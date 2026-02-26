@@ -25,12 +25,10 @@
 
     <div class="container">
         <!-- Today's Usage Cards -->
-        <h3 class="mb-4">Today's Usage ({{today}})</h3>
+        <h3 class="mb-4">Today's Usage (<span id="today-date">{{today}}</span>)</h3>
         <div class="row" id="today-cards">
-            <div class="col-12 text-center">
-                <div class="spinner-border text-primary" role="status">
-                    <span class="visually-hidden">Loading...</span>
-                </div>
+            <div class="col-12 text-center text-muted">
+                Loading data...
             </div>
         </div>
 
@@ -57,21 +55,28 @@
 
         <!-- Tools Info -->
         <div class="row mt-4" id="tools-info">
-            <div class="col-12 text-center">
-                <div class="spinner-border text-primary" role="status">
-                    <span class="visually-hidden">Loading...</span>
-                </div>
+            <div class="col-12 text-center text-muted">
+                Loading data...
             </div>
         </div>
     </div>
 
     <script>
+        // Color palette for each tool (consistent across all charts)
+        const toolColors = {
+            'openclaw': { border: 'rgba(255, 99, 132, 1)', background: 'rgba(255, 99, 132, 0.2)', card: 'bg-danger' },
+            'claude': { border: 'rgba(75, 192, 192, 1)', background: 'rgba(75, 192, 192, 0.2)', card: 'bg-success' },
+            'qwen': { border: 'rgba(54, 162, 235, 1)', background: 'rgba(54, 162, 235, 0.2)', card: 'bg-info' }
+        };
+
         // Load today's usage
         async function loadToday() {
+            const container = document.getElementById('today-cards');
+            // Clear loading text first
+            container.innerHTML = '';
             try {
                 const response = await fetch('/api/today');
                 const data = await response.json();
-                const container = document.getElementById('today-cards');
 
                 if (data.length === 0) {
                     container.innerHTML = '<div class="col-12 text-center">No data available for today</div>';
@@ -80,15 +85,11 @@
 
                 let html = '';
                 data.forEach(item => {
-                    const toolClass = {
-                        'openclaw': 'bg-primary',
-                        'claude': 'bg-success',
-                        'qwen': 'bg-info'
-                    };
+                    const colors = toolColors[item.tool_name] || { card: 'bg-secondary' };
 
                     html += `
                         <div class="col-md-4">
-                            <div class="card usage-card ${toolClass[item.tool_name] || 'bg-secondary'} text-white">
+                            <div class="card usage-card ${colors.card} text-white">
                                 <div class="card-body">
                                     <h6 class="card-subtitle mb-2 text-white-50">${item.tool_name.toUpperCase()}</h6>
                                     <h3 class="card-title">${formatTokens(item.tokens_used)}</h3>
@@ -103,27 +104,103 @@
                 container.innerHTML = html;
             } catch (error) {
                 console.error('Error loading today data:', error);
+                container.innerHTML = '<div class="col-12 text-center text-danger">Error loading today data</div>';
+            }
+        }
+
+        // Load Total Overview chart (pie chart)
+        async function loadTotalChart() {
+            // Clear loading text from tools-info if it exists
+            const toolsContainer = document.getElementById('tools-info');
+            if (toolsContainer && toolsContainer.querySelector('.text-muted')) {
+                toolsContainer.innerHTML = '';
+            }
+
+            const container = document.getElementById('totalChart');
+            try {
+                const response = await fetch('/api/summary');
+                const data = await response.json();
+
+                if (Object.keys(data).length === 0) {
+                    container.parentElement.innerHTML = '<p class="text-center text-muted">No data available</p>';
+                    return;
+                }
+
+                const ctx = document.getElementById('totalChart').getContext('2d');
+
+                const labels = Object.keys(data);
+                const dataValues = Object.values(data).map(item => item.total_tokens);
+
+                // Color palette for each tool
+                const backgroundColors = labels.map(tool => {
+                    return toolColors[tool].background;
+                });
+                const borderColors = labels.map(tool => {
+                    return toolColors[tool].border;
+                });
+
+                new Chart(ctx, {
+                    type: 'pie',
+                    data: {
+                        labels: labels.map(tool => tool.toUpperCase()),
+                        datasets: [{
+                            label: 'Total Tokens',
+                            data: dataValues,
+                            backgroundColor: backgroundColors,
+                            borderColor: borderColors,
+                            borderWidth: 2
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            title: { display: true, text: 'Total Token Usage by Tool', font: { size: 14 } },
+                            legend: { position: 'bottom' },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        let label = context.label || '';
+                                        if (label) {
+                                            label += ': ';
+                                        }
+                                        if (context.parsed !== null) {
+                                            label += formatTokens(context.parsed);
+                                        }
+                                        return label + ' tokens';
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            } catch (error) {
+                console.error('Error loading total chart:', error);
+                const container = document.getElementById('totalChart');
+                container.parentElement.innerHTML = '<p class="text-center text-muted">No data available</p>';
             }
         }
 
         // Load summary data
         async function loadSummary() {
+            const container = document.getElementById('tools-info');
+            // Clear loading text first
+            container.innerHTML = '';
             try {
                 const response = await fetch('/api/summary');
                 const data = await response.json();
-                const container = document.getElementById('tools-info');
+
+                if (Object.keys(data).length === 0) {
+                    container.innerHTML = '<div class="col-12 text-center">No data available</div>';
+                    return;
+                }
 
                 let html = '';
                 Object.entries(data).forEach(([tool, stats]) => {
-                    const toolClass = {
-                        'openclaw': 'bg-primary',
-                        'claude': 'bg-success',
-                        'qwen': 'bg-info'
-                    };
+                    const colors = toolColors[tool] || { card: 'bg-secondary' };
 
                     html += `
                         <div class="col-md-4">
-                            <div class="card usage-card ${toolClass[tool] || 'bg-secondary'} text-white">
+                            <div class="card usage-card ${colors.card} text-white">
                                 <div class="card-body">
                                     <h5 class="card-title">${tool.toUpperCase()}</h5>
                                     <p class="card-text">
@@ -140,14 +217,26 @@
                 container.innerHTML = html;
             } catch (error) {
                 console.error('Error loading summary:', error);
+                container.innerHTML = '<div class="col-12 text-center text-danger">Error loading summary data</div>';
             }
         }
 
         // Load trend chart
         async function loadTrendChart() {
+            const container = document.getElementById('trendChart');
+            // Clear loading text from tools-info if it exists (for total chart loading message)
+            const toolsContainer = document.getElementById('tools-info');
+            if (toolsContainer && toolsContainer.querySelector('.text-muted')) {
+                toolsContainer.innerHTML = '';
+            }
             try {
                 const response = await fetch('/api/range?start=' + getDaysAgo(30) + '&end=' + getToday());
                 const data = await response.json();
+
+                if (data.length === 0) {
+                    container.parentElement.innerHTML = '<p class="text-center text-muted">No data available</p>';
+                    return;
+                }
 
                 const ctx = document.getElementById('trendChart').getContext('2d');
 
@@ -161,7 +250,12 @@
                         const entry = data.find(d => d.date === date && d.tool_name === tool);
                         return entry ? entry.tokens_used : 0;
                     }),
-                    tension: 0.4
+                    tension: 0.4,
+                    borderColor: toolColors[tool].border,
+                    backgroundColor: toolColors[tool].background,
+                    pointBackgroundColor: toolColors[tool].border,
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 2
                 }));
 
                 new Chart(ctx, {
@@ -189,6 +283,8 @@
                 });
             } catch (error) {
                 console.error('Error loading trend chart:', error);
+                const container = document.getElementById('trendChart');
+                container.parentElement.innerHTML = '<p class="text-center text-muted">No data available</p>';
             }
         }
 
@@ -218,6 +314,7 @@
         // Load data on page load
         document.addEventListener('DOMContentLoaded', function() {
             loadToday();
+            loadTotalChart();
             loadSummary();
             loadTrendChart();
         });

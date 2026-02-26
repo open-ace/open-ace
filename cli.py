@@ -9,6 +9,7 @@ import argparse
 import sys
 import os
 from typing import Optional
+from collections import defaultdict
 
 # Add shared directory to path
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -17,7 +18,7 @@ shared_dir = os.path.join(script_dir, 'scripts')
 if shared_dir not in sys.path:
     sys.path.insert(0, shared_dir)
 
-from shared import db, utils, email
+from shared import db, utils, email_module
 
 
 def cmd_today(tool: Optional[str] = None) -> None:
@@ -112,10 +113,8 @@ def cmd_top(
         print(f"{tool_name.upper()}: {utils.format_tokens(total)} ({total:,})")
 
 
-def cmd_reportEmail() -> None:
+def cmd_report() -> None:
     """Generate and send email report."""
-    import email
-
     config = utils.load_config()
 
     # Get summary and data
@@ -127,7 +126,7 @@ def cmd_reportEmail() -> None:
         daily_data.extend(db.get_usage_by_tool(tool, 7))
 
     # Format email body
-    body = email.format_report_email(summary, daily_data)
+    body = email_module.format_report_email(summary, daily_data)
 
     # Check email config
     email_config = config.get('email', {})
@@ -142,12 +141,12 @@ def cmd_reportEmail() -> None:
         return
 
     # Test connection first
-    if not email.test_email_config(email_config):
+    if not email_module.test_email_config(email_config):
         print("Email server connection failed. Check your configuration.")
         return
 
     # Send email
-    success = email.send_email(
+    success = email_module.send_email(
         subject=f"AI Token Usage Report - {utils.get_today()}",
         body=body,
         smtp_config=email_config,
@@ -158,6 +157,81 @@ def cmd_reportEmail() -> None:
         print(f"Report sent to {to_email}")
     else:
         print("Failed to send report")
+
+
+def cmd_config(action: str) -> None:
+    """Handle configuration management."""
+    import os
+    import json
+
+    config_dir = os.path.expanduser("~/.ai_token_usage")
+    config_path = os.path.join(config_dir, "config.json")
+
+    if action == 'show':
+        config = utils.load_config()
+        if not config:
+            print("No configuration found.")
+            print(f"Create one at: {config_path}")
+            return
+        print(f"Configuration from: {config_path}")
+        print(json.dumps(config, indent=2))
+
+    elif action == 'init':
+        # Create config directory if it doesn't exist
+        os.makedirs(config_dir, exist_ok=True)
+
+        if os.path.exists(config_path):
+            print(f"Configuration already exists at: {config_path}")
+            response = input("Overwrite? (y/N): ")
+            if response.lower() != 'y':
+                print("Cancelled.")
+                return
+
+        # Copy sample config
+        sample_path = os.path.join(script_dir, "config", "settings.json.sample")
+        if os.path.exists(sample_path):
+            with open(sample_path, 'r') as src:
+                config = json.load(src)
+            with open(config_path, 'w') as dst:
+                json.dump(config, dst, indent=2)
+            print(f"Configuration created at: {config_path}")
+            print("Please edit the file with your settings.")
+        else:
+            # Create default config
+            default_config = {
+                "email": {
+                    "smtp_server": "smtp.gmail.com",
+                    "smtp_port": 587,
+                    "smtp_username": "",
+                    "smtp_password": "",
+                    "from_email": "",
+                    "to_email": "",
+                    "use_tls": True
+                },
+                "tools": {
+                    "openclaw": {"enabled": True},
+                    "claude": {"enabled": True},
+                    "qwen": {"enabled": True}
+                },
+                "cron": {
+                    "enabled": True,
+                    "run_time": "00:30"
+                }
+            }
+            with open(config_path, 'w') as f:
+                json.dump(default_config, f, indent=2)
+            print(f"Default configuration created at: {config_path}")
+
+    elif action == 'edit':
+        config = utils.load_config()
+        if not config:
+            print("No configuration found. Running 'init' first...")
+            cmd_config('init')
+            return
+
+        editor = os.environ.get('EDITOR', 'nano')
+        print(f"Opening {config_path} with {editor}...")
+        os.system(f"{editor} {config_path}")
 
 
 def cmd_summary() -> None:
@@ -203,10 +277,14 @@ def main():
 
     # report command
     report_parser = subparsers.add_parser('report', help='Generate report')
-    report_parser.add_argument('type', choices=['email'], help='Report type')
+    report_parser.add_argument('type', nargs='?', default='email', choices=['email'], help='Report type (default: email)')
 
     # summary command
     subparsers.add_parser('summary', help='Show summary')
+
+    # config command
+    config_parser = subparsers.add_parser('config', help='Configuration management')
+    config_parser.add_argument('action', choices=['show', 'edit', 'init'], help='Action: show, edit, or init')
 
     args = parser.parse_args()
 
@@ -224,9 +302,11 @@ def main():
     elif args.command == 'top':
         cmd_top(args.tool, args.days)
     elif args.command == 'report':
-        cmd_reportEmail()
+        cmd_report()
     elif args.command == 'summary':
         cmd_summary()
+    elif args.command == 'config':
+        cmd_config(args.action)
 
 
 if __name__ == "__main__":

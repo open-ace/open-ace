@@ -8,7 +8,7 @@ Provides database operations for the ai_token_usage project.
 import sqlite3
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Tuple
 
 

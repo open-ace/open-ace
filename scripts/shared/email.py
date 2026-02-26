@@ -55,11 +55,16 @@ def send_email(
         msg.attach(MIMEText(body, 'plain'))
 
         # Connect to SMTP server
-        if use_tls:
-            server = smtplib.SMTP(smtp_server, smtp_port)
-            server.starttls()
-        else:
+        # Port 465 usually means SSL, ports 587/25 usually mean TLS
+        use_ssl = smtp_port == 465
+        if use_ssl:
             server = smtplib.SMTP_SSL(smtp_server, smtp_port)
+        else:
+            if use_tls:
+                server = smtplib.SMTP(smtp_server, smtp_port)
+                server.starttls()
+            else:
+                server = smtplib.SMTP(smtp_server, smtp_port)
 
         # Login if authentication required
         if username and password:
@@ -170,11 +175,16 @@ def test_email_config(smtp_config: Dict) -> bool:
         username = smtp_config.get('smtp_username', '')
         password = smtp_config.get('smtp_password', '')
 
-        if use_tls:
-            server = smtplib.SMTP(smtp_server, smtp_port)
-            server.starttls()
-        else:
+        # Port 465 usually means SSL, ports 587/25 usually mean TLS
+        use_ssl = smtp_port == 465
+        if use_ssl:
             server = smtplib.SMTP_SSL(smtp_server, smtp_port)
+        else:
+            if use_tls:
+                server = smtplib.SMTP(smtp_server, smtp_port)
+                server.starttls()
+            else:
+                server = smtplib.SMTP(smtp_server, smtp_port)
 
         if username and password:
             server.login(username, password)
