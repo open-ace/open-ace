@@ -1,2 +1,3 @@
 aiohttp>=1.0.0
 websockets>=10.0
+flask>=2.0.0

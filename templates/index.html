@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Token Usage Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .usage-card {
+            transition: transform 0.2s;
+        }
+        .usage-card:hover {
+            transform: translateY(-5px);
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-primary mb-4">
+        <div class="container">
+            <span class="navbar-brand">AI Token Usage Dashboard</span>
+            <span class="navbar-text">Last updated: <span id="last-updated">{{today}}</span></span>
+        </div>
+    </nav>
+
+    <div class="container">
+        <!-- Today's Usage Cards -->
+        <h3 class="mb-4">Today's Usage ({{today}})</h3>
+        <div class="row" id="today-cards">
+            <div class="col-12 text-center">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mt-4">
+            <!-- Summary Cards -->
+            <div class="col-md-4">
+                <div class="card usage-card mb-4">
+                    <div class="card-body">
+                        <h5 class="card-title">Total Overview</h5>
+                        <canvas id="totalChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-8">
+                <div class="card usage-card">
+                    <div class="card-body">
+                        <h5 class="card-title">Trend Chart (Last 30 Days)</h5>
+                        <canvas id="trendChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tools Info -->
+        <div class="row mt-4" id="tools-info">
+            <div class="col-12 text-center">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Load today's usage
+        async function loadToday() {
+            try {
+                const response = await fetch('/api/today');
+                const data = await response.json();
+                const container = document.getElementById('today-cards');
+
+                if (data.length === 0) {
+                    container.innerHTML = '<div class="col-12 text-center">No data available for today</div>';
+                    return;
+                }
+
+                let html = '';
+                data.forEach(item => {
+                    const toolClass = {
+                        'openclaw': 'bg-primary',
+                        'claude': 'bg-success',
+                        'qwen': 'bg-info'
+                    };
+
+                    html += `
+                        <div class="col-md-4">
+                            <div class="card usage-card ${toolClass[item.tool_name] || 'bg-secondary'} text-white">
+                                <div class="card-body">
+                                    <h6 class="card-subtitle mb-2 text-white-50">${item.tool_name.toUpperCase()}</h6>
+                                    <h3 class="card-title">${formatTokens(item.tokens_used)}</h3>
+                                    <p class="card-text mb-1">Date: ${item.date}</p>
+                                    ${item.input_tokens > 0 ? `<p class="card-text">Input: ${formatTokens(item.input_tokens)}</p>` : ''}
+                                    ${item.output_tokens > 0 ? `<p class="card-text">Output: ${formatTokens(item.output_tokens)}</p>` : ''}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+                container.innerHTML = html;
+            } catch (error) {
+                console.error('Error loading today data:', error);
+            }
+        }
+
+        // Load summary data
+        async function loadSummary() {
+            try {
+                const response = await fetch('/api/summary');
+                const data = await response.json();
+                const container = document.getElementById('tools-info');
+
+                let html = '';
+                Object.entries(data).forEach(([tool, stats]) => {
+                    const toolClass = {
+                        'openclaw': 'bg-primary',
+                        'claude': 'bg-success',
+                        'qwen': 'bg-info'
+                    };
+
+                    html += `
+                        <div class="col-md-4">
+                            <div class="card usage-card ${toolClass[tool] || 'bg-secondary'} text-white">
+                                <div class="card-body">
+                                    <h5 class="card-title">${tool.toUpperCase()}</h5>
+                                    <p class="card-text">
+                                        <strong>${formatTokens(stats.total_tokens)}</strong> total<br>
+                                        ${stats.days_count} days tracked<br>
+                                        Avg: ${formatTokens(stats.avg_tokens)}/day
+                                    </p>
+                                    <small>Date range: ${stats.first_date} to ${stats.last_date}</small>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+                container.innerHTML = html;
+            } catch (error) {
+                console.error('Error loading summary:', error);
+            }
+        }
+
+        // Load trend chart
+        async function loadTrendChart() {
+            try {
+                const response = await fetch('/api/range?start=' + getDaysAgo(30) + '&end=' + getToday());
+                const data = await response.json();
+
+                const ctx = document.getElementById('trendChart').getContext('2d');
+
+                // Group data by date
+                const dates = [...new Set(data.map(d => d.date))].sort().slice(-14); // Last 14 days
+                const tools = [...new Set(data.map(d => d.tool_name))];
+
+                const datasets = tools.map(tool => ({
+                    label: tool.toUpperCase(),
+                    data: dates.map(date => {
+                        const entry = data.find(d => d.date === date && d.tool_name === tool);
+                        return entry ? entry.tokens_used : 0;
+                    }),
+                    tension: 0.4
+                }));
+
+                new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: dates,
+                        datasets: datasets
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            title: { display: true, text: 'Token Usage Trend (Last 14 Days)' }
+                        },
+                        scales: {
+                            y: {
+                                suggestedMin: 0,
+                                ticks: {
+                                    callback: function(value) {
+                                        return formatTokens(value);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            } catch (error) {
+                console.error('Error loading trend chart:', error);
+            }
+        }
+
+        // Helper functions
+        function formatTokens(tokens) {
+            if (tokens >= 1_000_000_000) {
+                return (tokens / 1_000_000_000).toFixed(2) + 'B';
+            } else if (tokens >= 1_000_000) {
+                return (tokens / 1_000_000).toFixed(2) + 'M';
+            } else if (tokens >= 1_000) {
+                return (tokens / 1_000).toFixed(2) + 'K';
+            }
+            return tokens.toString();
+        }
+
+        function getToday() {
+            const d = new Date();
+            return d.toISOString().split('T')[0];
+        }
+
+        function getDaysAgo(days) {
+            const d = new Date();
+            d.setDate(d.getDate() - days);
+            return d.toISOString().split('T')[0];
+        }
+
+        // Load data on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadToday();
+            loadSummary();
+            loadTrendChart();
+        });
+    </script>
+</body>
+</html>
