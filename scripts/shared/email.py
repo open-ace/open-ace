@@ -138,14 +138,10 @@ def format_report_email(
                 <td class="tool-data">"""
             for entry in tool_entries:
                 tokens = format_tokens(entry['tokens_used'])
-                input_tok = format_tokens(entry.get('input_tokens', 0))
-                output_tok = format_tokens(entry.get('output_tokens', 0))
-                details = f'<span class="details">I: {input_tok} / O: {output_tok}</span>' if input_tok != '0' or output_tok != '0' else ''
                 daily_tables += f"""
                 <div class="daily-entry">
                     <span class="date">{entry['date']}</span>
                     <span class="tokens">{tokens}</span>
-                    {details}
                 </div>"""
             daily_tables += """
                 </td>
@@ -253,11 +249,6 @@ def format_report_email(
         .tokens {{
             font-weight: 600;
             color: #333;
-        }}
-        .details {{
-            color: #999;
-            font-size: 12px;
-            margin-left: 10px;
         }}
         .summary-tool {{
             font-weight: 600;
