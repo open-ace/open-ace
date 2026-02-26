@@ -46,9 +46,23 @@ log "Fetching Qwen data..."
 python3 "$BASE_DIR/scripts/fetch_qwen.py" --days 7 2>&1 | tee -a "$LOG_FILE"
 
 # Send email report if configured
-if [ -n "$EMAIL_TO" ]; then
-    log "Sending email report to $EMAIL_TO..."
+# Check if email is enabled in config.json
+if python3 -c "
+import json
+import os
+config_path = os.path.expanduser('~/.ai_token_usage/config.json')
+if os.path.exists(config_path):
+    with open(config_path) as f:
+        config = json.load(f)
+    email_config = config.get('email', {})
+    if email_config.get('to_email'):
+        exit(0)
+exit(1)
+" 2>/dev/null; then
+    log "Sending email report..."
     python3 "$BASE_DIR/cli.py" report email 2>&1 | tee -a "$LOG_FILE"
+else
+    log "SKIP: Email not configured in config.json"
 fi
 
 log "Daily collection completed"
