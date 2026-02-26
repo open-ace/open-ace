@@ -25,8 +25,9 @@ log() {
 
 log "Starting daily token usage collection"
 
-# Initialize database
-python3 "$BASE_DIR/scripts/shared/db.py" 2>&1 | tee -a "$LOG_FILE"
+# Initialize database by running cli.py with dummy command
+log "Initializing database..."
+python3 "$BASE_DIR/cli.py" summary > /dev/null 2>&1 || true
 
 # Fetch OpenClaw data
 log "Fetching OpenClaw data..."
