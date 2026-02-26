@@ -115,18 +115,28 @@ def cmd_top(
 
 def cmd_report() -> None:
     """Generate and send email report."""
+    import datetime as dt
+
     config = utils.load_config()
 
-    # Get summary and data
-    summary = db.get_summary_by_tool()
-    all_tools = db.get_all_tools()
+    # Get today's date, or yesterday if running before a certain hour (e.g., 8 AM)
+    # This ensures cron jobs running in the early morning still get the previous day's data
+    current_hour = dt.datetime.now().hour
+    reference_date = utils.get_today()
+    if current_hour < 8:  # Before 8 AM, use yesterday's data
+        reference_date = utils.get_days_ago(1)
 
+    # Get summary (still show all-time summary)
+    summary = db.get_summary_by_tool()
+
+    # Get only today's (or yesterday's) daily data
     daily_data = []
+    all_tools = db.get_all_tools()
     for tool in all_tools:
-        daily_data.extend(db.get_usage_by_tool(tool, 7))
+        daily_data.extend(db.get_usage_by_date(reference_date, tool))
 
     # Format email body
-    body = email_module.format_report_email(summary, daily_data)
+    body = email_module.format_report_email(summary, daily_data, report_date=reference_date)
 
     # Check email config
     email_config = config.get('email', {})
@@ -145,12 +155,14 @@ def cmd_report() -> None:
         print("Email server connection failed. Check your configuration.")
         return
 
-    # Send email
+    # Send email (HTML format)
+    subject_date = reference_date
     success = email_module.send_email(
-        subject=f"AI Token Usage Report - {utils.get_today()}",
+        subject=f"AI Token Usage Report - {subject_date}",
         body=body,
         smtp_config=email_config,
-        to_email=to_email
+        to_email=to_email,
+        is_html=True
     )
 
     if success:

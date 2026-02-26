@@ -18,7 +18,8 @@ def send_email(
     body: str,
     smtp_config: Dict,
     to_email: str,
-    from_email: Optional[str] = None
+    from_email: Optional[str] = None,
+    is_html: bool = False
 ) -> bool:
     """
     Send an email with the given subject and body.
@@ -29,6 +30,7 @@ def send_email(
         smtp_config: SMTP server configuration
         to_email: Recipient email address
         from_email: Sender email address (optional, uses config if not provided)
+        is_html: Whether the body is HTML format (default: False)
 
     Returns:
         True if email sent successfully, False otherwise
@@ -52,7 +54,12 @@ def send_email(
         msg['From'] = from_email
         msg['To'] = to_email
         msg['Subject'] = subject
-        msg.attach(MIMEText(body, 'plain'))
+
+        # Attach body with correct content type
+        if is_html:
+            msg.attach(MIMEText(body, 'html', 'utf-8'))
+        else:
+            msg.attach(MIMEText(body, 'plain', 'utf-8'))
 
         # Connect to SMTP server
         # Port 465 usually means SSL, ports 587/25 usually mean TLS
@@ -82,10 +89,23 @@ def send_email(
         return False
 
 
+def format_tokens(tokens: int) -> str:
+    """Format token count with human-readable units (K, M, B)."""
+    if tokens >= 1_000_000_000:
+        return f"{tokens / 1_000_000_000:.2f}B"
+    elif tokens >= 1_000_000:
+        return f"{tokens / 1_000_000:.2f}M"
+    elif tokens >= 1_000:
+        return f"{tokens / 1_000:.2f}K"
+    else:
+        return str(tokens)
+
+
 def format_report_email(
     summary: Dict[str, Dict],
     daily_data: List[Dict],
-    tool_name: Optional[str] = None
+    tool_name: Optional[str] = None,
+    report_date: Optional[str] = None
 ) -> str:
     """
     Format the email body from usage data.
@@ -94,68 +114,232 @@ def format_report_email(
         summary: Summary statistics by tool
         daily_data: Daily usage data
         tool_name: Optional filter for specific tool
+        report_date: Optional date for the report (shows which day's data this is)
 
     Returns:
-        Formatted email body as string
+        Formatted email body as HTML string
     """
-    lines = []
-    lines.append("=" * 60)
-    lines.append("AI Token Usage Report")
-    lines.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    lines.append("=" * 60)
+    # Date display
+    display_date = report_date or "today"
 
-    # Tool selection indicator
-    if tool_name:
-        lines.append(f"\nTool: {tool_name.upper()}")
+    # Build HTML table for daily data (tools used on report date)
+    daily_tables = ""
+    if daily_data:
+        # Sort by tool name
+        sorted_tools = sorted(set(e['tool_name'] for e in daily_data))
+        for tool in sorted_tools:
+            tool_entries = [e for e in daily_data if e['tool_name'] == tool]
+            # Sort by date descending (most recent first)
+            tool_entries = sorted(tool_entries, key=lambda x: x['date'], reverse=True)
+
+            daily_tables += f"""
+            <tr>
+                <td class="tool-name">{tool.upper()}</td>
+                <td class="tool-data">"""
+            for entry in tool_entries:
+                tokens = format_tokens(entry['tokens_used'])
+                input_tok = format_tokens(entry.get('input_tokens', 0))
+                output_tok = format_tokens(entry.get('output_tokens', 0))
+                daily_tables += f"""
+                <div class="daily-entry">
+                    <span class="date">{entry['date']}</span>
+                    <span class="tokens">{tokens}</span>
+                    {input_tok != '0' or output_tok != '0' f'<span class="details">I: {input_tok} / O: {output_tok}</span>' or ''}
+                </div>"""
+            daily_tables += """
+                </td>
+            </tr>"""
     else:
-        lines.append(f"\nTools: {', '.join(k.upper() for k in summary.keys())}")
+        daily_tables = f"""
+            <tr>
+                <td colspan="2" class="no-data">No usage data available for {display_date}</td>
+            </tr>"""
 
-    # Summary section
-    lines.append("\n" + "-" * 40)
-    lines.append("SUMMARY")
-    lines.append("-" * 40)
+    # Build HTML table for summary (all-time stats)
+    summary_rows = ""
+    for tool, stats in sorted(summary.items(), key=lambda x: x[1]['total_tokens'], reverse=True):
+        summary_rows += f"""
+            <tr>
+                <td class="summary-tool">{tool.upper()}</td>
+                <td class="summary-days">{stats['days_count']} days</td>
+                <td class="summary-tokens">{format_tokens(stats['total_tokens'])}</td>
+                <td class="summary-avg">{format_tokens(int(stats['avg_tokens']))}/day</td>
+            </tr>"""
 
-    for tool, stats in summary.items():
-        if tool_name and tool != tool_name:
-            continue
-        lines.append(f"\n{tool.upper()}:")
-        lines.append(f"  Days tracked:    {stats['days_count']}")
-        lines.append(f"  Total tokens:    {stats['total_tokens']:,}")
-        lines.append(f"  Avg per day:     {stats['avg_tokens']:,.0f}")
-        lines.append(f"  Date range:      {stats['first_date']} to {stats['last_date']}")
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background-color: #f5f5f5;
+            margin: 0;
+            padding: 20px;
+        }}
+        .container {{
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }}
+        .header {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }}
+        .header h1 {{
+            margin: 0;
+            font-size: 24px;
+            font-weight: 600;
+        }}
+        .header p {{
+            margin: 8px 0 0;
+            opacity: 0.9;
+            font-size: 14px;
+        }}
+        .content {{
+            padding: 25px;
+        }}
+        .section {{
+            margin-bottom: 30px;
+        }}
+        .section-title {{
+            background-color: #f8f9fa;
+            padding: 12px 15px;
+            border-left: 4px solid #667eea;
+            font-weight: 600;
+            font-size: 16px;
+            margin-bottom: 15px;
+            color: #333;
+        }}
+        table {{
+            width: 100%;
+            border-collapse: collapse;
+        }}
+        td {{
+            padding: 12px 15px;
+            border-bottom: 1px solid #eee;
+        }}
+        tr:last-child td {{
+            border-bottom: none;
+        }}
+        .tool-name {{
+            font-weight: 600;
+            color: #333;
+            width: 120px;
+            vertical-align: top;
+        }}
+        .tool-data {{
+            color: #666;
+        }}
+        .daily-entry {{
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 0;
+            border-bottom: 1px dashed #eee;
+        }}
+        .daily-entry:last-child {{
+            border-bottom: none;
+        }}
+        .date {{
+            color: #888;
+            font-size: 13px;
+        }}
+        .tokens {{
+            font-weight: 600;
+            color: #333;
+        }}
+        .details {{
+            color: #999;
+            font-size: 12px;
+            margin-left: 10px;
+        }}
+        .summary-tool {{
+            font-weight: 600;
+            color: #333;
+        }}
+        .summary-days {{
+            color: #888;
+            text-align: center;
+        }}
+        .summary-tokens {{
+            font-weight: 600;
+            color: #667eea;
+            text-align: right;
+        }}
+        .summary-avg {{
+            color: #999;
+            text-align: right;
+        }}
+        .no-data {{
+            text-align: center;
+            color: #999;
+            padding: 30px !important;
+        }}
+        .footer {{
+            background-color: #f8f9fa;
+            padding: 20px 30px;
+            text-align: center;
+            color: #999;
+            font-size: 12px;
+            border-top: 1px solid #eee;
+        }}
+        .badge {{
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+        }}
+        .badge-today {{
+            background-color: #e3f2fd;
+            color: #1976d2;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>AI Token Usage Report</h1>
+            <p>Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+            <span class="badge badge-today">Report Date: {display_date}</span>
+        </div>
 
-    # Daily details section
-    lines.append("\n" + "-" * 40)
-    lines.append("DAILY DETAILS")
-    lines.append("-" * 40)
+        <div class="content">
+            <div class="section">
+                <div class="section-title">Today's Usage by Tool</div>
+                <table>
+                    {daily_tables}
+                </table>
+            </div>
 
-    # Sort by date descending
-    sorted_data = sorted(daily_data, key=lambda x: x['date'], reverse=True)
+            <div class="section">
+                <div class="section-title">All-Time Summary</div>
+                <table>
+                    <tr>
+                        <th style="text-align: left; padding: 10px 15px; color: #666; font-weight: 500;">Tool</th>
+                        <th style="text-align: center; padding: 10px 15px; color: #666; font-weight: 500;">Days</th>
+                        <th style="text-align: right; padding: 10px 15px; color: #666; font-weight: 500;">Total</th>
+                        <th style="text-align: right; padding: 10px 15px; color: #666; font-weight: 500;">Avg/Day</th>
+                    </tr>
+                    {summary_rows}
+                </table>
+            </div>
+        </div>
 
-    current_tool = None
-    for entry in sorted_data:
-        if tool_name and entry['tool_name'] != tool_name:
-            continue
+        <div class="footer">
+            <p>End of Report</p>
+            <p>AI Token Usage Tracking System</p>
+        </div>
+    </div>
+</body>
+</html>"""
 
-        if current_tool != entry['tool_name']:
-            current_tool = entry['tool_name']
-            lines.append(f"\n[{current_tool.upper()}]")
-
-        tokens = entry['tokens_used']
-        input_tok = entry.get('input_tokens', 0)
-        output_tok = entry.get('output_tokens', 0)
-
-        lines.append(f"  {entry['date']}: {tokens:,} total")
-        if input_tok > 0 or output_tok > 0:
-            lines.append(f"    - Input: {input_tok:,}, Output: {output_tok:,}")
-        if entry.get('models_used'):
-            lines.append(f"    - Models: {', '.join(entry['models_used'])}")
-
-    lines.append("\n" + "=" * 60)
-    lines.append("End of Report")
-    lines.append("=" * 60)
-
-    return "\n".join(lines)
+    return html
 
 
 def test_email_config(smtp_config: Dict) -> bool:
