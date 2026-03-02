@@ -440,3 +440,77 @@ QWEN
   Total requests: 425
   Avg requests/day: 106
   Date range:     2026-02-22 to 2026-02-25
+[2026-03-02 15:49:41] Starting daily token usage collection
+[2026-03-02 15:49:41] Initializing database...
+[2026-03-02 15:49:41] Fetching OpenClaw data...
+Database initialized at /Users/rhuang/.ai_token_usage/usage.db
+Fetching 7 days of OpenClaw usage data...
+Date range: 2026-02-24 to 2026-03-02
+Connecting to WebSocket: ws://127.0.0.1:18789/gateway
+Connection established successfully!
+  2026-02-28: 8,922,421 tokens
+  2026-03-01: 1,420,105 tokens
+
+Saved 2 days of OpenClaw usage data
+[2026-03-02 15:49:41] Fetching Claude data...
+Database initialized at /Users/rhuang/.ai_token_usage/usage.db
+Multiple Claude project directories found, scanning all:
+  - -Users-rhuang-workspace (11 files)
+  - -Users-rhuang-workspace-ai-token-analyzer (1 files)
+  - -Users-rhuang-workspace-ai-token-usage (9 files)
+  - -Users-rhuang-workspace-claude (3 files)
+  - -Users-rhuang-workspace-github-v2box-auto (2 files)
+  - -Users-rhuang-workspace-node-modules (1 files)
+  - -Users-rhuang-workspace-tmp (2 files)
+Scanning: -Users-rhuang-workspace
+Scanning: -Users-rhuang-workspace-ai-token-analyzer
+Scanning: -Users-rhuang-workspace-ai-token-usage
+Scanning: -Users-rhuang-workspace-claude
+Scanning: -Users-rhuang-workspace-github-v2box-auto
+Scanning: -Users-rhuang-workspace-node-modules
+Scanning: -Users-rhuang-workspace-tmp
+  2026-02-28: 51,737,000 tokens, 1278 requests
+  2026-02-25: 10,287,701 tokens, 353 requests
+  2026-02-26: 72,921,576 tokens, 928 requests
+  2026-02-24: 2,466,174 tokens, 152 requests
+  2026-03-01: 152,233,397 tokens, 2246 requests
+  2026-02-27: 49,530,259 tokens, 736 requests
+
+Saved 6 days of Claude usage data
+[2026-03-02 15:49:47] Fetching Qwen data...
+Database initialized at /Users/rhuang/.ai_token_usage/usage.db
+Scanning: chats
+  2026-02-25: 1,533,768 tokens, 35 requests
+  2026-02-24: 318,340 tokens, 1 requests
+
+Saved 2 days of Qwen usage data
+[2026-03-02 15:49:48] Sending email report...
+Database initialized at /Users/rhuang/.ai_token_usage/usage.db
+Email sent successfully to rh@ivyent.cn
+Report sent to rh@ivyent.cn
+[2026-03-02 15:49:50] Daily collection completed
+Database initialized at /Users/rhuang/.ai_token_usage/usage.db
+AI Token Usage Summary
+============================================================
+
+CLAUDE
+  Days tracked:   7
+  Total tokens:   359.62M (359,624,599)
+  Average/day:    51.37M (51,374,942)
+  Total requests: 6,159
+  Avg requests/day: 879
+  Date range:     2026-02-23 to 2026-03-01
+
+OPENCLAW
+  Days tracked:   9
+  Total tokens:   129.69M (129,686,040)
+  Average/day:    14.41M (14,409,560)
+  Date range:     2026-02-21 to 2026-03-01
+
+QWEN
+  Days tracked:   4
+  Total tokens:   52.97M (52,972,254)
+  Average/day:    13.24M (13,243,063)
+  Total requests: 425
+  Avg requests/day: 106
+  Date range:     2026-02-22 to 2026-02-25

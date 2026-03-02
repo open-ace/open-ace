@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Token Analyzer Dashboard</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><linearGradient id=%22grad%22 x1=%220%22 x2=%221%22 y1=%220%22 y2=%221%22><stop offset=%220%22 stop-color=%22%23667eea%22/><stop offset=%221%22 stop-color=%22%23764ba2%22/></linearGradient><rect width=%22100%22 height=%22100%22 rx=%2220%22 fill=%22url(%23grad)%22/><path d=%22M30 40h40M30 60h40M35 30v40M65 30v40M25 50h50%22 stroke=%22white%22 stroke-width=%228%22 stroke-linecap=%22round%22 fill=%22none%22/></svg>">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+    <script src="/static/js/Chart.min.js"></script>
+    <link href="/static/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/css/bootstrap-icons.css" rel="stylesheet">
     <style>
         :root {
             --sidebar-width: 250px;
@@ -517,7 +517,7 @@
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/js/bootstrap.bundle.min.js"></script>
     <script>
         // Language resources
         const i18n = {
@@ -546,10 +546,10 @@
                 assistant: 'Assistant',
                 system: 'System',
                 noMessagesFound: 'No messages found for the selected filters',
-                openclawMessagesNotAvailable: 'Openclaw Messages Not Available',
-                openclawMessagesNotAvailableDetail: 'Openclaw does not support viewing individual messages. This feature is only available for Claude and Qwen.',
                 resetFilters: 'Reset Filters',
                 selectRole: 'Please select at least one role to view messages',
+                dateChangedPrompt: 'New messages are available for a different date. Would you like to switch to view them?',
+                autoRefreshDisabled: 'Auto-refresh disabled because the date has changed',
                 prevPage: 'Previous',
                 nextPage: 'Next',
                 page: 'Page',
@@ -636,10 +636,10 @@
                 assistant: 'AI 回复',
                 system: '系统',
                 noMessagesFound: '没有找到符合条件的消息',
-                openclawMessagesNotAvailable: 'Openclaw 无法查看消息',
-                openclawMessagesNotAvailableDetail: 'Openclaw 不支持查看单条消息。此功能仅适用于 Claude 和 Qwen。',
                 resetFilters: '重置筛选',
                 selectRole: '请至少选择一个角色来查看消息',
+                dateChangedPrompt: '有新的消息可用，但日期不同。是否切换到新日期查看？',
+                autoRefreshDisabled: '自动刷新已禁用（日期已更改）',
                 prevPage: '上一页',
                 nextPage: '下一页',
                 page: '第',
@@ -812,7 +812,6 @@
                 updateMessagesText();
                 loadMessages();
             }
-            console.log('Language switched to:', lang);
         }
 
         // Render sidebar navigation with translations
@@ -839,6 +838,7 @@
         let isAutoRefreshing = false;
         let currentMessageCount = 0; // Track current message count to avoid unnecessary refresh
         let lastFetchTimestamp = 0; // Track last fetch time
+        let autoRefreshDate = null; // Track the date when auto-refresh was enabled
 
         // Color palette for each tool (consistent across all charts)
         const toolColors = {
@@ -973,19 +973,14 @@
                 const ctx = document.getElementById('totalChart').getContext('2d');
                 const labels = Object.keys(summaryDataForChart);
                 const dataValues = Object.values(summaryDataForChart).map(item => item.total_tokens);
-                console.log('Total Chart - Labels:', labels, 'Values:', dataValues);
 
                 const backgroundColors = labels.map(tool => toolColors[tool].background);
                 const borderColors = labels.map(tool => toolColors[tool].border);
-
-                console.log('Creating chart with labels:', labels, 'values:', dataValues);
 
                 // Destroy existing chart if it exists and is a valid Chart.js instance
                 if (window.totalChart && typeof window.totalChart.destroy === 'function') {
                     window.totalChart.destroy();
                 }
-
-                console.log('About to create new Chart...');
 
                 window.totalChart = new Chart(ctx, {
                     type: 'pie',
@@ -1085,14 +1080,32 @@
 
         async function loadTrendChart() {
             const container = document.getElementById('trendChart');
+
+            // Check if container exists
+            if (!container) {
+                console.error('trendChart container not found');
+                return;
+            }
+
             try {
                 // Check if Chart.js is loaded
                 if (typeof Chart === 'undefined') {
                     container.parentElement.innerHTML = '<p class="text-center text-muted">' + t('chartJsLoading') + '</p>';
+                    // Try to check again after a delay
+                    setTimeout(() => {
+                        if (typeof Chart === 'undefined') {
+                            container.parentElement.innerHTML = '<p class="text-center text-muted">' + t('errorLoadingData') + ' - Chart.js failed to load</p>';
+                        }
+                    }, 5000);
                     return;
                 }
 
                 const response = await fetch('/api/range?start=' + getDaysAgo(30) + '&end=' + getToday());
+
+                if (!response.ok) {
+                    throw new Error('Failed to fetch trend data: ' + response.statusText);
+                }
+
                 const data = await response.json();
 
                 if (data.length === 0) {
@@ -1139,7 +1152,9 @@
             } catch (error) {
                 console.error('Error loading trend chart:', error);
                 const container = document.getElementById('trendChart');
-                container.parentElement.innerHTML = '<p class="text-center text-muted">' + t('dataNotAvailable') + '</p>';
+                if (container && container.parentElement) {
+                    container.parentElement.innerHTML = '<p class="text-center text-muted">' + t('errorLoadingData') + '</p>';
+                }
             }
         }
 
@@ -1198,20 +1213,14 @@
                 console.log('Loading messages from:', url);
                 const response = await fetch(url);
                 const data = await response.json();
-                console.log('Messages data received:', data);
-                console.log('Messages data count:', data.messages ? data.messages.length : 0);
-                console.log('Messages roles:', data.messages ? data.messages.map(m => m.role) : []);
 
-                // Check if tool is openclaw and no messages found
-                if ((!data.messages || data.messages.length === 0) && tool === 'openclaw') {
+                // Check if no messages found for openclaw (date may not have data)
+                if (!data.messages || data.messages.length === 0) {
                     const paginationControls = document.getElementById('pagination-controls');
                     container.innerHTML = `
-                        <div class="alert alert-info py-4">
-                            <div class="text-center">
-                                <i class="bi bi-info-circle" style="font-size: 3rem; opacity: 0.3;"></i>
-                                <h5 class="mt-3">${t('openclawMessagesNotAvailable')}</h5>
-                                <p class="mb-0">${t('openclawMessagesNotAvailableDetail')}</p>
-                            </div>
+                        <div class="text-center text-muted py-5">
+                            <i class="bi bi-inbox" style="font-size: 3rem; opacity: 0.3;"></i>
+                            <p class="mt-3">${t('noMessagesFound')}</p>
                         </div>
                     `;
                     if (paginationControls) {
@@ -1250,16 +1259,11 @@
             currentMessagesPage = data.page;
             currentMessagesTotalPages = data.total_pages;
 
-            console.log('renderMessages called, data.messages.length:', data.messages ? data.messages.length : 0);
-
             // Store full messages data in a global variable for access by toggleExpanded
             window.messagesDataMap = {};
-            console.log('Populating messagesDataMap...');
             data.messages.forEach(msg => {
-                console.log('Storing msg:', msg.id, 'type:', typeof msg.id);
                 window.messagesDataMap[msg.id] = msg;
             });
-            console.log('messagesDataMap populated, keys:', Object.keys(window.messagesDataMap));
 
             if (!data.messages || data.messages.length === 0) {
                 container.innerHTML = `
@@ -1381,18 +1385,8 @@
             const chevron = element.querySelector('#chevron-' + element.dataset.id);
             const msgId = element.dataset.id;
 
-            console.log('message ID:', msgId, 'type:', typeof msgId);
-            console.log('messagesDataMap.keys():', Object.keys(window.messagesDataMap));
-            console.log('messagesDataMap[msgId]:', window.messagesDataMap[msgId]);
             const msg = window.messagesDataMap[msgId];
-            console.log('Found message from messagesDataMap:', !!msg, 'msg:', msg);
-            if (msg) {
-                console.log('msg.content length:', msg.content ? msg.content.length : 0, 'msg.content:', msg.content);
-                console.log('msg.full_entry exists:', !!msg.full_entry);
-                if (msg.full_entry) {
-                    console.log('msg.full_entry length:', msg.full_entry.length);
-                }
-            }
+            if (!msg) return;
 
             // If content is not yet loaded, load it from the stored messages data
             if (preElement && !preElement.dataset.loaded && contentExpanded) {
@@ -1424,7 +1418,6 @@
 
             if (contentExpanded) {
                 const isHidden = contentExpanded.style.display === 'none' || !contentExpanded.style.display;
-                console.log('isHidden:', isHidden);
                 contentExpanded.style.display = isHidden ? 'block' : 'none';
                 if (chevron) {
                     chevron.classList.toggle('rotate-180', !isHidden);
@@ -1447,21 +1440,22 @@
             isAutoRefreshing = checkbox.checked;
 
             if (isAutoRefreshing) {
-                console.log('Auto-refresh enabled');
+                // Save the current date when auto-refresh is enabled
+                autoRefreshDate = document.getElementById('date-filter').value;
                 // Fetch new data first
                 fetchData();
 
                 // Check for new data every 10 seconds
-                // Only refresh the display when new data is successfully fetched
                 autoRefreshInterval = setInterval(() => {
                     fetchData();
                 }, 10000);
             } else {
-                console.log('Auto-refresh disabled');
                 if (autoRefreshInterval) {
                     clearInterval(autoRefreshInterval);
                     autoRefreshInterval = null;
                 }
+                // Reset auto-refresh date when disabled
+                autoRefreshDate = null;
             }
         }
 
@@ -1476,15 +1470,26 @@
             try {
                 const response = await fetch('/api/fetch');
                 const data = await response.json();
-                console.log('Data fetch completed:', data);
                 // Show a toast notification if fetch was successful
                 const successCount = Object.values(data).filter(d => d.success).length;
                 if (successCount > 0) {
-                    console.log(`Successfully fetched data for ${successCount} tool(s)`);
+                    // When auto-refresh is enabled, check if date is not today
+                    // If not, prompt user to update
+                    const dateFilter = document.getElementById('date-filter');
+                    const currentDate = dateFilter.value;
+                    const today = getToday();
+
+                    if (isAutoRefreshing && currentDate !== today) {
+                        // Update date filter to today
+                        dateFilter.value = today;
+                        // Reload messages for today
+                        currentMessageCount = 0; // Reset to force reload
+                        loadMessages();
+                    }
+
                     // After successful fetch, check if message count changed
                     // by loading messages and comparing count
                     const container = document.getElementById('messages-container');
-                    const date = document.getElementById('date-filter').value;
                     const tool = document.getElementById('tool-filter').value;
                     const search = document.getElementById('search-filter').value;
 
@@ -1495,20 +1500,40 @@
                     if (document.getElementById('role-system').checked) roles.push('system');
 
                     const rolesParam = roles.length > 0 ? roles.join(',') : '';
-                    const url = `/api/messages?date=${date}&tool=${tool || ''}&roles=${rolesParam}&search=${search || ''}&page=1&limit=50`;
+                    const url = `/api/messages?date=${today}&tool=${tool || ''}&roles=${rolesParam}&search=${search || ''}&page=1&limit=50`;
 
                     const response2 = await fetch(url);
                     const newData = await response2.json();
 
-                    console.log(`Current count: ${currentMessageCount}, New count: ${newData.total}`);
+                    // Check if date has changed when auto-refresh is enabled
+                    if (isAutoRefreshing && autoRefreshDate && today !== autoRefreshDate) {
+                        // Check if there are new messages for the new date
+                        if (newData.total > currentMessageCount) {
+                            // Ask user if they want to switch to the new date
+                            if (confirm(t('dateChangedPrompt'))) {
+                                // User wants to switch to new date
+                                autoRefreshDate = today; // Update the tracked date
+                                currentMessageCount = newData.total;
+                                loadMessages();
+                            } else {
+                                // User doesn't want to switch, disable auto-refresh
+                                const checkbox = document.getElementById('auto-refresh');
+                                checkbox.checked = false;
+                                isAutoRefreshing = false;
+                                if (autoRefreshInterval) {
+                                    clearInterval(autoRefreshInterval);
+                                    autoRefreshInterval = null;
+                                }
+                                alert(t('autoRefreshDisabled'));
+                                return;
+                            }
+                        }
+                    }
 
                     // Only reload if message count changed
                     if (currentMessageCount === 0 || newData.total > currentMessageCount) {
-                        console.log(`Message count changed from ${currentMessageCount} to ${newData.total}, reloading...`);
                         currentMessageCount = newData.total;
                         loadMessages();
-                    } else {
-                        console.log('No new messages, skipping refresh');
                     }
                 }
             } catch (error) {
@@ -1580,13 +1605,11 @@
                 renderMessages(data);
 
                 // Merge messages into global map (don't overwrite)
-                console.log('Populating messagesDataMap for page', page);
                 data.messages.forEach(msg => {
                     if (!window.messagesDataMap[msg.id]) {
                         window.messagesDataMap[msg.id] = msg;
                     }
                 });
-                console.log('messagesDataMap size:', Object.keys(window.messagesDataMap).length);
             } catch (error) {
                 console.error('Error loading messages:', error);
                 container.innerHTML = '<div class="alert alert-danger">Error loading messages</div>';
@@ -1646,10 +1669,6 @@
                 switchSection('messages');
             }
         });
-    </script>
-    <script>
-        //Debug: Check Chart.js availability
-        console.log('Chart.js available:', typeof Chart !== 'undefined');
     </script>
 </body>
 </html>

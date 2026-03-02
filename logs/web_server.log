@@ -1,0 +1,845 @@
+Database initialized at /Users/rhuang/.ai_token_usage/usage.db
+ * Serving Flask app 'web'
+ * Debug mode: on
+Address already in use
+Port 5001 is in use by another program. Either identify and stop that program, or start the server with a different port.
+Database initialized at /Users/rhuang/.ai_token_usage/usage.db
+ * Serving Flask app 'web'
+ * Debug mode: on
+Address already in use
+Port 5001 is in use by another program. Either identify and stop that program, or start the server with a different port.
+Database initialized at /Users/rhuang/.ai_token_usage/usage.db
+ * Serving Flask app 'web'
+ * Debug mode: on
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5001
+ * Running on http://192.168.31.181:5001
+[33mPress CTRL+C to quit[0m
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 706-267-210
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/multiprocessing/resource_tracker.py:216: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '
+Database initialized at /Users/rhuang/.ai_token_usage/usage.db
+ * Serving Flask app 'web'
+ * Debug mode: on
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5001
+ * Running on http://192.168.31.181:5001
+[33mPress CTRL+C to quit[0m
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 706-267-210
+Database initialized at /Users/rhuang/.ai_token_usage/usage.db
+ * Serving Flask app 'web'
+ * Debug mode: on
+Address already in use
+Port 5001 is in use by another program. Either identify and stop that program, or start the server with a different port.
+Database initialized at /Users/rhuang/.ai_token_usage/usage.db
+ * Serving Flask app 'web'
+ * Debug mode: on
+Address already in use
+Port 5001 is in use by another program. Either identify and stop that program, or start the server with a different port.
+127.0.0.1 - - [02/Mar/2026 16:00:11] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:00:15] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:00:15] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:00:15] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+Database initialized at /Users/rhuang/.ai_token_usage/usage.db
+ * Serving Flask app 'web'
+ * Debug mode: on
+Address already in use
+Port 5001 is in use by another program. Either identify and stop that program, or start the server with a different port.
+Database initialized at /Users/rhuang/.ai_token_usage/usage.db
+ * Serving Flask app 'web'
+ * Debug mode: on
+Address already in use
+Port 5001 is in use by another program. Either identify and stop that program, or start the server with a different port.
+127.0.0.1 - - [02/Mar/2026 16:00:29] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:00:29] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:00:29] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+Database initialized at /Users/rhuang/.ai_token_usage/usage.db
+ * Serving Flask app 'web'
+ * Debug mode: on
+Address already in use
+Port 5001 is in use by another program. Either identify and stop that program, or start the server with a different port.
+127.0.0.1 - - [02/Mar/2026 16:00:43] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:00:43] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+Database initialized at /Users/rhuang/.ai_token_usage/usage.db
+ * Serving Flask app 'web'
+ * Debug mode: on
+Address already in use
+Port 5001 is in use by another program. Either identify and stop that program, or start the server with a different port.
+127.0.0.1 - - [02/Mar/2026 16:00:53] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:00:53] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+Database initialized at /Users/rhuang/.ai_token_usage/usage.db
+ * Serving Flask app 'web'
+ * Debug mode: on
+Address already in use
+Port 5001 is in use by another program. Either identify and stop that program, or start the server with a different port.
+Database initialized at /Users/rhuang/.ai_token_usage/usage.db
+ * Serving Flask app 'web'
+ * Debug mode: on
+Address already in use
+Port 5001 is in use by another program. Either identify and stop that program, or start the server with a different port.
+127.0.0.1 - - [02/Mar/2026 16:01:13] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:01:13] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+Database initialized at /Users/rhuang/.ai_token_usage/usage.db
+ * Serving Flask app 'web'
+ * Debug mode: on
+Address already in use
+Port 5001 is in use by another program. Either identify and stop that program, or start the server with a different port.
+127.0.0.1 - - [02/Mar/2026 16:01:23] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:01:23] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+Database initialized at /Users/rhuang/.ai_token_usage/usage.db
+ * Serving Flask app 'web'
+ * Debug mode: on
+Address already in use
+Port 5001 is in use by another program. Either identify and stop that program, or start the server with a different port.
+127.0.0.1 - - [02/Mar/2026 16:01:33] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:01:33] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+Database initialized at /Users/rhuang/.ai_token_usage/usage.db
+ * Serving Flask app 'web'
+ * Debug mode: on
+Address already in use
+Port 5001 is in use by another program. Either identify and stop that program, or start the server with a different port.
+127.0.0.1 - - [02/Mar/2026 16:01:43] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:01:43] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:01:43] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+Database initialized at /Users/rhuang/.ai_token_usage/usage.db
+ * Serving Flask app 'web'
+ * Debug mode: on
+Address already in use
+Port 5001 is in use by another program. Either identify and stop that program, or start the server with a different port.
+127.0.0.1 - - [02/Mar/2026 16:01:57] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:01:57] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:01:57] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:02:11] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:02:11] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:02:11] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:02:26] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:02:26] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:02:26] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:02:40] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:02:40] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:02:40] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:02:45] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:02:54] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:02:54] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:02:54] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:03:08] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:03:08] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:03:18] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:03:18] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:03:28] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:03:28] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:03:38] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:03:38] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:03:48] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:03:48] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:03:58] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:03:58] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:04:08] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:04:08] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:04:18] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:04:18] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:04:38] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:04:38] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:04:58] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:04:58] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:05:08] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:05:08] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:05:08] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:05:22] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:05:22] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:05:22] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:05:36] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:05:36] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:05:36] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:05:51] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:05:51] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:05:51] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:06:05] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:06:05] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:06:05] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:06:19] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:06:19] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:06:29] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:06:29] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:06:39] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:06:39] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:06:39] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+ * Detected change in '/Users/rhuang/workspace/ai-token-analyzer/scripts/fetch_openclaw_messages.py', reloading
+Database initialized at /Users/rhuang/.ai_token_usage/usage.db
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 706-267-210
+127.0.0.1 - - [02/Mar/2026 16:06:53] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:06:53] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:06:53] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+ * Detected change in '/Users/rhuang/workspace/ai-token-analyzer/scripts/fetch_openclaw_messages.py', reloading
+Database initialized at /Users/rhuang/.ai_token_usage/usage.db
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 706-267-210
+ * Detected change in '/Users/rhuang/workspace/ai-token-analyzer/scripts/fetch_openclaw_messages.py', reloading
+Database initialized at /Users/rhuang/.ai_token_usage/usage.db
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 706-267-210
+127.0.0.1 - - [02/Mar/2026 16:07:18] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:07:18] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:07:18] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:07:32] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:07:32] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:07:32] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+ * Detected change in '/Users/rhuang/workspace/ai-token-analyzer/scripts/fetch_openclaw_messages.py', reloading
+Database initialized at /Users/rhuang/.ai_token_usage/usage.db
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 706-267-210
+127.0.0.1 - - [02/Mar/2026 16:07:46] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:07:46] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:07:46] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:08:00] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:08:00] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:08:00] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:08:15] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:08:15] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:08:35] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:08:35] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:08:35] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+ * Detected change in '/Users/rhuang/workspace/ai-token-analyzer/web.py', reloading
+Database initialized at /Users/rhuang/.ai_token_usage/usage.db
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 706-267-210
+127.0.0.1 - - [02/Mar/2026 16:08:45] "GET /api/tools HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:08:49] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:08:49] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:08:49] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:08:51] "GET /api/messages?date=2026-03-01&tool=openclaw&limit=3 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:09:03] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:09:03] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:09:03] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:09:11] "GET /api/messages?date=2026-03-01&tool=openclaw HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:09:18] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:09:18] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:09:18] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:09:19] "GET /api/tools HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:09:30] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:09:32] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:09:32] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:09:32] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:09:46] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:09:46] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:09:56] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:09:56] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:09:56] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:10:11] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:10:11] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:10:21] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:10:21] "GET /api/messages?date=2026-03-02&tool=&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:10:22] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:10:22] "GET /api/today HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:10:22] "GET /api/summary HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:10:22] "GET /api/range?start=2026-01-31&end=2026-03-02 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:10:22] "GET /api/summary HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:10:22] "GET /api/range?start=2026-01-31&end=2026-03-02 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:10:24] "GET /api/messages?date=2026-03-02&tool=&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:10:30] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:10:39] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:10:52] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user,assistant&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:10:57] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:11:59] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:11:59] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:11:59] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:12:13] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:12:13] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:12:23] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:12:23] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:12:33] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:12:33] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:12:45] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:12:46] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:13:03] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:13:04] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:13:19] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:13:19] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:13:29] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:13:29] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:13:49] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:13:49] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:13:59] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:13:59] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:14:17] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:14:18] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:14:18] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:14:32] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:14:32] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:14:42] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:14:42] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:14:52] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:14:52] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:15:02] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:15:02] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:15:22] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:15:22] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:15:32] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:15:32] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:15:52] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:15:52] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:16:12] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:16:12] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:16:22] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:16:22] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:16:32] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:16:32] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:16:42] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:16:42] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:17:44] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:17:44] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:18:44] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:18:44] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:19:45] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:19:45] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:20:28] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:20:28] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:20:42] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:20:42] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:21:02] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:21:02] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:21:22] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:21:22] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:21:32] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:21:32] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:21:42] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:21:42] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:22:02] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:22:02] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:22:12] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:22:12] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:22:32] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:22:32] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:22:42] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:22:42] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:22:45] "GET /api/messages?date=2026-03-04&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:25:32] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:26:04] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:26:13] "GET /api/messages?date=2026-03-21&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:26:18] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:26:49] "GET /api/summary HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:26:49] "GET /api/today HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:27:09] "[33mGET /.well-known/appspecific/com.chrome.devtools.json HTTP/1.1[0m" 404 -
+127.0.0.1 - - [02/Mar/2026 16:28:48] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:28:48] "[33mGET /.well-known/appspecific/com.chrome.devtools.json HTTP/1.1[0m" 404 -
+Database initialized at /Users/rhuang/.ai_token_usage/usage.db
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/multiprocessing/resource_tracker.py:216: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '
+Database initialized at /Users/rhuang/.ai_token_usage/usage.db
+ * Serving Flask app 'web'
+ * Debug mode: on
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5001
+ * Running on http://192.168.31.181:5001
+[33mPress CTRL+C to quit[0m
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 706-267-210
+127.0.0.1 - - [02/Mar/2026 16:32:53] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:33:13] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:33:48] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:33:48] "[33mGET /.well-known/appspecific/com.chrome.devtools.json HTTP/1.1[0m" 404 -
+127.0.0.1 - - [02/Mar/2026 16:33:48] "GET /static/js/Chart.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:33:48] "GET /static/css/bootstrap.min.css HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:33:48] "GET /static/css/bootstrap-icons.css HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:33:48] "GET /static/js/bootstrap.bundle.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:33:48] "[33mGET /static/js/chart.umd.js.map HTTP/1.1[0m" 404 -
+127.0.0.1 - - [02/Mar/2026 16:33:48] "[33mGET /static/js/bootstrap.bundle.min.js.map HTTP/1.1[0m" 404 -
+127.0.0.1 - - [02/Mar/2026 16:33:48] "[33mGET /static/css/fonts/bootstrap-icons.woff2?1bb88866b4085542c8ed5fb61b9393dd HTTP/1.1[0m" 404 -
+127.0.0.1 - - [02/Mar/2026 16:33:48] "GET /api/summary HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:33:48] "GET /api/summary HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:33:48] "GET /api/today HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:33:48] "GET /api/range?start=2026-01-31&end=2026-03-02 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:33:48] "GET /api/range?start=2026-01-31&end=2026-03-02 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:33:48] "[33mGET /static/css/bootstrap.min.css.map HTTP/1.1[0m" 404 -
+127.0.0.1 - - [02/Mar/2026 16:33:48] "[33mGET /static/css/fonts/bootstrap-icons.woff?1bb88866b4085542c8ed5fb61b9393dd HTTP/1.1[0m" 404 -
+127.0.0.1 - - [02/Mar/2026 16:35:19] "GET /api/summary HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:35:37] "GET /static/css/fonts/bootstrap-icons.woff2 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:35:41] "GET /static/css/fonts/bootstrap-icons.woff HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:35:54] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:35:54] "[33mGET /.well-known/appspecific/com.chrome.devtools.json HTTP/1.1[0m" 404 -
+127.0.0.1 - - [02/Mar/2026 16:35:54] "GET /static/css/bootstrap.min.css HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:35:54] "GET /static/js/Chart.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:35:54] "GET /static/js/bootstrap.bundle.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:35:54] "GET /static/css/bootstrap-icons.css HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:35:54] "[33mGET /static/js/chart.umd.js.map HTTP/1.1[0m" 404 -
+127.0.0.1 - - [02/Mar/2026 16:35:54] "[33mGET /static/js/bootstrap.bundle.min.js.map HTTP/1.1[0m" 404 -
+127.0.0.1 - - [02/Mar/2026 16:35:54] "GET /api/today HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:35:54] "GET /static/css/fonts/bootstrap-icons.woff2?1bb88866b4085542c8ed5fb61b9393dd HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:35:54] "GET /api/summary HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:35:54] "GET /api/range?start=2026-01-31&end=2026-03-02 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:35:54] "GET /api/range?start=2026-01-31&end=2026-03-02 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:35:54] "GET /api/summary HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:35:54] "[33mGET /static/css/bootstrap.min.css.map HTTP/1.1[0m" 404 -
+127.0.0.1 - - [02/Mar/2026 16:36:09] "GET /api/messages?date=2026-03-02&tool=&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:36:40] "GET /api/messages?date=2026-03-02&tool=&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:36:45] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:36:49] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:36:57] "GET /api/messages?date=2026-02-20&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:56:22] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:56:24] "GET /api/messages?date=2026-03-02&tool=claude&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:56:32] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:56:32] "GET /api/messages?date=2026-03-02&tool=claude&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:56:32] "GET /api/messages?date=2026-03-02&tool=claude&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:56:46] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:56:46] "GET /api/messages?date=2026-03-02&tool=claude&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:57:06] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:57:06] "GET /api/messages?date=2026-03-02&tool=claude&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:57:16] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:57:16] "GET /api/messages?date=2026-03-02&tool=claude&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:57:26] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:57:26] "GET /api/messages?date=2026-03-02&tool=claude&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:57:36] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:57:36] "GET /api/messages?date=2026-03-02&tool=claude&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:57:46] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:57:46] "GET /api/messages?date=2026-03-02&tool=claude&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:57:56] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:57:56] "GET /api/messages?date=2026-03-02&tool=claude&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:58:05] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:58:16] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:58:16] "GET /api/messages?date=2026-03-02&tool=claude&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:58:37] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:58:37] "GET /api/messages?date=2026-03-02&tool=claude&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:58:44] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:58:44] "GET /static/js/Chart.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:58:44] "GET /static/css/bootstrap.min.css HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:58:44] "GET /static/css/bootstrap-icons.css HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:58:44] "GET /static/js/bootstrap.bundle.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:58:44] "GET /api/summary HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:58:44] "GET /api/today HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:58:44] "GET /api/summary HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:58:44] "GET /api/range?start=2026-01-31&end=2026-03-02 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:58:44] "GET /api/range?start=2026-01-31&end=2026-03-02 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:58:44] "GET /static/css/fonts/bootstrap-icons.woff2?1bb88866b4085542c8ed5fb61b9393dd HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:58:46] "GET /api/messages?date=2026-03-02&tool=&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:58:46] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:58:50] "GET /api/messages?date=2026-03-02&tool=claude&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:58:55] "GET /api/messages?date=2026-03-01&tool=claude&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:58:56] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:58:56] "GET /api/messages?date=2026-03-01&tool=claude&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:59:26] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:59:26] "GET /api/messages?date=2026-03-01&tool=claude&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:59:26] "GET /api/messages?date=2026-03-01&tool=claude&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:59:41] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 16:59:41] "GET /api/messages?date=2026-03-01&tool=claude&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:00:01] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:00:01] "GET /api/messages?date=2026-03-01&tool=claude&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:00:11] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:00:11] "GET /api/messages?date=2026-03-01&tool=claude&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:00:21] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:00:21] "GET /api/messages?date=2026-03-01&tool=claude&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:00:31] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:00:31] "GET /api/messages?date=2026-03-01&tool=claude&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:00:51] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:00:51] "GET /api/messages?date=2026-03-01&tool=claude&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:01:01] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:01:01] "GET /api/messages?date=2026-03-01&tool=claude&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:01:11] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:01:11] "GET /api/messages?date=2026-03-01&tool=claude&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:01:15] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:01:31] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:01:31] "GET /api/messages?date=2026-03-01&tool=claude&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:01:41] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:01:41] "GET /api/messages?date=2026-03-01&tool=claude&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:01:46] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:01:46] "GET /static/js/Chart.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:01:46] "GET /static/css/bootstrap.min.css HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:01:46] "GET /static/css/bootstrap-icons.css HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:01:46] "GET /static/js/bootstrap.bundle.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:01:46] "GET /api/today HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:01:46] "GET /api/range?start=2026-01-31&end=2026-03-02 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:01:46] "GET /api/summary HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:01:46] "GET /api/summary HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:01:46] "GET /api/range?start=2026-01-31&end=2026-03-02 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:01:46] "GET /static/css/fonts/bootstrap-icons.woff2?1bb88866b4085542c8ed5fb61b9393dd HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:01:48] "GET /api/messages?date=2026-03-02&tool=&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:01:54] "GET /api/messages?date=2026-03-01&tool=&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:02:02] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:02:02] "GET /api/messages?date=2026-03-01&tool=&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:02:02] "GET /api/messages?date=2026-03-01&tool=&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:02:16] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:02:16] "GET /api/messages?date=2026-03-01&tool=&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:02:21] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:02:36] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:02:36] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:02:56] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:02:56] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:03:06] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:03:06] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:03:12] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user,assistant&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:03:17] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:03:31] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:03:31] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:03:41] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:03:41] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:03:51] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:03:51] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:04:01] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:04:01] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:04:11] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:04:11] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:04:21] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:04:21] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:04:31] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:04:31] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:04:41] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:04:41] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:04:51] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:04:51] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:05:01] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:05:01] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:05:11] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:05:11] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:05:21] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:05:21] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:05:31] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:05:31] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:05:35] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:05:52] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:05:52] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:06:01] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:06:01] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:06:11] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:06:11] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:06:15] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:06:15] "GET /static/css/bootstrap-icons.css HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:06:15] "GET /static/js/Chart.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:06:15] "GET /static/css/bootstrap.min.css HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:06:15] "GET /static/js/bootstrap.bundle.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:06:15] "GET /static/css/fonts/bootstrap-icons.woff2?1bb88866b4085542c8ed5fb61b9393dd HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:06:15] "GET /api/summary HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:06:15] "GET /api/today HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:06:15] "GET /api/summary HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:06:15] "GET /api/range?start=2026-01-31&end=2026-03-02 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:06:15] "GET /api/range?start=2026-01-31&end=2026-03-02 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:06:17] "GET /api/messages?date=2026-03-02&tool=&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:06:23] "GET /api/messages?date=2026-03-01&tool=&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:06:25] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:06:31] "[33mGET /.well-known/appspecific/com.chrome.devtools.json HTTP/1.1[0m" 404 -
+127.0.0.1 - - [02/Mar/2026 17:06:31] "[36mGET /static/css/bootstrap.min.css HTTP/1.1[0m" 304 -
+127.0.0.1 - - [02/Mar/2026 17:06:31] "[36mGET /static/css/bootstrap-icons.css HTTP/1.1[0m" 304 -
+127.0.0.1 - - [02/Mar/2026 17:06:31] "[33mGET /static/js/chart.umd.js.map HTTP/1.1[0m" 404 -
+127.0.0.1 - - [02/Mar/2026 17:06:31] "[33mGET /static/js/bootstrap.bundle.min.js.map HTTP/1.1[0m" 404 -
+127.0.0.1 - - [02/Mar/2026 17:06:31] "[33mGET /static/css/bootstrap.min.css.map HTTP/1.1[0m" 404 -
+127.0.0.1 - - [02/Mar/2026 17:06:32] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:06:32] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:06:32] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:06:47] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:06:47] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:07:07] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:07:07] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:07:17] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:07:17] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:07:37] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:07:37] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:07:57] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:07:57] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:08:07] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:08:07] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:08:17] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:08:17] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:08:27] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:08:27] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:08:37] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:08:37] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:08:47] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:08:47] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:09:07] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:09:07] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:09:17] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:09:17] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:09:27] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:09:27] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:09:37] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:09:37] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:09:47] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:09:47] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:09:57] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:09:57] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:10:17] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:10:17] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:10:27] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:10:27] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:10:37] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:10:37] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:10:47] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:10:47] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:11:07] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:11:07] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:11:10] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:11:17] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:11:17] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:11:27] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:11:27] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:11:37] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:11:37] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:11:47] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:11:47] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:11:57] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:11:57] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:12:07] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:12:07] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:12:27] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:12:27] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:12:47] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:12:47] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:13:07] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:13:07] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:13:17] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:13:17] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:13:27] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:13:27] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:13:37] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:13:37] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:13:47] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:13:47] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:13:57] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:13:57] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:14:07] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:14:07] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:14:47] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:14:50] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:14:50] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:15:07] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:15:07] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:15:17] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:15:17] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:15:27] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:15:27] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:15:37] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:15:37] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:15:47] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:15:47] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:15:49] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:15:49] "GET /static/css/bootstrap.min.css HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:15:49] "GET /static/js/Chart.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:15:49] "GET /static/css/bootstrap-icons.css HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:15:49] "GET /static/js/bootstrap.bundle.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:15:49] "GET /api/today HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:15:49] "GET /api/range?start=2026-01-31&end=2026-03-02 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:15:49] "GET /api/summary HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:15:49] "GET /api/summary HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:15:49] "GET /static/css/fonts/bootstrap-icons.woff2?1bb88866b4085542c8ed5fb61b9393dd HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:15:49] "GET /api/range?start=2026-01-31&end=2026-03-02 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:15:51] "GET /api/messages?date=2026-03-02&tool=&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:15:56] "[36mGET /static/css/bootstrap.min.css HTTP/1.1[0m" 304 -
+127.0.0.1 - - [02/Mar/2026 17:15:56] "[36mGET /static/css/bootstrap-icons.css HTTP/1.1[0m" 304 -
+127.0.0.1 - - [02/Mar/2026 17:15:56] "[33mGET /.well-known/appspecific/com.chrome.devtools.json HTTP/1.1[0m" 404 -
+127.0.0.1 - - [02/Mar/2026 17:15:56] "[33mGET /static/js/chart.umd.js.map HTTP/1.1[0m" 404 -
+127.0.0.1 - - [02/Mar/2026 17:15:56] "[33mGET /static/js/bootstrap.bundle.min.js.map HTTP/1.1[0m" 404 -
+127.0.0.1 - - [02/Mar/2026 17:15:56] "[33mGET /static/css/bootstrap.min.css.map HTTP/1.1[0m" 404 -
+127.0.0.1 - - [02/Mar/2026 17:16:04] "GET /api/messages?date=2026-03-01&tool=&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:16:12] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:16:24] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:16:24] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:16:24] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:16:38] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:16:38] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:16:48] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:16:48] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:17:09] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:17:09] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:17:18] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:17:18] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:17:28] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:17:28] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:17:38] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:17:38] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:17:48] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:17:48] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:17:58] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:17:58] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:18:19] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:18:19] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:18:28] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:18:28] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:18:49] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:18:49] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:18:58] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:18:58] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:19:08] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:19:08] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:19:09] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:19:18] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:19:18] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:19:28] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:19:28] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:19:38] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:19:38] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:19:49] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:19:57] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:19:59] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:19:59] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:20:08] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:20:08] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:20:18] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:20:18] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:20:28] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:20:28] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:20:29] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:20:29] "[33mGET /.well-known/appspecific/com.chrome.devtools.json HTTP/1.1[0m" 404 -
+127.0.0.1 - - [02/Mar/2026 17:20:29] "GET /static/css/bootstrap.min.css HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:20:29] "GET /static/css/bootstrap-icons.css HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:20:29] "GET /static/js/bootstrap.bundle.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:20:29] "GET /static/js/Chart.min.js HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:20:29] "[33mGET /static/js/chart.umd.js.map HTTP/1.1[0m" 404 -
+127.0.0.1 - - [02/Mar/2026 17:20:29] "[33mGET /static/js/bootstrap.bundle.min.js.map HTTP/1.1[0m" 404 -
+127.0.0.1 - - [02/Mar/2026 17:20:29] "GET /api/today HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:20:29] "GET /api/range?start=2026-01-31&end=2026-03-02 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:20:29] "GET /api/summary HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:20:29] "GET /static/css/fonts/bootstrap-icons.woff2?1bb88866b4085542c8ed5fb61b9393dd HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:20:29] "GET /api/summary HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:20:29] "GET /api/range?start=2026-01-31&end=2026-03-02 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:20:29] "[33mGET /static/css/bootstrap.min.css.map HTTP/1.1[0m" 404 -
+127.0.0.1 - - [02/Mar/2026 17:20:32] "GET /api/messages?date=2026-03-02&tool=&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:20:34] "GET /api/messages?date=2026-03-01&tool=&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:20:37] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:20:43] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:20:43] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:20:43] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:20:49] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:21:03] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:21:03] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:21:03] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:21:03] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:21:03] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:21:12] "GET /api/messages?date=2026-03-01&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:21:26] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:21:26] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:21:26] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:21:26] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:21:41] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:21:41] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:21:51] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:21:51] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:22:01] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:22:01] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:22:11] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:22:11] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:22:21] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:22:21] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:22:31] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:22:31] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:22:41] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:22:41] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:22:51] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:22:51] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:23:01] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:23:01] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:23:11] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:23:11] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:23:21] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:23:21] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:23:41] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:23:41] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:23:51] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:23:51] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:24:01] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:24:01] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:24:11] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:24:11] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:24:21] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:24:21] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:24:31] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:24:31] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:24:41] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:24:41] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:24:51] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:24:51] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:25:01] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:25:01] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:25:11] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:25:11] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:25:31] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:25:31] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:25:41] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:25:41] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:25:51] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:25:51] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:26:01] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:26:01] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:26:11] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:26:11] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:26:31] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:26:31] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:26:41] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:26:41] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:26:51] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:26:51] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:27:11] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:27:11] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:27:21] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:27:21] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:27:41] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:27:41] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:27:51] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:27:51] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:28:11] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:28:11] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:28:21] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:28:21] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:28:31] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:28:31] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:28:41] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:28:41] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:28:51] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:28:51] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:29:01] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:29:01] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:29:11] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:29:11] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:29:21] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:29:21] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:29:31] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:29:31] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:29:41] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:29:41] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:29:51] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:29:51] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:30:01] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:30:01] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:30:11] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:30:11] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:30:21] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:30:21] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:30:41] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:30:41] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:30:51] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:30:51] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:31:00] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:31:01] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:31:01] "GET /api/messages?date=2026-03-02&tool=openclaw&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:31:07] "GET /api/messages?date=2026-03-02&tool=claude&roles=user&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:31:11] "GET /api/messages?date=2026-03-02&tool=claude&roles=user,assistant&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:31:12] "GET /api/messages?date=2026-03-02&tool=claude&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:31:27] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:31:27] "GET /api/messages?date=2026-03-02&tool=claude&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:31:27] "GET /api/messages?date=2026-03-02&tool=claude&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:31:42] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:31:42] "GET /api/messages?date=2026-03-02&tool=claude&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:31:52] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:31:52] "GET /api/messages?date=2026-03-02&tool=claude&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:31:52] "GET /api/messages?date=2026-03-02&tool=claude&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:32:06] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:32:06] "GET /api/messages?date=2026-03-02&tool=claude&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:32:06] "GET /api/messages?date=2026-03-02&tool=claude&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:32:21] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:32:21] "GET /api/messages?date=2026-03-02&tool=claude&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:32:21] "GET /api/messages?date=2026-03-02&tool=claude&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:32:35] "GET /api/fetch HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:32:35] "GET /api/messages?date=2026-03-02&tool=claude&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:32:35] "GET /api/messages?date=2026-03-02&tool=claude&roles=user,assistant,system&search=&page=1&limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [02/Mar/2026 17:34:06] "GET / HTTP/1.1" 200 -

@@ -98,6 +98,25 @@ def api_fetch():
 
     results = {}
 
+    # Fetch OpenClaw data (including messages)
+    try:
+        result = subprocess.run(
+            ['python3', 'scripts/fetch_openclaw_messages.py', '--days', '7'],
+            capture_output=True,
+            text=True,
+            timeout=120
+        )
+        results['openclaw'] = {
+            'success': result.returncode == 0,
+            'stdout': result.stdout,
+            'stderr': result.stderr
+        }
+    except Exception as e:
+        results['openclaw'] = {
+            'success': False,
+            'error': str(e)
+        }
+
     # Fetch Claude data
     try:
         result = subprocess.run(
