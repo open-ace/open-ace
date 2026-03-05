@@ -258,6 +258,30 @@
             font-size: 0.7rem;
         }
 
+        .message-source {
+            font-size: 0.65rem;
+            padding: 2px 6px;
+            border-radius: 3px;
+            margin-left: 6px;
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+
+        .message-source.slack {
+            background-color: #4A154B;
+            color: white;
+        }
+
+        .message-source.feishu {
+            background-color: #00D6B9;
+            color: white;
+        }
+
+        .message-source.openclaw {
+            background-color: #0d6efd;
+            color: white;
+        }
+
         .message-content-truncated {
             color: #495057;
             font-size: 0.9rem;
@@ -1467,12 +1491,14 @@
 
                 // Get sender info for user messages (especially for OpenClaw)
                 let senderDisplayName = '';
-                if (role === 'user' && msg.sender_name) {
-                    // Use sender_name if available
-                    senderDisplayName = msg.sender_name;
-                } else if (role === 'user' && msg.sender_id) {
-                    // Fall back to sender_id
-                    senderDisplayName = msg.sender_id;
+                let messageSource = '';
+                if (role === 'user') {
+                    if (msg.sender_name) {
+                        senderDisplayName = msg.sender_name;
+                    } else if (msg.sender_id) {
+                        senderDisplayName = msg.sender_id;
+                    }
+                    messageSource = msg.message_source || 'openclaw';
                 }
 
                 // Get content and parse if it's JSON
@@ -1523,7 +1549,7 @@
                                 <span class="role-badge ${role}">${role}</span>
                             </div>
                             <div class="message-content">
-                                ${senderDisplayName ? `<div class="message-sender text-muted mb-1" style="font-size: 0.75rem;"><i class="bi bi-person"></i> ${escapeHtmlForDisplay(senderDisplayName)}</div>` : ''}
+                                ${senderDisplayName ? `<div class="message-sender text-muted mb-1" style="font-size: 0.75rem;"><i class="bi bi-person"></i> ${escapeHtmlForDisplay(senderDisplayName)}${messageSource ? `<span class="message-source ${messageSource}">${messageSource}</span>` : ''}</div>` : ''}
                                 <div class="message-content-truncated">${contentHtml}</div>
                             </div>
                             ${tokens > 0 ? `<div class="message-tokens ms-2">

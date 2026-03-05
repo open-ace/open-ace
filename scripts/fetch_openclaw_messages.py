@@ -67,7 +67,7 @@ def extract_content_from_entry(entry: dict) -> tuple:
     """Extract content from an OpenClaw log entry.
     
     Returns:
-        tuple: (cleaned_content, sender_id, sender_name)
+        tuple: (cleaned_content, sender_id, sender_name, message_source)
     """
     entry_type = entry.get("type")
 
@@ -78,11 +78,12 @@ def extract_content_from_entry(entry: dict) -> tuple:
             content_list = msg.get("content", [])
 
             if not isinstance(content_list, list):
-                return ("", None, None)
+                return ("", None, None, "openclaw")
 
             texts = []
             sender_id = None
             sender_name = None
+            message_source = "openclaw"
 
             for item in content_list:
                 if not isinstance(item, dict):
@@ -104,6 +105,7 @@ def extract_content_from_entry(entry: dict) -> tuple:
                         if parsed:
                             sender_id = parsed.get("sender_id") or sender_id
                             sender_name = parsed.get("sender_name") or sender_name
+                            message_source = parsed.get("message_source", "openclaw")
                             text = parsed.get("cleaned_content", text)
                     
                     texts.append(text)
@@ -132,7 +134,7 @@ def extract_content_from_entry(entry: dict) -> tuple:
                     texts.append("[Document content]")
 
             if texts:
-                return ("\n".join(texts), sender_id, sender_name)
+                return ("\n".join(texts), sender_id, sender_name, message_source)
 
     elif entry_type == "session":
         # Session start - get basic info
@@ -144,9 +146,9 @@ def extract_content_from_entry(entry: dict) -> tuple:
             "id": session_id,
             "timestamp": timestamp,
             "cwd": cwd
-        }, ensure_ascii=False), None, None)
+        }, ensure_ascii=False), None, None, "openclaw")
 
-    return ("", None, None)
+    return ("", None, None, "openclaw")
 
 
 def extract_user_message_metadata(text: str) -> Optional[dict]:
@@ -166,6 +168,7 @@ def extract_user_message_metadata(text: str) -> Optional[dict]:
     sender_id = None
     sender_name = None
     cleaned_content = text
+    message_source = "openclaw"  # Default source
     
     # Try to extract sender_id from JSON metadata
     try:
@@ -193,7 +196,7 @@ def extract_user_message_metadata(text: str) -> Optional[dict]:
     except Exception:
         pass
     
-    # Extract the actual message content (after metadata blocks)
+    # Detect message source and extract content
     lines = text.split('\n')
     content_lines = []
     found_actual_content = False
@@ -201,6 +204,12 @@ def extract_user_message_metadata(text: str) -> Optional[dict]:
     
     for line in lines:
         stripped = line.strip()
+        
+        # Detect message source
+        if '[Slack' in stripped or 'Slack message' in stripped or 'Slack DM' in stripped:
+            message_source = "slack"
+        elif '[Feishu' in stripped or 'Feishu message' in stripped:
+            message_source = "feishu"
         
         # Skip metadata lines
         if stripped.startswith('Conversation info'):
@@ -230,10 +239,13 @@ def extract_user_message_metadata(text: str) -> Optional[dict]:
             if found_actual_content:
                 content_lines.append(line)
             continue
-            
+        
+        # Remove timestamp prefix pattern: [Wed 2026-03-04 09:49 GMT+8]
+        timestamp_pattern = r'^\[[A-Za-z]{3}\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}.*?\]\s*'
+        stripped = re.sub(timestamp_pattern, '', stripped)
+        
         # Check if this is the actual user message (pattern: sender_id: content or Uxxxx: content)
         import re
-        # Match both ou_xxx (OpenClaw user IDs) and Uxxxx (Slack user IDs)
         match = re.match(r'^(ou_[a-f0-9]+|U[A-Z0-9]+):\s*(.+)$', stripped)
         if match:
             found_actual_content = True
@@ -251,10 +263,10 @@ def extract_user_message_metadata(text: str) -> Optional[dict]:
                     sender_name = label_match.group(1)
         elif found_actual_content:
             # Continue collecting content after finding the start
-            content_lines.append(line)
+            content_lines.append(stripped)
         elif not found_actual_content and stripped and not stripped.startswith('{'):
-            # If we haven't found the pattern but have content, use it
-            content_lines.append(line)
+            # If we haven't found the pattern but have content, use it (after removing timestamp)
+            content_lines.append(stripped)
     
     if content_lines:
         cleaned_content = '\n'.join(content_lines).strip()
@@ -266,7 +278,8 @@ def extract_user_message_metadata(text: str) -> Optional[dict]:
     return {
         "sender_id": sender_id,
         "sender_name": sender_name,
-        "cleaned_content": cleaned_content
+        "cleaned_content": cleaned_content,
+        "message_source": message_source
     }
 
 
@@ -334,11 +347,12 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                             # Determine role from message role
                             role = msg.get("role", "unknown")
 
-                            # Get content (now returns tuple: content, sender_id, sender_name)
+                            # Get content (returns tuple: content, sender_id, sender_name, message_source)
                             result = extract_content_from_entry(entry)
                             content = result[0] if result else ""
                             sender_id = result[1] if result else None
                             sender_name = result[2] if result else None
+                            message_source = result[3] if result else "openclaw"
 
                             # Get token counts
                             input_tokens = tokens.get("input_tokens", 0)
@@ -360,7 +374,7 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                             # Save full entry as JSON for complete original data
                             full_entry_json = json.dumps(entry, ensure_ascii=False)
 
-                            # Save message to database with sender info
+                            # Save message to database with sender info and message source
                             db.save_message(
                                 date=date_key,
                                 tool_name="openclaw",
@@ -376,7 +390,8 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                                 model=model,
                                 timestamp=ts,
                                 sender_id=sender_id,
-                                sender_name=sender_name
+                                sender_name=sender_name,
+                                message_source=message_source
                             )
 
                 if sum([

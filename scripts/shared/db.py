@@ -93,6 +93,7 @@ def init_database() -> None:
             timestamp TEXT,
             sender_id TEXT,
             sender_name TEXT,
+            message_source TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(date, tool_name, message_id, host_name)
         )
@@ -148,6 +149,14 @@ def init_database() -> None:
     if 'sender_name' not in columns:
         print("Adding sender_name column to existing daily_messages table...")
         cursor.execute("ALTER TABLE daily_messages ADD COLUMN sender_name TEXT")
+        conn.commit()
+
+    # Check if message_source column exists in daily_messages, add it if not (for old databases)
+    cursor.execute("PRAGMA table_info(daily_messages)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if 'message_source' not in columns:
+        print("Adding message_source column to existing daily_messages table...")
+        cursor.execute("ALTER TABLE daily_messages ADD COLUMN message_source TEXT")
         conn.commit()
 
     conn.commit()
@@ -426,7 +435,8 @@ def save_message(
     parent_id: Optional[str] = None,
     host_name: str = 'localhost',
     sender_id: Optional[str] = None,
-    sender_name: Optional[str] = None
+    sender_name: Optional[str] = None,
+    message_source: Optional[str] = None
 ) -> bool:
     """Save an individual message to the database."""
     conn = get_connection()
@@ -434,9 +444,9 @@ def save_message(
 
     cursor.execute('''
         INSERT OR REPLACE INTO daily_messages
-        (date, tool_name, host_name, message_id, parent_id, role, content, full_entry, tokens_used, input_tokens, output_tokens, model, timestamp, sender_id, sender_name)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (date, tool_name, host_name, message_id, parent_id, role, content, full_entry, tokens_used, input_tokens, output_tokens, model, timestamp, sender_id, sender_name))
+        (date, tool_name, host_name, message_id, parent_id, role, content, full_entry, tokens_used, input_tokens, output_tokens, model, timestamp, sender_id, sender_name, message_source)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (date, tool_name, host_name, message_id, parent_id, role, content, full_entry, tokens_used, input_tokens, output_tokens, model, timestamp, sender_id, sender_name, message_source))
 
     conn.commit()
     conn.close()
