@@ -1491,16 +1491,19 @@
 
                 // Get sender info for user messages (especially for OpenClaw)
                 let senderDisplayName = '';
-                let messageSource = 'openclaw';  // Default source
+                let messageSource = null;
                 if (role === 'user') {
                     if (msg.sender_name) {
                         senderDisplayName = msg.sender_name;
                     } else if (msg.sender_id) {
                         senderDisplayName = msg.sender_id;
                     }
-                    // Use message_source if available, otherwise default to 'openclaw'
-                    if (msg.message_source) {
+                    // Only show source if explicitly set (not default)
+                    if (msg.message_source && msg.message_source !== 'openclaw') {
                         messageSource = msg.message_source;
+                    } else if (senderDisplayName) {
+                        // If we have a sender name, show openclaw as source
+                        messageSource = 'openclaw';
                     }
                 }
 
@@ -1552,7 +1555,7 @@
                                 <span class="role-badge ${role}">${role}</span>
                             </div>
                             <div class="message-content">
-                                ${role === 'user' ? `<div class="message-sender text-muted mb-1" style="font-size: 0.75rem;">${senderDisplayName ? `<i class="bi bi-person"></i> ${escapeHtmlForDisplay(senderDisplayName)}` : ''}${senderDisplayName ? ' ' : ''}<span class="message-source ${messageSource}">${messageSource}</span></div>` : ''}
+                                ${role === 'user' ? `<div class="message-sender text-muted mb-1" style="font-size: 0.75rem;">${senderDisplayName ? `<i class="bi bi-person"></i> ${escapeHtmlForDisplay(senderDisplayName)}` : ''}${messageSource ? (senderDisplayName ? ' ' : '') + `<span class="message-source ${messageSource}">${messageSource}</span>` : ''}</div>` : ''}
                                 <div class="message-content-truncated">${contentHtml}</div>
                             </div>
                             ${tokens > 0 ? `<div class="message-tokens ms-2">
