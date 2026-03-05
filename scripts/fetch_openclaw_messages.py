@@ -212,8 +212,9 @@ def extract_user_message_metadata(text: str) -> Optional[dict]:
         if '[Slack' in stripped or 'Slack message' in stripped or 'Slack DM' in stripped:
             message_source = "slack"
             # Try to extract sender name from Slack system message
-            # Pattern: "Slack message in #channel from Name: content" or "Slack message in #channel from Name: content"
-            slack_match = re.search(r'Slack message.*?from\s+([^:]+):\s*(.+)', stripped)
+            # Pattern 1: "Slack message in #channel from Name: content"
+            # Pattern 2: "Slack DM from Name: content"
+            slack_match = re.search(r'Slack (?:message.*?|DM )from\s+([^:]+):\s*(.+)', stripped)
             if slack_match:
                 extracted_name = slack_match.group(1).strip()
                 extracted_content = slack_match.group(2).strip()
