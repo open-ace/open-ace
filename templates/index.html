@@ -1491,14 +1491,17 @@
 
                 // Get sender info for user messages (especially for OpenClaw)
                 let senderDisplayName = '';
-                let messageSource = '';
+                let messageSource = 'openclaw';  // Default source
                 if (role === 'user') {
                     if (msg.sender_name) {
                         senderDisplayName = msg.sender_name;
                     } else if (msg.sender_id) {
                         senderDisplayName = msg.sender_id;
                     }
-                    messageSource = msg.message_source || 'openclaw';
+                    // Use message_source if available, otherwise default to 'openclaw'
+                    if (msg.message_source) {
+                        messageSource = msg.message_source;
+                    }
                 }
 
                 // Get content and parse if it's JSON
@@ -1549,7 +1552,7 @@
                                 <span class="role-badge ${role}">${role}</span>
                             </div>
                             <div class="message-content">
-                                ${senderDisplayName ? `<div class="message-sender text-muted mb-1" style="font-size: 0.75rem;"><i class="bi bi-person"></i> ${escapeHtmlForDisplay(senderDisplayName)}${messageSource ? `<span class="message-source ${messageSource}">${messageSource}</span>` : ''}</div>` : ''}
+                                ${role === 'user' ? `<div class="message-sender text-muted mb-1" style="font-size: 0.75rem;">${senderDisplayName ? `<i class="bi bi-person"></i> ${escapeHtmlForDisplay(senderDisplayName)}` : ''}${senderDisplayName ? ' ' : ''}<span class="message-source ${messageSource}">${messageSource}</span></div>` : ''}
                                 <div class="message-content-truncated">${contentHtml}</div>
                             </div>
                             ${tokens > 0 ? `<div class="message-tokens ms-2">
