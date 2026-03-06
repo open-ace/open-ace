@@ -22,19 +22,23 @@
 ```
 ai-token-analyzer/
 ├── scripts/
-│   ├── shared/          # 共享模块 (db, utils, email)
-│   ├── fetch_claude.py  # Claude 日志收集
-│   ├── fetch_openclaw.py # OpenClaw 日志收集
-│   ├── fetch_qwen.py    # Qwen 日志收集
-│   └── check_requirements.py
-├── web/                 # Web 应用目录
-├── templates/           # HTML 模板
-├── static/              # 静态资源
-├── web.py               # Flask Web 服务器
-├── cli.py               # 命令行工具
-├── requirements.txt     # Python 依赖
+│   ├── shared/           # 共享模块 (db, utils, config, email_notifier, feishu_user_cache)
+│   ├── manage.py         # 统一部署和管理脚本
+│   ├── fetch_claude.py   # Claude 日志收集
+│   ├── fetch_openclaw.py # OpenClaw 日志收集（消息+token）
+│   ├── fetch_qwen.py     # Qwen 日志收集
+│   ├── create_db.py      # 数据库创建
+│   ├── init_db.py        # 数据库初始化
+│   └── setup.py          # 安装设置
+├── web/                  # Web 应用目录
+├── templates/            # HTML 模板
+├── static/               # 静态资源
+├── web.py                # Flask Web 服务器
+├── cli.py                # 命令行工具
+├── requirements.txt      # Python 依赖
 └── config/
-    └── settings.json.sample  # 配置文件模板
+    ├── config.json.sample        # 本地配置文件模板
+    └── remote_config.json.sample # 远程机器配置模板
 ```
 
 ### 安装
@@ -43,7 +47,33 @@ ai-token-analyzer/
 pip install -r requirements.txt
 ```
 
-### 使用
+### 部署和使用
+
+#### 开发目录 vs 部署目录
+
+- **开发目录**：`/Users/rhuang/workspace/ai-token-analyzer/` - 源代码和开发使用
+- **部署目录**：`~/ai-token-analyzer/` - 实际运行和部署使用
+
+#### 部署到本地（中央服务器）
+
+```bash
+# 从开发目录部署到 ~/ai-token-analyzer/
+cd /Users/rhuang/workspace/ai-token-analyzer
+python3 scripts/manage.py local deploy
+```
+
+#### 使用部署版本
+
+```bash
+# 切换到部署目录
+cd ~/ai-token-analyzer
+
+# 启动 Web 服务
+python3 web.py
+
+# 或使用管理脚本（从开发目录）
+python3 /Users/rhuang/workspace/ai-token-analyzer/scripts/manage.py local start
+```
 
 #### 初始化配置
 
@@ -84,6 +114,10 @@ python3 cli.py summary
 #### 运行 Web 界面
 
 ```bash
+# 使用管理脚本（推荐）
+python3 scripts/manage.py local start
+
+# 或直接运行
 python3 web.py
 ```
 
@@ -92,6 +126,24 @@ python3 web.py
 **Web 界面功能：**
 - **Summary 页面**：查看各工具的用量摘要和趋势图
 - **Messages 页面**：查看单条消息详情（支持按日期、工具、角色、搜索词筛选）
+
+### 部署和管理
+
+使用统一的管理脚本 `scripts/manage.py`：
+
+```bash
+# 本地部署（中央服务器）
+python3 scripts/manage.py local setup    # 初始化配置
+python3 scripts/manage.py local install  # 安装系统服务
+python3 scripts/manage.py local start    # 启动 Web 服务
+python3 scripts/manage.py local stop     # 停止 Web 服务
+python3 scripts/manage.py local status   # 查看服务状态
+
+# 远程部署（ai-lab）
+python3 scripts/manage.py remote deploy  # 完整部署到远程机器
+python3 scripts/manage.py remote sync    # 快速同步文件到远程
+python3 scripts/manage.py remote status  # 查看远程状态
+```
 
 #### 生成邮件报告
 

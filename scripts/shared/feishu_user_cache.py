@@ -81,7 +81,7 @@ def get_user_info(user_id: str, app_id: str, app_secret: str) -> Optional[Dict]:
     token = get_feishu_token(app_id, app_secret)
     if not token:
         return None
-    
+
     # Call Feishu user info API
     url = f"https://open.feishu.cn/open-apis/contact/v3/users/{user_id}"
     params = {"user_id_type": "open_id"}  # ou_ prefix indicates open_id
@@ -89,23 +89,28 @@ def get_user_info(user_id: str, app_id: str, app_secret: str) -> Optional[Dict]:
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json"
     }
-    
+
     try:
         response = requests.get(url, headers=headers, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
-        
+
         if data.get("code") == 0:
             user_data = data.get("data", {})
-            
-            # Cache the result
+            user_info = user_data.get("user", {})
+
+            # Debug: log available fields
+            if not user_info.get("name") and not user_info.get("zh_name"):
+                print(f"Warning: User {user_id} has no name field. Available fields: {list(user_info.keys())}")
+
+            # Cache the result (use 'user' nested structure)
             cache["users"][user_id] = {
-                "data": user_data,
+                "data": user_info,
                 "cached_at": time.time()
             }
             save_cache(cache)
-            
-            return user_data
+
+            return user_info
         else:
             print(f"Failed to get user info for {user_id}: {data}")
             return None

@@ -2,9 +2,49 @@
 
 ## 概述
 
-为了在 Messages 页面显示飞书用户的真实姓名（而不是用户 ID如 `ou_xxxxx`），需要配置飞书开放平台应用并启用用户信息查询功能。
+为了在 Messages 页面显示飞书用户的真实姓名（而不是用户 ID 如 `ou_xxxxx`），需要配置飞书开放平台应用并启用用户信息查询功能。
 
-## 配置步骤
+## 当前状态
+
+**已配置应用信息：**
+- App ID: `cli_a92be94ec4395cc2`
+- App Secret: `6pvXz79b6gqadmEGKWIuVdTEjkf1DkSf`
+
+**API 测试结果：**
+- ✅ 应用凭证有效（可以获取 access_token）
+- ⚠️ 用户信息 API 返回的数据不包含姓名字段
+
+**可能原因：**
+1. 应用缺少 `contact:contact:user:readonly` 权限
+2. 目标用户是外部联系人
+3. 应用未发布或未通过审核
+
+## 解决方案
+
+### 检查应用权限
+
+1. 访问飞书开放平台：https://open.feishu.cn/app
+2. 找到应用 `cli_a92be94ec4395cc2`
+3. 点击"权限管理"
+4. 确保已添加以下权限：
+   - `contact:contact:user:readonly` - 读取用户信息
+5. 如果权限未申请，点击"申请权限"并提交审核
+6. 发布应用版本
+
+### 测试权限是否生效
+
+配置完成后，运行以下命令测试：
+
+```bash
+cd /Users/rhuang/workspace/ai-token-analyzer
+python3 scripts/shared/feishu_user_cache.py test ou_3e479c7f81f8674741d778e8f838f8ed cli_a92be94ec4395cc2 6pvXz79b6gqadmEGKWIuVdTEjkf1DkSf
+```
+
+如果返回用户姓名，说明配置成功。
+
+---
+
+## 完整配置步骤（如需重新配置）
 
 ### 1. 创建飞书自建应用
 
@@ -41,14 +81,21 @@
 ```json
 {
   "host_name": "your-machine-name",
+  "server": {
+    "upload_auth_key": "your-auth-key",
+    "server_url": "http://server-ip:5001"
+  },
   "tools": {
     "openclaw": {
       "enabled": true,
       "token_env": "OPENCLAW_TOKEN",
       "gateway_url": "http://127.0.0.1:18789",
-      "feishu_app_id": "cli_xxxxxxxxxxxxxxxx",
-      "feishu_app_secret": "xxxxxxxxxxxxxxxxxxxxxxxx"
+      "hostname": "your-machine-name"
     }
+  },
+  "feishu": {
+    "app_id": "cli_xxxxxxxxxxxxxxxx",
+    "app_secret": "xxxxxxxxxxxxxxxxxxxxxxxx"
   }
 }
 ```
@@ -120,6 +167,14 @@ A: `~/.ai-token-analyzer/feishu_users.json`
 
 ### Q: 如何禁用用户信息查询？
 A: 从配置文件中删除 `feishu_app_id` 和 `feishu_app_secret` 字段即可。
+
+### Q: API 返回数据但没有姓名？
+A: 这可能是因为：
+   - 应用缺少 `contact:contact:user:readonly` 权限
+   - 目标用户是外部联系人（不在企业组织架构内）
+   - 应用未发布或未通过审核
+
+   请检查应用权限设置，确保已添加用户信息读取权限。
 
 ## 参考资料
 

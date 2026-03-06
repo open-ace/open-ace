@@ -118,3 +118,99 @@ QWEN
   Total requests: 425
   Avg requests/day: 106
   Date range:     2026-02-22 to 2026-02-25
+[2026-03-06 00:30:01] Starting daily token usage collection
+[2026-03-06 00:30:01] Initializing database...
+[2026-03-06 00:30:01] Fetching OpenClaw data...
+Database initialized at /Users/rhuang/.ai-token-analyzer/usage.db
+Fetching 7 days of OpenClaw usage data...
+Date range: 2026-02-28 to 2026-03-06
+Connecting to WebSocket: ws://127.0.0.1:18789/gateway
+Connection established successfully!
+  2026-02-28: 8,922,421 tokens
+  2026-03-01: 1,420,105 tokens
+  2026-03-02: 720,728 tokens
+  2026-03-04: 911,096 tokens
+
+Saved 4 days of OpenClaw usage data
+[2026-03-06 00:30:01] Fetching Claude data...
+Database initialized at /Users/rhuang/.ai-token-analyzer/usage.db
+Multiple Claude project directories found, scanning all:
+  - -Users-rhuang-workspace (11 files)
+  - -Users-rhuang-workspace-ai-token-analyzer (7 files)
+  - -Users-rhuang-workspace-ai-token-usage (9 files)
+  - -Users-rhuang-workspace-claude (3 files)
+  - -Users-rhuang-workspace-github-v2box-auto (2 files)
+  - -Users-rhuang-workspace-ivyent-lab (1 files)
+  - -Users-rhuang-workspace-node-modules (1 files)
+  - -Users-rhuang-workspace-test-claude-code-web (1 files)
+  - -Users-rhuang-workspace-test-claude-code-web-test (2 files)
+  - -Users-rhuang-workspace-tmp (2 files)
+Scanning: -Users-rhuang-workspace
+Scanning: -Users-rhuang-workspace-ai-token-analyzer
+Scanning: -Users-rhuang-workspace-ai-token-usage
+Scanning: -Users-rhuang-workspace-claude
+Scanning: -Users-rhuang-workspace-github-v2box-auto
+Scanning: -Users-rhuang-workspace-ivyent-lab
+Scanning: -Users-rhuang-workspace-node-modules
+Scanning: -Users-rhuang-workspace-test-claude-code-web
+Scanning: -Users-rhuang-workspace-test-claude-code-web-test
+Scanning: -Users-rhuang-workspace-tmp
+  2026-02-28: 51,737,000 tokens, 1278 requests
+  2026-03-05: 25,939,008 tokens, 470 requests
+  2026-03-02: 44,229,538 tokens, 615 requests
+  2026-03-03: 75,285,938 tokens, 1006 requests
+  2026-03-01: 152,233,397 tokens, 2246 requests
+
+Saved 5 days of Claude usage data
+[2026-03-06 00:30:14] Fetching Qwen data...
+Database initialized at /Users/rhuang/.ai-token-analyzer/usage.db
+Multiple Qwen project directories found, scanning all:
+  - chats (1 files)
+  - chats (4 files)
+  - chats (1 files)
+  - chats (1 files)
+  - chats (1 files)
+  - chats (1 files)
+Scanning: chats
+Scanning: chats
+Scanning: chats
+Scanning: chats
+Scanning: chats
+Scanning: chats
+  2026-03-05: 42,471,958 tokens, 393 requests
+
+Saved 1 days of Qwen usage data
+[2026-03-06 00:30:19] Sending email report...
+Database initialized at /Users/rhuang/.ai-token-analyzer/usage.db
+Email sent successfully to rh@ivyent.cn
+Report sent to rh@ivyent.cn
+[2026-03-06 00:30:21] Daily collection completed
+
+=== Daily Summary ===
+Database initialized at /Users/rhuang/.ai-token-analyzer/usage.db
+AI Token Usage Summary
+============================================================
+
+CLAUDE
+  Days tracked:   6
+  Total tokens:   398.96M (398,955,140)
+  Average/day:    66.49M (66,492,523)
+  Total requests: 6,351
+  Avg requests/day: 1058
+  Date range:     2026-02-27 to 2026-03-05
+
+QWEN
+  Days tracked:   1
+  Total tokens:   42.47M (42,471,958)
+  Average/day:    42.47M (42,471,958)
+  Total requests: 393
+  Avg requests/day: 393
+  Date range:     2026-03-05 to 2026-03-05
+
+OPENCLAW
+  Days tracked:   14
+  Total tokens:   32.50M (32,503,502)
+  Average/day:    2.32M (2,321,678)
+  Total requests: 403
+  Avg requests/day: 28
+  Date range:     2026-02-27 to 2026-03-05

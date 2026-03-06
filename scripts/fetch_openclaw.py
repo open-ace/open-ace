@@ -1,277 +1,605 @@
 #!/usr/bin/env python3
 """
-AI Token Usage - OpenClaw Fetcher
+AI Token Usage - OpenClaw Messages Fetcher
 
-Fetches daily token usage from OpenClaw gateway using WebSocket API.
+Fetches individual messages from OpenClaw session logs and saves to database.
+OpenClaw session logs are located in ~/.openclaw/agents/<agent>/sessions/
 """
 
-import asyncio
+import argparse
 import json
 import os
 import sys
-import uuid
+from collections import defaultdict
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Dict, List, Optional
 
-try:
-    import websockets
-except ImportError:
-    print("Error: websockets module not installed")
-    print("Install with: pip install websockets")
-    sys.exit(1)
+# Import shared modules
+script_dir = os.path.dirname(os.path.abspath(__file__))
+shared_dir = os.path.join(script_dir, 'shared')
+if shared_dir not in sys.path:
+    sys.path.insert(0, shared_dir)
 
-# Add parent directory to path for imports
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PARENT_DIR = os.path.dirname(SCRIPT_DIR)
-if PARENT_DIR not in sys.path:
-    sys.path.insert(0, PARENT_DIR)
-
-from shared import db, utils
+import feishu_user_cache
+import utils
 
 
-async def get_openclaw_usage(
-    gateway_url: str,
-    token: str,
-    days: int = 7
-) -> Optional[Dict[str, int]]:
-    """
-    Fetch daily usage data from OpenClaw gateway.
+def parse_timestamp(ts_str: str) -> str:
+    """Extract date from ISO timestamp."""
+    if not ts_str:
+        return "unknown"
+    try:
+        if ts_str.endswith("Z"):
+            if "." in ts_str:
+                base, rest = ts_str.rsplit(".", 1)
+                ms = rest.rstrip("Z")
+                ms = ms[:3].ljust(3, "0")
+                dt = datetime.strptime(f"{base}.{ms}Z", "%Y-%m-%dT%H:%M:%S.%fZ")
+            else:
+                dt = datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%SZ")
+        else:
+            dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+        return dt.strftime("%Y-%m-%d")
+    except Exception:
+        return "unknown"
 
-    Returns a dict mapping dates to token counts, or None on error.
-    """
-    # Calculate date range
-    end_date = datetime.now().strftime("%Y-%m-%d")
-    start_date = (datetime.now() - timedelta(days=days-1)).strftime("%Y-%m-%d")
 
-    print(f"Fetching {days} days of OpenClaw usage data...")
-    print(f"Date range: {start_date} to {end_date}")
-
-    # Parse gateway URL for WebSocket connection
-    if gateway_url.startswith("https://"):
-        ws_scheme = "wss://"
-        gateway_host = gateway_url[8:]
-    elif gateway_url.startswith("http://"):
-        ws_scheme = "ws://"
-        gateway_host = gateway_url[7:]
-    else:
-        ws_scheme = "ws://"
-        gateway_host = gateway_url
-
-    ws_url = f"{ws_scheme}{gateway_host}/gateway"
-    print(f"Connecting to WebSocket: {ws_url}")
-
-    extra_headers = {
-        "Authorization": f"Bearer {token}",
-        "Origin": gateway_url,
+def extract_tokens_from_entry(entry: dict) -> dict:
+    """Extract token counts from an OpenClaw log entry."""
+    result = {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "model": None,
     }
 
-    try:
-        async with websockets.connect(ws_url, additional_headers=extra_headers) as websocket:
-            # Wait for connect.challenge
-            message = await asyncio.wait_for(websocket.recv(), timeout=10)
-            response = json.loads(message)
+    usage = None
+    if "usage" in entry:
+        usage = entry.get("usage")
+    elif entry.get("type") == "message" and "message" in entry:
+        msg = entry.get("message", {})
+        if isinstance(msg, dict):
+            usage = msg.get("usage")
 
-            if response.get("type") != "event" or response.get("event") != "connect.challenge":
-                print(f"Unexpected initial message: {response}")
-                return None
+    if usage and isinstance(usage, dict):
+        result["input_tokens"] = usage.get("input", 0)
+        result["output_tokens"] = usage.get("output", 0)
+        result["cache_read_tokens"] = usage.get("cacheRead", 0)
+        result["cache_write_tokens"] = usage.get("cacheWrite", 0)
 
-            nonce = response.get("payload", {}).get("nonce")
-
-            # Connect with openclaw-control-ui client
-            connect_params = {
-                "minProtocol": 3,
-                "maxProtocol": 3,
-                "client": {
-                    "id": "openclaw-control-ui",
-                    "displayName": "AI Token Usage Getter",
-                    "version": "1.0.0",
-                    "platform": "web",
-                    "mode": "ui",
-                },
-                "role": "operator",
-                "scopes": ["operator.admin", "operator.read", "operator.write"],
-                "auth": {
-                    "token": token,
-                },
-                "userAgent": "AI-Token-Usage-Getter/1.0",
-                "locale": "en-US",
-            }
-
-            connect_request = {
-                "type": "req",
-                "id": str(uuid.uuid4()),
-                "method": "connect",
-                "params": connect_params
-            }
-
-            await websocket.send(json.dumps(connect_request))
-
-            # Wait for hello-ok response
-            hello = await asyncio.wait_for(websocket.recv(), timeout=10)
-            hello_resp = json.loads(hello)
-
-            if hello_resp.get("type") != "res" or not hello_resp.get("ok"):
-                error = hello_resp.get("error", {})
-                print(f"Connect failed: {error.get('code', 'Unknown')}: {error.get('message', '')}")
-                return None
-
-            print("Connection established successfully!")
-
-            # Send usage.cost request
-            usage_request = {
-                "type": "req",
-                "id": str(uuid.uuid4()),
-                "method": "usage.cost",
-                "params": {
-                    "startDate": start_date,
-                    "endDate": end_date,
-                    "days": days,
-                    "mode": "utc"
-                }
-            }
-
-            await websocket.send(json.dumps(usage_request))
-
-            # Wait for response
-            response = await asyncio.wait_for(websocket.recv(), timeout=10)
-            response = json.loads(response)
-
-            if response.get("type") == "res" and response.get("ok"):
-                return parse_usage_response(response)
-            else:
-                print(f"Usage request failed: {response}")
-                return None
-
-    except websockets.exceptions.ConnectionClosed as e:
-        print(f"WebSocket connection closed: {e.code} {e.reason}")
-        return None
-    except asyncio.TimeoutError:
-        print("Timeout waiting for response")
-        return None
-    except Exception as e:
-        print(f"Error: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
+    return result
 
 
-def parse_usage_response(response: dict) -> Dict[str, int]:
-    """Parse the usage cost response and extract daily token usage."""
-    result = response.get("payload", {})
-
-    daily_usage = {}
-    daily_requests = {}
-    daily_array = result.get("daily", [])
-
-    for day_entry in daily_array:
-        if isinstance(day_entry, dict):
-            date = day_entry.get("date")
-            tokens = day_entry.get("tokens") or day_entry.get("totalTokens")
-            # Also check for request count if available
-            requests = day_entry.get("requests") or day_entry.get("requestCount") or day_entry.get("totalRequests")
-            if date and tokens is not None:
-                daily_usage[date] = int(tokens)
-                if requests is not None:
-                    daily_requests[date] = int(requests)
-
-    # If we have request counts, return as a dict with both tokens and requests
-    if daily_requests:
-        return {"tokens": daily_usage, "requests": daily_requests}
-
-    return {"tokens": daily_usage, "requests": {}}
-
-
-async def fetch_and_save(
-    days: int = 7,
-    gateway_url: str = None,
-    token: str = None
-) -> bool:
+def extract_content_from_entry(entry: dict) -> tuple:
+    """Extract content from an OpenClaw log entry.
+    
+    Returns:
+        tuple: (cleaned_content, sender_id, sender_name, message_source)
     """
-    Fetch OpenClaw usage and save to database.
+    entry_type = entry.get("type")
+
+    if entry_type == "message":
+        msg = entry.get("message", {})
+        if isinstance(msg, dict):
+            role = msg.get("role")
+            content_list = msg.get("content", [])
+
+            if not isinstance(content_list, list):
+                return ("", None, None, "openclaw")
+
+            texts = []
+            sender_id = None
+            sender_name = None
+            message_source = "openclaw"
+
+            for item in content_list:
+                if not isinstance(item, dict):
+                    continue
+
+                item_type = item.get("type")
+
+                if item_type == "text":
+                    text = item.get("text", "")
+                    
+                    # For user messages, try to extract sender info and clean content
+                    if role == "user":
+                        # First try to extract from full entry metadata
+                        sender_id = entry.get("senderId") or entry.get("sender_id")
+                        sender_name = entry.get("senderName") or entry.get("sender_name")
+                        
+                        # Try to parse metadata from content
+                        parsed = extract_user_message_metadata(text)
+                        if parsed:
+                            sender_id = parsed.get("sender_id") or sender_id
+                            sender_name = parsed.get("sender_name") or sender_name
+                            message_source = parsed.get("message_source", "openclaw")
+                            text = parsed.get("cleaned_content", text)
+                    
+                    texts.append(text)
+                    
+                elif item_type == "thinking":
+                    thinking = item.get("thinking", "")
+                    if thinking:
+                        texts.append(f"[Thinking]\n{thinking}")
+                elif item_type == "toolCall":
+                    tool_id = item.get("id", "")
+                    tool_name = item.get("name", "unknown")
+                    args = item.get("arguments", {})
+                    args_str = json.dumps(args, ensure_ascii=False) if args else ""
+                    texts.append(f"[Tool Call: {tool_name}]\n{args_str}")
+                elif item_type == "toolResult":
+                    content = item.get("content", [])
+                    if isinstance(content, list):
+                        for c in content:
+                            if isinstance(c, dict) and c.get("type") == "text":
+                                texts.append(f"[Tool Result]\n{c.get('text', '')}")
+                    elif isinstance(content, str):
+                        texts.append(f"[Tool Result]\n{content}")
+                elif item_type == "image":
+                    texts.append("[Image content]")
+                elif item_type == "document":
+                    texts.append("[Document content]")
+
+            if texts:
+                return ("\n".join(texts), sender_id, sender_name, message_source)
+
+    elif entry_type == "session":
+        # Session start - get basic info
+        session_id = entry.get("id", "")
+        timestamp = entry.get("timestamp", "")
+        cwd = entry.get("cwd", "")
+        return (json.dumps({
+            "type": "session_start",
+            "id": session_id,
+            "timestamp": timestamp,
+            "cwd": cwd
+        }, ensure_ascii=False), None, None, "openclaw")
+
+    return ("", None, None, "openclaw")
+
+
+def extract_user_message_metadata(text: str) -> Optional[dict]:
+    """Extract sender info and clean content from user message.
+    
+    OpenClaw user messages often contain metadata like:
+    - Conversation info (untrusted metadata)
+    - Sender (untrusted metadata)  
+    - [message_id: ...]
+    - Channel info from slack/feishu
+    - System: [...] Slack message in #channel from User: content
+    
+    This function extracts the actual user content and sender information.
+    """
+    if not text:
+        return None
+    
+    sender_id = None
+    sender_name = None
+    cleaned_content = text
+    message_source = "openclaw"  # Default source
+    
+    # Try to extract sender_id from JSON metadata
+    try:
+        import re
+        # Look for "sender_id" or "sender" in JSON blocks
+        json_blocks = re.findall(r'\{[^{}]*("sender_id"[^{}]*| "sender"[^{}]*)\}', text, re.DOTALL)
+        for block in json_blocks:
+            # Try to find full JSON block
+            full_blocks = re.findall(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', text, re.DOTALL)
+            for full_block in full_blocks:
+                try:
+                    data = json.loads(full_block)
+                    if isinstance(data, dict):
+                        if "sender_id" in data:
+                            sender_id = data.get("sender_id")
+                        if "sender" in data and not sender_id:
+                            sender_id = data.get("sender")
+                        # Check for name in label or name field
+                        if "label" in data and data.get("label") != sender_id:
+                            sender_name = data.get("label")
+                        if "name" in data and data.get("name") != sender_id:
+                            sender_name = data.get("name")
+                except json.JSONDecodeError:
+                    continue
+    except Exception:
+        pass
+    
+    # Detect Feishu from conversation_label or sender_id pattern (ou_ prefix)
+    if 'conversation_label' in text or (sender_id and sender_id.startswith('ou_')):
+        message_source = "feishu"
+    
+    # Detect message source and extract content
+    lines = text.split('\n')
+    content_lines = []
+    found_actual_content = False
+    skip_next_empty = False
+    has_slack_content = False  # Track if we found Slack system message content
+    slack_content_extracted = ""  # Store extracted Slack content
+
+    # Detect Feishu from conversation_label or sender_id pattern
+    if 'conversation_label' in text or (sender_id and sender_id.startswith('ou_')):
+        message_source = "feishu"
+
+    for line in lines:
+        stripped = line.strip()
+
+        # Detect message source
+        if '[Slack' in stripped or 'Slack message' in stripped or 'Slack DM' in stripped:
+            message_source = "slack"
+            # Try to extract sender name from Slack system message
+            # Pattern 1: "Slack message in #channel from Name: content"
+            # Pattern 2: "Slack DM from Name: content"
+            slack_match = re.search(r'Slack (?:message.*?|DM )from\s+([^:]+):\s*(.+)', stripped)
+            if slack_match:
+                extracted_name = slack_match.group(1).strip()
+                extracted_content = slack_match.group(2).strip()
+                if extracted_name and not sender_name:
+                    sender_name = extracted_name
+                if extracted_content:
+                    # Remove user mention tags like <@U0AE9GW0KLJ>
+                    slack_content_extracted = re.sub(r'<@[A-Z0-9]+>', '', extracted_content).strip()
+                    found_actual_content = True
+                    has_slack_content = True
+                    continue
+        elif '[Feishu' in stripped or 'Feishu message' in stripped:
+            message_source = "feishu"
+        
+        # Skip metadata lines
+        if stripped.startswith('Conversation info'):
+            skip_next_empty = True
+            continue
+        if stripped.startswith('Sender (untrusted'):
+            continue
+        if stripped.startswith('```json') or stripped.startswith('```'):
+            continue
+        if stripped.startswith('[message_id:'):
+            continue
+        if stripped.startswith('[Thread history'):
+            continue
+        if stripped.startswith('[Slack') or stripped.startswith('[Feishu'):
+            continue
+        if stripped.startswith('System:'):
+            # Skip System lines that are Slack forwarded messages (already processed)
+            if has_slack_content:
+                continue
+            # Keep other System messages but mark them
+            content_lines.append(line)
+            continue
+        if stripped.startswith('[media attached:'):
+            content_lines.append(line)
+            continue
+        if stripped == '':
+            if skip_next_empty:
+                skip_next_empty = False
+                continue
+            if found_actual_content:
+                content_lines.append(line)
+            continue
+        
+        # Remove timestamp prefix pattern: [Wed 2026-03-04 09:49 GMT+8]
+        timestamp_pattern = r'^\[[A-Za-z]{3}\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}.*?\]\s*'
+        stripped = re.sub(timestamp_pattern, '', stripped)
+        
+        # Check if this is the actual user message (pattern: sender_id: content or Uxxxx: content)
+        import re
+        match = re.match(r'^(ou_[a-f0-9]+|U[A-Z0-9]+):\s*(.+)$', stripped)
+        if match:
+            found_actual_content = True
+            if not sender_id:
+                sender_id = match.group(1)
+            content_lines.append(match.group(2))
+            # Also try to extract a better name from the content
+            if not sender_name or sender_name == sender_id:
+                # Try to find a human-readable name from earlier in the text
+                name_match = re.search(r'"name":\s*"([^"]+)"', text)
+                if name_match and name_match.group(1) != sender_id:
+                    sender_name = name_match.group(1)
+                label_match = re.search(r'"label":\s*"([^"]+)"', text)
+                if label_match and label_match.group(1) != sender_id:
+                    sender_name = label_match.group(1)
+        elif found_actual_content:
+            # Continue collecting content after finding the start
+            content_lines.append(stripped)
+        elif not found_actual_content and stripped and not stripped.startswith('{'):
+            # If we haven't found the pattern but have content, use it (after removing timestamp)
+            content_lines.append(stripped)
+    
+    # If we found Slack content, use only that content (don't include metadata)
+    if has_slack_content and slack_content_extracted:
+        content_lines = [slack_content_extracted]
+        cleaned_content = slack_content_extracted
+    elif content_lines:
+        cleaned_content = '\n'.join(content_lines).strip()
+    
+    if content_lines:
+        cleaned_content = '\n'.join(content_lines).strip()
+    
+    # If no sender name found, use sender_id as display name
+    if not sender_name and sender_id:
+        sender_name = sender_id
+    
+    return {
+        "sender_id": sender_id,
+        "sender_name": sender_name,
+        "cleaned_content": cleaned_content,
+        "message_source": message_source
+    }
+
+
+def find_openclaw_sessions_dir() -> Optional[Path]:
+    """Find the OpenClaw sessions directory."""
+    home = Path.home()
+    agents_dir = home / ".openclaw" / "agents"
+
+    if not agents_dir.is_dir():
+        return None
+
+    # Find all agent directories
+    for agent_dir in agents_dir.iterdir():
+        if not agent_dir.is_dir():
+            continue
+
+        sessions_dir = agent_dir / "sessions"
+        if sessions_dir.is_dir():
+            # Check if there are jsonl files
+            jsonl_files = list(sessions_dir.glob("*.jsonl"))
+            if jsonl_files:
+                return sessions_dir
+
+    return None
+
+
+def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str, dict]:
+    """Process a single JSONL file and return daily token aggregates."""
+    daily = defaultdict(lambda: {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "request_count": 0,
+        "models_used": set(),
+    })
+
+    with open(filepath, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+                if not isinstance(entry, dict):
+                    continue
+
+                ts = entry.get("timestamp")
+                if not ts:
+                    continue
+
+                date_key = parse_timestamp(ts)
+                tokens = extract_tokens_from_entry(entry)
+                role = ""
+                model = None
+
+                # Extract and save individual message
+                entry_type = entry.get("type")
+                if entry_type == "message":
+                    msg = entry.get("message", {})
+                    if isinstance(msg, dict):
+                        # Get message ID
+                        message_id = msg.get("id") or entry.get("id") or entry.get("uuid")
+                        if message_id:
+                            # Determine role from message role
+                            role = msg.get("role", "unknown")
+
+                            # Get content (returns tuple: content, sender_id, sender_name, message_source)
+                            result = extract_content_from_entry(entry)
+                            content = result[0] if result else ""
+                            sender_id = result[1] if result else None
+                            sender_name = result[2] if result else None
+                            message_source = result[3] if result else "openclaw"
+                            
+                            # Try to get Feishu user name if not already found
+                            if message_source == "feishu" and sender_id and (not sender_name or sender_name == sender_id):
+                                # Try to get user name from cache first
+                                cached_name = feishu_user_cache.get_user_name_from_cache(sender_id)
+                                if cached_name:
+                                    sender_name = cached_name
+                                else:
+                                    # Try to fetch from API if config is available
+                                    feishu_config = utils.load_config().get('tools', {}).get('openclaw', {})
+                                    app_id = feishu_config.get('feishu_app_id')
+                                    app_secret = feishu_config.get('feishu_app_secret')
+                                    if app_id and app_secret:
+                                        api_name = feishu_user_cache.get_user_name(sender_id, app_id, app_secret)
+                                        if api_name:
+                                            sender_name = api_name
+
+                            # Get token counts
+                            input_tokens = tokens.get("input_tokens", 0)
+                            output_tokens = tokens.get("output_tokens", 0)
+                            cache_read = tokens.get("cache_read_tokens", 0)
+                            cache_write = tokens.get("cache_write_tokens", 0)
+                            total_tokens = input_tokens + output_tokens
+
+                            # Get model info
+                            if "modelId" in entry:
+                                model = entry.get("modelId")
+                            elif "provider" in entry or "modelApi" in entry:
+                                provider = entry.get("provider", "unknown")
+                                model = entry.get("modelId", provider)
+
+                            # Get parent ID
+                            parent_id = entry.get("parentId")
+
+                            # Save full entry as JSON for complete original data
+                            full_entry_json = json.dumps(entry, ensure_ascii=False)
+
+                            # Save message to database with sender info and message source
+                            db.save_message(
+                                date=date_key,
+                                tool_name="openclaw",
+                                host_name=hostname,
+                                message_id=message_id,
+                                parent_id=parent_id,
+                                role=role,
+                                content=content,
+                                full_entry=full_entry_json,
+                                tokens_used=total_tokens,
+                                input_tokens=input_tokens,
+                                output_tokens=output_tokens,
+                                model=model,
+                                timestamp=ts,
+                                sender_id=sender_id,
+                                sender_name=sender_name,
+                                message_source=message_source
+                            )
+
+                if sum([
+                    tokens["input_tokens"],
+                    tokens["output_tokens"],
+                    tokens["cache_read_tokens"],
+                    tokens["cache_write_tokens"],
+                ]) == 0:
+                    # Count assistant messages as requests even if tokens are 0
+                    if role == "assistant":
+                        daily[date_key]["request_count"] += 1
+                    continue
+
+                daily[date_key]["input_tokens"] += tokens["input_tokens"]
+                daily[date_key]["output_tokens"] += tokens["output_tokens"]
+                daily[date_key]["cache_read_tokens"] += tokens["cache_read_tokens"]
+                daily[date_key]["cache_write_tokens"] += tokens["cache_write_tokens"]
+
+                if role == "assistant":
+                    daily[date_key]["request_count"] += 1
+
+                if model:
+                    daily[date_key]["models_used"].add(model)
+
+            except (json.JSONDecodeError, KeyError, TypeError) as e:
+                # Silently skip problematic entries
+                continue
+
+    return dict(daily)
+
+
+def fetch_and_save(days: int = 7, sessions_dir: Optional[Path] = None, hostname: Optional[str] = None) -> bool:
+    """
+    Fetch OpenClaw messages and save to database.
 
     Args:
-        days: Number of days to fetch
-        gateway_url: OpenClaw gateway URL (reads from config.json if not provided)
-        token: OpenClaw token (reads from config.json if not provided)
+        days: Number of days to look back
+        sessions_dir: Optional specific sessions directory
+        hostname: Optional host name to identify this machine
 
     Returns:
         True if successful, False otherwise
     """
-    # Try to load config.json for defaults
-    if gateway_url is None or token is None:
+    # Import db directly to avoid email module conflict
+    import db
+    import os
+    import sys
+    import json
+    from datetime import datetime, timedelta
+    from collections import defaultdict
+    from pathlib import Path
+    from typing import Dict, Optional
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    shared_dir = os.path.join(script_dir, 'shared')
+    if shared_dir not in sys.path:
+        sys.path.insert(0, shared_dir)
+
+    # Import utils directly
+    import utils
+
+    if hostname is None:
+        # Try to load hostname from config
         config = utils.load_config()
-        openclaw_config = config.get('tools', {}).get('openclaw', {})
+        hostname = config.get('host_name', 'localhost')
 
-        if gateway_url is None:
-            gateway_url = openclaw_config.get('gateway_url', 'http://127.0.0.1:18789')
+    if sessions_dir is None:
+        sessions_dir = find_openclaw_sessions_dir()
 
-        if token is None:
-            # token_env can be either an environment variable name or the actual token
-            token_env = openclaw_config.get('token_env', 'OPENCLAW_TOKEN')
-            # First try as environment variable
-            token = os.getenv(token_env)
-            # If not found and starts with Config, treat as direct token value
-            if not token:
-                # Check if it looks like an environment variable reference
-                if token_env.startswith('${') or token_env.startswith('$'):
-                    # It's trying to reference an env var that doesn't exist
-                    print(f"Error: Environment variable '{token_env}' not found")
-                    print("Please set the environment variable or update config.json with the token directly")
-                    return False
-                else:
-                    # It's the actual token value (not a variable name)
-                    token = token_env
-
-    if not token:
-        print("Error: OpenClaw token not provided")
-        print("Please set OPENCLAW_TOKEN environment variable or configure token_env in config.json")
+    if not sessions_dir:
+        print("Error: Cannot find OpenClaw sessions directory.")
+        print("Expected location: ~/.openclaw/agents/<agent>/sessions/")
         return False
 
-    result = await get_openclaw_usage(gateway_url, token, days)
+    # Get all jsonl files
+    jsonl_files = list(sessions_dir.glob("*.jsonl"))
 
-    if result:
-        saved = 0
-        # Handle both old format (just tokens dict) and new format (tokens + requests)
-        if isinstance(result, dict) and "tokens" in result:
-            tokens_result = result["tokens"]
-            requests_result = result.get("requests", {})
-        else:
-            tokens_result = result
-            requests_result = {}
+    if not jsonl_files:
+        print(f"Error: No .jsonl files found in {sessions_dir}")
+        return False
 
-        for date, tokens in tokens_result.items():
-            request_count = requests_result.get(date, 0)
+    print(f"Found {len(jsonl_files)} session files in {sessions_dir}")
+
+    # Aggregate across all files
+    aggregated = defaultdict(lambda: {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "request_count": 0,
+        "models_used": set(),
+    })
+
+    for f in sorted(jsonl_files, key=lambda x: x.name):
+        daily = process_jsonl_file(f, hostname)
+        for date, stats in daily.items():
+            for key in ["input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "request_count"]:
+                aggregated[date][key] += stats[key]
+            aggregated[date]["models_used"].update(stats["models_used"])
+
+    # Filter by date range
+    today = datetime.now().strftime("%Y-%m-%d")
+    start_date = (datetime.now() - timedelta(days=days-1)).strftime("%Y-%m-%d")
+
+    saved = 0
+    for date, stats in aggregated.items():
+        if start_date <= date <= today:
+            total = (
+                stats["input_tokens"]
+                + stats["output_tokens"]
+                + stats["cache_read_tokens"]
+                + stats["cache_write_tokens"]
+            )
+
             if db.save_usage(
                 date=date,
                 tool_name="openclaw",
-                tokens_used=tokens,
-                request_count=request_count
+                host_name=hostname,
+                tokens_used=total,
+                input_tokens=stats["input_tokens"],
+                output_tokens=stats["output_tokens"],
+                cache_tokens=stats["cache_read_tokens"] + stats["cache_write_tokens"],
+                request_count=stats["request_count"],
+                models_used=sorted(stats["models_used"])
             ):
                 saved += 1
-                if request_count > 0:
-                    print(f"  {date}: {tokens:,} tokens, {request_count} requests")
-                else:
-                    print(f"  {date}: {tokens:,} tokens")
+            print(f"  {date}: {total:,} tokens, {stats['request_count']} requests")
 
-        print(f"\nSaved {saved} days of OpenClaw usage data")
-        return True
-    else:
-        print("Failed to retrieve usage data")
-        return False
+    print(f"\nSaved {saved} days of OpenClaw usage data")
+    return True
 
 
 if __name__ == "__main__":
-    import argparse
+    # Add shared directory to path for db module
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    shared_dir = os.path.join(script_dir, 'shared')
+    if shared_dir not in sys.path:
+        sys.path.insert(0, shared_dir)
+    # Import db directly to avoid email module conflict
+    import db
+
     parser = argparse.ArgumentParser(description='Fetch OpenClaw token usage')
     parser.add_argument('--days', type=int, default=7, help='Number of days')
-    parser.add_argument('--url', default=None, help='Gateway URL (reads from config.json if not provided)')
-    parser.add_argument('--token', default=None, help='OpenClaw token (reads from config.json if not provided)')
+    parser.add_argument('--sessions-dir', help='Specific sessions directory')
+    parser.add_argument('--hostname', help='Host name to identify this machine')
     args = parser.parse_args()
 
-    # Initialize database
     db.init_database()
-
-    # Run the fetcher
-    success = asyncio.run(fetch_and_save(days=args.days, gateway_url=args.url, token=args.token))
-
+    success = fetch_and_save(days=args.days, sessions_dir=Path(args.sessions_dir) if args.sessions_dir else None, hostname=args.hostname)
     sys.exit(0 if success else 1)

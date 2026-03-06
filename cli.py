@@ -18,7 +18,7 @@ shared_dir = os.path.join(script_dir, 'scripts')
 if shared_dir not in sys.path:
     sys.path.insert(0, shared_dir)
 
-from shared import db, utils, email_module
+from shared import db, utils, email_notifier
 from shared.config import CONFIG_DIR, CONFIG_PATH
 
 
@@ -151,7 +151,7 @@ def cmd_report() -> None:
         daily_data.extend(db.get_usage_by_date(reference_date, tool))
 
     # Format email body
-    body = email_module.format_report_email(summary, daily_data, report_date=reference_date)
+    body = email_notifier.format_report_email(summary, daily_data, report_date=reference_date)
 
     # Check email config
     email_config = config.get('email', {})
@@ -166,13 +166,13 @@ def cmd_report() -> None:
         return
 
     # Test connection first
-    if not email_module.test_email_config(email_config):
+    if not email_notifier.test_email_config(email_config):
         print("Email server connection failed. Check your configuration.")
         return
 
     # Send email (HTML format)
     subject_date = reference_date
-    success = email_module.send_email(
+    success = email_notifier.send_email(
         subject=f"AI Token Usage Report - {subject_date}",
         body=body,
         smtp_config=email_config,

@@ -1,3 +1,3 @@
-from . import db, utils, email as email_module
+from . import db, utils, config
 
-__all__ = ['db', 'utils', 'email_module', 'config']
+__all__ = ['db', 'utils', 'config']

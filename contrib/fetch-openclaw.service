@@ -6,9 +6,9 @@ After=network.target
 Type=simple
 User=openclaw
 Group=openclaw
-WorkingDirectory=/opt/ai-token-analyzer
+WorkingDirectory=/home/openclaw/ai-token-analyzer
 Environment="PYTHONUNBUFFERED=1"
-ExecStart=/usr/bin/python3 /opt/ai-token-analyzer/scripts/fetch_openclaw_messages.py --days 1
+ExecStart=/usr/bin/python3 /home/openclaw/ai-token-analyzer/scripts/fetch_openclaw.py --days 1
 
 [Install]
 WantedBy=multi-user.target

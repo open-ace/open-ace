@@ -32,5 +32,9 @@
   "cron": {
     "enabled": true,
     "run_time": "00:30"
+  },
+  "feishu": {
+    "app_id": "cli_xxxxxxxxxxxxx",
+    "app_secret": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
   }
 }

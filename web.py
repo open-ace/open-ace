@@ -389,7 +389,10 @@ def api_upload_batch():
                 output_tokens=entry.get('output_tokens', 0),
                 model=entry.get('model'),
                 timestamp=entry.get('timestamp'),
-                parent_id=entry.get('parent_id')
+                parent_id=entry.get('parent_id'),
+                sender_id=entry.get('sender_id'),
+                sender_name=entry.get('sender_name'),
+                message_source=entry.get('message_source')
             ):
                 messages_saved += 1
 
@@ -411,7 +414,7 @@ def api_fetch():
     # Fetch OpenClaw data (including messages)
     try:
         result = subprocess.run(
-            ['python3', 'scripts/fetch_openclaw_messages.py', '--days', '7'],
+            ['python3', 'scripts/fetch_openclaw.py', '--days', '7'],
             capture_output=True,
             text=True,
             timeout=120
