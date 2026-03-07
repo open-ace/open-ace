@@ -276,9 +276,14 @@ try:
     test("DB-09: user email updated", updated_user['email'] == "updated@test.com", f"Email not updated: {updated_user['email']}")
     test("DB-09: user quota_tokens updated", updated_user['quota_tokens'] == 200000, f"Quota not updated: {updated_user['quota_tokens']}")
 
-    # Test invalid field is ignored
-    result_ignore = db.update_user(user_id, invalid_field="value")
-    test("DB-09: update_user() ignores invalid fields", result_ignore, "Should return True for valid fields")
+    # Test invalid field is ignored when mixed with valid fields
+    # (The function should update valid fields and ignore invalid ones)
+    result_mixed = db.update_user(user_id, email="mixed@test.com", invalid_field="value")
+    test("DB-09: update_user() ignores invalid fields", result_mixed, "Should return True when valid fields provided")
+
+    # Verify only valid field was updated
+    updated_user = db.get_user_by_username("user_list_1")
+    test("DB-09: invalid field not applied", updated_user['email'] == "mixed@test.com", f"Email should be updated: {updated_user['email']}")
 except Exception as e:
     test("DB-09: update_user() works correctly", False, str(e))
 

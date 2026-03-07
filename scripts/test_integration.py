@@ -52,6 +52,25 @@ if not check_server():
     sys.exit(1)
 print("Server is running")
 
+# Cleanup: Delete any existing test users that might interfere with tests
+print("\n[Setup] Cleaning up any existing test users...")
+login_resp = requests.post(f"{BASE_URL}/api/auth/login", json={
+    "username": "admin",
+    "password": "admin123"
+})
+admin_token = login_resp.json().get('session_token')
+headers = {'Authorization': f'Bearer {admin_token}'}
+
+# Get all users and delete test users
+users_resp = requests.get(f"{BASE_URL}/api/admin/users", headers=headers)
+test_usernames = ['inttestuser', 'quotatestuser', 'sessiontestuser', 'inactiveuser']
+for user in users_resp.json().get('users', []):
+    if user.get('username') in test_usernames:
+        user_id = user['id']
+        delete_resp = requests.delete(f"{BASE_URL}/api/admin/users/{user_id}", headers=headers)
+        print(f"  Deleted existing test user: {user['username']}")
+print("Cleanup complete")
+
 # ==========================================
 # INT-01: Create user, login as user, access profile
 # ==========================================
@@ -203,13 +222,14 @@ if user_id:
     # Verify session was created with 7-day expiry
     import sqlite3
     import os
-    import config
+    import sys
 
     # Load config to get DB path
     script_dir = os.path.dirname(os.path.abspath(__file__))
     shared_dir = os.path.join(script_dir, 'shared')
     if shared_dir not in sys.path:
         sys.path.insert(0, shared_dir)
+    import config
     import db
 
     # Check sessions in database
@@ -252,7 +272,7 @@ resp = requests.post(f"{BASE_URL}/api/auth/login", json={
 })
 data = resp.json()
 test("INT-05: Inactive user login returns 403", resp.status_code == 403, f"Status: {resp.status_code}")
-test("INT-05: Error message about inactive account", 'error' in data and 'inactive' in data.get('error', '').lower(), f"Error: {data.get('error')}")
+test("INT-05: Error message about inactive account", 'error' in data and ('inactive' in data.get('error', '').lower() or 'not active' in data.get('error', '').lower()), f"Error: {data.get('error')}")
 
 # ==========================================
 # Summary

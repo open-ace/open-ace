@@ -181,6 +181,207 @@ def api_senders():
     return jsonify(senders)
 
 
+# =============================================================================
+# Analysis APIs - 深度分析 API 端点
+# =============================================================================
+
+@app.route('/api/analysis/key-metrics')
+def api_analysis_key_metrics():
+    """Get key metrics for dashboard."""
+    date = request.args.get('date', utils.get_today())
+    tool = request.args.get('tool')
+    host = request.args.get('host')
+    
+    metrics = db.get_key_metrics(date, tool_name=tool, host_name=host)
+    return jsonify(metrics)
+
+
+@app.route('/api/analysis/hourly-usage')
+def api_analysis_hourly_usage():
+    """Get hourly usage statistics from daily_messages table."""
+    start_date = request.args.get('start', utils.get_days_ago(7))
+    end_date = request.args.get('end', utils.get_today())
+    tool = request.args.get('tool')
+    host = request.args.get('host')
+    
+    data = db.get_hourly_usage_from_messages(start_date, end_date, tool_name=tool, host_name=host)
+    return jsonify(data)
+
+
+@app.route('/api/analysis/peak-usage')
+def api_analysis_peak_usage():
+    """Get peak usage periods."""
+    start_date = request.args.get('start', utils.get_days_ago(7))
+    end_date = request.args.get('end', utils.get_today())
+    tool = request.args.get('tool')
+    host = request.args.get('host')
+    limit = request.args.get('limit', 10, type=int)
+    
+    data = db.get_peak_usage_periods(start_date, end_date, tool_name=tool, host_name=host, limit=limit)
+    return jsonify(data)
+
+
+@app.route('/api/analysis/user-ranking')
+def api_analysis_user_ranking():
+    """Get user activity ranking."""
+    start_date = request.args.get('start', utils.get_days_ago(7))
+    end_date = request.args.get('end', utils.get_today())
+    tool = request.args.get('tool')
+    host = request.args.get('host')
+    limit = request.args.get('limit', 10, type=int)
+    
+    data = db.get_user_activity_ranking(start_date, end_date, limit=limit, tool_name=tool, host_name=host)
+    return jsonify(data)
+
+
+@app.route('/api/analysis/session-stats')
+def api_analysis_session_stats():
+    """Get session/conversation statistics."""
+    start_date = request.args.get('start', utils.get_days_ago(7))
+    end_date = request.args.get('end', utils.get_today())
+    tool = request.args.get('tool')
+    host = request.args.get('host')
+    
+    data = db.get_session_statistics(start_date, end_date, tool_name=tool, host_name=host)
+    return jsonify(data)
+
+
+@app.route('/api/analysis/user-segmentation')
+def api_analysis_user_segmentation():
+    """Get user segmentation by activity level."""
+    date = request.args.get('date', utils.get_today())
+    tool = request.args.get('tool')
+    host = request.args.get('host')
+    
+    data = db.get_user_segmentation(date, tool_name=tool, host_name=host)
+    return jsonify(data)
+
+
+@app.route('/api/analysis/tool-comparison')
+def api_analysis_tool_comparison():
+    """Get comparison metrics for different tools."""
+    start_date = request.args.get('start', utils.get_days_ago(30))
+    end_date = request.args.get('end', utils.get_today())
+    host = request.args.get('host')
+    
+    data = db.get_tool_comparison_metrics(start_date, end_date, host_name=host)
+    return jsonify(data)
+
+
+@app.route('/api/analysis/anomaly-detection')
+def api_analysis_anomaly_detection():
+    """Detect usage anomalies using statistical methods."""
+    start_date = request.args.get('start', utils.get_days_ago(30))
+    end_date = request.args.get('end', utils.get_today())
+    tool = request.args.get('tool')
+    host = request.args.get('host')
+    threshold = request.args.get('threshold', 3.0, type=float)
+    
+    data = db.detect_usage_anomalies(start_date, end_date, tool_name=tool, host_name=host, threshold_std=threshold)
+    return jsonify(data)
+
+
+@app.route('/api/analysis/recommendations')
+def api_analysis_recommendations():
+    """Generate recommendations based on usage patterns."""
+    start_date = request.args.get('start', utils.get_days_ago(7))
+    end_date = request.args.get('end', utils.get_today())
+    tool = request.args.get('tool')
+    host = request.args.get('host')
+    
+    recommendations = []
+    
+    # Get tool comparison data
+    tool_data = db.get_tool_comparison_metrics(start_date, end_date, host_name=host)
+    
+    # Get anomaly data
+    anomalies = db.detect_usage_anomalies(start_date, end_date, tool_name=tool, host_name=host)
+    
+    # Get user segmentation
+    user_seg = db.get_user_segmentation(utils.get_today(), tool_name=tool, host_name=host)
+    
+    # Generate recommendations based on data
+    
+    # 1. Check for high usage variance
+    if len(anomalies) > 0:
+        high_severity = [a for a in anomalies if a.get('severity') == 'high']
+        if high_severity:
+            recommendations.append({
+                'id': 'rec_anomaly',
+                'type': 'stability',
+                'priority': 'high',
+                'title': '检测到用量异常波动',
+                'title_en': 'Usage Anomaly Detected',
+                'description': f'发现 {len(high_severity)} 次严重用量波动，建议检查是否有异常使用模式',
+                'description_en': f'Detected {len(high_severity)} severe usage fluctuations. Recommend checking for abnormal usage patterns.',
+                'expected_benefit': '提高系统稳定性',
+                'expected_benefit_en': 'Improve system stability',
+                'implementation_difficulty': 'medium',
+                'data': high_severity[:3]
+            })
+    
+    # 2. Check user distribution
+    if user_seg.get('high', 0) > user_seg.get('medium', 0) * 2:
+        recommendations.append({
+            'id': 'rec_user_distribution',
+            'type': 'user_management',
+            'priority': 'medium',
+            'title': '用户分布不均衡',
+            'title_en': 'Unbalanced User Distribution',
+            'description': '少数高频用户占用大部分资源，建议优化配额管理',
+            'description_en': 'Few high-frequency users consume most resources. Recommend optimizing quota management.',
+            'expected_benefit': '更公平的资源分配',
+            'expected_benefit_en': 'More fair resource distribution',
+            'implementation_difficulty': 'easy',
+            'data': user_seg
+        })
+    
+    # 3. Tool usage optimization
+    if tool_data:
+        max_tokens_tool = max(tool_data, key=lambda x: x.get('total_tokens', 0))
+        avg_tokens = sum(t.get('total_tokens', 0) for t in tool_data) / len(tool_data) if tool_data else 0
+        
+        if max_tokens_tool.get('total_tokens', 0) > avg_tokens * 3:
+            recommendations.append({
+                'id': 'rec_tool_balance',
+                'type': 'cost_optimization',
+                'priority': 'medium',
+                'title': f'{max_tokens_tool["tool_name"]} 用量过高',
+                'title_en': f'{max_tokens_tool["tool_name"]} High Usage',
+                'description': f'{max_tokens_tool["tool_name"]} 用量远超其他工具，建议评估是否有更经济的替代方案',
+                'description_en': f'{max_tokens_tool["tool_name"]} usage far exceeds other tools. Consider evaluating more cost-effective alternatives.',
+                'expected_benefit': '降低成本',
+                'expected_benefit_en': 'Reduce costs',
+                'implementation_difficulty': 'medium',
+                'data': max_tokens_tool
+            })
+    
+    # 4. Cache usage recommendation
+    for tool in tool_data:
+        if tool.get('output_tokens', 0) > 0:
+            cache_ratio = tool.get('input_tokens', 0) / max(tool.get('output_tokens', 1), 1)
+            if cache_ratio < 2:  # Low cache ratio
+                recommendations.append({
+                    'id': f'rec_cache_{tool["tool_name"]}',
+                    'type': 'performance',
+                    'priority': 'low',
+                    'title': f'{tool["tool_name"]} 缓存利用率低',
+                    'title_en': f'{tool["tool_name"]} Low Cache Utilization',
+                    'description': f'{tool["tool_name"]} 的输入/输出比例较低，建议增加缓存使用以提高性能',
+                    'description_en': f'{tool["tool_name"]} has low input/output ratio. Recommend increasing cache usage for better performance.',
+                    'expected_benefit': '提升响应速度，降低成本',
+                    'expected_benefit_en': 'Improve response speed and reduce costs',
+                    'implementation_difficulty': 'easy',
+                    'data': {'tool': tool['tool_name'], 'cache_ratio': round(cache_ratio, 2)}
+                })
+    
+    # Sort by priority
+    priority_order = {'high': 0, 'medium': 1, 'low': 2}
+    recommendations.sort(key=lambda x: priority_order.get(x['priority'], 3))
+    
+    return jsonify(recommendations)
+
+
 @app.route('/api/upload/usage', methods=['POST'])
 def api_upload_usage():
     """Accept usage data upload from remote machine.
@@ -583,7 +784,7 @@ def logout_page():
         token = auth_header.replace('Bearer ', '')
         db.delete_session(token)
 
-    response = make_response(render_template('login.html'))
+    response = make_response(render_template('logout_success.html'))
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
     return response
 
@@ -761,6 +962,7 @@ def api_admin_create_user():
     role = data.get('role', 'user')
     quota_tokens = data.get('quota_tokens', 1000000)
     quota_requests = data.get('quota_requests', 1000)
+    is_active = data.get('is_active', 1)
 
     if not username or not password:
         return jsonify({'error': 'Username and password are required'}), 400
@@ -768,16 +970,17 @@ def api_admin_create_user():
     # Hash password
     password_hash = hashlib.sha256(password.encode()).hexdigest()
 
-    user_id = db.create_user(
+    result = db.create_user_with_is_active(
         username=username,
         password_hash=password_hash,
         email=email,
         role=role,
         quota_tokens=quota_tokens,
-        quota_requests=quota_requests
+        quota_requests=quota_requests,
+        is_active=is_active
     )
 
-    if user_id:
+    if result:
         return jsonify({'success': True, 'message': 'User created successfully'})
     else:
         return jsonify({'error': 'Failed to create user (may already exist)'}), 400

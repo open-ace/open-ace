@@ -52,6 +52,25 @@ if not check_server():
     sys.exit(1)
 print("Server is running")
 
+# Cleanup: Delete any existing test users that might interfere with tests
+print("\n[Setup] Cleaning up any existing test users...")
+login_resp = requests.post(f"{BASE_URL}/api/auth/login", json={
+    "username": "admin",
+    "password": "admin123"
+})
+session_token = login_resp.json().get('session_token')
+headers = {'Authorization': f'Bearer {session_token}'}
+
+# Get all users and delete test users
+users_resp = requests.get(f"{BASE_URL}/api/admin/users", headers=headers)
+test_usernames = ['testuser_api11', 'todelete_user', 'regularuser', 'reguser123', 'quotatestuser', 'inttestuser', 'sessiontestuser', 'inactiveuser']
+for user in users_resp.json().get('users', []):
+    if user.get('username') in test_usernames:
+        user_id = user['id']
+        delete_resp = requests.delete(f"{BASE_URL}/api/admin/users/{user_id}", headers=headers)
+        print(f"  Deleted existing test user: {user['username']}")
+print("Cleanup complete")
+
 
 # ==========================================
 # API-01 to API-08: Authentication APIs
@@ -436,6 +455,23 @@ try:
     test("API-25: Response has messages list", 'messages' in data, f"Response: {data}")
 except Exception as e:
     test("API-25: Messages works", False, str(e))
+
+# Cleanup: Delete any test users created during tests
+print("\n[Cleanup] Deleting test users...")
+test_usernames = ['testuser_api11', 'todelete_user', 'regularuser', 'reguser123', 'quotatestuser', 'sessiontestuser', 'inactiveuser']
+for username in test_usernames:
+    try:
+        # Get user ID
+        list_resp = requests.get(f"{BASE_URL}/api/admin/users", headers=headers)
+        for user in list_resp.json().get('users', []):
+            if user.get('username') == username:
+                user_id = user['id']
+                requests.delete(f"{BASE_URL}/api/admin/users/{user_id}", headers=headers)
+                print(f"  Deleted test user: {username}")
+                break
+    except:
+        pass  # User may not exist
+print("Cleanup complete")
 
 # ==========================================
 # Summary

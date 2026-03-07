@@ -601,9 +601,235 @@
 
     <!-- Analysis Section -->
     <div id="analysis-section" class="content-section" style="display: none;">
-        <h3><i class="bi bi-graph-up"></i> <span id="analysis-title">Analysis</span></h3>
-        <div class="alert alert-info mt-3">
-            <i class="bi bi-info-circle"></i> Analysis page coming soon - AI usage trend analysis, tool comparison, user activity metrics
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h3><i class="bi bi-graph-up"></i> <span id="analysis-title">Analysis</span></h3>
+            <div class="d-flex gap-2">
+                <div class="input-group input-group-sm" style="width: 250px;">
+                    <span class="input-group-text"><i class="bi bi-calendar-range"></i></span>
+                    <input type="date" class="form-control" id="analysis-start-date" value="">
+                    <span class="input-group-text">to</span>
+                    <input type="date" class="form-control" id="analysis-end-date" value="">
+                </div>
+                <select class="form-select form-select-sm" id="analysis-tool-filter" style="width: 150px;">
+                    <option value="">All Tools</option>
+                </select>
+                <select class="form-select form-select-sm" id="analysis-host-filter" style="width: 150px;">
+                    <option value="">All Hosts</option>
+                </select>
+                <button class="btn btn-primary btn-sm" onclick="loadAnalysisData()">
+                    <i class="bi bi-arrow-clockwise"></i> <span id="analysis-refresh-btn">Refresh</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Key Metrics Cards -->
+        <div class="row mb-4" id="analysis-key-metrics">
+            <div class="col-md-2">
+                <div class="card bg-primary text-white h-100">
+                    <div class="card-body">
+                        <h6 class="card-subtitle mb-2"><span id="metric-total-tokens-label">Total Tokens</span></h6>
+                        <h3 class="card-title" id="metric-total-tokens">-</h3>
+                        <small id="metric-total-tokens-change">--</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-2">
+                <div class="card bg-success text-white h-100">
+                    <div class="card-body">
+                        <h6 class="card-subtitle mb-2"><span id="metric-total-requests-label">Total Requests</span></h6>
+                        <h3 class="card-title" id="metric-total-requests">-</h3>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-2">
+                <div class="card bg-info text-white h-100">
+                    <div class="card-body">
+                        <h6 class="card-subtitle mb-2"><span id="metric-active-users-label">Active Users</span></h6>
+                        <h3 class="card-title" id="metric-active-users">-</h3>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-2">
+                <div class="card bg-warning text-dark h-100">
+                    <div class="card-body">
+                        <h6 class="card-subtitle mb-2"><span id="metric-active-tools-label">Active Tools</span></h6>
+                        <h3 class="card-title" id="metric-active-tools">-</h3>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-2">
+                <div class="card bg-danger text-white h-100">
+                    <div class="card-body">
+                        <h6 class="card-subtitle mb-2"><span id="metric-anomalies-label">Anomalies</span></h6>
+                        <h3 class="card-title" id="metric-anomalies">-</h3>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-2">
+                <div class="card bg-secondary text-white h-100">
+                    <div class="card-body">
+                        <h6 class="card-subtitle mb-2"><span id="metric-health-score-label">Health Score</span></h6>
+                        <h3 class="card-title" id="metric-health-score">-</h3>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Usage Heatmap & Peak Usage -->
+        <div class="row mb-4">
+            <div class="col-md-8">
+                <div class="card h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0"><i class="bi bi-grid-3x3-gap"></i> <span id="analysis-heatmap-title">Usage Heatmap (Last 7 Days)</span></h5>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="heatmapChart" height="120"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card h-100">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-trophy"></i> <span id="analysis-peak-title">Peak Usage Periods</span></h5>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive" style="max-height: 300px; overflow-y: auto;">
+                            <table class="table table-sm table-hover mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th><span id="peak-date">Date</span></th>
+                                        <th><span id="peak-hour">Hour</span></th>
+                                        <th class="text-end"><span id="peak-tokens">Tokens</span></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="peak-usage-table">
+                                    <tr><td colspan="3" class="text-center text-muted">Loading...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- User Ranking & Tool Comparison -->
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-people"></i> <span id="analysis-user-ranking-title">Top 10 Active Users</span></h5>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th><span id="ranking-user">User</span></th>
+                                        <th class="text-end"><span id="ranking-messages">Messages</span></th>
+                                        <th class="text-end"><span id="ranking-tokens">Tokens</span></th>
+                                        <th class="text-end"><span id="ranking-days">Days</span></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="user-ranking-table">
+                                    <tr><td colspan="4" class="text-center text-muted">Loading...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-pie-chart"></i> <span id="analysis-tool-comparison-title">Tool Comparison</span></h5>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="toolComparisonChart" height="200"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Session Stats & User Segmentation -->
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-chat-left-text"></i> <span id="analysis-session-stats-title">Session Statistics</span></h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row text-center">
+                            <div class="col-6 mb-3">
+                                <h2 class="text-primary" id="session-total-messages">-</h2>
+                                <small class="text-muted"><span id="session-total-messages-label">Total Messages</span></small>
+                            </div>
+                            <div class="col-6 mb-3">
+                                <h2 class="text-success" id="session-conversations">-</h2>
+                                <small class="text-muted"><span id="session-conversations-label">Conversations</span></small>
+                            </div>
+                            <div class="col-6 mb-3">
+                                <h2 class="text-info" id="session-avg-length">-</h2>
+                                <small class="text-muted"><span id="session-avg-length-label">Avg Length</span></small>
+                            </div>
+                            <div class="col-6 mb-3">
+                                <h2 class="text-warning" id="session-multi-turn-ratio">-</h2>
+                                <small class="text-muted"><span id="session-multi-turn-label">Multi-turn Ratio</span></small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-person-lines"></i> <span id="analysis-user-segmentation-title">User Segmentation</span></h5>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="userSegmentationChart" height="180"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Anomalies & Recommendations -->
+        <div class="row">
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-exclamation-triangle"></i> <span id="analysis-anomalies-title">Anomaly Detection</span></h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive" style="max-height: 250px; overflow-y: auto;">
+                            <table class="table table-sm mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th><span id="anomaly-date">Date</span></th>
+                                        <th><span id="anomaly-tool">Tool</span></th>
+                                        <th><span id="anomaly-type">Type</span></th>
+                                        <th class="text-end"><span id="anomaly-tokens">Tokens</span></th>
+                                        <th><span id="anomaly-severity">Severity</span></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="anomaly-table">
+                                    <tr><td colspan="5" class="text-center text-muted">No anomalies detected</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-lightbulb"></i> <span id="analysis-recommendations-title">Recommendations</span></h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="recommendations-list" style="max-height: 250px; overflow-y: auto;">
+                            <div class="text-center text-muted">Loading...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -837,7 +1063,40 @@
                 dashboardFilterClaude: 'Claude',
                 dashboardFilterOpenclaw: 'Openclaw',
                 dashboardFilterQwen: 'Qwen',
-                dashboardFilterRefresh: 'Refresh'
+                dashboardFilterRefresh: 'Refresh',
+                // Analysis page translations
+                analysisTitle: 'Analysis',
+                analysisRefreshBtn: 'Refresh',
+                analysisHeatmapTitle: 'Usage Heatmap (Last 7 Days)',
+                analysisPeakTitle: 'Peak Usage Periods',
+                analysisUserRankingTitle: 'Top 10 Active Users',
+                analysisToolComparisonTitle: 'Tool Comparison',
+                analysisSessionStatsTitle: 'Session Statistics',
+                analysisUserSegmentationTitle: 'User Segmentation',
+                analysisAnomaliesTitle: 'Anomaly Detection',
+                analysisRecommendationsTitle: 'Recommendations',
+                metricTotalTokensLabel: 'Total Tokens',
+                metricTotalRequestsLabel: 'Total Requests',
+                metricActiveUsersLabel: 'Active Users',
+                metricActiveToolsLabel: 'Active Tools',
+                metricAnomaliesLabel: 'Anomalies',
+                metricHealthScoreLabel: 'Health Score',
+                peakDate: 'Date',
+                peakHour: 'Hour',
+                peakTokens: 'Tokens',
+                rankingUser: 'User',
+                rankingMessages: 'Messages',
+                rankingTokens: 'Tokens',
+                rankingDays: 'Days',
+                sessionTotalMessagesLabel: 'Total Messages',
+                sessionConversationsLabel: 'Conversations',
+                sessionAvgLengthLabel: 'Avg Length',
+                sessionMultiTurnLabel: 'Multi-turn Ratio',
+                anomalyDate: 'Date',
+                anomalyTool: 'Tool',
+                anomalyType: 'Type',
+                anomalyTokens: 'Tokens',
+                anomalySeverity: 'Severity'
             },
             workspaceText: 'Workspace',
             reportText: 'My Usage Report',
@@ -969,6 +1228,39 @@
                 dashboardFilterOpenclaw: 'Openclaw',
                 dashboardFilterQwen: 'Qwen',
                 dashboardFilterRefresh: '刷新',
+                // Analysis page translations
+                analysisTitle: '分析',
+                analysisRefreshBtn: '刷新',
+                analysisHeatmapTitle: '用量热力图（最近 7 天）',
+                analysisPeakTitle: '高峰时段',
+                analysisUserRankingTitle: 'Top 10 活跃用户',
+                analysisToolComparisonTitle: '工具对比',
+                analysisSessionStatsTitle: '会话统计',
+                analysisUserSegmentationTitle: '用户分群',
+                analysisAnomaliesTitle: '异常检测',
+                analysisRecommendationsTitle: '改进建议',
+                metricTotalTokensLabel: '总 Token',
+                metricTotalRequestsLabel: '总请求',
+                metricActiveUsersLabel: '活跃用户',
+                metricActiveToolsLabel: '活跃工具',
+                metricAnomaliesLabel: '异常',
+                metricHealthScoreLabel: '健康度',
+                peakDate: '日期',
+                peakHour: '时段',
+                peakTokens: 'Token',
+                rankingUser: '用户',
+                rankingMessages: '消息数',
+                rankingTokens: 'Token',
+                rankingDays: '天数',
+                sessionTotalMessagesLabel: '总消息数',
+                sessionConversationsLabel: '会话数',
+                sessionAvgLengthLabel: '平均长度',
+                sessionMultiTurnLabel: '多轮比例',
+                anomalyDate: '日期',
+                anomalyTool: '工具',
+                anomalyType: '类型',
+                anomalyTokens: 'Token',
+                anomalySeverity: '级别',
                 workspaceText: '工作空间',
                 reportText: '我的用量报告',
                 analysisText: '分析',
@@ -1278,6 +1570,10 @@
             } else if (section === 'analysis') {
                 if (navAnalysis) navAnalysis.classList.add('active');
                 updateAnalysisText();
+                // Initialize and load Analysis data
+                initAnalysisDateRange();
+                initAnalysisFilters();
+                loadAnalysisData();
             } else if (section === 'management') {
                 if (navManagement) navManagement.classList.add('active');
                 updateManagementText();
@@ -2158,6 +2454,538 @@
                 .catch(error => console.error('Error updating sender list:', error));
         }
 
+        // =====================================================================
+        // Analysis Functions - Analysis 页面数据加载和图表渲染
+        // =====================================================================
+
+        // Store chart instances to avoid memory leaks
+        let heatmapChartInstance = null;
+        let toolComparisonChartInstance = null;
+        let userSegmentationChartInstance = null;
+        let analysisInitialized = false;
+
+        // Initialize Analysis page date range (last 7 days)
+        function initAnalysisDateRange() {
+            // Only initialize once
+            if (analysisInitialized) return;
+            
+            const endDate = new Date();
+            const startDate = new Date();
+            startDate.setDate(startDate.getDate() - 7);
+
+            document.getElementById('analysis-end-date').value = endDate.toISOString().split('T')[0];
+            document.getElementById('analysis-start-date').value = startDate.toISOString().split('T')[0];
+            analysisInitialized = true;
+        }
+
+        // Load Analysis data
+        async function loadAnalysisData() {
+            const startDate = document.getElementById('analysis-start-date').value;
+            const endDate = document.getElementById('analysis-end-date').value;
+            const tool = document.getElementById('analysis-tool-filter').value;
+            const host = document.getElementById('analysis-host-filter').value;
+
+            if (!startDate || !endDate) {
+                alert('Please select a date range');
+                return;
+            }
+
+            // Load all analysis data in parallel with error handling
+            // Each function has its own try-catch, so failures won't block others
+            await Promise.allSettled([
+                loadKeyMetrics(startDate, endDate, tool, host),
+                loadHourlyUsage(startDate, endDate, tool, host),
+                loadPeakUsage(startDate, endDate, tool, host),
+                loadUserRanking(startDate, endDate, tool, host),
+                loadSessionStats(startDate, endDate, tool, host),
+                loadToolComparison(startDate, endDate, host),
+                loadUserSegmentation(endDate, tool, host),
+                loadAnomalyDetection(startDate, endDate, tool, host),
+                loadRecommendations(startDate, endDate, tool, host)
+            ]);
+        }
+
+        // Load Key Metrics
+        async function loadKeyMetrics(date, endDate, tool, host) {
+            try {
+                const params = new URLSearchParams({date, tool, host});
+                const response = await fetch(`/api/analysis/key-metrics?${params}`);
+                const data = await response.json();
+
+                document.getElementById('metric-total-tokens').textContent = formatTokens(data.total_tokens || 0);
+                document.getElementById('metric-total-requests').textContent = (data.total_requests || 0).toLocaleString();
+                document.getElementById('metric-active-users').textContent = (data.active_users || 0).toLocaleString();
+                document.getElementById('metric-active-tools').textContent = (data.active_tools || 0).toLocaleString();
+
+                // Day over day change
+                const change = data.day_over_day_change || 0;
+                const changeEl = document.getElementById('metric-total-tokens-change');
+                if (change >= 0) {
+                    changeEl.innerHTML = `<i class="bi bi-arrow-up text-success"></i> +${change}% vs yesterday`;
+                } else {
+                    changeEl.innerHTML = `<i class="bi bi-arrow-down text-danger"></i> ${change}% vs yesterday`;
+                }
+
+                // Calculate health score (simple algorithm)
+                const healthScore = calculateHealthScore(data);
+                document.getElementById('metric-health-score').textContent = healthScore + '%';
+            } catch (error) {
+                console.error('Error loading key metrics:', error);
+            }
+        }
+
+        // Calculate health score based on metrics
+        function calculateHealthScore(metrics) {
+            let score = 100;
+            // Deduct points for high anomaly count (will be updated later)
+            // Deduct points for negative day-over-day change
+            if (metrics.day_over_day_change < -50) score -= 10;
+            if (metrics.day_over_day_change < -80) score -= 20;
+            return Math.max(0, Math.min(100, score));
+        }
+
+        // Load Hourly Usage (Heatmap data)
+        async function loadHourlyUsage(start, end, tool, host) {
+            try {
+                const params = new URLSearchParams({start, end, tool, host});
+                const response = await fetch(`/api/analysis/hourly-usage?${params}`);
+                const data = await response.json();
+
+                renderHeatmapChart(data);
+            } catch (error) {
+                console.error('Error loading hourly usage:', error);
+            }
+        }
+
+        // Render Heatmap Chart using bubble chart (matrix not supported in standard Chart.js)
+        function renderHeatmapChart(data) {
+            const ctx = document.getElementById('heatmapChart').getContext('2d');
+
+            // Prepare data for heatmap (day_of_week x hour)
+            const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+            const dataset = [];
+
+            // Create a map for quick lookup
+            const dataMap = {};
+            data.forEach(d => {
+                const key = `${d.day_of_week}-${d.hour}`;
+                dataMap[key] = d.tokens_used || 0;
+            });
+
+            // Generate dataset for bubble chart
+            let maxValue = 1;
+            for (let day = 0; day < 7; day++) {
+                for (let hour = 0; hour < 24; hour++) {
+                    const key = `${day}-${hour}`;
+                    const value = dataMap[key] || 0;
+                    if (value > 0) {
+                        dataset.push({
+                            x: hour,
+                            y: day,
+                            r: Math.max(5, Math.sqrt(value) / 10), // Radius based on value
+                            v: value
+                        });
+                        if (value > maxValue) maxValue = value;
+                    }
+                }
+            }
+
+            // Destroy existing chart
+            if (heatmapChartInstance) {
+                heatmapChartInstance.destroy();
+            }
+
+            // Create bubble chart to simulate heatmap
+            heatmapChartInstance = new Chart(ctx, {
+                type: 'bubble',
+                data: {
+                    datasets: [{
+                        label: 'Tokens',
+                        data: dataset,
+                        backgroundColor: function(ctx) {
+                            const raw = ctx.raw;
+                            if (!raw || !raw.v) return 'rgba(54, 162, 235, 0.2)';
+                            const intensity = raw.v / maxValue;
+                            return `rgba(54, 162, 235, ${0.3 + intensity * 0.7})`;
+                        },
+                        borderColor: 'rgba(54, 162, 235, 0.8)'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function(ctx) {
+                                    const raw = ctx.raw;
+                                    const dayLabel = raw && raw.y !== undefined ? days[raw.y] : '';
+                                    const hourLabel = raw && raw.x !== undefined ? raw.x : '';
+                                    const value = raw && raw.v ? formatTokens(raw.v) : '0';
+                                    return `${dayLabel} ${hourLabel}:00 - ${value} tokens`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            min: -0.5,
+                            max: 23.5,
+                            ticks: { 
+                                stepSize: 3,
+                                callback: function(val) { return val + ':00'; }
+                            },
+                            title: { display: true, text: 'Hour of Day' }
+                        },
+                        y: {
+                            min: -0.5,
+                            max: 6.5,
+                            ticks: {
+                                callback: function(val, index) {
+                                    return days[val] || '';
+                                }
+                            },
+                            title: { display: true, text: 'Day of Week' }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Load Peak Usage
+        async function loadPeakUsage(start, end, tool, host) {
+            try {
+                const params = new URLSearchParams({start, end, tool, host, limit: '10'});
+                const response = await fetch(`/api/analysis/peak-usage?${params}`);
+                const data = await response.json();
+
+                const tbody = document.getElementById('peak-usage-table');
+                if (data.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">No data</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = data.map(d => `
+                    <tr>
+                        <td>${d.date}</td>
+                        <td>${d.hour}:00</td>
+                        <td class="text-end">${formatTokens(d.tokens_used)}</td>
+                    </tr>
+                `).join('');
+            } catch (error) {
+                console.error('Error loading peak usage:', error);
+            }
+        }
+
+        // Load User Ranking
+        async function loadUserRanking(start, end, tool, host) {
+            try {
+                const params = new URLSearchParams({start, end, tool, host, limit: '10'});
+                const response = await fetch(`/api/analysis/user-ranking?${params}`);
+                const data = await response.json();
+
+                const tbody = document.getElementById('user-ranking-table');
+                if (data.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No data</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = data.map((d, i) => `
+                    <tr>
+                        <td>
+                            <span class="badge bg-${i < 3 ? 'warning' : 'secondary'} me-2">${i + 1}</span>
+                            ${escapeHtmlForDisplay(d.sender_name || d.sender_id || 'Unknown')}
+                        </td>
+                        <td class="text-end">${(d.message_count || 0).toLocaleString()}</td>
+                        <td class="text-end">${formatTokens(d.tokens_used || 0)}</td>
+                        <td class="text-end">${d.active_days || 0}</td>
+                    </tr>
+                `).join('');
+            } catch (error) {
+                console.error('Error loading user ranking:', error);
+            }
+        }
+
+        // Load Session Statistics
+        async function loadSessionStats(start, end, tool, host) {
+            try {
+                const params = new URLSearchParams({start, end, tool, host});
+                const response = await fetch(`/api/analysis/session-stats?${params}`);
+                const data = await response.json();
+
+                document.getElementById('session-total-messages').textContent = (data.total_messages || 0).toLocaleString();
+                document.getElementById('session-conversations').textContent = (data.unique_conversations || 0).toLocaleString();
+                document.getElementById('session-avg-length').textContent = (data.conversation_stats?.avg_length || 0).toFixed(1);
+                document.getElementById('session-multi-turn-ratio').textContent = ((data.multi_turn_ratio || 0) * 100).toFixed(0) + '%';
+            } catch (error) {
+                console.error('Error loading session stats:', error);
+            }
+        }
+
+        // Load Tool Comparison
+        async function loadToolComparison(start, end, host) {
+            try {
+                const params = new URLSearchParams({start, end, host});
+                const response = await fetch(`/api/analysis/tool-comparison?${params}`);
+                const data = await response.json();
+
+                renderToolComparisonChart(data);
+            } catch (error) {
+                console.error('Error loading tool comparison:', error);
+            }
+        }
+
+        // Render Tool Comparison Chart
+        function renderToolComparisonChart(data) {
+            const ctx = document.getElementById('toolComparisonChart').getContext('2d');
+
+            // Destroy existing chart
+            if (toolComparisonChartInstance) {
+                toolComparisonChartInstance.destroy();
+            }
+
+            const labels = data.map(d => d.tool_name.toUpperCase());
+            const tokensData = data.map(d => d.total_tokens || 0);
+            const usersData = data.map(d => d.unique_users || 0);
+            const messagesData = data.map(d => d.total_messages || 0);
+
+            toolComparisonChartInstance = new Chart(ctx, {
+                type: 'radar',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Total Tokens',
+                            data: tokensData,
+                            backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                            borderColor: 'rgba(54, 162, 235, 1)',
+                            borderWidth: 2,
+                            pointBackgroundColor: 'rgba(54, 162, 235, 1)'
+                        },
+                        {
+                            label: 'Active Users',
+                            data: usersData,
+                            backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                            borderColor: 'rgba(255, 99, 132, 1)',
+                            borderWidth: 2,
+                            pointBackgroundColor: 'rgba(255, 99, 132, 1)'
+                        },
+                        {
+                            label: 'Messages',
+                            data: messagesData,
+                            backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                            borderColor: 'rgba(75, 192, 192, 1)',
+                            borderWidth: 2,
+                            pointBackgroundColor: 'rgba(75, 192, 192, 1)'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        r: {
+                            beginAtZero: true,
+                            ticks: { display: false }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        }
+                    }
+                }
+            });
+        }
+
+        // Load User Segmentation
+        async function loadUserSegmentation(date, tool, host) {
+            try {
+                const params = new URLSearchParams({date, tool, host});
+                const response = await fetch(`/api/analysis/user-segmentation?${params}`);
+                const data = await response.json();
+
+                renderUserSegmentationChart(data);
+            } catch (error) {
+                console.error('Error loading user segmentation:', error);
+            }
+        }
+
+        // Render User Segmentation Chart
+        function renderUserSegmentationChart(data) {
+            const ctx = document.getElementById('userSegmentationChart').getContext('2d');
+
+            // Destroy existing chart
+            if (userSegmentationChartInstance) {
+                userSegmentationChartInstance.destroy();
+            }
+
+            userSegmentationChartInstance = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['High (>10K)', 'Medium (1K-10K)', 'Low (<1K)', 'Dormant'],
+                    datasets: [{
+                        data: [
+                            data.high || 0,
+                            data.medium || 0,
+                            data.low || 0,
+                            data.dormant || 0
+                        ],
+                        backgroundColor: [
+                            'rgba(255, 99, 132, 0.8)',
+                            'rgba(255, 206, 86, 0.8)',
+                            'rgba(75, 192, 192, 0.8)',
+                            'rgba(201, 203, 207, 0.8)'
+                        ],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'right'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(ctx) {
+                                    const total = (data.high || 0) + (data.medium || 0) + (data.low || 0) + (data.dormant || 0);
+                                    const percentage = total > 0 ? ((ctx.raw || 0) / total * 100).toFixed(1) : 0;
+                                    return `${ctx.label}: ${ctx.raw} (${percentage}%)`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Load Anomaly Detection
+        async function loadAnomalyDetection(start, end, tool, host) {
+            try {
+                const params = new URLSearchParams({start, end, tool, host});
+                const response = await fetch(`/api/analysis/anomaly-detection?${params}`);
+                const data = await response.json();
+
+                // Update anomaly count in metrics
+                document.getElementById('metric-anomalies').textContent = data.length;
+
+                const tbody = document.getElementById('anomaly-table');
+                if (data.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No anomalies detected</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = data.slice(0, 10).map(d => `
+                    <tr>
+                        <td>${d.date}</td>
+                        <td>${d.tool_name}</td>
+                        <td>
+                            <span class="badge bg-${d.anomaly_type === 'spike' ? 'danger' : 'warning'}">
+                                ${d.anomaly_type === 'spike' ? '↑ Spike' : '↓ Drop'}
+                            </span>
+                        </td>
+                        <td class="text-end">${formatTokens(d.tokens_used)}</td>
+                        <td>
+                            <span class="badge bg-${d.severity === 'high' ? 'danger' : 'warning'}">
+                                ${d.severity}
+                            </span>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (error) {
+                console.error('Error loading anomaly detection:', error);
+            }
+        }
+
+        // Load Recommendations
+        async function loadRecommendations(start, end, tool, host) {
+            try {
+                const params = new URLSearchParams({start, end, tool, host});
+                const response = await fetch(`/api/analysis/recommendations?${params}`);
+                const data = await response.json();
+
+                const container = document.getElementById('recommendations-list');
+                if (data.length === 0) {
+                    container.innerHTML = '<div class="text-center text-muted">No recommendations at this time</div>';
+                    return;
+                }
+
+                // Update anomaly metric if there are high priority anomalies
+                const anomalyRec = data.find(r => r.type === 'stability');
+                if (anomalyRec && anomalyRec.data && anomalyRec.data.length > 0) {
+                    document.getElementById('metric-anomalies').textContent = anomalyRec.data.length;
+                }
+
+                container.innerHTML = data.map(rec => `
+                    <div class="card mb-2 border-${rec.priority === 'high' ? 'danger' : rec.priority === 'medium' ? 'warning' : 'info'}" style="border-left-width: 3px;">
+                        <div class="card-body p-2">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div class="flex-grow-1">
+                                    <h6 class="mb-1">
+                                        <span class="badge bg-${rec.priority === 'high' ? 'danger' : rec.priority === 'medium' ? 'warning' : 'info'} me-1">
+                                            ${rec.priority.toUpperCase()}
+                                        </span>
+                                        ${currentLang === 'zh' ? rec.title : rec.title_en}
+                                    </h6>
+                                    <p class="mb-1 small text-muted">${currentLang === 'zh' ? rec.description : rec.description_en}</p>
+                                    <small class="text-success">
+                                        <i class="bi bi-check-circle"></i> ${currentLang === 'zh' ? rec.expected_benefit : rec.expected_benefit_en}
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Error loading recommendations:', error);
+            }
+        }
+
+        // Initialize Analysis tool and host filters
+        function initAnalysisFilters() {
+            // Only initialize once
+            if (analysisInitialized) return;
+            
+            // Load tools
+            fetch('/api/tools')
+                .then(response => response.json())
+                .then(tools => {
+                    const select = document.getElementById('analysis-tool-filter');
+                    // Clear existing options except the first one
+                    while (select.options.length > 1) {
+                        select.options.remove(1);
+                    }
+                    tools.forEach(tool => {
+                        const option = document.createElement('option');
+                        option.value = tool;
+                        option.textContent = tool.toUpperCase();
+                        select.appendChild(option);
+                    });
+                })
+                .catch(error => console.error('Error loading tools:', error));
+
+            // Load hosts
+            fetch('/api/hosts')
+                .then(response => response.json())
+                .then(hosts => {
+                    const select = document.getElementById('analysis-host-filter');
+                    // Clear existing options except the first one
+                    while (select.options.length > 1) {
+                        select.options.remove(1);
+                    }
+                    hosts.forEach(host => {
+                        const option = document.createElement('option');
+                        option.value = host;
+                        option.textContent = host;
+                        select.appendChild(option);
+                    });
+                })
+                .catch(error => console.error('Error loading hosts:', error));
+        }
+
         function updatePagination() {
             document.getElementById('current-page').textContent = currentMessagesPage;
             document.getElementById('total-pages').textContent = currentMessagesTotalPages;
@@ -2328,6 +3156,10 @@
                 dashboardToolFilter.value = urlParams.get('tool');
             }
 
+            // Analysis filters will be initialized when user switches to Analysis page
+            // initAnalysisDateRange();
+            // initAnalysisFilters();
+
             loadToday();
             loadTotalChart();
             loadSummary();
@@ -2337,10 +3169,10 @@
             // Check hash on initial load
             if (window.location.hash === '#messages') {
                 switchSection('messages');
+            } else {
+                // Only load messages if on messages page
+                // Messages will be loaded when user switches to messages section
             }
-
-            // Load messages on initial page load
-            loadMessages();
         });
 
         // Dashboard filter functions

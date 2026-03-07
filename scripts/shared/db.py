@@ -737,6 +737,26 @@ def create_user(username: str, password_hash: str, email: str = None,
         conn.close()
 
 
+def create_user_with_is_active(username: str, password_hash: str, email: str = None,
+                               role: str = 'user', quota_tokens: int = 1000000,
+                               quota_requests: int = 1000, is_active: int = 1) -> bool:
+    """Create a new user with is_active flag."""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute('''
+            INSERT INTO users (username, password_hash, email, role, quota_tokens, quota_requests, is_active)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (username, password_hash, email, role, quota_tokens, quota_requests, is_active))
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+    finally:
+        conn.close()
+
+
 def get_user_by_username(username: str) -> Optional[Dict]:
     """Get user by username."""
     conn = get_connection()
@@ -954,3 +974,585 @@ def get_quota_usage_by_tool(user_id: int, start_date: str, end_date: str) -> Lis
     conn.close()
 
     return [dict(row) for row in rows]
+
+
+# =============================================================================
+# Analysis Module - 深度分析查询函数
+# =============================================================================
+
+def get_hourly_usage_from_messages(start_date: str, end_date: str, 
+                                    tool_name: Optional[str] = None,
+                                    host_name: Optional[str] = None) -> List[Dict]:
+    """Get hourly usage statistics from daily_messages table.
+    
+    Args:
+        start_date: Start date in YYYY-MM-DD format
+        end_date: End date in YYYY-MM-DD format
+        tool_name: Optional tool name filter
+        host_name: Optional host name filter
+    
+    Returns:
+        List of dicts with hour (0-23), day_of_week (0-6), tokens_used, message_count
+        Note: day_of_week 0=Monday, 6=Sunday
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    conditions = ['date >= ?', 'date <= ?', 'timestamp IS NOT NULL']
+    params = [start_date, end_date]
+    
+    if tool_name:
+        conditions.append('tool_name = ?')
+        params.append(tool_name)
+    
+    if host_name:
+        conditions.append('host_name = ?')
+        params.append(host_name)
+    
+    where_clause = ' AND '.join(conditions)
+    
+    # Extract hour from timestamp and calculate day of week
+    # SQLite doesn't have native day of week, use strftime('%w')
+    cursor.execute(f'''
+        SELECT 
+            CAST(strftime('%H', timestamp) AS INTEGER) as hour,
+            CAST(strftime('%w', date) AS INTEGER) as day_of_week,
+            SUM(tokens_used) as tokens_used,
+            COUNT(*) as message_count,
+            SUM(input_tokens) as input_tokens,
+            SUM(output_tokens) as output_tokens
+        FROM daily_messages
+        WHERE {where_clause}
+        GROUP BY hour, day_of_week
+        ORDER BY day_of_week, hour
+    ''', params)
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    return [dict(row) for row in rows]
+
+
+def get_user_activity_ranking(start_date: str, end_date: str, 
+                               limit: int = 10,
+                               tool_name: Optional[str] = None,
+                               host_name: Optional[str] = None) -> List[Dict]:
+    """Get user activity ranking.
+    
+    Args:
+        start_date: Start date in YYYY-MM-DD format
+        end_date: End date in YYYY-MM-DD format
+        limit: Number of users to return
+        tool_name: Optional tool name filter
+        host_name: Optional host name filter
+    
+    Returns:
+        List of dicts with sender_id, sender_name, message_count, tokens_used, active_days
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    conditions = ['date >= ?', 'date <= ?', '(sender_id IS NOT NULL OR sender_name IS NOT NULL)']
+    params = [start_date, end_date]
+    
+    if tool_name:
+        conditions.append('tool_name = ?')
+        params.append(tool_name)
+    
+    if host_name:
+        conditions.append('host_name = ?')
+        params.append(host_name)
+    
+    where_clause = ' AND '.join(conditions)
+    
+    cursor.execute(f'''
+        SELECT 
+            COALESCE(sender_name, sender_id) as sender_name,
+            sender_id,
+            COUNT(*) as message_count,
+            SUM(tokens_used) as tokens_used,
+            COUNT(DISTINCT date) as active_days,
+            MIN(date) as first_active_date,
+            MAX(date) as last_active_date
+        FROM daily_messages
+        WHERE {where_clause}
+        GROUP BY COALESCE(sender_name, sender_id), sender_id
+        ORDER BY message_count DESC
+        LIMIT ?
+    ''', params + [limit])
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    return [dict(row) for row in rows]
+
+
+def get_session_statistics(start_date: str, end_date: str,
+                           tool_name: Optional[str] = None,
+                           host_name: Optional[str] = None) -> Dict:
+    """Get session/conversation statistics.
+    
+    Analyzes conversation patterns based on parent_id relationships.
+    
+    Args:
+        start_date: Start date in YYYY-MM-DD format
+        end_date: End date in YYYY-MM-DD format
+        tool_name: Optional tool name filter
+        host_name: Optional host name filter
+    
+    Returns:
+        Dict with session statistics
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    conditions = ['date >= ?', 'date <= ?']
+    params = [start_date, end_date]
+    
+    if tool_name:
+        conditions.append('tool_name = ?')
+        params.append(tool_name)
+    
+    if host_name:
+        conditions.append('host_name = ?')
+        params.append(host_name)
+    
+    where_clause = ' AND '.join(conditions)
+    
+    # Get total messages and messages with parent_id (replies)
+    cursor.execute(f'''
+        SELECT 
+            COUNT(*) as total_messages,
+            SUM(CASE WHEN parent_id IS NOT NULL THEN 1 ELSE 0 END) as reply_messages,
+            COUNT(DISTINCT parent_id) as unique_conversations
+        FROM daily_messages
+        WHERE {where_clause}
+    ''', params)
+    
+    row = cursor.fetchone()
+    
+    # Calculate conversation length distribution
+    cursor.execute(f'''
+        SELECT 
+            COUNT(*) as conversation_count,
+            AVG(conv_length) as avg_length,
+            MIN(conv_length) as min_length,
+            MAX(conv_length) as max_length
+        FROM (
+            SELECT parent_id, COUNT(*) as conv_length
+            FROM daily_messages
+            WHERE {where_clause} AND parent_id IS NOT NULL
+            GROUP BY parent_id
+        )
+    ''', params)
+    
+    conv_row = cursor.fetchone()
+    
+    conn.close()
+    
+    total = row['total_messages'] or 0
+    replies = row['reply_messages'] or 0
+    conversations = row['unique_conversations'] or 0
+    
+    return {
+        'total_messages': total,
+        'reply_messages': replies,
+        'unique_conversations': conversations,
+        'single_turn': total - replies,
+        'multi_turn_ratio': round(replies / total, 3) if total > 0 else 0,
+        'conversation_stats': {
+            'count': conv_row['conversation_count'] if conv_row else 0,
+            'avg_length': round(conv_row['avg_length'], 2) if conv_row and conv_row['avg_length'] else 0,
+            'min_length': conv_row['min_length'] if conv_row else 0,
+            'max_length': conv_row['max_length'] if conv_row else 0
+        }
+    }
+
+
+def get_peak_usage_periods(start_date: str, end_date: str,
+                           tool_name: Optional[str] = None,
+                           host_name: Optional[str] = None,
+                           limit: int = 10) -> List[Dict]:
+    """Get peak usage periods.
+    
+    Args:
+        start_date: Start date in YYYY-MM-DD format
+        end_date: End date in YYYY-MM-DD format
+        tool_name: Optional tool name filter
+        host_name: Optional host name filter
+        limit: Number of peak periods to return
+    
+    Returns:
+        List of dicts with date, hour, tokens_used, message_count
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    conditions = ['date >= ?', 'date <= ?', 'timestamp IS NOT NULL']
+    params = [start_date, end_date]
+    
+    if tool_name:
+        conditions.append('tool_name = ?')
+        params.append(tool_name)
+    
+    if host_name:
+        conditions.append('host_name = ?')
+        params.append(host_name)
+    
+    where_clause = ' AND '.join(conditions)
+    
+    cursor.execute(f'''
+        SELECT 
+            date,
+            CAST(strftime('%H', timestamp) AS INTEGER) as hour,
+            SUM(tokens_used) as tokens_used,
+            COUNT(*) as message_count
+        FROM daily_messages
+        WHERE {where_clause}
+        GROUP BY date, hour
+        ORDER BY tokens_used DESC
+        LIMIT ?
+    ''', params + [limit])
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    return [dict(row) for row in rows]
+
+
+def get_user_segmentation(date: str, 
+                          tool_name: Optional[str] = None,
+                          host_name: Optional[str] = None) -> Dict:
+    """Get user segmentation by activity level.
+    
+    Segments:
+    - high: > 10K tokens
+    - medium: 1K - 10K tokens
+    - low: < 1K tokens
+    - dormant: no activity in last 7 days
+    
+    Args:
+        date: Date in YYYY-MM-DD format
+        tool_name: Optional tool name filter
+        host_name: Optional host name filter
+    
+    Returns:
+        Dict with user counts for each segment
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    # Get user usage for the specified date
+    conditions = ['date = ?', '(sender_id IS NOT NULL OR sender_name IS NOT NULL)']
+    params = [date]
+    
+    if tool_name:
+        conditions.append('tool_name = ?')
+        params.append(tool_name)
+    
+    if host_name:
+        conditions.append('host_name = ?')
+        params.append(host_name)
+    
+    where_clause = ' AND '.join(conditions)
+    
+    cursor.execute(f'''
+        SELECT 
+            COALESCE(sender_name, sender_id) as sender,
+            SUM(tokens_used) as tokens_used
+        FROM daily_messages
+        WHERE {where_clause}
+        GROUP BY COALESCE(sender_name, sender_id), sender_id
+    ''', params)
+    
+    rows = cursor.fetchall()
+    
+    # Calculate segments
+    high_users = 0
+    medium_users = 0
+    low_users = 0
+    
+    for row in rows:
+        tokens = row['tokens_used'] or 0
+        if tokens > 10000:
+            high_users += 1
+        elif tokens >= 1000:
+            medium_users += 1
+        else:
+            low_users += 1
+    
+    # Get dormant users (active in past 30 days but not in last 7 days)
+    from datetime import datetime, timedelta
+    date_obj = datetime.strptime(date, '%Y-%m-%d')
+    seven_days_ago = (date_obj - timedelta(days=7)).strftime('%Y-%m-%d')
+    thirty_days_ago = (date_obj - timedelta(days=30)).strftime('%Y-%m-%d')
+    
+    cursor.execute(f'''
+        SELECT COUNT(DISTINCT COALESCE(sender_name, sender_id)) as dormant_count
+        FROM daily_messages
+        WHERE date >= ? AND date < ? AND (sender_id IS NOT NULL OR sender_name IS NOT NULL)
+    ''', [thirty_days_ago, seven_days_ago])
+    
+    dormant_row = cursor.fetchone()
+    dormant_users = dormant_row['dormant_count'] if dormant_row else 0
+    
+    conn.close()
+    
+    return {
+        'high': high_users,
+        'medium': medium_users,
+        'low': low_users,
+        'dormant': dormant_users,
+        'total_active': high_users + medium_users + low_users
+    }
+
+
+def get_tool_comparison_metrics(start_date: str, end_date: str,
+                                host_name: Optional[str] = None) -> List[Dict]:
+    """Get comparison metrics for different tools.
+    
+    Args:
+        start_date: Start date in YYYY-MM-DD format
+        end_date: End date in YYYY-MM-DD format
+        host_name: Optional host name filter
+    
+    Returns:
+        List of dicts with tool metrics
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    conditions = ['date >= ?', 'date <= ?']
+    params = [start_date, end_date]
+    
+    if host_name:
+        conditions.append('host_name = ?')
+        params.append(host_name)
+    
+    where_clause = ' AND '.join(conditions)
+    
+    # Get usage metrics from daily_usage
+    cursor.execute(f'''
+        SELECT 
+            tool_name,
+            SUM(tokens_used) as total_tokens,
+            SUM(input_tokens) as input_tokens,
+            SUM(output_tokens) as output_tokens,
+            SUM(request_count) as total_requests,
+            COUNT(*) as days_active,
+            AVG(tokens_used) as avg_daily_tokens
+        FROM daily_usage
+        WHERE {where_clause}
+        GROUP BY tool_name
+        ORDER BY total_tokens DESC
+    ''', params)
+    
+    usage_rows = cursor.fetchall()
+    
+    # Get message metrics from daily_messages
+    cursor.execute(f'''
+        SELECT 
+            tool_name,
+            COUNT(*) as total_messages,
+            COUNT(DISTINCT COALESCE(sender_name, sender_id)) as unique_users,
+            AVG(tokens_used) as avg_tokens_per_message
+        FROM daily_messages
+        WHERE {where_clause}
+        GROUP BY tool_name
+    ''', params)
+    
+    message_rows = cursor.fetchall()
+    message_data = {row['tool_name']: dict(row) for row in message_rows}
+    
+    conn.close()
+    
+    results = []
+    for row in usage_rows:
+        result = dict(row)
+        msg_data = message_data.get(row['tool_name'], {})
+        result['total_messages'] = msg_data.get('total_messages', 0)
+        result['unique_users'] = msg_data.get('unique_users', 0)
+        result['avg_tokens_per_message'] = round(msg_data.get('avg_tokens_per_message', 0), 2)
+        results.append(result)
+    
+    return results
+
+
+def detect_usage_anomalies(start_date: str, end_date: str,
+                           tool_name: Optional[str] = None,
+                           host_name: Optional[str] = None,
+                           threshold_std: float = 3.0) -> List[Dict]:
+    """Detect usage anomalies using statistical methods (3-sigma rule).
+    
+    Args:
+        start_date: Start date in YYYY-MM-DD format
+        end_date: End date in YYYY-MM-DD format
+        tool_name: Optional tool name filter
+        host_name: Optional host name filter
+        threshold_std: Number of standard deviations for anomaly detection
+    
+    Returns:
+        List of dicts with anomaly details
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    conditions = ['date >= ?', 'date <= ?']
+    params = [start_date, end_date]
+    
+    if tool_name:
+        conditions.append('tool_name = ?')
+        params.append(tool_name)
+    
+    if host_name:
+        conditions.append('host_name = ?')
+        params.append(host_name)
+    
+    where_clause = ' AND '.join(conditions)
+    
+    # Get daily usage statistics
+    cursor.execute(f'''
+        SELECT 
+            date,
+            tool_name,
+            tokens_used,
+            request_count
+        FROM daily_usage
+        WHERE {where_clause}
+        ORDER BY date
+    ''', params)
+    
+    rows = cursor.fetchall()
+    
+    if not rows:
+        conn.close()
+        return []
+    
+    # Calculate mean and std for each tool
+    from collections import defaultdict
+    import math
+    
+    tool_data = defaultdict(list)
+    for row in rows:
+        tool_data[row['tool_name']].append({
+            'date': row['date'],
+            'tokens_used': row['tokens_used'],
+            'request_count': row['request_count'] or 0
+        })
+    
+    anomalies = []
+    
+    for tool_name, data in tool_data.items():
+        if len(data) < 3:  # Need at least 3 data points
+            continue
+        
+        tokens = [d['tokens_used'] for d in data]
+        mean = sum(tokens) / len(tokens)
+        variance = sum((x - mean) ** 2 for x in tokens) / len(tokens)
+        std = math.sqrt(variance)
+        
+        if std == 0:
+            continue
+        
+        # Detect anomalies
+        for d in data:
+            z_score = (d['tokens_used'] - mean) / std
+            if abs(z_score) > threshold_std:
+                anomalies.append({
+                    'date': d['date'],
+                    'tool_name': tool_name,
+                    'tokens_used': d['tokens_used'],
+                    'mean': round(mean, 2),
+                    'std': round(std, 2),
+                    'z_score': round(z_score, 2),
+                    'anomaly_type': 'spike' if z_score > 0 else 'drop',
+                    'severity': 'high' if abs(z_score) > 4 else 'medium'
+                })
+    
+    conn.close()
+    
+    # Sort by severity and z_score magnitude
+    anomalies.sort(key=lambda x: (0 if x['severity'] == 'high' else 1, -abs(x['z_score'])))
+    
+    return anomalies
+
+
+def get_key_metrics(date: str, 
+                    tool_name: Optional[str] = None,
+                    host_name: Optional[str] = None) -> Dict:
+    """Get key metrics for dashboard.
+    
+    Args:
+        date: Date in YYYY-MM-DD format
+        tool_name: Optional tool name filter
+        host_name: Optional host name filter
+    
+    Returns:
+        Dict with key metrics
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    # Get today's usage
+    usage_conditions = ['date = ?']
+    usage_params = [date]
+    
+    if tool_name:
+        usage_conditions.append('tool_name = ?')
+        usage_params.append(tool_name)
+    
+    if host_name:
+        usage_conditions.append('host_name = ?')
+        usage_params.append(host_name)
+    
+    usage_where = ' AND '.join(usage_conditions)
+    
+    cursor.execute(f'''
+        SELECT 
+            SUM(tokens_used) as total_tokens,
+            SUM(request_count) as total_requests,
+            COUNT(*) as active_tools
+        FROM daily_usage
+        WHERE {usage_where}
+    ''', usage_params)
+    
+    usage_row = cursor.fetchone()
+    
+    # Get message metrics
+    cursor.execute(f'''
+        SELECT 
+            COUNT(*) as total_messages,
+            COUNT(DISTINCT COALESCE(sender_name, sender_id)) as active_users
+        FROM daily_messages
+        WHERE {usage_where} AND (sender_id IS NOT NULL OR sender_name IS NOT NULL)
+    ''', usage_params)
+    
+    message_row = cursor.fetchone()
+    
+    # Get yesterday's usage for comparison
+    from datetime import datetime, timedelta
+    date_obj = datetime.strptime(date, '%Y-%m-%d')
+    yesterday = (date_obj - timedelta(days=1)).strftime('%Y-%m-%d')
+    
+    cursor.execute(f'''
+        SELECT SUM(tokens_used) as yesterday_tokens
+        FROM daily_usage
+        WHERE date = ? AND {' AND '.join(usage_conditions[1:]) if len(usage_conditions) > 1 else '1=1'}
+    ''', [yesterday] + usage_params[1:])
+    
+    yesterday_row = cursor.fetchone()
+    yesterday_tokens = yesterday_row['yesterday_tokens'] if yesterday_row and yesterday_row['yesterday_tokens'] else 0
+    
+    conn.close()
+    
+    today_tokens = usage_row['total_tokens'] or 0
+    day_over_day_change = ((today_tokens - yesterday_tokens) / yesterday_tokens * 100) if yesterday_tokens > 0 else 0
+    
+    return {
+        'total_tokens': today_tokens,
+        'total_requests': usage_row['total_requests'] or 0,
+        'active_tools': usage_row['active_tools'] or 0,
+        'total_messages': message_row['total_messages'] or 0,
+        'active_users': message_row['active_users'] or 0,
+        'day_over_day_change': round(day_over_day_change, 2)
+    }
