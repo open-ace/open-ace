@@ -22,6 +22,7 @@ if shared_dir not in sys.path:
     sys.path.insert(0, shared_dir)
 
 import feishu_user_cache
+import feishu_group_cache
 import utils
 
 
@@ -74,9 +75,9 @@ def extract_tokens_from_entry(entry: dict) -> dict:
 
 def extract_content_from_entry(entry: dict) -> tuple:
     """Extract content from an OpenClaw log entry.
-    
+
     Returns:
-        tuple: (cleaned_content, sender_id, sender_name, message_source)
+        tuple: (cleaned_content, sender_id, sender_name, message_source, conversation_label, group_subject, is_group_chat)
     """
     entry_type = entry.get("type")
 
@@ -87,12 +88,15 @@ def extract_content_from_entry(entry: dict) -> tuple:
             content_list = msg.get("content", [])
 
             if not isinstance(content_list, list):
-                return ("", None, None, "openclaw")
+                return ("", None, None, "openclaw", None, None, None)
 
             texts = []
             sender_id = None
             sender_name = None
             message_source = "openclaw"
+            conversation_label = None
+            group_subject = None
+            is_group_chat = None
 
             for item in content_list:
                 if not isinstance(item, dict):
@@ -108,7 +112,7 @@ def extract_content_from_entry(entry: dict) -> tuple:
                         # First try to extract from full entry metadata
                         sender_id = entry.get("senderId") or entry.get("sender_id")
                         sender_name = entry.get("senderName") or entry.get("sender_name")
-                        
+
                         # Try to parse metadata from content
                         parsed = extract_user_message_metadata(text)
                         if parsed:
@@ -116,7 +120,10 @@ def extract_content_from_entry(entry: dict) -> tuple:
                             sender_name = parsed.get("sender_name") or sender_name
                             message_source = parsed.get("message_source", "openclaw")
                             text = parsed.get("cleaned_content", text)
-                    
+                            conversation_label = parsed.get("conversation_label")
+                            group_subject = parsed.get("group_subject")
+                            is_group_chat = parsed.get("is_group_chat")
+
                     texts.append(text)
                     
                 elif item_type == "thinking":
@@ -143,7 +150,7 @@ def extract_content_from_entry(entry: dict) -> tuple:
                     texts.append("[Document content]")
 
             if texts:
-                return ("\n".join(texts), sender_id, sender_name, message_source)
+                return ("\n".join(texts), sender_id, sender_name, message_source, conversation_label, group_subject, is_group_chat)
 
     elif entry_type == "session":
         # Session start - get basic info
@@ -155,100 +162,128 @@ def extract_content_from_entry(entry: dict) -> tuple:
             "id": session_id,
             "timestamp": timestamp,
             "cwd": cwd
-        }, ensure_ascii=False), None, None, "openclaw")
+        }, ensure_ascii=False), None, None, "openclaw", None, None, None)
 
-    return ("", None, None, "openclaw")
+    return ("", None, None, "openclaw", None, None, None)
 
 
 def extract_user_message_metadata(text: str) -> Optional[dict]:
     """Extract sender info and clean content from user message.
-    
+
     OpenClaw user messages often contain metadata like:
     - Conversation info (untrusted metadata)
-    - Sender (untrusted metadata)  
+    - Sender (untrusted metadata)
     - [message_id: ...]
     - Channel info from slack/feishu
     - System: [...] Slack message in #channel from User: content
-    
+    - System: [...] Feishu[default] message in group XXX: ACTUAL_CONTENT
+
     This function extracts the actual user content and sender information.
     """
     if not text:
         return None
-    
+
+    import re
+
     sender_id = None
     sender_name = None
     cleaned_content = text
     message_source = "openclaw"  # Default source
-    
-    # Try to extract sender_id from JSON metadata
-    try:
-        import re
-        # Look for "sender_id" or "sender" in JSON blocks
-        json_blocks = re.findall(r'\{[^{}]*("sender_id"[^{}]*| "sender"[^{}]*)\}', text, re.DOTALL)
-        for block in json_blocks:
-            # Try to find full JSON block
-            full_blocks = re.findall(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', text, re.DOTALL)
-            for full_block in full_blocks:
-                try:
-                    data = json.loads(full_block)
-                    if isinstance(data, dict):
-                        if "sender_id" in data:
-                            sender_id = data.get("sender_id")
-                        if "sender" in data and not sender_id:
-                            sender_id = data.get("sender")
-                        # Check for name in label or name field
-                        if "label" in data and data.get("label") != sender_id:
-                            sender_name = data.get("label")
-                        if "name" in data and data.get("name") != sender_id:
-                            sender_name = data.get("name")
-                except json.JSONDecodeError:
-                    continue
-    except Exception:
-        pass
-    
-    # Detect Feishu from conversation_label or sender_id pattern (ou_ prefix)
-    if 'conversation_label' in text or (sender_id and sender_id.startswith('ou_')):
-        message_source = "feishu"
-    
-    # Detect message source and extract content
-    lines = text.split('\n')
-    content_lines = []
-    found_actual_content = False
-    skip_next_empty = False
-    has_slack_content = False  # Track if we found Slack system message content
-    slack_content_extracted = ""  # Store extracted Slack content
+    conversation_label = None
+    group_subject = None
+    is_group_chat = None
 
-    # Detect Feishu from conversation_label or sender_id pattern
-    if 'conversation_label' in text or (sender_id and sender_id.startswith('ou_')):
+    # ========== Step 1: Detect message source ==========
+    if 'conversation_label' in text or 'Feishu' in text:
         message_source = "feishu"
+    elif 'Slack' in text:
+        message_source = "slack"
+
+    # ========== Step 2: Handle Feishu System message format ==========
+    # Pattern: "System: [...] Feishu[default] message in group XXX: ACTUAL_CONTENT"
+    # or: "System: [...] Feishu message from User: ACTUAL_CONTENT"
+    feishu_system_match = re.search(
+        r'System:\s*\[[^\]]+\]\s*Feishu\[[^\]]*\]\s*(?:message\s+in\s+group\s+\w+|message\s+from\s+\w+):\s*(.+?)(?:\n\nConversation info|$)',
+        text,
+        re.DOTALL
+    )
+    if feishu_system_match:
+        # Extract the actual content after the colon
+        actual_content = feishu_system_match.group(1).strip()
+        # Remove any leading sender_id: pattern if present
+        prefix_match = re.match(r'^(ou_[a-f0-9]+):\s*(.+)$', actual_content, re.DOTALL)
+        if prefix_match:
+            sender_id = prefix_match.group(1)
+            actual_content = prefix_match.group(2).strip()
+        cleaned_content = actual_content
+        # Extract sender name from Sender metadata block
+        sender_name_match = re.search(r'"label":\s*"([^"]+)"', text)
+        if sender_name_match:
+            sender_name = sender_name_match.group(1)
+        return {
+            "sender_id": sender_id,
+            "sender_name": sender_name,
+            "cleaned_content": cleaned_content,
+            "message_source": "feishu"
+        }
+
+    # ========== Step 3: Handle Slack System message format ==========
+    # Pattern: "System: [...] Slack message in #channel from Name: ACTUAL_CONTENT"
+    slack_match = re.search(
+        r'Slack\s+(?:message\s+in\s+\S+\s+from|DM\s+from)\s+([^:]+):\s*(.+?)(?:\n\nConversation info|$)',
+        text,
+        re.DOTALL
+    )
+    if slack_match:
+        extracted_name = slack_match.group(1).strip()
+        extracted_content = slack_match.group(2).strip()
+        # Remove user mention tags like <@U0AE9GW0KLJ>
+        extracted_content = re.sub(r'<@[A-Z0-9]+>', '', extracted_content).strip()
+        return {
+            "sender_id": None,
+            "sender_name": extracted_name,
+            "cleaned_content": extracted_content,
+            "message_source": "slack"
+        }
+
+    # ========== Step 4: Handle simple sender_id: content format ==========
+    # Pattern: "ou_xxxxx: content" or "on_xxxxx: content" or "oc_xxxxx: content" or "Uxxxx: content"
+    simple_match = re.match(r'^(ou_[a-f0-9]+|on_[a-f0-9]+|oc_[a-f0-9]+|U[A-Z0-9]+):\s*(.+)$', text.strip(), re.DOTALL)
+    if simple_match:
+        sender_id = simple_match.group(1)
+        actual_content = simple_match.group(2).strip()
+        message_source = "openclaw"
+        if sender_id.startswith('ou_') or sender_id.startswith('on_') or sender_id.startswith('oc_'):
+            message_source = "feishu"
+        return {
+            "sender_id": sender_id,
+            "sender_name": None,  # Will be resolved later from cache
+            "cleaned_content": actual_content,
+            "message_source": message_source
+        }
+
+    # ========== Step 5: Fallback - try to extract content from metadata blocks ==========
+    # Remove ```json``` code blocks
+    content = re.sub(r'```json\s*\n?\s*```', '', text)
+    content = re.sub(r'```\s*\n?\s*```', '', content)
+    
+    # Remove "Replied message" blocks
+    content = re.sub(r'Replied message \(untrusted, for context\):\s*```json\s*\n?"[^"]*"\s*```', '', content, flags=re.DOTALL)
+    
+    # Remove standalone JSON string lines like "body": "..."
+    content = re.sub(r'^\s*"body":\s*"[^"]*"\s*$', '', content, flags=re.MULTILINE)
+
+    # Remove metadata lines
+    lines = content.split('\n')
+    cleaned_lines = []
+    skip_until_empty = False
 
     for line in lines:
         stripped = line.strip()
 
-        # Detect message source
-        if '[Slack' in stripped or 'Slack message' in stripped or 'Slack DM' in stripped:
-            message_source = "slack"
-            # Try to extract sender name from Slack system message
-            # Pattern 1: "Slack message in #channel from Name: content"
-            # Pattern 2: "Slack DM from Name: content"
-            slack_match = re.search(r'Slack (?:message.*?|DM )from\s+([^:]+):\s*(.+)', stripped)
-            if slack_match:
-                extracted_name = slack_match.group(1).strip()
-                extracted_content = slack_match.group(2).strip()
-                if extracted_name and not sender_name:
-                    sender_name = extracted_name
-                if extracted_content:
-                    # Remove user mention tags like <@U0AE9GW0KLJ>
-                    slack_content_extracted = re.sub(r'<@[A-Z0-9]+>', '', extracted_content).strip()
-                    found_actual_content = True
-                    has_slack_content = True
-                    continue
-        elif '[Feishu' in stripped or 'Feishu message' in stripped:
-            message_source = "feishu"
-        
-        # Skip metadata lines
+        # Skip metadata patterns
         if stripped.startswith('Conversation info'):
-            skip_next_empty = True
+            skip_until_empty = True
             continue
         if stripped.startswith('Sender (untrusted'):
             continue
@@ -260,71 +295,76 @@ def extract_user_message_metadata(text: str) -> Optional[dict]:
             continue
         if stripped.startswith('[Slack') or stripped.startswith('[Feishu'):
             continue
-        if stripped.startswith('System:'):
-            # Skip System lines that are Slack forwarded messages (already processed)
-            if has_slack_content:
-                continue
-            # Keep other System messages but mark them
-            content_lines.append(line)
-            continue
         if stripped.startswith('[media attached:'):
-            content_lines.append(line)
+            continue
+        if stripped.startswith('System:'):
+            continue
+        if stripped.startswith('{') or stripped.startswith('}'):
+            continue
+        # Skip JSON key-value lines
+        if re.match(r'^"[^"]+"\s*:\s*("[^"]*"|\d+|true|false|null)\s*,?\s*$', stripped):
+            continue
+        if re.match(r'^"(message_id|sender_id|reply_to_id|conversation_label|sender|timestamp|group_subject|is_group_chat|was_mentioned|has_reply_context|label|id|name)"\s*:', stripped):
+            continue
+        if stripped.endswith('"]') or stripped.endswith('"}'):
+            continue
+        if stripped.startswith('Replied message'):
             continue
         if stripped == '':
-            if skip_next_empty:
-                skip_next_empty = False
+            if skip_until_empty:
+                skip_until_empty = False
                 continue
-            if found_actual_content:
-                content_lines.append(line)
             continue
-        
-        # Remove timestamp prefix pattern: [Wed 2026-03-04 09:49 GMT+8]
-        timestamp_pattern = r'^\[[A-Za-z]{3}\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}.*?\]\s*'
-        stripped = re.sub(timestamp_pattern, '', stripped)
-        
-        # Check if this is the actual user message (pattern: sender_id: content or Uxxxx: content)
-        import re
-        match = re.match(r'^(ou_[a-f0-9]+|U[A-Z0-9]+):\s*(.+)$', stripped)
-        if match:
-            found_actual_content = True
-            if not sender_id:
-                sender_id = match.group(1)
-            content_lines.append(match.group(2))
-            # Also try to extract a better name from the content
-            if not sender_name or sender_name == sender_id:
-                # Try to find a human-readable name from earlier in the text
-                name_match = re.search(r'"name":\s*"([^"]+)"', text)
-                if name_match and name_match.group(1) != sender_id:
-                    sender_name = name_match.group(1)
-                label_match = re.search(r'"label":\s*"([^"]+)"', text)
-                if label_match and label_match.group(1) != sender_id:
-                    sender_name = label_match.group(1)
-        elif found_actual_content:
-            # Continue collecting content after finding the start
-            content_lines.append(stripped)
-        elif not found_actual_content and stripped and not stripped.startswith('{'):
-            # If we haven't found the pattern but have content, use it (after removing timestamp)
-            content_lines.append(stripped)
-    
-    # If we found Slack content, use only that content (don't include metadata)
-    if has_slack_content and slack_content_extracted:
-        content_lines = [slack_content_extracted]
-        cleaned_content = slack_content_extracted
-    elif content_lines:
-        cleaned_content = '\n'.join(content_lines).strip()
-    
-    if content_lines:
-        cleaned_content = '\n'.join(content_lines).strip()
-    
-    # If no sender name found, use sender_id as display name
-    if not sender_name and sender_id:
-        sender_name = sender_id
-    
+
+        # Remove timestamp prefix
+        stripped = re.sub(r'^\[[A-Za-z]{3}\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}.*?\]\s*', '', stripped)
+
+        # Remove "Sender: " prefix
+        sender_prefix_match = re.match(r'^[\u4e00-\u9fa5a-zA-Z\s]+:\s*(.+)$', stripped)
+        if sender_prefix_match and len(stripped) < 100:
+            stripped = sender_prefix_match.group(1)
+
+        if stripped:
+            cleaned_lines.append(stripped)
+
+    if cleaned_lines:
+        cleaned_content = '\n'.join(cleaned_lines).strip()
+
+    # Try to extract sender_id from JSON metadata
+    try:
+        json_blocks = re.findall(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', text, re.DOTALL)
+        for full_block in json_blocks:
+            try:
+                data = json.loads(full_block)
+                if isinstance(data, dict):
+                    if "sender_id" in data:
+                        sender_id = data.get("sender_id")
+                    if "sender" in data and not sender_id:
+                        sender_id = data.get("sender")
+                    if "label" in data and data.get("label") != sender_id:
+                        sender_name = data.get("label")
+                    if "name" in data and data.get("name") != sender_id:
+                        sender_name = data.get("name")
+                    # Extract conversation info
+                    if "conversation_label" in data and not conversation_label:
+                        conversation_label = data.get("conversation_label")
+                    if "group_subject" in data and not group_subject:
+                        group_subject = data.get("group_subject")
+                    if "is_group_chat" in data and is_group_chat is None:
+                        is_group_chat = data.get("is_group_chat")
+            except json.JSONDecodeError:
+                continue
+    except Exception:
+        pass
+
     return {
         "sender_id": sender_id,
         "sender_name": sender_name,
         "cleaned_content": cleaned_content,
-        "message_source": message_source
+        "message_source": message_source,
+        "conversation_label": conversation_label,
+        "group_subject": group_subject,
+        "is_group_chat": is_group_chat
     }
 
 
@@ -392,13 +432,26 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                             # Determine role from message role
                             role = msg.get("role", "unknown")
 
-                            # Get content (returns tuple: content, sender_id, sender_name, message_source)
+                            # Get content (returns tuple: content, sender_id, sender_name, message_source, conversation_label, group_subject, is_group_chat)
                             result = extract_content_from_entry(entry)
                             content = result[0] if result else ""
                             sender_id = result[1] if result else None
                             sender_name = result[2] if result else None
                             message_source = result[3] if result else "openclaw"
-                            
+                            conversation_label = result[4] if result and len(result) > 4 else None
+                            group_subject = result[5] if result and len(result) > 5 else None
+                            is_group_chat = result[6] if result and len(result) > 6 else None
+
+                            # Try to get group subject from conversation_label if not already found
+                            if message_source == "feishu" and (not group_subject and conversation_label):
+                                feishu_config = utils.load_config().get('feishu', {})
+                                app_id = feishu_config.get('app_id')
+                                app_secret = feishu_config.get('app_secret')
+                                if app_id and app_secret:
+                                    group_name = feishu_group_cache.get_group_name_from_conversation_label(conversation_label, app_id, app_secret)
+                                    if group_name:
+                                        group_subject = group_name
+
                             # Try to get Feishu user name if not already found
                             if message_source == "feishu" and sender_id and (not sender_name or sender_name == sender_id):
                                 # Try to get user name from cache first
@@ -407,9 +460,9 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                                     sender_name = cached_name
                                 else:
                                     # Try to fetch from API if config is available
-                                    feishu_config = utils.load_config().get('tools', {}).get('openclaw', {})
-                                    app_id = feishu_config.get('feishu_app_id')
-                                    app_secret = feishu_config.get('feishu_app_secret')
+                                    feishu_config = utils.load_config().get('feishu', {})
+                                    app_id = feishu_config.get('app_id')
+                                    app_secret = feishu_config.get('app_secret')
                                     if app_id and app_secret:
                                         api_name = feishu_user_cache.get_user_name(sender_id, app_id, app_secret)
                                         if api_name:
@@ -452,7 +505,10 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                                 timestamp=ts,
                                 sender_id=sender_id,
                                 sender_name=sender_name,
-                                message_source=message_source
+                                message_source=message_source,
+                                conversation_label=conversation_label,
+                                group_subject=group_subject,
+                                is_group_chat=is_group_chat
                             )
 
                 if sum([

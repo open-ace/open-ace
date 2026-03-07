@@ -362,11 +362,11 @@ def sync_remote():
     
     # Sync shared modules
     print("Syncing shared modules...")
-    run_command(f"rsync -avz scripts/shared/__init__.py scripts/shared/db.py scripts/shared/config.py scripts/shared/utils.py scripts/shared/feishu_user_cache.py {REMOTE_USER}@{REMOTE_HOST}:{REMOTE_DIR}/scripts/shared/")
+    run_command(f"rsync -avz scripts/shared/__init__.py scripts/shared/db.py scripts/shared/config.py scripts/shared/utils.py scripts/shared/feishu_user_cache.py scripts/shared/email_notifier.py {REMOTE_USER}@{REMOTE_HOST}:{REMOTE_DIR}/scripts/shared/")
     
-    # Sync main script
-    print("Syncing fetch_openclaw.py...")
-    run_command(f"rsync -avz scripts/fetch_openclaw.py {REMOTE_USER}@{REMOTE_HOST}:{REMOTE_DIR}/scripts/")
+    # Sync main scripts
+    print("Syncing main scripts...")
+    run_command(f"rsync -avz scripts/fetch_openclaw.py scripts/upload_to_server.py {REMOTE_USER}@{REMOTE_HOST}:{REMOTE_DIR}/scripts/")
     
     print_success("Sync completed!")
 

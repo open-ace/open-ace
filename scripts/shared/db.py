@@ -436,7 +436,10 @@ def save_message(
     host_name: str = 'localhost',
     sender_id: Optional[str] = None,
     sender_name: Optional[str] = None,
-    message_source: Optional[str] = None
+    message_source: Optional[str] = None,
+    conversation_label: Optional[str] = None,
+    group_subject: Optional[str] = None,
+    is_group_chat: Optional[bool] = None
 ) -> bool:
     """Save an individual message to the database."""
     conn = get_connection()
@@ -444,9 +447,9 @@ def save_message(
 
     cursor.execute('''
         INSERT OR REPLACE INTO daily_messages
-        (date, tool_name, host_name, message_id, parent_id, role, content, full_entry, tokens_used, input_tokens, output_tokens, model, timestamp, sender_id, sender_name, message_source)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (date, tool_name, host_name, message_id, parent_id, role, content, full_entry, tokens_used, input_tokens, output_tokens, model, timestamp, sender_id, sender_name, message_source))
+        (date, tool_name, host_name, message_id, parent_id, role, content, full_entry, tokens_used, input_tokens, output_tokens, model, timestamp, sender_id, sender_name, message_source, conversation_label, group_subject, is_group_chat)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (date, tool_name, host_name, message_id, parent_id, role, content, full_entry, tokens_used, input_tokens, output_tokens, model, timestamp, sender_id, sender_name, message_source, conversation_label, group_subject, is_group_chat))
 
     conn.commit()
     conn.close()
@@ -460,7 +463,8 @@ def get_messages_by_date(
     search: Optional[str] = None,
     page: int = 1,
     limit: int = 50,
-    host_name: Optional[str] = None
+    host_name: Optional[str] = None,
+    sender: Optional[str] = None
 ) -> Dict:
     """Get messages for a specific date with filters.
 
@@ -472,6 +476,7 @@ def get_messages_by_date(
         page: Page number (1-indexed)
         limit: Number of results per page
         host_name: Optional host name filter
+        sender: Optional sender name or ID filter
 
     Returns:
         Dict with 'messages' (list), 'total' (int), 'page', 'limit', 'total_pages'
@@ -490,6 +495,10 @@ def get_messages_by_date(
     if host_name:
         conditions.append('host_name = ?')
         params.append(host_name)
+
+    if sender:
+        conditions.append('(sender_name = ? OR sender_id = ?)')
+        params.extend([sender, sender])
 
     if roles:
         placeholders = ','.join(['?' for _ in roles])
@@ -559,6 +568,53 @@ def get_hosts_by_tool(tool_name: str) -> List[str]:
     conn.close()
 
     return [row['host_name'] for row in rows]
+
+
+def get_unique_senders(date: str, tool_name: Optional[str] = None, host_name: Optional[str] = None) -> List[str]:
+    """Get unique sender names for a specific date.
+
+    Args:
+        date: Date in YYYY-MM-DD format
+        tool_name: Optional tool name filter (claude, qwen, etc.)
+        host_name: Optional host name filter
+
+    Returns:
+        List of unique sender names sorted alphabetically
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    conditions = ['date = ?']
+    params = [date]
+
+    if tool_name:
+        conditions.append('tool_name = ?')
+        params.append(tool_name)
+
+    if host_name:
+        conditions.append('host_name = ?')
+        params.append(host_name)
+
+    # Get unique sender_name values, falling back to sender_id if sender_name is null
+    # Include records where either sender_name or sender_id is not null
+    cursor.execute(f'''
+        SELECT DISTINCT
+            CASE
+                WHEN sender_name IS NOT NULL AND sender_name != '' THEN sender_name
+                ELSE sender_id
+            END as sender
+        FROM daily_messages
+        WHERE {' AND '.join(conditions)}
+          AND (sender_name IS NOT NULL OR sender_id IS NOT NULL)
+        ORDER BY sender
+    ''', params)
+
+    rows = cursor.fetchall()
+    conn.close()
+
+    # Filter out None values and return unique senders
+    senders = [row['sender'] for row in rows if row['sender']]
+    return senders
 
 
 def format_timestamp_to_cst(timestamp_str: str) -> str:

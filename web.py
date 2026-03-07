@@ -129,6 +129,16 @@ def api_hosts():
     return jsonify(hosts)
 
 
+@app.route('/api/senders')
+def api_senders():
+    """Get list of unique senders for a specific date."""
+    date = request.args.get('date', utils.get_today())
+    tool = request.args.get('tool')
+    host = request.args.get('host')
+    senders = db.get_unique_senders(date, tool_name=tool, host_name=host)
+    return jsonify(senders)
+
+
 @app.route('/api/upload/usage', methods=['POST'])
 def api_upload_usage():
     """Accept usage data upload from remote machine.
@@ -281,7 +291,13 @@ def api_upload_messages():
             output_tokens=entry.get('output_tokens', 0),
             model=entry.get('model'),
             timestamp=entry.get('timestamp'),
-            parent_id=entry.get('parent_id')
+            parent_id=entry.get('parent_id'),
+            sender_id=entry.get('sender_id'),
+            sender_name=entry.get('sender_name'),
+            message_source=entry.get('message_source'),
+            conversation_label=entry.get('conversation_label'),
+            group_subject=entry.get('group_subject'),
+            is_group_chat=entry.get('is_group_chat')
         )
 
         if result:
@@ -392,7 +408,10 @@ def api_upload_batch():
                 parent_id=entry.get('parent_id'),
                 sender_id=entry.get('sender_id'),
                 sender_name=entry.get('sender_name'),
-                message_source=entry.get('message_source')
+                message_source=entry.get('message_source'),
+                conversation_label=entry.get('conversation_label'),
+                group_subject=entry.get('group_subject'),
+                is_group_chat=entry.get('is_group_chat')
             ):
                 messages_saved += 1
 
@@ -473,11 +492,12 @@ def api_fetch():
 
 @app.route('/api/messages')
 def api_messages():
-    """Get messages with filters for date, tool, role, and host."""
+    """Get messages with filters for date, tool, role, host, and sender."""
     # Query parameters
     date = request.args.get('date', utils.get_today())
     tool = request.args.get('tool')
     host = request.args.get('host')
+    sender = request.args.get('sender')
     roles_param = request.args.get('roles')  # comma-separated list
     search = request.args.get('search')
     page = request.args.get('page', 1, type=int)
@@ -491,6 +511,7 @@ def api_messages():
         date=date,
         tool_name=tool,
         host_name=host,
+        sender=sender,
         roles=roles,
         search=search,
         page=page,

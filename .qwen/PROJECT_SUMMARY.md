@@ -1,228 +1,182 @@
-# Project Summary
+# AI Token Analyzer - 项目总结
 
-## Overall Goal
-Build and maintain an AI token usage tracking and analysis system that collects data from multiple AI tools (OpenClaw, Claude, Qwen) across multiple machines, with a web-based dashboard for visualization and analysis.
+## 项目概述
 
-## Key Knowledge
+AI Token 用量追踪和分析系统，支持 OpenClaw、Claude、Qwen 等 AI 工具，提供 Web 仪表板和消息分析功能。
 
-### Architecture
-- **Central Server**: 192.168.31.181:5001 (Flask web application)
-- **Remote Machine**: 192.168.31.159 (hostname: ai-lab, user: openclaw)
-- **Data Flow**: Remote machine collects OpenClaw logs → uploads to central server via HTTP API → stored in SQLite database
-- **Database**: `~/.ai-token-analyzer/usage.db` with tables: `daily_usage`, `daily_messages`
+## 架构
 
-### Technology Stack
-- **Backend**: Python 3.9+, Flask, SQLite
-- **Frontend**: HTML templates, Chart.js, Bootstrap
-- **Data Collection**: Custom scripts (`fetch_openclaw_messages.py`, `fetch_claude.py`, `fetch_qwen.py`)
-- **Remote Sync**: HTTP POST to `/api/upload/batch` with auth key
+- **中央服务器**: 192.168.31.181:5001 (Flask Web 应用)
+- **远程机器**: 192.168.31.159 (hostname: ai-lab, user: openclaw)
+- **数据流**: 远程机器收集 OpenClaw 日志 → 通过 HTTP API 上传到中央服务器 → 存入 SQLite 数据库
+- **数据库**: `~/.ai-token-analyzer/usage.db`，包含表：`daily_usage`、`daily_messages`
 
-### Important Files
-| File | Purpose |
-|------|---------|
-| `web.py` | Flask web server with API endpoints |
-| `templates/index.html` | Dashboard and Messages UI |
-| `scripts/fetch_openclaw_messages.py` | OpenClaw message extraction |
-| `scripts/shared/db.py` | Database operations |
-| `scripts/shared/feishu_user_cache.py` | Feishu user info caching |
-| `scripts/shared/utils.py` | Utility functions |
-| `scripts/shared/email_notifier.py` | Email notification (renamed from email.py) |
-| `~/.ai-token-analyzer/config.json` | Local configuration |
-| `remote_config.json` | Remote machine configuration template |
+## 技术栈
 
-### User Preferences
-- Messages page should display clean user content without metadata
-- Sender names should be shown when available (Slack/Feishu)
-- Message source badges: Slack (purple), Feishu (cyan), OpenClaw (blue)
-- Timestamps should be removed from message content display
-- Feishu user IDs (`ou_xxxxx`) should be resolved to real names via API
+- **后端**: Python 3.9+, Flask, SQLite
+- **前端**: HTML 模板，Chart.js, Bootstrap
+- **数据收集**: 自定义脚本 (`fetch_openclaw.py`, `fetch_claude.py`, `fetch_qwen.py`)
+- **远程同步**: HTTP POST 到 `/api/upload/batch`，使用 auth key 认证
 
-### Build/Run Commands
+## 重要文件
+
+| 文件 | 用途 | 部署位置 |
+|------|------|----------|
+| `web.py` | Flask Web 服务器，提供 API 和 Dashboard 界面 | 中央服务器 |
+| `cli.py` | 命令行工具，支持查询、报告、邮件发送等 | 中央服务器 |
+| `templates/index.html` | Dashboard 和 Messages 页面 UI | 中央服务器 |
+| `scripts/fetch_openclaw.py` | OpenClaw 数据收集（token 用量 + 消息内容） | 全部 |
+| `scripts/fetch_claude.py` | Claude 数据收集 | 中央服务器 |
+| `scripts/fetch_qwen.py` | Qwen 数据收集 | 中央服务器 |
+| `scripts/upload_to_server.py` | 数据上传脚本 | 远程机器 |
+| `scripts/manage.py` | 统一部署和管理脚本 | 全部 |
+| `scripts/shared/db.py` | 数据库操作 | 全部 |
+| `scripts/shared/feishu_user_cache.py` | 飞书用户信息查询和缓存 | 全部 |
+| `scripts/clean_message_content.py` | 消息内容清洗脚本 | 全部 |
+| `~/.ai-token-analyzer/config.json` | 本地配置 | 全部 |
+
+## 部署目录
+
+- **开发目录**: `/Users/rhuang/workspace/ai-token-analyzer/` - 源代码和开发使用
+- **部署目录**: `~/ai-token-analyzer/` - 实际运行和部署使用
+- **远程部署**: `/home/openclaw/ai-token-analyzer/` - 远程机器部署
+
+## 部署和管理命令
+
 ```bash
-# Start web server
-python3 web.py
+# 本地部署（中央服务器）
+python3 scripts/manage.py local deploy    # 部署到 ~/ai-token-analyzer/
+python3 scripts/manage.py local start     # 启动 Web 服务
+python3 scripts/manage.py local stop      # 停止 Web 服务
+python3 scripts/manage.py local status    # 查看服务状态
 
-# Fetch messages locally
-python3 scripts/fetch_openclaw_messages.py --days 7
-
-# Fetch messages on remote machine
-ssh openclaw@192.168.31.159 "cd /opt/ai-token-analyzer && python3 scripts/fetch_openclaw_messages.py --days 7"
-
-# Push to GitHub (with V2Box auto-connect)
-python3 ~/.qwen/scripts/github-push-auto.py
+# 远程部署（ai-lab）
+python3 scripts/manage.py remote deploy   # 完整部署到远程机器
+python3 scripts/manage.py remote sync     # 快速同步文件到远程
+python3 scripts/manage.py remote status   # 查看远程状态
 ```
 
-## Recent Actions
+## ⚠️ 高优先级问题：正确提取用户消息
 
-### [DONE] Fixed Messages Page Host List
-- **Problem**: Host dropdown was empty on Messages page
-- **Root Cause**: JavaScript only initialized Dashboard host filter, not Messages host filter
-- **Fix**: Added `host-filter` initialization in `templates/index.html`
-- **Result**: Both Dashboard and Messages pages now show all hosts
+### 问题描述
 
-### [DONE] Fixed Remote Data Collection
-- **Problem**: Remote machine (192.168.31.159) uploads failing with HTTP 500 errors
-- **Root Cause**: JSON parsing errors in uploaded data, outdated scripts on remote machine
-- **Fix**:
-  - Improved error handling in `web.py` upload endpoint
-  - Updated scripts on remote machine via root SSH access
-  - Scripts synced: `fetch_openclaw_messages.py`, `db.py`, `config.py`, `feishu_user_cache.py`
-- **Result**: Remote machine now successfully uploads data every 30 seconds
+当前从 OpenClaw 原始日志提取用户消息时，存在以下问题：
 
-### [DONE] Enhanced Message Extraction
-- **Slack Messages**: Extract sender name from "Slack message in #channel from Name: content" format
-- **Slack DM**: Extract sender name from "Slack DM from Name: content" format
-- **Feishu Messages**: Detect via `conversation_label` field or `ou_` sender_id prefix
-- **Content Cleaning**: Remove metadata blocks, timestamps, mention tags
-- **Result**: Messages display clean content with sender info and source badges
+1. **消息内容包含元数据**：提取的消息包含 JSON 元数据块（```json```）、Conversation info、Sender info 等
+2. **发送者姓名未正确解析**：飞书用户的 `ou_xxxxx` ID 没有解析为真实姓名
+3. **群聊信息丢失**：`group_subject` 和 `conversation_label` 字段没有正确提取
 
-### [DONE] Added Feishu User Name Lookup
-- **Feature**: Resolve Feishu user IDs to real names via Feishu API
-- **Implementation**: `feishu_user_cache.py` module with local caching (1 hour TTL)
-- **Configuration**: Requires `feishu_app_id` and `feishu_app_secret` in config.json
-- **Permissions Required**: `contact:contact:user:readonly`
-- **Documentation**: Created `FEISHU_USER_CONFIG.md` with setup instructions
+### 影响范围
 
-### [DONE] Fixed Python Module Naming Conflict
-- **Problem**: `scripts/shared/email.py` conflicted with Python's built-in `email` module
-- **Fix**: Renamed to `scripts/shared/email_notifier.py`
-- **Updated**: `__init__.py`, `cli.py`, and remote machine files
-- **Result**: No more import errors
+- 数据库中已有约 400+ 条飞书消息受到污染
+- Web 界面显示的消息包含大量元数据，影响可读性
+- 消息分析和搜索功能受到影响
 
-### [DONE] Configured Feishu App Credentials
-- **App ID**: `cli_a92be94ec4395cc2`
-- **App Secret**: `6pvXz79b6gqadmEGKWIuVdTEjkf1DkSf`
-- **Status**: ✅ Working - User names now resolved (e.g., `ou_3e479c7f81f8674741d778e8f838f8ed` → `韩成凤`)
-- **Updated**: Local and remote config.json files
+### 解决方案
 
-### [DONE] Updated Web Upload API
-- **Added**: `sender_id`, `sender_name`, `message_source` field support in `/api/upload/batch` endpoint
-- **Result**: Remote uploads now include complete sender information
+#### 1. 修复提取逻辑（进行中）
 
-### [DONE] Fixed Remote Script Import Error
-- **Problem**: `utils` module not imported in `fetch_openclaw_messages.py`
-- **Fix**: Added `import utils` to script imports
-- **Result**: Remote script runs successfully
+在 `scripts/fetch_openclaw.py` 中：
 
-### [DONE] Cleaned and Reorganized Remote Deployment
-- **Problem**: Remote machine files were disorganized with mixed ownership (root/openclaw)
-- **Solution**:
-  - Removed old `/opt/ai-token-analyzer/` directory
-  - Deployed to `/home/openclaw/ai-token-analyzer/` (openclaw user's home)
-  - All files now owned by openclaw:openclaw
-  - Removed unnecessary scripts:
-    - `email_notifier.py` - Email sent from central server only
-    - `fetch_claude.py`, `fetch_qwen.py` - Central server use only
-    - `check_*.py`, `test_*.py` - Debug/test scripts
-    - `deploy_remote.py`, `fetch_remote.py`, `upload_to_server.py` - Deployment tools
-    - Web service scripts (`start_web.sh`, etc.)
-  - Kept only essential scripts: `fetch_openclaw.py`, `create_db.py`, `init_db.py`, `setup.py`
-  - Updated `__init__.py` to remove `email_notifier` reference
-- **Documentation**: Created `REMOTE_DEPLOY.md` with deployment guide
-- **Scripts**: Created `scripts/clean_deploy_remote.sh` for automated redeployment
-- **Result**: Clean, organized deployment with consistent ownership
+```python
+def clean_message_content(text: str) -> str:
+    """Clean message content by removing all metadata."""
+    # 处理 System 格式
+    # 移除 ```json``` 代码块
+    # 移除 JSON 元数据行
+    # 移除 "Sender: " 前缀
+    # 返回纯文本内容
+```
 
-### [DONE] Renamed fetch_openclaw_messages.py to fetch_openclaw.py
-- **Reason**: Consistent naming convention, merged functionality
-- **Updated References**:
-  - `web.py` - API endpoint
-  - `scripts/fetch_remote.py` - Remote execution
-  - `scripts/fetch_all_tools.py` - Tool runner
-  - `scripts/clean_deploy_remote.sh` - Deployment script
-  - `scripts/sync_remote.sh` - Sync script
-  - `contrib/fetch-openclaw.service` - systemd service
-  - `REMOTE_DEPLOY.md` - Documentation
-- **Fixed**: Added missing `import utils` to script
-- **Result**: Script renamed and all references updated
+#### 2. 飞书用户名解析
 
-### [DONE] Cleaned Up Central Server Scripts
-- **Removed Unnecessary Scripts**:
-  - `check_*.py` - Debug/check utilities
-  - `test_*.py` - Test scripts
-  - `db_info.py`, `fix_timestamps.py` - Debug tools
-  - `deploy_remote.py`, `fetch_remote.py`, `upload_to_server.py` - Deployment tools
-  - `fetch_all_tools.py` - Replaced by direct calls
-- **Kept Essential Scripts**:
-  - `fetch_openclaw.py` - OpenClaw data collection (messages + tokens)
-  - `fetch_claude.py` - Claude data collection
-  - `fetch_qwen.py` - Qwen data collection
-  - `create_db.py`, `init_db.py`, `setup.py` - Database utilities
-- **Result**: Cleaner codebase with only necessary scripts
+已实现飞书用户 ID 到真实姓名的解析：
+- App ID: `cli_a92be94ec4395cc2`
+- App Secret: `6pvXz79b6gqadmEGKWIuVdTEjkf1DkSf`
+- 缓存位置：`~/.ai-token-analyzer/feishu_users.json`
+- 缓存有效期：1 小时
 
-### [DONE] Created Unified Management Script
-- **New Script**: `scripts/manage.py`
-- **Features**:
-  - Local deployment (central server): setup, install, start, stop, status
-  - Remote deployment (ai-lab): deploy, sync, status
-  - Replaces multiple shell scripts
-- **Removed Scripts**:
-  - `sync_remote.sh` - Replaced by `manage.py remote sync`
-  - `clean_deploy_remote.sh` - Replaced by `manage.py remote deploy`
-  - `start_web.sh` - Replaced by `manage.py local start`
-  - `stop_web.sh` - Replaced by `manage.py local stop`
-  - `install_web_service.sh` - Replaced by `manage.py local install`
-- **Result**: Single unified script for all deployment and management tasks
+#### 3. 数据清洗脚本
 
-### [DONE] Separated Development and Deployment Directories
-- **Development Directory**: `/Users/rhuang/workspace/ai-token-analyzer/` - Source code and development
-- **Deployment Directory**: `~/ai-token-analyzer/` - Actual runtime deployment
-- **Deploy Command**: `python3 scripts/manage.py local deploy`
-- **Result**: Clean separation between development and production environments
+已创建 `scripts/clean_message_content.py` 用于清洗已有数据：
 
-## Current Plan
+```bash
+cd ~/ai-token-analyzer
+python3 scripts/clean_message_content.py
+```
 
-1. **[DONE]** Fix Messages page host filter initialization
-2. **[DONE]** Fix remote machine data collection
-3. **[DONE]** Implement message content cleaning
-4. **[DONE]** Add message source detection and badges
-5. **[DONE]** Create Feishu user name lookup feature
-6. **[DONE]** Configure Feishu app credentials for user name resolution
-7. **[DONE]** Fix Python email module naming conflict
-8. **[DONE]** Update remote machine scripts and configuration
-9. **[DONE]** Clean and reorganize remote deployment
-10. **[DONE]** Rename fetch_openclaw_messages.py to fetch_openclaw.py
-11. **[DONE]** Clean up central server scripts
-12. **[DONE]** Create unified management script (manage.py)
-13. **[DONE]** Remove unused service files
-14. **[DONE]** Reorganize config files
-15. **[DONE]** Separate development and deployment directories
-16. **[TODO]** Monitor remote machine uploads for any new issues
-17. **[TODO]** Consider adding similar user lookup for Slack users
+### 数据修复流程（解决后执行）
 
-## Open Issues
+**⚠️ 重要：在提取逻辑完全修复后，必须执行以下步骤：**
 
-1. **Script Synchronization**: Remote machine scripts need to be kept in sync with local development (use `python3 scripts/manage.py remote sync`)
+```bash
+# 1. 清除中央服务器数据库中的飞书消息
+sqlite3 ~/.ai-token-analyzer/usage.db "DELETE FROM daily_messages WHERE message_source='feishu';"
 
-## Testing Checklist
+# 2. 清除远程机器数据库中的飞书消息
+ssh openclaw@192.168.31.159 "python3 -c \"import sqlite3; conn=sqlite3.connect('/home/openclaw/.ai-token-analyzer/usage.db'); c=conn.cursor(); c.execute(\\\"DELETE FROM daily_messages WHERE message_source='feishu'\\\"); conn.commit(); conn.close()\""
 
-- [x] Dashboard shows all hosts (RichdeMacBook-Pro.local, ai-lab)
-- [x] Messages page shows all hosts in filter dropdown
-- [x] Slack messages display sender name + [SLACK] badge
-- [x] Feishu messages display sender name + [FEISHU] badge
-- [x] Message content is cleaned (no metadata, timestamps)
-- [x] Feishu user names resolved (韩成凤)
-- [x] Remote machine uploads working (HTTP 200 responses)
-- [x] No Python import errors
-- [x] Remote deployment cleaned and organized
-- [x] All remote files owned by openclaw:openclaw
-- [x] fetch_openclaw_messages.py renamed to fetch_openclaw.py
-- [x] Central server scripts cleaned up
-- [x] Unified management script created (manage.py)
-- [x] Unused service files removed
-- [x] Config files reorganized
-- [x] Development and deployment directories separated
+# 3. 清除上传标记
+ssh openclaw@192.168.31.159 "rm -f ~openclaw/.ai-token-analyzer/upload_marker.json"
 
-## Feishu User Cache
+# 4. 重新从原始日志提取
+ssh openclaw@192.168.31.159 "cd /home/openclaw/ai-token-analyzer && python3 scripts/fetch_openclaw.py --days 30"
 
-**Cached Users:**
-- `ou_3e479c7f81f8674741d778e8f838f8ed` → `韩成凤`
+# 5. 上传到中央服务器
+ssh openclaw@192.168.31.159 "cd /home/openclaw/ai-token-analyzer && python3 scripts/upload_to_server.py --server http://192.168.31.181:5001 --auth-key deploy-remote-machine-key-2026 --hostname ai-lab --days 30"
 
-**Cache Location:** `~/.ai-token-analyzer/feishu_users.json`
+# 6. 验证数据
+sqlite3 ~/.ai-token-analyzer/usage.db "SELECT sender_name, group_subject, substr(content, 1, 50) FROM daily_messages WHERE message_source='feishu' LIMIT 10;"
+```
 
-**Cache TTL:** 1 hour (3600 seconds)
+### 验收标准
+
+修复后的消息应满足：
+
+1. ✅ **纯文本内容**：不包含 ```json```、Conversation info、Sender info 等元数据
+2. ✅ **发送者姓名**：飞书用户显示真实姓名（如"韩成凤"），而不是 `ou_xxxxx` ID
+3. ✅ **群聊信息**：`group_subject` 字段包含群聊 ID，`is_group_chat` 正确标识群聊/私聊
+4. ✅ **消息来源**：正确标识 `feishu`、`slack`、`openclaw`
+
+## 当前状态
+
+### 已完成的功能
+
+- ✅ 飞书用户姓名解析（韩成凤、黄迎春、吴丹）
+- ✅ 消息来源检测（Slack/Feishu/OpenClaw）
+- ✅ 群聊信息提取（conversation_label, group_subject, is_group_chat）
+- ✅ Web 界面显示发送者、来源、群聊、主机、工具信息
+- ✅ 远程机器数据收集和上传
+- ✅ 统一管理和部署脚本
+
+### 待解决的问题
+
+- ⚠️ **高优先级**: 消息内容清洗逻辑需要完善
+- ⚠️ **高优先级**: 需要从原始日志重新提取所有飞书消息
+- 🔧 部分消息仍包含元数据残留
+
+## 测试清单
+
+- [ ] 所有飞书消息显示纯文本内容
+- [ ] 所有飞书消息显示发送者真实姓名
+- [ ] 群聊消息正确标识群聊信息
+- [ ] Web 界面正确显示所有元信息
+- [ ] 远程机器数据正常上传
+
+## 更新历史
+
+**2026-03-06**:
+- 创建统一管理和部署脚本 `manage.py`
+- 分离开发和部署目录
+- 添加消息内容清洗功能
+- 实现飞书用户姓名解析
+- 添加群聊信息提取
+
+**2026-03-05**:
+- 修复远程机器数据收集
+- 增强消息内容提取
+- 添加消息来源检测
 
 ---
 
-## Summary Metadata
-**Update time**: 2026-03-06T17:00:00+08:00
-**Last updated by**: AI Assistant
+**更新**: 2026-03-06T17:00:00+08:00

@@ -18,16 +18,17 @@
 │   └── settings.json.sample        # 配置示例
 ├── contrib/                        # systemd 服务配置
 │   ├── fetch-openclaw.service      # OpenClaw 数据收集服务
-│   ├── fetch-openclaw.timer        # OpenClaw 数据收集定时器
-│   └── UPLOAD_SERVICE.md           # 上传服务说明
+│   └── fetch-openclaw.timer        # OpenClaw 数据收集定时器
 ├── cron/                           # cron 脚本
 │   └── daily_run.sh                # 每日运行脚本
 ├── logs/                           # 日志目录
 ├── scripts/                        # 核心脚本
-│   ├── fetch_openclaw.py         # OpenClaw 数据收集（主要脚本）
+│   ├── fetch_openclaw.py           # OpenClaw 数据收集（消息+token）
+│   ├── upload_to_server.py         # 数据上传脚本
 │   ├── create_db.py                # 数据库创建工具
 │   ├── init_db.py                  # 数据库初始化工具
 │   ├── setup.py                    # 设置工具
+│   ├── clean_message_content.py    # 消息内容清洗脚本
 │   └── shared/                     # 共享模块
 │       ├── __init__.py
 │       ├── config.py               # 配置加载
@@ -42,6 +43,39 @@
 - `email_notifier.py` - 邮件从中央服务器发送
 - `fetch_claude.py`, `fetch_qwen.py` - 中央服务器使用
 - `cli.py`, `web.py` - 中央服务器使用
+
+## ⚠️ 高优先级：数据修复流程
+
+**在 `fetch_openclaw.py` 的消息提取逻辑完全修复后，必须执行以下步骤重新提取所有消息：**
+
+```bash
+# 1. 从中央服务器清除飞书消息
+sqlite3 ~/.ai-token-analyzer/usage.db "DELETE FROM daily_messages WHERE message_source='feishu';"
+
+# 2. 从远程机器清除飞书消息
+ssh openclaw@192.168.31.159 "python3 -c \"import sqlite3; conn=sqlite3.connect('/home/openclaw/.ai-token-analyzer/usage.db'); c=conn.cursor(); c.execute(\\\"DELETE FROM daily_messages WHERE message_source='feishu'\\\"); conn.commit(); conn.close()\""
+
+# 3. 清除上传标记
+ssh openclaw@192.168.31.159 "rm -f ~openclaw/.ai-token-analyzer/upload_marker.json"
+
+# 4. 重新从原始日志提取（建议提取 30 天）
+ssh openclaw@192.168.31.159 "cd /home/openclaw/ai-token-analyzer && python3 scripts/fetch_openclaw.py --days 30"
+
+# 5. 上传到中央服务器
+ssh openclaw@192.168.31.159 "cd /home/openclaw/ai-token-analyzer && python3 scripts/upload_to_server.py --server http://192.168.31.181:5001 --auth-key deploy-remote-machine-key-2026 --hostname ai-lab --days 30"
+
+# 6. 验证数据
+sqlite3 ~/.ai-token-analyzer/usage.db "SELECT sender_name, group_subject, substr(content, 1, 50) FROM daily_messages WHERE message_source='feishu' LIMIT 10;"
+```
+
+### 验收标准
+
+修复后的数据应满足：
+
+1. ✅ 消息内容为纯文本，不包含 ```json```、Conversation info 等元数据
+2. ✅ 飞书用户显示真实姓名（如"韩成凤"），而不是 `ou_xxxxx` ID
+3. ✅ 群聊消息的 `group_subject` 字段包含群聊 ID
+4. ✅ `is_group_chat` 正确标识群聊/私聊
 
 ## 配置文件
 

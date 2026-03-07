@@ -517,6 +517,14 @@
                         </select>
                     </div>
 
+                    <!-- Sender Filter -->
+                    <div class="col-md-2">
+                        <label class="form-label"><span id="filter-sender-label">Sender</span></label>
+                        <select class="form-select form-select-searchable" id="sender-filter" style="display: none;">
+                            <option value=""><span id="filter-all-senders">All Senders</span></option>
+                        </select>
+                    </div>
+
                     <!-- Search Filter -->
                     <div class="col-md-4">
                         <label class="form-label"><span id="filter-search-label">Search</span></label>
@@ -671,6 +679,8 @@
                 noDataAvailable: '-',
                 hostFilter: 'Host',
                 allHosts: 'All Hosts',
+                senderFilter: 'Sender',
+                allSenders: 'All Senders',
                 dashboardFilterHostLabel: 'Host',
                 dashboardFilterToolLabel: 'Tool',
                 dashboardFilterAllHosts: 'All Hosts',
@@ -772,6 +782,8 @@
                 chartJsLoading: 'Chart.js 加载中...',
                 hostFilter: '主机',
                 allHosts: '全部主机',
+                senderFilter: '发送者',
+                allSenders: '全部发送者',
                 dashboardFilterHostLabel: '主机',
                 dashboardFilterToolLabel: '工具',
                 dashboardFilterAllHosts: '全部主机',
@@ -846,10 +858,12 @@
             const filterDateLabel = document.getElementById('filter-date-label');
             const filterHostLabel = document.getElementById('filter-host-label');
             const filterToolLabel = document.getElementById('filter-tool-label');
+            const filterSenderLabel = document.getElementById('filter-sender-label');
             const filterSearchLabel = document.getElementById('filter-search-label');
             const filterRoleLabel = document.getElementById('filter-role-label');
             const filterAllTools = document.getElementById('filter-all-tools');
             const filterAllHosts = document.getElementById('filter-all-hosts');
+            const filterAllSenders = document.getElementById('filter-all-senders');
             const filterOpenclaw = document.getElementById('filter-openclaw');
             const filterClaude = document.getElementById('filter-claude');
             const filterQwen = document.getElementById('filter-qwen');
@@ -863,10 +877,12 @@
             if (filterDateLabel) filterDateLabel.textContent = t('dateFilter');
             if (filterHostLabel) filterHostLabel.textContent = t('hostFilter');
             if (filterToolLabel) filterToolLabel.textContent = t('toolFilter');
+            if (filterSenderLabel) filterSenderLabel.textContent = t('senderFilter');
             if (filterSearchLabel) filterSearchLabel.textContent = t('searchFilter');
             if (filterRoleLabel) filterRoleLabel.textContent = t('roleLabel');
             if (filterAllTools) filterAllTools.textContent = t('allTools');
             if (filterAllHosts) filterAllHosts.textContent = t('allHosts');
+            if (filterAllSenders) filterAllSenders.textContent = t('allSenders');
             if (filterOpenclaw) filterOpenclaw.textContent = t('openclaw');
             if (filterClaude) filterClaude.textContent = t('claude');
             if (filterQwen) filterQwen.textContent = t('qwen');
@@ -1372,6 +1388,7 @@
             const date = document.getElementById('date-filter').value;
             const host = document.getElementById('host-filter').value;
             const tool = document.getElementById('tool-filter').value;
+            const sender = document.getElementById('sender-filter').value;
             const search = document.getElementById('search-filter').value;
 
             // Save auto-refresh state before reloading
@@ -1414,7 +1431,7 @@
             try {
                 const rolesParam = roles.length > 0 ? roles.join(',') : '';
                 const hostParam = host || '';
-                const url = `/api/messages?date=${date}&tool=${tool || ''}&host=${hostParam}&roles=${rolesParam}&search=${search || ''}&page=1&limit=50`;
+                const url = `/api/messages?date=${date}&tool=${tool || ''}&host=${hostParam}&sender=${sender || ''}&roles=${rolesParam}&search=${search || ''}&page=1&limit=50`;
                 console.log('Loading messages from:', url);
                 const response = await fetch(url);
                 const data = await response.json();
@@ -1492,11 +1509,20 @@
                 // Get sender info for user messages (especially for OpenClaw)
                 let senderDisplayName = '';
                 let messageSource = null;
+
                 if (role === 'user') {
                     if (msg.sender_name) {
                         senderDisplayName = msg.sender_name;
                     } else if (msg.sender_id) {
-                        senderDisplayName = msg.sender_id;
+                        // For Feishu users, show a more friendly name if sender_id is just an ID
+                        // Check if it looks like an ID (starts with ou_, on_, or oc_)
+                        const senderId = msg.sender_id || '';
+                        if (senderId.startsWith('ou_') || senderId.startsWith('on_') || senderId.startsWith('oc_')) {
+                            // Show a shortened version of sender_id
+                            senderDisplayName = senderId.substring(0, 12);
+                        } else {
+                            senderDisplayName = msg.sender_id;
+                        }
                     }
                     // Only show source if explicitly set (not default)
                     if (msg.message_source && msg.message_source !== 'openclaw') {
@@ -1555,7 +1581,13 @@
                                 <span class="role-badge ${role}">${role}</span>
                             </div>
                             <div class="message-content">
-                                ${role === 'user' ? `<div class="message-sender text-muted mb-1" style="font-size: 0.75rem;">${senderDisplayName ? `<i class="bi bi-person"></i> ${escapeHtmlForDisplay(senderDisplayName)}` : ''}${messageSource ? (senderDisplayName ? ' ' : '') + `<span class="message-source ${messageSource}">${messageSource}</span>` : ''}</div>` : ''}
+                                ${role === 'user' ? `
+                                <div class="message-meta mb-1" style="font-size: 0.75rem; display: flex; flex-wrap: nowrap; gap: 10px; align-items: center;">
+                                    ${msg.host_name ? `<span class="text-muted"><i class="bi bi-pc-display-horizontal"></i> ${escapeHtmlForDisplay(msg.host_name)}</span>` : '<span class="text-muted opacity-50"><i class="bi bi-pc-display-horizontal"></i></span>'}
+                                    ${msg.tool_name ? `<span class="text-muted"><i class="bi bi-box-seam"></i> ${escapeHtmlForDisplay(msg.tool_name)}</span>` : '<span class="text-muted opacity-50"><i class="bi bi-box-seam"></i></span>'}
+                                    ${messageSource ? `<span class="message-source ${messageSource}">${messageSource}</span>` : '<span class="message-source opacity-25"></span>'}
+                                    ${senderDisplayName ? `<span class="text-primary fw-semibold"><i class="bi bi-person-circle"></i> ${escapeHtmlForDisplay(senderDisplayName)}</span>` : '<span class="text-primary fw-semibold opacity-25"><i class="bi bi-person-circle"></i></span>'}
+                                </div>` : ''}
                                 <div class="message-content-truncated">${contentHtml}</div>
                             </div>
                             ${tokens > 0 ? `<div class="message-tokens ms-2">
@@ -1651,8 +1683,25 @@
             loadMessages();
         }
 
-        function refreshMessages() {
-            applyFilters();
+        async function refreshMessages() {
+            // First fetch new data from the server
+            const fetchBtnText = document.getElementById('refresh-btn-text');
+            const originalText = fetchBtnText ? fetchBtnText.textContent : 'Refresh';
+
+            if (fetchBtnText) fetchBtnText.textContent = 'Fetching...';
+
+            try {
+                await fetch('/api/fetch');
+                // Update sender list after refresh
+                updateSenderList();
+            } catch (error) {
+                console.error('Fetch failed:', error);
+            } finally {
+                if (fetchBtnText) fetchBtnText.textContent = originalText;
+            }
+
+            // Then reload messages with current filters
+            loadMessages();
         }
 
         function toggleAutoRefresh() {
@@ -1693,6 +1742,9 @@
                 // Show a toast notification if fetch was successful
                 const successCount = Object.values(data).filter(d => d.success).length;
                 if (successCount > 0) {
+                    // Update sender list after successful fetch
+                    updateSenderList();
+
                     // When auto-refresh is enabled, check if date is not today
                     // If not, prompt user to update
                     const dateFilter = document.getElementById('date-filter');
@@ -1712,6 +1764,8 @@
                     const container = document.getElementById('messages-container');
                     const tool = document.getElementById('tool-filter').value;
                     const search = document.getElementById('search-filter').value;
+                    const host = document.getElementById('host-filter').value;
+                    const sender = document.getElementById('sender-filter').value;
 
                     // Get selected roles
                     const roles = [];
@@ -1720,7 +1774,7 @@
                     if (document.getElementById('role-system').checked) roles.push('system');
 
                     const rolesParam = roles.length > 0 ? roles.join(',') : '';
-                    const url = `/api/messages?date=${today}&tool=${tool || ''}&roles=${rolesParam}&search=${search || ''}&page=1&limit=50`;
+                    const url = `/api/messages?date=${today}&tool=${tool || ''}&host=${host || ''}&sender=${sender || ''}&roles=${rolesParam}&search=${search || ''}&page=1&limit=50`;
 
                     const response2 = await fetch(url);
                     const newData = await response2.json();
@@ -1763,12 +1817,62 @@
 
         function resetFilters() {
             document.getElementById('date-filter').value = getToday();
+            document.getElementById('host-filter').value = '';
             document.getElementById('tool-filter').value = '';
+            document.getElementById('sender-filter').value = '';
             document.getElementById('search-filter').value = '';
             document.getElementById('role-user').checked = true;
             document.getElementById('role-assistant').checked = false;
             document.getElementById('role-system').checked = false;
+            // Update sender list after resetting filters
+            updateSenderList();
             loadMessages();
+        }
+
+        // Update sender list dynamically when new messages arrive
+        function updateSenderList() {
+            const senderFilter = document.getElementById('sender-filter');
+            if (!senderFilter) return;
+
+            // Get current filters
+            const date = document.getElementById('date-filter').value;
+            const tool = document.getElementById('tool-filter').value;
+            const host = document.getElementById('host-filter').value;
+
+            // Clear existing options except the first one (All Senders)
+            while (senderFilter.options.length > 1) {
+                senderFilter.options.remove(1);
+            }
+
+            // Fetch fresh sender list
+            const params = new URLSearchParams({date, tool, host});
+            fetch(`/api/senders?${params}`)
+                .then(response => response.json())
+                .then(senders => {
+                    senders.forEach(sender => {
+                        const option = document.createElement('option');
+                        option.value = sender;
+                        option.textContent = sender;
+                        senderFilter.appendChild(option);
+                    });
+
+                    // Update custom dropdown button text if available
+                    const wrapper = senderFilter.previousElementSibling;
+                    if (wrapper && wrapper.classList.contains('btn-group')) {
+                        const defaultText = senders.length > 0 ? senders[0] : 'All Senders';
+                        const filterText = wrapper.querySelector('.filter-text');
+                        if (filterText) {
+                            // Check if current selection is still valid
+                            const currentSelection = senderFilter.options[senderFilter.selectedIndex];
+                            if (currentSelection) {
+                                filterText.textContent = currentSelection.textContent;
+                            } else {
+                                filterText.textContent = 'All Senders';
+                            }
+                        }
+                    }
+                })
+                .catch(error => console.error('Error updating sender list:', error));
         }
 
         function updatePagination() {
@@ -1807,6 +1911,7 @@
             const container = document.getElementById('messages-container');
             const date = document.getElementById('date-filter').value;
             const tool = document.getElementById('tool-filter').value;
+            const sender = document.getElementById('sender-filter').value;
             const search = document.getElementById('search-filter').value;
 
             const roles = [];
@@ -1815,7 +1920,7 @@
             if (document.getElementById('role-system').checked) roles.push('system');
 
             const rolesParam = roles.length > 0 ? roles.join(',') : '';
-            const url = `/api/messages?date=${date}&tool=${tool || ''}&roles=${rolesParam}&search=${search || ''}&page=${page}&limit=50`;
+            const url = `/api/messages?date=${date}&tool=${tool || ''}&host=${host || ''}&sender=${sender || ''}&roles=${rolesParam}&search=${search || ''}&page=${page}&limit=50`;
 
             container.innerHTML = '<div class="text-center py-3"><div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div></div>';
 
@@ -1918,6 +2023,22 @@
                     .catch(error => console.error('Error loading messages hosts:', error));
             }
 
+            // Initialize messages sender filter
+            const messagesSenderFilter = document.getElementById('sender-filter');
+            if (messagesSenderFilter) {
+                fetch('/api/senders')
+                    .then(response => response.json())
+                    .then(senders => {
+                        senders.forEach(sender => {
+                            const option = document.createElement('option');
+                            option.value = sender;
+                            option.textContent = sender;
+                            messagesSenderFilter.appendChild(option);
+                        });
+                    })
+                    .catch(error => console.error('Error loading messages senders:', error));
+            }
+
             // Initialize dashboard tool filter
             const dashboardToolFilter = document.getElementById('dashboard-tool-filter');
             if (dashboardToolFilter && urlParams.has('tool')) {
@@ -1934,6 +2055,9 @@
             if (window.location.hash === '#messages') {
                 switchSection('messages');
             }
+
+            // Load messages on initial page load
+            loadMessages();
         });
 
         // Dashboard filter functions
@@ -1954,6 +2078,115 @@
             loadSummary(host);
             loadTrendChart(host);
         }
+
+        // Simple searchable select dropdown implementation
+        function initSearchableSelect(selectId) {
+            const select = document.getElementById(selectId);
+            if (!select) return;
+
+            // Remove the original select's onchange to avoid duplicate calls
+            select.removeAttribute('onchange');
+
+            // Create a custom dropdown wrapper
+            const wrapper = document.createElement('div');
+            wrapper.className = 'btn-group';
+            wrapper.style.width = '100%';
+
+            const button = document.createElement('button');
+            button.className = 'btn btn-light w-100';
+            button.style.textAlign = 'left';
+            button.style.border = '1px solid #ced4da';
+            button.style.borderRadius = '0.375rem';
+            button.style.padding = '0.375rem 0.75rem';
+            button.style.cursor = 'pointer';
+            button.innerHTML = '<span class="filter-text">All Senders</span> <i class="bi bi-chevron-down" style="position:absolute; right:10px; top:50%; transform:translateY(-50%)"></i>';
+            button.onclick = function() {
+                const menu = wrapper.querySelector('.dropdown-menu');
+                menu.style.display = menu.style.display === 'block' ? 'none' : 'block';
+                // Close other dropdowns
+                document.querySelectorAll('.sender-dropdown .dropdown-menu').forEach(m => {
+                    if (m !== menu) m.style.display = 'none';
+                });
+            };
+
+            const menu = document.createElement('ul');
+            menu.className = 'dropdown-menu sender-dropdown-menu';
+            menu.style.width = '100%';
+            menu.style.maxHeight = '400px';
+            menu.style.overflowY = 'auto';
+            menu.style.position = 'absolute';
+            menu.style.zIndex = '1050';
+            menu.style.display = 'none';
+
+            const searchInput = document.createElement('input');
+            searchInput.type = 'text';
+            searchInput.className = 'form-control form-control-sm';
+            searchInput.placeholder = 'Search...';
+            searchInput.style.margin = '2px';
+            searchInput.style.width = 'calc(100% - 6px)';
+
+            searchInput.addEventListener('input', function() {
+                const term = searchInput.value.toLowerCase();
+                Array.from(menu.querySelectorAll('.dropdown-item')).forEach(item => {
+                    item.style.display = item.textContent.toLowerCase().includes(term) ? 'block' : 'none';
+                });
+            });
+
+            // Add search container
+            const searchLi = document.createElement('li');
+            searchLi.style.padding = '0';
+            searchLi.appendChild(searchInput);
+            menu.appendChild(searchLi);
+
+            // Copy options
+            Array.from(select.options).forEach(option => {
+                const li = document.createElement('li');
+                const a = document.createElement('a');
+                a.className = 'dropdown-item';
+                a.href = '#';
+                a.textContent = option.textContent;
+                a.dataset.value = option.value;
+                a.onclick = function(e) {
+                    e.preventDefault();
+                    select.value = option.value;
+                    wrapper.querySelector('.filter-text').textContent = option.textContent;
+                    menu.style.display = 'none';
+                    // Trigger loadMessages directly since onchange was removed
+                    loadMessages();
+                };
+                li.appendChild(a);
+                menu.appendChild(li);
+            });
+
+            wrapper.appendChild(button);
+            wrapper.appendChild(menu);
+            select.style.display = 'none';
+            select.parentNode.insertBefore(wrapper, select);
+
+            // Close dropdown when clicking outside (only add once)
+            if (!window.senderDropdownListenerAdded) {
+                document.addEventListener('click', function(event) {
+                    const allMenus = document.querySelectorAll('.sender-dropdown-menu');
+                    allMenus.forEach(function(menu) {
+                        if (!menu.parentElement.contains(event.target)) {
+                            menu.style.display = 'none';
+                        }
+                    });
+                });
+                window.senderDropdownListenerAdded = true;
+            }
+        }
+
+        // Initialize searchable selects after DOM is ready
+        document.addEventListener('DOMContentLoaded', function() {
+            // Run existing initialization code
+            // Initialize messages sender filter
+
+            // Wait for other initializations to complete
+            setTimeout(function() {
+                initSearchableSelect('sender-filter');
+            }, 100);
+        });
     </script>
 </body>
 </html>
