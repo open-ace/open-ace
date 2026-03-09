@@ -159,6 +159,30 @@ def init_database() -> None:
         cursor.execute("ALTER TABLE daily_messages ADD COLUMN message_source TEXT")
         conn.commit()
 
+    # Check if conversation_label column exists in daily_messages, add it if not (for old databases)
+    cursor.execute("PRAGMA table_info(daily_messages)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if 'conversation_label' not in columns:
+        print("Adding conversation_label column to existing daily_messages table...")
+        cursor.execute("ALTER TABLE daily_messages ADD COLUMN conversation_label TEXT")
+        conn.commit()
+
+    # Check if group_subject column exists in daily_messages, add it if not (for old databases)
+    cursor.execute("PRAGMA table_info(daily_messages)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if 'group_subject' not in columns:
+        print("Adding group_subject column to existing daily_messages table...")
+        cursor.execute("ALTER TABLE daily_messages ADD COLUMN group_subject TEXT")
+        conn.commit()
+
+    # Check if is_group_chat column exists in daily_messages, add it if not (for old databases)
+    cursor.execute("PRAGMA table_info(daily_messages)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if 'is_group_chat' not in columns:
+        print("Adding is_group_chat column to existing daily_messages table...")
+        cursor.execute("ALTER TABLE daily_messages ADD COLUMN is_group_chat INTEGER")
+        conn.commit()
+
     conn.commit()
 
     # Initialize authentication tables

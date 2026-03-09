@@ -41,5 +41,17 @@
   "feishu": {
     "app_id": "cli_xxxxxxxxxxxxx",
     "app_secret": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  },
+  "remote": {
+    "enabled": true,
+    "hosts": [
+      {
+        "name": "ai-lab",
+        "host": "192.168.31.159",
+        "user": "openclaw",
+        "base_dir": "/home/openclaw/ai-token-analyzer",
+        "tools": ["openclaw"]
+      }
+    ]
   }
 }

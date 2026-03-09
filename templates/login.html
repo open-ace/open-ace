@@ -207,11 +207,8 @@
             const errorMessage = document.getElementById('error-message');
             const successMessage = document.getElementById('success-message');
 
-            // Check if already authenticated
-            if (Auth.isAuthenticated()) {
-                window.location.href = '/';
-                return;
-            }
+            // Note: We don't check authentication here to avoid redirect loops
+            // The server will handle redirection if user is already authenticated
 
             loginForm.addEventListener('submit', async function(e) {
                 e.preventDefault();
@@ -233,9 +230,15 @@
                     console.log('Login result:', result);
 
                     if (result.success) {
-                        console.log('Login successful, redirecting...');
+                        console.log('Login successful, waiting for auth init...');
                         successMessage.textContent = 'Login successful! Redirecting...';
                         successMessage.classList.add('show');
+
+                        // Wait for auth initialization to complete
+                        if (typeof Auth !== 'undefined' && Auth.ready) {
+                            await Auth.ready;
+                            console.log('Auth ready, updating menu...');
+                        }
 
                         // Update navigation
                         Auth.updateNavMenu();

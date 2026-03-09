@@ -718,11 +718,11 @@
         <div class="d-flex justify-content-between align-items-center mb-4">
             <h3><i class="bi bi-graph-up"></i> <span id="analysis-title">Analysis</span></h3>
             <div class="d-flex gap-2">
-                <div class="input-group input-group-sm" style="width: 250px;">
+                <div class="input-group input-group-sm" style="width: 320px;">
                     <span class="input-group-text"><i class="bi bi-calendar-range"></i></span>
-                    <input type="date" class="form-control" id="analysis-start-date" value="">
+                    <input type="date" class="form-control" id="analysis-start-date" value="" style="min-width: 120px;">
                     <span class="input-group-text">to</span>
-                    <input type="date" class="form-control" id="analysis-end-date" value="">
+                    <input type="date" class="form-control" id="analysis-end-date" value="" style="min-width: 120px;">
                 </div>
                 <select class="form-select form-select-sm" id="analysis-tool-filter" style="width: 150px;">
                     <option value="">All Tools</option>
@@ -796,8 +796,8 @@
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <h5 class="mb-0"><i class="bi bi-grid-3x3-gap"></i> <span id="analysis-heatmap-title">Usage Heatmap (Last 7 Days)</span></h5>
                     </div>
-                    <div class="card-body">
-                        <canvas id="heatmapChart" height="120"></canvas>
+                    <div class="card-body" style="height: 280px;">
+                        <canvas id="heatmapChart"></canvas>
                     </div>
                 </div>
             </div>
@@ -2811,10 +2811,11 @@
                 // Period over period change
                 const change = data.period_change || 0;
                 const changeEl = document.getElementById('metric-total-tokens-change');
+                const vsPeriodText = currentLang === 'zh' ? '较上期' : 'vs last period';
                 if (change >= 0) {
-                    changeEl.innerHTML = `<i class="bi bi-arrow-up text-success"></i> +${change}% vs previous period`;
+                    changeEl.innerHTML = `<i class="bi bi-arrow-up text-success"></i> +${change}% ${vsPeriodText}`;
                 } else {
-                    changeEl.innerHTML = `<i class="bi bi-arrow-down text-danger"></i> ${change}% vs previous period`;
+                    changeEl.innerHTML = `<i class="bi bi-arrow-down text-danger"></i> ${change}% ${vsPeriodText}`;
                 }
 
                 // Calculate health score (simple algorithm)
@@ -2879,20 +2880,32 @@
                 dataMap[key] = d.tokens_used || 0;
             });
 
-            // Generate dataset for bubble chart
+            // First pass: find max value for normalization
             let maxValue = 1;
             for (let day = 0; day < 7; day++) {
                 for (let hour = 0; hour < 24; hour++) {
                     const key = `${day}-${hour}`;
                     const value = dataMap[key] || 0;
+                    if (value > maxValue) maxValue = value;
+                }
+            }
+
+            // Second pass: generate dataset with normalized radius
+            const minRadius = 3;
+            const maxRadius = 15;
+            for (let day = 0; day < 7; day++) {
+                for (let hour = 0; hour < 24; hour++) {
+                    const key = `${day}-${hour}`;
+                    const value = dataMap[key] || 0;
                     if (value > 0) {
+                        // Normalize radius based on value relative to max
+                        const normalizedRadius = minRadius + (Math.sqrt(value) / Math.sqrt(maxValue)) * (maxRadius - minRadius);
                         dataset.push({
                             x: hour,
                             y: day,
-                            r: Math.max(5, Math.sqrt(value) / 10), // Radius based on value
+                            r: normalizedRadius,
                             v: value
                         });
-                        if (value > maxValue) maxValue = value;
                     }
                 }
             }

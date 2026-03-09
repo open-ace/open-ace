@@ -1,0 +1,34 @@
+# AI Token Analyzer - Installation Configuration
+# 
+# Copy this file and modify as needed, then run:
+#   ./scripts/install.sh --config install.conf
+#
+# Choose one of the two modes below and comment out the other.
+
+# ============================================================================
+# LOCAL INSTALLATION
+# ============================================================================
+
+INSTALL_MODE=local
+
+# User to run the application (default: current user)
+LOCAL_USER=${USER}
+
+# Installation path
+LOCAL_PATH=$HOME/ai-token-analyzer
+
+# Data collection interval in minutes
+LOCAL_INTERVAL=30
+
+# ============================================================================
+# REMOTE INSTALLATION (comment out LOCAL section above if using this)
+# ============================================================================
+
+# INSTALL_MODE=remote
+# REMOTE_HOST=192.168.31.159
+# REMOTE_USER=openclaw
+# REMOTE_PATH=/home/openclaw/ai-token-analyzer
+# REMOTE_INTERVAL=30
+
+# Scheduler type: "systemd" (recommended) or "cron"
+# REMOTE_SCHEDULER=systemd
