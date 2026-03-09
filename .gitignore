@@ -1,7 +1,5 @@
 # Logs
-logs/*.log
-logs/*.err
-*.log
+logs/
 
 # Database
 *.db
