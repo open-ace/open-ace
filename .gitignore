@@ -1,6 +1,9 @@
 # Logs
 logs/
 
+# Screenshots
+screenshots/
+
 # Database
 *.db
 
