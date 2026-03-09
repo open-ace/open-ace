@@ -718,11 +718,11 @@
         <div class="d-flex justify-content-between align-items-center mb-4">
             <h3><i class="bi bi-graph-up"></i> <span id="analysis-title">Analysis</span></h3>
             <div class="d-flex gap-2">
-                <div class="input-group input-group-sm" style="width: 320px;">
+                <div class="input-group input-group-sm" style="width: 380px;">
                     <span class="input-group-text"><i class="bi bi-calendar-range"></i></span>
-                    <input type="date" class="form-control" id="analysis-start-date" value="" style="min-width: 120px;">
+                    <input type="date" class="form-control" id="analysis-start-date" value="" style="min-width: 130px;">
                     <span class="input-group-text">to</span>
-                    <input type="date" class="form-control" id="analysis-end-date" value="" style="min-width: 120px;">
+                    <input type="date" class="form-control" id="analysis-end-date" value="" style="min-width: 130px;">
                 </div>
                 <select class="form-select form-select-sm" id="analysis-tool-filter" style="width: 150px;">
                     <option value="">All Tools</option>
@@ -2854,7 +2854,11 @@
             const ctx = document.getElementById('heatmapChart').getContext('2d');
 
             // Prepare data for heatmap (day_of_week x hour)
-            const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+            // SQLite day_of_week: 0=Sun, 1=Mon, ..., 6=Sat
+            // Display order: Mon(1), Tue(2), Wed(3), Thu(4), Fri(5), Sat(6), Sun(0)
+            const daysDisplay = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+            // Map display index (0-6) to SQLite day_of_week
+            const displayToSqlDay = [1, 2, 3, 4, 5, 6, 0]; // Mon->1, Tue->2, ..., Sun->0
             const dataset = [];
 
             // Handle empty data
@@ -2873,7 +2877,7 @@
                 return;
             }
 
-            // Create a map for quick lookup
+            // Create a map for quick lookup (using SQLite day_of_week)
             const dataMap = {};
             data.forEach(d => {
                 const key = `${d.day_of_week}-${d.hour}`;
@@ -2882,29 +2886,32 @@
 
             // First pass: find max value for normalization
             let maxValue = 1;
-            for (let day = 0; day < 7; day++) {
+            for (let sqlDay = 0; sqlDay < 7; sqlDay++) {
                 for (let hour = 0; hour < 24; hour++) {
-                    const key = `${day}-${hour}`;
+                    const key = `${sqlDay}-${hour}`;
                     const value = dataMap[key] || 0;
                     if (value > maxValue) maxValue = value;
                 }
             }
 
             // Second pass: generate dataset with normalized radius
+            // Y-axis: 0=Mon, 1=Tue, ..., 6=Sun (display order)
             const minRadius = 3;
             const maxRadius = 15;
-            for (let day = 0; day < 7; day++) {
+            for (let displayDay = 0; displayDay < 7; displayDay++) {
+                const sqlDay = displayToSqlDay[displayDay]; // Convert to SQLite day_of_week
                 for (let hour = 0; hour < 24; hour++) {
-                    const key = `${day}-${hour}`;
+                    const key = `${sqlDay}-${hour}`;
                     const value = dataMap[key] || 0;
                     if (value > 0) {
                         // Normalize radius based on value relative to max
                         const normalizedRadius = minRadius + (Math.sqrt(value) / Math.sqrt(maxValue)) * (maxRadius - minRadius);
                         dataset.push({
                             x: hour,
-                            y: day,
+                            y: displayDay, // Use display index for Y position
                             r: normalizedRadius,
-                            v: value
+                            v: value,
+                            sqlDay: sqlDay // Keep original for tooltip
                         });
                     }
                 }
@@ -2940,7 +2947,7 @@
                             callbacks: {
                                 label: function(ctx) {
                                     const raw = ctx.raw;
-                                    const dayLabel = raw && raw.y !== undefined ? days[raw.y] : '';
+                                    const dayLabel = raw && raw.y !== undefined ? daysDisplay[raw.y] : '';
                                     const hourLabel = raw && raw.x !== undefined ? raw.x : '';
                                     const value = raw && raw.v ? formatTokens(raw.v) : '0';
                                     return `${dayLabel} ${hourLabel}:00 - ${value} tokens`;
@@ -2950,20 +2957,22 @@
                     },
                     scales: {
                         x: {
-                            min: -0.5,
-                            max: 23.5,
+                            min: 0,
+                            max: 23,
                             ticks: { 
                                 stepSize: 3,
-                                callback: function(val) { return val + ':00'; }
+                                callback: function(val) {
+                                    return val + ':00';
+                                }
                             },
-                            title: { display: true, text: 'Hour of Day' }
+                            title: { display: true, text: 'Hour of Day (CST UTC+8)' }
                         },
                         y: {
                             min: -0.5,
                             max: 6.5,
                             ticks: {
                                 callback: function(val, index) {
-                                    return days[val] || '';
+                                    return daysDisplay[val] || '';
                                 }
                             },
                             title: { display: true, text: 'Day of Week' }

@@ -1093,29 +1093,30 @@ def get_hourly_usage_from_messages(start_date: str, end_date: str,
         host_name: Optional host name filter
 
     Returns:
-        List of dicts with hour (0-23), day_of_week (0-6), tokens_used, message_count
+        List of dicts with hour (0-23 in UTC+8/CST), day_of_week (0-6), tokens_used, message_count
         Note: day_of_week uses SQLite strftime('%w'): 0=Sunday, 1=Monday, ..., 6=Saturday
+        Times are converted from UTC to CST (UTC+8).
     """
     conn = get_connection()
     cursor = conn.cursor()
-    
+
     conditions = ['date >= ?', 'date <= ?', 'timestamp IS NOT NULL']
     params = [start_date, end_date]
-    
+
     if tool_name:
         conditions.append('tool_name = ?')
         params.append(tool_name)
-    
+
     if host_name:
         conditions.append('host_name = ?')
         params.append(host_name)
-    
+
     where_clause = ' AND '.join(conditions)
-    
+
     # Extract hour from timestamp and calculate day of week
     # SQLite doesn't have native day of week, use strftime('%w')
     cursor.execute(f'''
-        SELECT 
+        SELECT
             CAST(strftime('%H', timestamp) AS INTEGER) as hour,
             CAST(strftime('%w', date) AS INTEGER) as day_of_week,
             SUM(tokens_used) as tokens_used,
@@ -1127,11 +1128,43 @@ def get_hourly_usage_from_messages(start_date: str, end_date: str,
         GROUP BY hour, day_of_week
         ORDER BY day_of_week, hour
     ''', params)
-    
+
     rows = cursor.fetchall()
     conn.close()
-    
-    return [dict(row) for row in rows]
+
+    # Convert UTC hour to CST (UTC+8) and aggregate by new (day_of_week, hour)
+    # Use a dict to aggregate duplicates created by timezone conversion
+    aggregated = {}
+    for row in rows:
+        utc_hour = row['hour']
+        cst_hour = (utc_hour + 8) % 24
+        day_of_week = row['day_of_week']
+
+        # If hour overflowed to next day (UTC hour >= 16), adjust day_of_week
+        if utc_hour >= 16:
+            day_of_week = (day_of_week + 1) % 7
+
+        key = (day_of_week, cst_hour)
+        if key not in aggregated:
+            aggregated[key] = {
+                'hour': cst_hour,
+                'day_of_week': day_of_week,
+                'tokens_used': 0,
+                'message_count': 0,
+                'input_tokens': 0,
+                'output_tokens': 0
+            }
+
+        aggregated[key]['tokens_used'] += row['tokens_used']
+        aggregated[key]['message_count'] += row['message_count']
+        aggregated[key]['input_tokens'] += row['input_tokens']
+        aggregated[key]['output_tokens'] += row['output_tokens']
+
+    # Convert to list and sort
+    results = list(aggregated.values())
+    results.sort(key=lambda x: (x['day_of_week'], x['hour']))
+
+    return results
 
 
 def get_user_activity_ranking(start_date: str, end_date: str, 
@@ -1275,35 +1308,35 @@ def get_peak_usage_periods(start_date: str, end_date: str,
                            host_name: Optional[str] = None,
                            limit: int = 10) -> List[Dict]:
     """Get peak usage periods.
-    
+
     Args:
         start_date: Start date in YYYY-MM-DD format
         end_date: End date in YYYY-MM-DD format
         tool_name: Optional tool name filter
         host_name: Optional host name filter
         limit: Number of peak periods to return
-    
+
     Returns:
-        List of dicts with date, hour, tokens_used, message_count
+        List of dicts with date, hour (in UTC+8/CST), tokens_used, message_count
     """
     conn = get_connection()
     cursor = conn.cursor()
-    
+
     conditions = ['date >= ?', 'date <= ?', 'timestamp IS NOT NULL']
     params = [start_date, end_date]
-    
+
     if tool_name:
         conditions.append('tool_name = ?')
         params.append(tool_name)
-    
+
     if host_name:
         conditions.append('host_name = ?')
         params.append(host_name)
-    
+
     where_clause = ' AND '.join(conditions)
-    
+
     cursor.execute(f'''
-        SELECT 
+        SELECT
             date,
             CAST(strftime('%H', timestamp) AS INTEGER) as hour,
             SUM(tokens_used) as tokens_used,
@@ -1314,11 +1347,30 @@ def get_peak_usage_periods(start_date: str, end_date: str,
         ORDER BY tokens_used DESC
         LIMIT ?
     ''', params + [limit])
-    
+
     rows = cursor.fetchall()
     conn.close()
-    
-    return [dict(row) for row in rows]
+
+    # Convert UTC hour to CST (UTC+8)
+    results = []
+    for row in rows:
+        result = dict(row)
+        utc_hour = result['hour']
+        cst_hour = (utc_hour + 8) % 24
+        result['hour'] = cst_hour
+
+        # If hour overflowed to next day (UTC hour >= 16), adjust date
+        if utc_hour >= 16:
+            from datetime import datetime, timedelta
+            try:
+                dt = datetime.strptime(result['date'], '%Y-%m-%d')
+                result['date'] = (dt + timedelta(days=1)).strftime('%Y-%m-%d')
+            except ValueError:
+                pass  # Keep original date if parsing fails
+
+        results.append(result)
+
+    return results
 
 
 def get_user_segmentation(date: str, 
