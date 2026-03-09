@@ -107,6 +107,9 @@
             margin-left: var(--sidebar-width);
             transition: margin-left 0.3s ease;
             min-height: 100vh;
+            width: calc(100% - var(--sidebar-width));
+            position: relative;
+            overflow-x: hidden; /* Prevent horizontal scroll issues */
         }
 
         .main-content.full-width {
@@ -124,7 +127,9 @@
         }
 
         .content-section {
-            padding: 20px;
+            padding: 70px 20px 20px 20px;
+            margin-left: 0;
+            min-height: calc(100vh - 70px); /* Account for navbar height */
         }
 
         /* Dashboard cards */
@@ -363,6 +368,65 @@
             margin-right: 15px;
         }
 
+        /* Data Status Panel */
+        .data-status-panel {
+            font-size: 0.75rem;
+            padding: 8px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 4px;
+        }
+
+        .data-status-list {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .data-status-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 6px;
+            border-radius: 3px;
+            background: rgba(255,255,255,0.05);
+        }
+
+        .data-status-item .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .data-status-item .host-name {
+            flex: 1;
+            color: var(--sidebar-text);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .data-status-item .last-updated {
+            color: var(--sidebar-text-muted);
+            font-size: 0.7rem;
+        }
+
+        .data-status-item.status-fresh .status-indicator {
+            background-color: #28a745;
+        }
+
+        .data-status-item.status-recent .status-indicator {
+            background-color: #ffc107;
+        }
+
+        .data-status-item.status-stale .status-indicator {
+            background-color: #dc3545;
+        }
+
+        .data-status-item.status-unknown .status-indicator {
+            background-color: #6c757d;
+        }
+
         /* Responsive */
         @media (max-width: 768px) {
             .sidebar {
@@ -378,7 +442,7 @@
                 transform: translateX(var(--sidebar-width));
             }
             .content-section {
-                padding: 10px;
+                padding: 60px 10px 10px 10px;
             }
         }
     </style>
@@ -397,13 +461,25 @@
                 <i class="bi bi-chat-dots"></i> <span id="nav-messages-text">Messages</span>
             </a>
             <!-- Analysis menu - Admin only -->
+            {% if is_admin %}
+            <a href="#" class="nav-link" id="nav-analysis" style="display: block;" onclick="switchSection('analysis'); return false;">
+                <i class="bi bi-graph-up"></i> <span id="nav-analysis-text">Analysis</span>
+            </a>
+            {% else %}
             <a href="#" class="nav-link" id="nav-analysis" style="display: none;" onclick="switchSection('analysis'); return false;">
                 <i class="bi bi-graph-up"></i> <span id="nav-analysis-text">Analysis</span>
             </a>
+            {% endif %}
             <!-- Management menu - Admin only -->
+            {% if is_admin %}
+            <a href="#" class="nav-link" id="nav-management" style="display: block;" onclick="switchSection('management'); return false;">
+                <i class="bi bi-gear"></i> <span id="nav-management-text">Management</span>
+            </a>
+            {% else %}
             <a href="#" class="nav-link" id="nav-management" style="display: none;" onclick="switchSection('management'); return false;">
                 <i class="bi bi-gear"></i> <span id="nav-management-text">Management</span>
             </a>
+            {% endif %}
             <!-- Workspace menu - User only -->
             <a href="#" class="nav-link" id="nav-workspace" style="display: none;" onclick="switchSection('workspace'); return false;">
                 <i class="bi bi-window-split"></i> <span id="nav-workspace-text">Workspace</span>
@@ -412,9 +488,34 @@
             <a href="#" class="nav-link" id="nav-report" onclick="switchSection('report'); return false;">
                 <i class="bi bi-file-earmark-text"></i> <span id="nav-report-text">Report</span>
             </a>
+            <!-- Profile link (shown when logged in) -->
+            {% if is_authenticated %}
+            <a href="#" class="nav-link" id="nav-profile" onclick="handleProfile(); return false;" style="display: inline-block;">
+                <i class="bi bi-person-circle"></i> <span id="nav-profile-text">Profile</span>
+            </a>
+            {% else %}
+            <a href="#" class="nav-link" id="nav-profile" onclick="handleProfile(); return false;" style="display: none;">
+                <i class="bi bi-person-circle"></i> <span id="nav-profile-text">Profile</span>
+            </a>
+            {% endif %}
+        </div>
+        <div class="sidebar-nav" id="sidebar-nav-bottom">
+            {% if is_authenticated %}
+            <a href="#" class="nav-link" id="nav-logout" onclick="handleLogout(); return false;" style="display: inline-block;">
+                <i class="bi bi-box-arrow-right"></i> <span id="nav-logout-text">Logout</span>
+            </a>
+            {% else %}
+            <a href="#" class="nav-link" id="nav-login" onclick="handleLogin(); return false;" style="display: inline-block;">
+                <i class="bi bi-box-arrow-in-right"></i> <span id="nav-login-text">Login</span>
+            </a>
+            {% endif %}
         </div>
         <div class="sidebar-footer">
             <button class="lang-switch" id="lang-switch-btn" onclick="switchLang(currentLang === 'en' ? 'zh' : 'en')">中文</button>
+            <!-- Data Status Panel -->
+            <div id="data-status-container" class="data-status-panel mt-2">
+                <small class="text-muted">Loading data status...</small>
+            </div>
             <small class="d-block mt-2"><span id="last-updated-label">Last updated:</span> <span id="sidebar-updated">{{today}}</span></small>
         </div>
     </nav>
@@ -433,6 +534,20 @@
 
         <!-- Dashboard Section -->
         <div id="dashboard-section" class="content-section">
+            <!-- Dashboard Header with Auto-refresh -->
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h3><i class="bi bi-bar-chart-line"></i> <span id="dashboard-title">Dashboard</span></h3>
+                <div class="d-flex align-items-center gap-2">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="dashboard-auto-refresh" onchange="toggleDashboardAutoRefresh()">
+                        <label class="form-check-label" for="dashboard-auto-refresh"><span id="dashboard-auto-refresh-text">Auto-refresh</span></label>
+                    </div>
+                    <button class="btn btn-outline-primary btn-sm" onclick="refreshDashboardData()">
+                        <i class="bi bi-arrow-repeat"></i> <span id="dashboard-refresh-btn-text">Refresh</span>
+                    </button>
+                </div>
+            </div>
+
             <!-- Dashboard Filters -->
             <div class="row mb-4">
                 <div class="col-12">
@@ -448,7 +563,7 @@
             </div>
 
             <!-- Today's Usage Cards -->
-            <h3 class="mb-4"><span id="dashboard-today-usage">Today's Usage</span> (<span id="today-date">{{today}}</span>)</h3>
+            <h5 class="mb-3"><span id="dashboard-today-usage">Today's Usage</span> (<span id="today-date">{{today}}</span>)</h5>
             <div class="row" id="today-cards">
                 <div class="col-12 text-center text-muted py-5">
                     <div class="spinner-border" role="status">
@@ -597,10 +712,9 @@
                 </nav>
             </div>
         </div>
-    </div>
 
     <!-- Analysis Section -->
-    <div id="analysis-section" class="content-section" style="display: none;">
+    <div id="analysis-section" class="content-section" style="display: none; min-height: calc(100vh - 70px);">
         <div class="d-flex justify-content-between align-items-center mb-4">
             <h3><i class="bi bi-graph-up"></i> <span id="analysis-title">Analysis</span></h3>
             <div class="d-flex gap-2">
@@ -834,7 +948,7 @@
     </div>
 
     <!-- Management Section -->
-    <div id="management-section" class="content-section" style="display: none;">
+    <div id="management-section" class="content-section" style="display: none; min-height: calc(100vh - 70px);">
         <h3><i class="bi bi-gear"></i> <span id="management-title">Management</span></h3>
         <div class="management-nav mb-3">
             <ul class="nav nav-tabs" id="managementTabs" role="tablist">
@@ -933,14 +1047,14 @@
                 </div>
             </div>
         </nav>
-        <iframe src="/static/claude-code-webui"
+        <iframe src="/static/claude-code-webui/index.html"
                 id="workspace-frame"
                 style="width: 100%; height: calc(100vh - 160px); border: none; display: block;">
         </iframe>
     </div>
 
     <!-- Report Section -->
-    <div id="report-section" class="content-section" style="display: none;">
+    <div id="report-section" class="content-section" style="display: none; min-height: calc(100vh - 70px);">
         <h3><i class="bi bi-file-earmark-text"></i> <span id="report-title">My Usage Report</span></h3>
         <div class="row mt-4" id="report-summary">
             <div class="col-12 text-center text-muted py-5">
@@ -957,8 +1071,10 @@
             </div>
         </div>
     </div>
+    </div><!-- End main-content -->
 
     <script src="/static/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/js/auth.js"></script>
     <script>
         // Language resources
         const i18n = {
@@ -968,6 +1084,8 @@
                 messagesNav: 'Messages',
                 refreshBtn: 'Refresh',
                 autoRefresh: 'Auto-refresh',
+                dashboardAutoRefresh: 'Auto-refresh',
+                dashboardTitle: 'Dashboard',
                 totalOverview: 'Total Overview',
                 trendChart: 'Trend Chart (Last 30 Days)',
                 loading: 'Loading...',
@@ -1096,35 +1214,34 @@
                 anomalyTool: 'Tool',
                 anomalyType: 'Type',
                 anomalyTokens: 'Tokens',
-                anomalySeverity: 'Severity'
-            },
-            workspaceText: 'Workspace',
-            reportText: 'My Usage Report',
-            analysisText: 'Analysis',
-            managementText: 'Management',
-            usersText: 'Users',
-            quotaText: 'Quota',
-            securityText: 'Security',
-            addButtonText: 'Add User',
-            editButtonText: 'Edit',
-            deleteButtonText: 'Delete',
-            saveButtonText: 'Save',
-            cancelButtonText: 'Cancel',
-            userLabel: 'User',
-            usernameLabel: 'Username',
-            emailLabel: 'Email',
-            quotaTokensLabel: 'Token Quota',
-            quotaRequestsLabel: 'Request Quota',
-            statusLabel: 'Status',
-            activeLabel: 'Active',
-            inactiveLabel: 'Inactive',
-            adminLabel: 'Admin',
-            reportTotalTokens: 'Total Tokens',
-            reportTotalRequests: 'Total Requests',
-            reportUsageByTool: 'Usage by Tool',
-            analysisComingSoon: 'Analysis page coming soon',
-            managementComingSoon: 'Quota management coming soon',
-            securityComingSoon: 'Security settings coming soon'
+                anomalySeverity: 'Severity',
+                workspaceText: 'Workspace',
+                reportText: 'My Usage Report',
+                analysisText: 'Analysis',
+                managementText: 'Management',
+                usersText: 'Users',
+                quotaText: 'Quota',
+                securityText: 'Security',
+                addButtonText: 'Add User',
+                editButtonText: 'Edit',
+                deleteButtonText: 'Delete',
+                saveButtonText: 'Save',
+                cancelButtonText: 'Cancel',
+                userLabel: 'User',
+                usernameLabel: 'Username',
+                emailLabel: 'Email',
+                quotaTokensLabel: 'Token Quota',
+                quotaRequestsLabel: 'Request Quota',
+                statusLabel: 'Status',
+                activeLabel: 'Active',
+                inactiveLabel: 'Inactive',
+                adminLabel: 'Admin',
+                reportTotalTokens: 'Total Tokens',
+                reportTotalRequests: 'Total Requests',
+                reportUsageByTool: 'Usage by Tool',
+                analysisComingSoon: 'Analysis page coming soon',
+                managementComingSoon: 'Quota management coming soon',
+                securityComingSoon: 'Security settings coming soon'
             },
             zh: {
                 sidebarTitle: 'AI Token Analyzer',
@@ -1132,6 +1249,8 @@
                 messagesNav: '消息',
                 refreshBtn: '刷新',
                 autoRefresh: '自动刷新',
+                dashboardAutoRefresh: '自动刷新',
+                dashboardTitle: '仪表盘',
                 totalOverview: '总体概览',
                 trendChart: '趋势图 (最近 30 天)',
                 loading: '加载中...',
@@ -1474,6 +1593,144 @@
             if (add_user_btn) add_user_btn.innerHTML = `<i class="bi bi-plus-circle"></i> ${t('addButtonText')}`;
         }
 
+        // Admin module for Management page
+        const Admin = (function() {
+            // Get all users
+            async function renderUsersTable() {
+                const tableBody = document.getElementById('users-table-body');
+                if (!tableBody) return;
+
+                try {
+                    const response = await fetch('/api/admin/users', {
+                        headers: {
+                            'Authorization': 'Bearer ' + (localStorage.getItem('ai_token_session') || '')
+                        }
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('Failed to fetch users');
+                    }
+
+                    const data = await response.json();
+                    const users = data.users || [];
+
+                    if (users.length === 0) {
+                        tableBody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No users found</td></tr>';
+                        return;
+                    }
+
+                    let html = '';
+                    users.forEach(user => {
+                        const statusClass = user.is_active ? 'badge bg-success' : 'badge bg-danger';
+                        const roleClass = user.role === 'admin' ? 'badge bg-secondary' : 'badge bg-primary';
+                        html += `
+                            <tr>
+                                <td>${user.id}</td>
+                                <td>${escapeHtmlForDisplay(user.username)}</td>
+                                <td>${escapeHtmlForDisplay(user.email || '')}</td>
+                                <td><span class="${roleClass}">${user.role}</span></td>
+                                <td>${formatTokens(user.quota_tokens || 0)}</td>
+                                <td><span class="${statusClass}">${user.is_active ? 'Active' : 'Inactive'}</span></td>
+                                <td>
+                                    <button class="btn btn-sm btn-warning" onclick="Admin.editUser(${user.id})"><i class="bi bi-pencil"></i></button>
+                                    <button class="btn btn-sm btn-danger" onclick="Admin.deleteUser(${user.id})"><i class="bi bi-trash"></i></button>
+                                </td>
+                            </tr>
+                        `;
+                    });
+                    tableBody.innerHTML = html;
+                } catch (error) {
+                    console.error('Error rendering users table:', error);
+                    tableBody.innerHTML = '<tr><td colspan="7" class="text-center text-danger">Error loading users</td></tr>';
+                }
+            }
+
+            // Render quota usage statistics
+            async function renderQuotaUsage() {
+                const container = document.getElementById('quota-usage-container');
+                if (!container) return;
+
+                try {
+                    const response = await fetch('/api/admin/quota-usage', {
+                        headers: {
+                            'Authorization': 'Bearer ' + (localStorage.getItem('ai_token_session') || '')
+                        }
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('Failed to fetch quota usage');
+                    }
+
+                    const data = await response.json();
+                    const usage = data.usage || {};
+
+                    let html = `<div class="row">
+                        <div class="col-md-6">
+                            <div class="card">
+                                <div class="card-body">
+                                    <h6 class="card-subtitle mb-2">Total Quota</h6>
+                                    <h3 class="text-primary">${formatTokens(usage.total_quota || 0)}</h3>
+                                    <small class="text-muted">Tokens allocated globally</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="card">
+                                <div class="card-body">
+                                    <h6 class="card-subtitle mb-2">Total Used</h6>
+                                    <h3 class="text-success">${formatTokens(usage.total_used || 0)}</h3>
+                                    <small class="text-muted">Tokens consumed</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>`;
+
+                    // User quota breakdown
+                    html += '<h5 class="mt-4">User Quota Breakdown</h5><div class="table-responsive mt-3"><table class="table table-sm table-hover"><thead class="table-light"><tr><th>User</th><th>Quota</th><th>Used</th><th>Remaining</th></tr></thead><tbody>';
+
+                    const userQuotas = usage.user_quotas || [];
+                    if (userQuotas.length === 0) {
+                        html += '<tr><td colspan="4" class="text-center text-muted">No user quota data</td></tr>';
+                    } else {
+                        userQuotas.forEach(uq => {
+                            const remaining = (uq.quota || 0) - (uq.used || 0);
+                            html += `<tr>
+                                <td>${escapeHtmlForDisplay(uq.username || 'Unknown')}</td>
+                                <td>${formatTokens(uq.quota || 0)}</td>
+                                <td>${formatTokens(uq.used || 0)}</td>
+                                <td class="${remaining < 0 ? 'text-danger' : 'text-success'}">${formatTokens(remaining)}</td>
+                            </tr>`;
+                        });
+                    }
+                    html += '</tbody></table></div>';
+
+                    container.innerHTML = html;
+                } catch (error) {
+                    console.error('Error rendering quota usage:', error);
+                    container.innerHTML = '<div class="text-center text-muted">Error loading quota usage</div>';
+                }
+            }
+
+            // Edit user
+            function editUser(userId) {
+                alert('Edit user ' + userId + ' - Feature not implemented yet');
+            }
+
+            // Delete user
+            function deleteUser(userId) {
+                if (confirm('Are you sure you want to delete this user?')) {
+                    alert('Delete user ' + userId + ' - Feature not implemented yet');
+                }
+            }
+
+            return {
+                renderUsersTable,
+                renderQuotaUsage,
+                editUser,
+                deleteUser
+            };
+        })();
+
         // Update workspace text based on current language
         function updateWorkspaceText() {
             const workspaceTitle = document.getElementById('workspace-title');
@@ -1498,6 +1755,11 @@
         let currentMessageCount = 0; // Track current message count to avoid unnecessary refresh
         let lastFetchTimestamp = 0; // Track last fetch time
         let autoRefreshDate = null; // Track the date when auto-refresh was enabled
+
+        // Dashboard auto-refresh variables
+        let dashboardAutoRefreshInterval = null;
+        let isDashboardAutoRefreshing = false;
+        let dashboardLastFetchTimestamp = 0;
 
         // Color palette for each tool (consistent across all charts)
         const toolColors = {
@@ -1553,6 +1815,23 @@
             document.getElementById('management-section').style.display = section === 'management' ? 'block' : 'none';
             document.getElementById('workspace-section').style.display = section === 'workspace' ? 'block' : 'none';
             document.getElementById('report-section').style.display = section === 'report' ? 'block' : 'none';
+
+            // Update navigation menu
+            if (typeof Auth !== 'undefined') {
+                Auth.updateNavMenu();
+            }
+
+            // Add a small delay to ensure DOM updates before focusing
+            setTimeout(() => {
+                // Scroll to top of the active section to ensure proper positioning
+                const activeSection = document.querySelector(`#${section}-section`);
+                if (activeSection) {
+                    activeSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+                
+                // Force a reflow to ensure layout is recalculated
+                document.body.offsetHeight;
+            }, 50);
 
             // Load data and update text if needed
             if (section === 'dashboard') {
@@ -2263,16 +2542,19 @@
         }
 
         async function refreshMessages() {
-            // First fetch new data from the server
+            // First fetch new data from both local and remote servers
             const fetchBtnText = document.getElementById('refresh-btn-text');
             const originalText = fetchBtnText ? fetchBtnText.textContent : 'Refresh';
 
             if (fetchBtnText) fetchBtnText.textContent = 'Fetching...';
 
             try {
-                await fetch('/api/fetch');
+                // Fetch data from both local and remote machines
+                await fetch('/api/fetch?include_remote=true');
                 // Update sender list after refresh
                 updateSenderList();
+                // Update data status
+                updateDataStatus();
             } catch (error) {
                 console.error('Fetch failed:', error);
             } finally {
@@ -2316,13 +2598,22 @@
             lastFetchTimestamp = now;
 
             try {
-                const response = await fetch('/api/fetch');
+                // Fetch data from both local and remote machines
+                const response = await fetch('/api/fetch?include_remote=true');
                 const data = await response.json();
-                // Show a toast notification if fetch was successful
-                const successCount = Object.values(data).filter(d => d.success).length;
-                if (successCount > 0) {
+
+                // Check local fetch success
+                const localSuccess = data.local ? Object.values(data.local).filter(d => d.success).length : 0;
+                // Check remote fetch success
+                const remoteSuccess = data.remote && !data.remote.error ?
+                    Object.values(data.remote).filter(h => h.fetch && h.fetch.success).length : 0;
+
+                if (localSuccess > 0 || remoteSuccess > 0) {
                     // Update sender list after successful fetch
                     updateSenderList();
+
+                    // Update data status
+                    updateDataStatus();
 
                     // When auto-refresh is enabled, check if date is not today
                     // If not, prompt user to update
@@ -2506,9 +2797,9 @@
         }
 
         // Load Key Metrics
-        async function loadKeyMetrics(date, endDate, tool, host) {
+        async function loadKeyMetrics(startDate, endDate, tool, host) {
             try {
-                const params = new URLSearchParams({date, tool, host});
+                const params = new URLSearchParams({start: startDate, end: endDate, tool, host});
                 const response = await fetch(`/api/analysis/key-metrics?${params}`);
                 const data = await response.json();
 
@@ -2517,13 +2808,13 @@
                 document.getElementById('metric-active-users').textContent = (data.active_users || 0).toLocaleString();
                 document.getElementById('metric-active-tools').textContent = (data.active_tools || 0).toLocaleString();
 
-                // Day over day change
-                const change = data.day_over_day_change || 0;
+                // Period over period change
+                const change = data.period_change || 0;
                 const changeEl = document.getElementById('metric-total-tokens-change');
                 if (change >= 0) {
-                    changeEl.innerHTML = `<i class="bi bi-arrow-up text-success"></i> +${change}% vs yesterday`;
+                    changeEl.innerHTML = `<i class="bi bi-arrow-up text-success"></i> +${change}% vs previous period`;
                 } else {
-                    changeEl.innerHTML = `<i class="bi bi-arrow-down text-danger"></i> ${change}% vs yesterday`;
+                    changeEl.innerHTML = `<i class="bi bi-arrow-down text-danger"></i> ${change}% vs previous period`;
                 }
 
                 // Calculate health score (simple algorithm)
@@ -2538,9 +2829,9 @@
         function calculateHealthScore(metrics) {
             let score = 100;
             // Deduct points for high anomaly count (will be updated later)
-            // Deduct points for negative day-over-day change
-            if (metrics.day_over_day_change < -50) score -= 10;
-            if (metrics.day_over_day_change < -80) score -= 20;
+            // Deduct points for negative period change
+            if (metrics.period_change < -50) score -= 10;
+            if (metrics.period_change < -80) score -= 20;
             return Math.max(0, Math.min(100, score));
         }
 
@@ -2564,6 +2855,22 @@
             // Prepare data for heatmap (day_of_week x hour)
             const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
             const dataset = [];
+
+            // Handle empty data
+            if (!data || data.length === 0) {
+                // Destroy existing chart
+                if (heatmapChartInstance) {
+                    heatmapChartInstance.destroy();
+                    heatmapChartInstance = null;
+                }
+                // Display empty state message
+                ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+                ctx.font = '14px sans-serif';
+                ctx.fillStyle = '#6c757d';
+                ctx.textAlign = 'center';
+                ctx.fillText('No data available for the selected period', ctx.canvas.width / 2, ctx.canvas.height / 2);
+                return;
+            }
 
             // Create a map for quick lookup
             const dataMap = {};
@@ -2743,6 +3050,17 @@
             // Destroy existing chart
             if (toolComparisonChartInstance) {
                 toolComparisonChartInstance.destroy();
+                toolComparisonChartInstance = null;
+            }
+
+            // Handle empty data
+            if (!data || data.length === 0) {
+                ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+                ctx.font = '14px sans-serif';
+                ctx.fillStyle = '#6c757d';
+                ctx.textAlign = 'center';
+                ctx.fillText('No tool data available', ctx.canvas.width / 2, ctx.canvas.height / 2);
+                return;
             }
 
             const labels = data.map(d => d.tool_name.toUpperCase());
@@ -2819,6 +3137,20 @@
             // Destroy existing chart
             if (userSegmentationChartInstance) {
                 userSegmentationChartInstance.destroy();
+                userSegmentationChartInstance = null;
+            }
+
+            // Calculate total for empty check
+            const total = (data.high || 0) + (data.medium || 0) + (data.low || 0) + (data.dormant || 0);
+
+            // Handle empty data
+            if (total === 0) {
+                ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+                ctx.font = '14px sans-serif';
+                ctx.fillStyle = '#6c757d';
+                ctx.textAlign = 'center';
+                ctx.fillText('No user data available', ctx.canvas.width / 2, ctx.canvas.height / 2);
+                return;
             }
 
             userSegmentationChartInstance = new Chart(ctx, {
@@ -2851,7 +3183,6 @@
                         tooltip: {
                             callbacks: {
                                 label: function(ctx) {
-                                    const total = (data.high || 0) + (data.medium || 0) + (data.low || 0) + (data.dormant || 0);
                                     const percentage = total > 0 ? ((ctx.raw || 0) / total * 100).toFixed(1) : 0;
                                     return `${ctx.label}: ${ctx.raw} (${percentage}%)`;
                                 }
@@ -2945,9 +3276,11 @@
         }
 
         // Initialize Analysis tool and host filters
+        let analysisFiltersInitialized = false;
         function initAnalysisFilters() {
             // Only initialize once
-            if (analysisInitialized) return;
+            if (analysisFiltersInitialized) return;
+            analysisFiltersInitialized = true;
             
             // Load tools
             fetch('/api/tools')
@@ -3094,6 +3427,9 @@
             updateSidebarText();
             renderSidebarNav();
 
+            // Initialize data status
+            updateDataStatus();
+
             // Initialize dashboard host filter
             const dashboardHostFilter = document.getElementById('dashboard-host-filter');
             if (dashboardHostFilter) {
@@ -3164,7 +3500,6 @@
             loadTotalChart();
             loadSummary();
             loadTrendChart();
-            loadTrendChart();
 
             // Check hash on initial load
             if (window.location.hash === '#messages') {
@@ -3192,6 +3527,134 @@
             loadTotalChart(host);
             loadSummary(host);
             loadTrendChart(host);
+        }
+
+        // Dashboard auto-refresh functions
+        async function refreshDashboardData() {
+            const refreshBtn = document.getElementById('dashboard-refresh-btn-text');
+            const originalText = refreshBtn ? refreshBtn.textContent : 'Refresh';
+
+            if (refreshBtn) refreshBtn.textContent = 'Fetching...';
+
+            try {
+                // Fetch data from both local and remote machines
+                const response = await fetch('/api/fetch?include_remote=true');
+                const data = await response.json();
+
+                // Update dashboard with new data
+                loadDashboardWithFilters();
+
+                // Update data status
+                updateDataStatus();
+            } catch (error) {
+                console.error('Error refreshing dashboard:', error);
+            } finally {
+                if (refreshBtn) refreshBtn.textContent = originalText;
+            }
+        }
+
+        function toggleDashboardAutoRefresh() {
+            const checkbox = document.getElementById('dashboard-auto-refresh');
+            isDashboardAutoRefreshing = checkbox.checked;
+
+            if (isDashboardAutoRefreshing) {
+                // Fetch new data first
+                fetchDashboardData();
+
+                // Check for new data every 30 seconds
+                dashboardAutoRefreshInterval = setInterval(() => {
+                    fetchDashboardData();
+                }, 30000);
+            } else {
+                if (dashboardAutoRefreshInterval) {
+                    clearInterval(dashboardAutoRefreshInterval);
+                    dashboardAutoRefreshInterval = null;
+                }
+            }
+        }
+
+        async function fetchDashboardData() {
+            const now = Date.now();
+            // Only fetch if last fetch was more than 10 seconds ago
+            if (now - dashboardLastFetchTimestamp < 10000) {
+                return;
+            }
+            dashboardLastFetchTimestamp = now;
+
+            try {
+                const response = await fetch('/api/fetch?include_remote=true');
+                const data = await response.json();
+
+                // Update dashboard with new data
+                loadDashboardWithFilters();
+
+                // Update data status
+                updateDataStatus();
+            } catch (error) {
+                console.error('Error fetching dashboard data:', error);
+            }
+        }
+
+        // Data status functions
+        async function updateDataStatus() {
+            try {
+                const response = await fetch('/api/data-status');
+                const data = await response.json();
+
+                const statusContainer = document.getElementById('data-status-container');
+                if (!statusContainer) return;
+
+                let html = '<div class="data-status-list">';
+
+                for (const host of data.hosts) {
+                    const lastUpdated = host.last_updated ? formatRelativeTime(host.last_updated) : 'N/A';
+                    const statusClass = getStatusClass(host.last_updated);
+
+                    html += `
+                        <div class="data-status-item ${statusClass}">
+                            <span class="status-indicator"></span>
+                            <span class="host-name">${host.name || host.host_name}</span>
+                            <span class="last-updated">${lastUpdated}</span>
+                        </div>
+                    `;
+                }
+
+                html += '</div>';
+                statusContainer.innerHTML = html;
+            } catch (error) {
+                console.error('Error updating data status:', error);
+            }
+        }
+
+        function formatRelativeTime(timestamp) {
+            if (!timestamp) return 'N/A';
+
+            // 数据库中的时间是 UTC，需要转换为 GMT+8
+            // 格式: "2026-03-09 06:45:56"
+            const date = new Date(timestamp + ' UTC');  // 明确指定为 UTC 时间
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHours = Math.floor(diffMs / 3600000);
+            const diffDays = Math.floor(diffMs / 86400000);
+
+            if (diffMins < 1) return 'Just now';
+            if (diffMins < 60) return `${diffMins}m ago`;
+            if (diffHours < 24) return `${diffHours}h ago`;
+            return `${diffDays}d ago`;
+        }
+
+        function getStatusClass(lastUpdated) {
+            if (!lastUpdated) return 'status-unknown';
+
+            // 数据库中的时间是 UTC，需要转换为 GMT+8
+            const date = new Date(lastUpdated + ' UTC');
+            const now = new Date();
+            const diffMins = (now - date) / 60000;
+
+            if (diffMins < 30) return 'status-fresh';
+            if (diffMins < 120) return 'status-recent';
+            return 'status-stale';
         }
 
         // Simple searchable select dropdown implementation
@@ -3297,18 +3760,98 @@
             // Run existing initialization code
             // Initialize messages sender filter
 
-            // Wait for other initializations to complete
-            setTimeout(function() {
-                initSearchableSelect('sender-filter');
-                checkReportPage();
-            }, 100);
+            // Wait for auth initialization to complete before updating nav menu
+            if (typeof Auth !== 'undefined' && Auth.ready) {
+                Auth.ready.then(async function() {
+                    // Auth initialized, now fetch user info if not available
+                    if (!Auth.getCurrentUser()) {
+                        console.log('[index.html] Fetching user from server...');
+                        const user = await fetch('/api/auth/profile', {
+                            method: 'GET',
+                            headers: {
+                                'Authorization': 'Bearer ' + (localStorage.getItem('ai_token_session') || sessionStorage.getItem('ai_token_session') || '')
+                            },
+                            credentials: 'include'
+                        }).then(r => r.json()).then(data => {
+                            if (data.success) {
+                                Auth.setCurrentUser(data.user);
+                                return data.user;
+                            }
+                            return null;
+                        }).catch(e => {
+                            console.error('Failed to fetch user:', e);
+                            return null;
+                        });
+                        console.log('[index.html] Fetched user:', user);
+                    }
+                    // Auth initialized, now update nav menu with user info
+                    setTimeout(function() {
+                        initSearchableSelect('sender-filter');
+                        checkReportPage();
+                        // Update navigation menu based on authentication
+                        Auth.updateNavMenu();
+                        // Check authentication on page load and redirect if not authenticated
+                        checkAuthOnLoad();
+                    }, 100);
+                });
+            } else {
+                // Fallback if Auth is not ready
+                setTimeout(function() {
+                    initSearchableSelect('sender-filter');
+                    checkReportPage();
+                    if (typeof Auth !== 'undefined') {
+                        Auth.updateNavMenu();
+                    }
+                    checkAuthOnLoad();
+                }, 100);
+            }
         });
+
+        // Check authentication on page load
+        function checkAuthOnLoad() {
+            // Check if user is authenticated
+            if (typeof Auth !== 'undefined' && !Auth.isAuthenticated()) {
+                // Don't redirect if already on login page or static claude-code-webui page
+                var pathname = window.location.pathname;
+                if (pathname !== '/login' && !pathname.startsWith('/static/claude-code-webui')) {
+                    // Store the attempted URL for redirect after login
+                    sessionStorage.setItem('redirect_after_login', window.location.href);
+                    window.location.href = '/login';
+                }
+            }
+        }
 
         // Check if on report page and load data
         function checkReportPage() {
             if (document.getElementById('report-section') && document.getElementById('report-section').style.display !== 'none') {
                 loadMyUsageReport();
             }
+        }
+
+        // Handle logout button click
+        function handleLogout() {
+            if (typeof Auth !== 'undefined') {
+                Auth.logout();
+            }
+            // Clear local storage and session storage
+            localStorage.removeItem('ai_token_session');
+            sessionStorage.clear();
+            // Redirect to login
+            window.location.href = '/login';
+        }
+
+        // Handle profile button click
+        function handleProfile() {
+            // Show user profile info in an alert or modal
+            const user = Auth.getCurrentUser();
+            if (user) {
+                alert('User Profile:\nUsername: ' + user.username + '\nEmail: ' + (user.email || 'N/A') + '\nRole: ' + user.role);
+            }
+        }
+
+        // Handle login button click (from sidebar)
+        function handleLogin() {
+            window.location.href = '/login';
         }
 
         // Load current user's usage report
@@ -3454,6 +3997,21 @@
                 }
             });
         }
+        
+        // Handle window resize to adjust layout
+        window.addEventListener('resize', function() {
+            // Small delay to ensure resize is complete
+            setTimeout(() => {
+                const activeSection = document.querySelector('.content-section[style*="display: block"]');
+                if (activeSection) {
+                    // Force re-layout
+                    activeSection.style.display = 'none';
+                    setTimeout(() => {
+                        activeSection.style.display = 'block';
+                    }, 10);
+                }
+            }, 100);
+        });
     </script>
 </body>
 </html>

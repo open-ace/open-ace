@@ -785,6 +785,83 @@ def get_user_by_id(user_id: int) -> Optional[Dict]:
     return None
 
 
+def get_all_users() -> List[Dict]:
+    """Get all users (admin only)."""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        SELECT id, username, email, role, quota_tokens, quota_requests,
+               is_active, created_at
+        FROM users
+        ORDER BY id DESC
+    ''')
+    rows = cursor.fetchall()
+    conn.close()
+
+    return [dict(row) for row in rows]
+
+
+def get_global_quota_summary(start_date: str, end_date: str) -> Dict:
+    """Get global quota summary within a date range."""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # Get total quota allocated to all users
+    cursor.execute('''
+        SELECT COALESCE(SUM(quota_tokens), 0) as total_quota
+        FROM users
+    ''')
+    total_quota = cursor.fetchone()[0] or 0
+
+    # Get total usage within date range
+    cursor.execute('''
+        SELECT COALESCE(SUM(tokens_used), 0) as total_used
+        FROM quota_usage
+        WHERE date >= ? AND date <= ?
+    ''', (start_date, end_date))
+    total_used = cursor.fetchone()[0] or 0
+
+    conn.close()
+
+    return {
+        'total_quota': total_quota,
+        'total_used': total_used,
+        'remaining': total_quota - total_used
+    }
+
+
+def get_user_quota_breakdown(start_date: str, end_date: str) -> List[Dict]:
+    """Get quota usage breakdown by user."""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        SELECT
+            u.id as user_id,
+            u.username,
+            u.email,
+            u.quota_tokens as quota,
+            COALESCE(SUM(q.tokens_used), 0) as used
+        FROM users u
+        LEFT JOIN quota_usage q ON u.id = q.user_id
+            AND q.date >= ? AND q.date <= ?
+        GROUP BY u.id, u.username, u.email, u.quota_tokens
+        ORDER BY used DESC
+    ''', (start_date, end_date))
+
+    rows = cursor.fetchall()
+    conn.close()
+
+    result = []
+    for row in rows:
+        row_dict = dict(row)
+        row_dict['remaining'] = row_dict['quota'] - row_dict['used']
+        result.append(row_dict)
+
+    return result
+
+
 def verify_password(username: str, password: str) -> Optional[Dict]:
     """Verify user password and return user info if valid."""
     import hashlib
@@ -980,20 +1057,20 @@ def get_quota_usage_by_tool(user_id: int, start_date: str, end_date: str) -> Lis
 # Analysis Module - 深度分析查询函数
 # =============================================================================
 
-def get_hourly_usage_from_messages(start_date: str, end_date: str, 
+def get_hourly_usage_from_messages(start_date: str, end_date: str,
                                     tool_name: Optional[str] = None,
                                     host_name: Optional[str] = None) -> List[Dict]:
     """Get hourly usage statistics from daily_messages table.
-    
+
     Args:
         start_date: Start date in YYYY-MM-DD format
         end_date: End date in YYYY-MM-DD format
         tool_name: Optional tool name filter
         host_name: Optional host name filter
-    
+
     Returns:
         List of dicts with hour (0-23), day_of_week (0-6), tokens_used, message_count
-        Note: day_of_week 0=Monday, 6=Sunday
+        Note: day_of_week uses SQLite strftime('%w'): 0=Sunday, 1=Monday, ..., 6=Saturday
     """
     conn = get_connection()
     cursor = conn.cursor()
@@ -1477,82 +1554,266 @@ def detect_usage_anomalies(start_date: str, end_date: str,
     return anomalies
 
 
-def get_key_metrics(date: str, 
+def get_key_metrics(start_date: str,
+                    end_date: Optional[str] = None,
                     tool_name: Optional[str] = None,
                     host_name: Optional[str] = None) -> Dict:
     """Get key metrics for dashboard.
-    
+
     Args:
-        date: Date in YYYY-MM-DD format
+        start_date: Start date in YYYY-MM-DD format
+        end_date: End date in YYYY-MM-DD format (optional, defaults to start_date for single day)
         tool_name: Optional tool name filter
         host_name: Optional host name filter
-    
+
     Returns:
         Dict with key metrics
     """
+    # If end_date not provided, use start_date for single day query
+    if end_date is None:
+        end_date = start_date
+
     conn = get_connection()
     cursor = conn.cursor()
-    
-    # Get today's usage
-    usage_conditions = ['date = ?']
-    usage_params = [date]
-    
+
+    # Build WHERE conditions for date range
+    usage_conditions = ['date >= ?', 'date <= ?']
+    usage_params = [start_date, end_date]
+
     if tool_name:
         usage_conditions.append('tool_name = ?')
         usage_params.append(tool_name)
-    
+
     if host_name:
         usage_conditions.append('host_name = ?')
         usage_params.append(host_name)
-    
+
     usage_where = ' AND '.join(usage_conditions)
-    
+
+    # Get usage metrics for the date range
     cursor.execute(f'''
-        SELECT 
+        SELECT
             SUM(tokens_used) as total_tokens,
             SUM(request_count) as total_requests,
-            COUNT(*) as active_tools
+            COUNT(DISTINCT tool_name) as active_tools,
+            COUNT(DISTINCT date) as active_days
         FROM daily_usage
         WHERE {usage_where}
     ''', usage_params)
-    
+
     usage_row = cursor.fetchone()
-    
-    # Get message metrics
+
+    # Get message metrics for the date range
     cursor.execute(f'''
-        SELECT 
+        SELECT
             COUNT(*) as total_messages,
             COUNT(DISTINCT COALESCE(sender_name, sender_id)) as active_users
         FROM daily_messages
         WHERE {usage_where} AND (sender_id IS NOT NULL OR sender_name IS NOT NULL)
     ''', usage_params)
-    
+
     message_row = cursor.fetchone()
-    
-    # Get yesterday's usage for comparison
+
+    # Get previous period usage for comparison (same length as current period)
     from datetime import datetime, timedelta
-    date_obj = datetime.strptime(date, '%Y-%m-%d')
-    yesterday = (date_obj - timedelta(days=1)).strftime('%Y-%m-%d')
-    
+    start_obj = datetime.strptime(start_date, '%Y-%m-%d')
+    end_obj = datetime.strptime(end_date, '%Y-%m-%d')
+    period_days = (end_obj - start_obj).days + 1
+
+    prev_end = (start_obj - timedelta(days=1)).strftime('%Y-%m-%d')
+    prev_start = (start_obj - timedelta(days=period_days)).strftime('%Y-%m-%d')
+
+    prev_conditions = ['date >= ?', 'date <= ?']
+    prev_params = [prev_start, prev_end]
+
+    if tool_name:
+        prev_conditions.append('tool_name = ?')
+        prev_params.append(tool_name)
+
+    if host_name:
+        prev_conditions.append('host_name = ?')
+        prev_params.append(host_name)
+
     cursor.execute(f'''
-        SELECT SUM(tokens_used) as yesterday_tokens
+        SELECT SUM(tokens_used) as prev_tokens
         FROM daily_usage
-        WHERE date = ? AND {' AND '.join(usage_conditions[1:]) if len(usage_conditions) > 1 else '1=1'}
-    ''', [yesterday] + usage_params[1:])
-    
-    yesterday_row = cursor.fetchone()
-    yesterday_tokens = yesterday_row['yesterday_tokens'] if yesterday_row and yesterday_row['yesterday_tokens'] else 0
-    
+        WHERE {' AND '.join(prev_conditions)}
+    ''', prev_params)
+
+    prev_row = cursor.fetchone()
+    prev_tokens = prev_row['prev_tokens'] if prev_row and prev_row['prev_tokens'] else 0
+
     conn.close()
-    
-    today_tokens = usage_row['total_tokens'] or 0
-    day_over_day_change = ((today_tokens - yesterday_tokens) / yesterday_tokens * 100) if yesterday_tokens > 0 else 0
-    
+
+    current_tokens = usage_row['total_tokens'] or 0
+    period_change = ((current_tokens - prev_tokens) / prev_tokens * 100) if prev_tokens > 0 else 0
+
     return {
-        'total_tokens': today_tokens,
+        'total_tokens': current_tokens,
         'total_requests': usage_row['total_requests'] or 0,
         'active_tools': usage_row['active_tools'] or 0,
+        'active_days': usage_row['active_days'] or 0,
         'total_messages': message_row['total_messages'] or 0,
         'active_users': message_row['active_users'] or 0,
-        'day_over_day_change': round(day_over_day_change, 2)
+        'period_change': round(period_change, 2)
     }
+
+
+def get_data_status_by_host(host_name: str) -> Dict:
+    """Get data status for a specific host.
+
+    Args:
+        host_name: Name of the host to get status for
+
+    Returns:
+        Dict with host status information
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # Get last update time from daily_usage
+    cursor.execute('''
+        SELECT MAX(created_at) as last_updated
+        FROM daily_usage
+        WHERE host_name = ?
+    ''', [host_name])
+    usage_row = cursor.fetchone()
+    last_updated_usage = usage_row['last_updated'] if usage_row else None
+
+    # Get last update time from daily_messages
+    cursor.execute('''
+        SELECT MAX(created_at) as last_updated
+        FROM daily_messages
+        WHERE host_name = ?
+    ''', [host_name])
+    message_row = cursor.fetchone()
+    last_updated_messages = message_row['last_updated'] if message_row else None
+
+    # Use the most recent update time
+    last_updated = last_updated_usage
+    if last_updated_messages:
+        if not last_updated or last_updated_messages > last_updated:
+            last_updated = last_updated_messages
+
+    # Get record counts
+    cursor.execute('''
+        SELECT COUNT(*) as count
+        FROM daily_usage
+        WHERE host_name = ?
+    ''', [host_name])
+    usage_count = cursor.fetchone()['count'] or 0
+
+    cursor.execute('''
+        SELECT COUNT(*) as count
+        FROM daily_messages
+        WHERE host_name = ?
+    ''', [host_name])
+    message_count = cursor.fetchone()['count'] or 0
+
+    # Get date range
+    cursor.execute('''
+        SELECT MIN(date) as min_date, MAX(date) as max_date
+        FROM daily_usage
+        WHERE host_name = ?
+    ''', [host_name])
+    date_row = cursor.fetchone()
+
+    cursor.execute('''
+        SELECT MIN(date) as min_date, MAX(date) as max_date
+        FROM daily_messages
+        WHERE host_name = ?
+    ''', [host_name])
+    msg_date_row = cursor.fetchone()
+
+    # Combine date ranges
+    min_dates = [date_row['min_date'], msg_date_row['min_date']]
+    max_dates = [date_row['max_date'], msg_date_row['max_date']]
+    min_dates = [d for d in min_dates if d]
+    max_dates = [d for d in max_dates if d]
+
+    conn.close()
+
+    return {
+        'host_name': host_name,
+        'last_updated': last_updated,
+        'usage_records': usage_count,
+        'message_records': message_count,
+        'date_range': {
+            'start': min(min_dates) if min_dates else None,
+            'end': max(max_dates) if max_dates else None
+        }
+    }
+
+
+def get_all_hosts_with_status() -> List[Dict]:
+    """Get data status for all hosts in the database.
+
+    Returns:
+        List of dicts with host status information
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # Get all unique host names from both tables
+    cursor.execute('''
+        SELECT DISTINCT host_name FROM daily_usage
+        UNION
+        SELECT DISTINCT host_name FROM daily_messages
+    ''')
+    hosts = [row['host_name'] for row in cursor.fetchall()]
+
+    results = []
+
+    for host_name in hosts:
+        # Get last update time from daily_usage
+        cursor.execute('''
+            SELECT MAX(created_at) as last_updated
+            FROM daily_usage
+            WHERE host_name = ?
+        ''', [host_name])
+        usage_row = cursor.fetchone()
+        last_updated_usage = usage_row['last_updated'] if usage_row else None
+
+        # Get last update time from daily_messages
+        cursor.execute('''
+            SELECT MAX(created_at) as last_updated
+            FROM daily_messages
+            WHERE host_name = ?
+        ''', [host_name])
+        message_row = cursor.fetchone()
+        last_updated_messages = message_row['last_updated'] if message_row else None
+
+        # Use the most recent update time
+        last_updated = last_updated_usage
+        if last_updated_messages:
+            if not last_updated or last_updated_messages > last_updated:
+                last_updated = last_updated_messages
+
+        # Get record counts
+        cursor.execute('''
+            SELECT COUNT(*) as count
+            FROM daily_usage
+            WHERE host_name = ?
+        ''', [host_name])
+        usage_count = cursor.fetchone()['count'] or 0
+
+        cursor.execute('''
+            SELECT COUNT(*) as count
+            FROM daily_messages
+            WHERE host_name = ?
+        ''', [host_name])
+        message_count = cursor.fetchone()['count'] or 0
+
+        results.append({
+            'host_name': host_name,
+            'last_updated': last_updated,
+            'usage_records': usage_count,
+            'message_records': message_count
+        })
+
+    conn.close()
+
+    # Sort by last_updated (most recent first)
+    results.sort(key=lambda x: x.get('last_updated') or '', reverse=True)
+
+    return results

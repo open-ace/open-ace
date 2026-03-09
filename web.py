@@ -188,11 +188,12 @@ def api_senders():
 @app.route('/api/analysis/key-metrics')
 def api_analysis_key_metrics():
     """Get key metrics for dashboard."""
-    date = request.args.get('date', utils.get_today())
+    start_date = request.args.get('start', utils.get_days_ago(7))
+    end_date = request.args.get('end', utils.get_today())
     tool = request.args.get('tool')
     host = request.args.get('host')
-    
-    metrics = db.get_key_metrics(date, tool_name=tool, host_name=host)
+
+    metrics = db.get_key_metrics(start_date, end_date=end_date, tool_name=tool, host_name=host)
     return jsonify(metrics)
 
 
@@ -666,9 +667,8 @@ def api_upload_batch():
     })
 
 
-@app.route('/api/fetch')
-def api_fetch():
-    """Trigger data fetch for all tools."""
+def _fetch_local_data():
+    """Fetch data from local machine."""
     import subprocess
 
     results = {}
@@ -730,7 +730,159 @@ def api_fetch():
             'error': str(e)
         }
 
+    return results
+
+
+def _fetch_remote_data():
+    """Fetch data from remote machines via SSH."""
+    import subprocess
+
+    config = utils.load_config()
+    remote_config = config.get('remote', {})
+
+    if not remote_config.get('enabled', False):
+        return {'error': 'Remote fetch not enabled'}
+
+    results = {}
+    hosts = remote_config.get('hosts', [])
+
+    for host_info in hosts:
+        host_name = host_info.get('name', 'unknown')
+        host = host_info.get('host')
+        user = host_info.get('user', 'openclaw')
+        base_dir = host_info.get('base_dir', '/home/openclaw/ai-token-analyzer')
+
+        if not host:
+            continue
+
+        host_results = {
+            'host': host,
+            'name': host_name,
+            'fetch': {'success': False},
+            'upload': {'success': False}
+        }
+
+        # Execute fetch on remote machine
+        try:
+            fetch_cmd = f"ssh {user}@{host} 'cd {base_dir} && python3 scripts/fetch_openclaw.py --days 7'"
+            result = subprocess.run(
+                fetch_cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=180
+            )
+            host_results['fetch'] = {
+                'success': result.returncode == 0,
+                'stdout': result.stdout[-500:] if result.stdout else '',
+                'stderr': result.stderr[-500:] if result.stderr else ''
+            }
+        except subprocess.TimeoutExpired:
+            host_results['fetch'] = {'success': False, 'error': 'Timeout'}
+        except Exception as e:
+            host_results['fetch'] = {'success': False, 'error': str(e)}
+
+        # Execute upload on remote machine
+        server_config = config.get('server', {})
+        server_url = server_config.get('server_url', 'http://localhost:5001')
+        auth_key = server_config.get('upload_auth_key', '')
+
+        if auth_key:
+            try:
+                upload_cmd = f"ssh {user}@{host} 'cd {base_dir} && python3 scripts/upload_to_server.py --server {server_url} --auth-key {auth_key} --hostname {host_name} --days 7'"
+                result = subprocess.run(
+                    upload_cmd,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=120
+                )
+                host_results['upload'] = {
+                    'success': result.returncode == 0,
+                    'stdout': result.stdout[-500:] if result.stdout else '',
+                    'stderr': result.stderr[-500:] if result.stderr else ''
+                }
+            except subprocess.TimeoutExpired:
+                host_results['upload'] = {'success': False, 'error': 'Timeout'}
+            except Exception as e:
+                host_results['upload'] = {'success': False, 'error': str(e)}
+
+        results[host_name] = host_results
+
+    return results
+
+
+@app.route('/api/fetch')
+def api_fetch():
+    """Trigger data fetch for all tools.
+
+    Query parameters:
+        include_remote: If 'true', also fetch data from remote machines
+    """
+    include_remote = request.args.get('include_remote', 'false').lower() == 'true'
+
+    results = {
+        'local': _fetch_local_data(),
+        'remote': {}
+    }
+
+    if include_remote:
+        results['remote'] = _fetch_remote_data()
+
     return jsonify(results)
+
+
+@app.route('/api/fetch/remote')
+def api_fetch_remote():
+    """Trigger data fetch from remote machines only."""
+    results = _fetch_remote_data()
+    return jsonify(results)
+
+
+@app.route('/api/data-status')
+def api_data_status():
+    """Get data status for all hosts (last update time, record counts)."""
+    config = utils.load_config()
+    remote_config = config.get('remote', {})
+    local_host_name = config.get('host_name', 'localhost')
+
+    status = {
+        'hosts': [],
+        'last_updated': None
+    }
+
+    # Get all hosts from database
+    all_hosts = db.get_all_hosts_with_status()
+
+    # Get configured remote hosts
+    remote_host_names = set()
+    if remote_config.get('enabled', False):
+        hosts = remote_config.get('hosts', [])
+        for host_info in hosts:
+            remote_host_names.add(host_info.get('name', 'unknown'))
+
+    for host_data in all_hosts:
+        host_name = host_data.get('host_name', 'unknown')
+        is_remote = host_name in remote_host_names
+        is_local = (host_name == local_host_name or host_name == 'localhost')
+
+        host_status = {
+            'name': host_name,
+            'host_name': host_name,
+            'is_remote': is_remote,
+            'is_local': is_local,
+            'last_updated': host_data.get('last_updated'),
+            'usage_records': host_data.get('usage_records', 0),
+            'message_records': host_data.get('message_records', 0)
+        }
+        status['hosts'].append(host_status)
+
+    # Find the most recent update time
+    all_times = [h.get('last_updated') for h in status['hosts'] if h.get('last_updated')]
+    if all_times:
+        status['last_updated'] = max(all_times)
+
+    return jsonify(status)
 
 
 @app.route('/api/messages')
@@ -769,10 +921,76 @@ def api_messages():
     return jsonify(result)
 
 
+@app.route('/workspace')
+def workspace():
+    """Render the workspace page with Claude Code Web UI."""
+    # Check authentication - check both Authorization header and cookie
+    auth_header = request.headers.get('Authorization')
+    token = None
+
+    if auth_header:
+        token = auth_header.replace('Bearer ', '')
+
+    # Also check cookie for session token
+    if not token and 'session_token' in request.cookies:
+        token = request.cookies.get('session_token')
+
+    # Check if user is authenticated via session cookie or header
+    is_authenticated = False
+    user_role = 'user'
+
+    if token:
+        session_data = db.get_session_by_token(token)
+        if session_data:
+            is_authenticated = True
+            user_role = session_data.get('role', 'user')
+
+    # If not authenticated, show login page
+    if not is_authenticated:
+        return redirect('/login')
+
+    # Workspace is only for non-admin users
+    if user_role == 'admin':
+        return redirect('/')
+
+    # Get user info for display
+    user_info = None
+    if token:
+        session_data = db.get_session_by_token(token)
+        if session_data:
+            user_info = {
+                'id': session_data['id'],
+                'username': session_data['username'],
+                'email': session_data.get('email'),
+                'role': session_data['role']
+            }
+
+    response = make_response(render_template(
+        'index.html',
+        summary=[],
+        today=utils.get_today(),
+        hosts=[],
+        tools=[],
+        selected_host=None,
+        selected_tool=None,
+        user_info=user_info,
+        is_authenticated=is_authenticated,
+        is_admin=user_role == 'admin'
+    ))
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
+
+
 @app.route('/login')
 def login_page():
     """Render login page."""
-    return render_template('login.html')
+    response = make_response(render_template('login.html'))
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 
 @app.route('/logout')
@@ -1204,9 +1422,16 @@ def api_report_my_usage():
     })
 
 
+@app.route('/static/claude-code-webui/<path:filename>')
+def serve_claude_code_webui(filename):
+    """Serve static files from claude-code-webui."""
+    directory = os.path.join(script_dir, 'static', 'claude-code-webui')
+    return send_from_directory(directory, filename)
+
+
 if __name__ == '__main__':
     # Initialize database (including auth tables)
     db.init_database()
 
     # Run the Flask app
-    app.run(host='0.0.0.0', port=5001, debug=True)
+    app.run(host='0.0.0.0', port=5001, debug=False)
