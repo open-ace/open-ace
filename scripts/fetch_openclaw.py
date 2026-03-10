@@ -239,8 +239,13 @@ def extract_user_message_metadata(text: str) -> Optional[dict]:
         extracted_content = slack_match.group(2).strip()
         # Remove user mention tags like <@U0AE9GW0KLJ>
         extracted_content = re.sub(r'<@[A-Z0-9]+>', '', extracted_content).strip()
+        # Try to extract sender_id from metadata
+        slack_sender_id = None
+        slack_id_match = re.search(r'"sender_id":\s*"(U[A-Z0-9]+)"', text)
+        if slack_id_match:
+            slack_sender_id = slack_id_match.group(1)
         return {
-            "sender_id": None,
+            "sender_id": slack_sender_id,
             "sender_name": extracted_name,
             "cleaned_content": extracted_content,
             "message_source": "slack"
