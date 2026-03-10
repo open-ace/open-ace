@@ -409,6 +409,8 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
     assistant_senders = {}
     # Also collect toolResult senders for assistant attribution (multi-turn conversations)
     toolResult_senders = {}
+    # Also collect error senders for assistant attribution (error messages can have senders too)
+    error_senders = {}
 
     with open(filepath, "r", encoding="utf-8") as f:
         for line in f:
@@ -504,10 +506,12 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                             full_entry_json = json.dumps(entry, ensure_ascii=False)
 
                             # For assistant messages without sender, try to get sender from parent
-                            # Priority: toolResult > assistant > user
+                            # Priority: toolResult > error > assistant > user
                             if role == "assistant" and not sender_id and not sender_name and parent_id:
                                 if parent_id in toolResult_senders:
                                     sender_id, sender_name = toolResult_senders[parent_id]
+                                elif parent_id in error_senders:
+                                    sender_id, sender_name = error_senders[parent_id]
                                 elif parent_id in assistant_senders:
                                     sender_id, sender_name = assistant_senders[parent_id]
                                 elif parent_id in user_senders:
@@ -579,12 +583,14 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                                 content += f" Provider: {provider}"
 
                             # Try to get sender from parent message
-                            # Priority: toolResult > assistant > user
+                            # Priority: toolResult > error > assistant > user
                             sender_id = None
                             sender_name = None
                             if parent_id:
                                 if parent_id in toolResult_senders:
                                     sender_id, sender_name = toolResult_senders[parent_id]
+                                elif parent_id in error_senders:
+                                    sender_id, sender_name = error_senders[parent_id]
                                 elif parent_id in assistant_senders:
                                     sender_id, sender_name = assistant_senders[parent_id]
                                 elif parent_id in user_senders:
@@ -615,9 +621,9 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                                 group_subject=None,
                                 is_group_chat=None
                             )
-                            # Store error sender for future messages
+                            # Store error sender for future messages (assistant can inherit from error)
                             if sender_id or sender_name:
-                                assistant_senders[message_id] = (sender_id, sender_name)
+                                error_senders[message_id] = (sender_id, sender_name)
                         # For other custom types (e.g., model-snapshot), skip them
                         # as they are just status notifications without meaningful content
 
