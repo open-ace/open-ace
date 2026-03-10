@@ -78,6 +78,11 @@ SCREENSHOT_TARGETS = {
         'description': 'User Segmentation Chart',
         'selector': '.card:has(#userSegmentationChart)',
         'full_page': False
+    },
+    'session-history': {
+        'description': 'Session History Tab',
+        'selector': '#session-history-content',
+        'full_page': False
     }
 }
 
@@ -135,7 +140,7 @@ def take_screenshots(url: str, output_dir: str, targets: list, title: str = None
         page.reload(wait_until='networkidle', timeout=TIMEOUT)
         
         # Check if we need to navigate to Analysis section
-        needs_analysis = any(t in ['analysis', 'datepicker', 'heatmap', 'metrics', 'tokens', 'peak'] for t in targets)
+        needs_analysis = any(t in ['analysis', 'datepicker', 'heatmap', 'metrics', 'tokens', 'peak', 'session-history'] for t in targets)
         if needs_analysis:
             try:
                 # Try multiple selectors for Analysis link
@@ -160,6 +165,17 @@ def take_screenshots(url: str, output_dir: str, targets: list, title: str = None
                     page.wait_for_timeout(2000)
                     # Wait for analysis section to be visible
                     page.wait_for_selector('#analysis-section', state='visible', timeout=5000)
+                    
+                    # Click Session History tab if needed
+                    if 'session-history' in targets:
+                        try:
+                            session_tab = page.locator('#session-history-tab').first
+                            if session_tab.is_visible(timeout=1000):
+                                session_tab.click()
+                                print("Clicked Session History tab")
+                                page.wait_for_timeout(2000)
+                        except Exception as e:
+                            print(f"Warning: Could not click Session History tab: {e}")
                 else:
                     print("Warning: Could not find Analysis tab")
             except Exception as e:

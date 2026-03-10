@@ -1925,3 +1925,375 @@ def get_all_hosts_with_status() -> List[Dict]:
     results.sort(key=lambda x: x.get('last_updated') or '', reverse=True)
 
     return results
+
+
+# =============================================================================
+# Session History Module - 会话历史查询函数
+# =============================================================================
+
+def get_session_history(
+    start_date: str,
+    end_date: str,
+    tool_name: Optional[str] = None,
+    host_name: Optional[str] = None,
+    page: int = 1,
+    limit: int = 20,
+    sort_by: str = 'start_time',
+    sort_order: str = 'desc'
+) -> Dict:
+    """Get session history with pagination and sorting.
+
+    A session is identified by conversation_label or parent_id relationships.
+    For messages without conversation_label, we group by (sender_id/sender_name, date)
+    and order by timestamp to form sessions.
+
+    Args:
+        start_date: Start date in YYYY-MM-DD format
+        end_date: End date in YYYY-MM-DD format
+        tool_name: Optional tool name filter
+        host_name: Optional host name filter
+        page: Page number (1-indexed)
+        limit: Number of results per page
+        sort_by: Field to sort by (session_id, user, model, start_time, end_time,
+                 user_messages, ai_messages, avg_latency)
+        sort_order: Sort order (asc or desc)
+
+    Returns:
+        Dict with 'sessions' (list), 'total' (int), 'page', 'limit', 'total_pages'
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # Build WHERE conditions
+    conditions = ['date >= ?', 'date <= ?']
+    params = [start_date, end_date]
+
+    if tool_name:
+        conditions.append('tool_name = ?')
+        params.append(tool_name)
+
+    if host_name:
+        conditions.append('host_name = ?')
+        params.append(host_name)
+
+    where_clause = ' AND '.join(conditions)
+
+    # First, get all messages ordered by timestamp to identify sessions
+    # We use conversation_label as primary session identifier, fallback to sender+date grouping
+    cursor.execute(f'''
+        SELECT
+            id,
+            date,
+            tool_name,
+            host_name,
+            message_id,
+            parent_id,
+            role,
+            content,
+            tokens_used,
+            model,
+            timestamp,
+            sender_id,
+            sender_name,
+            conversation_label
+        FROM daily_messages
+        WHERE {where_clause}
+        ORDER BY timestamp ASC
+    ''', params)
+
+    rows = cursor.fetchall()
+
+    # Group messages into sessions
+    # Strategy:
+    # 1. If conversation_label exists, use it as session identifier
+    # 2. Otherwise, group by (sender, date, tool_name) and use timestamp proximity
+    sessions = {}
+    session_counter = 0
+
+    for row in rows:
+        row_dict = dict(row)
+        sender = row_dict.get('sender_name') or row_dict.get('sender_id') or 'Unknown'
+        conv_label = row_dict.get('conversation_label')
+        timestamp = row_dict.get('timestamp')
+
+        # Determine session ID
+        if conv_label:
+            session_id = conv_label
+        else:
+            # Group by sender + date + tool_name
+            # Use a session key that combines sender, date, and tool
+            session_key = f"{sender}_{row_dict['date']}_{row_dict['tool_name']}"
+            session_id = session_key
+
+        if session_id not in sessions:
+            session_counter += 1
+            sessions[session_id] = {
+                'session_id': session_id,
+                'session_index': session_counter,
+                'user': sender,
+                'sender_id': row_dict.get('sender_id'),
+                'sender_name': row_dict.get('sender_name'),
+                'models': set(),
+                'start_time': None,
+                'end_time': None,
+                'user_messages': 0,
+                'ai_messages': 0,
+                'total_tokens': 0,
+                'messages': [],  # Store all messages for timeline/latency calculation
+                'tool_name': row_dict.get('tool_name'),
+                'host_name': row_dict.get('host_name'),
+                'date': row_dict.get('date')
+            }
+
+        session = sessions[session_id]
+
+        # Update session info
+        if row_dict.get('model'):
+            session['models'].add(row_dict['model'])
+
+        # Track timestamps
+        if timestamp:
+            if session['start_time'] is None or timestamp < session['start_time']:
+                session['start_time'] = timestamp
+            if session['end_time'] is None or timestamp > session['end_time']:
+                session['end_time'] = timestamp
+
+        # Count messages by role
+        role = row_dict.get('role', '').lower()
+        if role == 'user':
+            session['user_messages'] += 1
+        elif role == 'assistant':
+            session['ai_messages'] += 1
+
+        # Sum tokens
+        session['total_tokens'] += row_dict.get('tokens_used') or 0
+
+        # Store message for timeline/latency calculation
+        session['messages'].append({
+            'timestamp': timestamp,
+            'role': role,
+            'tokens': row_dict.get('tokens_used') or 0
+        })
+
+    # Calculate average latency for each session
+    for session_id, session in sessions.items():
+        session['models'] = list(session['models'])
+        session['avg_latency'] = _calculate_avg_latency(session['messages'])
+        # Remove messages list from final output (too much data)
+        del session['messages']
+
+    # Convert to list for sorting and pagination
+    sessions_list = list(sessions.values())
+
+    # Sort sessions
+    sort_field_map = {
+        'session_id': 'session_id',
+        'user': 'user',
+        'model': 'models',
+        'start_time': 'start_time',
+        'end_time': 'end_time',
+        'user_messages': 'user_messages',
+        'ai_messages': 'ai_messages',
+        'avg_latency': 'avg_latency'
+    }
+
+    sort_field = sort_field_map.get(sort_by, 'start_time')
+
+    def get_sort_key(session):
+        val = session.get(sort_field)
+        if val is None:
+            # Handle None values
+            if sort_field in ['user_messages', 'ai_messages', 'avg_latency']:
+                return 0
+            return ''
+        # For models field, use first model or empty string
+        if sort_field == 'models':
+            return val[0] if val else ''
+        return val
+
+    sessions_list.sort(key=get_sort_key, reverse=(sort_order == 'desc'))
+
+    # Paginate
+    total = len(sessions_list)
+    total_pages = (total + limit - 1) // limit if total > 0 else 1
+    start_idx = (page - 1) * limit
+    end_idx = start_idx + limit
+    paginated_sessions = sessions_list[start_idx:end_idx]
+
+    conn.close()
+
+    return {
+        'sessions': paginated_sessions,
+        'total': total,
+        'page': page,
+        'limit': limit,
+        'total_pages': total_pages
+    }
+
+
+def _calculate_avg_latency(messages: List[Dict]) -> float:
+    """Calculate average AI response latency from messages.
+
+    Latency is calculated as the time difference between a user message
+    and the following assistant message.
+
+    Args:
+        messages: List of message dicts with 'timestamp' and 'role' keys
+
+    Returns:
+        Average latency in seconds, or 0 if cannot be calculated
+    """
+    if not messages or len(messages) < 2:
+        return 0.0
+
+    # Sort messages by timestamp
+    sorted_msgs = sorted([m for m in messages if m.get('timestamp')],
+                         key=lambda x: x['timestamp'])
+
+    latencies = []
+    prev_user_time = None
+
+    for msg in sorted_msgs:
+        timestamp_str = msg.get('timestamp')
+        role = msg.get('role', '')
+
+        if not timestamp_str:
+            continue
+
+        try:
+            # Parse timestamp
+            if 'T' in timestamp_str:
+                ts = timestamp_str.replace('Z', '')
+                if '.' in ts:
+                    msg_time = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S.%f")
+                else:
+                    msg_time = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S")
+            else:
+                if '.' in timestamp_str:
+                    msg_time = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S.%f")
+                else:
+                    msg_time = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
+        except (ValueError, TypeError):
+            continue
+
+        if role == 'user':
+            prev_user_time = msg_time
+        elif role == 'assistant' and prev_user_time is not None:
+            latency = (msg_time - prev_user_time).total_seconds()
+            if latency > 0:  # Only count positive latencies
+                latencies.append(latency)
+            prev_user_time = None  # Reset after calculating
+
+    if not latencies:
+        return 0.0
+
+    return round(sum(latencies) / len(latencies), 2)
+
+
+def get_session_timeline(session_id: str) -> Dict:
+    """Get detailed timeline data for a specific session.
+
+    Args:
+        session_id: The session identifier (conversation_label or generated key)
+
+    Returns:
+        Dict with timeline data for rendering charts
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # Try to find messages by conversation_label first
+    cursor.execute('''
+        SELECT
+            timestamp,
+            role,
+            tokens_used,
+            model,
+            sender_name,
+            sender_id
+        FROM daily_messages
+        WHERE conversation_label = ?
+        ORDER BY timestamp ASC
+    ''', [session_id])
+
+    rows = cursor.fetchall()
+
+    # If no results, try parsing the session_id (format: sender_date_tool)
+    if not rows:
+        parts = session_id.rsplit('_', 2)
+        if len(parts) >= 3:
+            sender = parts[0]
+            date = parts[1]
+            tool = parts[2]
+
+            cursor.execute('''
+                SELECT
+                    timestamp,
+                    role,
+                    tokens_used,
+                    model,
+                    sender_name,
+                    sender_id
+                FROM daily_messages
+                WHERE date = ? AND tool_name = ?
+                  AND (sender_name = ? OR sender_id = ?)
+                ORDER BY timestamp ASC
+            ''', [date, tool, sender, sender])
+            rows = cursor.fetchall()
+
+    conn.close()
+
+    if not rows:
+        return {'timeline': [], 'latency_curve': []}
+
+    timeline = []
+    latency_data = []
+    prev_user_time = None
+
+    for row in rows:
+        timestamp_str = row['timestamp']
+        if not timestamp_str:
+            continue
+
+        try:
+            # Parse timestamp
+            if 'T' in timestamp_str:
+                ts = timestamp_str.replace('Z', '')
+                if '.' in ts:
+                    msg_time = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S.%f")
+                else:
+                    msg_time = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S")
+            else:
+                if '.' in timestamp_str:
+                    msg_time = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S.%f")
+                else:
+                    msg_time = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
+        except (ValueError, TypeError):
+            continue
+
+        role = row['role'] or 'unknown'
+
+        timeline.append({
+            'timestamp': timestamp_str,
+            'time': msg_time.strftime('%H:%M:%S'),
+            'role': role,
+            'tokens': row['tokens_used'] or 0
+        })
+
+        # Calculate latency for assistant messages
+        if role == 'user':
+            prev_user_time = msg_time
+        elif role == 'assistant' and prev_user_time is not None:
+            latency = (msg_time - prev_user_time).total_seconds()
+            if latency > 0:
+                latency_data.append({
+                    'timestamp': timestamp_str,
+                    'time': msg_time.strftime('%H:%M:%S'),
+                    'latency': round(latency, 2)
+                })
+            prev_user_time = None
+
+    return {
+        'timeline': timeline,
+        'latency_curve': latency_data
+    }

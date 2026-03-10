@@ -749,14 +749,21 @@
 
     <!-- Analysis Section -->
     <div id="analysis-section" class="content-section" style="display: none; min-height: calc(100vh - 70px);">
-        <div class="d-flex justify-content-between align-items-center mb-4">
+        <div class="d-flex justify-content-between align-items-center mb-3">
             <h3><i class="bi bi-graph-up"></i> <span id="analysis-title">Analysis</span></h3>
             <div class="d-flex gap-2">
+                <!-- Quick Date Range Selector -->
+                <div class="btn-group btn-group-sm" role="group" id="analysis-quick-date-group">
+                    <button type="button" class="btn btn-outline-secondary active" data-range="7" onclick="setQuickDateRange(7)"><span id="quick-date-7">Last 7 Days</span></button>
+                    <button type="button" class="btn btn-outline-secondary" data-range="30" onclick="setQuickDateRange(30)"><span id="quick-date-30">Last 30 Days</span></button>
+                    <button type="button" class="btn btn-outline-secondary" data-range="90" onclick="setQuickDateRange(90)"><span id="quick-date-90">Last 90 Days</span></button>
+                    <button type="button" class="btn btn-outline-secondary" data-range="all" onclick="setQuickDateRange('all')"><span id="quick-date-all">All Time</span></button>
+                </div>
                 <div class="input-group input-group-sm" style="width: 380px;">
                     <span class="input-group-text"><i class="bi bi-calendar-range"></i></span>
-                    <input type="date" class="form-control" id="analysis-start-date" value="" style="min-width: 130px;">
+                    <input type="date" class="form-control" id="analysis-start-date" value="" style="min-width: 130px;" onchange="onAnalysisDateChange()">
                     <span class="input-group-text">to</span>
-                    <input type="date" class="form-control" id="analysis-end-date" value="" style="min-width: 130px;">
+                    <input type="date" class="form-control" id="analysis-end-date" value="" style="min-width: 130px;" onchange="onAnalysisDateChange()">
                 </div>
                 <select class="form-select form-select-sm" id="analysis-tool-filter" style="width: 150px;">
                     <option value="">All Tools</option>
@@ -770,6 +777,25 @@
             </div>
         </div>
 
+        <!-- Analysis Tabs -->
+        <div class="analysis-nav mb-3">
+            <ul class="nav nav-tabs" id="analysisTabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="analysis-overview-tab" data-bs-toggle="tab" data-bs-target="#analysis-overview-content" type="button">
+                        <i class="bi bi-graph-up"></i> <span id="analysis-overview-tab-text">Overview</span>
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="session-history-tab" data-bs-toggle="tab" data-bs-target="#session-history-content" type="button">
+                        <i class="bi bi-chat-history"></i> <span id="session-history-tab-text">Session History</span>
+                    </button>
+                </li>
+            </ul>
+        </div>
+
+        <div class="tab-content" id="analysisTabsContent">
+            <!-- Overview Tab -->
+            <div class="tab-pane fade show active" id="analysis-overview-content">
         <!-- Key Metrics Cards -->
         <div class="row mb-4" id="analysis-key-metrics">
             <div class="col-md-2">
@@ -976,6 +1002,102 @@
                             <div class="text-center text-muted">Loading...</div>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+            </div><!-- End Overview Tab -->
+
+            <!-- Session History Tab -->
+            <div class="tab-pane fade" id="session-history-content">
+                <div class="card">
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover mb-0" id="session-history-table-container">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th class="sortable" data-sort-key="session_id" onclick="sortSessionHistory('session_id')">
+                                            <span id="sh-session">Session</span> <i class="bi bi-arrow-down-up sort-icon"></i>
+                                        </th>
+                                        <th class="sortable" data-sort-key="user" onclick="sortSessionHistory('user')">
+                                            <span id="sh-user">User</span> <i class="bi bi-arrow-down-up sort-icon"></i>
+                                        </th>
+                                        <th class="sortable" data-sort-key="model" onclick="sortSessionHistory('model')">
+                                            <span id="sh-model">Model</span> <i class="bi bi-arrow-down-up sort-icon"></i>
+                                        </th>
+                                        <th class="sortable" data-sort-key="start_time" onclick="sortSessionHistory('start_time')">
+                                            <span id="sh-start">Start Time</span> <i class="bi bi-arrow-down-up sort-icon"></i>
+                                        </th>
+                                        <th class="sortable" data-sort-key="end_time" onclick="sortSessionHistory('end_time')">
+                                            <span id="sh-end">End Time</span> <i class="bi bi-arrow-down-up sort-icon"></i>
+                                        </th>
+                                        <th class="sortable text-end" data-sort-key="user_messages" onclick="sortSessionHistory('user_messages')">
+                                            <span id="sh-user-msg">User Msgs</span> <i class="bi bi-arrow-down-up sort-icon"></i>
+                                        </th>
+                                        <th class="sortable text-end" data-sort-key="ai_messages" onclick="sortSessionHistory('ai_messages')">
+                                            <span id="sh-ai-msg">AI Msgs</span> <i class="bi bi-arrow-down-up sort-icon"></i>
+                                        </th>
+                                        <th class="sortable text-end" data-sort-key="avg_latency" onclick="sortSessionHistory('avg_latency')">
+                                            <span id="sh-latency">Avg Latency</span> <i class="bi bi-arrow-down-up sort-icon"></i>
+                                        </th>
+                                        <th><span id="sh-timeline">Timeline</span></th>
+                                        <th><span id="sh-latency-curve">Latency Curve</span></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="session-history-table">
+                                    <tr><td colspan="10" class="text-center text-muted">Loading...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <!-- Pagination -->
+                        <div class="d-flex justify-content-between align-items-center mt-3">
+                            <div class="text-muted">
+                                <span id="session-history-count">0</span> sessions
+                            </div>
+                            <nav aria-label="Session history pagination">
+                                <ul class="pagination pagination-sm mb-0" id="session-history-pagination">
+                                    <li class="page-item disabled" id="session-prev-page">
+                                        <a class="page-link" href="#" onclick="sessionHistoryPrevPage()"><i class="bi bi-chevron-left"></i></a>
+                                    </li>
+                                    <li class="page-item" id="session-page-display">
+                                        <span class="page-link"><span id="session-current-page">1</span> / <span id="session-total-pages">1</span></span>
+                                    </li>
+                                    <li class="page-item" id="session-next-page">
+                                        <a class="page-link" href="#" onclick="sessionHistoryNextPage()"><i class="bi bi-chevron-right"></i></a>
+                                    </li>
+                                </ul>
+                            </nav>
+                        </div>
+                    </div>
+                </div>
+            </div><!-- End Session History Tab -->
+        </div><!-- End tab-content -->
+    </div><!-- End Analysis Section -->
+
+    <!-- Timeline Modal -->
+    <div class="modal fade" id="timelineModal" tabindex="-1" aria-labelledby="timelineModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="timelineModalLabel">Conversation Timeline</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <canvas id="timelineModalChart" height="200"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Latency Modal -->
+    <div class="modal fade" id="latencyModal" tabindex="-1" aria-labelledby="latencyModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="latencyModalLabel">Latency Curve</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <canvas id="latencyModalChart" height="200"></canvas>
                 </div>
             </div>
         </div>
@@ -1218,6 +1340,10 @@
                 dashboardFilterRefresh: 'Refresh',
                 // Analysis page translations
                 analysisTitle: 'Analysis',
+                quickDate7: 'Last 7 Days',
+                quickDate30: 'Last 30 Days',
+                quickDate90: 'Last 90 Days',
+                quickDateAll: 'All Time',
                 analysisRefreshBtn: 'Refresh',
                 analysisHeatmapTitle: 'Usage Heatmap (Last 7 Days)',
                 analysisPeakTitle: 'Peak Usage Periods',
@@ -1275,7 +1401,27 @@
                 reportUsageByTool: 'Usage by Tool',
                 analysisComingSoon: 'Analysis page coming soon',
                 managementComingSoon: 'Quota management coming soon',
-                securityComingSoon: 'Security settings coming soon'
+                securityComingSoon: 'Security settings coming soon',
+                // Session History translations
+                analysisOverviewTab: 'Overview',
+                sessionHistoryTab: 'Session History',
+                shSession: 'Session',
+                shUser: 'User',
+                shModel: 'Model',
+                shStartTime: 'Start Time',
+                shEndTime: 'End Time',
+                shUserMsgs: 'User Msgs',
+                shAiMsgs: 'AI Msgs',
+                shAvgLatency: 'Avg Latency',
+                shTimeline: 'Timeline',
+                shLatencyCurve: 'Latency Curve',
+                shSessions: 'sessions',
+                shNoSessions: 'No sessions found',
+                shLoading: 'Loading...',
+                timelineModalTitle: 'Conversation Timeline',
+                latencyModalTitle: 'Latency Curve',
+                noTimelineData: 'No timeline data available',
+                noLatencyData: 'No latency data available'
             },
             zh: {
                 sidebarTitle: 'AI Token Analyzer',
@@ -1383,6 +1529,10 @@
                 dashboardFilterRefresh: '刷新',
                 // Analysis page translations
                 analysisTitle: '分析',
+                quickDate7: '最近 7 天',
+                quickDate30: '最近 30 天',
+                quickDate90: '最近 90 天',
+                quickDateAll: '全部时间',
                 analysisRefreshBtn: '刷新',
                 analysisHeatmapTitle: '用量热力图（最近 7 天）',
                 analysisPeakTitle: '高峰时段',
@@ -1440,7 +1590,25 @@
                 reportUsageByTool: '按工具用量',
                 analysisComingSoon: '分析页面即将推出',
                 managementComingSoon: '配额管理即将推出',
-                securityComingSoon: '安全设置即将推出'
+                securityComingSoon: '安全设置即将推出',
+                // Session History translations
+                analysisOverviewTab: '概览',
+                sessionHistoryTab: '会话历史',
+                shSession: '会话',
+                shUser: '用户',
+                shModel: '模型',
+                shStartTime: '开始时间',
+                shEndTime: '结束时间',
+                shUserMsgs: '用户消息',
+                shAiMsgs: 'AI 消息',
+                shAvgLatency: '平均延迟',
+                shTimeline: '时间线',
+                shLatencyCurve: '延迟曲线',
+                shSessions: '个会话',
+                shNoSessions: '未找到会话',
+                shLoading: '加载中...',
+                timelineModalTitle: '对话时间线',
+                latencyModalTitle: '延迟曲线'
             }
         };
 
@@ -1610,6 +1778,16 @@
         function updateAnalysisText() {
             const analysisTitle = document.getElementById('analysis-title');
             if (analysisTitle) analysisTitle.textContent = t('analysisText');
+
+            // Update quick date range buttons
+            const quickDate7 = document.getElementById('quick-date-7');
+            const quickDate30 = document.getElementById('quick-date-30');
+            const quickDate90 = document.getElementById('quick-date-90');
+            const quickDateAll = document.getElementById('quick-date-all');
+            if (quickDate7) quickDate7.textContent = t('quickDate7');
+            if (quickDate30) quickDate30.textContent = t('quickDate30');
+            if (quickDate90) quickDate90.textContent = t('quickDate90');
+            if (quickDateAll) quickDateAll.textContent = t('quickDateAll');
         }
 
         // Update management text based on current language
@@ -2843,6 +3021,40 @@
             document.getElementById('analysis-end-date').value = endDate.toISOString().split('T')[0];
             document.getElementById('analysis-start-date').value = startDate.toISOString().split('T')[0];
             analysisInitialized = true;
+        }
+
+        // Quick date range selector
+        function setQuickDateRange(range) {
+            const endDate = new Date();
+            let startDate = new Date();
+
+            if (range === 'all') {
+                // Set to a very early date for "All Time"
+                startDate = new Date('2020-01-01');
+            } else {
+                startDate.setDate(startDate.getDate() - range);
+            }
+
+            document.getElementById('analysis-end-date').value = endDate.toISOString().split('T')[0];
+            document.getElementById('analysis-start-date').value = startDate.toISOString().split('T')[0];
+
+            // Update button active state
+            const buttons = document.querySelectorAll('#analysis-quick-date-group button');
+            buttons.forEach(btn => {
+                btn.classList.remove('active');
+                if (btn.dataset.range === String(range)) {
+                    btn.classList.add('active');
+                }
+            });
+
+            // Reload data with new date range
+            loadAnalysisData();
+        }
+
+        // Handle manual date change - clear quick selector active state
+        function onAnalysisDateChange() {
+            const buttons = document.querySelectorAll('#analysis-quick-date-group button');
+            buttons.forEach(btn => btn.classList.remove('active'));
         }
 
         // Load Analysis data
@@ -4333,6 +4545,379 @@
                     }, 10);
                 }
             }, 100);
+        });
+
+        // =====================================================================
+        // Session History Functions - 会话历史数据加载和图表渲染
+        // =====================================================================
+
+        // Session History state
+        let sessionHistoryData = [];
+        let sessionHistoryPage = 1;
+        let sessionHistorySortBy = 'start_time';
+        let sessionHistorySortOrder = 'desc';
+        let timelineModalChart = null;
+        let latencyModalChart = null;
+
+        // Load Session History data
+        async function loadSessionHistory() {
+            const startDate = document.getElementById('analysis-start-date').value;
+            const endDate = document.getElementById('analysis-end-date').value;
+            const tool = document.getElementById('analysis-tool-filter').value;
+            const host = document.getElementById('analysis-host-filter').value;
+
+            if (!startDate || !endDate) {
+                return;
+            }
+
+            const params = new URLSearchParams({
+                start: startDate,
+                end: endDate,
+                tool: tool || '',
+                host: host || '',
+                page: sessionHistoryPage,
+                limit: 20,
+                sort_by: sessionHistorySortBy,
+                sort_order: sessionHistorySortOrder
+            });
+
+            try {
+                const response = await fetch(`/api/session-history?${params}`);
+                const data = await response.json();
+
+                sessionHistoryData = data.sessions || [];
+                renderSessionHistoryTable(data);
+            } catch (error) {
+                console.error('Error loading session history:', error);
+                document.getElementById('session-history-table').innerHTML =
+                    '<tr><td colspan="10" class="text-center text-danger">Error loading session history</td></tr>';
+            }
+        }
+
+        // Render Session History table
+        function renderSessionHistoryTable(data) {
+            const tbody = document.getElementById('session-history-table');
+            const sessions = data.sessions || [];
+
+            // Update pagination info
+            document.getElementById('session-history-count').textContent = data.total || 0;
+            document.getElementById('session-current-page').textContent = data.page || 1;
+            document.getElementById('session-total-pages').textContent = data.total_pages || 1;
+
+            // Update pagination buttons
+            const prevBtn = document.getElementById('session-prev-page');
+            const nextBtn = document.getElementById('session-next-page');
+            prevBtn.classList.toggle('disabled', data.page <= 1);
+            nextBtn.classList.toggle('disabled', data.page >= data.total_pages);
+
+            if (sessions.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted">No sessions found</td></tr>';
+                return;
+            }
+
+            let html = '';
+            sessions.forEach((session, index) => {
+                const sessionId = escapeHtmlForDisplay(session.session_id || '');
+                const user = escapeHtmlForDisplay(session.user || 'Unknown');
+                const models = (session.models || []).map(m => escapeHtmlForDisplay(m)).join(', ') || '-';
+                const startTime = session.start_time ? formatTimestamp(session.start_time) : '-';
+                const endTime = session.end_time ? formatTimestamp(session.end_time) : '-';
+                const userMsgs = session.user_messages || 0;
+                const aiMsgs = session.ai_messages || 0;
+                const avgLatency = session.avg_latency ? `${session.avg_latency.toFixed(1)}s` : '-';
+
+                html += `
+                    <tr>
+                        <td><small title="${sessionId}">${truncateText(sessionId, 20)}</small></td>
+                        <td>${user}</td>
+                        <td><small>${truncateText(models, 15)}</small></td>
+                        <td><small>${startTime}</small></td>
+                        <td><small>${endTime}</small></td>
+                        <td class="text-end">${userMsgs}</td>
+                        <td class="text-end">${aiMsgs}</td>
+                        <td class="text-end">${avgLatency}</td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-primary" onclick="showTimelineModal('${encodeURIComponent(sessionId)}')" title="View Timeline">
+                                <i class="bi bi-bar-chart-line"></i>
+                            </button>
+                        </td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-success" onclick="showLatencyModal('${encodeURIComponent(sessionId)}')" title="View Latency Curve">
+                                <i class="bi bi-graph-up"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            tbody.innerHTML = html;
+        }
+
+        // Format timestamp for display
+        function formatTimestamp(ts) {
+            if (!ts) return '-';
+            try {
+                const date = new Date(ts);
+                return date.toLocaleString();
+            } catch (e) {
+                return ts;
+            }
+        }
+
+        // Truncate text with ellipsis
+        function truncateText(text, maxLength) {
+            if (!text) return '';
+            return text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
+        }
+
+        // Sort Session History table
+        function sortSessionHistory(sortKey) {
+            if (sessionHistorySortBy === sortKey) {
+                sessionHistorySortOrder = sessionHistorySortOrder === 'asc' ? 'desc' : 'asc';
+            } else {
+                sessionHistorySortBy = sortKey;
+                sessionHistorySortOrder = 'desc';
+            }
+
+            // Update sort icons
+            updateSessionHistorySortIcons(sortKey, sessionHistorySortOrder);
+
+            // Reload data with new sort
+            loadSessionHistory();
+        }
+
+        // Update sort icons for session history table
+        function updateSessionHistorySortIcons(activeKey, direction) {
+            const headers = document.querySelectorAll('#session-history-table-container th.sortable');
+            headers.forEach(th => {
+                const key = th.getAttribute('data-sort-key');
+                const icon = th.querySelector('.sort-icon');
+                if (key === activeKey) {
+                    th.classList.add(direction === 'asc' ? 'sort-asc' : 'sort-desc');
+                    th.classList.remove(direction === 'asc' ? 'sort-desc' : 'sort-asc');
+                    if (icon) {
+                        icon.className = `bi bi-arrow-down-up sort-icon ${direction === 'asc' ? 'bi-arrow-up' : 'bi-arrow-down'}`;
+                    }
+                } else {
+                    th.classList.remove('sort-asc', 'sort-desc');
+                    if (icon) {
+                        icon.className = 'bi bi-arrow-down-up sort-icon';
+                    }
+                }
+            });
+        }
+
+        // Pagination functions
+        function sessionHistoryPrevPage() {
+            if (sessionHistoryPage > 1) {
+                sessionHistoryPage--;
+                loadSessionHistory();
+            }
+        }
+
+        function sessionHistoryNextPage() {
+            sessionHistoryPage++;
+            loadSessionHistory();
+        }
+
+        // Show Timeline Modal
+        async function showTimelineModal(sessionIdEncoded) {
+            const sessionId = decodeURIComponent(sessionIdEncoded);
+
+            // Show modal
+            const modal = new bootstrap.Modal(document.getElementById('timelineModal'));
+            modal.show();
+
+            try {
+                const response = await fetch(`/api/session-timeline/${encodeURIComponent(sessionId)}`);
+                const data = await response.json();
+
+                renderTimelineChart(data.timeline || []);
+            } catch (error) {
+                console.error('Error loading timeline:', error);
+            }
+        }
+
+        // Render Timeline Chart
+        function renderTimelineChart(timelineData) {
+            const ctx = document.getElementById('timelineModalChart').getContext('2d');
+
+            if (timelineModalChart) {
+                timelineModalChart.destroy();
+            }
+
+            if (!timelineData || timelineData.length === 0) {
+                ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+                ctx.font = '14px sans-serif';
+                ctx.fillStyle = '#6c757d';
+                ctx.textAlign = 'center';
+                ctx.fillText('No timeline data available', ctx.canvas.width / 2, ctx.canvas.height / 2);
+                return;
+            }
+
+            // Create scatter plot for timeline
+            const userData = timelineData.filter(d => d.role === 'user').map((d, i) => ({
+                x: i,
+                y: 1,
+                time: d.time,
+                tokens: d.tokens
+            }));
+
+            const assistantData = timelineData.filter(d => d.role === 'assistant').map((d, i) => ({
+                x: i,
+                y: 2,
+                time: d.time,
+                tokens: d.tokens
+            }));
+
+            timelineModalChart = new Chart(ctx, {
+                type: 'scatter',
+                data: {
+                    datasets: [
+                        {
+                            label: 'User Messages',
+                            data: userData,
+                            backgroundColor: 'rgba(13, 110, 253, 0.7)',
+                            borderColor: 'rgba(13, 110, 253, 1)',
+                            pointRadius: 8,
+                            pointHoverRadius: 10
+                        },
+                        {
+                            label: 'AI Messages',
+                            data: assistantData,
+                            backgroundColor: 'rgba(25, 135, 84, 0.7)',
+                            borderColor: 'rgba(25, 135, 84, 1)',
+                            pointRadius: 8,
+                            pointHoverRadius: 10
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Message Sequence'
+                            },
+                            ticks: {
+                                stepSize: 1
+                            }
+                        },
+                        y: {
+                            min: 0,
+                            max: 3,
+                            ticks: {
+                                callback: function(value) {
+                                    if (value === 1) return 'User';
+                                    if (value === 2) return 'AI';
+                                    return '';
+                                }
+                            }
+                        }
+                    },
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const point = context.raw;
+                                    return [
+                                        `Time: ${point.time}`,
+                                        `Tokens: ${point.tokens}`
+                                    ];
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Show Latency Modal
+        async function showLatencyModal(sessionIdEncoded) {
+            const sessionId = decodeURIComponent(sessionIdEncoded);
+
+            // Show modal
+            const modal = new bootstrap.Modal(document.getElementById('latencyModal'));
+            modal.show();
+
+            try {
+                const response = await fetch(`/api/session-timeline/${encodeURIComponent(sessionId)}`);
+                const data = await response.json();
+
+                renderLatencyChart(data.latency_curve || []);
+            } catch (error) {
+                console.error('Error loading latency curve:', error);
+            }
+        }
+
+        // Render Latency Chart
+        function renderLatencyChart(latencyData) {
+            const ctx = document.getElementById('latencyModalChart').getContext('2d');
+
+            if (latencyModalChart) {
+                latencyModalChart.destroy();
+            }
+
+            if (!latencyData || latencyData.length === 0) {
+                ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+                ctx.font = '14px sans-serif';
+                ctx.fillStyle = '#6c757d';
+                ctx.textAlign = 'center';
+                ctx.fillText('No latency data available', ctx.canvas.width / 2, ctx.canvas.height / 2);
+                return;
+            }
+
+            latencyModalChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: latencyData.map(d => d.time),
+                    datasets: [{
+                        label: 'Response Latency (seconds)',
+                        data: latencyData.map(d => d.latency),
+                        borderColor: 'rgba(255, 193, 7, 1)',
+                        backgroundColor: 'rgba(255, 193, 7, 0.2)',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 4,
+                        pointHoverRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Latency (seconds)'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Time'
+                            }
+                        }
+                    },
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `Latency: ${context.raw.toFixed(2)}s`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Listen for tab change to load session history
+        document.getElementById('session-history-tab')?.addEventListener('shown.bs.tab', function() {
+            loadSessionHistory();
         });
     </script>
 </body>
