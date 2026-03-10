@@ -431,7 +431,10 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
 
                 # Extract and save individual message
                 entry_type = entry.get("type")
+
+                # Process different entry types
                 if entry_type == "message":
+                    # Process regular message entries
                     msg = entry.get("message", {})
                     if isinstance(msg, dict):
                         # Get message ID
@@ -552,6 +555,56 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                                 group_subject=group_subject,
                                 is_group_chat=is_group_chat
                             )
+
+                elif entry_type == "custom":
+                    # Process custom entries (e.g., openclaw:prompt-error)
+                    custom_type = entry.get("customType")
+                    message_id = entry.get("id")
+                    parent_id = entry.get("parentId")
+                    
+                    # Only save if we have a message_id
+                    if message_id:
+                        # For openclaw:prompt-error, extract error info
+                        if custom_type == "openclaw:prompt-error":
+                            data = entry.get("data", {})
+                            error = data.get("error", "unknown") if isinstance(data, dict) else "unknown"
+                            model = data.get("model") if isinstance(data, dict) else None
+                            provider = data.get("provider") if isinstance(data, dict) else None
+                            
+                            # Build error content
+                            content = f"[Error: {error}]"
+                            if model:
+                                content += f" Model: {model}"
+                            if provider:
+                                content += f" Provider: {provider}"
+                            
+                            # Save full entry as JSON for complete original data
+                            full_entry_json = json.dumps(entry, ensure_ascii=False)
+                            
+                            # Save error message to database with 0 tokens
+                            db.save_message(
+                                date=date_key,
+                                tool_name="openclaw",
+                                host_name=hostname,
+                                message_id=message_id,
+                                parent_id=parent_id,
+                                role="error",
+                                content=content,
+                                full_entry=full_entry_json,
+                                tokens_used=0,
+                                input_tokens=0,
+                                output_tokens=0,
+                                model=model,
+                                timestamp=ts,
+                                sender_id=None,
+                                sender_name=None,
+                                message_source="openclaw",
+                                conversation_label=None,
+                                group_subject=None,
+                                is_group_chat=None
+                            )
+                        # For other custom types (e.g., model-snapshot), skip them
+                        # as they are just status notifications without meaningful content
 
                 if sum([
                     tokens["input_tokens"],
