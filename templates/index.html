@@ -427,6 +427,40 @@
             background-color: #6c757d;
         }
 
+        /* Sortable table headers */
+        .sortable {
+            cursor: pointer;
+            user-select: none;
+            transition: background-color 0.2s;
+            white-space: nowrap;
+        }
+
+        .sortable:hover {
+            background-color: rgba(0, 0, 0, 0.05);
+        }
+
+        .sortable .sort-icon {
+            font-size: 0.7rem;
+            opacity: 0.5;
+            margin-left: 4px;
+            transition: opacity 0.2s, color 0.2s;
+            color: #6c757d;
+        }
+
+        .sortable:hover .sort-icon {
+            opacity: 0.8;
+        }
+
+        .sortable.sort-asc .sort-icon {
+            opacity: 1;
+            color: #0d6efd;
+        }
+
+        .sortable.sort-desc .sort-icon {
+            opacity: 1;
+            color: #0d6efd;
+        }
+
         /* Responsive */
         @media (max-width: 768px) {
             .sidebar {
@@ -808,12 +842,12 @@
                     </div>
                     <div class="card-body p-0">
                         <div class="table-responsive" style="max-height: 300px; overflow-y: auto;">
-                            <table class="table table-sm table-hover mb-0">
+                            <table class="table table-sm table-hover mb-0" id="peak-usage-table-container">
                                 <thead class="table-light">
                                     <tr>
-                                        <th><span id="peak-date">Date</span></th>
-                                        <th><span id="peak-hour">Hour</span></th>
-                                        <th class="text-end"><span id="peak-tokens">Tokens</span></th>
+                                        <th class="sortable" data-sort-key="date" onclick="sortPeakUsageTable('date')"><span id="peak-date">Date</span> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                                        <th class="sortable" data-sort-key="hour" onclick="sortPeakUsageTable('hour')"><span id="peak-hour">Hour</span> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                                        <th class="sortable text-end" data-sort-key="tokens" onclick="sortPeakUsageTable('tokens')"><span id="peak-tokens">Tokens</span> <i class="bi bi-arrow-down-up sort-icon"></i></th>
                                     </tr>
                                 </thead>
                                 <tbody id="peak-usage-table">
@@ -835,13 +869,13 @@
                     </div>
                     <div class="card-body p-0">
                         <div class="table-responsive">
-                            <table class="table table-sm table-hover mb-0">
+                            <table class="table table-sm table-hover mb-0" id="user-ranking-table-container">
                                 <thead class="table-light">
                                     <tr>
-                                        <th><span id="ranking-user">User</span></th>
-                                        <th class="text-end"><span id="ranking-messages">Messages</span></th>
-                                        <th class="text-end"><span id="ranking-tokens">Tokens</span></th>
-                                        <th class="text-end"><span id="ranking-days">Days</span></th>
+                                        <th class="sortable" data-sort-key="user" onclick="sortUserRankingTable('user')"><span id="ranking-user">User</span> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                                        <th class="sortable text-end" data-sort-key="messages" onclick="sortUserRankingTable('messages')"><span id="ranking-messages">Messages</span> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                                        <th class="sortable text-end" data-sort-key="tokens" onclick="sortUserRankingTable('tokens')"><span id="ranking-tokens">Tokens</span> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                                        <th class="sortable text-end" data-sort-key="days" onclick="sortUserRankingTable('days')"><span id="ranking-days">Days</span> <i class="bi bi-arrow-down-up sort-icon"></i></th>
                                     </tr>
                                 </thead>
                                 <tbody id="user-ranking-table">
@@ -914,14 +948,14 @@
                     </div>
                     <div class="card-body">
                         <div class="table-responsive" style="max-height: 250px; overflow-y: auto;">
-                            <table class="table table-sm mb-0">
+                            <table class="table table-sm mb-0" id="anomaly-table-container">
                                 <thead class="table-light">
                                     <tr>
-                                        <th><span id="anomaly-date">Date</span></th>
-                                        <th><span id="anomaly-tool">Tool</span></th>
-                                        <th><span id="anomaly-type">Type</span></th>
-                                        <th class="text-end"><span id="anomaly-tokens">Tokens</span></th>
-                                        <th><span id="anomaly-severity">Severity</span></th>
+                                        <th class="sortable" data-sort-key="date" onclick="sortAnomalyTable('date')"><span id="anomaly-date">Date</span> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                                        <th class="sortable" data-sort-key="tool" onclick="sortAnomalyTable('tool')"><span id="anomaly-tool">Tool</span> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                                        <th class="sortable" data-sort-key="type" onclick="sortAnomalyTable('type')"><span id="anomaly-type">Type</span> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                                        <th class="sortable text-end" data-sort-key="tokens" onclick="sortAnomalyTable('tokens')"><span id="anomaly-tokens">Tokens</span> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                                        <th class="sortable" data-sort-key="severity" onclick="sortAnomalyTable('severity')"><span id="anomaly-severity">Severity</span> <i class="bi bi-arrow-down-up sort-icon"></i></th>
                                     </tr>
                                 </thead>
                                 <tbody id="anomaly-table">
@@ -2755,6 +2789,48 @@
         let userSegmentationChartInstance = null;
         let analysisInitialized = false;
 
+        // Store original data for sorting
+        let peakUsageData = [];
+        let userRankingData = [];
+        let anomalyData = [];
+
+        // Sort state for each table
+        let peakUsageSortState = { key: null, direction: 'asc' };
+        let userRankingSortState = { key: null, direction: 'asc' };
+        let anomalySortState = { key: null, direction: 'asc' };
+
+        // Update sort icons for a table
+        function updateSortIcons(tableContainer, sortKey, direction) {
+            const container = typeof tableContainer === 'string'
+                ? document.getElementById(tableContainer)
+                : tableContainer;
+
+            if (!container) return;
+
+            // Remove all sort classes from headers and reset icons
+            container.querySelectorAll('th.sortable').forEach(th => {
+                th.classList.remove('sort-asc', 'sort-desc');
+                const icon = th.querySelector('.sort-icon');
+                if (icon) {
+                    icon.classList.remove('bi-arrow-up', 'bi-arrow-down');
+                    icon.classList.add('bi-arrow-down-up');
+                }
+            });
+
+            // Add sort class to the active header and update icon
+            if (sortKey) {
+                const activeHeader = container.querySelector(`th[data-sort-key="${sortKey}"]`);
+                if (activeHeader) {
+                    activeHeader.classList.add(direction === 'asc' ? 'sort-asc' : 'sort-desc');
+                    const icon = activeHeader.querySelector('.sort-icon');
+                    if (icon) {
+                        icon.classList.remove('bi-arrow-down-up');
+                        icon.classList.add(direction === 'asc' ? 'bi-arrow-up' : 'bi-arrow-down');
+                    }
+                }
+            }
+        }
+
         // Initialize Analysis page date range (last 7 days)
         function initAnalysisDateRange() {
             // Only initialize once
@@ -2989,22 +3065,82 @@
                 const response = await fetch(`/api/analysis/peak-usage?${params}`);
                 const data = await response.json();
 
-                const tbody = document.getElementById('peak-usage-table');
-                if (data.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">No data</td></tr>';
-                    return;
-                }
+                // Store original data for sorting
+                peakUsageData = data;
+                peakUsageSortState = { key: null, direction: 'asc' };
+                updateSortIcons('peak-usage-table-container', null);
 
-                tbody.innerHTML = data.map(d => `
-                    <tr>
-                        <td>${d.date}</td>
-                        <td>${d.hour}:00</td>
-                        <td class="text-end">${formatTokens(d.tokens_used)}</td>
-                    </tr>
-                `).join('');
+                renderPeakUsageTable(data);
             } catch (error) {
                 console.error('Error loading peak usage:', error);
             }
+        }
+
+        // Render Peak Usage table
+        function renderPeakUsageTable(data) {
+            const tbody = document.getElementById('peak-usage-table');
+            if (!data || data.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">No data</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = data.map(d => `
+                <tr>
+                    <td>${d.date}</td>
+                    <td>${d.hour}:00</td>
+                    <td class="text-end">${formatTokens(d.tokens_used)}</td>
+                </tr>
+            `).join('');
+        }
+
+        // Sort Peak Usage table
+        function sortPeakUsageTable(sortKey) {
+            const tableContainer = document.getElementById('peak-usage-table-container');
+
+            // Toggle direction if same key, otherwise default to asc
+            if (peakUsageSortState.key === sortKey) {
+                peakUsageSortState.direction = peakUsageSortState.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+                peakUsageSortState.key = sortKey;
+                peakUsageSortState.direction = 'asc';
+            }
+
+            // Update sort icons
+            updateSortIcons(tableContainer, sortKey, peakUsageSortState.direction);
+
+            // Sort data
+            const sortedData = [...peakUsageData].sort((a, b) => {
+                let valA, valB;
+
+                switch (sortKey) {
+                    case 'date':
+                        valA = a.date;
+                        valB = b.date;
+                        break;
+                    case 'hour':
+                        valA = a.hour;
+                        valB = b.hour;
+                        break;
+                    case 'tokens':
+                        valA = a.tokens_used;
+                        valB = b.tokens_used;
+                        break;
+                    default:
+                        return 0;
+                }
+
+                if (typeof valA === 'number' && typeof valB === 'number') {
+                    return peakUsageSortState.direction === 'asc' ? valA - valB : valB - valA;
+                }
+
+                const strA = String(valA || '');
+                const strB = String(valB || '');
+                return peakUsageSortState.direction === 'asc'
+                    ? strA.localeCompare(strB)
+                    : strB.localeCompare(strA);
+            });
+
+            renderPeakUsageTable(sortedData);
         }
 
         // Load User Ranking
@@ -3014,26 +3150,90 @@
                 const response = await fetch(`/api/analysis/user-ranking?${params}`);
                 const data = await response.json();
 
-                const tbody = document.getElementById('user-ranking-table');
-                if (data.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No data</td></tr>';
-                    return;
-                }
+                // Store original data for sorting
+                userRankingData = data;
+                userRankingSortState = { key: null, direction: 'asc' };
+                updateSortIcons('user-ranking-table-container', null);
 
-                tbody.innerHTML = data.map((d, i) => `
-                    <tr>
-                        <td>
-                            <span class="badge bg-${i < 3 ? 'warning' : 'secondary'} me-2">${i + 1}</span>
-                            ${escapeHtmlForDisplay(d.sender_name || d.sender_id || 'Unknown')}
-                        </td>
-                        <td class="text-end">${(d.message_count || 0).toLocaleString()}</td>
-                        <td class="text-end">${formatTokens(d.tokens_used || 0)}</td>
-                        <td class="text-end">${d.active_days || 0}</td>
-                    </tr>
-                `).join('');
+                renderUserRankingTable(data);
             } catch (error) {
                 console.error('Error loading user ranking:', error);
             }
+        }
+
+        // Render User Ranking table
+        function renderUserRankingTable(data) {
+            const tbody = document.getElementById('user-ranking-table');
+            if (!data || data.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No data</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = data.map((d, i) => `
+                <tr>
+                    <td>
+                        <span class="badge bg-${i < 3 ? 'warning' : 'secondary'} me-2">${i + 1}</span>
+                        ${escapeHtmlForDisplay(d.sender_name || d.sender_id || 'Unknown')}
+                    </td>
+                    <td class="text-end">${(d.message_count || 0).toLocaleString()}</td>
+                    <td class="text-end">${formatTokens(d.tokens_used || 0)}</td>
+                    <td class="text-end">${d.active_days || 0}</td>
+                </tr>
+            `).join('');
+        }
+
+        // Sort User Ranking table
+        function sortUserRankingTable(sortKey) {
+            const tableContainer = document.getElementById('user-ranking-table-container');
+
+            // Toggle direction if same key, otherwise default to asc
+            if (userRankingSortState.key === sortKey) {
+                userRankingSortState.direction = userRankingSortState.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+                userRankingSortState.key = sortKey;
+                userRankingSortState.direction = 'asc';
+            }
+
+            // Update sort icons
+            updateSortIcons(tableContainer, sortKey, userRankingSortState.direction);
+
+            // Sort data
+            const sortedData = [...userRankingData].sort((a, b) => {
+                let valA, valB;
+
+                switch (sortKey) {
+                    case 'user':
+                        valA = a.sender_name || a.sender_id || 'Unknown';
+                        valB = b.sender_name || b.sender_id || 'Unknown';
+                        break;
+                    case 'messages':
+                        valA = a.message_count || 0;
+                        valB = b.message_count || 0;
+                        break;
+                    case 'tokens':
+                        valA = a.tokens_used || 0;
+                        valB = b.tokens_used || 0;
+                        break;
+                    case 'days':
+                        valA = a.active_days || 0;
+                        valB = b.active_days || 0;
+                        break;
+                    default:
+                        return 0;
+                }
+
+                if (typeof valA === 'number' && typeof valB === 'number') {
+                    return userRankingSortState.direction === 'asc' ? valA - valB : valB - valA;
+                }
+
+                const strA = String(valA || '');
+                const strB = String(valB || '');
+                return userRankingSortState.direction === 'asc'
+                    ? strA.localeCompare(strB)
+                    : strB.localeCompare(strA);
+            });
+
+            renderUserRankingTable(sortedData);
         }
 
         // Load Session Statistics
@@ -3257,32 +3457,100 @@
                 // Update anomaly count in metrics
                 document.getElementById('metric-anomalies').textContent = data.length;
 
-                const tbody = document.getElementById('anomaly-table');
-                if (data.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No anomalies detected</td></tr>';
-                    return;
-                }
+                // Store original data for sorting (limit to 10 for display)
+                anomalyData = data.slice(0, 10);
+                anomalySortState = { key: null, direction: 'asc' };
+                updateSortIcons('anomaly-table-container', null);
 
-                tbody.innerHTML = data.slice(0, 10).map(d => `
-                    <tr>
-                        <td>${d.date}</td>
-                        <td>${d.tool_name}</td>
-                        <td>
-                            <span class="badge bg-${d.anomaly_type === 'spike' ? 'danger' : 'warning'}">
-                                ${d.anomaly_type === 'spike' ? '↑ Spike' : '↓ Drop'}
-                            </span>
-                        </td>
-                        <td class="text-end">${formatTokens(d.tokens_used)}</td>
-                        <td>
-                            <span class="badge bg-${d.severity === 'high' ? 'danger' : 'warning'}">
-                                ${d.severity}
-                            </span>
-                        </td>
-                    </tr>
-                `).join('');
+                renderAnomalyTable(anomalyData);
             } catch (error) {
                 console.error('Error loading anomaly detection:', error);
             }
+        }
+
+        // Render Anomaly table
+        function renderAnomalyTable(data) {
+            const tbody = document.getElementById('anomaly-table');
+            if (!data || data.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No anomalies detected</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = data.map(d => `
+                <tr>
+                    <td>${d.date}</td>
+                    <td>${d.tool_name}</td>
+                    <td>
+                        <span class="badge bg-${d.anomaly_type === 'spike' ? 'danger' : 'warning'}">
+                            ${d.anomaly_type === 'spike' ? '↑ Spike' : '↓ Drop'}
+                        </span>
+                    </td>
+                    <td class="text-end">${formatTokens(d.tokens_used)}</td>
+                    <td>
+                        <span class="badge bg-${d.severity === 'high' ? 'danger' : 'warning'}">
+                            ${d.severity}
+                        </span>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        // Sort Anomaly table
+        function sortAnomalyTable(sortKey) {
+            const tableContainer = document.getElementById('anomaly-table-container');
+
+            // Toggle direction if same key, otherwise default to asc
+            if (anomalySortState.key === sortKey) {
+                anomalySortState.direction = anomalySortState.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+                anomalySortState.key = sortKey;
+                anomalySortState.direction = 'asc';
+            }
+
+            // Update sort icons
+            updateSortIcons(tableContainer, sortKey, anomalySortState.direction);
+
+            // Sort data
+            const sortedData = [...anomalyData].sort((a, b) => {
+                let valA, valB;
+
+                switch (sortKey) {
+                    case 'date':
+                        valA = a.date;
+                        valB = b.date;
+                        break;
+                    case 'tool':
+                        valA = a.tool_name;
+                        valB = b.tool_name;
+                        break;
+                    case 'type':
+                        valA = a.anomaly_type;
+                        valB = b.anomaly_type;
+                        break;
+                    case 'tokens':
+                        valA = a.tokens_used;
+                        valB = b.tokens_used;
+                        break;
+                    case 'severity':
+                        valA = a.severity;
+                        valB = b.severity;
+                        break;
+                    default:
+                        return 0;
+                }
+
+                if (typeof valA === 'number' && typeof valB === 'number') {
+                    return anomalySortState.direction === 'asc' ? valA - valB : valB - valA;
+                }
+
+                const strA = String(valA || '');
+                const strB = String(valB || '');
+                return anomalySortState.direction === 'asc'
+                    ? strA.localeCompare(strB)
+                    : strB.localeCompare(strA);
+            });
+
+            renderAnomalyTable(sortedData);
         }
 
         // Load Recommendations
