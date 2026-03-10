@@ -34,6 +34,7 @@ ai-token-analyzer/
 │   ├── fetch_openclaw.py         # OpenClaw 数据收集
 │   ├── fetch_qwen.py             # Qwen 数据收集
 │   ├── upload_to_server.py       # 数据上传到中央服务器
+│   ├── upload_daemon.py          # 远程机器上传守护进程（fetch+upload）
 │   ├── create_db.py              # 数据库创建
 │   ├── init_db.py                # 数据库初始化
 │   ├── init_auth_db.py           # 认证数据库初始化
@@ -99,11 +100,11 @@ ai-token-analyzer/
 │  场景B：本地 + 远程机器分布式部署                                │
 │  ┌─────────────────────┐     ┌─────────────────────┐          │
 │  │ 本地机器 (中央服务器) │     │ 远程机器 (ai-lab)    │          │
-│  │ - fetch_claude.py   │     │ - fetch_openclaw.py │          │
-│  │ - fetch_qwen.py     │     │ - fetch_claude.py   │ (如需要) │
-│  │ - fetch_openclaw.py │     │ - fetch_qwen.py     │ (如需要) │
-│  │ - web.py            │     │ - systemd timer     │          │
-│  │ - cron job          │     └──────────┬──────────┘          │
+│  │ - fetch_claude.py   │     │ - upload_daemon.py  │          │
+│  │ - fetch_qwen.py     │     │   (fetch+upload)    │          │
+│  │ - fetch_openclaw.py │     │ - @reboot cron      │          │
+│  │ - web.py            │     └──────────┬──────────┘          │
+│  │ - cron job          │                │                      │
 │  └──────────┬──────────┘                │                      │
 │             │                           ▼                      │
 │             │                 ┌─────────────────────┐          │
@@ -113,7 +114,8 @@ ai-token-analyzer/
 │             │                            ▼                      │
 │             │                 ┌─────────────────────┐          │
 │             │◄────────────────│ upload_to_server.py │          │
-│             │                 └─────────────────────┘          │
+│             │   (由 daemon    │   (由 daemon 调用)  │          │
+│             │    自动调用)    └─────────────────────┘          │
 │             │                                                   │
 │             ▼                                                   │
 │  ┌─────────────────────┐                                       │
@@ -145,6 +147,13 @@ ai-token-analyzer/
 - 如果机器运行 Claude，需要定时调用 `fetch_claude.py`
 - 如果机器运行 Qwen，需要定时调用 `fetch_qwen.py`
 - 如果机器运行 OpenClaw，需要定时调用 `fetch_openclaw.py`
+
+**远程机器部署说明：**
+远程机器（如 ai-lab）使用 `upload_daemon.py` 作为统一入口：
+- 功能：每5分钟自动执行 `fetch_openclaw.py` + `upload_to_server.py`
+- 调度：通过 `@reboot` cron 任务启动守护进程
+- 优势：自动重试、指数退避、简化配置（只需一个 cron 任务）
+- 配置示例：`@reboot cd /path && nohup python3 upload_daemon.py > logs/daemon.log 2>&1 &`
 
 ---
 
@@ -390,6 +399,7 @@ ai-token-analyzer-v1.0.0-20260309/
 │   ├── fetch_openclaw.py
 │   ├── fetch_qwen.py
 │   ├── upload_to_server.py
+│   ├── upload_daemon.py          # 远程机器上传守护进程
 │   ├── create_db.py
 │   ├── init_db.py
 │   ├── init_auth_db.py
@@ -433,5 +443,5 @@ python3 scripts/manage.py remote sync
 
 ---
 
-*文档版本：1.0.0*
-*最后更新：2026-03-09*
+*文档版本：1.0.1*
+*最后更新：2026-03-10*
