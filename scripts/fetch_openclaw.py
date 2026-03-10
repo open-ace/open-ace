@@ -402,6 +402,10 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
         "models_used": set(),
     })
 
+    # First pass: collect user message senders for assistant message attribution
+    # Map: message_id -> (sender_id, sender_name)
+    user_senders = {}
+
     with open(filepath, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -468,6 +472,10 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                                         if api_name:
                                             sender_name = api_name
 
+                            # Store user message sender for assistant attribution
+                            if role == "user" and (sender_id or sender_name):
+                                user_senders[message_id] = (sender_id, sender_name)
+
                             # Get token counts
                             input_tokens = tokens.get("input_tokens", 0)
                             output_tokens = tokens.get("output_tokens", 0)
@@ -487,6 +495,16 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
 
                             # Save full entry as JSON for complete original data
                             full_entry_json = json.dumps(entry, ensure_ascii=False)
+
+                            # For assistant messages without sender, try to get sender from parent user message
+                            if role == "assistant" and not sender_id and not sender_name and parent_id:
+                                if parent_id in user_senders:
+                                    sender_id, sender_name = user_senders[parent_id]
+
+                            # Set default sender for messages without sender info
+                            if not sender_id and not sender_name:
+                                sender_id = "openclaw_user"
+                                sender_name = "User of OpenClaw"
 
                             # Save message to database with sender info and message source
                             db.save_message(
