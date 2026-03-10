@@ -68,6 +68,16 @@ SCREENSHOT_TARGETS = {
         'description': 'Peak Usage Periods',
         'selector': '.card:has(.table)',
         'full_page': False
+    },
+    'tool-comparison': {
+        'description': 'Tool Comparison Chart',
+        'selector': '.card:has(#toolComparisonChart)',
+        'full_page': False
+    },
+    'user-segmentation': {
+        'description': 'User Segmentation Chart',
+        'selector': '.card:has(#userSegmentationChart)',
+        'full_page': False
     }
 }
 
@@ -89,9 +99,17 @@ def take_screenshots(url: str, output_dir: str, targets: list, title: str = None
     
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
+        # Use incognito context to avoid cache
         context = browser.new_context()
         page = context.new_page()
         page.set_viewport_size(VIEWPORT_SIZE)
+        
+        # Clear all storage and cache
+        page.context.clear_cookies()
+        try:
+            page.context.clear_permissions()
+        except:
+            pass
 
         print(f"Loading page: {url}")
         
@@ -112,6 +130,9 @@ def take_screenshots(url: str, output_dir: str, targets: list, title: str = None
                 print(f"Warning: Login may have failed: {e}")
         
         page.wait_for_timeout(1000)
+        
+        # Hard refresh to ensure fresh content (bypass cache)
+        page.reload(wait_until='networkidle', timeout=TIMEOUT)
         
         # Check if we need to navigate to Analysis section
         needs_analysis = any(t in ['analysis', 'datepicker', 'heatmap', 'metrics', 'tokens', 'peak'] for t in targets)

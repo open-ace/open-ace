@@ -3090,30 +3090,40 @@
             const usersData = data.map(d => d.unique_users || 0);
             const messagesData = data.map(d => d.total_messages || 0);
 
+            // Normalize data to 0-100 scale for radar chart
+            // This is necessary because tokens can be billions while users are single digits
+            const maxTokens = Math.max(...tokensData, 1);
+            const maxUsers = Math.max(...usersData, 1);
+            const maxMessages = Math.max(...messagesData, 1);
+
+            const normalizedTokens = tokensData.map(v => Math.round((v / maxTokens) * 100));
+            const normalizedUsers = usersData.map(v => Math.round((v / maxUsers) * 100));
+            const normalizedMessages = messagesData.map(v => Math.round((v / maxMessages) * 100));
+
             toolComparisonChartInstance = new Chart(ctx, {
                 type: 'radar',
                 data: {
                     labels: labels,
                     datasets: [
                         {
-                            label: 'Total Tokens',
-                            data: tokensData,
+                            label: 'Tokens (normalized)',
+                            data: normalizedTokens,
                             backgroundColor: 'rgba(54, 162, 235, 0.2)',
                             borderColor: 'rgba(54, 162, 235, 1)',
                             borderWidth: 2,
                             pointBackgroundColor: 'rgba(54, 162, 235, 1)'
                         },
                         {
-                            label: 'Active Users',
-                            data: usersData,
+                            label: 'Users (normalized)',
+                            data: normalizedUsers,
                             backgroundColor: 'rgba(255, 99, 132, 0.2)',
                             borderColor: 'rgba(255, 99, 132, 1)',
                             borderWidth: 2,
                             pointBackgroundColor: 'rgba(255, 99, 132, 1)'
                         },
                         {
-                            label: 'Messages',
-                            data: messagesData,
+                            label: 'Messages (normalized)',
+                            data: normalizedMessages,
                             backgroundColor: 'rgba(75, 192, 192, 0.2)',
                             borderColor: 'rgba(75, 192, 192, 1)',
                             borderWidth: 2,
@@ -3127,12 +3137,34 @@
                     scales: {
                         r: {
                             beginAtZero: true,
-                            ticks: { display: false }
+                            max: 100,
+                            ticks: {
+                                display: true,
+                                stepSize: 25,
+                                callback: function(value) { return value + '%'; }
+                            }
                         }
                     },
                     plugins: {
                         legend: {
                             position: 'bottom'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(ctx) {
+                                    const label = ctx.dataset.label;
+                                    const idx = ctx.dataIndex;
+                                    let actualValue;
+                                    if (label.includes('Tokens')) {
+                                        actualValue = formatTokens(tokensData[idx]);
+                                    } else if (label.includes('Users')) {
+                                        actualValue = usersData[idx];
+                                    } else {
+                                        actualValue = (messagesData[idx] || 0).toLocaleString();
+                                    }
+                                    return label + ': ' + actualValue;
+                                }
+                            }
                         }
                     }
                 }
