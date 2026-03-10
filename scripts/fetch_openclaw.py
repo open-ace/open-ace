@@ -561,7 +561,7 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                     custom_type = entry.get("customType")
                     message_id = entry.get("id")
                     parent_id = entry.get("parentId")
-                    
+
                     # Only save if we have a message_id
                     if message_id:
                         # For openclaw:prompt-error, extract error info
@@ -570,17 +570,29 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                             error = data.get("error", "unknown") if isinstance(data, dict) else "unknown"
                             model = data.get("model") if isinstance(data, dict) else None
                             provider = data.get("provider") if isinstance(data, dict) else None
-                            
+
                             # Build error content
                             content = f"[Error: {error}]"
                             if model:
                                 content += f" Model: {model}"
                             if provider:
                                 content += f" Provider: {provider}"
-                            
+
+                            # Try to get sender from parent message
+                            # Priority: toolResult > assistant > user
+                            sender_id = None
+                            sender_name = None
+                            if parent_id:
+                                if parent_id in toolResult_senders:
+                                    sender_id, sender_name = toolResult_senders[parent_id]
+                                elif parent_id in assistant_senders:
+                                    sender_id, sender_name = assistant_senders[parent_id]
+                                elif parent_id in user_senders:
+                                    sender_id, sender_name = user_senders[parent_id]
+
                             # Save full entry as JSON for complete original data
                             full_entry_json = json.dumps(entry, ensure_ascii=False)
-                            
+
                             # Save error message to database with 0 tokens
                             db.save_message(
                                 date=date_key,
@@ -596,13 +608,16 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                                 output_tokens=0,
                                 model=model,
                                 timestamp=ts,
-                                sender_id=None,
-                                sender_name=None,
+                                sender_id=sender_id,
+                                sender_name=sender_name,
                                 message_source="openclaw",
                                 conversation_label=None,
                                 group_subject=None,
                                 is_group_chat=None
                             )
+                            # Store error sender for future messages
+                            if sender_id or sender_name:
+                                assistant_senders[message_id] = (sender_id, sender_name)
                         # For other custom types (e.g., model-snapshot), skip them
                         # as they are just status notifications without meaningful content
 
