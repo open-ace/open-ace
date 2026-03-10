@@ -2790,7 +2790,7 @@
                 loadUserRanking(startDate, endDate, tool, host),
                 loadSessionStats(startDate, endDate, tool, host),
                 loadToolComparison(startDate, endDate, host),
-                loadUserSegmentation(endDate, tool, host),
+                loadUserSegmentation(startDate, endDate, tool, host),
                 loadAnomalyDetection(startDate, endDate, tool, host),
                 loadRecommendations(startDate, endDate, tool, host)
             ]);
@@ -3172,9 +3172,9 @@
         }
 
         // Load User Segmentation
-        async function loadUserSegmentation(date, tool, host) {
+        async function loadUserSegmentation(start, end, tool, host) {
             try {
-                const params = new URLSearchParams({date, tool, host});
+                const params = new URLSearchParams({start, end, tool, host});
                 const response = await fetch(`/api/analysis/user-segmentation?${params}`);
                 const data = await response.json();
 

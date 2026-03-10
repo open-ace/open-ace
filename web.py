@@ -250,11 +250,12 @@ def api_analysis_session_stats():
 @app.route('/api/analysis/user-segmentation')
 def api_analysis_user_segmentation():
     """Get user segmentation by activity level."""
-    date = request.args.get('date', utils.get_today())
+    start_date = request.args.get('start', utils.get_days_ago(30))
+    end_date = request.args.get('end', utils.get_today())
     tool = request.args.get('tool')
     host = request.args.get('host')
-    
-    data = db.get_user_segmentation(date, tool_name=tool, host_name=host)
+
+    data = db.get_user_segmentation(start_date, end_date, tool_name=tool, host_name=host)
     return jsonify(data)
 
 

@@ -1402,58 +1402,60 @@ def get_peak_usage_periods(start_date: str, end_date: str,
     return results
 
 
-def get_user_segmentation(date: str, 
+def get_user_segmentation(start_date: str,
+                          end_date: str,
                           tool_name: Optional[str] = None,
                           host_name: Optional[str] = None) -> Dict:
     """Get user segmentation by activity level.
-    
+
     Segments:
     - high: > 10K tokens
     - medium: 1K - 10K tokens
     - low: < 1K tokens
     - dormant: no activity in last 7 days
-    
+
     Args:
-        date: Date in YYYY-MM-DD format
+        start_date: Start date in YYYY-MM-DD format
+        end_date: End date in YYYY-MM-DD format
         tool_name: Optional tool name filter
         host_name: Optional host name filter
-    
+
     Returns:
         Dict with user counts for each segment
     """
     conn = get_connection()
     cursor = conn.cursor()
-    
-    # Get user usage for the specified date
-    conditions = ['date = ?', '(sender_id IS NOT NULL OR sender_name IS NOT NULL)']
-    params = [date]
-    
+
+    # Get user usage for the specified date range
+    conditions = ['date >= ?', 'date <= ?', '(sender_id IS NOT NULL OR sender_name IS NOT NULL)']
+    params = [start_date, end_date]
+
     if tool_name:
         conditions.append('tool_name = ?')
         params.append(tool_name)
-    
+
     if host_name:
         conditions.append('host_name = ?')
         params.append(host_name)
-    
+
     where_clause = ' AND '.join(conditions)
-    
+
     cursor.execute(f'''
-        SELECT 
+        SELECT
             COALESCE(sender_name, sender_id) as sender,
             SUM(tokens_used) as tokens_used
         FROM daily_messages
         WHERE {where_clause}
-        GROUP BY COALESCE(sender_name, sender_id), sender_id
+        GROUP BY COALESCE(sender_name, sender_id)
     ''', params)
-    
+
     rows = cursor.fetchall()
-    
+
     # Calculate segments
     high_users = 0
     medium_users = 0
     low_users = 0
-    
+
     for row in rows:
         tokens = row['tokens_used'] or 0
         if tokens > 10000:
@@ -1462,24 +1464,25 @@ def get_user_segmentation(date: str,
             medium_users += 1
         else:
             low_users += 1
-    
-    # Get dormant users (active in past 30 days but not in last 7 days)
+
+    # Get dormant users (active in past 30 days but not in selected period)
     from datetime import datetime, timedelta
-    date_obj = datetime.strptime(date, '%Y-%m-%d')
-    seven_days_ago = (date_obj - timedelta(days=7)).strftime('%Y-%m-%d')
-    thirty_days_ago = (date_obj - timedelta(days=30)).strftime('%Y-%m-%d')
-    
+    end_date_obj = datetime.strptime(end_date, '%Y-%m-%d')
+    start_date_obj = datetime.strptime(start_date, '%Y-%m-%d')
+    period_days = (end_date_obj - start_date_obj).days + 1
+    thirty_days_ago = (end_date_obj - timedelta(days=30)).strftime('%Y-%m-%d')
+
     cursor.execute(f'''
         SELECT COUNT(DISTINCT COALESCE(sender_name, sender_id)) as dormant_count
         FROM daily_messages
         WHERE date >= ? AND date < ? AND (sender_id IS NOT NULL OR sender_name IS NOT NULL)
-    ''', [thirty_days_ago, seven_days_ago])
-    
+    ''', [thirty_days_ago, start_date])
+
     dormant_row = cursor.fetchone()
     dormant_users = dormant_row['dormant_count'] if dormant_row else 0
-    
+
     conn.close()
-    
+
     return {
         'high': high_users,
         'medium': medium_users,
