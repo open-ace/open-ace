@@ -501,10 +501,12 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                             full_entry_json = json.dumps(entry, ensure_ascii=False)
 
                             # For assistant messages without sender, try to get sender from parent
-                            # Priority: toolResult > user
+                            # Priority: toolResult > assistant > user
                             if role == "assistant" and not sender_id and not sender_name and parent_id:
                                 if parent_id in toolResult_senders:
                                     sender_id, sender_name = toolResult_senders[parent_id]
+                                elif parent_id in assistant_senders:
+                                    sender_id, sender_name = assistant_senders[parent_id]
                                 elif parent_id in user_senders:
                                     sender_id, sender_name = user_senders[parent_id]
 
