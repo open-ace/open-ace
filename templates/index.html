@@ -3014,6 +3014,14 @@
                 const response = await fetch(`/api/analysis/user-ranking?${params}`);
                 const data = await response.json();
 
+                // Update title with date range
+                const titleEl = document.getElementById('analysis-user-ranking-title');
+                const baseTitle = titleEl.getAttribute('data-base-title') || titleEl.textContent;
+                if (!titleEl.getAttribute('data-base-title')) {
+                    titleEl.setAttribute('data-base-title', baseTitle);
+                }
+                titleEl.textContent = `${baseTitle} (${start} ~ ${end})`;
+
                 const tbody = document.getElementById('user-ranking-table');
                 if (data.length === 0) {
                     tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No data</td></tr>';
