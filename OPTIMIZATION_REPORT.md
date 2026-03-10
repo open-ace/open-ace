@@ -27,7 +27,7 @@
 │  │ 本地数据抓取     │      │ 远程数据抓取 (SSH)       │  │
 │  │ - fetch_openclaw│      │ - fetch_openclaw.py     │  │
 │  │ - fetch_claude  │  →   │ - upload_to_server.py   │  │
-│  │ - fetch_qwen    │      │ (192.168.31.159)        │  │
+│  │ - fetch_qwen    │      │ (<REMOTE_HOST>)        │  │
 │  └─────────────────┘      └─────────────────────────┘  │
 │           │                         │                   │
 │           ▼                         ▼                   │
@@ -54,7 +54,7 @@
   "hosts": [
     {
       "name": "ai-lab",
-      "host": "192.168.31.159",
+      "host": "<REMOTE_HOST>",
       "user": "openclaw",
       "base_dir": "/home/openclaw/ai-token-analyzer",
       "tools": ["openclaw"]
@@ -249,10 +249,10 @@ $ curl -s "http://localhost:5001/api/fetch?include_remote=false" | python3 -m js
 
 ```bash
 # 测试免密登录
-ssh openclaw@192.168.31.159
+ssh openclaw@<REMOTE_HOST>
 
 # 如果需要配置
-ssh-copy-id openclaw@192.168.31.159
+ssh-copy-id openclaw@<REMOTE_HOST>
 ```
 
 ### 7.2 配置文件
@@ -266,7 +266,7 @@ ssh-copy-id openclaw@192.168.31.159
     "hosts": [
       {
         "name": "ai-lab",
-        "host": "192.168.31.159",
+        "host": "<REMOTE_HOST>",
         "user": "openclaw",
         "base_dir": "/home/openclaw/ai-token-analyzer"
       }

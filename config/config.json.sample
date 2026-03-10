@@ -47,7 +47,7 @@
     "hosts": [
       {
         "name": "ai-lab",
-        "host": "192.168.31.159",
+        "host": "<REMOTE_HOST>",
         "user": "openclaw",
         "base_dir": "/home/openclaw/ai-token-analyzer",
         "tools": ["openclaw"]

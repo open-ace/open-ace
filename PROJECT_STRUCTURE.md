@@ -252,7 +252,7 @@ LOCAL_PATH=$HOME/ai-token-analyzer
 LOCAL_INTERVAL=30
 
 # 远程配置
-REMOTE_HOST=192.168.31.159
+REMOTE_HOST=<REMOTE_HOST>
 REMOTE_USER=openclaw
 REMOTE_PATH=/home/openclaw/ai-token-analyzer
 REMOTE_INTERVAL=30

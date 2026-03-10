@@ -7,8 +7,8 @@
 ## 当前状态
 
 **已配置应用信息：**
-- App ID: `cli_a92be94ec4395cc2`
-- App Secret: `6pvXz79b6gqadmEGKWIuVdTEjkf1DkSf`
+- App ID: `cli_xxxxxxxxxxxxxxxx`
+- App Secret: `your_feishu_app_secret_here`
 
 **API 测试结果：**
 - ✅ 应用凭证有效（可以获取 access_token）
@@ -43,7 +43,7 @@
 #### 1. 检查应用权限
 
 1. 访问飞书开放平台：https://open.feishu.cn/app
-2. 找到应用 `cli_a92be94ec4395cc2`
+2. 找到应用 `cli_xxxxxxxxxxxxxxxx`
 3. 点击"权限管理"
 4. 确保已添加以下权限：
    - `chat:chat:readonly` - 读取会话信息

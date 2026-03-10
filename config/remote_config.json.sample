@@ -1,8 +1,8 @@
 {
   "host_name": "ai-lab",
   "server": {
-    "upload_auth_key": "deploy-remote-machine-key-2026",
-    "server_url": "http://192.168.31.181:5001"
+    "upload_auth_key": "<UPLOAD_AUTH_KEY>",
+    "server_url": "http://<SERVER_IP>:5001"
   },
   "tools": {
     "openclaw": {

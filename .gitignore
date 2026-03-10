@@ -18,8 +18,10 @@ __pycache__/
 env/
 venv/
 
-# Config (local)
+# Config (local) - contains sensitive credentials
 remote_config.json
+config.json
+*.local.json
 
 # IDE
 .idea/
@@ -30,3 +32,11 @@ remote_config.json
 
 # Node
 node_modules/
+
+# Secrets - NEVER commit these
+*secret*
+*credential*
+*password*
+*.pem
+*.key
+.env.*

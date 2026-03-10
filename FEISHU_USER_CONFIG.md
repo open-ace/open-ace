@@ -7,8 +7,8 @@
 ## 当前状态
 
 **已配置应用信息：**
-- App ID: `cli_a92be94ec4395cc2`
-- App Secret: `6pvXz79b6gqadmEGKWIuVdTEjkf1DkSf`
+- App ID: `cli_xxxxxxxxxxxxxxxx`
+- App Secret: `your_feishu_app_secret_here`
 
 **API 测试结果：**
 - ✅ 应用凭证有效（可以获取 access_token）
@@ -24,7 +24,7 @@
 ### 检查应用权限
 
 1. 访问飞书开放平台：https://open.feishu.cn/app
-2. 找到应用 `cli_a92be94ec4395cc2`
+2. 找到应用 `cli_xxxxxxxxxxxxxxxx`
 3. 点击"权限管理"
 4. 确保已添加以下权限：
    - `contact:contact:user:readonly` - 读取用户信息
@@ -37,7 +37,7 @@
 
 ```bash
 cd /Users/rhuang/workspace/ai-token-analyzer
-python3 scripts/shared/feishu_user_cache.py test ou_3e479c7f81f8674741d778e8f838f8ed cli_a92be94ec4395cc2 6pvXz79b6gqadmEGKWIuVdTEjkf1DkSf
+python3 scripts/shared/feishu_user_cache.py test ou_3e479c7f81f8674741d778e8f838f8ed <your_app_id> <your_app_secret>
 ```
 
 如果返回用户姓名，说明配置成功。
@@ -102,15 +102,15 @@ python3 scripts/shared/feishu_user_cache.py test ou_3e479c7f81f8674741d778e8f838
 
 ### 5. 同步配置到远程机器（如果使用远程收集）
 
-如果在远程机器（如 192.168.31.159）上运行 OpenClaw：
+如果在远程机器上运行 OpenClaw：
 
 ```bash
 # 在远程机器上编辑配置
-ssh openclaw@192.168.31.159
+ssh openclaw@<REMOTE_HOST>
 nano /home/openclaw/.ai-token-analyzer/config.json
 
 # 或者从本地同步
-scp ~/.ai-token-analyzer/config.json openclaw@192.168.31.159:/home/openclaw/.ai-token-analyzer/
+scp ~/.ai-token-analyzer/config.json openclaw@<REMOTE_HOST>:/home/openclaw/.ai-token-analyzer/
 ```
 
 ## 测试配置

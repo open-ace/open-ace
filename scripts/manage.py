@@ -25,10 +25,47 @@ SCRIPTS_DIR = DEPLOY_DIR / "scripts"
 CONFIG_DIR = DEPLOY_DIR / "config"
 LOG_DIR = DEPLOY_DIR / "logs"
 
-# Remote machine configuration
-REMOTE_USER = "openclaw"
-REMOTE_HOST = "192.168.31.159"
-REMOTE_DIR = "/home/openclaw/ai-token-analyzer"
+# Remote machine configuration - loaded from config file or environment
+# Set REMOTE_HOST environment variable or configure in ~/.ai-token-analyzer/config.json
+REMOTE_USER = os.environ.get("REMOTE_USER", "openclaw")
+REMOTE_HOST = os.environ.get("REMOTE_HOST", "")
+REMOTE_DIR = os.environ.get("REMOTE_DIR", "/home/openclaw/ai-token-analyzer")
+
+
+def get_remote_config() -> dict:
+    """Get remote configuration from config file.
+    
+    Returns dict with host, user, dir, and other settings.
+    """
+    global REMOTE_HOST, REMOTE_USER, REMOTE_DIR
+    
+    # If REMOTE_HOST is set via environment, use it
+    if REMOTE_HOST:
+        return {
+            "host": REMOTE_HOST,
+            "user": REMOTE_USER,
+            "dir": REMOTE_DIR
+        }
+    
+    # Otherwise, try to load from config file
+    config_file = Path.home() / ".ai-token-analyzer" / "config.json"
+    if config_file.exists():
+        try:
+            with open(config_file) as f:
+                config = json.load(f)
+            
+            remote_config = config.get("remote", {})
+            if remote_config.get("enabled") and remote_config.get("hosts"):
+                host_info = remote_config["hosts"][0]
+                return {
+                    "host": host_info.get("host", ""),
+                    "user": host_info.get("user", "openclaw"),
+                    "dir": host_info.get("base_dir", "/home/openclaw/ai-token-analyzer")
+                }
+        except (json.JSONDecodeError, IOError) as e:
+            print_error(f"Failed to load config: {e}")
+    
+    return {"host": "", "user": REMOTE_USER, "dir": REMOTE_DIR}
 
 
 def print_header(text: str):
@@ -317,27 +354,44 @@ rm -f ../scripts/shared/email_notifier.py
     
     # Step 7: Setup config
     print("\n7. Setting up configuration...")
-    config_content = f"""{{
+    
+    # Get remote config to determine host info
+    remote_cfg = get_remote_config()
+    if not remote_cfg["host"]:
+        print_error("Remote host not configured. Set REMOTE_HOST environment variable or configure in ~/.ai-token-analyzer/config.json")
+        return
+    
+    # Generate config template - user should edit with actual credentials
+    config_content = """{
   "host_name": "ai-lab",
-  "server": {{
-    "upload_auth_key": "deploy-remote-machine-key-2026",
-    "server_url": "http://192.168.31.181:5001"
-  }},
-  "tools": {{
-    "openclaw": {{
+  "server": {
+    "upload_auth_key": "<UPLOAD_AUTH_KEY>",
+    "server_url": "http://<SERVER_IP>:5001"
+  },
+  "tools": {
+    "openclaw": {
       "enabled": true,
-      "token_env": "4a1783fec45ae0dd5e67d0560fe63415cbbd1daff1bb2cd1",
+      "token_env": "<OPENCLAW_TOKEN>",
       "gateway_url": "http://127.0.0.1:18789",
       "hostname": "ai-lab"
-    }}
-  }},
-  "feishu": {{
-    "app_id": "cli_a92be94ec4395cc2",
-    "app_secret": "6pvXz79b6gqadmEGKWIuVdTEjkf1DkSf"
-  }}
-}}"""
-    run_command(f"ssh {REMOTE_USER}@{REMOTE_HOST} \"cat > ~{REMOTE_USER}/.ai-token-analyzer/config.json << 'EOF'\n{config_content}\nEOF\"")
-    print_success("Configuration setup")
+    }
+  },
+  "feishu": {
+    "app_id": "cli_xxxxxxxxxxxxxxxx",
+    "app_secret": "your_feishu_app_secret_here"
+  }
+}"""
+    print("\n  ⚠️  IMPORTANT: Please edit the config file with your actual credentials!")
+    print(f"  Config location: ~{REMOTE_USER}/.ai-token-analyzer/config.json")
+    print("  Required fields to update:")
+    print("    - server.upload_auth_key")
+    print("    - server.server_url")
+    print("    - tools.openclaw.token_env")
+    print("    - feishu.app_id")
+    print("    - feishu.app_secret")
+    
+    run_command(f"ssh {REMOTE_USER}@{REMOTE_HOST} \"mkdir -p ~{REMOTE_USER}/.ai-token-analyzer && cat > ~{REMOTE_USER}/.ai-token-analyzer/config.json << 'EOF'\n{config_content}\nEOF\"")
+    print_success("Configuration template created")
     
     # Step 8: Test deployment
     print("\n8. Testing deployment...")

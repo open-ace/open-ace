@@ -2,7 +2,7 @@
 
 ## 部署位置
 
-远程机器：**192.168.31.159 (ai-lab)**
+远程机器：**<REMOTE_HOST> (ai-lab)**
 用户：**openclaw**
 部署目录：**/home/openclaw/ai-token-analyzer/**
 
@@ -53,16 +53,16 @@
 sqlite3 ~/.ai-token-analyzer/usage.db "DELETE FROM daily_messages WHERE message_source='feishu';"
 
 # 2. 从远程机器清除飞书消息
-ssh openclaw@192.168.31.159 "python3 -c \"import sqlite3; conn=sqlite3.connect('/home/openclaw/.ai-token-analyzer/usage.db'); c=conn.cursor(); c.execute(\\\"DELETE FROM daily_messages WHERE message_source='feishu'\\\"); conn.commit(); conn.close()\""
+ssh openclaw@<REMOTE_HOST> "python3 -c \"import sqlite3; conn=sqlite3.connect('/home/openclaw/.ai-token-analyzer/usage.db'); c=conn.cursor(); c.execute(\\\"DELETE FROM daily_messages WHERE message_source='feishu'\\\"); conn.commit(); conn.close()\""
 
 # 3. 清除上传标记
-ssh openclaw@192.168.31.159 "rm -f ~openclaw/.ai-token-analyzer/upload_marker.json"
+ssh openclaw@<REMOTE_HOST> "rm -f ~openclaw/.ai-token-analyzer/upload_marker.json"
 
 # 4. 重新从原始日志提取（建议提取 30 天）
-ssh openclaw@192.168.31.159 "cd /home/openclaw/ai-token-analyzer && python3 scripts/fetch_openclaw.py --days 30"
+ssh openclaw@<REMOTE_HOST> "cd /home/openclaw/ai-token-analyzer && python3 scripts/fetch_openclaw.py --days 30"
 
 # 5. 上传到中央服务器
-ssh openclaw@192.168.31.159 "cd /home/openclaw/ai-token-analyzer && python3 scripts/upload_to_server.py --server http://192.168.31.181:5001 --auth-key deploy-remote-machine-key-2026 --hostname ai-lab --days 30"
+ssh openclaw@<REMOTE_HOST> "cd /home/openclaw/ai-token-analyzer && python3 scripts/upload_to_server.py --server http://<SERVER_IP>:5001 --auth-key <UPLOAD_AUTH_KEY> --hostname ai-lab --days 30"
 
 # 6. 验证数据
 sqlite3 ~/.ai-token-analyzer/usage.db "SELECT sender_name, group_subject, substr(content, 1, 50) FROM daily_messages WHERE message_source='feishu' LIMIT 10;"
@@ -85,20 +85,20 @@ sqlite3 ~/.ai-token-analyzer/usage.db "SELECT sender_name, group_subject, substr
 {
   "host_name": "ai-lab",
   "server": {
-    "upload_auth_key": "deploy-remote-machine-key-2026",
-    "server_url": "http://192.168.31.181:5001"
+    "upload_auth_key": "<UPLOAD_AUTH_KEY>",
+    "server_url": "http://<SERVER_IP>:5001"
   },
   "tools": {
     "openclaw": {
       "enabled": true,
-      "token_env": "4a1783fec45ae0dd5e67d0560fe63415cbbd1daff1bb2cd1",
+      "token_env": "<OPENCLAW_TOKEN>",
       "gateway_url": "http://127.0.0.1:18789",
       "hostname": "ai-lab"
     }
   },
   "feishu": {
-    "app_id": "cli_a92be94ec4395cc2",
-    "app_secret": "6pvXz79b6gqadmEGKWIuVdTEjkf1DkSf"
+    "app_id": "cli_xxxxxxxxxxxxxxxx",
+    "app_secret": "your_feishu_app_secret_here"
   }
 }
 ```
@@ -122,7 +122,7 @@ python3 scripts/manage.py remote sync
 
 ```bash
 # 创建部署目录
-ssh openclaw@192.168.31.159 "mkdir -p /home/openclaw/ai-token-analyzer"
+ssh openclaw@<REMOTE_HOST> "mkdir -p /home/openclaw/ai-token-analyzer"
 ```
 
 ### 3. 同步文件
@@ -136,14 +136,14 @@ rsync -avz \
     --exclude='__pycache__' \
     --exclude='*.pyc' \
     --exclude='.DS_Store' \
-    ./ openclaw@192.168.31.159:/home/openclaw/ai-token-analyzer/
+    ./ openclaw@<REMOTE_HOST>:/home/openclaw/ai-token-analyzer/
 ```
 
 ### 4. 清理不必要的脚本
 
 ```bash
 # 在远程机器上清理
-ssh openclaw@192.168.31.159 "
+ssh openclaw@<REMOTE_HOST> "
 cd /home/openclaw/ai-token-analyzer/scripts
 rm -f check_*.py db_info.py test_*.py
 rm -f deploy_remote.py fetch_remote.py upload_to_server.py
@@ -157,10 +157,10 @@ rm -f com.ai-token-analyzer.web.plist
 
 ```bash
 # 确保所有文件属于 openclaw 用户
-ssh root@192.168.31.159 "chown -R openclaw:openclaw /home/openclaw/ai-token-analyzer"
+ssh root@<REMOTE_HOST> "chown -R openclaw:openclaw /home/openclaw/ai-token-analyzer"
 
 # 设置可执行权限
-ssh openclaw@192.168.31.159 "
+ssh openclaw@<REMOTE_HOST> "
 chmod +x /home/openclaw/ai-token-analyzer/scripts/fetch_openclaw.py
 chmod +x /home/openclaw/ai-token-analyzer/web.py
 chmod +x /home/openclaw/ai-token-analyzer/cli.py
@@ -171,10 +171,10 @@ chmod +x /home/openclaw/ai-token-analyzer/cli.py
 
 ```bash
 # 复制服务文件
-scp contrib/fetch-openclaw.service contrib/fetch-openclaw.timer root@192.168.31.159:/etc/systemd/system/
+scp contrib/fetch-openclaw.service contrib/fetch-openclaw.timer root@<REMOTE_HOST>:/etc/systemd/system/
 
 # 重新加载并启用服务
-ssh root@192.168.31.159 "
+ssh root@<REMOTE_HOST> "
 systemctl daemon-reload
 systemctl enable fetch-openclaw.timer
 systemctl start fetch-openclaw.timer
@@ -186,13 +186,13 @@ systemctl status fetch-openclaw.timer
 
 ```bash
 # 测试数据收集
-ssh openclaw@192.168.31.159 "
+ssh openclaw@<REMOTE_HOST> "
 cd /home/openclaw/ai-token-analyzer
 python3 scripts/fetch_openclaw.py --days 1
 "
 
 # 检查数据库
-ssh openclaw@192.168.31.159 "
+ssh openclaw@<REMOTE_HOST> "
 sqlite3 ~/.ai-token-analyzer/usage.db 'SELECT date, host_name, tokens_used FROM daily_usage ORDER BY date DESC LIMIT 5;'
 "
 ```
@@ -202,7 +202,7 @@ sqlite3 ~/.ai-token-analyzer/usage.db 'SELECT date, host_name, tokens_used FROM 
 ### 手动运行数据收集
 
 ```bash
-ssh openclaw@192.168.31.159 "
+ssh openclaw@<REMOTE_HOST> "
 cd /home/openclaw/ai-token-analyzer
 python3 scripts/fetch_openclaw.py --days 7
 "
@@ -211,7 +211,7 @@ python3 scripts/fetch_openclaw.py --days 7
 ### 查看日志
 
 ```bash
-ssh openclaw@192.168.31.159 "
+ssh openclaw@<REMOTE_HOST> "
 tail -f /home/openclaw/ai-token-analyzer/logs/*.log
 "
 ```
@@ -219,7 +219,7 @@ tail -f /home/openclaw/ai-token-analyzer/logs/*.log
 ### 检查 systemd 服务状态
 
 ```bash
-ssh root@192.168.31.159 "
+ssh root@<REMOTE_HOST> "
 systemctl status fetch-openclaw.service
 systemctl status fetch-openclaw.timer
 systemctl list-timers
@@ -241,7 +241,7 @@ bash scripts/clean_deploy_remote.sh
 ### 查看缓存用户
 
 ```bash
-ssh openclaw@192.168.31.159 "
+ssh openclaw@<REMOTE_HOST> "
 cd /home/openclaw/ai-token-analyzer
 python3 scripts/shared/feishu_user_cache.py list
 "
@@ -250,7 +250,7 @@ python3 scripts/shared/feishu_user_cache.py list
 ### 清除缓存
 
 ```bash
-ssh openclaw@192.168.31.159 "
+ssh openclaw@<REMOTE_HOST> "
 cd /home/openclaw/ai-token-analyzer
 python3 scripts/shared/feishu_user_cache.py clear
 "
@@ -261,7 +261,7 @@ python3 scripts/shared/feishu_user_cache.py clear
 ### 检查 Python 依赖
 
 ```bash
-ssh openclaw@192.168.31.159 "
+ssh openclaw@<REMOTE_HOST> "
 cd /home/openclaw/ai-token-analyzer
 pip3 list | grep -E 'requests|flask|sqlite'
 "
@@ -270,7 +270,7 @@ pip3 list | grep -E 'requests|flask|sqlite'
 ### 检查数据库
 
 ```bash
-ssh openclaw@192.168.31.159 "
+ssh openclaw@<REMOTE_HOST> "
 sqlite3 ~/.ai-token-analyzer/usage.db '.tables'
 sqlite3 ~/.ai-token-analyzer/usage.db 'SELECT COUNT(*) FROM daily_usage;'
 "
@@ -279,7 +279,7 @@ sqlite3 ~/.ai-token-analyzer/usage.db 'SELECT COUNT(*) FROM daily_usage;'
 ### 检查文件权限
 
 ```bash
-ssh openclaw@192.168.31.159 "
+ssh openclaw@<REMOTE_HOST> "
 ls -la /home/openclaw/ai-token-analyzer/
 ls -la /home/openclaw/ai-token-analyzer/scripts/
 "
