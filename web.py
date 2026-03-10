@@ -380,8 +380,63 @@ def api_analysis_recommendations():
     # Sort by priority
     priority_order = {'high': 0, 'medium': 1, 'low': 2}
     recommendations.sort(key=lambda x: priority_order.get(x['priority'], 3))
-    
+
     return jsonify(recommendations)
+
+
+# =============================================================================
+# Session History APIs - 会话历史 API 端点
+# =============================================================================
+
+@app.route('/api/session-history')
+def api_session_history():
+    """Get session history with pagination and sorting.
+
+    Query parameters:
+        start: Start date (default: 7 days ago)
+        end: End date (default: today)
+        tool: Tool name filter (optional)
+        host: Host name filter (optional)
+        page: Page number (default: 1)
+        limit: Results per page (default: 20)
+        sort_by: Sort field (session_id, user, model, start_time, end_time,
+                 user_messages, ai_messages, avg_latency)
+        sort_order: Sort order (asc or desc, default: desc)
+    """
+    start_date = request.args.get('start', utils.get_days_ago(7))
+    end_date = request.args.get('end', utils.get_today())
+    tool = request.args.get('tool')
+    host = request.args.get('host')
+    page = request.args.get('page', 1, type=int)
+    limit = request.args.get('limit', 20, type=int)
+    sort_by = request.args.get('sort_by', 'start_time')
+    sort_order = request.args.get('sort_order', 'desc')
+
+    data = db.get_session_history(
+        start_date=start_date,
+        end_date=end_date,
+        tool_name=tool,
+        host_name=host,
+        page=page,
+        limit=limit,
+        sort_by=sort_by,
+        sort_order=sort_order
+    )
+    return jsonify(data)
+
+
+@app.route('/api/session-timeline/<path:session_id>')
+def api_session_timeline(session_id):
+    """Get timeline data for a specific session.
+
+    Args:
+        session_id: The session identifier (URL-encoded)
+
+    Returns:
+        JSON with timeline and latency_curve data for chart rendering
+    """
+    data = db.get_session_timeline(session_id)
+    return jsonify(data)
 
 
 @app.route('/api/upload/usage', methods=['POST'])
@@ -855,6 +910,9 @@ def api_data_status():
     # Get all hosts from database
     all_hosts = db.get_all_hosts_with_status()
 
+    # Create a map of host_name -> host_data for quick lookup
+    host_data_map = {h.get('host_name', 'unknown'): h for h in all_hosts}
+
     # Get configured remote hosts
     remote_host_names = set()
     if remote_config.get('enabled', False):
@@ -862,21 +920,77 @@ def api_data_status():
         for host_info in hosts:
             remote_host_names.add(host_info.get('name', 'unknown'))
 
-    for host_data in all_hosts:
-        host_name = host_data.get('host_name', 'unknown')
-        is_remote = host_name in remote_host_names
-        is_local = (host_name == local_host_name or host_name == 'localhost')
+    # Track which hosts have been added
+    added_hosts = set()
 
-        host_status = {
-            'name': host_name,
-            'host_name': host_name,
-            'is_remote': is_remote,
-            'is_local': is_local,
-            'last_updated': host_data.get('last_updated'),
-            'usage_records': host_data.get('usage_records', 0),
-            'message_records': host_data.get('message_records', 0)
-        }
-        status['hosts'].append(host_status)
+    # Add local host first
+    local_host_data = host_data_map.get(local_host_name) or host_data_map.get('localhost')
+    if local_host_data:
+        status['hosts'].append({
+            'name': local_host_name,
+            'host_name': local_host_name,
+            'is_remote': False,
+            'is_local': True,
+            'last_updated': local_host_data.get('last_updated'),
+            'usage_records': local_host_data.get('usage_records', 0),
+            'message_records': local_host_data.get('message_records', 0)
+        })
+        added_hosts.add(local_host_name)
+        added_hosts.add('localhost')
+    else:
+        # Local host not in database yet
+        status['hosts'].append({
+            'name': local_host_name,
+            'host_name': local_host_name,
+            'is_remote': False,
+            'is_local': True,
+            'last_updated': None,
+            'usage_records': 0,
+            'message_records': 0
+        })
+        added_hosts.add(local_host_name)
+
+    # Add configured remote hosts
+    for host_name in remote_host_names:
+        if host_name in added_hosts:
+            continue
+        host_data = host_data_map.get(host_name)
+        if host_data:
+            status['hosts'].append({
+                'name': host_name,
+                'host_name': host_name,
+                'is_remote': True,
+                'is_local': False,
+                'last_updated': host_data.get('last_updated'),
+                'usage_records': host_data.get('usage_records', 0),
+                'message_records': host_data.get('message_records', 0)
+            })
+        else:
+            # Remote host not in database yet
+            status['hosts'].append({
+                'name': host_name,
+                'host_name': host_name,
+                'is_remote': True,
+                'is_local': False,
+                'last_updated': None,
+                'usage_records': 0,
+                'message_records': 0
+            })
+        added_hosts.add(host_name)
+
+    # Add any remaining hosts from database that haven't been added yet
+    # (e.g., hosts that are no longer in config but still have data)
+    for host_name, host_data in host_data_map.items():
+        if host_name not in added_hosts:
+            status['hosts'].append({
+                'name': host_name,
+                'host_name': host_name,
+                'is_remote': False,  # Unknown, assume local
+                'is_local': False,
+                'last_updated': host_data.get('last_updated'),
+                'usage_records': host_data.get('usage_records', 0),
+                'message_records': host_data.get('message_records', 0)
+            })
 
     # Find the most recent update time
     all_times = [h.get('last_updated') for h in status['hosts'] if h.get('last_updated')]
