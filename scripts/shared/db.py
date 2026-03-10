@@ -1231,7 +1231,7 @@ def get_user_activity_ranking(start_date: str, end_date: str,
     cursor.execute(f'''
         SELECT 
             COALESCE(sender_name, sender_id) as sender_name,
-            sender_id,
+            MAX(sender_id) as sender_id,
             COUNT(*) as message_count,
             SUM(tokens_used) as tokens_used,
             COUNT(DISTINCT date) as active_days,
@@ -1239,8 +1239,8 @@ def get_user_activity_ranking(start_date: str, end_date: str,
             MAX(date) as last_active_date
         FROM daily_messages
         WHERE {where_clause}
-        GROUP BY COALESCE(sender_name, sender_id), sender_id
-        ORDER BY message_count DESC
+        GROUP BY COALESCE(sender_name, sender_id)
+        ORDER BY tokens_used DESC
         LIMIT ?
     ''', params + [limit])
     
