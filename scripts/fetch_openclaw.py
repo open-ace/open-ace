@@ -407,6 +407,8 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
     user_senders = {}
     # Also collect assistant senders for toolResult attribution
     assistant_senders = {}
+    # Also collect toolResult senders for assistant attribution (multi-turn conversations)
+    toolResult_senders = {}
 
     with open(filepath, "r", encoding="utf-8") as f:
         for line in f:
@@ -498,9 +500,12 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                             # Save full entry as JSON for complete original data
                             full_entry_json = json.dumps(entry, ensure_ascii=False)
 
-                            # For assistant messages without sender, try to get sender from parent user message
+                            # For assistant messages without sender, try to get sender from parent
+                            # Priority: toolResult > user
                             if role == "assistant" and not sender_id and not sender_name and parent_id:
-                                if parent_id in user_senders:
+                                if parent_id in toolResult_senders:
+                                    sender_id, sender_name = toolResult_senders[parent_id]
+                                elif parent_id in user_senders:
                                     sender_id, sender_name = user_senders[parent_id]
 
                             # For toolResult messages without sender, try to get sender from parent assistant message
@@ -518,6 +523,10 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                             # Store assistant sender for toolResult attribution
                             if role == "assistant" and (sender_id or sender_name):
                                 assistant_senders[message_id] = (sender_id, sender_name)
+
+                            # Store toolResult sender for assistant attribution
+                            if role == "toolResult" and (sender_id or sender_name):
+                                toolResult_senders[message_id] = (sender_id, sender_name)
 
                             # Save message to database with sender info and message source
                             db.save_message(
