@@ -405,6 +405,8 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
     # First pass: collect user message senders for assistant message attribution
     # Map: message_id -> (sender_id, sender_name)
     user_senders = {}
+    # Also collect assistant senders for toolResult attribution
+    assistant_senders = {}
 
     with open(filepath, "r", encoding="utf-8") as f:
         for line in f:
@@ -501,10 +503,21 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                                 if parent_id in user_senders:
                                     sender_id, sender_name = user_senders[parent_id]
 
+                            # For toolResult messages without sender, try to get sender from parent assistant message
+                            if role == "toolResult" and not sender_id and not sender_name and parent_id:
+                                if parent_id in assistant_senders:
+                                    sender_id, sender_name = assistant_senders[parent_id]
+                                elif parent_id in user_senders:
+                                    sender_id, sender_name = user_senders[parent_id]
+
                             # Set default sender for messages without sender info
                             if not sender_id and not sender_name:
                                 sender_id = "openclaw_user"
                                 sender_name = "User of OpenClaw"
+
+                            # Store assistant sender for toolResult attribution
+                            if role == "assistant" and (sender_id or sender_name):
+                                assistant_senders[message_id] = (sender_id, sender_name)
 
                             # Save message to database with sender info and message source
                             db.save_message(
