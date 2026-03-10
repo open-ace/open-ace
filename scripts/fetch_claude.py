@@ -202,7 +202,7 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                             # Save full entry as JSON for complete original data
                             full_entry_json = json.dumps(entry, ensure_ascii=False)
 
-                            # Save message to database
+                            # Save message to database with default sender for Claude
                             db.save_message(
                                 date=date_key,
                                 tool_name="claude",
@@ -216,7 +216,9 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                                 input_tokens=input_tokens,
                                 output_tokens=output_tokens,
                                 model=model,
-                                timestamp=ts
+                                timestamp=ts,
+                                sender_id="claude_user",
+                                sender_name="User of Claude Code"
                             )
 
                 if sum([

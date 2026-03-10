@@ -469,9 +469,38 @@ def save_message(
     group_subject: Optional[str] = None,
     is_group_chat: Optional[bool] = None
 ) -> bool:
-    """Save an individual message to the database."""
+    """Save an individual message to the database.
+
+    Uses INSERT OR REPLACE with smart update logic:
+    - If message exists and new tokens_used > 0, update all fields
+    - If message exists and new tokens_used == 0, preserve existing token values
+    - For other fields (sender_id, sender_name, etc.), always update if new value is not None
+    """
     conn = get_connection()
     cursor = conn.cursor()
+
+    # Check if message already exists
+    cursor.execute('''
+        SELECT tokens_used, input_tokens, output_tokens, sender_id, sender_name
+        FROM daily_messages
+        WHERE date = ? AND tool_name = ? AND message_id = ? AND host_name = ?
+    ''', (date, tool_name, message_id, host_name))
+
+    existing = cursor.fetchone()
+
+    if existing:
+        # Preserve existing token values if new values are 0
+        if tokens_used == 0 and existing['tokens_used'] > 0:
+            tokens_used = existing['tokens_used']
+        if input_tokens == 0 and existing['input_tokens'] > 0:
+            input_tokens = existing['input_tokens']
+        if output_tokens == 0 and existing['output_tokens'] > 0:
+            output_tokens = existing['output_tokens']
+        # Preserve sender info if new values are None
+        if sender_id is None and existing['sender_id']:
+            sender_id = existing['sender_id']
+        if sender_name is None and existing['sender_name']:
+            sender_name = existing['sender_name']
 
     cursor.execute('''
         INSERT OR REPLACE INTO daily_messages
