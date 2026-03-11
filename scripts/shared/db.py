@@ -1196,6 +1196,92 @@ def get_hourly_usage_from_messages(start_date: str, end_date: str,
     return results
 
 
+def get_daily_hourly_usage(start_date: str, end_date: str,
+                           tool_name: Optional[str] = None,
+                           host_name: Optional[str] = None) -> List[Dict]:
+    """Get hourly usage statistics grouped by date (not day_of_week).
+
+    Args:
+        start_date: Start date in YYYY-MM-DD format
+        end_date: End date in YYYY-MM-DD format
+        tool_name: Optional tool name filter
+        host_name: Optional host name filter
+
+    Returns:
+        List of dicts with date, hour (0-23 in CST), tokens_used, message_count
+        Times are converted from UTC to CST (UTC+8).
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    conditions = ['date >= ?', 'date <= ?', 'timestamp IS NOT NULL']
+    params = [start_date, end_date]
+
+    if tool_name:
+        conditions.append('tool_name = ?')
+        params.append(tool_name)
+
+    if host_name:
+        conditions.append('host_name = ?')
+        params.append(host_name)
+
+    where_clause = ' AND '.join(conditions)
+
+    # Extract hour from timestamp and keep date
+    cursor.execute(f'''
+        SELECT
+            date,
+            CAST(strftime('%H', timestamp) AS INTEGER) as hour,
+            SUM(tokens_used) as tokens_used,
+            COUNT(*) as message_count,
+            SUM(input_tokens) as input_tokens,
+            SUM(output_tokens) as output_tokens
+        FROM daily_messages
+        WHERE {where_clause}
+        GROUP BY date, hour
+        ORDER BY date, hour
+    ''', params)
+
+    rows = cursor.fetchall()
+    conn.close()
+
+    # Convert UTC hour to CST (UTC+8) and aggregate by new (date, hour)
+    aggregated = {}
+    for row in rows:
+        utc_hour = row['hour']
+        cst_hour = (utc_hour + 8) % 24
+        date = row['date']
+
+        # If hour overflowed to next day (UTC hour >= 16), adjust date
+        if utc_hour >= 16:
+            from datetime import datetime, timedelta
+            date_obj = datetime.strptime(date, '%Y-%m-%d')
+            date_obj = date_obj + timedelta(days=1)
+            date = date_obj.strftime('%Y-%m-%d')
+
+        key = (date, cst_hour)
+        if key not in aggregated:
+            aggregated[key] = {
+                'date': date,
+                'hour': cst_hour,
+                'tokens_used': 0,
+                'message_count': 0,
+                'input_tokens': 0,
+                'output_tokens': 0
+            }
+
+        aggregated[key]['tokens_used'] += row['tokens_used']
+        aggregated[key]['message_count'] += row['message_count']
+        aggregated[key]['input_tokens'] += row['input_tokens']
+        aggregated[key]['output_tokens'] += row['output_tokens']
+
+    # Convert to list and sort
+    results = list(aggregated.values())
+    results.sort(key=lambda x: (x['date'], x['hour']))
+
+    return results
+
+
 def get_user_activity_ranking(start_date: str, end_date: str, 
                                limit: int = 10,
                                tool_name: Optional[str] = None,
@@ -2005,25 +2091,22 @@ def get_session_history(
 
     # Group messages into sessions
     # Strategy:
-    # 1. If conversation_label exists, use it as session identifier
-    # 2. Otherwise, group by (sender, date, tool_name) and use timestamp proximity
+    # - Group by (sender, date, tool_name) to ensure all messages from the same user
+    #   on the same day with the same tool are in the same session
+    # - This ensures user_messages and ai_messages are correctly counted
     sessions = {}
     session_counter = 0
 
     for row in rows:
         row_dict = dict(row)
         sender = row_dict.get('sender_name') or row_dict.get('sender_id') or 'Unknown'
-        conv_label = row_dict.get('conversation_label')
         timestamp = row_dict.get('timestamp')
 
-        # Determine session ID
-        if conv_label:
-            session_id = conv_label
-        else:
-            # Group by sender + date + tool_name
-            # Use a session key that combines sender, date, and tool
-            session_key = f"{sender}_{row_dict['date']}_{row_dict['tool_name']}"
-            session_id = session_key
+        # Use sender + date + tool_name as session identifier
+        # This ensures all messages from the same user on the same day with the same tool
+        # are grouped together, regardless of conversation_label
+        session_key = f"{sender}_{row_dict['date']}_{row_dict['tool_name']}"
+        session_id = session_key
 
         if session_id not in sessions:
             session_counter += 1

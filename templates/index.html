@@ -3077,10 +3077,20 @@
 
             const heatmapTitleEl = document.getElementById('analysis-heatmap-title');
             if (heatmapTitleEl) {
-                if (currentLang === 'zh') {
-                    heatmapTitleEl.textContent = `用量热力图（${diffDays} 天）`;
+                if (diffDays <= 14) {
+                    // Daily view: show date range
+                    if (currentLang === 'zh') {
+                        heatmapTitleEl.textContent = `用量热力图（${diffDays} 天）`;
+                    } else {
+                        heatmapTitleEl.textContent = `Usage Heatmap (${diffDays} Days)`;
+                    }
                 } else {
-                    heatmapTitleEl.textContent = `Usage Heatmap (${diffDays} Days)`;
+                    // Weekday aggregated view
+                    if (currentLang === 'zh') {
+                        heatmapTitleEl.textContent = `用量热力图（${diffDays} 天 - 按星期聚合）`;
+                    } else {
+                        heatmapTitleEl.textContent = `Usage Heatmap (${diffDays} Days - By Weekday)`;
+                    }
                 }
             }
 
@@ -3142,36 +3152,39 @@
         // Load Hourly Usage (Heatmap data)
         async function loadHourlyUsage(start, end, tool, host) {
             try {
+                // Calculate days difference to decide which API to use
+                const startDate = new Date(start);
+                const endDate = new Date(end);
+                const diffTime = Math.abs(endDate - startDate);
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+
                 const params = new URLSearchParams({start, end, tool, host});
-                const response = await fetch(`/api/analysis/hourly-usage?${params}`);
+
+                // Use daily-hourly-usage API for ≤14 days, otherwise use hourly-usage (weekday aggregated)
+                const apiEndpoint = diffDays <= 14 ? '/api/analysis/daily-hourly-usage' : '/api/analysis/hourly-usage';
+                const response = await fetch(`${apiEndpoint}?${params}`);
                 const data = await response.json();
 
-                renderHeatmapChart(data);
+                renderHeatmapChart(data, diffDays);
             } catch (error) {
                 console.error('Error loading hourly usage:', error);
             }
         }
 
         // Render Heatmap Chart using bubble chart (matrix not supported in standard Chart.js)
-        function renderHeatmapChart(data) {
+        // Supports two modes: daily view (≤14 days) and weekday aggregated view (>14 days)
+        function renderHeatmapChart(data, daysRange) {
             const ctx = document.getElementById('heatmapChart').getContext('2d');
 
-            // Prepare data for heatmap (day_of_week x hour)
-            // SQLite day_of_week: 0=Sun, 1=Mon, ..., 6=Sat
-            // Display order: Mon(1), Tue(2), Wed(3), Thu(4), Fri(5), Sat(6), Sun(0)
-            const daysDisplay = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-            // Map display index (0-6) to SQLite day_of_week
-            const displayToSqlDay = [1, 2, 3, 4, 5, 6, 0]; // Mon->1, Tue->2, ..., Sun->0
-            const dataset = [];
+            // Determine mode: daily view for ≤14 days, weekday view for >14 days
+            const isDailyView = daysRange <= 14;
 
             // Handle empty data
             if (!data || data.length === 0) {
-                // Destroy existing chart
                 if (heatmapChartInstance) {
                     heatmapChartInstance.destroy();
                     heatmapChartInstance = null;
                 }
-                // Display empty state message
                 ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
                 ctx.font = '14px sans-serif';
                 ctx.fillStyle = '#6c757d';
@@ -3180,68 +3193,147 @@
                 return;
             }
 
-            // Create a map for quick lookup (using SQLite day_of_week)
-            const dataMap = {};
-            data.forEach(d => {
-                const key = `${d.day_of_week}-${d.hour}`;
-                dataMap[key] = d.tokens_used || 0;
-            });
-
-            // First pass: find max value for normalization
+            let dataset = [];
+            let yLabels = [];
             let maxValue = 1;
-            for (let sqlDay = 0; sqlDay < 7; sqlDay++) {
-                for (let hour = 0; hour < 24; hour++) {
-                    const key = `${sqlDay}-${hour}`;
-                    const value = dataMap[key] || 0;
-                    if (value > maxValue) maxValue = value;
-                }
-            }
+            let chartOptions = {};
 
-            // Second pass: generate dataset with normalized radius
-            // Y-axis: 0=Mon, 1=Tue, ..., 6=Sun (display order)
-            const minRadius = 3;
-            const maxRadius = 15;
-            for (let displayDay = 0; displayDay < 7; displayDay++) {
-                const sqlDay = displayToSqlDay[displayDay]; // Convert to SQLite day_of_week
-                for (let hour = 0; hour < 24; hour++) {
-                    const key = `${sqlDay}-${hour}`;
-                    const value = dataMap[key] || 0;
-                    if (value > 0) {
-                        // Normalize radius based on value relative to max
-                        const normalizedRadius = minRadius + (Math.sqrt(value) / Math.sqrt(maxValue)) * (maxRadius - minRadius);
-                        dataset.push({
-                            x: hour,
-                            y: displayDay, // Use display index for Y position
-                            r: normalizedRadius,
-                            v: value,
-                            sqlDay: sqlDay // Keep original for tooltip
-                        });
+            if (isDailyView) {
+                // Daily view: each row is a specific date
+                // Get unique dates and sort them
+                const dateSet = new Set();
+                data.forEach(d => {
+                    if (d.date) dateSet.add(d.date);
+                });
+                const dates = Array.from(dateSet).sort();
+                yLabels = dates.map(date => {
+                    const d = new Date(date);
+                    return `${d.getMonth() + 1}/${d.getDate()}`;
+                });
+
+                // Create data map
+                const dataMap = {};
+                data.forEach(d => {
+                    if (d.date) {
+                        const key = `${d.date}-${d.hour}`;
+                        dataMap[key] = d.tokens_used || 0;
+                    }
+                });
+
+                // Find max value
+                Object.values(dataMap).forEach(v => {
+                    if (v > maxValue) maxValue = v;
+                });
+
+                // Generate dataset
+                const minRadius = 3;
+                const maxRadius = 15;
+                dates.forEach((date, dateIndex) => {
+                    for (let hour = 0; hour < 24; hour++) {
+                        const key = `${date}-${hour}`;
+                        const value = dataMap[key] || 0;
+                        if (value > 0) {
+                            const normalizedRadius = minRadius + (Math.sqrt(value) / Math.sqrt(maxValue)) * (maxRadius - minRadius);
+                            dataset.push({
+                                x: hour,
+                                y: dateIndex,
+                                r: normalizedRadius,
+                                v: value,
+                                date: date
+                            });
+                        }
+                    }
+                });
+
+                // Chart options for daily view
+                chartOptions = {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function(ctx) {
+                                    const raw = ctx.raw;
+                                    const dateLabel = raw && raw.date ? raw.date : '';
+                                    const hourLabel = raw && raw.x !== undefined ? raw.x : '';
+                                    const value = raw && raw.v ? formatTokens(raw.v) : '0';
+                                    return `${dateLabel} ${hourLabel}:00 - ${value} tokens`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            min: 0,
+                            max: 23,
+                            ticks: {
+                                stepSize: 3,
+                                callback: function(val) {
+                                    return val + ':00';
+                                }
+                            },
+                            title: { display: true, text: 'Hour of Day (CST UTC+8)' }
+                        },
+                        y: {
+                            min: -0.5,
+                            max: dates.length - 0.5,
+                            ticks: {
+                                callback: function(val) {
+                                    return yLabels[val] || '';
+                                }
+                            },
+                            title: { display: true, text: 'Date' }
+                        }
+                    }
+                };
+            } else {
+                // Weekday aggregated view: rows are Mon-Sun
+                const daysDisplay = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+                yLabels = daysDisplay;
+
+                // Map display index (0-6) to SQLite day_of_week
+                const displayToSqlDay = [1, 2, 3, 4, 5, 6, 0]; // Mon->1, Tue->2, ..., Sun->0
+
+                // Create data map
+                const dataMap = {};
+                data.forEach(d => {
+                    const key = `${d.day_of_week}-${d.hour}`;
+                    dataMap[key] = d.tokens_used || 0;
+                });
+
+                // Find max value
+                for (let sqlDay = 0; sqlDay < 7; sqlDay++) {
+                    for (let hour = 0; hour < 24; hour++) {
+                        const key = `${sqlDay}-${hour}`;
+                        const value = dataMap[key] || 0;
+                        if (value > maxValue) maxValue = value;
                     }
                 }
-            }
 
-            // Destroy existing chart
-            if (heatmapChartInstance) {
-                heatmapChartInstance.destroy();
-            }
+                // Generate dataset
+                const minRadius = 3;
+                const maxRadius = 15;
+                for (let displayDay = 0; displayDay < 7; displayDay++) {
+                    const sqlDay = displayToSqlDay[displayDay];
+                    for (let hour = 0; hour < 24; hour++) {
+                        const key = `${sqlDay}-${hour}`;
+                        const value = dataMap[key] || 0;
+                        if (value > 0) {
+                            const normalizedRadius = minRadius + (Math.sqrt(value) / Math.sqrt(maxValue)) * (maxRadius - minRadius);
+                            dataset.push({
+                                x: hour,
+                                y: displayDay,
+                                r: normalizedRadius,
+                                v: value,
+                                sqlDay: sqlDay
+                            });
+                        }
+                    }
+                }
 
-            // Create bubble chart to simulate heatmap
-            heatmapChartInstance = new Chart(ctx, {
-                type: 'bubble',
-                data: {
-                    datasets: [{
-                        label: 'Tokens',
-                        data: dataset,
-                        backgroundColor: function(ctx) {
-                            const raw = ctx.raw;
-                            if (!raw || !raw.v) return 'rgba(54, 162, 235, 0.2)';
-                            const intensity = raw.v / maxValue;
-                            return `rgba(54, 162, 235, ${0.3 + intensity * 0.7})`;
-                        },
-                        borderColor: 'rgba(54, 162, 235, 0.8)'
-                    }]
-                },
-                options: {
+                // Chart options for weekday view
+                chartOptions = {
                     responsive: true,
                     maintainAspectRatio: false,
                     plugins: {
@@ -3262,7 +3354,7 @@
                         x: {
                             min: 0,
                             max: 23,
-                            ticks: { 
+                            ticks: {
                                 stepSize: 3,
                                 callback: function(val) {
                                     return val + ':00';
@@ -3274,14 +3366,38 @@
                             min: -0.5,
                             max: 6.5,
                             ticks: {
-                                callback: function(val, index) {
+                                callback: function(val) {
                                     return daysDisplay[val] || '';
                                 }
                             },
-                            title: { display: true, text: 'Day of Week' }
+                            title: { display: true, text: 'Day of Week (Aggregated)' }
                         }
                     }
-                }
+                };
+            }
+
+            // Destroy existing chart
+            if (heatmapChartInstance) {
+                heatmapChartInstance.destroy();
+            }
+
+            // Create bubble chart
+            heatmapChartInstance = new Chart(ctx, {
+                type: 'bubble',
+                data: {
+                    datasets: [{
+                        label: 'Tokens',
+                        data: dataset,
+                        backgroundColor: function(ctx) {
+                            const raw = ctx.raw;
+                            if (!raw || !raw.v) return 'rgba(54, 162, 235, 0.2)';
+                            const intensity = raw.v / maxValue;
+                            return `rgba(54, 162, 235, ${0.3 + intensity * 0.7})`;
+                        },
+                        borderColor: 'rgba(54, 162, 235, 0.8)'
+                    }]
+                },
+                options: chartOptions
             });
         }
 

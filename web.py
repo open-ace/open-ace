@@ -204,8 +204,20 @@ def api_analysis_hourly_usage():
     end_date = request.args.get('end', utils.get_today())
     tool = request.args.get('tool')
     host = request.args.get('host')
-    
+
     data = db.get_hourly_usage_from_messages(start_date, end_date, tool_name=tool, host_name=host)
+    return jsonify(data)
+
+
+@app.route('/api/analysis/daily-hourly-usage')
+def api_analysis_daily_hourly_usage():
+    """Get hourly usage statistics grouped by date (for heatmap with daily view)."""
+    start_date = request.args.get('start', utils.get_days_ago(7))
+    end_date = request.args.get('end', utils.get_today())
+    tool = request.args.get('tool')
+    host = request.args.get('host')
+
+    data = db.get_daily_hourly_usage(start_date, end_date, tool_name=tool, host_name=host)
     return jsonify(data)
 
 
