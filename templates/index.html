@@ -3069,6 +3069,21 @@
                 return;
             }
 
+            // Update heatmap title based on selected date range
+            const start = new Date(startDate);
+            const end = new Date(endDate);
+            const diffTime = Math.abs(end - start);
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+
+            const heatmapTitleEl = document.getElementById('analysis-heatmap-title');
+            if (heatmapTitleEl) {
+                if (currentLang === 'zh') {
+                    heatmapTitleEl.textContent = `用量热力图（${diffDays} 天）`;
+                } else {
+                    heatmapTitleEl.textContent = `Usage Heatmap (${diffDays} Days)`;
+                }
+            }
+
             // Load all analysis data in parallel with error handling
             // Each function has its own try-catch, so failures won't block others
             await Promise.allSettled([
