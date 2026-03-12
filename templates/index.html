@@ -4824,7 +4824,18 @@
                     background: white !important;
                     padding: 20px !important;
                     overflow: auto !important;
+                    display: flex !important;
+                    flex-direction: column !important;
                 `;
+
+                // Make table fill the container
+                const tableElement = document.getElementById('session-history-table');
+                if (tableElement) {
+                    tableElement.style.cssText = `
+                        height: 100% !important;
+                        width: 100% !important;
+                    `;
+                }
                 
                 if (btn) {
                     btn.innerHTML = `<i class="bi bi-fullscreen-exit"></i> <span id="fullscreen-btn-text">${t('exitFullscreenText')}</span>`;
@@ -4849,6 +4860,12 @@
                 // Remove fullscreen styles
                 container.style.cssText = '';
                 
+
+                // Reset table element styles
+                const tableElement = document.getElementById('session-history-table');
+                if (tableElement) {
+                    tableElement.style.cssText = '';
+                }
                 if (btn) {
                     btn.innerHTML = `<i class="bi bi-arrows-fullscreen"></i> <span id="fullscreen-btn-text">${t('fullscreenText')}</span>`;
                 }
@@ -4872,6 +4889,12 @@
                     container.style.cssText = '';
                 }
                 
+
+                // Reset table element styles
+                const tableElement = document.getElementById('session-history-table');
+                if (tableElement) {
+                    tableElement.style.cssText = '';
+                }
                 if (btn) {
                     btn.innerHTML = `<i class="bi bi-arrows-fullscreen"></i> <span id="fullscreen-btn-text">${t('fullscreenText')}</span>`;
                 }
@@ -4904,6 +4927,7 @@
                         field: "session_id",
                         sorter: "string",
                         headerSort: true,
+                        hozAlign: "center",
                         minWidth: 200,
                         variableHeight: true,
                         visible: true,
@@ -4917,6 +4941,7 @@
                         field: "user",
                         sorter: "string",
                         headerSort: true,
+                        hozAlign: "center",
                         minWidth: 100,
                         visible: true,
                         formatter: function(cell) {
@@ -4928,6 +4953,7 @@
                         field: "models",
                         sorter: "string",
                         headerSort: true,
+                        hozAlign: "center",
                         minWidth: 150,
                         variableHeight: true,
                         visible: true,
@@ -4942,6 +4968,7 @@
                         field: "start_time",
                         sorter: "datetime",
                         headerSort: true,
+                        hozAlign: "center",
                         minWidth: 150,
                         visible: true,
                         formatter: function(cell) {
@@ -4954,6 +4981,7 @@
                         field: "end_time",
                         sorter: "datetime",
                         headerSort: true,
+                        hozAlign: "center",
                         minWidth: 150,
                         visible: false,
                         formatter: function(cell) {
