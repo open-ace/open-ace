@@ -2,7 +2,9 @@
   "host_name": "localhost",
   "server": {
     "upload_auth_key": "your_upload_auth_key_here",
-    "server_url": "http://localhost:5001"
+    "server_url": "http://localhost:5001",
+    "web_port": 5001,
+    "web_host": "0.0.0.0"
   },
   "authentication": {
     "enabled": true,

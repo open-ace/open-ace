@@ -28,10 +28,63 @@ REMOTE_USER = os.environ.get('AI_TOKEN_REMOTE_USER', 'openclaw')
 REMOTE_CONFIG_DIR = f"/home/{REMOTE_USER}/.ai-token-analyzer"
 REMOTE_DB_PATH = f"{REMOTE_CONFIG_DIR}/usage.db"
 
+def _load_user_config() -> dict:
+    """Load user configuration from config.json if it exists."""
+    if os.path.exists(CONFIG_PATH):
+        try:
+            with open(CONFIG_PATH, 'r') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            pass
+    return {}
+
+
+def _get_web_port() -> int:
+    """Get web server port with priority: config file > environment variable > default."""
+    # Priority 1: Environment variable
+    env_port = os.environ.get('AI_TOKEN_WEB_PORT')
+    if env_port:
+        try:
+            return int(env_port)
+        except ValueError:
+            pass
+
+    # Priority 2: Config file
+    user_config = _load_user_config()
+    server_config = user_config.get('server', {})
+    config_port = server_config.get('web_port')
+    if config_port:
+        try:
+            return int(config_port)
+        except (ValueError, TypeError):
+            pass
+
+    # Priority 3: Default
+    return 5001
+
+
+def _get_web_host() -> str:
+    """Get web server host with priority: config file > environment variable > default."""
+    # Priority 1: Environment variable
+    env_host = os.environ.get('AI_TOKEN_WEB_HOST')
+    if env_host:
+        return env_host
+
+    # Priority 2: Config file
+    user_config = _load_user_config()
+    server_config = user_config.get('server', {})
+    config_host = server_config.get('web_host')
+    if config_host:
+        return config_host
+
+    # Priority 3: Default
+    return '0.0.0.0'
+
+
 # Web server configuration
-# Port for the web server (default: 5001, can be overridden via environment variable)
-WEB_PORT = int(os.environ.get('AI_TOKEN_WEB_PORT', '5001'))
-WEB_HOST = os.environ.get('AI_TOKEN_WEB_HOST', '0.0.0.0')
+# Port and host are loaded with priority: config file > environment variable > default
+WEB_PORT = _get_web_port()
+WEB_HOST = _get_web_host()
 
 
 def ensure_config_dir():
