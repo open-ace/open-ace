@@ -479,6 +479,38 @@
                 padding: 60px 10px 10px 10px;
             }
         }
+
+        /* Resizable table columns */
+        .resizable-table {
+            table-layout: fixed;
+            width: 100%;
+        }
+        .resizable-table th {
+            position: relative;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .resizable-table th .resizer {
+            position: absolute;
+            right: 0;
+            top: 0;
+            height: 100%;
+            width: 5px;
+            cursor: col-resize;
+            user-select: none;
+            touch-action: none;
+            z-index: 10;
+        }
+        .resizable-table th .resizer:hover,
+        .resizable-table th .resizer.resizing {
+            background-color: #0d6efd;
+        }
+        .resizable-table td {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
     </style>
 </head>
 <body>
@@ -1012,35 +1044,43 @@
                 <div class="card">
                     <div class="card-body">
                         <div class="table-responsive">
-                            <table class="table table-sm table-hover mb-0" id="session-history-table-container">
+                            <table class="table table-sm table-hover mb-0 resizable-table" id="session-history-table-container">
                                 <thead class="table-light">
                                     <tr>
-                                        <th class="sortable" data-sort-key="session_id" onclick="sortSessionHistory('session_id')">
+                                        <th class="sortable" data-sort-key="session_id" onclick="sortSessionHistory('session_id')" data-col-index="0">
                                             <span id="sh-session">Session</span> <i class="bi bi-arrow-down-up sort-icon"></i>
+                                            <div class="resizer"></div>
                                         </th>
-                                        <th class="sortable" data-sort-key="user" onclick="sortSessionHistory('user')">
+                                        <th class="sortable" data-sort-key="user" onclick="sortSessionHistory('user')" data-col-index="1">
                                             <span id="sh-user">User</span> <i class="bi bi-arrow-down-up sort-icon"></i>
+                                            <div class="resizer"></div>
                                         </th>
-                                        <th class="sortable" data-sort-key="model" onclick="sortSessionHistory('model')">
+                                        <th class="sortable" data-sort-key="model" onclick="sortSessionHistory('model')" data-col-index="2">
                                             <span id="sh-model">Model</span> <i class="bi bi-arrow-down-up sort-icon"></i>
+                                            <div class="resizer"></div>
                                         </th>
-                                        <th class="sortable" data-sort-key="start_time" onclick="sortSessionHistory('start_time')">
+                                        <th class="sortable" data-sort-key="start_time" onclick="sortSessionHistory('start_time')" data-col-index="3">
                                             <span id="sh-start">Start Time</span> <i class="bi bi-arrow-down-up sort-icon"></i>
+                                            <div class="resizer"></div>
                                         </th>
-                                        <th class="sortable" data-sort-key="end_time" onclick="sortSessionHistory('end_time')">
+                                        <th class="sortable" data-sort-key="end_time" onclick="sortSessionHistory('end_time')" data-col-index="4">
                                             <span id="sh-end">End Time</span> <i class="bi bi-arrow-down-up sort-icon"></i>
+                                            <div class="resizer"></div>
                                         </th>
-                                        <th class="sortable text-end" data-sort-key="user_messages" onclick="sortSessionHistory('user_messages')">
+                                        <th class="sortable text-end" data-sort-key="user_messages" onclick="sortSessionHistory('user_messages')" data-col-index="5">
                                             <span id="sh-user-msg">User Msgs</span> <i class="bi bi-arrow-down-up sort-icon"></i>
+                                            <div class="resizer"></div>
                                         </th>
-                                        <th class="sortable text-end" data-sort-key="ai_messages" onclick="sortSessionHistory('ai_messages')">
+                                        <th class="sortable text-end" data-sort-key="ai_messages" onclick="sortSessionHistory('ai_messages')" data-col-index="6">
                                             <span id="sh-ai-msg">AI Msgs</span> <i class="bi bi-arrow-down-up sort-icon"></i>
+                                            <div class="resizer"></div>
                                         </th>
-                                        <th class="sortable text-end" data-sort-key="avg_latency" onclick="sortSessionHistory('avg_latency')">
+                                        <th class="sortable text-end" data-sort-key="avg_latency" onclick="sortSessionHistory('avg_latency')" data-col-index="7">
                                             <span id="sh-latency">Avg Latency</span> <i class="bi bi-arrow-down-up sort-icon"></i>
+                                            <div class="resizer"></div>
                                         </th>
-                                        <th><span id="sh-timeline">Timeline</span></th>
-                                        <th><span id="sh-latency-curve">Latency Curve</span></th>
+                                        <th data-col-index="8"><span id="sh-timeline">Timeline</span><div class="resizer"></div></th>
+                                        <th data-col-index="9"><span id="sh-latency-curve">Latency Curve</span></th>
                                     </tr>
                                 </thead>
                                 <tbody id="session-history-table">
@@ -5050,6 +5090,95 @@
         document.getElementById('session-history-tab')?.addEventListener('shown.bs.tab', function() {
             loadSessionHistory();
         });
+
+        // Resizable table columns functionality
+        (function initResizableColumns() {
+            const table = document.getElementById('session-history-table-container');
+            if (!table) return;
+
+            const headers = table.querySelectorAll('th');
+            const storageKey = 'sessionHistoryColumnWidths';
+
+            // Load saved column widths
+            function loadColumnWidths() {
+                try {
+                    const saved = localStorage.getItem(storageKey);
+                    if (saved) {
+                        const widths = JSON.parse(saved);
+                        headers.forEach((th, index) => {
+                            if (widths[index]) {
+                                th.style.width = widths[index];
+                            }
+                        });
+                    }
+                } catch (e) {
+                    console.error('Error loading column widths:', e);
+                }
+            }
+
+            // Save column widths
+            function saveColumnWidths() {
+                try {
+                    const widths = Array.from(headers).map(th => th.style.width || '');
+                    localStorage.setItem(storageKey, JSON.stringify(widths));
+                } catch (e) {
+                    console.error('Error saving column widths:', e);
+                }
+            }
+
+            // Initialize resizers
+            headers.forEach((th, index) => {
+                const resizer = th.querySelector('.resizer');
+                if (!resizer) return;
+
+                let startX, startWidth;
+
+                resizer.addEventListener('mousedown', function(e) {
+                    startX = e.pageX;
+                    startWidth = th.offsetWidth;
+                    resizer.classList.add('resizing');
+
+                    document.addEventListener('mousemove', onMouseMove);
+                    document.addEventListener('mouseup', onMouseUp);
+                    e.preventDefault();
+                });
+
+                // Double-click to auto-fit
+                resizer.addEventListener('dblclick', function(e) {
+                    e.stopPropagation();
+                    // Calculate optimal width based on content
+                    const colIndex = Array.from(th.parentNode.children).indexOf(th);
+                    const cells = table.querySelectorAll(`tbody tr td:nth-child(${colIndex + 1})`);
+                    let maxWidth = th.scrollWidth;
+
+                    cells.forEach(cell => {
+                        const contentWidth = cell.scrollWidth;
+                        if (contentWidth > maxWidth) {
+                            maxWidth = contentWidth;
+                        }
+                    });
+
+                    th.style.width = (maxWidth + 20) + 'px';
+                    saveColumnWidths();
+                });
+
+                function onMouseMove(e) {
+                    const diff = e.pageX - startX;
+                    const newWidth = Math.max(50, startWidth + diff);
+                    th.style.width = newWidth + 'px';
+                }
+
+                function onMouseUp() {
+                    resizer.classList.remove('resizing');
+                    document.removeEventListener('mousemove', onMouseMove);
+                    document.removeEventListener('mouseup', onMouseUp);
+                    saveColumnWidths();
+                }
+            });
+
+            // Load saved widths on init
+            loadColumnWidths();
+        })();
     </script>
 </body>
 </html>
