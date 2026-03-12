@@ -9,11 +9,12 @@ import time
 import os
 from datetime import datetime
 
-# Configuration
-SERVER_URL = "http://192.168.31.208:5001"
-AUTH_KEY = "deploy-remote-machine-key-2026"
-HOSTNAME = "ai-lab"
-UPLOAD_INTERVAL = 300  # seconds between uploads (5 minutes)
+# Configuration - can be overridden via environment variables
+DEFAULT_PORT = os.environ.get('AI_TOKEN_WEB_PORT', '5001')
+SERVER_URL = os.environ.get('AI_TOKEN_SERVER_URL', f"http://192.168.31.208:{DEFAULT_PORT}")
+AUTH_KEY = os.environ.get('AI_TOKEN_UPLOAD_AUTH_KEY', 'deploy-remote-machine-key-2026')
+HOSTNAME = os.environ.get('AI_TOKEN_HOSTNAME', 'ai-lab')
+UPLOAD_INTERVAL = int(os.environ.get('AI_TOKEN_UPLOAD_INTERVAL', '300'))  # seconds between uploads (5 minutes)
 MAX_RETRIES = 5
 BASE_RETRY_DELAY = 10  # seconds
 

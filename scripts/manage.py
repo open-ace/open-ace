@@ -29,6 +29,17 @@ LOG_DIR = DEPLOY_DIR / "logs"
 # Set REMOTE_HOST environment variable or configure in ~/.ai-token-analyzer/config.json
 REMOTE_USER = os.environ.get("REMOTE_USER", "openclaw")
 REMOTE_HOST = os.environ.get("REMOTE_HOST", "")
+
+# Import shared config for web server settings
+sys.path.insert(0, str(DEV_DIR / "scripts" / "shared"))
+try:
+    import config
+    WEB_PORT = config.WEB_PORT
+    WEB_HOST = config.WEB_HOST
+except ImportError:
+    # Fallback defaults if config module not available
+    WEB_PORT = int(os.environ.get('AI_TOKEN_WEB_PORT', '5001'))
+    WEB_HOST = os.environ.get('AI_TOKEN_WEB_HOST', '0.0.0.0')
 REMOTE_DIR = os.environ.get("REMOTE_DIR", "/home/openclaw/ai-token-analyzer")
 
 
@@ -118,12 +129,12 @@ def setup_local_config():
             print_success(f"Created config file: {config_file}")
             print(f"  Please edit {config_file} with your settings")
         else:
-            # Create default config
-            config = {
+            # Create default config using WEB_PORT from environment or config
+            default_config = {
                 "host_name": "localhost",
                 "server": {
                     "upload_auth_key": "your-auth-key-here",
-                    "server_url": "http://localhost:5001"
+                    "server_url": f"http://localhost:{WEB_PORT}"
                 },
                 "tools": {
                     "openclaw": {"enabled": True, "hostname": "localhost"},
@@ -132,7 +143,7 @@ def setup_local_config():
                 }
             }
             with open(config_file, 'w') as f:
-                json.dump(config, f, indent=2)
+                json.dump(default_config, f, indent=2)
             print_success(f"Created default config: {config_file}")
     else:
         print(f"Config file already exists: {config_file}")
@@ -242,13 +253,13 @@ def start_local_service():
     os.chdir(DEPLOY_DIR)
     
     # Check if already running
-    result = run_command("lsof -i :5001", capture=True, check=False)
+    result = run_command(f"lsof -i :{WEB_PORT}", capture=True, check=False)
     if result and result.returncode == 0:
-        print("Web server is already running on port 5001")
+        print(f"Web server is already running on port {WEB_PORT}")
         return
-    
+
     # Start web server
-    print(f"Starting web server... (log: {log_file})")
+    print(f"Starting web server on port {WEB_PORT}... (log: {log_file})")
     with open(log_file, 'a') as log:
         subprocess.Popen(
             [sys.executable, str(DEPLOY_DIR / "web.py")],
@@ -256,14 +267,14 @@ def start_local_service():
             stderr=log,
             cwd=DEPLOY_DIR
         )
-    
+
     import time
     time.sleep(2)
-    
+
     # Verify it started
-    result = run_command("lsof -i :5001", capture=True, check=False)
+    result = run_command(f"lsof -i :{WEB_PORT}", capture=True, check=False)
     if result and result.returncode == 0:
-        print_success("Web server started on http://localhost:5001")
+        print_success(f"Web server started on http://localhost:{WEB_PORT}")
     else:
         print_error("Failed to start web server")
 
@@ -271,23 +282,23 @@ def start_local_service():
 def stop_local_service():
     """Stop local web server."""
     print_header("Stopping Local Web Server")
-    
-    # Find and kill process on port 5001
+
+    # Find and kill process on web port
     if os.uname().sysname == "Darwin":  # macOS
-        run_command("lsof -ti :5001 | xargs kill -9", check=False)
+        run_command(f"lsof -ti :{WEB_PORT} | xargs kill -9", check=False)
     else:  # Linux
-        run_command("fuser -k 5001/tcp", check=False)
-    
+        run_command(f"fuser -k {WEB_PORT}/tcp", check=False)
+
     print_success("Web server stopped")
 
 
 def status_local_service():
     """Check local web server status."""
     print_header("Local Service Status")
-    
-    result = run_command("lsof -i :5001", capture=True, check=False)
+
+    result = run_command(f"lsof -i :{WEB_PORT}", capture=True, check=False)
     if result and result.returncode == 0:
-        print("Web server is RUNNING on http://localhost:5001")
+        print(f"Web server is RUNNING on http://localhost:{WEB_PORT}")
         print(f"\nProcess info:\n{result.stdout}")
     else:
         print("Web server is NOT RUNNING")
@@ -362,25 +373,25 @@ rm -f ../scripts/shared/email_notifier.py
         return
     
     # Generate config template - user should edit with actual credentials
-    config_content = """{
+    config_content = f"""{{
   "host_name": "ai-lab",
-  "server": {
+  "server": {{
     "upload_auth_key": "<UPLOAD_AUTH_KEY>",
-    "server_url": "http://<SERVER_IP>:5001"
-  },
-  "tools": {
-    "openclaw": {
+    "server_url": "http://<SERVER_IP>:{WEB_PORT}"
+  }},
+  "tools": {{
+    "openclaw": {{
       "enabled": true,
       "token_env": "<OPENCLAW_TOKEN>",
       "gateway_url": "http://127.0.0.1:18789",
       "hostname": "ai-lab"
-    }
-  },
-  "feishu": {
+    }}
+  }},
+  "feishu": {{
     "app_id": "cli_xxxxxxxxxxxxxxxx",
     "app_secret": "your_feishu_app_secret_here"
-  }
-}"""
+  }}
+}}"""
     print("\n  ⚠️  IMPORTANT: Please edit the config file with your actual credentials!")
     print(f"  Config location: ~{REMOTE_USER}/.ai-token-analyzer/config.json")
     print("  Required fields to update:")

@@ -33,6 +33,12 @@ spec_utils = importlib.util.spec_from_file_location('utils', utils_path)
 utils = importlib.util.module_from_spec(spec_utils)
 spec_utils.loader.exec_module(utils)
 
+# Load config module
+config_path = os.path.join(shared_dir, 'config.py')
+spec_config = importlib.util.spec_from_file_location('config', config_path)
+config_module = importlib.util.module_from_spec(spec_config)
+spec_config.loader.exec_module(config_module)
+
 app = Flask(__name__, static_folder='static', template_folder='templates')
 
 
@@ -852,7 +858,8 @@ def _fetch_remote_data():
 
         # Execute upload on remote machine
         server_config = config.get('server', {})
-        server_url = server_config.get('server_url', 'http://localhost:5001')
+        default_server_url = f"http://localhost:{config_module.WEB_PORT}"
+        server_url = server_config.get('server_url', default_server_url)
         auth_key = server_config.get('upload_auth_key', '')
 
         if auth_key:
@@ -1560,5 +1567,5 @@ if __name__ == '__main__':
     # Initialize database (including auth tables)
     db.init_database()
 
-    # Run the Flask app
-    app.run(host='0.0.0.0', port=5001, debug=False)
+    # Run the Flask app using configuration from config module
+    app.run(host=config.WEB_HOST, port=config.WEB_PORT, debug=False)

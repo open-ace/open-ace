@@ -28,6 +28,11 @@ REMOTE_USER = os.environ.get('AI_TOKEN_REMOTE_USER', 'openclaw')
 REMOTE_CONFIG_DIR = f"/home/{REMOTE_USER}/.ai-token-analyzer"
 REMOTE_DB_PATH = f"{REMOTE_CONFIG_DIR}/usage.db"
 
+# Web server configuration
+# Port for the web server (default: 5001, can be overridden via environment variable)
+WEB_PORT = int(os.environ.get('AI_TOKEN_WEB_PORT', '5001'))
+WEB_HOST = os.environ.get('AI_TOKEN_WEB_HOST', '0.0.0.0')
+
 
 def ensure_config_dir():
     """Ensure the configuration directory exists."""
