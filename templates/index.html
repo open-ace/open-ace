@@ -4819,8 +4819,12 @@
                 ]
             });
 
-            // Add row click event listener
+            // Add row click event listener (exclude button clicks)
             sessionHistoryTable.on("rowClick", function(e, row) {
+                // 如果点击的是按钮或图标，不显示对话详情
+                if (e.target.closest('button') || e.target.closest('.btn')) {
+                    return;
+                }
                 const sessionId = row.getData().session_id;
                 showConversationModal(encodeURIComponent(sessionId));
             });
