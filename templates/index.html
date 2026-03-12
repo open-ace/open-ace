@@ -8,6 +8,8 @@
     <script src="/static/js/Chart.min.js"></script>
     <link href="/static/css/bootstrap.min.css" rel="stylesheet">
     <link href="/static/css/bootstrap-icons.css" rel="stylesheet">
+    <!-- Tabulator CSS -->
+    <link href="https://unpkg.com/tabulator-tables@6.2.0/dist/css/tabulator_bootstrap5.min.css" rel="stylesheet">
     <style>
         :root {
             --sidebar-width: 250px;
@@ -479,38 +481,6 @@
                 padding: 60px 10px 10px 10px;
             }
         }
-
-        /* Resizable table columns */
-        .resizable-table {
-            table-layout: fixed;
-            width: 100%;
-        }
-        .resizable-table th {
-            position: relative;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-        .resizable-table th .resizer {
-            position: absolute;
-            right: 0;
-            top: 0;
-            height: 100%;
-            width: 5px;
-            cursor: col-resize;
-            user-select: none;
-            touch-action: none;
-            z-index: 10;
-        }
-        .resizable-table th .resizer:hover,
-        .resizable-table th .resizer.resizing {
-            background-color: #0d6efd;
-        }
-        .resizable-table td {
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
     </style>
 </head>
 <body>
@@ -819,7 +789,7 @@
                 </li>
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="session-history-tab" data-bs-toggle="tab" data-bs-target="#session-history-content" type="button">
-                        <i class="bi bi-chat-history"></i> <span id="session-history-tab-text">Session History</span>
+                        <i class="bi bi-chat-history"></i> <span id="session-history-tab-text">Conversation History</span>
                     </button>
                 </li>
             </ul>
@@ -1043,70 +1013,8 @@
             <div class="tab-pane fade" id="session-history-content">
                 <div class="card">
                     <div class="card-body">
-                        <div class="table-responsive">
-                            <table class="table table-sm table-hover mb-0 resizable-table" id="session-history-table-container">
-                                <thead class="table-light">
-                                    <tr>
-                                        <th class="sortable" data-sort-key="session_id" onclick="sortSessionHistory('session_id')" data-col-index="0">
-                                            <span id="sh-session">Session</span> <i class="bi bi-arrow-down-up sort-icon"></i>
-                                            <div class="resizer"></div>
-                                        </th>
-                                        <th class="sortable" data-sort-key="user" onclick="sortSessionHistory('user')" data-col-index="1">
-                                            <span id="sh-user">User</span> <i class="bi bi-arrow-down-up sort-icon"></i>
-                                            <div class="resizer"></div>
-                                        </th>
-                                        <th class="sortable" data-sort-key="model" onclick="sortSessionHistory('model')" data-col-index="2">
-                                            <span id="sh-model">Model</span> <i class="bi bi-arrow-down-up sort-icon"></i>
-                                            <div class="resizer"></div>
-                                        </th>
-                                        <th class="sortable" data-sort-key="start_time" onclick="sortSessionHistory('start_time')" data-col-index="3">
-                                            <span id="sh-start">Start Time</span> <i class="bi bi-arrow-down-up sort-icon"></i>
-                                            <div class="resizer"></div>
-                                        </th>
-                                        <th class="sortable" data-sort-key="end_time" onclick="sortSessionHistory('end_time')" data-col-index="4">
-                                            <span id="sh-end">End Time</span> <i class="bi bi-arrow-down-up sort-icon"></i>
-                                            <div class="resizer"></div>
-                                        </th>
-                                        <th class="sortable text-end" data-sort-key="user_messages" onclick="sortSessionHistory('user_messages')" data-col-index="5">
-                                            <span id="sh-user-msg">User Msgs</span> <i class="bi bi-arrow-down-up sort-icon"></i>
-                                            <div class="resizer"></div>
-                                        </th>
-                                        <th class="sortable text-end" data-sort-key="ai_messages" onclick="sortSessionHistory('ai_messages')" data-col-index="6">
-                                            <span id="sh-ai-msg">AI Msgs</span> <i class="bi bi-arrow-down-up sort-icon"></i>
-                                            <div class="resizer"></div>
-                                        </th>
-                                        <th class="sortable text-end" data-sort-key="avg_latency" onclick="sortSessionHistory('avg_latency')" data-col-index="7">
-                                            <span id="sh-latency">Avg Latency</span> <i class="bi bi-arrow-down-up sort-icon"></i>
-                                            <div class="resizer"></div>
-                                        </th>
-                                        <th data-col-index="8"><span id="sh-timeline">Timeline</span><div class="resizer"></div></th>
-                                        <th data-col-index="9"><span id="sh-latency-curve">Latency Curve</span></th>
-                                    </tr>
-                                </thead>
-                                <tbody id="session-history-table">
-                                    <tr><td colspan="10" class="text-center text-muted">Loading...</td></tr>
-                                </tbody>
-                            </table>
-                        </div>
-                        <!-- Pagination -->
-                        <div class="d-flex justify-content-between align-items-center mt-3">
-                            <div class="text-muted">
-                                <span id="session-history-count">0</span> sessions
-                            </div>
-                            <nav aria-label="Session history pagination">
-                                <ul class="pagination pagination-sm mb-0" id="session-history-pagination">
-                                    <li class="page-item disabled" id="session-prev-page">
-                                        <a class="page-link" href="#" onclick="sessionHistoryPrevPage()"><i class="bi bi-chevron-left"></i></a>
-                                    </li>
-                                    <li class="page-item" id="session-page-display">
-                                        <span class="page-link"><span id="session-current-page">1</span> / <span id="session-total-pages">1</span></span>
-                                    </li>
-                                    <li class="page-item" id="session-next-page">
-                                        <a class="page-link" href="#" onclick="sessionHistoryNextPage()"><i class="bi bi-chevron-right"></i></a>
-                                    </li>
-                                </ul>
-                            </nav>
-                        </div>
+                        <!-- Tabulator Table Container -->
+                        <div id="session-history-table"></div>
                     </div>
                 </div>
             </div><!-- End Session History Tab -->
@@ -1270,6 +1178,8 @@
     </div><!-- End main-content -->
 
     <script src="/static/js/bootstrap.bundle.min.js"></script>
+    <!-- Tabulator JS -->
+    <script type="text/javascript" src="https://unpkg.com/tabulator-tables@6.2.0/dist/js/tabulator.min.js"></script>
     <script src="/static/js/auth.js"></script>
     <script>
         // Language resources
@@ -1444,8 +1354,8 @@
                 securityComingSoon: 'Security settings coming soon',
                 // Session History translations
                 analysisOverviewTab: 'Overview',
-                sessionHistoryTab: 'Session History',
-                shSession: 'Session',
+                sessionHistoryTab: 'Conversation History',
+                shSession: 'Conversation ID',
                 shUser: 'User',
                 shModel: 'Model',
                 shStartTime: 'Start Time',
@@ -1818,6 +1728,10 @@
         function updateAnalysisText() {
             const analysisTitle = document.getElementById('analysis-title');
             if (analysisTitle) analysisTitle.textContent = t('analysisText');
+
+            // Update session history tab text
+            const sessionHistoryTabText = document.getElementById('session-history-tab-text');
+            if (sessionHistoryTabText) sessionHistoryTabText.textContent = t('sessionHistoryTab');
 
             // Update quick date range buttons
             const quickDate7 = document.getElementById('quick-date-7');
@@ -4723,105 +4637,175 @@
         // =====================================================================
 
         // Session History state
-        let sessionHistoryData = [];
-        let sessionHistoryPage = 1;
-        let sessionHistorySortBy = 'start_time';
-        let sessionHistorySortOrder = 'desc';
+        let sessionHistoryTable = null;
         let timelineModalChart = null;
         let latencyModalChart = null;
 
-        // Load Session History data
-        async function loadSessionHistory() {
-            const startDate = document.getElementById('analysis-start-date').value;
-            const endDate = document.getElementById('analysis-end-date').value;
-            const tool = document.getElementById('analysis-tool-filter').value;
-            const host = document.getElementById('analysis-host-filter').value;
+        // Initialize Tabulator for Session History
+        function initSessionHistoryTable() {
+            if (sessionHistoryTable) return;
 
+            sessionHistoryTable = new Tabulator("#session-history-table", {
+                height: "100%",
+                layout: "fitColumns",
+                responsiveLayout: "collapse",
+                pagination: true,
+                paginationMode: "remote",
+                paginationSize: 20,
+                paginationSizeSelector: [10, 20, 50, 100],
+                sortMode: "remote",
+                placeholder: "No sessions found",
+                columns: [
+                    {
+                        title: "Conversation ID",
+                        field: "session_id",
+                        sorter: "string",
+                        headerSort: true,
+                        minWidth: 200,
+                        variableHeight: true,
+                        formatter: function(cell) {
+                            const value = cell.getValue() || '';
+                            return `<span title="${escapeHtmlForDisplay(value)}">${escapeHtmlForDisplay(value)}</span>`;
+                        }
+                    },
+                    {
+                        title: "User",
+                        field: "user",
+                        sorter: "string",
+                        headerSort: true,
+                        minWidth: 100,
+                        formatter: function(cell) {
+                            return escapeHtmlForDisplay(cell.getValue() || 'Unknown');
+                        }
+                    },
+                    {
+                        title: "Model",
+                        field: "models",
+                        sorter: "string",
+                        headerSort: true,
+                        minWidth: 150,
+                        variableHeight: true,
+                        formatter: function(cell) {
+                            const models = cell.getValue() || [];
+                            const text = Array.isArray(models) ? models.join(', ') || '-' : '-';
+                            return `<span title="${escapeHtmlForDisplay(text)}">${escapeHtmlForDisplay(text)}</span>`;
+                        }
+                    },
+                    {
+                        title: "Start Time",
+                        field: "start_time",
+                        sorter: "datetime",
+                        headerSort: true,
+                        minWidth: 150,
+                        formatter: function(cell) {
+                            const ts = cell.getValue();
+                            return ts ? formatTimestamp(ts) : '-';
+                        }
+                    },
+                    {
+                        title: "End Time",
+                        field: "end_time",
+                        sorter: "datetime",
+                        headerSort: true,
+                        minWidth: 150,
+                        formatter: function(cell) {
+                            const ts = cell.getValue();
+                            return ts ? formatTimestamp(ts) : '-';
+                        }
+                    },
+                    {
+                        title: "User Msgs",
+                        field: "user_messages",
+                        sorter: "number",
+                        headerSort: true,
+                        hozAlign: "right",
+                        minWidth: 80
+                    },
+                    {
+                        title: "AI Msgs",
+                        field: "ai_messages",
+                        sorter: "number",
+                        headerSort: true,
+                        hozAlign: "right",
+                        minWidth: 80
+                    },
+                    {
+                        title: "Avg Latency",
+                        field: "avg_latency",
+                        sorter: "number",
+                        headerSort: true,
+                        hozAlign: "right",
+                        minWidth: 100,
+                        formatter: function(cell) {
+                            const val = cell.getValue();
+                            return val ? `${val.toFixed(1)}s` : '-';
+                        }
+                    },
+                    {
+                        title: "Timeline",
+                        field: "session_id",
+                        headerSort: false,
+                        hozAlign: "center",
+                        minWidth: 80,
+                        formatter: function(cell) {
+                            const sessionId = cell.getValue();
+                            return `<button class="btn btn-sm btn-outline-primary" onclick="showTimelineModal('${encodeURIComponent(sessionId)}')" title="View Timeline"><i class="bi bi-bar-chart-line"></i></button>`;
+                        }
+                    },
+                    {
+                        title: "Latency Curve",
+                        field: "session_id",
+                        headerSort: false,
+                        hozAlign: "center",
+                        minWidth: 80,
+                        formatter: function(cell) {
+                            const sessionId = cell.getValue();
+                            return `<button class="btn btn-sm btn-outline-success" onclick="showLatencyModal('${encodeURIComponent(sessionId)}')" title="View Latency Curve"><i class="bi bi-graph-up"></i></button>`;
+                        }
+                    }
+                ],
+            });
+            
+            // Load data after initialization
+            loadSessionHistoryData();
+        }
+        
+        // Load Session History data from API
+        async function loadSessionHistoryData() {
+            if (!sessionHistoryTable) return;
+            
+            const startDate = document.getElementById('analysis-start-date')?.value || '';
+            const endDate = document.getElementById('analysis-end-date')?.value || '';
+            const tool = document.getElementById('analysis-tool-filter')?.value || '';
+            const host = document.getElementById('analysis-host-filter')?.value || '';
+            
             if (!startDate || !endDate) {
                 return;
             }
-
+            
             const params = new URLSearchParams({
                 start: startDate,
                 end: endDate,
-                tool: tool || '',
-                host: host || '',
-                page: sessionHistoryPage,
+                tool: tool,
+                host: host,
+                page: 1,
                 limit: 20,
-                sort_by: sessionHistorySortBy,
-                sort_order: sessionHistorySortOrder
+                sort_by: 'start_time',
+                sort_order: 'desc'
             });
-
+            
             try {
-                const response = await fetch(`/api/session-history?${params}`);
+                const response = await fetch(`/api/session-history?${params.toString()}`);
                 const data = await response.json();
-
-                sessionHistoryData = data.sessions || [];
-                renderSessionHistoryTable(data);
+                sessionHistoryTable.setData(data.sessions || []);
             } catch (error) {
                 console.error('Error loading session history:', error);
-                document.getElementById('session-history-table').innerHTML =
-                    '<tr><td colspan="10" class="text-center text-danger">Error loading session history</td></tr>';
             }
         }
 
-        // Render Session History table
-        function renderSessionHistoryTable(data) {
-            const tbody = document.getElementById('session-history-table');
-            const sessions = data.sessions || [];
-
-            // Update pagination info
-            document.getElementById('session-history-count').textContent = data.total || 0;
-            document.getElementById('session-current-page').textContent = data.page || 1;
-            document.getElementById('session-total-pages').textContent = data.total_pages || 1;
-
-            // Update pagination buttons
-            const prevBtn = document.getElementById('session-prev-page');
-            const nextBtn = document.getElementById('session-next-page');
-            prevBtn.classList.toggle('disabled', data.page <= 1);
-            nextBtn.classList.toggle('disabled', data.page >= data.total_pages);
-
-            if (sessions.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted">No sessions found</td></tr>';
-                return;
-            }
-
-            let html = '';
-            sessions.forEach((session, index) => {
-                const sessionId = escapeHtmlForDisplay(session.session_id || '');
-                const user = escapeHtmlForDisplay(session.user || 'Unknown');
-                const models = (session.models || []).map(m => escapeHtmlForDisplay(m)).join(', ') || '-';
-                const startTime = session.start_time ? formatTimestamp(session.start_time) : '-';
-                const endTime = session.end_time ? formatTimestamp(session.end_time) : '-';
-                const userMsgs = session.user_messages || 0;
-                const aiMsgs = session.ai_messages || 0;
-                const avgLatency = session.avg_latency ? `${session.avg_latency.toFixed(1)}s` : '-';
-
-                html += `
-                    <tr>
-                        <td><small title="${sessionId}">${sessionId}</small></td>
-                        <td>${user}</td>
-                        <td><small title="${models}">${models}</small></td>
-                        <td><small>${startTime}</small></td>
-                        <td><small>${endTime}</small></td>
-                        <td class="text-end">${userMsgs}</td>
-                        <td class="text-end">${aiMsgs}</td>
-                        <td class="text-end">${avgLatency}</td>
-                        <td>
-                            <button class="btn btn-sm btn-outline-primary" onclick="showTimelineModal('${encodeURIComponent(sessionId)}')" title="View Timeline">
-                                <i class="bi bi-bar-chart-line"></i>
-                            </button>
-                        </td>
-                        <td>
-                            <button class="btn btn-sm btn-outline-success" onclick="showLatencyModal('${encodeURIComponent(sessionId)}')" title="View Latency Curve">
-                                <i class="bi bi-graph-up"></i>
-                            </button>
-                        </td>
-                    </tr>
-                `;
-            });
-
-            tbody.innerHTML = html;
+        // Load Session History data (for filter changes)
+        function loadSessionHistory() {
+            loadSessionHistoryData();
         }
 
         // Format timestamp for display
@@ -4833,62 +4817,6 @@
             } catch (e) {
                 return ts;
             }
-        }
-
-        // Truncate text with ellipsis
-        function truncateText(text, maxLength) {
-            if (!text) return '';
-            return text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
-        }
-
-        // Sort Session History table
-        function sortSessionHistory(sortKey) {
-            if (sessionHistorySortBy === sortKey) {
-                sessionHistorySortOrder = sessionHistorySortOrder === 'asc' ? 'desc' : 'asc';
-            } else {
-                sessionHistorySortBy = sortKey;
-                sessionHistorySortOrder = 'desc';
-            }
-
-            // Update sort icons
-            updateSessionHistorySortIcons(sortKey, sessionHistorySortOrder);
-
-            // Reload data with new sort
-            loadSessionHistory();
-        }
-
-        // Update sort icons for session history table
-        function updateSessionHistorySortIcons(activeKey, direction) {
-            const headers = document.querySelectorAll('#session-history-table-container th.sortable');
-            headers.forEach(th => {
-                const key = th.getAttribute('data-sort-key');
-                const icon = th.querySelector('.sort-icon');
-                if (key === activeKey) {
-                    th.classList.add(direction === 'asc' ? 'sort-asc' : 'sort-desc');
-                    th.classList.remove(direction === 'asc' ? 'sort-desc' : 'sort-asc');
-                    if (icon) {
-                        icon.className = `bi bi-arrow-down-up sort-icon ${direction === 'asc' ? 'bi-arrow-up' : 'bi-arrow-down'}`;
-                    }
-                } else {
-                    th.classList.remove('sort-asc', 'sort-desc');
-                    if (icon) {
-                        icon.className = 'bi bi-arrow-down-up sort-icon';
-                    }
-                }
-            });
-        }
-
-        // Pagination functions
-        function sessionHistoryPrevPage() {
-            if (sessionHistoryPage > 1) {
-                sessionHistoryPage--;
-                loadSessionHistory();
-            }
-        }
-
-        function sessionHistoryNextPage() {
-            sessionHistoryPage++;
-            loadSessionHistory();
         }
 
         // Show Timeline Modal
@@ -5088,97 +5016,8 @@
 
         // Listen for tab change to load session history
         document.getElementById('session-history-tab')?.addEventListener('shown.bs.tab', function() {
-            loadSessionHistory();
+            initSessionHistoryTable();
         });
-
-        // Resizable table columns functionality
-        (function initResizableColumns() {
-            const table = document.getElementById('session-history-table-container');
-            if (!table) return;
-
-            const headers = table.querySelectorAll('th');
-            const storageKey = 'sessionHistoryColumnWidths';
-
-            // Load saved column widths
-            function loadColumnWidths() {
-                try {
-                    const saved = localStorage.getItem(storageKey);
-                    if (saved) {
-                        const widths = JSON.parse(saved);
-                        headers.forEach((th, index) => {
-                            if (widths[index]) {
-                                th.style.width = widths[index];
-                            }
-                        });
-                    }
-                } catch (e) {
-                    console.error('Error loading column widths:', e);
-                }
-            }
-
-            // Save column widths
-            function saveColumnWidths() {
-                try {
-                    const widths = Array.from(headers).map(th => th.style.width || '');
-                    localStorage.setItem(storageKey, JSON.stringify(widths));
-                } catch (e) {
-                    console.error('Error saving column widths:', e);
-                }
-            }
-
-            // Initialize resizers
-            headers.forEach((th, index) => {
-                const resizer = th.querySelector('.resizer');
-                if (!resizer) return;
-
-                let startX, startWidth;
-
-                resizer.addEventListener('mousedown', function(e) {
-                    startX = e.pageX;
-                    startWidth = th.offsetWidth;
-                    resizer.classList.add('resizing');
-
-                    document.addEventListener('mousemove', onMouseMove);
-                    document.addEventListener('mouseup', onMouseUp);
-                    e.preventDefault();
-                });
-
-                // Double-click to auto-fit
-                resizer.addEventListener('dblclick', function(e) {
-                    e.stopPropagation();
-                    // Calculate optimal width based on content
-                    const colIndex = Array.from(th.parentNode.children).indexOf(th);
-                    const cells = table.querySelectorAll(`tbody tr td:nth-child(${colIndex + 1})`);
-                    let maxWidth = th.scrollWidth;
-
-                    cells.forEach(cell => {
-                        const contentWidth = cell.scrollWidth;
-                        if (contentWidth > maxWidth) {
-                            maxWidth = contentWidth;
-                        }
-                    });
-
-                    th.style.width = (maxWidth + 20) + 'px';
-                    saveColumnWidths();
-                });
-
-                function onMouseMove(e) {
-                    const diff = e.pageX - startX;
-                    const newWidth = Math.max(50, startWidth + diff);
-                    th.style.width = newWidth + 'px';
-                }
-
-                function onMouseUp() {
-                    resizer.classList.remove('resizing');
-                    document.removeEventListener('mousemove', onMouseMove);
-                    document.removeEventListener('mouseup', onMouseUp);
-                    saveColumnWidths();
-                }
-            });
-
-            // Load saved widths on init
-            loadColumnWidths();
-        })();
     </script>
 </body>
 </html>
