@@ -10,8 +10,25 @@ import sys
 import importlib.util
 import json
 import secrets
+import subprocess
 from datetime import datetime, timedelta
 from flask import Flask, render_template, jsonify, request, send_from_directory, make_response, redirect, session
+
+
+def get_git_commit():
+    """Get the current git commit hash for version display."""
+    try:
+        result = subprocess.run(
+            ['git', 'rev-parse', '--short', 'HEAD'],
+            capture_output=True,
+            text=True,
+            cwd=os.path.dirname(os.path.abspath(__file__))
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return 'unknown'
 
 # Dynamically load shared modules
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -108,7 +125,8 @@ def index():
         selected_tool=tool,
         user_info=user_info,
         is_authenticated=is_authenticated,
-        is_admin=user_role == 'admin'
+        is_admin=user_role == 'admin',
+        git_commit=get_git_commit()
     ))
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
     response.headers['Pragma'] = 'no-cache'
