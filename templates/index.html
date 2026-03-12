@@ -463,6 +463,102 @@
             color: #0d6efd;
         }
 
+        /* Conversation Detail Modal Styles */
+        .conversation-container {
+            max-height: 60vh;
+            overflow-y: auto;
+        }
+
+        .conversation-message {
+            margin-bottom: 16px;
+            padding: 12px 16px;
+            border-radius: 12px;
+            position: relative;
+        }
+
+        .conversation-message.user {
+            background-color: #e7f1ff;
+            border-left: 4px solid #0d6efd;
+            margin-left: 0;
+            margin-right: 20%;
+        }
+
+        .conversation-message.assistant {
+            background-color: #d1e7dd;
+            border-left: 4px solid #198754;
+            margin-left: 20%;
+            margin-right: 0;
+        }
+
+        .conversation-message.system {
+            background-color: #f8f9fa;
+            border-left: 4px solid #6c757d;
+            margin-left: 10%;
+            margin-right: 10%;
+        }
+
+        .conversation-message-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            font-size: 0.85rem;
+        }
+
+        .conversation-message-role {
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .conversation-message.user .conversation-message-role {
+            color: #0d6efd;
+        }
+
+        .conversation-message.assistant .conversation-message-role {
+            color: #198754;
+        }
+
+        .conversation-message.system .conversation-message-role {
+            color: #6c757d;
+        }
+
+        .conversation-message-meta {
+            font-size: 0.75rem;
+            color: #6c757d;
+            display: flex;
+            gap: 12px;
+        }
+
+        .conversation-message-content {
+            white-space: pre-wrap;
+            word-break: break-word;
+            font-size: 0.9rem;
+            line-height: 1.5;
+            color: #212529;
+        }
+
+        .conversation-message-content.collapsed {
+            max-height: 100px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .conversation-message-content.collapsed::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 40px;
+            background: linear-gradient(transparent, white);
+        }
+
+        .conversation-toggle-btn {
+            font-size: 0.75rem;
+            padding: 2px 8px;
+            margin-top: 4px;
+        }
+
         /* Responsive */
         @media (max-width: 768px) {
             .sidebar {
@@ -1051,6 +1147,37 @@
         </div>
     </div>
 
+    <!-- Conversation Detail Modal -->
+    <div class="modal fade" id="conversationModal" tabindex="-1" aria-labelledby="conversationModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="conversationModalLabel">Conversation Details</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- Session Info -->
+                    <div id="conversation-session-info" class="mb-3 p-3 bg-light rounded">
+                        <div class="row">
+                            <div class="col-md-3"><strong>User:</strong> <span id="conv-user">-</span></div>
+                            <div class="col-md-3"><strong>Model:</strong> <span id="conv-model">-</span></div>
+                            <div class="col-md-3"><strong>Time:</strong> <span id="conv-time">-</span></div>
+                            <div class="col-md-3"><strong>Messages:</strong> <span id="conv-messages-count">-</span></div>
+                        </div>
+                    </div>
+                    <!-- Conversation Messages -->
+                    <div id="conversation-messages" class="conversation-container">
+                        <div class="text-center text-muted py-4">
+                            <div class="spinner-border" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Management Section -->
     <div id="management-section" class="content-section" style="display: none; min-height: calc(100vh - 70px);">
         <h3><i class="bi bi-gear"></i> <span id="management-title">Management</span></h3>
@@ -1363,6 +1490,7 @@
                 shUserMsgs: 'User Msgs',
                 shAiMsgs: 'AI Msgs',
                 shAvgLatency: 'Avg Latency',
+                shMaxLatency: 'Max Latency',
                 shTimeline: 'Timeline',
                 shLatencyCurve: 'Latency Curve',
                 shSessions: 'sessions',
@@ -1552,6 +1680,7 @@
                 shUserMsgs: '用户消息',
                 shAiMsgs: 'AI 消息',
                 shAvgLatency: '平均延迟',
+                shMaxLatency: '最大延迟',
                 shTimeline: '时间线',
                 shLatencyCurve: '延迟曲线',
                 shSessions: '个会话',
@@ -4742,6 +4871,18 @@
                         }
                     },
                     {
+                        title: "Max Latency",
+                        field: "max_latency",
+                        sorter: "number",
+                        headerSort: true,
+                        hozAlign: "right",
+                        minWidth: 100,
+                        formatter: function(cell) {
+                            const val = cell.getValue();
+                            return val ? `${val.toFixed(1)}s` : '-';
+                        }
+                    },
+                    {
                         title: "Timeline",
                         field: "session_id",
                         headerSort: false,
@@ -5012,6 +5153,114 @@
                     }
                 }
             });
+        }
+
+        // Show Conversation Detail Modal
+        async function showConversationModal(sessionIdEncoded) {
+            const sessionId = decodeURIComponent(sessionIdEncoded);
+
+            // Show modal with loading state
+            const modal = new bootstrap.Modal(document.getElementById('conversationModal'));
+            document.getElementById('conversation-messages').innerHTML = `
+                <div class="text-center text-muted py-4">
+                    <div class="spinner-border" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                </div>
+            `;
+            modal.show();
+
+            try {
+                const response = await fetch(`/api/session-conversation/${encodeURIComponent(sessionId)}`);
+                const data = await response.json();
+
+                renderConversationDetail(data);
+            } catch (error) {
+                console.error('Error loading conversation:', error);
+                document.getElementById('conversation-messages').innerHTML = `
+                    <div class="alert alert-danger">Failed to load conversation details</div>
+                `;
+            }
+        }
+
+        // Render Conversation Detail
+        function renderConversationDetail(data) {
+            // Update session info
+            document.getElementById('conv-user').textContent = data.sender_name || 'Unknown';
+            document.getElementById('conv-model').textContent = (data.models || []).join(', ') || '-';
+            document.getElementById('conv-time').textContent = data.start_time || '-';
+            document.getElementById('conv-messages-count').textContent =
+                `${data.user_messages || 0} user / ${data.ai_messages || 0} AI`;
+
+            // Render messages
+            const container = document.getElementById('conversation-messages');
+            const messages = data.messages || [];
+
+            if (messages.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center text-muted py-4">
+                        <i class="bi bi-chat-square-text" style="font-size: 2rem;"></i>
+                        <p class="mt-2">No messages found</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = messages.map((msg, index) => {
+                const role = msg.role || 'unknown';
+                const content = formatMessageContent(msg.content, msg.content_parsed);
+                const isLongContent = content.length > 500;
+                const collapsedClass = isLongContent ? 'collapsed' : '';
+                const toggleBtn = isLongContent ?
+                    `<button class="btn btn-outline-secondary btn-sm conversation-toggle-btn" onclick="toggleConversationContent(this)">
+                        <i class="bi bi-chevron-down"></i> <span>Show more</span>
+                    </button>` : '';
+
+                return `
+                    <div class="conversation-message ${role}" data-index="${index}">
+                        <div class="conversation-message-header">
+                            <span class="conversation-message-role">
+                                <i class="bi ${role === 'user' ? 'bi-person' : role === 'assistant' ? 'bi-robot' : 'bi-gear'}"></i>
+                                ${role}
+                            </span>
+                            <div class="conversation-message-meta">
+                                ${msg.formatted_time ? `<span><i class="bi bi-clock"></i> ${msg.formatted_time}</span>` : ''}
+                                ${msg.model ? `<span><i class="bi bi-cpu"></i> ${msg.model}</span>` : ''}
+                                ${msg.tokens_used ? `<span><i class="bi bi-hash"></i> ${msg.tokens_used} tokens</span>` : ''}
+                            </div>
+                        </div>
+                        <div class="conversation-message-content ${collapsedClass}">${escapeHtmlForDisplay(content)}</div>
+                        ${toggleBtn}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Format message content (handle JSON or plain text)
+        function formatMessageContent(content, contentParsed) {
+            if (contentParsed && typeof contentParsed === 'object') {
+                return JSON.stringify(contentParsed, null, 2);
+            }
+            return content || '(empty)';
+        }
+
+        // Toggle conversation content expand/collapse
+        function toggleConversationContent(btn) {
+            const contentDiv = btn.previousElementSibling;
+            const icon = btn.querySelector('i');
+            const span = btn.querySelector('span');
+
+            if (contentDiv.classList.contains('collapsed')) {
+                contentDiv.classList.remove('collapsed');
+                icon.classList.remove('bi-chevron-down');
+                icon.classList.add('bi-chevron-up');
+                span.textContent = 'Show less';
+            } else {
+                contentDiv.classList.add('collapsed');
+                icon.classList.remove('bi-chevron-up');
+                icon.classList.add('bi-chevron-down');
+                span.textContent = 'Show more';
+            }
         }
 
         // Listen for tab change to load session history

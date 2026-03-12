@@ -2158,10 +2158,11 @@ def get_session_history(
             'tokens': row_dict.get('tokens_used') or 0
         })
 
-    # Calculate average latency for each session
+    # Calculate average and max latency for each session
     for session_id, session in sessions.items():
         session['models'] = list(session['models'])
         session['avg_latency'] = _calculate_avg_latency(session['messages'])
+        session['max_latency'] = _calculate_max_latency(session['messages'])
         # Remove messages list from final output (too much data)
         del session['messages']
 
@@ -2177,7 +2178,8 @@ def get_session_history(
         'end_time': 'end_time',
         'user_messages': 'user_messages',
         'ai_messages': 'ai_messages',
-        'avg_latency': 'avg_latency'
+        'avg_latency': 'avg_latency',
+        'max_latency': 'max_latency'
     }
 
     sort_field = sort_field_map.get(sort_by, 'start_time')
@@ -2186,7 +2188,7 @@ def get_session_history(
         val = session.get(sort_field)
         if val is None:
             # Handle None values
-            if sort_field in ['user_messages', 'ai_messages', 'avg_latency']:
+            if sort_field in ['user_messages', 'ai_messages', 'avg_latency', 'max_latency']:
                 return 0
             return ''
         # For models field, use first model or empty string
@@ -2271,6 +2273,65 @@ def _calculate_avg_latency(messages: List[Dict]) -> float:
         return 0.0
 
     return round(sum(latencies) / len(latencies), 2)
+
+
+def _calculate_max_latency(messages: List[Dict]) -> float:
+    """Calculate maximum AI response latency from messages.
+
+    Latency is calculated as the time difference between a user message
+    and the following assistant message.
+
+    Args:
+        messages: List of message dicts with 'timestamp' and 'role' keys
+
+    Returns:
+        Maximum latency in seconds, or 0 if cannot be calculated
+    """
+    if not messages or len(messages) < 2:
+        return 0.0
+
+    # Sort messages by timestamp
+    sorted_msgs = sorted([m for m in messages if m.get('timestamp')],
+                         key=lambda x: x['timestamp'])
+
+    latencies = []
+    prev_user_time = None
+
+    for msg in sorted_msgs:
+        timestamp_str = msg.get('timestamp')
+        role = msg.get('role', '')
+
+        if not timestamp_str:
+            continue
+
+        try:
+            # Parse timestamp
+            if 'T' in timestamp_str:
+                ts = timestamp_str.replace('Z', '')
+                if '.' in ts:
+                    msg_time = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S.%f")
+                else:
+                    msg_time = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S")
+            else:
+                if '.' in timestamp_str:
+                    msg_time = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S.%f")
+                else:
+                    msg_time = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
+        except (ValueError, TypeError):
+            continue
+
+        if role == 'user':
+            prev_user_time = msg_time
+        elif role == 'assistant' and prev_user_time is not None:
+            latency = (msg_time - prev_user_time).total_seconds()
+            if latency > 0:  # Only count positive latencies
+                latencies.append(latency)
+            prev_user_time = None  # Reset after calculating
+
+    if not latencies:
+        return 0.0
+
+    return round(max(latencies), 2)
 
 
 def get_session_timeline(session_id: str) -> Dict:
@@ -2451,4 +2512,134 @@ def get_session_timeline(session_id: str) -> Dict:
     return {
         'timeline': timeline,
         'latency_curve': latency_data
+    }
+
+
+def get_session_conversation(session_id: str) -> Dict:
+    """Get complete conversation details for a specific session.
+
+    Args:
+        session_id: The session identifier (format: sender_date_tool)
+
+    Returns:
+        Dict with session info and list of messages with full content
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    rows = []
+
+    # Try parsing the session_id (format: sender_date_tool)
+    parts = session_id.rsplit('_', 2)
+    if len(parts) >= 3:
+        sender = parts[0]
+        date = parts[1]
+        tool = parts[2]
+
+        # Handle 'Unknown' sender (sender_name and sender_id are both NULL)
+        if sender == 'Unknown':
+            cursor.execute('''
+                SELECT
+                    message_id,
+                    parent_id,
+                    role,
+                    content,
+                    tokens_used,
+                    input_tokens,
+                    output_tokens,
+                    model,
+                    timestamp,
+                    sender_name,
+                    sender_id
+                FROM daily_messages
+                WHERE date = ? AND tool_name = ?
+                  AND sender_name IS NULL AND sender_id IS NULL
+                ORDER BY timestamp ASC
+            ''', [date, tool])
+        else:
+            cursor.execute('''
+                SELECT
+                    message_id,
+                    parent_id,
+                    role,
+                    content,
+                    tokens_used,
+                    input_tokens,
+                    output_tokens,
+                    model,
+                    timestamp,
+                    sender_name,
+                    sender_id
+                FROM daily_messages
+                WHERE date = ? AND tool_name = ?
+                  AND (sender_name = ? OR sender_id = ?)
+                ORDER BY timestamp ASC
+            ''', [date, tool, sender, sender])
+        rows = cursor.fetchall()
+
+    conn.close()
+
+    if not rows:
+        return {
+            'session_id': session_id,
+            'messages': [],
+            'total_messages': 0,
+            'total_tokens': 0
+        }
+
+    messages = []
+    total_tokens = 0
+
+    for row in rows:
+        row_dict = dict(row)
+        tokens = row_dict.get('tokens_used') or 0
+        total_tokens += tokens
+
+        # Format timestamp to CST
+        timestamp_str = row_dict.get('timestamp')
+        formatted_time = format_timestamp_to_cst(timestamp_str) if timestamp_str else None
+
+        # Parse content if it's JSON
+        content = row_dict.get('content')
+        content_parsed = None
+        if content:
+            try:
+                content_parsed = json.loads(content)
+            except (json.JSONDecodeError, TypeError):
+                content_parsed = content
+
+        messages.append({
+            'message_id': row_dict.get('message_id'),
+            'parent_id': row_dict.get('parent_id'),
+            'role': row_dict.get('role'),
+            'content': content,
+            'content_parsed': content_parsed,
+            'tokens_used': tokens,
+            'input_tokens': row_dict.get('input_tokens') or 0,
+            'output_tokens': row_dict.get('output_tokens') or 0,
+            'model': row_dict.get('model'),
+            'timestamp': timestamp_str,
+            'formatted_time': formatted_time,
+            'sender_name': row_dict.get('sender_name'),
+            'sender_id': row_dict.get('sender_id')
+        })
+
+    # Get session metadata from first and last messages
+    first_msg = messages[0] if messages else {}
+    last_msg = messages[-1] if messages else {}
+
+    user_messages = [m for m in messages if m.get('role') == 'user']
+    ai_messages = [m for m in messages if m.get('role') == 'assistant']
+
+    return {
+        'session_id': session_id,
+        'messages': messages,
+        'total_messages': len(messages),
+        'total_tokens': total_tokens,
+        'user_messages': len(user_messages),
+        'ai_messages': len(ai_messages),
+        'start_time': first_msg.get('formatted_time'),
+        'end_time': last_msg.get('formatted_time'),
+        'models': list(set(m.get('model') for m in messages if m.get('model'))),
+        'sender_name': first_msg.get('sender_name') or first_msg.get('sender_id') or 'Unknown'
     }
