@@ -2310,20 +2310,37 @@ def get_session_timeline(session_id: str) -> Dict:
             date = parts[1]
             tool = parts[2]
 
-            cursor.execute('''
-                SELECT
-                    timestamp,
-                    role,
-                    tokens_used,
-                    model,
-                    sender_name,
-                    sender_id,
-                    parent_id
-                FROM daily_messages
-                WHERE date = ? AND tool_name = ?
-                  AND (sender_name = ? OR sender_id = ?)
-                ORDER BY timestamp ASC
-            ''', [date, tool, sender, sender])
+            # Handle 'Unknown' sender (sender_name and sender_id are both NULL)
+            if sender == 'Unknown':
+                cursor.execute('''
+                    SELECT
+                        timestamp,
+                        role,
+                        tokens_used,
+                        model,
+                        sender_name,
+                        sender_id,
+                        parent_id
+                    FROM daily_messages
+                    WHERE date = ? AND tool_name = ?
+                      AND sender_name IS NULL AND sender_id IS NULL
+                    ORDER BY timestamp ASC
+                ''', [date, tool])
+            else:
+                cursor.execute('''
+                    SELECT
+                        timestamp,
+                        role,
+                        tokens_used,
+                        model,
+                        sender_name,
+                        sender_id,
+                        parent_id
+                    FROM daily_messages
+                    WHERE date = ? AND tool_name = ?
+                      AND (sender_name = ? OR sender_id = ?)
+                    ORDER BY timestamp ASC
+                ''', [date, tool, sender, sender])
             rows = cursor.fetchall()
 
     conn.close()
