@@ -185,6 +185,35 @@ def init_database() -> None:
 
     conn.commit()
 
+    # Create indexes for daily_messages table to improve query performance
+    # Issue #20: Messages page loading slowly due to missing indexes
+    indexes_to_create = [
+        ('idx_messages_date', 'daily_messages', 'date'),
+        ('idx_messages_tool_name', 'daily_messages', 'tool_name'),
+        ('idx_messages_host_name', 'daily_messages', 'host_name'),
+        ('idx_messages_sender_name', 'daily_messages', 'sender_name'),
+        ('idx_messages_sender_id', 'daily_messages', 'sender_id'),
+        ('idx_messages_timestamp', 'daily_messages', 'timestamp'),
+        ('idx_messages_role', 'daily_messages', 'role'),
+        # Composite indexes for common query patterns
+        ('idx_messages_date_tool', 'daily_messages', 'date, tool_name'),
+        ('idx_messages_date_host', 'daily_messages', 'date, host_name'),
+        ('idx_messages_date_sender', 'daily_messages', 'date, sender_name'),
+        ('idx_messages_date_tool_host', 'daily_messages', 'date, tool_name, host_name'),
+        # Indexes for ORDER BY optimization (Issue #20)
+        ('idx_messages_date_timestamp', 'daily_messages', 'date, timestamp DESC'),
+        ('idx_messages_date_role_timestamp', 'daily_messages', 'date, role, timestamp DESC'),
+    ]
+
+    for index_name, table_name, columns in indexes_to_create:
+        try:
+            cursor.execute(f'CREATE INDEX IF NOT EXISTS {index_name} ON {table_name} ({columns})')
+            print(f"Index created: {index_name} on {table_name}({columns})")
+        except Exception as e:
+            print(f"Warning: Could not create index {index_name}: {e}")
+
+    conn.commit()
+
     # Initialize authentication tables
     init_auth_database()
 
@@ -593,7 +622,8 @@ def get_messages_by_date(
         msg = dict(row)
         # Store original content first
         original_content = msg.get('content')
-        # Parse content as JSON if possible
+        # Parse content as JSON if possible (for backend processing)
+        # Note: Frontend also handles JSON parsing for display
         if original_content:
             try:
                 msg['content_parsed'] = json.loads(original_content)
