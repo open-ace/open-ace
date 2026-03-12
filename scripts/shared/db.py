@@ -2293,7 +2293,8 @@ def get_session_timeline(session_id: str) -> Dict:
             tokens_used,
             model,
             sender_name,
-            sender_id
+            sender_id,
+            parent_id
         FROM daily_messages
         WHERE conversation_label = ?
         ORDER BY timestamp ASC
@@ -2316,7 +2317,8 @@ def get_session_timeline(session_id: str) -> Dict:
                     tokens_used,
                     model,
                     sender_name,
-                    sender_id
+                    sender_id,
+                    parent_id
                 FROM daily_messages
                 WHERE date = ? AND tool_name = ?
                   AND (sender_name = ? OR sender_id = ?)
@@ -2331,8 +2333,13 @@ def get_session_timeline(session_id: str) -> Dict:
 
     timeline = []
     latency_data = []
-    prev_user_time = None
 
+    # Build a map of message_id -> message_time for user messages
+    # and track user message times by their IDs for parent_id lookup
+    user_message_times = {}  # message_id -> datetime
+    message_times = {}  # For looking up any message by some identifier
+
+    # First pass: collect all user message times
     for row in rows:
         timestamp_str = row['timestamp']
         if not timestamp_str:
@@ -2355,6 +2362,39 @@ def get_session_timeline(session_id: str) -> Dict:
             continue
 
         role = row['role'] or 'unknown'
+        parent_id = row['parent_id']
+
+        # Store user message times for latency calculation
+        if role == 'user':
+            # Use a combination of timestamp and parent_id as key
+            key = f"{timestamp_str}_{parent_id or ''}"
+            user_message_times[key] = msg_time
+
+    # Second pass: build timeline and calculate latency
+    last_user_time = None
+    for row in rows:
+        timestamp_str = row['timestamp']
+        if not timestamp_str:
+            continue
+
+        try:
+            # Parse timestamp
+            if 'T' in timestamp_str:
+                ts = timestamp_str.replace('Z', '')
+                if '.' in ts:
+                    msg_time = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S.%f")
+                else:
+                    msg_time = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S")
+            else:
+                if '.' in timestamp_str:
+                    msg_time = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S.%f")
+                else:
+                    msg_time = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
+        except (ValueError, TypeError):
+            continue
+
+        role = row['role'] or 'unknown'
+        parent_id = row['parent_id']
 
         timeline.append({
             'timestamp': timestamp_str,
@@ -2363,18 +2403,33 @@ def get_session_timeline(session_id: str) -> Dict:
             'tokens': row['tokens_used'] or 0
         })
 
-        # Calculate latency for assistant messages
+        # Track last user message time for sequential latency calculation
         if role == 'user':
-            prev_user_time = msg_time
-        elif role == 'assistant' and prev_user_time is not None:
-            latency = (msg_time - prev_user_time).total_seconds()
-            if latency > 0:
-                latency_data.append({
-                    'timestamp': timestamp_str,
-                    'time': msg_time.strftime('%H:%M:%S'),
-                    'latency': round(latency, 2)
-                })
-            prev_user_time = None
+            last_user_time = msg_time
+        elif role == 'assistant':
+            user_time = None
+
+            # Try to find corresponding user message by parent_id
+            if parent_id:
+                # Look for user message with matching parent_id or timestamp
+                for key, utime in user_message_times.items():
+                    if parent_id in key or key.startswith(parent_id):
+                        user_time = utime
+                        break
+
+            # Fallback to last user message if no parent_id match
+            if user_time is None and last_user_time is not None:
+                user_time = last_user_time
+
+            # Calculate latency if we found a user message
+            if user_time is not None:
+                latency = (msg_time - user_time).total_seconds()
+                if latency > 0:
+                    latency_data.append({
+                        'timestamp': timestamp_str,
+                        'time': msg_time.strftime('%H:%M:%S'),
+                        'latency': round(latency, 2)
+                    })
 
     return {
         'timeline': timeline,
