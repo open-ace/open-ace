@@ -1,0 +1,24 @@
+[
+    {
+        "name": "测试 Conversation History 列选择器功能",
+        "steps": [
+            {"action": "navigate", "target": "#nav-analysis", "description": "导航到 Analysis 页面"},
+            {"action": "wait", "value": 2},
+            {"action": "click", "target": "#session-history-tab", "description": "点击 Session History Tab"},
+            {"action": "wait", "value": 3},
+            {"action": "check_visible", "target": "#session-history-table", "description": "检查表格可见"},
+            {"action": "check_visible", "target": "#columnSelectorBtn", "description": "检查列选择器按钮可见"},
+            {"action": "click", "target": "#columnSelectorBtn", "description": "点击列选择器按钮"},
+            {"action": "wait", "value": 1},
+            {"action": "check_count", "target": "#columnSelectorMenu .form-check-input", "expected": 11, "description": "检查列选项数量"},
+            {"action": "screenshot", "value": "test_column_selector.png"}
+        ]
+    },
+    {
+        "name": "测试全屏功能",
+        "steps": [
+            {"action": "check_visible", "target": "#sessionHistoryFullscreenBtn", "description": "检查全屏按钮可见"},
+            {"action": "screenshot", "value": "test_fullscreen_btn.png"}
+        ]
+    }
+]
