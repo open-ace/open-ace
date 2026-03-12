@@ -457,6 +457,20 @@ def api_session_timeline(session_id):
     return jsonify(data)
 
 
+@app.route('/api/session-conversation/<path:session_id>')
+def api_session_conversation(session_id):
+    """Get complete conversation details for a specific session.
+
+    Args:
+        session_id: The session identifier (URL-encoded)
+
+    Returns:
+        JSON with session info and list of messages with full content
+    """
+    data = db.get_session_conversation(session_id)
+    return jsonify(data)
+
+
 @app.route('/api/upload/usage', methods=['POST'])
 def api_upload_usage():
     """Accept usage data upload from remote machine.

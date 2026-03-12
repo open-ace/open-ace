@@ -4816,7 +4816,13 @@
                             return `<button class="btn btn-sm btn-outline-success" onclick="showLatencyModal('${encodeURIComponent(sessionId)}')" title="View Latency Curve"><i class="bi bi-graph-up"></i></button>`;
                         }
                     }
-                ],
+                ]
+            });
+
+            // Add row click event listener
+            sessionHistoryTable.on("rowClick", function(e, row) {
+                const sessionId = row.getData().session_id;
+                showConversationModal(encodeURIComponent(sessionId));
             });
             
             // Load data after initialization
