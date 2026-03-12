@@ -1568,4 +1568,4 @@ if __name__ == '__main__':
     db.init_database()
 
     # Run the Flask app using configuration from config module
-    app.run(host=config.WEB_HOST, port=config.WEB_PORT, debug=False)
+    app.run(host=config_module.WEB_HOST, port=config_module.WEB_PORT, debug=False)
