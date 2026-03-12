@@ -1109,8 +1109,30 @@
             <div class="tab-pane fade" id="session-history-content">
                 <div class="card">
                     <div class="card-body">
+                        <!-- Table Toolbar -->
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <div class="d-flex align-items-center gap-2">
+                                <!-- Column Selector Dropdown -->
+                                <div class="dropdown">
+                                    <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" id="columnSelectorBtn" data-bs-toggle="dropdown" aria-expanded="false">
+                                        <i class="bi bi-columns-gap"></i> <span id="column-selector-text">Columns</span>
+                                    </button>
+                                    <div class="dropdown-menu p-2" id="columnSelectorMenu" style="min-width: 200px;">
+                                        <!-- Column checkboxes will be populated by JavaScript -->
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="d-flex align-items-center gap-2">
+                                <!-- Fullscreen Button -->
+                                <button class="btn btn-outline-primary btn-sm" id="sessionHistoryFullscreenBtn" onclick="toggleSessionHistoryFullscreen()">
+                                    <i class="bi bi-arrows-fullscreen"></i> <span id="fullscreen-btn-text">Fullscreen</span>
+                                </button>
+                            </div>
+                        </div>
                         <!-- Tabulator Table Container -->
-                        <div id="session-history-table"></div>
+                        <div id="session-history-table-container">
+                            <div id="session-history-table"></div>
+                        </div>
                     </div>
                 </div>
             </div><!-- End Session History Tab -->
@@ -1499,7 +1521,11 @@
                 timelineModalTitle: 'Conversation Timeline',
                 latencyModalTitle: 'Latency Curve',
                 noTimelineData: 'No timeline data available',
-                noLatencyData: 'No latency data available'
+                noLatencyData: 'No latency data available',
+                // Column selector and fullscreen
+                columnSelectorText: 'Columns',
+                fullscreenText: 'Fullscreen',
+                exitFullscreenText: 'Exit Fullscreen'
             },
             zh: {
                 sidebarTitle: 'AI Token Analyzer',
@@ -1687,7 +1713,11 @@
                 shNoSessions: '未找到会话',
                 shLoading: '加载中...',
                 timelineModalTitle: '对话时间线',
-                latencyModalTitle: '延迟曲线'
+                latencyModalTitle: '延迟曲线',
+                // Column selector and fullscreen
+                columnSelectorText: '列选择',
+                fullscreenText: '全屏',
+                exitFullscreenText: '退出全屏'
             }
         };
 
@@ -1817,6 +1847,17 @@
             if (document.getElementById('messages-section').style.display !== 'none') {
                 updateMessagesText();
                 loadMessages();
+            }
+            // Update analysis text if visible
+            if (document.getElementById('analysis-section').style.display !== 'none') {
+                updateAnalysisText();
+                // Update column selector and fullscreen button text
+                const columnSelectorText = document.getElementById('column-selector-text');
+                const fullscreenBtnText = document.getElementById('fullscreen-btn-text');
+                if (columnSelectorText) columnSelectorText.textContent = t('columnSelectorText');
+                if (fullscreenBtnText) fullscreenBtnText.textContent = isSessionHistoryFullscreen ? t('exitFullscreenText') : t('fullscreenText');
+                // Re-initialize column selector with new translations
+                initColumnSelector();
             }
         }
 
@@ -4681,6 +4722,167 @@
         let sessionHistoryTable = null;
         let timelineModalChart = null;
         let latencyModalChart = null;
+        let isSessionHistoryFullscreen = false;
+
+        // Column visibility configuration
+        const sessionHistoryColumnConfig = [
+            { field: 'session_id', title: 'Conversation ID', visible: true, essential: true },
+            { field: 'user', title: 'User', visible: true, essential: false },
+            { field: 'models', title: 'Model', visible: true, essential: false },
+            { field: 'start_time', title: 'Start Time', visible: true, essential: false },
+            { field: 'end_time', title: 'End Time', visible: false, essential: false },
+            { field: 'user_messages', title: 'User Msgs', visible: true, essential: false },
+            { field: 'ai_messages', title: 'AI Msgs', visible: true, essential: false },
+            { field: 'avg_latency', title: 'Avg Latency', visible: true, essential: false },
+            { field: 'max_latency', title: 'Max Latency', visible: true, essential: false },
+            { field: 'timeline_btn', title: 'Timeline', visible: true, essential: false },
+            { field: 'latency_btn', title: 'Latency Curve', visible: true, essential: false }
+        ];
+
+        // Initialize column selector
+        function initColumnSelector() {
+            const menu = document.getElementById('columnSelectorMenu');
+            if (!menu) return;
+
+            menu.innerHTML = '';
+            sessionHistoryColumnConfig.forEach(col => {
+                // Get translated title
+                let translatedTitle = col.title;
+                if (col.field === 'session_id') translatedTitle = t('shSession');
+                else if (col.field === 'user') translatedTitle = t('shUser');
+                else if (col.field === 'models') translatedTitle = t('shModel');
+                else if (col.field === 'start_time') translatedTitle = t('shStartTime');
+                else if (col.field === 'end_time') translatedTitle = t('shEndTime');
+                else if (col.field === 'user_messages') translatedTitle = t('shUserMsgs');
+                else if (col.field === 'ai_messages') translatedTitle = t('shAiMsgs');
+                else if (col.field === 'avg_latency') translatedTitle = t('shAvgLatency');
+                else if (col.field === 'max_latency') translatedTitle = t('shMaxLatency');
+                else if (col.field === 'timeline_btn') translatedTitle = t('shTimeline');
+                else if (col.field === 'latency_btn') translatedTitle = t('shLatencyCurve');
+
+                const item = document.createElement('div');
+                item.className = 'form-check mb-1';
+                item.innerHTML = `
+                    <input class="form-check-input" type="checkbox" id="col-${col.field}" 
+                           ${col.visible ? 'checked' : ''} 
+                           ${col.essential ? 'disabled' : ''}
+                           onchange="toggleColumnVisibility('${col.field}', this.checked)">
+                    <label class="form-check-label" for="col-${col.field}">
+                        ${translatedTitle}
+                    </label>
+                `;
+                menu.appendChild(item);
+            });
+        }
+
+        // Toggle column visibility
+        function toggleColumnVisibility(field, visible) {
+            if (!sessionHistoryTable) return;
+            
+            const column = sessionHistoryTable.getColumn(field);
+            if (column) {
+                if (visible) {
+                    column.show();
+                } else {
+                    column.hide();
+                }
+                
+                // Update config
+                const config = sessionHistoryColumnConfig.find(c => c.field === field);
+                if (config) {
+                    config.visible = visible;
+                }
+            }
+        }
+
+        // Toggle fullscreen for session history table
+        function toggleSessionHistoryFullscreen() {
+            const container = document.getElementById('session-history-table-container');
+            const btn = document.getElementById('sessionHistoryFullscreenBtn');
+            const btnText = document.getElementById('fullscreen-btn-text');
+            
+            if (!container) return;
+
+            if (!isSessionHistoryFullscreen) {
+                // Enter fullscreen
+                if (container.requestFullscreen) {
+                    container.requestFullscreen();
+                } else if (container.webkitRequestFullscreen) {
+                    container.webkitRequestFullscreen();
+                } else if (container.msRequestFullscreen) {
+                    container.msRequestFullscreen();
+                }
+                
+                // Add fullscreen styles
+                container.style.cssText = `
+                    position: fixed !important;
+                    top: 0 !important;
+                    left: 0 !important;
+                    width: 100vw !important;
+                    height: 100vh !important;
+                    z-index: 9999 !important;
+                    background: white !important;
+                    padding: 20px !important;
+                    overflow: auto !important;
+                `;
+                
+                if (btn) {
+                    btn.innerHTML = `<i class="bi bi-fullscreen-exit"></i> <span id="fullscreen-btn-text">${t('exitFullscreenText')}</span>`;
+                }
+                
+                isSessionHistoryFullscreen = true;
+                
+                // Redraw table to fit new size
+                if (sessionHistoryTable) {
+                    setTimeout(() => sessionHistoryTable.redraw(true), 100);
+                }
+            } else {
+                // Exit fullscreen
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                } else if (document.webkitExitFullscreen) {
+                    document.webkitExitFullscreen();
+                } else if (document.msExitFullscreen) {
+                    document.msExitFullscreen();
+                }
+                
+                // Remove fullscreen styles
+                container.style.cssText = '';
+                
+                if (btn) {
+                    btn.innerHTML = `<i class="bi bi-arrows-fullscreen"></i> <span id="fullscreen-btn-text">${t('fullscreenText')}</span>`;
+                }
+                
+                isSessionHistoryFullscreen = false;
+                
+                // Redraw table to fit new size
+                if (sessionHistoryTable) {
+                    setTimeout(() => sessionHistoryTable.redraw(true), 100);
+                }
+            }
+        }
+
+        // Listen for fullscreen changes
+        document.addEventListener('fullscreenchange', function() {
+            if (!document.fullscreenElement && isSessionHistoryFullscreen) {
+                const container = document.getElementById('session-history-table-container');
+                const btn = document.getElementById('sessionHistoryFullscreenBtn');
+                
+                if (container) {
+                    container.style.cssText = '';
+                }
+                
+                if (btn) {
+                    btn.innerHTML = `<i class="bi bi-arrows-fullscreen"></i> <span id="fullscreen-btn-text">${t('fullscreenText')}</span>`;
+                }
+                
+                isSessionHistoryFullscreen = false;
+                
+                if (sessionHistoryTable) {
+                    setTimeout(() => sessionHistoryTable.redraw(true), 100);
+                }
+            }
+        });
 
         // Initialize Tabulator for Session History
         function initSessionHistoryTable() {
@@ -4704,6 +4906,7 @@
                         headerSort: true,
                         minWidth: 200,
                         variableHeight: true,
+                        visible: true,
                         formatter: function(cell) {
                             const value = cell.getValue() || '';
                             return `<span title="${escapeHtmlForDisplay(value)}">${escapeHtmlForDisplay(value)}</span>`;
@@ -4715,6 +4918,7 @@
                         sorter: "string",
                         headerSort: true,
                         minWidth: 100,
+                        visible: true,
                         formatter: function(cell) {
                             return escapeHtmlForDisplay(cell.getValue() || 'Unknown');
                         }
@@ -4726,6 +4930,7 @@
                         headerSort: true,
                         minWidth: 150,
                         variableHeight: true,
+                        visible: true,
                         formatter: function(cell) {
                             const models = cell.getValue() || [];
                             const text = Array.isArray(models) ? models.join(', ') || '-' : '-';
@@ -4738,6 +4943,7 @@
                         sorter: "datetime",
                         headerSort: true,
                         minWidth: 150,
+                        visible: true,
                         formatter: function(cell) {
                             const ts = cell.getValue();
                             return ts ? formatTimestamp(ts) : '-';
@@ -4749,6 +4955,7 @@
                         sorter: "datetime",
                         headerSort: true,
                         minWidth: 150,
+                        visible: false,
                         formatter: function(cell) {
                             const ts = cell.getValue();
                             return ts ? formatTimestamp(ts) : '-';
@@ -4760,7 +4967,8 @@
                         sorter: "number",
                         headerSort: true,
                         hozAlign: "right",
-                        minWidth: 80
+                        minWidth: 80,
+                        visible: true
                     },
                     {
                         title: "AI Msgs",
@@ -4768,7 +4976,8 @@
                         sorter: "number",
                         headerSort: true,
                         hozAlign: "right",
-                        minWidth: 80
+                        minWidth: 80,
+                        visible: true
                     },
                     {
                         title: "Avg Latency",
@@ -4777,6 +4986,7 @@
                         headerSort: true,
                         hozAlign: "right",
                         minWidth: 100,
+                        visible: true,
                         formatter: function(cell) {
                             const val = cell.getValue();
                             return val ? `${val.toFixed(1)}s` : '-';
@@ -4789,6 +4999,7 @@
                         headerSort: true,
                         hozAlign: "right",
                         minWidth: 100,
+                        visible: true,
                         formatter: function(cell) {
                             const val = cell.getValue();
                             return val ? `${val.toFixed(1)}s` : '-';
@@ -4796,28 +5007,35 @@
                     },
                     {
                         title: "Timeline",
-                        field: "session_id",
+                        field: "timeline_btn",
                         headerSort: false,
                         hozAlign: "center",
                         minWidth: 80,
+                        visible: true,
                         formatter: function(cell) {
-                            const sessionId = cell.getValue();
+                            const data = cell.getRow().getData();
+                            const sessionId = data.session_id;
                             return `<button class="btn btn-sm btn-outline-primary" onclick="showTimelineModal('${encodeURIComponent(sessionId)}')" title="View Timeline"><i class="bi bi-bar-chart-line"></i></button>`;
                         }
                     },
                     {
                         title: "Latency Curve",
-                        field: "session_id",
+                        field: "latency_btn",
                         headerSort: false,
                         hozAlign: "center",
                         minWidth: 80,
+                        visible: true,
                         formatter: function(cell) {
-                            const sessionId = cell.getValue();
+                            const data = cell.getRow().getData();
+                            const sessionId = data.session_id;
                             return `<button class="btn btn-sm btn-outline-success" onclick="showLatencyModal('${encodeURIComponent(sessionId)}')" title="View Latency Curve"><i class="bi bi-graph-up"></i></button>`;
                         }
                     }
                 ]
             });
+
+            // Initialize column selector after table is created
+            initColumnSelector();
 
             // Add row click event listener (exclude button clicks)
             sessionHistoryTable.on("rowClick", function(e, row) {
