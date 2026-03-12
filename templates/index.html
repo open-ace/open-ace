@@ -4799,9 +4799,9 @@
 
                 html += `
                     <tr>
-                        <td><small title="${sessionId}">${truncateText(sessionId, 20)}</small></td>
+                        <td><small title="${sessionId}">${sessionId}</small></td>
                         <td>${user}</td>
-                        <td><small>${truncateText(models, 15)}</small></td>
+                        <td><small title="${models}">${models}</small></td>
                         <td><small>${startTime}</small></td>
                         <td><small>${endTime}</small></td>
                         <td class="text-end">${userMsgs}</td>
