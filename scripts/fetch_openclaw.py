@@ -498,11 +498,16 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                             total_tokens = input_tokens + output_tokens
 
                             # Get model info
-                            if "modelId" in entry:
-                                model = entry.get("modelId")
-                            elif "provider" in entry or "modelApi" in entry:
-                                provider = entry.get("provider", "unknown")
-                                model = entry.get("modelId", provider)
+                            # For assistant messages, model is in the message object
+                            if role == "assistant":
+                                model = msg.get("model")
+                            # Fallback: check entry-level fields
+                            if not model:
+                                if "modelId" in entry:
+                                    model = entry.get("modelId")
+                                elif "provider" in entry or "modelApi" in entry:
+                                    provider = entry.get("provider", "unknown")
+                                    model = entry.get("modelId", provider)
 
                             # Get parent ID
                             parent_id = entry.get("parentId")
