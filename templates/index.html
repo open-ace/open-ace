@@ -5083,10 +5083,25 @@
                 showConversationModal(encodeURIComponent(sessionId));
             });
             
+            // Add sort event listener for remote sorting
+            conversationHistoryTable.on("dataSorting", function(sorters) {
+                // sorters is an array of sort objects: [{field: "name", dir: "asc"}]
+                if (sorters && sorters.length > 0) {
+                    const sorter = sorters[0];
+                    currentSortField = sorter.field;
+                    currentSortDir = sorter.dir;
+                    loadConversationHistoryData();
+                }
+            });
+
             // Load data after initialization
             loadConversationHistoryData();
         }
         
+        // Current sort state for Conversation History table
+        let currentSortField = 'start_time';
+        let currentSortDir = 'desc';
+
         // Load Session History data from API
         async function loadConversationHistoryData() {
             if (!conversationHistoryTable) return;
@@ -5107,8 +5122,8 @@
                 host: host,
                 page: 1,
                 limit: 20,
-                sort_by: 'start_time',
-                sort_order: 'desc'
+                sort_by: currentSortField,
+                sort_order: currentSortDir
             });
             
             try {
