@@ -1438,6 +1438,7 @@
                 tableOutput: 'Output',
                 tableTotal: 'Total',
                 noDataAvailable: '-',
+                tokenDataNotAvailable: 'Token data not available from API provider',
                 hostFilter: 'Host',
                 allHosts: 'All Hosts',
                 senderFilter: 'Sender',
@@ -1628,6 +1629,7 @@
                 tableOutput: '输出',
                 tableTotal: '总计',
                 noDataAvailable: '-',
+                tokenDataNotAvailable: 'API 提供商未返回 Token 数据',
                 dashboardTotalTokens: '工具 Token 总用量',
                 tokenUsageTrend: 'Token 使用趋势 (最近 30 天)',
                 chartTooltipTokens: 'tokens',
@@ -2250,14 +2252,30 @@
                 data.forEach(item => {
                     const colors = toolColors[item.tool_name] || { card: 'bg-secondary' };
 
+                    // Determine what to display as the main metric
+                    let mainMetric = '';
+                    if (item.tokens_used > 0) {
+                        // Normal case: show tokens
+                        mainMetric = `<h3 class="card-title mb-3">${formatTokens(item.tokens_used)} <small class="fs-6">${t('tokens')}</small></h3>`;
+                    } else if (item.request_count > 0) {
+                        // Token data not available but has requests - show request count as main metric
+                        mainMetric = `
+                            <h3 class="card-title mb-3">${item.request_count} <small class="fs-6">${t('tableRequests')}</small></h3>
+                            <p class="card-text mb-1 text-warning"><small><i class="bi bi-exclamation-triangle"></i> ${t('tokenDataNotAvailable')}</small></p>
+                        `;
+                    } else {
+                        // No data at all
+                        mainMetric = `<h3 class="card-title mb-3">${t('noDataAvailable')}</h3>`;
+                    }
+
                     html += `
                         <div class="col-md-4">
                             <div class="card usage-card ${colors.card} text-white">
                                 <div class="card-body">
                                     <h6 class="card-subtitle mb-3 text-white-50">${item.tool_name.toUpperCase()}</h6>
-                                    <h3 class="card-title mb-3">${formatTokens(item.tokens_used)} <small class="fs-6">${t('tokens')}</small></h3>
+                                    ${mainMetric}
                                     <p class="card-text mb-1"><strong>${t('tableDate')}:</strong> ${item.date}</p>
-                                    ${item.request_count > 0 ? `<p class="card-text mb-1"><strong>${t('tableRequests')}:</strong> ${item.request_count}</p>` : `<p class="card-text mb-1"><strong>${t('tableRequests')}:</strong> ${t('noDataAvailable')}</p>`}
+                                    ${item.tokens_used > 0 && item.request_count > 0 ? `<p class="card-text mb-1"><strong>${t('tableRequests')}:</strong> ${item.request_count}</p>` : ''}
                                     ${item.input_tokens > 0 ? `<p class="card-text mb-1"><strong>${t('tableInput')}:</strong> ${formatTokens(item.input_tokens)} <small class="fs-6">${t('tokens')}</small></p>` : ''}
                                     ${item.output_tokens > 0 ? `<p class="card-text mb-1"><strong>${t('tableOutput')}:</strong> ${formatTokens(item.output_tokens)} <small class="fs-6">${t('tokens')}</small></p>` : ''}
                                 </div>
