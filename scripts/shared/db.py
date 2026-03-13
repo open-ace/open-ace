@@ -2047,7 +2047,7 @@ def get_all_hosts_with_status() -> List[Dict]:
 # Session History Module - 会话历史查询函数
 # =============================================================================
 
-def get_session_history(
+def get_conversation_history(
     start_date: str,
     end_date: str,
     tool_name: Optional[str] = None,

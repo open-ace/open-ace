@@ -424,8 +424,8 @@ def api_analysis_recommendations():
 # Session History APIs - 会话历史 API 端点
 # =============================================================================
 
-@app.route('/api/session-history')
-def api_session_history():
+@app.route('/api/conversation-history')
+def api_conversation_history():
     """Get session history with pagination and sorting.
 
     Query parameters:
@@ -448,7 +448,7 @@ def api_session_history():
     sort_by = request.args.get('sort_by', 'start_time')
     sort_order = request.args.get('sort_order', 'desc')
 
-    data = db.get_session_history(
+    data = db.get_conversation_history(
         start_date=start_date,
         end_date=end_date,
         tool_name=tool,

@@ -45,16 +45,16 @@ async def main():
 
         # Click on Session History tab
         print("Clicking Session History tab...")
-        await page.click('#session-history-tab')
+        await page.click('#conversation-history-tab')
         await asyncio.sleep(3)  # Wait for data to load
 
         # Take screenshot of Session History page
-        await page.screenshot(path='screenshots/04_session_history.png', full_page=True)
-        print("Saved: screenshots/04_session_history.png")
+        await page.screenshot(path='screenshots/04_conversation_history.png', full_page=True)
+        print("Saved: screenshots/04_conversation_history.png")
 
         # Show resizer handles by hovering over column headers
         print("Demonstrating resizable columns...")
-        headers = await page.query_selector_all('#session-history-table-container th')
+        headers = await page.query_selector_all('#conversation-history-table-container th')
 
         for i, header in enumerate(headers[:3]):  # First 3 columns
             if header:
@@ -65,7 +65,7 @@ async def main():
 
         # Demonstrate resizing by dragging
         print("Demonstrating column resize...")
-        first_header = await page.query_selector('#session-history-table-container th:first-child')
+        first_header = await page.query_selector('#conversation-history-table-container th:first-child')
         if first_header:
             resizer = await first_header.query_selector('.resizer')
             if resizer:

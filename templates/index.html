@@ -885,8 +885,8 @@
                     </button>
                 </li>
                 <li class="nav-item" role="presentation">
-                    <button class="nav-link" id="session-history-tab" data-bs-toggle="tab" data-bs-target="#session-history-content" type="button">
-                        <i class="bi bi-chat-history"></i> <span id="session-history-tab-text">Conversation History</span>
+                    <button class="nav-link" id="conversation-history-tab" data-bs-toggle="tab" data-bs-target="#conversation-history-content" type="button">
+                        <i class="bi bi-chat-history"></i> <span id="conversation-history-tab-text">Conversation History</span>
                     </button>
                 </li>
             </ul>
@@ -1107,7 +1107,7 @@
             </div><!-- End Overview Tab -->
 
             <!-- Session History Tab -->
-            <div class="tab-pane fade" id="session-history-content">
+            <div class="tab-pane fade" id="conversation-history-content">
                 <div class="card">
                     <div class="card-body">
                         <!-- Table Toolbar -->
@@ -1125,14 +1125,14 @@
                             </div>
                             <div class="d-flex align-items-center gap-2">
                                 <!-- Fullscreen Button -->
-                                <button class="btn btn-outline-primary btn-sm" id="sessionHistoryFullscreenBtn" onclick="toggleSessionHistoryFullscreen()">
+                                <button class="btn btn-outline-primary btn-sm" id="conversationHistoryFullscreenBtn" onclick="toggleConversationHistoryFullscreen()">
                                     <i class="bi bi-arrows-fullscreen"></i> <span id="fullscreen-btn-text">Fullscreen</span>
                                 </button>
                             </div>
                         </div>
                         <!-- Tabulator Table Container -->
-                        <div id="session-history-table-container">
-                            <div id="session-history-table"></div>
+                        <div id="conversation-history-table-container">
+                            <div id="conversation-history-table"></div>
                         </div>
                     </div>
                 </div>
@@ -1504,7 +1504,7 @@
                 securityComingSoon: 'Security settings coming soon',
                 // Session History translations
                 analysisOverviewTab: 'Overview',
-                sessionHistoryTab: 'Conversation History',
+                conversationHistoryTab: 'Conversation History',
                 shSession: 'Conversation ID',
                 shUser: 'User',
                 shModel: 'Model',
@@ -1698,7 +1698,7 @@
                 securityComingSoon: '安全设置即将推出',
                 // Session History translations
                 analysisOverviewTab: '概览',
-                sessionHistoryTab: '会话历史',
+                conversationHistoryTab: '会话历史',
                 shSession: '会话',
                 shUser: '用户',
                 shModel: '模型',
@@ -1856,7 +1856,7 @@
                 const columnSelectorText = document.getElementById('column-selector-text');
                 const fullscreenBtnText = document.getElementById('fullscreen-btn-text');
                 if (columnSelectorText) columnSelectorText.textContent = t('columnSelectorText');
-                if (fullscreenBtnText) fullscreenBtnText.textContent = isSessionHistoryFullscreen ? t('exitFullscreenText') : t('fullscreenText');
+                if (fullscreenBtnText) fullscreenBtnText.textContent = isConversationHistoryFullscreen ? t('exitFullscreenText') : t('fullscreenText');
                 // Re-initialize column selector with new translations
                 initColumnSelector();
             }
@@ -1901,8 +1901,8 @@
             if (analysisTitle) analysisTitle.textContent = t('analysisText');
 
             // Update session history tab text
-            const sessionHistoryTabText = document.getElementById('session-history-tab-text');
-            if (sessionHistoryTabText) sessionHistoryTabText.textContent = t('sessionHistoryTab');
+            const conversationHistoryTabText = document.getElementById('conversation-history-tab-text');
+            if (conversationHistoryTabText) conversationHistoryTabText.textContent = t('conversationHistoryTab');
 
             // Update quick date range buttons
             const quickDate7 = document.getElementById('quick-date-7');
@@ -4720,13 +4720,13 @@
         // =====================================================================
 
         // Session History state
-        let sessionHistoryTable = null;
+        let conversationHistoryTable = null;
         let timelineModalChart = null;
         let latencyModalChart = null;
-        let isSessionHistoryFullscreen = false;
+        let isConversationHistoryFullscreen = false;
 
         // Column visibility configuration
-        const sessionHistoryColumnConfig = [
+        const conversationHistoryColumnConfig = [
             { field: 'session_id', title: 'Conversation ID', visible: true, essential: true },
             { field: 'user', title: 'User', visible: true, essential: false },
             { field: 'models', title: 'Model', visible: true, essential: false },
@@ -4746,7 +4746,7 @@
             if (!menu) return;
 
             menu.innerHTML = '';
-            sessionHistoryColumnConfig.forEach(col => {
+            conversationHistoryColumnConfig.forEach(col => {
                 // Get translated title
                 let translatedTitle = col.title;
                 if (col.field === 'session_id') translatedTitle = t('shSession');
@@ -4778,9 +4778,9 @@
 
         // Toggle column visibility
         function toggleColumnVisibility(field, visible) {
-            if (!sessionHistoryTable) return;
+            if (!conversationHistoryTable) return;
             
-            const column = sessionHistoryTable.getColumn(field);
+            const column = conversationHistoryTable.getColumn(field);
             if (column) {
                 if (visible) {
                     column.show();
@@ -4789,7 +4789,7 @@
                 }
                 
                 // Update config
-                const config = sessionHistoryColumnConfig.find(c => c.field === field);
+                const config = conversationHistoryColumnConfig.find(c => c.field === field);
                 if (config) {
                     config.visible = visible;
                 }
@@ -4797,14 +4797,14 @@
         }
 
         // Toggle fullscreen for session history table
-        function toggleSessionHistoryFullscreen() {
-            const container = document.getElementById('session-history-table-container');
-            const btn = document.getElementById('sessionHistoryFullscreenBtn');
+        function toggleConversationHistoryFullscreen() {
+            const container = document.getElementById('conversation-history-table-container');
+            const btn = document.getElementById('conversationHistoryFullscreenBtn');
             const btnText = document.getElementById('fullscreen-btn-text');
             
             if (!container) return;
 
-            if (!isSessionHistoryFullscreen) {
+            if (!isConversationHistoryFullscreen) {
                 // Enter fullscreen
                 if (container.requestFullscreen) {
                     container.requestFullscreen();
@@ -4831,11 +4831,11 @@
                     btn.innerHTML = `<i class="bi bi-fullscreen-exit"></i> <span id="fullscreen-btn-text">${t('exitFullscreenText')}</span>`;
                 }
                 
-                isSessionHistoryFullscreen = true;
+                isConversationHistoryFullscreen = true;
                 
                 // Redraw table to fit new size
-                if (sessionHistoryTable) {
-                    setTimeout(() => sessionHistoryTable.redraw(true), 100);
+                if (conversationHistoryTable) {
+                    setTimeout(() => conversationHistoryTable.redraw(true), 100);
                 }
             } else {
                 // Exit fullscreen
@@ -4854,20 +4854,20 @@
                     btn.innerHTML = `<i class="bi bi-arrows-fullscreen"></i> <span id="fullscreen-btn-text">${t('fullscreenText')}</span>`;
                 }
                 
-                isSessionHistoryFullscreen = false;
+                isConversationHistoryFullscreen = false;
                 
                 // Redraw table to fit new size
-                if (sessionHistoryTable) {
-                    setTimeout(() => sessionHistoryTable.redraw(true), 100);
+                if (conversationHistoryTable) {
+                    setTimeout(() => conversationHistoryTable.redraw(true), 100);
                 }
             }
         }
 
         // Listen for fullscreen changes
         document.addEventListener('fullscreenchange', function() {
-            if (!document.fullscreenElement && isSessionHistoryFullscreen) {
-                const container = document.getElementById('session-history-table-container');
-                const btn = document.getElementById('sessionHistoryFullscreenBtn');
+            if (!document.fullscreenElement && isConversationHistoryFullscreen) {
+                const container = document.getElementById('conversation-history-table-container');
+                const btn = document.getElementById('conversationHistoryFullscreenBtn');
                 
                 if (container) {
                     container.style.cssText = '';
@@ -4877,19 +4877,19 @@
                     btn.innerHTML = `<i class="bi bi-arrows-fullscreen"></i> <span id="fullscreen-btn-text">${t('fullscreenText')}</span>`;
                 }
                 
-                isSessionHistoryFullscreen = false;
+                isConversationHistoryFullscreen = false;
                 
-                if (sessionHistoryTable) {
-                    setTimeout(() => sessionHistoryTable.redraw(true), 100);
+                if (conversationHistoryTable) {
+                    setTimeout(() => conversationHistoryTable.redraw(true), 100);
                 }
             }
         });
 
         // Initialize Tabulator for Session History
-        function initSessionHistoryTable() {
-            if (sessionHistoryTable) return;
+        function initConversationHistoryTable() {
+            if (conversationHistoryTable) return;
 
-            sessionHistoryTable = new Tabulator("#session-history-table", {
+            conversationHistoryTable = new Tabulator("#conversation-history-table", {
                 height: "500px",
                 layout: "fitColumns",
                 responsiveLayout: "collapse",
@@ -5055,7 +5055,7 @@
             initColumnSelector();
 
             // Add row click event listener (exclude button clicks)
-            sessionHistoryTable.on("rowClick", function(e, row) {
+            conversationHistoryTable.on("rowClick", function(e, row) {
                 // 如果点击的是按钮或图标，不显示对话详情
                 if (e.target.closest('button') || e.target.closest('.btn')) {
                     return;
@@ -5065,12 +5065,12 @@
             });
             
             // Load data after initialization
-            loadSessionHistoryData();
+            loadConversationHistoryData();
         }
         
         // Load Session History data from API
-        async function loadSessionHistoryData() {
-            if (!sessionHistoryTable) return;
+        async function loadConversationHistoryData() {
+            if (!conversationHistoryTable) return;
             
             const startDate = document.getElementById('analysis-start-date')?.value || '';
             const endDate = document.getElementById('analysis-end-date')?.value || '';
@@ -5093,17 +5093,17 @@
             });
             
             try {
-                const response = await fetch(`/api/session-history?${params.toString()}`);
+                const response = await fetch(`/api/conversation-history?${params.toString()}`);
                 const data = await response.json();
-                sessionHistoryTable.setData(data.sessions || []);
+                conversationHistoryTable.setData(data.sessions || []);
             } catch (error) {
                 console.error('Error loading session history:', error);
             }
         }
 
         // Load Session History data (for filter changes)
-        function loadSessionHistory() {
-            loadSessionHistoryData();
+        function loadConversationHistory() {
+            loadConversationHistoryData();
         }
 
         // Format timestamp for display
@@ -5421,8 +5421,8 @@
         }
 
         // Listen for tab change to load session history
-        document.getElementById('session-history-tab')?.addEventListener('shown.bs.tab', function() {
-            initSessionHistoryTable();
+        document.getElementById('conversation-history-tab')?.addEventListener('shown.bs.tab', function() {
+            initConversationHistoryTable();
         });
     </script>
 </body>
