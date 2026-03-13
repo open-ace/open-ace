@@ -4132,6 +4132,9 @@
             // Initialize data status
             updateDataStatus();
 
+            // Update data status every 30 seconds
+            setInterval(updateDataStatus, 30000);
+
             // Initialize dashboard host filter
             const dashboardHostFilter = document.getElementById('dashboard-host-filter');
             if (dashboardHostFilter) {
