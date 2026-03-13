@@ -4733,7 +4733,6 @@
 
         // Column visibility configuration
         const conversationHistoryColumnConfig = [
-            { field: 'session_id', title: 'Conversation ID', visible: true, essential: true },
             { field: 'user', title: 'User', visible: true, essential: false },
             { field: 'models', title: 'Model', visible: true, essential: false },
             { field: 'start_time', title: 'Start Time', visible: true, essential: false },
@@ -4755,8 +4754,7 @@
             conversationHistoryColumnConfig.forEach(col => {
                 // Get translated title
                 let translatedTitle = col.title;
-                if (col.field === 'session_id') translatedTitle = t('shSession');
-                else if (col.field === 'user') translatedTitle = t('shUser');
+                if (col.field === 'user') translatedTitle = t('shUser');
                 else if (col.field === 'models') translatedTitle = t('shModel');
                 else if (col.field === 'start_time') translatedTitle = t('shStartTime');
                 else if (col.field === 'end_time') translatedTitle = t('shEndTime');
@@ -4909,21 +4907,6 @@
                 sortMode: "remote",
                 placeholder: "No sessions found",
                 columns: [
-                    {
-                        title: "Conversation ID",
-                        field: "session_id",
-                        sorter: "string",
-                        headerSort: true,
-                        hozAlign: "center",
-                        headerHozAlign: "center",
-                        minWidth: 200,
-                        variableHeight: true,
-                        visible: true,
-                        formatter: function(cell) {
-                            const value = cell.getValue() || '';
-                            return `<span title="${escapeHtmlForDisplay(value)}">${escapeHtmlForDisplay(value)}</span>`;
-                        }
-                    },
                     {
                         title: "User",
                         field: "user",
