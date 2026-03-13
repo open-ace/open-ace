@@ -1159,7 +1159,9 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    <canvas id="timelineModalChart" height="200"></canvas>
+                    <div id="timelineContainer" style="max-height: 500px; overflow-y: auto;">
+                        <!-- Timeline cards will be rendered here -->
+                    </div>
                 </div>
             </div>
         </div>
@@ -1533,6 +1535,9 @@
                 latencyModalTitle: 'Latency Curve',
                 noTimelineData: 'No timeline data available',
                 noLatencyData: 'No latency data available',
+                userMessages: 'User Messages',
+                aiMessages: 'AI Messages',
+                afterPrevious: 'after previous',
                 // Column selector and fullscreen
                 columnSelectorText: 'Columns',
                 fullscreenText: 'Fullscreen',
@@ -1725,6 +1730,9 @@
                 shLoading: '加载中...',
                 timelineModalTitle: '对话时间线',
                 latencyModalTitle: '延迟曲线',
+                userMessages: '用户消息',
+                aiMessages: 'AI 消息',
+                afterPrevious: '距上一条',
                 // Column selector and fullscreen
                 columnSelectorText: '列选择',
                 fullscreenText: '全屏',
@@ -4747,7 +4755,6 @@
 
         // Session History state
         let conversationHistoryTable = null;
-        let timelineModalChart = null;
         let latencyModalChart = null;
         let isConversationHistoryFullscreen = false;
 
@@ -5149,98 +5156,87 @@
 
         // Render Timeline Chart
         function renderTimelineChart(timelineData) {
-            const ctx = document.getElementById('timelineModalChart').getContext('2d');
-
-            if (timelineModalChart) {
-                timelineModalChart.destroy();
-            }
+            const container = document.getElementById('timelineContainer');
+            container.innerHTML = '';
 
             if (!timelineData || timelineData.length === 0) {
-                ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-                ctx.font = '14px sans-serif';
-                ctx.fillStyle = '#6c757d';
-                ctx.textAlign = 'center';
-                ctx.fillText('No timeline data available', ctx.canvas.width / 2, ctx.canvas.height / 2);
+                container.innerHTML = '<div class="text-center text-muted py-4">' + t('noTimelineData') + '</div>';
                 return;
             }
 
-            // Create scatter plot for timeline
-            const userData = timelineData.filter(d => d.role === 'user').map((d, i) => ({
-                x: i,
-                y: 1,
-                time: d.time,
-                tokens: d.tokens
-            }));
+            // Build timeline HTML with cards
+            let html = '<div class="timeline-container" style="position: relative; padding: 10px 0;">';
+            
+            // Add summary header
+            const userCount = timelineData.filter(d => d.role === 'user').length;
+            const aiCount = timelineData.filter(d => d.role === 'assistant').length;
+            const totalTokens = timelineData.reduce((sum, d) => sum + (d.tokens || 0), 0);
+            
+            html += '<div class="timeline-summary mb-3 p-2 bg-light rounded" style="font-size: 0.85rem;">';
+            html += '<span class="me-3"><i class="bi bi-person-fill text-primary"></i> ' + userCount + ' ' + t('userMessages') + '</span>';
+            html += '<span class="me-3"><i class="bi bi-robot text-success"></i> ' + aiCount + ' ' + t('aiMessages') + '</span>';
+            html += '<span><i class="bi bi-cpu text-secondary"></i> ' + totalTokens.toLocaleString() + ' tokens</span>';
+            html += '</div>';
 
-            const assistantData = timelineData.filter(d => d.role === 'assistant').map((d, i) => ({
-                x: i,
-                y: 2,
-                time: d.time,
-                tokens: d.tokens
-            }));
-
-            timelineModalChart = new Chart(ctx, {
-                type: 'scatter',
-                data: {
-                    datasets: [
-                        {
-                            label: 'User Messages',
-                            data: userData,
-                            backgroundColor: 'rgba(13, 110, 253, 0.7)',
-                            borderColor: 'rgba(13, 110, 253, 1)',
-                            pointRadius: 8,
-                            pointHoverRadius: 10
-                        },
-                        {
-                            label: 'AI Messages',
-                            data: assistantData,
-                            backgroundColor: 'rgba(25, 135, 84, 0.7)',
-                            borderColor: 'rgba(25, 135, 84, 1)',
-                            pointRadius: 8,
-                            pointHoverRadius: 10
-                        }
-                    ]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        x: {
-                            title: {
-                                display: true,
-                                text: 'Message Sequence'
-                            },
-                            ticks: {
-                                stepSize: 1
-                            }
-                        },
-                        y: {
-                            min: 0,
-                            max: 3,
-                            ticks: {
-                                callback: function(value) {
-                                    if (value === 1) return 'User';
-                                    if (value === 2) return 'AI';
-                                    return '';
-                                }
-                            }
-                        }
-                    },
-                    plugins: {
-                        tooltip: {
-                            callbacks: {
-                                label: function(context) {
-                                    const point = context.raw;
-                                    return [
-                                        `Time: ${point.time}`,
-                                        `Tokens: ${point.tokens}`
-                                    ];
-                                }
-                            }
+            // Add timeline items
+            timelineData.forEach((item, index) => {
+                const isUser = item.role === 'user';
+                const bgColor = isUser ? 'bg-primary bg-opacity-10' : 'bg-success bg-opacity-10';
+                const borderColor = isUser ? 'border-primary' : 'border-success';
+                const icon = isUser ? 'bi-person-fill' : 'bi-robot';
+                const iconColor = isUser ? 'text-primary' : 'text-success';
+                const roleLabel = isUser ? t('user') : t('assistant');
+                
+                // Calculate time gap from previous message
+                let timeGap = '';
+                if (index > 0) {
+                    const prevTime = new Date('1970-01-01T' + timelineData[index - 1].time + 'Z');
+                    const currTime = new Date('1970-01-01T' + item.time + 'Z');
+                    const diffSeconds = Math.floor((currTime - prevTime) / 1000);
+                    if (diffSeconds > 0) {
+                        if (diffSeconds < 60) {
+                            timeGap = diffSeconds + 's';
+                        } else if (diffSeconds < 3600) {
+                            timeGap = Math.floor(diffSeconds / 60) + 'm ' + (diffSeconds % 60) + 's';
+                        } else {
+                            timeGap = Math.floor(diffSeconds / 3600) + 'h ' + Math.floor((diffSeconds % 3600) / 60) + 'm';
                         }
                     }
                 }
+
+                html += '<div class="timeline-item mb-2" style="display: flex; align-items: flex-start;">';
+                
+                // Time column
+                html += '<div style="min-width: 70px; text-align: right; padding-right: 10px;">';
+                html += '<span style="font-size: 0.8rem; color: #6c757d;">' + item.time + '</span>';
+                html += '</div>';
+                
+                // Timeline connector
+                html += '<div style="display: flex; flex-direction: column; align-items: center; margin: 0 10px;">';
+                html += '<div style="width: 12px; height: 12px; border-radius: 50%; background: ' + (isUser ? '#0d6efd' : '#198754') + ';"></div>';
+                if (index < timelineData.length - 1) {
+                    html += '<div style="width: 2px; height: 30px; background: #dee2e6;"></div>';
+                }
+                html += '</div>';
+                
+                // Card
+                html += '<div class="card flex-grow-1 ' + borderColor + '" style="border-left: 3px solid;">';
+                html += '<div class="card-body py-2 px-3 ' + bgColor + '">';
+                html += '<div class="d-flex justify-content-between align-items-center">';
+                html += '<span><i class="bi ' + icon + ' ' + iconColor + ' me-1"></i><strong>' + roleLabel + '</strong></span>';
+                html += '<span class="badge bg-secondary">' + (item.tokens || 0) + ' tokens</span>';
+                html += '</div>';
+                if (timeGap) {
+                    html += '<small class="text-muted mt-1 d-block"><i class="bi bi-clock me-1"></i>' + timeGap + ' ' + t('afterPrevious') + '</small>';
+                }
+                html += '</div>';
+                html += '</div>';
+                
+                html += '</div>';
             });
+
+            html += '</div>';
+            container.innerHTML = html;
         }
 
         // Show Latency Modal
