@@ -1377,10 +1377,10 @@ def get_user_activity_ranking(start_date: str, end_date: str,
     return [dict(row) for row in rows]
 
 
-def get_session_statistics(start_date: str, end_date: str,
+def get_conversation_statistics(start_date: str, end_date: str,
                            tool_name: Optional[str] = None,
                            host_name: Optional[str] = None) -> Dict:
-    """Get session/conversation statistics.
+    """Get conversation statistics.
     
     Analyzes conversation patterns based on parent_id relationships.
     
@@ -2375,8 +2375,8 @@ def _calculate_max_latency(messages: List[Dict]) -> float:
     return round(max(latencies), 2)
 
 
-def get_session_timeline(session_id: str) -> Dict:
-    """Get detailed timeline data for a specific session.
+def get_conversation_timeline(session_id: str) -> Dict:
+    """Get detailed timeline data for a specific conversation.
 
     Args:
         session_id: The session identifier (conversation_label or generated key)
@@ -2572,14 +2572,14 @@ def get_session_timeline(session_id: str) -> Dict:
     }
 
 
-def get_session_conversation(session_id: str) -> Dict:
-    """Get complete conversation details for a specific session.
+def get_conversation_details(session_id: str) -> Dict:
+    """Get complete conversation details for a specific conversation.
 
     Args:
         session_id: The session identifier (format: sender_date_tool)
 
     Returns:
-        Dict with session info and list of messages with full content
+        Dict with conversation info and list of messages with full content
     """
     conn = get_connection()
     cursor = conn.cursor()

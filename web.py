@@ -271,15 +271,15 @@ def api_analysis_user_ranking():
     return jsonify(data)
 
 
-@app.route('/api/analysis/session-stats')
-def api_analysis_session_stats():
-    """Get session/conversation statistics."""
+@app.route('/api/analysis/conversation-stats')
+def api_analysis_conversation_stats():
+    """Get conversation statistics."""
     start_date = request.args.get('start', utils.get_days_ago(7))
     end_date = request.args.get('end', utils.get_today())
     tool = request.args.get('tool')
     host = request.args.get('host')
     
-    data = db.get_session_statistics(start_date, end_date, tool_name=tool, host_name=host)
+    data = db.get_conversation_statistics(start_date, end_date, tool_name=tool, host_name=host)
     return jsonify(data)
 
 
@@ -461,9 +461,9 @@ def api_conversation_history():
     return jsonify(data)
 
 
-@app.route('/api/session-timeline/<path:session_id>')
-def api_session_timeline(session_id):
-    """Get timeline data for a specific session.
+@app.route('/api/conversation-timeline/<path:session_id>')
+def api_conversation_timeline(session_id):
+    """Get timeline data for a specific conversation.
 
     Args:
         session_id: The session identifier (URL-encoded)
@@ -471,21 +471,21 @@ def api_session_timeline(session_id):
     Returns:
         JSON with timeline and latency_curve data for chart rendering
     """
-    data = db.get_session_timeline(session_id)
+    data = db.get_conversation_timeline(session_id)
     return jsonify(data)
 
 
-@app.route('/api/session-conversation/<path:session_id>')
-def api_session_conversation(session_id):
-    """Get complete conversation details for a specific session.
+@app.route('/api/conversation-details/<path:session_id>')
+def api_conversation_details(session_id):
+    """Get complete conversation details for a specific conversation.
 
     Args:
         session_id: The session identifier (URL-encoded)
 
     Returns:
-        JSON with session info and list of messages with full content
+        JSON with conversation info and list of messages with full content
     """
-    data = db.get_session_conversation(session_id)
+    data = db.get_conversation_details(session_id)
     return jsonify(data)
 
 

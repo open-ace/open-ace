@@ -3651,7 +3651,7 @@
         async function loadSessionStats(start, end, tool, host) {
             try {
                 const params = new URLSearchParams({start, end, tool, host});
-                const response = await fetch(`/api/analysis/session-stats?${params}`);
+                const response = await fetch(`/api/analysis/conversation-stats?${params}`);
                 const data = await response.json();
 
                 document.getElementById('session-total-messages').textContent = (data.total_messages || 0).toLocaleString();
@@ -5145,7 +5145,7 @@
             modal.show();
 
             try {
-                const response = await fetch(`/api/session-timeline/${encodeURIComponent(sessionId)}`);
+                const response = await fetch(`/api/conversation-timeline/${encodeURIComponent(sessionId)}`);
                 const data = await response.json();
 
                 renderTimelineChart(data.timeline || []);
@@ -5248,7 +5248,7 @@
             modal.show();
 
             try {
-                const response = await fetch(`/api/session-timeline/${encodeURIComponent(sessionId)}`);
+                const response = await fetch(`/api/conversation-timeline/${encodeURIComponent(sessionId)}`);
                 const data = await response.json();
 
                 renderLatencyChart(data.latency_curve || []);
@@ -5336,7 +5336,7 @@
             modal.show();
 
             try {
-                const response = await fetch(`/api/session-conversation/${encodeURIComponent(sessionId)}`);
+                const response = await fetch(`/api/conversation-details/${encodeURIComponent(sessionId)}`);
                 const data = await response.json();
 
                 renderConversationDetail(data);
