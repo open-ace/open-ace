@@ -289,6 +289,16 @@
             color: white;
         }
 
+        .message-source.qwen {
+            background-color: #0dcaf0;
+            color: #000;
+        }
+
+        .message-source.claude {
+            background-color: #d63384;
+            color: white;
+        }
+
         .message-content-truncated {
             color: #495057;
             font-size: 0.9rem;
@@ -2694,7 +2704,6 @@
                                 ${role === 'user' ? `
                                 <div class="message-meta mb-1" style="font-size: 0.75rem; display: flex; flex-wrap: nowrap; gap: 10px; align-items: center;">
                                     ${msg.host_name ? `<span class="text-muted"><i class="bi bi-pc-display-horizontal"></i> ${escapeHtmlForDisplay(msg.host_name)}</span>` : '<span class="text-muted opacity-50"><i class="bi bi-pc-display-horizontal"></i></span>'}
-                                    ${msg.tool_name ? `<span class="text-muted"><i class="bi bi-box-seam"></i> ${escapeHtmlForDisplay(msg.tool_name)}</span>` : '<span class="text-muted opacity-50"><i class="bi bi-box-seam"></i></span>'}
                                     ${messageSource ? `<span class="message-source ${messageSource}">${messageSource}</span>` : '<span class="message-source opacity-25"></span>'}
                                     ${senderDisplayName ? `<span class="text-primary fw-semibold"><i class="bi bi-person-circle"></i> ${escapeHtmlForDisplay(senderDisplayName)}</span>` : '<span class="text-primary fw-semibold opacity-25"><i class="bi bi-person-circle"></i></span>'}
                                 </div>` : ''}
