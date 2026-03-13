@@ -4794,6 +4794,9 @@
                     config.visible = visible;
                 }
             }
+
+            // Redraw table to adjust column widths
+            conversationHistoryTable.redraw();
         }
 
         // Toggle fullscreen for session history table
