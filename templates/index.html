@@ -2626,6 +2626,7 @@
                 // Get sender info for user messages (especially for OpenClaw)
                 let senderDisplayName = '';
                 let messageSource = null;
+                let messageSourceClass = null;
 
                 if (role === 'user') {
                     if (msg.sender_name) {
@@ -2642,13 +2643,23 @@
                         }
                     }
                     // Determine message source: priority is tool_name > message_source > openclaw (fallback)
+                    // messageSourceClass: CSS class for styling (e.g., 'openclaw', 'qwen', 'claude')
+                    // messageSource: Display text (e.g., 'OPENCLAW (feishu)', 'QWEN')
                     if (msg.tool_name) {
                         // Use tool_name as the primary source indicator
-                        messageSource = msg.tool_name;
+                        messageSourceClass = msg.tool_name;
+                        // If tool_name is openclaw and message_source is different, show combined format
+                        if (msg.tool_name === 'openclaw' && msg.message_source && msg.message_source !== 'openclaw') {
+                            messageSource = `openclaw (${msg.message_source})`;
+                        } else {
+                            messageSource = msg.tool_name;
+                        }
                     } else if (msg.message_source && msg.message_source !== 'openclaw') {
+                        messageSourceClass = msg.message_source;
                         messageSource = msg.message_source;
                     } else if (senderDisplayName) {
                         // If we have a sender name but no tool_name or explicit source, show openclaw
+                        messageSourceClass = 'openclaw';
                         messageSource = 'openclaw';
                     }
                 }
@@ -2704,7 +2715,7 @@
                                 ${role === 'user' ? `
                                 <div class="message-meta mb-1" style="font-size: 0.75rem; display: flex; flex-wrap: nowrap; gap: 10px; align-items: center;">
                                     ${msg.host_name ? `<span class="text-muted"><i class="bi bi-pc-display-horizontal"></i> ${escapeHtmlForDisplay(msg.host_name)}</span>` : '<span class="text-muted opacity-50"><i class="bi bi-pc-display-horizontal"></i></span>'}
-                                    ${messageSource ? `<span class="message-source ${messageSource}">${messageSource}</span>` : '<span class="message-source opacity-25"></span>'}
+                                    ${messageSource ? `<span class="message-source ${messageSourceClass}">${messageSource}</span>` : '<span class="message-source opacity-25"></span>'}
                                     ${senderDisplayName ? `<span class="text-primary fw-semibold"><i class="bi bi-person-circle"></i> ${escapeHtmlForDisplay(senderDisplayName)}</span>` : '<span class="text-primary fw-semibold opacity-25"><i class="bi bi-person-circle"></i></span>'}
                                 </div>` : ''}
                                 <div class="message-content-truncated">${contentHtml}</div>
