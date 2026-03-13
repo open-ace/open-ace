@@ -9,7 +9,7 @@ import sqlite3
 import json
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, List, Tuple
 
 # Import shared configuration - support both relative and absolute imports
@@ -2384,6 +2384,16 @@ def get_session_timeline(session_id: str) -> Dict:
     Returns:
         Dict with timeline data for rendering charts
     """
+    # GMT+8 timezone
+    gmt_plus_8 = timezone(timedelta(hours=8))
+    
+    def convert_to_gmt8(dt: datetime) -> datetime:
+        """Convert datetime to GMT+8 timezone."""
+        # If the datetime is naive (no timezone), assume it's UTC
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(gmt_plus_8)
+    
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -2477,6 +2487,9 @@ def get_session_timeline(session_id: str) -> Dict:
                     msg_time = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S.%f")
                 else:
                     msg_time = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
+            
+            # Convert to GMT+8
+            msg_time = convert_to_gmt8(msg_time)
         except (ValueError, TypeError):
             continue
 
@@ -2509,6 +2522,9 @@ def get_session_timeline(session_id: str) -> Dict:
                     msg_time = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S.%f")
                 else:
                     msg_time = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
+            
+            # Convert to GMT+8
+            msg_time = convert_to_gmt8(msg_time)
         except (ValueError, TypeError):
             continue
 
