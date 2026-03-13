@@ -360,8 +360,13 @@ def get_all_hosts(active_only: bool = True) -> List[str]:
     cursor = conn.cursor()
 
     if active_only:
+        # Query hosts from both daily_usage and daily_messages tables
         cursor.execute('''
             SELECT DISTINCT host_name FROM daily_usage
+            WHERE date >= date('now', '-7 days')
+              AND host_name != 'localhost'
+            UNION
+            SELECT DISTINCT host_name FROM daily_messages
             WHERE date >= date('now', '-7 days')
               AND host_name != 'localhost'
             ORDER BY host_name
@@ -369,6 +374,9 @@ def get_all_hosts(active_only: bool = True) -> List[str]:
     else:
         cursor.execute('''
             SELECT DISTINCT host_name FROM daily_usage
+            WHERE host_name != 'localhost' OR host_name IS NULL
+            UNION
+            SELECT DISTINCT host_name FROM daily_messages
             WHERE host_name != 'localhost' OR host_name IS NULL
             ORDER BY host_name
         ''')
@@ -510,7 +518,7 @@ def save_message(
 
     # Check if message already exists
     cursor.execute('''
-        SELECT tokens_used, input_tokens, output_tokens, sender_id, sender_name
+        SELECT tokens_used, input_tokens, output_tokens, sender_id, sender_name, model
         FROM daily_messages
         WHERE date = ? AND tool_name = ? AND message_id = ? AND host_name = ?
     ''', (date, tool_name, message_id, host_name))
@@ -530,6 +538,9 @@ def save_message(
             sender_id = existing['sender_id']
         if sender_name is None and existing['sender_name']:
             sender_name = existing['sender_name']
+        # Preserve model if new value is None and existing value exists
+        if model is None and existing['model']:
+            model = existing['model']
 
     cursor.execute('''
         INSERT OR REPLACE INTO daily_messages
