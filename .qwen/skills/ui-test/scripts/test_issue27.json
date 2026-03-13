@@ -1,0 +1,13 @@
+[
+    {
+        "name": "测试 Conversation History 表格列居中对齐",
+        "steps": [
+            {"action": "navigate", "target": "#nav-analysis", "description": "导航到 Analysis 页面"},
+            {"action": "wait", "value": 2},
+            {"action": "click", "target": "#conversation-history-tab", "description": "点击 Conversation History Tab"},
+            {"action": "wait", "value": 3},
+            {"action": "check_visible", "target": "#conversation-history-table", "description": "检查表格可见"},
+            {"action": "screenshot", "value": "test_issue21_conversation_history.png"}
+        ]
+    }
+]

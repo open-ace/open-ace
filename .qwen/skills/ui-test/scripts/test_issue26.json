@@ -1,0 +1,18 @@
+[
+    {
+        "name": "测试列选择器切换列时自动调整列宽",
+        "steps": [
+            {"action": "navigate", "target": "#nav-analysis", "description": "导航到 Analysis 页面"},
+            {"action": "wait", "value": 2},
+            {"action": "click", "target": "#conversation-history-tab", "description": "点击 Conversation History Tab"},
+            {"action": "wait", "value": 3},
+            {"action": "check_visible", "target": "#conversation-history-table", "description": "检查表格可见"},
+            {"action": "check_visible", "target": "#columnSelectorBtn", "description": "检查列选择器按钮可见"},
+            {"action": "screenshot", "value": "test_issue26_before.png"},
+            {"action": "click", "target": "#columnSelectorBtn", "description": "点击列选择器按钮"},
+            {"action": "wait", "value": 1},
+            {"action": "check_visible", "target": "#columnSelectorMenu", "description": "检查列选择器菜单可见"},
+            {"action": "screenshot", "value": "test_issue26_column_selector.png"}
+        ]
+    }
+]
