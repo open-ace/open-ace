@@ -1,0 +1,76 @@
+{
+  "timestamp": "20260313_105719",
+  "url": "http://localhost:5001",
+  "summary": {
+    "total": 1,
+    "passed": 1,
+    "failed": 0
+  },
+  "results": [
+    {
+      "name": "测试列选择器切换列时自动调整列宽",
+      "passed": true,
+      "steps": [
+        {
+          "step": "导航到 Analysis 页面",
+          "passed": true,
+          "message": ""
+        },
+        {
+          "step": "wait: ",
+          "passed": true,
+          "message": ""
+        },
+        {
+          "step": "点击 Conversation History Tab",
+          "passed": true,
+          "message": ""
+        },
+        {
+          "step": "wait: ",
+          "passed": true,
+          "message": ""
+        },
+        {
+          "step": "检查表格可见",
+          "passed": true,
+          "message": ""
+        },
+        {
+          "step": "检查列选择器按钮可见",
+          "passed": true,
+          "message": ""
+        },
+        {
+          "step": "screenshot: ",
+          "passed": true,
+          "message": ""
+        },
+        {
+          "step": "点击列选择器按钮",
+          "passed": true,
+          "message": ""
+        },
+        {
+          "step": "wait: ",
+          "passed": true,
+          "message": ""
+        },
+        {
+          "step": "检查列选择器菜单可见",
+          "passed": true,
+          "message": ""
+        },
+        {
+          "step": "screenshot: ",
+          "passed": true,
+          "message": ""
+        }
+      ],
+      "screenshots": [
+        "./screenshots/test_issue26_before.png",
+        "./screenshots/test_issue26_column_selector.png"
+      ]
+    }
+  ]
+}

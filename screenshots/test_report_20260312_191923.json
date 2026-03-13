@@ -1,0 +1,89 @@
+{
+  "timestamp": "20260312_191923",
+  "url": "http://localhost:5001",
+  "summary": {
+    "total": 2,
+    "passed": 2,
+    "failed": 0
+  },
+  "results": [
+    {
+      "name": "测试 Conversation History 列选择器功能",
+      "passed": true,
+      "steps": [
+        {
+          "step": "导航到 Analysis 页面",
+          "passed": true,
+          "message": ""
+        },
+        {
+          "step": "wait: ",
+          "passed": true,
+          "message": ""
+        },
+        {
+          "step": "点击 Session History Tab",
+          "passed": true,
+          "message": ""
+        },
+        {
+          "step": "wait: ",
+          "passed": true,
+          "message": ""
+        },
+        {
+          "step": "检查表格可见",
+          "passed": true,
+          "message": ""
+        },
+        {
+          "step": "检查列选择器按钮可见",
+          "passed": true,
+          "message": ""
+        },
+        {
+          "step": "点击列选择器按钮",
+          "passed": true,
+          "message": ""
+        },
+        {
+          "step": "wait: ",
+          "passed": true,
+          "message": ""
+        },
+        {
+          "step": "检查列选项数量",
+          "passed": true,
+          "message": ""
+        },
+        {
+          "step": "screenshot: ",
+          "passed": true,
+          "message": ""
+        }
+      ],
+      "screenshots": [
+        "./screenshots/test_column_selector.png"
+      ]
+    },
+    {
+      "name": "测试全屏功能",
+      "passed": true,
+      "steps": [
+        {
+          "step": "检查全屏按钮可见",
+          "passed": true,
+          "message": ""
+        },
+        {
+          "step": "screenshot: ",
+          "passed": true,
+          "message": ""
+        }
+      ],
+      "screenshots": [
+        "./screenshots/test_fullscreen_btn.png"
+      ]
+    }
+  ]
+}
