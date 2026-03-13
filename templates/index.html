@@ -2631,11 +2631,14 @@
                             senderDisplayName = msg.sender_id;
                         }
                     }
-                    // Only show source if explicitly set (not default)
-                    if (msg.message_source && msg.message_source !== 'openclaw') {
+                    // Determine message source: priority is tool_name > message_source > openclaw (fallback)
+                    if (msg.tool_name) {
+                        // Use tool_name as the primary source indicator
+                        messageSource = msg.tool_name;
+                    } else if (msg.message_source && msg.message_source !== 'openclaw') {
                         messageSource = msg.message_source;
                     } else if (senderDisplayName) {
-                        // If we have a sender name, show openclaw as source
+                        // If we have a sender name but no tool_name or explicit source, show openclaw
                         messageSource = 'openclaw';
                     }
                 }
