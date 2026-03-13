@@ -144,12 +144,49 @@ def api_summary():
 
 @app.route('/api/today')
 def api_today():
-    """Get today's usage for all tools."""
+    """Get today's usage for all tools, merged by tool_name."""
     today = utils.get_today()
     host = request.args.get('host')
     tool = request.args.get('tool')
     entries = db.get_usage_by_date(today, tool_name=tool, host_name=host)
-    return jsonify(entries)
+
+    # Merge entries by tool_name (combine all hosts)
+    merged = {}
+    for entry in entries:
+        tool_name = entry.get('tool_name', 'unknown')
+        if tool_name not in merged:
+            merged[tool_name] = {
+                'date': entry.get('date'),
+                'tool_name': tool_name,
+                'tokens_used': 0,
+                'input_tokens': 0,
+                'output_tokens': 0,
+                'cache_tokens': 0,
+                'request_count': 0,
+                'models_used': [],
+                'hosts': []
+            }
+        merged[tool_name]['tokens_used'] += entry.get('tokens_used', 0)
+        merged[tool_name]['input_tokens'] += entry.get('input_tokens', 0)
+        merged[tool_name]['output_tokens'] += entry.get('output_tokens', 0)
+        merged[tool_name]['cache_tokens'] += entry.get('cache_tokens', 0)
+        merged[tool_name]['request_count'] += entry.get('request_count', 0)
+        if entry.get('models_used'):
+            for m in entry.get('models_used', []):
+                if m not in merged[tool_name]['models_used']:
+                    merged[tool_name]['models_used'].append(m)
+        host_name = entry.get('host_name', 'unknown')
+        if host_name not in merged[tool_name]['hosts']:
+            merged[tool_name]['hosts'].append(host_name)
+
+    # Convert to list and clean up
+    result = []
+    for tool_name, data in merged.items():
+        if not data['models_used']:
+            data['models_used'] = None
+        result.append(data)
+
+    return jsonify(result)
 
 
 @app.route('/api/tool/<tool_name>/<int:days>')
