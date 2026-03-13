@@ -58,10 +58,10 @@ def upload_data(server_url: str, auth_key: str, hostname: str, days: int = 1, in
                 upload_data['usage'].append({
                     'date': date,
                     'tool_name': item.get('tool_name'),
+                    'tokens_used': item.get('tokens_used', 0),
                     'input_tokens': item.get('input_tokens', 0),
                     'output_tokens': item.get('output_tokens', 0),
-                    'cache_read_tokens': item.get('cache_read_tokens', 0),
-                    'cache_write_tokens': item.get('cache_write_tokens', 0),
+                    'cache_tokens': item.get('cache_tokens', 0),
                     'request_count': item.get('request_count', 0)
                 })
     
