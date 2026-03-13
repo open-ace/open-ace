@@ -5112,6 +5112,17 @@
                 }
             });
 
+            // Add page size change event listener
+            conversationHistoryTable.on("pageSizeChanged", function(pageSize) {
+                // Reset to page 1 and reload data with new page size
+                loadConversationHistoryData();
+            });
+
+            // Add page change event listener
+            conversationHistoryTable.on("pageChanged", function(page) {
+                loadConversationHistoryData();
+            });
+
             // Load data after initialization
             loadConversationHistoryData();
         }
@@ -5133,13 +5144,17 @@
                 return;
             }
             
+            // Get current page size and page number from Tabulator
+            const pageSize = conversationHistoryTable.getPageSize() || 20;
+            const page = conversationHistoryTable.getPage() || 1;
+
             const params = new URLSearchParams({
                 start: startDate,
                 end: endDate,
                 tool: tool,
                 host: host,
-                page: 1,
-                limit: 20,
+                page: page,
+                limit: pageSize,
                 sort_by: currentSortField,
                 sort_order: currentSortDir
             });
@@ -5464,6 +5479,10 @@
         // Listen for tab change to load session history
         document.getElementById('conversation-history-tab')?.addEventListener('shown.bs.tab', function() {
             initConversationHistoryTable();
+            // Always reload data when switching to this tab
+            if (conversationHistoryTable) {
+                loadConversationHistoryData();
+            }
         });
     </script>
 </body>
