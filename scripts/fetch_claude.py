@@ -6,13 +6,22 @@ Fetches daily token usage from Claude Code local JSONL logs.
 """
 
 import argparse
+import getpass
 import json
 import os
+import socket
 import sys
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
+
+
+def get_default_sender_name(tool: str = "claude") -> str:
+    """Generate default sender name in format: {user}-{hostname}-{tool}."""
+    user = getpass.getuser()
+    hostname = socket.gethostname()
+    return f"{user}-{hostname}-{tool}"
 
 # Add shared directory to path
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -218,7 +227,7 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                                 model=model,
                                 timestamp=ts,
                                 sender_id="claude_user",
-                                sender_name="User of Claude Code"
+                                sender_name=get_default_sender_name("claude")
                             )
 
                 if sum([

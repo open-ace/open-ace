@@ -7,8 +7,10 @@ OpenClaw session logs are located in ~/.openclaw/agents/<agent>/sessions/
 """
 
 import argparse
+import getpass
 import json
 import os
+import socket
 import sys
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -24,6 +26,13 @@ if shared_dir not in sys.path:
 import feishu_user_cache
 import feishu_group_cache
 import utils
+
+
+def get_default_sender_name(tool: str = "openclaw") -> str:
+    """Generate default sender name in format: {user}-{hostname}-{tool}."""
+    user = getpass.getuser()
+    hostname = socket.gethostname()
+    return f"{user}-{hostname}-{tool}"
 
 
 def parse_timestamp(ts_str: str) -> str:
@@ -540,7 +549,7 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                             # Set default sender for messages without sender info
                             if not sender_id and not sender_name:
                                 sender_id = "openclaw_user"
-                                sender_name = "User of OpenClaw"
+                                sender_name = get_default_sender_name("openclaw")
 
                             # Store assistant sender for toolResult attribution
                             if role == "assistant" and (sender_id or sender_name):
