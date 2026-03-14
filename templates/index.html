@@ -2607,6 +2607,9 @@
 
                 renderMessages(data);
 
+                // Update current message count for auto-refresh comparison
+                currentMessageCount = data.total;
+
                 // Update sender list when date changes
                 updateSenderList();
 
@@ -3004,18 +3007,10 @@
                     updateDataStatus();
 
                     // When auto-refresh is enabled, check if date is not today
-                    // If not, prompt user to update
+                    // If so, we'll handle it in the confirm dialog below
                     const dateFilter = document.getElementById('date-filter');
                     const currentDate = dateFilter.value;
                     const today = getToday();
-
-                    if (isAutoRefreshing && currentDate !== today) {
-                        // Update date filter to today
-                        dateFilter.value = today;
-                        // Reload messages for today
-                        currentMessageCount = 0; // Reset to force reload
-                        loadMessages();
-                    }
 
                     // After successful fetch, check if message count changed
                     // by loading messages and comparing count
@@ -3032,40 +3027,53 @@
                     if (document.getElementById('role-system').checked) roles.push('system');
 
                     const rolesParam = roles.length > 0 ? roles.join(',') : '';
-                    const url = `/api/messages?date=${today}&tool=${tool || ''}&host=${host || ''}&sender=${sender || ''}&roles=${rolesParam}&search=${search || ''}&page=1&limit=50`;
 
-                    const response2 = await fetch(url);
-                    const newData = await response2.json();
+                    // Check if user is viewing today or a historical date
+                    if (currentDate === today) {
+                        // User is viewing today - check for new messages and refresh directly
+                        const url = `/api/messages?date=${today}&tool=${tool || ''}&host=${host || ''}&sender=${sender || ''}&roles=${rolesParam}&search=${search || ''}&page=1&limit=50`;
+                        const response2 = await fetch(url);
+                        const newData = await response2.json();
 
-                    // Check if date has changed when auto-refresh is enabled
-                    if (isAutoRefreshing && autoRefreshDate && today !== autoRefreshDate) {
-                        // Check if there are new messages for the new date
-                        if (newData.total > currentMessageCount) {
-                            // Ask user if they want to switch to the new date
-                            if (confirm(t('dateChangedPrompt'))) {
-                                // User wants to switch to new date
-                                autoRefreshDate = today; // Update the tracked date
-                                currentMessageCount = newData.total;
-                                loadMessages();
-                            } else {
-                                // User doesn't want to switch, disable auto-refresh
-                                const checkbox = document.getElementById('auto-refresh');
-                                checkbox.checked = false;
-                                isAutoRefreshing = false;
-                                if (autoRefreshInterval) {
-                                    clearInterval(autoRefreshInterval);
-                                    autoRefreshInterval = null;
+                        // Only reload if message count changed
+                        if (currentMessageCount === 0 || newData.total > currentMessageCount) {
+                            currentMessageCount = newData.total;
+                            loadMessages();
+                        }
+                    } else {
+                        // User is viewing a historical date - check if today has new messages
+                        const url = `/api/messages?date=${today}&tool=${tool || ''}&host=${host || ''}&sender=${sender || ''}&roles=${rolesParam}&search=${search || ''}&page=1&limit=50`;
+                        const response2 = await fetch(url);
+                        const newData = await response2.json();
+
+                        // If today has new messages, prompt user to switch
+                        if (isAutoRefreshing && newData.total > 0) {
+                            // Store today's message count for comparison
+                            if (!window.todayMessageCount) {
+                                window.todayMessageCount = newData.total;
+                            } else if (newData.total > window.todayMessageCount) {
+                                // New messages arrived today
+                                window.todayMessageCount = newData.total;
+                                if (confirm(t('dateChangedPrompt'))) {
+                                    // User wants to switch to today
+                                    dateFilter.value = today;
+                                    autoRefreshDate = today;
+                                    currentMessageCount = 0; // Reset to force reload
+                                    loadMessages();
+                                } else {
+                                    // User doesn't want to switch, disable auto-refresh
+                                    const checkbox = document.getElementById('auto-refresh');
+                                    checkbox.checked = false;
+                                    isAutoRefreshing = false;
+                                    if (autoRefreshInterval) {
+                                        clearInterval(autoRefreshInterval);
+                                        autoRefreshInterval = null;
+                                    }
+                                    alert(t('autoRefreshDisabled'));
+                                    return;
                                 }
-                                alert(t('autoRefreshDisabled'));
-                                return;
                             }
                         }
-                    }
-
-                    // Only reload if message count changed
-                    if (currentMessageCount === 0 || newData.total > currentMessageCount) {
-                        currentMessageCount = newData.total;
-                        loadMessages();
                     }
                 }
             } catch (error) {
