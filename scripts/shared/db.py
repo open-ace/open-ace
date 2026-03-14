@@ -807,6 +807,15 @@ def init_auth_database() -> None:
     ''')
 
     conn.commit()
+
+    # Add linux_account column if not exists (migration for existing databases)
+    cursor.execute("PRAGMA table_info(users)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if 'linux_account' not in columns:
+        print("Adding linux_account column to users table...")
+        cursor.execute("ALTER TABLE users ADD COLUMN linux_account TEXT")
+        conn.commit()
+
     conn.close()
     print("Authentication database initialized")
 
@@ -1035,7 +1044,7 @@ def get_all_users() -> List[Dict]:
 
 def update_user(user_id: int, **kwargs) -> bool:
     """Update user information."""
-    allowed_fields = ['email', 'role', 'quota_tokens', 'quota_requests', 'is_active']
+    allowed_fields = ['email', 'role', 'quota_tokens', 'quota_requests', 'is_active', 'linux_account']
     updates = []
     params = []
 
@@ -1054,6 +1063,19 @@ def update_user(user_id: int, **kwargs) -> bool:
     cursor.execute(f'''
         UPDATE users SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP WHERE id = ?
     ''', params)
+    conn.commit()
+    conn.close()
+    return True
+
+
+def update_user_password(user_id: int, password_hash: str) -> bool:
+    """Update user password hash."""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+    ''', (password_hash, user_id))
     conn.commit()
     conn.close()
     return True

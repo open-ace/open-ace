@@ -1515,6 +1515,8 @@ def api_admin_update_user(user_id):
         updates['quota_requests'] = data['quota_requests']
     if 'is_active' in data:
         updates['is_active'] = 1 if data['is_active'] else 0
+    if 'linux_account' in data:
+        updates['linux_account'] = data['linux_account']
 
     if updates:
         db.update_user(user_id, **updates)
@@ -1546,6 +1548,53 @@ def api_admin_delete_user(user_id):
 
     db.delete_user(user_id)
     return jsonify({'success': True, 'message': 'User deleted successfully'})
+
+
+@app.route('/api/admin/users/<int:user_id>/password', methods=['PUT'])
+def api_admin_reset_password(user_id):
+    """Reset user password (admin only)."""
+    import hashlib
+    import secrets
+
+    auth_header = request.headers.get('Authorization')
+    if not auth_header:
+        return jsonify({'error': 'Missing Authorization header'}), 401
+
+    token = auth_header.replace('Bearer ', '')
+    session = db.get_session_by_token(token)
+
+    if not session:
+        return jsonify({'error': 'Invalid or expired session'}), 401
+
+    if session.get('role') != 'admin':
+        return jsonify({'error': 'Admin access required'}), 403
+
+    # Check if user exists
+    user = db.get_user_by_id(user_id)
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Missing JSON body'}), 400
+
+    password = data.get('password')
+
+    # If no password provided, generate a random one
+    if not password:
+        password = secrets.token_urlsafe(12)
+
+    # Hash password
+    password_hash = hashlib.sha256(password.encode()).hexdigest()
+
+    # Update password
+    db.update_user_password(user_id, password_hash)
+
+    return jsonify({
+        'success': True,
+        'message': 'Password reset successfully',
+        'new_password': password  # Return the new password so admin can share with user
+    })
 
 
 @app.route('/api/admin/users/<int:user_id>/quota', methods=['PUT'])
