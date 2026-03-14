@@ -218,8 +218,9 @@ const Auth = (function() {
             if (profileLink) profileLink.textContent = user.username;
 
             // Show/hide menu items based on role
-            if (dashboardLink) dashboardLink.style.display = 'block';
-            if (messagesLink) messagesLink.style.display = 'block';
+            // Dashboard and Messages are admin-only
+            if (dashboardLink) dashboardLink.style.display = 'none';
+            if (messagesLink) messagesLink.style.display = 'none';
 
             if (analysisLink) {
                 analysisLink.style.display = 'none'; // Initially hide, will show if admin
@@ -229,17 +230,20 @@ const Auth = (function() {
                 managementLink.style.display = 'none'; // Initially hide, will show if admin
             }
 
+            // Workspace and Report are for non-admin users
             if (workspaceLink) workspaceLink.style.display = isAdmin() ? 'none' : 'block';
 
             if (reportLink) reportLink.style.display = 'block';
 
             // Show admin-only menus if user is admin
             if (isAdmin()) {
-                console.log('[updateNavMenu] User is admin, showing Analysis and Management');
+                console.log('[updateNavMenu] User is admin, showing Dashboard, Messages, Analysis and Management');
+                if (dashboardLink) dashboardLink.style.display = 'block';
+                if (messagesLink) messagesLink.style.display = 'block';
                 if (analysisLink) analysisLink.style.display = 'block';
                 if (managementLink) managementLink.style.display = 'block';
             } else {
-                console.log('[updateNavMenu] User is not admin');
+                console.log('[updateNavMenu] User is not admin, showing Workspace and Report only');
             }
         } else {
             // User is not logged in
