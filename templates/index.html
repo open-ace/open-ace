@@ -2781,19 +2781,39 @@
          * Simplify display name for Messages page.
          * Extracts username from formats like "user-hostname-tool" or "user-hostname".
          * Only affects Messages page display, not Analysis page.
+         * For hostname patterns, keeps tool name as suffix to distinguish different senders.
          */
         function simplifyDisplayName(name) {
             if (!name || typeof name !== 'string') return name;
+            
             // Pattern: {user}-{hostname}[-{tool}]
             // hostname can contain hyphens and dots (e.g., "RichdeMacBook-Pro.local")
-            // Simply extract the first segment before the first hyphen
+            // Examples:
+            //   "rhuang-RichdeMacBook-Pro.local-claude" -> "rhuang (claude)"
+            //   "rhuang-RichdeMacBook-Pro.local-qwen" -> "rhuang (qwen)"
+            //   "openclaw-ai-lab-openclaw" -> "openclaw (openclaw)"
+            //   "Maya Ding" -> "Maya Ding" (no change, not a hostname pattern)
+            
             const firstHyphenIndex = name.indexOf('-');
             if (firstHyphenIndex > 0) {
-                // Check if this looks like a hostname pattern (has more segments with dots or hyphens)
                 const rest = name.substring(firstHyphenIndex + 1);
-                // If the rest contains a dot or another hyphen, it's likely a hostname pattern
-                if (rest.includes('.') || rest.includes('-')) {
-                    return name.substring(0, firstHyphenIndex);
+                // Check if this looks like a hostname pattern (has dots or multiple hyphens)
+                if (rest.includes('.') || (rest.match(/-/g) || []).length >= 1) {
+                    // Extract username (first segment)
+                    const username = name.substring(0, firstHyphenIndex);
+                    
+                    // Try to extract tool name (last segment after last hyphen)
+                    const lastHyphenIndex = name.lastIndexOf('-');
+                    if (lastHyphenIndex > firstHyphenIndex) {
+                        const toolName = name.substring(lastHyphenIndex + 1);
+                        // Only add tool suffix if it looks like a tool name (not a hostname part)
+                        if (toolName && !toolName.includes('.') && toolName.length < 20) {
+                            return `${username} (${toolName})`;
+                        }
+                    }
+                    
+                    // Fallback: just return username
+                    return username;
                 }
             }
             return name; // Return original if no match
