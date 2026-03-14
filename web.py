@@ -1017,13 +1017,11 @@ def api_fetch():
     """Trigger data fetch for all tools.
 
     Query parameters:
-        include_remote: If 'true', also fetch data from remote machines in parallel
+        include_remote: If 'true', also fetch data from remote machines in background
 
-    Note: Local and remote fetches run in parallel to ensure local data
-    is returned quickly even if remote hosts are unreachable.
+    Note: Local data is returned immediately. Remote fetch runs in background
+    and does not block the response.
     """
-    from concurrent.futures import ThreadPoolExecutor
-
     include_remote = request.args.get('include_remote', 'false').lower() == 'true'
 
     if not include_remote:
@@ -1033,19 +1031,20 @@ def api_fetch():
             'remote': {}
         })
 
-    # Fetch local and remote data in parallel
-    # This ensures local data is returned quickly even if remote hosts timeout
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        local_future = executor.submit(_fetch_local_data)
-        remote_future = executor.submit(_fetch_remote_data)
+    # Fetch local data first (fast, should complete in 1-2 seconds)
+    local_result = _fetch_local_data()
 
-        # Wait for both to complete (local should be fast)
-        results = {
-            'local': local_future.result(),
-            'remote': remote_future.result()
-        }
+    # Start remote fetch in background thread (non-blocking)
+    from threading import Thread
+    remote_thread = Thread(target=_fetch_remote_data)
+    remote_thread.daemon = True
+    remote_thread.start()
 
-    return jsonify(results)
+    # Return local data immediately, remote data will be fetched in background
+    return jsonify({
+        'local': local_result,
+        'remote': {'status': 'fetching_in_background'}
+    })
 
 
 @app.route('/api/fetch/remote')
