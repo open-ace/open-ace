@@ -890,9 +890,89 @@ def _fetch_local_data():
     return results
 
 
-def _fetch_remote_data():
-    """Fetch data from remote machines via SSH."""
+def _fetch_single_host(host_info, config):
+    """Fetch data from a single remote machine via SSH.
+
+    Args:
+        host_info: Dict with host configuration (name, host, user, base_dir)
+        config: Full config dict for server settings
+
+    Returns:
+        Dict with host results
+    """
     import subprocess
+
+    host_name = host_info.get('name', 'unknown')
+    host = host_info.get('host')
+    user = host_info.get('user', 'openclaw')
+    base_dir = host_info.get('base_dir', '/home/openclaw/ai-token-analyzer')
+
+    if not host:
+        return None
+
+    host_results = {
+        'host': host,
+        'name': host_name,
+        'fetch': {'success': False},
+        'upload': {'success': False}
+    }
+
+    # Execute fetch on remote machine (timeout reduced to 30s)
+    try:
+        fetch_cmd = f"ssh -o ConnectTimeout=10 -o BatchMode=yes {user}@{host} 'cd {base_dir} && python3 scripts/fetch_openclaw.py --days 7'"
+        result = subprocess.run(
+            fetch_cmd,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        host_results['fetch'] = {
+            'success': result.returncode == 0,
+            'stdout': result.stdout[-500:] if result.stdout else '',
+            'stderr': result.stderr[-500:] if result.stderr else ''
+        }
+    except subprocess.TimeoutExpired:
+        host_results['fetch'] = {'success': False, 'error': 'Timeout (30s)'}
+    except Exception as e:
+        host_results['fetch'] = {'success': False, 'error': str(e)}
+
+    # Execute upload on remote machine (timeout reduced to 30s)
+    server_config = config.get('server', {})
+    default_server_url = f"http://localhost:{config_module.WEB_PORT}"
+    server_url = server_config.get('server_url', default_server_url)
+    auth_key = server_config.get('upload_auth_key', '')
+
+    if auth_key:
+        try:
+            upload_cmd = f"ssh -o ConnectTimeout=10 -o BatchMode=yes {user}@{host} 'cd {base_dir} && python3 scripts/upload_to_server.py --server {server_url} --auth-key {auth_key} --hostname {host_name} --days 7'"
+            result = subprocess.run(
+                upload_cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            host_results['upload'] = {
+                'success': result.returncode == 0,
+                'stdout': result.stdout[-500:] if result.stdout else '',
+                'stderr': result.stderr[-500:] if result.stderr else ''
+            }
+        except subprocess.TimeoutExpired:
+            host_results['upload'] = {'success': False, 'error': 'Timeout (30s)'}
+        except Exception as e:
+            host_results['upload'] = {'success': False, 'error': str(e)}
+
+    return host_name, host_results
+
+
+def _fetch_remote_data():
+    """Fetch data from remote machines via SSH in parallel.
+
+    Uses ThreadPoolExecutor to fetch from multiple hosts concurrently,
+    reducing total wait time when some hosts are unreachable.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
     config = utils.load_config()
     remote_config = config.get('remote', {})
@@ -903,69 +983,31 @@ def _fetch_remote_data():
     results = {}
     hosts = remote_config.get('hosts', [])
 
-    for host_info in hosts:
-        host_name = host_info.get('name', 'unknown')
-        host = host_info.get('host')
-        user = host_info.get('user', 'openclaw')
-        base_dir = host_info.get('base_dir', '/home/openclaw/ai-token-analyzer')
+    if not hosts:
+        return results
 
-        if not host:
-            continue
-
-        host_results = {
-            'host': host,
-            'name': host_name,
-            'fetch': {'success': False},
-            'upload': {'success': False}
+    # Fetch from all hosts in parallel
+    with ThreadPoolExecutor(max_workers=len(hosts)) as executor:
+        # Submit all tasks
+        future_to_host = {
+            executor.submit(_fetch_single_host, host_info, config): host_info.get('name', 'unknown')
+            for host_info in hosts
         }
 
-        # Execute fetch on remote machine
-        try:
-            fetch_cmd = f"ssh {user}@{host} 'cd {base_dir} && python3 scripts/fetch_openclaw.py --days 7'"
-            result = subprocess.run(
-                fetch_cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=180
-            )
-            host_results['fetch'] = {
-                'success': result.returncode == 0,
-                'stdout': result.stdout[-500:] if result.stdout else '',
-                'stderr': result.stderr[-500:] if result.stderr else ''
-            }
-        except subprocess.TimeoutExpired:
-            host_results['fetch'] = {'success': False, 'error': 'Timeout'}
-        except Exception as e:
-            host_results['fetch'] = {'success': False, 'error': str(e)}
-
-        # Execute upload on remote machine
-        server_config = config.get('server', {})
-        default_server_url = f"http://localhost:{config_module.WEB_PORT}"
-        server_url = server_config.get('server_url', default_server_url)
-        auth_key = server_config.get('upload_auth_key', '')
-
-        if auth_key:
+        # Collect results as they complete
+        for future in as_completed(future_to_host):
+            host_name = future_to_host[future]
             try:
-                upload_cmd = f"ssh {user}@{host} 'cd {base_dir} && python3 scripts/upload_to_server.py --server {server_url} --auth-key {auth_key} --hostname {host_name} --days 7'"
-                result = subprocess.run(
-                    upload_cmd,
-                    shell=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=120
-                )
-                host_results['upload'] = {
-                    'success': result.returncode == 0,
-                    'stdout': result.stdout[-500:] if result.stdout else '',
-                    'stderr': result.stderr[-500:] if result.stderr else ''
-                }
-            except subprocess.TimeoutExpired:
-                host_results['upload'] = {'success': False, 'error': 'Timeout'}
+                result = future.result()
+                if result:
+                    results[result[0]] = result[1]
             except Exception as e:
-                host_results['upload'] = {'success': False, 'error': str(e)}
-
-        results[host_name] = host_results
+                results[host_name] = {
+                    'host': host_name,
+                    'name': host_name,
+                    'fetch': {'success': False, 'error': str(e)},
+                    'upload': {'success': False, 'error': str(e)}
+                }
 
     return results
 
@@ -975,17 +1017,33 @@ def api_fetch():
     """Trigger data fetch for all tools.
 
     Query parameters:
-        include_remote: If 'true', also fetch data from remote machines
+        include_remote: If 'true', also fetch data from remote machines in parallel
+
+    Note: Local and remote fetches run in parallel to ensure local data
+    is returned quickly even if remote hosts are unreachable.
     """
+    from concurrent.futures import ThreadPoolExecutor
+
     include_remote = request.args.get('include_remote', 'false').lower() == 'true'
 
-    results = {
-        'local': _fetch_local_data(),
-        'remote': {}
-    }
+    if not include_remote:
+        # Only fetch local data (fast path)
+        return jsonify({
+            'local': _fetch_local_data(),
+            'remote': {}
+        })
 
-    if include_remote:
-        results['remote'] = _fetch_remote_data()
+    # Fetch local and remote data in parallel
+    # This ensures local data is returned quickly even if remote hosts timeout
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        local_future = executor.submit(_fetch_local_data)
+        remote_future = executor.submit(_fetch_remote_data)
+
+        # Wait for both to complete (local should be fast)
+        results = {
+            'local': local_future.result(),
+            'remote': remote_future.result()
+        }
 
     return jsonify(results)
 

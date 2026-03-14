@@ -2907,7 +2907,21 @@
 
             try {
                 // Fetch data from both local and remote machines
-                await fetch('/api/fetch?include_remote=true');
+                const response = await fetch('/api/fetch?include_remote=true');
+                const data = await response.json();
+
+                // Check for remote fetch errors and log them
+                if (data.remote && !data.remote.error) {
+                    const remoteHosts = Object.keys(data.remote);
+                    const failedHosts = remoteHosts.filter(host => {
+                        const hostData = data.remote[host];
+                        return hostData && (hostData.fetch?.error || hostData.upload?.error);
+                    });
+                    if (failedHosts.length > 0) {
+                        console.warn('Remote fetch failed for hosts:', failedHosts.join(', '));
+                    }
+                }
+
                 // Update sender list after refresh
                 updateSenderList();
                 // Update data status
@@ -4417,6 +4431,18 @@
                 const response = await fetch('/api/fetch?include_remote=true');
                 const data = await response.json();
 
+                // Check for remote fetch errors and log them
+                if (data.remote && !data.remote.error) {
+                    const remoteHosts = Object.keys(data.remote);
+                    const failedHosts = remoteHosts.filter(host => {
+                        const hostData = data.remote[host];
+                        return hostData && (hostData.fetch?.error || hostData.upload?.error);
+                    });
+                    if (failedHosts.length > 0) {
+                        console.warn('Dashboard: Remote fetch failed for hosts:', failedHosts.join(', '));
+                    }
+                }
+
                 // Update dashboard with new data
                 loadDashboardWithFilters();
 
@@ -5456,20 +5482,58 @@
                 return;
             }
 
+            // Separate data by role
+            const userLatency = latencyData.filter(d => d.role === 'user');
+            const assistantLatency = latencyData.filter(d => d.role === 'assistant');
+            
+            // Get all unique time labels for x-axis
+            const allTimes = [...new Set(latencyData.map(d => d.time))].sort();
+
+            const datasets = [];
+            
+            // User latency dataset (thinking time - time from last assistant response)
+            if (userLatency.length > 0) {
+                datasets.push({
+                    label: currentLang === 'zh' ? '用户思考时间' : 'User Thinking Time',
+                    data: allTimes.map(time => {
+                        const item = userLatency.find(d => d.time === time);
+                        return item ? item.latency : null;
+                    }),
+                    borderColor: 'rgba(13, 110, 253, 1)',
+                    backgroundColor: 'rgba(13, 110, 253, 0.2)',
+                    fill: false,
+                    tension: 0.3,
+                    pointRadius: 5,
+                    pointHoverRadius: 7,
+                    pointBackgroundColor: 'rgba(13, 110, 253, 1)',
+                    spanGaps: true
+                });
+            }
+            
+            // Assistant latency dataset (response time)
+            if (assistantLatency.length > 0) {
+                datasets.push({
+                    label: currentLang === 'zh' ? 'AI 响应时间' : 'AI Response Time',
+                    data: allTimes.map(time => {
+                        const item = assistantLatency.find(d => d.time === time);
+                        return item ? item.latency : null;
+                    }),
+                    borderColor: 'rgba(25, 135, 84, 1)',
+                    backgroundColor: 'rgba(25, 135, 84, 0.2)',
+                    fill: false,
+                    tension: 0.3,
+                    pointRadius: 5,
+                    pointHoverRadius: 7,
+                    pointBackgroundColor: 'rgba(25, 135, 84, 1)',
+                    spanGaps: true
+                });
+            }
+
             latencyModalChart = new Chart(ctx, {
                 type: 'line',
                 data: {
-                    labels: latencyData.map(d => d.time),
-                    datasets: [{
-                        label: 'Response Latency (seconds)',
-                        data: latencyData.map(d => d.latency),
-                        borderColor: 'rgba(255, 193, 7, 1)',
-                        backgroundColor: 'rgba(255, 193, 7, 0.2)',
-                        fill: true,
-                        tension: 0.3,
-                        pointRadius: 4,
-                        pointHoverRadius: 6
-                    }]
+                    labels: allTimes,
+                    datasets: datasets
                 },
                 options: {
                     responsive: true,
@@ -5479,21 +5543,28 @@
                             beginAtZero: true,
                             title: {
                                 display: true,
-                                text: 'Latency (seconds)'
+                                text: currentLang === 'zh' ? '延迟 (秒)' : 'Latency (seconds)'
                             }
                         },
                         x: {
                             title: {
                                 display: true,
-                                text: 'Time'
+                                text: currentLang === 'zh' ? '时间' : 'Time'
                             }
                         }
                     },
                     plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        },
                         tooltip: {
                             callbacks: {
                                 label: function(context) {
-                                    return `Latency: ${context.raw.toFixed(2)}s`;
+                                    const role = context.dataset.label;
+                                    const value = context.raw;
+                                    if (value === null) return null;
+                                    return `${role}: ${value.toFixed(2)}s`;
                                 }
                             }
                         }
