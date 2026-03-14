@@ -2946,6 +2946,26 @@
             if (isAutoRefreshing) {
                 // Save the current date when auto-refresh is enabled
                 autoRefreshDate = document.getElementById('date-filter').value;
+                
+                // Initialize today's message count for comparison when viewing historical dates
+                // This ensures we can detect new messages when user switches to a historical date
+                const today = getToday();
+                const tool = document.getElementById('tool-filter').value;
+                const host = document.getElementById('host-filter').value;
+                const sender = document.getElementById('sender-filter').value;
+                const roles = [];
+                if (document.getElementById('role-user').checked) roles.push('user');
+                if (document.getElementById('role-assistant').checked) roles.push('assistant');
+                if (document.getElementById('role-system').checked) roles.push('system');
+                const rolesParam = roles.length > 0 ? roles.join(',') : '';
+                
+                fetch(`/api/messages?date=${today}&tool=${tool || ''}&host=${host || ''}&sender=${sender || ''}&roles=${rolesParam}&search=&page=1&limit=1`)
+                    .then(response => response.json())
+                    .then(data => {
+                        window.todayMessageCount = data.total;
+                        console.log('Initialized todayMessageCount:', window.todayMessageCount);
+                    });
+                
                 // Fetch new data first
                 fetchData();
 
@@ -2960,6 +2980,8 @@
                 }
                 // Reset auto-refresh date when disabled
                 autoRefreshDate = null;
+                // Reset todayMessageCount when auto-refresh is disabled
+                window.todayMessageCount = null;
             }
         }
 
