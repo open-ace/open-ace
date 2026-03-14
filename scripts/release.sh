@@ -23,15 +23,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 DIST_DIR="$PROJECT_DIR/dist"
 
-# Default version from VERSION file
-VERSION_FILE="$PROJECT_DIR/VERSION"
-if [ -f "$VERSION_FILE" ]; then
-    DEFAULT_VERSION=$(cat "$VERSION_FILE" | tr -d '[:space:]')
-else
-    DEFAULT_VERSION="1.0.0"
-fi
+# Get version from git commit hash and date (same format as web UI)
+# Format: commit_hash (MM-DD HH:MM:SS)
+get_git_version() {
+    local commit_hash commit_date
+    commit_hash=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    commit_date=$(git log -1 --format=%cd --date=format:%m-%d_%H-%M-%S 2>/dev/null || echo "unknown")
+    echo "${commit_hash}-${commit_date}"
+}
 
-VERSION="$DEFAULT_VERSION"
+# Default version from git
+VERSION=$(get_git_version)
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -46,11 +48,11 @@ while [[ $# -gt 0 ]]; do
             echo "Usage: $0 [OPTIONS]"
             echo ""
             echo "Options:"
-            echo "  --version, -v VERSION   Specify version (default: from VERSION file)"
+            echo "  --version, -v VERSION   Specify version (default: from git commit)"
             echo "  --help, -h              Show this help message"
             echo ""
             echo "Output:"
-            echo "  Creates: dist/ai-token-analyzer-v{VERSION}-{DATE}.tar.gz"
+            echo "  Creates: dist/ai-token-analyzer-{VERSION}.tar.gz"
             echo ""
             exit 0
             ;;
@@ -61,11 +63,8 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Get current date
-DATE=$(date +%Y%m%d)
-
-# Package name
-PACKAGE_NAME="ai-token-analyzer-v${VERSION}-${DATE}"
+# Package name (version already includes date from git)
+PACKAGE_NAME="ai-token-analyzer-${VERSION}"
 ARCHIVE_NAME="${PACKAGE_NAME}.tar.gz"
 
 echo -e "${GREEN}========================================${NC}"
@@ -73,7 +72,6 @@ echo -e "${GREEN}  AI Token Analyzer - Release Builder${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 echo "Version: $VERSION"
-echo "Date: $DATE"
 echo "Project: $PROJECT_DIR"
 echo ""
 
@@ -87,6 +85,7 @@ INCLUDE_ITEMS=(
     "README.md"
     "requirements.txt"
     "VERSION"
+    "install.conf.sample"
     "config"
     "contrib"
     "cron"
@@ -128,6 +127,47 @@ echo -e "${YELLOW}Creating release package...${NC}"
 TEMP_DIR=$(mktemp -d)
 PACKAGE_DIR="$TEMP_DIR/$PACKAGE_NAME"
 mkdir -p "$PACKAGE_DIR"
+
+# Download Python dependencies to vendor directory
+echo -e "${YELLOW}Downloading Python dependencies...${NC}"
+VENDOR_DIR="$PACKAGE_DIR/vendor"
+mkdir -p "$VENDOR_DIR"
+if [ -f "$PROJECT_DIR/requirements.txt" ]; then
+    # Download pure Python packages (platform independent)
+    pip3 download -r "$PROJECT_DIR/requirements.txt" -d "$VENDOR_DIR" \
+        --platform any --only-binary=:all: 2>/dev/null || true
+    
+    # Download for Linux aarch64
+    pip3 download -r "$PROJECT_DIR/requirements.txt" -d "$VENDOR_DIR" \
+        --platform manylinux2014_aarch64 --platform manylinux_2_17_aarch64 \
+        --only-binary=:all: 2>/dev/null || true
+    
+    # Download for Linux x86_64
+    pip3 download -r "$PROJECT_DIR/requirements.txt" -d "$VENDOR_DIR" \
+        --platform manylinux2014_x86_64 --platform manylinux_2_17_x86_64 \
+        --only-binary=:all: 2>/dev/null || true
+    
+    # Download for macOS arm64 (Apple Silicon)
+    pip3 download -r "$PROJECT_DIR/requirements.txt" -d "$VENDOR_DIR" \
+        --platform macosx_11_0_arm64 \
+        --only-binary=:all: 2>/dev/null || true
+    
+    # Download for macOS x86_64 (Intel)
+    pip3 download -r "$PROJECT_DIR/requirements.txt" -d "$VENDOR_DIR" \
+        --platform macosx_10_9_x86_64 \
+        --only-binary=:all: 2>/dev/null || true
+    
+    # Fallback: download any missing packages
+    pip3 download -r "$PROJECT_DIR/requirements.txt" -d "$VENDOR_DIR" --prefer-binary 2>/dev/null || \
+        pip download -r "$PROJECT_DIR/requirements.txt" -d "$VENDOR_DIR" --prefer-binary 2>/dev/null || \
+        echo -e "${YELLOW}Warning: Failed to download some dependencies. Install will require network.${NC}"
+    
+    # Count downloaded packages
+    pkg_count=$(ls -1 "$VENDOR_DIR"/*.whl 2>/dev/null | wc -l | tr -d ' ')
+    echo "  ✓ Downloaded $pkg_count packages to vendor/ (multi-platform)"
+else
+    echo -e "${YELLOW}Warning: requirements.txt not found${NC}"
+fi
 
 # Copy included items
 for item in "${INCLUDE_ITEMS[@]}"; do
@@ -176,11 +216,21 @@ cd "$PROJECT_DIR"
 mkdir -p "$PACKAGE_DIR/logs"
 echo "  ✓ Created: logs/"
 
+# Remove macOS extended attributes and AppleDouble files
+echo -e "${YELLOW}Removing macOS metadata files...${NC}"
+find "$PACKAGE_DIR" -name "._*" -type f -delete 2>/dev/null || true
+# Remove extended attributes recursively (macOS only)
+if command -v xattr &>/dev/null; then
+    xattr -cr "$PACKAGE_DIR" 2>/dev/null || true
+fi
+
 # Create the archive
 echo ""
 echo -e "${YELLOW}Creating archive...${NC}"
 cd "$TEMP_DIR"
-tar -czf "$DIST_DIR/$ARCHIVE_NAME" "$PACKAGE_NAME"
+# Use COPYFILE_DISABLE=1 and --no-xattrs to prevent macOS extended attributes
+COPYFILE_DISABLE=1 tar --no-xattrs -czf "$DIST_DIR/$ARCHIVE_NAME" "$PACKAGE_NAME" 2>/dev/null || \
+    COPYFILE_DISABLE=1 tar -czf "$DIST_DIR/$ARCHIVE_NAME" "$PACKAGE_NAME"
 cd "$PROJECT_DIR"
 
 # Clean up temp directory

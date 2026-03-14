@@ -1,34 +1,35 @@
 # AI Token Analyzer - Installation Configuration
-# 
-# Copy this file and modify as needed, then run:
-#   ./scripts/install.sh --config install.conf
+# Copy this file to install.conf and modify as needed
 #
-# Choose one of the two modes below and comment out the other.
+# Usage: ./scripts/install.sh --config install.conf
 
 # ============================================================================
-# LOCAL INSTALLATION
+# Deployment Settings
 # ============================================================================
 
-INSTALL_MODE=local
-
-# User to run the application (default: current user)
-LOCAL_USER=${USER}
+# Deployment user (the user to run the service as)
+DEPLOY_USER=${USER}
 
 # Installation path
-LOCAL_PATH=$HOME/ai-token-analyzer
-
-# Data collection interval in minutes
-LOCAL_INTERVAL=30
+DEPLOY_PATH=$HOME/ai-token-analyzer
 
 # ============================================================================
-# REMOTE INSTALLATION (comment out LOCAL section above if using this)
+# Remote Deployment (optional)
+# ============================================================================
+# To deploy to a remote machine via SSH, uncomment and set DEPLOY_HOST.
+# If DEPLOY_HOST is empty or not set, installation will be local.
+
+# DEPLOY_HOST=192.168.1.100
+
+# ============================================================================
+# Examples
 # ============================================================================
 
-# INSTALL_MODE=remote
-# REMOTE_HOST=<REMOTE_HOST>
-# REMOTE_USER=openclaw
-# REMOTE_PATH=/home/openclaw/ai-token-analyzer
-# REMOTE_INTERVAL=30
+# Example 1: Local installation (single machine deployment)
+# DEPLOY_USER=${USER}
+# DEPLOY_PATH=$HOME/ai-token-analyzer
 
-# Scheduler type: "systemd" (recommended) or "cron"
-# REMOTE_SCHEDULER=systemd
+# Example 2: Deploy to 192.168.64.2 via SSH
+# DEPLOY_HOST=192.168.64.2
+# DEPLOY_USER=root
+# DEPLOY_PATH=/home/rhuang/ai-token-analyzer
