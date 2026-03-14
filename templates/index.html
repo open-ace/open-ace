@@ -2742,9 +2742,9 @@
                             <div class="message-content">
                                 ${role === 'user' ? `
                                 <div class="message-meta mb-1" style="font-size: 0.75rem; display: flex; flex-wrap: nowrap; gap: 10px; align-items: center;">
-                                    ${msg.host_name ? `<span class="text-muted"><i class="bi bi-pc-display-horizontal"></i> ${escapeHtmlForDisplay(msg.host_name)}</span>` : '<span class="text-muted opacity-50"><i class="bi bi-pc-display-horizontal"></i></span>'}
+                                    ${msg.host_name ? `<span class="text-muted"><i class="bi bi-pc-display-horizontal"></i> ${escapeHtmlForDisplay(simplifyDisplayName(msg.host_name))}</span>` : '<span class="text-muted opacity-50"><i class="bi bi-pc-display-horizontal"></i></span>'}
                                     ${messageSource ? `<span class="message-source ${messageSourceClass}">${messageSource}</span>` : '<span class="message-source opacity-25"></span>'}
-                                    ${senderDisplayName ? `<span class="text-primary fw-semibold"><i class="bi bi-person-circle"></i> ${escapeHtmlForDisplay(senderDisplayName)}</span>` : '<span class="text-primary fw-semibold opacity-25"><i class="bi bi-person-circle"></i></span>'}
+                                    ${senderDisplayName ? `<span class="text-primary fw-semibold"><i class="bi bi-person-circle"></i> ${escapeHtmlForDisplay(simplifyDisplayName(senderDisplayName))}</span>` : '<span class="text-primary fw-semibold opacity-25"><i class="bi bi-person-circle"></i></span>'}
                                 </div>` : ''}
                                 <div class="message-content-truncated">${contentHtml}</div>
                             </div>
@@ -2775,6 +2775,28 @@
             } else {
                 paginationControls.style.display = 'none';
             }
+        }
+
+        /**
+         * Simplify display name for Messages page.
+         * Extracts username from formats like "user-hostname-tool" or "user-hostname".
+         * Only affects Messages page display, not Analysis page.
+         */
+        function simplifyDisplayName(name) {
+            if (!name || typeof name !== 'string') return name;
+            // Pattern: {user}-{hostname}[-{tool}]
+            // hostname can contain hyphens and dots (e.g., "RichdeMacBook-Pro.local")
+            // Simply extract the first segment before the first hyphen
+            const firstHyphenIndex = name.indexOf('-');
+            if (firstHyphenIndex > 0) {
+                // Check if this looks like a hostname pattern (has more segments with dots or hyphens)
+                const rest = name.substring(firstHyphenIndex + 1);
+                // If the rest contains a dot or another hyphen, it's likely a hostname pattern
+                if (rest.includes('.') || rest.includes('-')) {
+                    return name.substring(0, firstHyphenIndex);
+                }
+            }
+            return name; // Return original if no match
         }
 
         function escapeHtmlForDisplay(text) {
@@ -3030,7 +3052,7 @@
                     senders.forEach(sender => {
                         const option = document.createElement('option');
                         option.value = sender;
-                        option.textContent = sender;
+                        option.textContent = simplifyDisplayName(sender);
                         senderFilter.appendChild(option);
                     });
 
@@ -4227,7 +4249,7 @@
                         hosts.forEach(host => {
                             const option = document.createElement('option');
                             option.value = host;
-                            option.textContent = host;
+                            option.textContent = simplifyDisplayName(host);
                             messagesHostFilter.appendChild(option);
                         });
                     })
@@ -4243,7 +4265,7 @@
                         senders.forEach(sender => {
                             const option = document.createElement('option');
                             option.value = sender;
-                            option.textContent = sender;
+                            option.textContent = simplifyDisplayName(sender);
                             messagesSenderFilter.appendChild(option);
                         });
                     })
