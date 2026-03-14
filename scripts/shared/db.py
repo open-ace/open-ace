@@ -842,16 +842,17 @@ def create_user(username: str, password_hash: str, email: str = None,
 
 def create_user_with_is_active(username: str, password_hash: str, email: str = None,
                                role: str = 'user', quota_tokens: int = 1000000,
-                               quota_requests: int = 1000, is_active: int = 1) -> bool:
+                               quota_requests: int = 1000, is_active: int = 1,
+                               linux_account: str = None) -> bool:
     """Create a new user with is_active flag."""
     conn = get_connection()
     cursor = conn.cursor()
 
     try:
         cursor.execute('''
-            INSERT INTO users (username, password_hash, email, role, quota_tokens, quota_requests, is_active)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (username, password_hash, email, role, quota_tokens, quota_requests, is_active))
+            INSERT INTO users (username, password_hash, email, role, quota_tokens, quota_requests, is_active, linux_account)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (username, password_hash, email, role, quota_tokens, quota_requests, is_active, linux_account))
         conn.commit()
         return True
     except sqlite3.IntegrityError:

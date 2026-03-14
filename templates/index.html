@@ -1409,8 +1409,20 @@
                             <input type="text" class="form-control" id="add-username" required placeholder="Enter username">
                         </div>
                         <div class="mb-3">
+                            <label for="add-linux-account" class="form-label">Linux Account</label>
+                            <input type="text" class="form-control" id="add-linux-account" placeholder="Enter Linux username">
+                            <small class="form-text text-muted">Linux username for the user (e.g., johndoe)</small>
+                        </div>
+                        <div class="mb-3">
                             <label for="add-password" class="form-label">Password <span class="text-danger">*</span></label>
                             <input type="password" class="form-control" id="add-password" required placeholder="Enter password">
+                        </div>
+                        <div class="mb-3">
+                            <label for="add-confirm-password" class="form-label">Confirm Password <span class="text-danger">*</span></label>
+                            <input type="password" class="form-control" id="add-confirm-password" required placeholder="Confirm password">
+                            <small class="form-text text-danger" id="password-match-msg" style="display: none;">
+                                Passwords do not match
+                            </small>
                         </div>
                         <div class="mb-3">
                             <label for="add-email" class="form-label">Email</label>
@@ -2347,12 +2359,17 @@
             function showAddUserModal() {
                 // Reset form
                 document.getElementById('add-username').value = '';
+                document.getElementById('add-linux-account').value = '';
                 document.getElementById('add-password').value = '';
+                document.getElementById('add-confirm-password').value = '';
                 document.getElementById('add-email').value = '';
                 document.getElementById('add-role').value = 'user';
                 document.getElementById('add-quota-tokens').value = '1000000';
                 document.getElementById('add-quota-requests').value = '1000';
                 document.getElementById('add-is-active').value = '1';
+                
+                // Hide password match message
+                document.getElementById('password-match-msg').style.display = 'none';
 
                 // Show modal
                 const modal = new bootstrap.Modal(document.getElementById('addUserModal'));
@@ -2362,7 +2379,9 @@
             // Create new user
             async function createUser() {
                 const username = document.getElementById('add-username').value.trim();
+                const linuxAccount = document.getElementById('add-linux-account').value.trim();
                 const password = document.getElementById('add-password').value;
+                const confirmPassword = document.getElementById('add-confirm-password').value;
                 const email = document.getElementById('add-email').value.trim();
                 const role = document.getElementById('add-role').value;
                 const quotaTokens = parseInt(document.getElementById('add-quota-tokens').value) || 1000000;
@@ -2373,6 +2392,13 @@
                     alert('Username and password are required');
                     return;
                 }
+
+                // Validate password confirmation
+                if (password !== confirmPassword) {
+                    document.getElementById('password-match-msg').style.display = 'block';
+                    return;
+                }
+                document.getElementById('password-match-msg').style.display = 'none';
 
                 try {
                     const response = await fetch('/api/admin/users', {
@@ -2388,7 +2414,8 @@
                             role: role,
                             quota_tokens: quotaTokens,
                             quota_requests: quotaRequests,
-                            is_active: isActive
+                            is_active: isActive,
+                            linux_account: linuxAccount || null
                         })
                     });
 
@@ -4689,6 +4716,29 @@
                 addUserBtn.addEventListener('click', function() {
                     Admin.showAddUserModal();
                 });
+            }
+
+            // Add password confirmation validation
+            const addPasswordInput = document.getElementById('add-password');
+            const addConfirmPasswordInput = document.getElementById('add-confirm-password');
+            const passwordMatchMsg = document.getElementById('password-match-msg');
+
+            if (addPasswordInput && addConfirmPasswordInput && passwordMatchMsg) {
+                const validatePasswordMatch = function() {
+                    const password = addPasswordInput.value;
+                    const confirmPassword = addConfirmPasswordInput.value;
+                    
+                    if (confirmPassword && password !== confirmPassword) {
+                        passwordMatchMsg.style.display = 'block';
+                        addConfirmPasswordInput.classList.add('is-invalid');
+                    } else {
+                        passwordMatchMsg.style.display = 'none';
+                        addConfirmPasswordInput.classList.remove('is-invalid');
+                    }
+                };
+
+                addPasswordInput.addEventListener('input', validatePasswordMatch);
+                addConfirmPasswordInput.addEventListener('input', validatePasswordMatch);
             }
 
             // Update data status every 30 seconds

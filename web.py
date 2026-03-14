@@ -1455,6 +1455,7 @@ def api_admin_create_user():
     quota_tokens = data.get('quota_tokens', 1000000)
     quota_requests = data.get('quota_requests', 1000)
     is_active = data.get('is_active', 1)
+    linux_account = data.get('linux_account')
 
     if not username or not password:
         return jsonify({'error': 'Username and password are required'}), 400
@@ -1469,7 +1470,8 @@ def api_admin_create_user():
         role=role,
         quota_tokens=quota_tokens,
         quota_requests=quota_requests,
-        is_active=is_active
+        is_active=is_active,
+        linux_account=linux_account
     )
 
     if result:
