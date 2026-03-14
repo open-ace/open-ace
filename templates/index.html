@@ -1394,6 +1394,60 @@
         </div>
     </div>
 
+    <!-- Add User Modal -->
+    <div class="modal fade" id="addUserModal" tabindex="-1" aria-labelledby="addUserModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="addUserModalLabel">Add User</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="add-user-form">
+                        <div class="mb-3">
+                            <label for="add-username" class="form-label">Username <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="add-username" required placeholder="Enter username">
+                        </div>
+                        <div class="mb-3">
+                            <label for="add-password" class="form-label">Password <span class="text-danger">*</span></label>
+                            <input type="password" class="form-control" id="add-password" required placeholder="Enter password">
+                        </div>
+                        <div class="mb-3">
+                            <label for="add-email" class="form-label">Email</label>
+                            <input type="email" class="form-control" id="add-email" placeholder="Enter email">
+                        </div>
+                        <div class="mb-3">
+                            <label for="add-role" class="form-label">Role</label>
+                            <select class="form-select" id="add-role">
+                                <option value="user">User</option>
+                                <option value="admin">Admin</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label for="add-quota-tokens" class="form-label">Quota Tokens</label>
+                            <input type="number" class="form-control" id="add-quota-tokens" min="0" value="1000000">
+                        </div>
+                        <div class="mb-3">
+                            <label for="add-quota-requests" class="form-label">Quota Requests</label>
+                            <input type="number" class="form-control" id="add-quota-requests" min="0" value="1000">
+                        </div>
+                        <div class="mb-3">
+                            <label for="add-is-active" class="form-label">Status</label>
+                            <select class="form-select" id="add-is-active">
+                                <option value="1">Active</option>
+                                <option value="0">Inactive</option>
+                            </select>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="Admin.createUser()">Create User</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Report Section -->
     <div id="report-section" class="content-section" style="display: none; min-height: calc(100vh - 70px);">
         <h3><i class="bi bi-file-earmark-text"></i> <span id="report-title">My Usage Report</span></h3>
@@ -2289,13 +2343,82 @@
                 }
             }
 
+            // Show add user modal
+            function showAddUserModal() {
+                // Reset form
+                document.getElementById('add-username').value = '';
+                document.getElementById('add-password').value = '';
+                document.getElementById('add-email').value = '';
+                document.getElementById('add-role').value = 'user';
+                document.getElementById('add-quota-tokens').value = '1000000';
+                document.getElementById('add-quota-requests').value = '1000';
+                document.getElementById('add-is-active').value = '1';
+
+                // Show modal
+                const modal = new bootstrap.Modal(document.getElementById('addUserModal'));
+                modal.show();
+            }
+
+            // Create new user
+            async function createUser() {
+                const username = document.getElementById('add-username').value.trim();
+                const password = document.getElementById('add-password').value;
+                const email = document.getElementById('add-email').value.trim();
+                const role = document.getElementById('add-role').value;
+                const quotaTokens = parseInt(document.getElementById('add-quota-tokens').value) || 1000000;
+                const quotaRequests = parseInt(document.getElementById('add-quota-requests').value) || 1000;
+                const isActive = document.getElementById('add-is-active').value === '1' ? 1 : 0;
+
+                if (!username || !password) {
+                    alert('Username and password are required');
+                    return;
+                }
+
+                try {
+                    const response = await fetch('/api/admin/users', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': 'Bearer ' + (localStorage.getItem('ai_token_session') || ''),
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            username: username,
+                            password: password,
+                            email: email || null,
+                            role: role,
+                            quota_tokens: quotaTokens,
+                            quota_requests: quotaRequests,
+                            is_active: isActive
+                        })
+                    });
+
+                    const data = await response.json();
+
+                    if (response.ok) {
+                        // Close modal
+                        const modal = bootstrap.Modal.getInstance(document.getElementById('addUserModal'));
+                        modal.hide();
+                        // Refresh table
+                        await renderUsersTable();
+                        alert('User created successfully');
+                    } else {
+                        alert('Error: ' + (data.error || 'Failed to create user'));
+                    }
+                } catch (error) {
+                    console.error('Error creating user:', error);
+                    alert('Error creating user: ' + error.message);
+                }
+            }
+
             return {
                 renderUsersTable,
                 renderQuotaUsage,
                 editUser,
                 saveUserChanges,
                 resetPassword,
-                deleteUser
+                deleteUser,
+                showAddUserModal,
+                createUser
             };
         })();
 
@@ -4559,6 +4682,14 @@
 
             // Initialize data status
             updateDataStatus();
+
+            // Bind Add User button click event
+            const addUserBtn = document.getElementById('add-user-btn');
+            if (addUserBtn) {
+                addUserBtn.addEventListener('click', function() {
+                    Admin.showAddUserModal();
+                });
+            }
 
             // Update data status every 30 seconds
             setInterval(updateDataStatus, 30000);
