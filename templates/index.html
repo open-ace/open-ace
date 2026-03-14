@@ -2598,6 +2598,9 @@
 
                 renderMessages(data);
 
+                // Update sender list when date changes
+                updateSenderList();
+
                 // Restore auto-refresh state if it was enabled
                 if (wasAutoRefreshing) {
                     isAutoRefreshing = true;
