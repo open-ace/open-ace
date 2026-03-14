@@ -2531,6 +2531,10 @@ def get_conversation_timeline(session_id: str) -> Dict:
         role = row['role'] or 'unknown'
         parent_id = row['parent_id']
 
+        # Skip toolResult messages - only show user and assistant in timeline
+        if role == 'toolResult':
+            continue
+
         timeline.append({
             'timestamp': timestamp_str,
             'time': msg_time.strftime('%H:%M:%S'),
