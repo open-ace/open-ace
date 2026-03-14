@@ -32,6 +32,15 @@ get_git_version() {
     echo "${commit_hash}-${commit_date}"
 }
 
+# Get version for VERSION file (same format as web.py displays)
+# Format: commit_hash (MM-DD HH:MM:SS)
+get_git_version_for_file() {
+    local commit_hash commit_date
+    commit_hash=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    commit_date=$(git log -1 --format=%cd --date=format:%m-%d\ %H:%M:%S 2>/dev/null || echo "unknown")
+    echo "${commit_hash} (${commit_date})"
+}
+
 # Default version from git
 VERSION=$(get_git_version)
 
@@ -192,6 +201,11 @@ for item in "${DOC_ITEMS[@]}"; do
         echo "  ✓ Included: $item"
     fi
 done
+
+# Write VERSION file with git commit info (for deployed environments without .git)
+VERSION_FILE_CONTENT=$(get_git_version_for_file)
+echo "$VERSION_FILE_CONTENT" > "$PACKAGE_DIR/VERSION"
+echo "  ✓ Updated: VERSION ($VERSION_FILE_CONTENT)"
 
 # Clean up unnecessary files in scripts directory
 echo ""

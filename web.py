@@ -17,10 +17,22 @@ from flask import Flask, render_template, jsonify, request, send_from_directory,
 
 def get_git_commit():
     """Get the current git commit hash and date for version display.
-    
+
     Returns:
-        str: Format "commit_hash (MM-DD HH:MM:SS)" or "unknown" if git info unavailable.
+        str: Format "commit_hash (MM-DD HH:MM:SS)" or "unknown" if version info unavailable.
     """
+    # Try to read from VERSION file first (for deployed environments without .git)
+    version_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'VERSION')
+    if os.path.exists(version_file):
+        try:
+            with open(version_file, 'r') as f:
+                version = f.read().strip()
+                if version:
+                    return version
+        except Exception:
+            pass
+
+    # Fallback to git command (for development environments)
     try:
         # Get commit hash
         hash_result = subprocess.run(
