@@ -3079,19 +3079,62 @@
                         senderFilter.appendChild(option);
                     });
 
-                    // Update custom dropdown button text if available
+                    // Update custom dropdown menu if it exists
                     const wrapper = senderFilter.previousElementSibling;
                     if (wrapper && wrapper.classList.contains('btn-group')) {
-                        const defaultText = senders.length > 0 ? senders[0] : 'All Senders';
+                        const menu = wrapper.querySelector('.dropdown-menu');
+                        if (menu) {
+                            // Remove all items except search input
+                            const searchInput = menu.querySelector('input');
+                            menu.innerHTML = '';
+                            if (searchInput) {
+                                const searchLi = document.createElement('li');
+                                searchLi.style.padding = '0';
+                                searchLi.appendChild(searchInput);
+                                menu.appendChild(searchLi);
+                            }
+
+                            // Add "All Senders" option
+                            const allLi = document.createElement('li');
+                            const allA = document.createElement('a');
+                            allA.className = 'dropdown-item';
+                            allA.href = '#';
+                            allA.textContent = 'All Senders';
+                            allA.dataset.value = '';
+                            allA.onclick = function(e) {
+                                e.preventDefault();
+                                senderFilter.value = '';
+                                wrapper.querySelector('.filter-text').textContent = 'All Senders';
+                                menu.style.display = 'none';
+                                loadMessages();
+                            };
+                            allLi.appendChild(allA);
+                            menu.appendChild(allLi);
+
+                            // Add sender options
+                            senders.forEach(sender => {
+                                const li = document.createElement('li');
+                                const a = document.createElement('a');
+                                a.className = 'dropdown-item';
+                                a.href = '#';
+                                a.textContent = simplifyDisplayName(sender);
+                                a.dataset.value = sender;
+                                a.onclick = function(e) {
+                                    e.preventDefault();
+                                    senderFilter.value = sender;
+                                    wrapper.querySelector('.filter-text').textContent = simplifyDisplayName(sender);
+                                    menu.style.display = 'none';
+                                    loadMessages();
+                                };
+                                li.appendChild(a);
+                                menu.appendChild(li);
+                            });
+                        }
+
+                        // Update button text
                         const filterText = wrapper.querySelector('.filter-text');
                         if (filterText) {
-                            // Check if current selection is still valid
-                            const currentSelection = senderFilter.options[senderFilter.selectedIndex];
-                            if (currentSelection) {
-                                filterText.textContent = currentSelection.textContent;
-                            } else {
-                                filterText.textContent = 'All Senders';
-                            }
+                            filterText.textContent = 'All Senders';
                         }
                     }
                 })
