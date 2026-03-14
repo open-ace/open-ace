@@ -50,6 +50,17 @@ ai-token-analyzer/
 │
 ├── static/                   # 静态资源 (Web UI)
 ├── templates/                # HTML 模板
+├── tests/                    # 测试文件
+│   ├── issues/               # Issue 相关测试（按 issue 号组织）
+│   │   ├── 15/               # Issue 15 测试脚本
+│   │   ├── 20/               # Issue 20 测试脚本
+│   │   └── ...               # 其他 issue 测试脚本
+│   └── ui/                   # UI 通用测试脚本
+├── screenshots/              # 截图文件（不提交到 git）
+│   └── issues/               # Issue 相关截图（按 issue 号组织）
+│       ├── 15/               # Issue 15 截图
+│       ├── 20/               # Issue 20 截图
+│       └── ...               # 其他 issue 截图
 ├── logs/                     # 日志目录 (运行时生成)
 └── dist/                     # 发布包目录 (构建时生成)
 ```
@@ -304,9 +315,63 @@ REMOTE_SCHEDULER=systemd  # 或 cron
 
 ---
 
-## 四、未来优化建议
+## 四、测试与截图目录组织规则
 
-### 4.1 项目结构优化
+### 4.1 测试目录 (tests/)
+
+测试文件按以下规则组织：
+
+```
+tests/
+├── issues/                   # Issue 相关测试脚本
+│   ├── 15/                   # Issue 15 测试脚本
+│   │   ├── test_issue15.py
+│   │   └── test_issue15_rowclick.py
+│   ├── 20/                   # Issue 20 测试脚本
+│   │   ├── test_issue20.py
+│   │   └── test_issue20_v2.py
+│   ├── 36/                   # Issue 36 测试脚本
+│   │   ├── test_issue36_simplified_display.py
+│   │   ├── check_sender.py
+│   │   └── check_custom_dropdown.py
+│   └── ...                   # 其他 issue 测试脚本
+├── ui/                       # UI 通用测试脚本
+│   ├── test_messages_page_loading.py
+│   └── test_screenshot.py
+└── conftest.py               # pytest 配置和共享 fixtures
+```
+
+**组织规则：**
+- Issue 相关测试脚本放在 `tests/issues/{issue_number}/` 目录下
+- 通用 UI 测试脚本放在 `tests/ui/` 目录下
+- 测试脚本命名：`test_issue{number}.py` 或描述性名称如 `check_*.py`
+
+### 4.2 截图目录 (screenshots/)
+
+截图文件按以下规则组织：
+
+```
+screenshots/                  # 被 .gitignore 忽略，不提交到 git
+└── issues/                   # Issue 相关截图
+    ├── 15/                   # Issue 15 截图
+    │   ├── issue15_01_analysis_page.png
+    │   └── issue15_02_session_history.png
+    ├── 36/                   # Issue 36 截图
+    │   ├── issue36_messages_full.png
+    │   └── issue36_sender_check.png
+    └── ...                   # 其他 issue 截图
+```
+
+**组织规则：**
+- Issue 相关截图放在 `screenshots/issues/{issue_number}/` 目录下
+- 截图命名：`issue{number}_{description}.png`
+- screenshots 目录被 `.gitignore` 忽略，不会提交到版本控制
+
+---
+
+## 五、未来优化建议
+
+### 5.1 项目结构优化
 
 1. **统一配置目录**
    - 当前：配置文件分散在 `~/.ai-token-analyzer/` 和部署目录
@@ -320,7 +385,7 @@ REMOTE_SCHEDULER=systemd  # 或 cron
    - 当前：`fetch_*.py` 脚本有大量重复代码
    - 建议：抽取公共基类，减少代码重复
 
-### 4.2 发布脚本优化
+### 5.2 发布脚本优化
 
 1. **增量发布**
    - 当前：每次发布完整包
@@ -334,7 +399,7 @@ REMOTE_SCHEDULER=systemd  # 或 cron
    - 当前：主要针对 Linux/macOS
    - 建议：考虑 Windows 支持
 
-### 4.3 安装脚本优化
+### 5.3 安装脚本优化
 
 1. **依赖检查**
    - 当前：不检查 Python 依赖
@@ -352,7 +417,7 @@ REMOTE_SCHEDULER=systemd  # 或 cron
    - 当前：配置格式变更需手动处理
    - 建议：支持配置文件版本迁移
 
-### 4.4 其他建议
+### 5.4 其他建议
 
 1. **版本号管理**
    - 使用语义化版本 (SemVer)
@@ -368,9 +433,9 @@ REMOTE_SCHEDULER=systemd  # 或 cron
 
 ---
 
-## 五、附录
+## 六、附录
 
-### 5.1 文件清单
+### 6.1 文件清单
 
 **发布包包含的文件：**
 
@@ -418,7 +483,7 @@ ai-token-analyzer-v1.0.0-20260309/
 └── logs/
 ```
 
-### 5.2 常用命令
+### 6.2 常用命令
 
 ```bash
 # 发布
@@ -443,5 +508,5 @@ python3 scripts/manage.py remote sync
 
 ---
 
-*文档版本：1.0.1*
-*最后更新：2026-03-10*
+*文档版本：1.0.2*
+*最后更新：2026-03-14*
