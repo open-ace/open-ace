@@ -86,15 +86,15 @@ async def test_timeline_no_toolresult():
                 results.append(("点击 Conversation History 标签", False, "未找到标签"))
                 return results
 
-            # 4. 等待 Session History 表格加载
-            print("4. 等待 Session History 表格加载...")
+            # 4. 等待 Conversation History 表格加载
+            print("4. 等待 Conversation History 表格加载...")
             await page.wait_for_selector('#conversation-history-table', timeout=10000)
             await page.wait_for_timeout(2000)
 
             # 截图
-            await page.screenshot(path=f'{SCREENSHOT_DIR}/session_history_{timestamp}.png', full_page=True)
-            print("   ✓ Session History 表格已加载")
-            results.append(("Session History 加载", True, ""))
+            await page.screenshot(path=f'{SCREENSHOT_DIR}/conversation_history_{timestamp}.png', full_page=True)
+            print("   ✓ Conversation History 表格已加载")
+            results.append(("Conversation History 加载", True, ""))
 
             # 5. 找到并点击第一个 Timeline 按钮
             print("4. 点击 Timeline 按钮...")
