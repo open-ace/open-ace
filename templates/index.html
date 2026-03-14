@@ -2111,6 +2111,8 @@
         let lastFetchTimestamp = 0; // Track last fetch time
         let lastRemoteFetchTimestamp = 0; // Track last remote fetch time (Issue #20)
         let autoRefreshDate = null; // Track the date when auto-refresh was enabled
+        let isFetchingData = false; // Prevent fetchData from being called multiple times
+        let isLoadingMessages = false; // Prevent loadMessages from being called multiple times
 
         // Dashboard auto-refresh variables
         let dashboardAutoRefreshInterval = null;
@@ -2527,12 +2529,21 @@
 
         // Message Functions
         async function loadMessages() {
+            // Prevent loadMessages from being called multiple times
+            if (isLoadingMessages) {
+                console.log('loadMessages is already running, skipping...');
+                return;
+            }
+            
             const container = document.getElementById('messages-container');
             const date = document.getElementById('date-filter').value;
             const host = document.getElementById('host-filter').value;
             const tool = document.getElementById('tool-filter').value;
             const sender = document.getElementById('sender-filter').value;
             const search = document.getElementById('search-filter').value;
+            
+            // Set loading flag
+            isLoadingMessages = true;
 
             // Save auto-refresh state before reloading
             const wasAutoRefreshing = isAutoRefreshing;
@@ -2617,6 +2628,9 @@
                         fetchData();
                     }, 10000);
                 }
+            } finally {
+                // Clear loading flag
+                isLoadingMessages = false;
             }
         }
 
@@ -2933,12 +2947,21 @@
         }
 
         async function fetchData() {
+            // Prevent fetchData from being called multiple times
+            if (isFetchingData) {
+                console.log('fetchData is already running, skipping...');
+                return;
+            }
+            
             const now = Date.now();
             // Only fetch local if last fetch was more than 10 seconds ago
             if (now - lastFetchTimestamp < 10000) {
                 return;
             }
             lastFetchTimestamp = now;
+            
+            // Set fetching flag
+            isFetchingData = true;
 
             // Determine if we should fetch remote data (every 5 minutes)
             const shouldFetchRemote = (now - lastRemoteFetchTimestamp) >= 300000; // 5 minutes
@@ -3033,6 +3056,9 @@
                 }
             } catch (error) {
                 console.error('Error fetching data:', error);
+            } finally {
+                // Clear fetching flag
+                isFetchingData = false;
             }
         }
 
