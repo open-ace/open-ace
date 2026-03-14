@@ -2111,12 +2111,14 @@
         let isAutoRefreshing = false;
         let currentMessageCount = 0; // Track current message count to avoid unnecessary refresh
         let lastFetchTimestamp = 0; // Track last fetch time
+        let lastRemoteFetchTimestamp = 0; // Track last remote fetch time (Issue #20)
         let autoRefreshDate = null; // Track the date when auto-refresh was enabled
 
         // Dashboard auto-refresh variables
         let dashboardAutoRefreshInterval = null;
         let isDashboardAutoRefreshing = false;
         let dashboardLastFetchTimestamp = 0;
+        let dashboardLastRemoteFetchTimestamp = 0; // Track last remote fetch time (Issue #20)
 
         // Color palette for each tool (consistent across all charts)
         const toolColors = {
@@ -2889,17 +2891,27 @@
 
         async function fetchData() {
             const now = Date.now();
-            // Only fetch if last fetch was more than 10 seconds ago
+            // Only fetch local if last fetch was more than 10 seconds ago
             if (now - lastFetchTimestamp < 10000) {
                 return;
             }
             lastFetchTimestamp = now;
 
+            // Determine if we should fetch remote data (every 5 minutes)
+            const shouldFetchRemote = (now - lastRemoteFetchTimestamp) >= 300000; // 5 minutes
+
             try {
-                // Fetch data from local machine only (remote fetch is slow and blocks UI)
-                // Remote data should be fetched manually via Refresh button
-                const response = await fetch('/api/fetch?include_remote=false');
+                // Fetch local data every time (fast)
+                // Fetch remote data every 5 minutes (slow, but non-blocking)
+                const includeRemote = shouldFetchRemote ? 'true' : 'false';
+                const response = await fetch(`/api/fetch?include_remote=${includeRemote}`);
                 const data = await response.json();
+
+                // Update remote fetch timestamp if we fetched remote data
+                if (shouldFetchRemote && data.remote && !data.remote.error) {
+                    lastRemoteFetchTimestamp = now;
+                    console.log('Remote data fetched successfully');
+                }
 
                 // Check local fetch success
                 const localSuccess = data.local ? Object.values(data.local).filter(d => d.success).length : 0;
@@ -4327,17 +4339,27 @@
 
         async function fetchDashboardData() {
             const now = Date.now();
-            // Only fetch if last fetch was more than 10 seconds ago
+            // Only fetch local if last fetch was more than 10 seconds ago
             if (now - dashboardLastFetchTimestamp < 10000) {
                 return;
             }
             dashboardLastFetchTimestamp = now;
 
+            // Determine if we should fetch remote data (every 5 minutes)
+            const shouldFetchRemote = (now - dashboardLastRemoteFetchTimestamp) >= 300000; // 5 minutes
+
             try {
-                // Fetch data from local machine only (remote fetch is slow and blocks UI)
-                // Remote data should be fetched manually via Refresh button
-                const response = await fetch('/api/fetch?include_remote=false');
+                // Fetch local data every time (fast)
+                // Fetch remote data every 5 minutes (slow, but non-blocking)
+                const includeRemote = shouldFetchRemote ? 'true' : 'false';
+                const response = await fetch(`/api/fetch?include_remote=${includeRemote}`);
                 const data = await response.json();
+
+                // Update remote fetch timestamp if we fetched remote data
+                if (shouldFetchRemote && data.remote && !data.remote.error) {
+                    dashboardLastRemoteFetchTimestamp = now;
+                    console.log('Dashboard: Remote data fetched successfully');
+                }
 
                 // Update dashboard with new data
                 loadDashboardWithFilters();
