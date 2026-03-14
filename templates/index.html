@@ -658,8 +658,7 @@
             <div id="data-status-container" class="data-status-panel mt-2">
                 <small class="text-muted">Loading data status...</small>
             </div>
-            <small class="d-block mt-2"><span id="last-updated-label">Last updated:</span> <span id="sidebar-updated">{{today}}</span></small>
-            <small class="d-block mt-1 text-white">Version: {{git_commit}}</small>
+            <small class="d-block mt-2">Version: {{git_commit}}</small>
         </div>
     </nav>
 
@@ -1793,8 +1792,7 @@
 
         // Update sidebar text based on current language
         function updateSidebarText() {
-            const lastUpdatedLabel = document.getElementById('last-updated-label');
-            if (lastUpdatedLabel) lastUpdatedLabel.textContent = t('lastUpdated');
+            // Sidebar text updates removed - Last updated line no longer exists
         }
 
         // Update messages text based on current language

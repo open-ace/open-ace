@@ -16,16 +16,30 @@ from flask import Flask, render_template, jsonify, request, send_from_directory,
 
 
 def get_git_commit():
-    """Get the current git commit hash for version display."""
+    """Get the current git commit hash and date for version display.
+    
+    Returns:
+        str: Format "commit_hash (MM-DD HH:MM:SS)" or "unknown" if git info unavailable.
+    """
     try:
-        result = subprocess.run(
+        # Get commit hash
+        hash_result = subprocess.run(
             ['git', 'rev-parse', '--short', 'HEAD'],
             capture_output=True,
             text=True,
             cwd=os.path.dirname(os.path.abspath(__file__))
         )
-        if result.returncode == 0:
-            return result.stdout.strip()
+        # Get commit date in MM-DD HH:MM:SS format
+        date_result = subprocess.run(
+            ['git', 'log', '-1', '--format=%cd', '--date=format:%m-%d %H:%M:%S'],
+            capture_output=True,
+            text=True,
+            cwd=os.path.dirname(os.path.abspath(__file__))
+        )
+        if hash_result.returncode == 0 and date_result.returncode == 0:
+            commit_hash = hash_result.stdout.strip()
+            commit_date = date_result.stdout.strip()
+            return f"{commit_hash} ({commit_date})"
     except Exception:
         pass
     return 'unknown'
