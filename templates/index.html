@@ -2896,17 +2896,15 @@
             lastFetchTimestamp = now;
 
             try {
-                // Fetch data from both local and remote machines
-                const response = await fetch('/api/fetch?include_remote=true');
+                // Fetch data from local machine only (remote fetch is slow and blocks UI)
+                // Remote data should be fetched manually via Refresh button
+                const response = await fetch('/api/fetch?include_remote=false');
                 const data = await response.json();
 
                 // Check local fetch success
                 const localSuccess = data.local ? Object.values(data.local).filter(d => d.success).length : 0;
-                // Check remote fetch success
-                const remoteSuccess = data.remote && !data.remote.error ?
-                    Object.values(data.remote).filter(h => h.fetch && h.fetch.success).length : 0;
 
-                if (localSuccess > 0 || remoteSuccess > 0) {
+                if (localSuccess > 0) {
                     // Update sender list after successful fetch
                     updateSenderList();
 
@@ -4336,7 +4334,9 @@
             dashboardLastFetchTimestamp = now;
 
             try {
-                const response = await fetch('/api/fetch?include_remote=true');
+                // Fetch data from local machine only (remote fetch is slow and blocks UI)
+                // Remote data should be fetched manually via Refresh button
+                const response = await fetch('/api/fetch?include_remote=false');
                 const data = await response.json();
 
                 // Update dashboard with new data
