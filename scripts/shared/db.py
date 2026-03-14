@@ -2504,6 +2504,7 @@ def get_conversation_timeline(session_id: str) -> Dict:
 
     # Second pass: build timeline and calculate latency
     last_user_time = None
+    last_assistant_time = None
     for row in rows:
         timestamp_str = row['timestamp']
         if not timestamp_str:
@@ -2542,9 +2543,19 @@ def get_conversation_timeline(session_id: str) -> Dict:
             'tokens': row['tokens_used'] or 0
         })
 
-        # Track last user message time for sequential latency calculation
         if role == 'user':
+            # Calculate user latency (thinking time): time from last assistant message
+            if last_assistant_time is not None:
+                latency = (msg_time - last_assistant_time).total_seconds()
+                if latency > 0:
+                    latency_data.append({
+                        'timestamp': timestamp_str,
+                        'time': msg_time.strftime('%H:%M:%S'),
+                        'latency': round(latency, 2),
+                        'role': 'user'
+                    })
             last_user_time = msg_time
+            last_assistant_time = None
         elif role == 'assistant':
             user_time = None
 
@@ -2567,8 +2578,10 @@ def get_conversation_timeline(session_id: str) -> Dict:
                     latency_data.append({
                         'timestamp': timestamp_str,
                         'time': msg_time.strftime('%H:%M:%S'),
-                        'latency': round(latency, 2)
+                        'latency': round(latency, 2),
+                        'role': 'assistant'
                     })
+            last_assistant_time = msg_time
 
     return {
         'timeline': timeline,

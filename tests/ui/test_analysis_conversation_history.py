@@ -141,8 +141,88 @@ def test_analysis_page(close_browser=True):
                     print("⚠ No timeline items found (may be expected if no data)")
             else:
                 print("✗ Timeline modal did not open")
+
+            # Close the Timeline modal
+            page.click('#timelineModal .btn-close, #timelineModal button[data-bs-dismiss="modal"]')
+            time.sleep(0.5)
         else:
             print("⚠ No Timeline buttons found (may be expected if no data)")
+
+        # Step 6: Test Latency Curve button (if available)
+        print("\n[Step 6] Testing Latency Curve button...")
+
+        # Find the first Latency Curve button in the table
+        latency_buttons = page.locator('button[onclick*="showLatencyModal"]')
+        latency_button_count = latency_buttons.count()
+
+        if latency_button_count > 0:
+            print(f"✓ Found {latency_button_count} Latency Curve buttons")
+
+            # Click the first Latency Curve button
+            latency_buttons.first.click()
+            print("✓ Latency Curve button clicked")
+
+            # Wait for modal to open
+            page.wait_for_selector('#latencyModal', state='visible', timeout=5000)
+            time.sleep(1)
+
+            # Check if modal has content
+            latency_modal_visible = page.is_visible('#latencyModal')
+            if latency_modal_visible:
+                print("✓ Latency modal opened")
+
+                # Check for chart canvas
+                chart_canvas = page.locator('#latencyModalChart')
+                if chart_canvas.count() > 0:
+                    print("✓ Latency chart canvas found")
+
+                    # Wait for chart to render
+                    time.sleep(2)
+
+                    # Use JavaScript to check chart datasets via Chart.js getChart
+                    has_user_data = page.evaluate('''() => {
+                        const chart = Chart.getChart('latencyModalChart');
+                        if (chart && chart.data) {
+                            const datasets = chart.data.datasets;
+                            return datasets.some(ds => ds.label && ds.label.includes('User'));
+                        }
+                        return false;
+                    }''')
+                    
+                    has_assistant_data = page.evaluate('''() => {
+                        const chart = Chart.getChart('latencyModalChart');
+                        if (chart && chart.data) {
+                            const datasets = chart.data.datasets;
+                            return datasets.some(ds => ds.label && (ds.label.includes('AI') || ds.label.includes('Assistant')));
+                        }
+                        return false;
+                    }''')
+
+                    if has_user_data:
+                        print("✓ User latency dataset found in chart")
+                    else:
+                        print("⚠ User latency dataset not found")
+
+                    if has_assistant_data:
+                        print("✓ AI/Assistant latency dataset found in chart")
+                    else:
+                        print("⚠ AI/Assistant latency dataset not found")
+
+                    # Take screenshot of latency modal
+                    timestamp = time.strftime('%Y%m%d_%H%M%S')
+                    latency_screenshot = f"screenshots/test_latency_curve_{timestamp}.png"
+                    page.screenshot(path=latency_screenshot)
+                    print(f"✓ Latency curve screenshot saved to {latency_screenshot}")
+                else:
+                    print("⚠ Latency chart canvas not found")
+            else:
+                print("✗ Latency modal did not open")
+
+            # Close the modal
+            page.click('#latencyModal .btn-close, #latencyModal button[data-bs-dismiss="modal"]')
+            time.sleep(0.5)
+        else:
+            print("⚠ No Latency Curve buttons found (may be expected if no data)")
 
         # Take screenshot
         timestamp = time.strftime('%Y%m%d_%H%M%S')
