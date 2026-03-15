@@ -497,13 +497,13 @@ install_local() {
         prompt_yesno "Upgrade existing installation?" "y" upgrade
 
         if [ "$upgrade" = "yes" ]; then
-            do_upgrade "$target_path" "$config_dir"
+            do_upgrade "$target_path" "$config_dir" "$DEPLOY_USER"
         else
             print_info "Installation cancelled."
             exit 0
         fi
     else
-        do_fresh_install "$target_path" "$config_dir"
+        do_fresh_install "$target_path" "$config_dir" "$DEPLOY_USER"
     fi
 
     # Install systemd service if requested
@@ -601,6 +601,7 @@ install_deploy() {
 do_fresh_install() {
     local target_path="$1"
     local config_dir="$2"
+    local install_user="$3"
 
     print_info "Performing fresh installation..."
 
@@ -636,6 +637,13 @@ do_fresh_install() {
             print_info "Created config file: $config_dir/config.json"
             print_warning "Please edit the config file with your settings."
         fi
+    fi
+
+    # Fix ownership if running as root and a different user is specified
+    if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ]; then
+        print_info "Setting ownership to $install_user..."
+        chown -R "$install_user:$(id -gn "$install_user")" "$target_path"
+        chown -R "$install_user:$(id -gn "$install_user")" "$config_dir"
     fi
 
     # Install Python dependencies
@@ -696,6 +704,7 @@ do_fresh_install() {
 do_upgrade() {
     local target_path="$1"
     local config_dir="$2"
+    local install_user="$3"
 
     print_info "Upgrading existing installation..."
 
@@ -733,6 +742,13 @@ do_upgrade() {
         # Set permissions
         chmod +x "$target_path/scripts/"*.py 2>/dev/null || true
         chmod +x "$target_path/scripts/"*.sh 2>/dev/null || true
+    fi
+
+    # Fix ownership if running as root and a different user is specified
+    if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ]; then
+        print_info "Setting ownership to $install_user..."
+        chown -R "$install_user:$(id -gn "$install_user")" "$target_path"
+        chown -R "$install_user:$(id -gn "$install_user")" "$config_dir"
     fi
 
     # Install Python dependencies
