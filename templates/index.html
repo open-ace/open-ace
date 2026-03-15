@@ -1321,10 +1321,21 @@
                 </div>
             </div>
         </nav>
-        <iframe src="http://localhost:3000/"
+        {% if workspace_enabled %}
+        <iframe src="{{ workspace_url }}/"
                 id="workspace-frame"
                 style="width: 100%; height: calc(100vh - 160px); border: none; display: block;">
         </iframe>
+        {% else %}
+        <div class="d-flex justify-content-center align-items-center" style="height: calc(100vh - 160px);">
+            <div class="text-center text-muted">
+                <i class="bi bi-window-split" style="font-size: 4rem; opacity: 0.3;"></i>
+                <h4 class="mt-3">Workspace Not Configured</h4>
+                <p class="mt-2">Workspace feature is not enabled. Please contact administrator to configure it.</p>
+                <p class="small text-muted">Add <code>"workspace": {"enabled": true, "url": "http://your-workspace-url"}</code> to config.json</p>
+            </div>
+        </div>
+        {% endif %}
     </div>
 
     <!-- Edit User Modal -->

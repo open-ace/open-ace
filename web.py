@@ -141,6 +141,12 @@ def index():
                 'role': session_data['role']
             }
 
+    # Get workspace config
+    config = utils.load_config()
+    workspace_config = config.get('workspace', {})
+    workspace_enabled = workspace_config.get('enabled', False)
+    workspace_url = workspace_config.get('url', 'http://localhost:3000')
+
     response = make_response(render_template(
         'index.html',
         summary=summary,
@@ -152,7 +158,9 @@ def index():
         user_info=user_info,
         is_authenticated=is_authenticated,
         is_admin=user_role == 'admin',
-        git_commit=get_git_commit()
+        git_commit=get_git_commit(),
+        workspace_enabled=workspace_enabled,
+        workspace_url=workspace_url
     ))
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
     response.headers['Pragma'] = 'no-cache'

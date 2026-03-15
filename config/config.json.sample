@@ -6,6 +6,10 @@
     "web_port": 5001,
     "web_host": "0.0.0.0"
   },
+  "workspace": {
+    "enabled": false,
+    "url": "http://localhost:3000"
+  },
   "authentication": {
     "enabled": true,
     "session_duration_days": 7,
