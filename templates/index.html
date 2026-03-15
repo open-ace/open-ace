@@ -596,16 +596,10 @@
             <h4><i class="bi bi-bar-chart-line"></i> <span id="sidebar-title">AI Token Analyzer</span></h4>
         </div>
         <div class="sidebar-nav" id="sidebar-nav">
-            <!-- Dashboard menu - Admin only -->
-            {% if is_admin %}
+            <!-- Dashboard menu - visible to all users -->
             <a href="#" class="nav-link active" id="nav-dashboard" style="display: block;" onclick="switchSection('dashboard'); return false;">
                 <i class="bi bi-bar-chart-line"></i> <span id="nav-dashboard-text">Dashboard</span>
             </a>
-            {% else %}
-            <a href="#" class="nav-link active" id="nav-dashboard" style="display: none;" onclick="switchSection('dashboard'); return false;">
-                <i class="bi bi-bar-chart-line"></i> <span id="nav-dashboard-text">Dashboard</span>
-            </a>
-            {% endif %}
             <!-- Messages menu - Admin only -->
             {% if is_admin %}
             <a href="#" class="nav-link" id="nav-messages" style="display: block;" onclick="switchSection('messages'); return false;">
@@ -636,16 +630,10 @@
                 <i class="bi bi-gear"></i> <span id="nav-management-text">Management</span>
             </a>
             {% endif %}
-            <!-- Workspace menu - User only (not for admin) -->
-            {% if is_admin %}
-            <a href="#" class="nav-link" id="nav-workspace" style="display: none;" onclick="switchSection('workspace'); return false;">
-                <i class="bi bi-window-split"></i> <span id="nav-workspace-text">Workspace</span>
-            </a>
-            {% else %}
+            <!-- Workspace menu - visible to all users -->
             <a href="#" class="nav-link" id="nav-workspace" style="display: block;" onclick="switchSection('workspace'); return false;">
                 <i class="bi bi-window-split"></i> <span id="nav-workspace-text">Workspace</span>
             </a>
-            {% endif %}
             <!-- Report menu - visible to all users -->
             <a href="#" class="nav-link" id="nav-report" onclick="switchSection('report'); return false;">
                 <i class="bi bi-file-earmark-text"></i> <span id="nav-report-text">Report</span>
