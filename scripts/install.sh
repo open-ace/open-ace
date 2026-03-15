@@ -143,6 +143,21 @@ get_web_port_from_config() {
     echo "$default_port"
 }
 
+# Run pip as a specific user (to avoid root warnings)
+run_pip_as_user() {
+    local user="$1"
+    shift
+    local pip_cmd="$@"
+
+    if [ "$EUID" -eq 0 ] && [ -n "$user" ] && [ "$user" != "root" ]; then
+        # Running as root but user specified - run pip as that user
+        su - "$user" -c "$pip_cmd"
+    else
+        # Run pip directly
+        $pip_cmd
+    fi
+}
+
 install_systemd_service() {
     local target_path="$1"
     local user="$2"
@@ -670,16 +685,16 @@ do_fresh_install() {
         if [ -d "$target_path/vendor" ] && [ "$(ls -A "$target_path/vendor" 2>/dev/null)" ]; then
             print_info "Installing from vendor directory (offline mode)..."
             if command -v pip3 &>/dev/null; then
-                pip3 install --no-index --find-links="$target_path/vendor" -r "$target_path/requirements.txt" && print_success "Dependencies installed from vendor"
+                run_pip_as_user "$install_user" pip3 install --user --no-index --find-links="$target_path/vendor" -r "$target_path/requirements.txt" && print_success "Dependencies installed from vendor"
             elif command -v pip &>/dev/null; then
-                pip install --no-index --find-links="$target_path/vendor" -r "$target_path/requirements.txt" && print_success "Dependencies installed from vendor"
+                run_pip_as_user "$install_user" pip install --user --no-index --find-links="$target_path/vendor" -r "$target_path/requirements.txt" && print_success "Dependencies installed from vendor"
             fi
         else
             # Install from network
             if command -v pip3 &>/dev/null; then
-                pip3 install -r "$target_path/requirements.txt" && print_success "Dependencies installed with pip3"
+                run_pip_as_user "$install_user" pip3 install --user -r "$target_path/requirements.txt" && print_success "Dependencies installed with pip3"
             elif command -v pip &>/dev/null; then
-                pip install -r "$target_path/requirements.txt" && print_success "Dependencies installed with pip"
+                run_pip_as_user "$install_user" pip install --user -r "$target_path/requirements.txt" && print_success "Dependencies installed with pip"
             fi
         fi
     fi
@@ -775,16 +790,16 @@ do_upgrade() {
         if [ -d "$target_path/vendor" ] && [ "$(ls -A "$target_path/vendor" 2>/dev/null)" ]; then
             print_info "Installing from vendor directory (offline mode)..."
             if command -v pip3 &>/dev/null; then
-                pip3 install --no-index --find-links="$target_path/vendor" -r "$target_path/requirements.txt" && print_success "Dependencies installed from vendor"
+                run_pip_as_user "$install_user" pip3 install --user --no-index --find-links="$target_path/vendor" -r "$target_path/requirements.txt" && print_success "Dependencies installed from vendor"
             elif command -v pip &>/dev/null; then
-                pip install --no-index --find-links="$target_path/vendor" -r "$target_path/requirements.txt" && print_success "Dependencies installed from vendor"
+                run_pip_as_user "$install_user" pip install --user --no-index --find-links="$target_path/vendor" -r "$target_path/requirements.txt" && print_success "Dependencies installed from vendor"
             fi
         else
             # Install from network
             if command -v pip3 &>/dev/null; then
-                pip3 install -r "$target_path/requirements.txt" && print_success "Dependencies installed with pip3"
+                run_pip_as_user "$install_user" pip3 install --user -r "$target_path/requirements.txt" && print_success "Dependencies installed with pip3"
             elif command -v pip &>/dev/null; then
-                pip install -r "$target_path/requirements.txt" && print_success "Dependencies installed with pip"
+                run_pip_as_user "$install_user" pip install --user -r "$target_path/requirements.txt" && print_success "Dependencies installed with pip"
             fi
         fi
     fi
@@ -849,15 +864,15 @@ do_fresh_install_remote() {
         if [ -d 'vendor' ] && [ \"\$(ls -A vendor 2>/dev/null)\" ]; then
             echo 'Installing from vendor directory (offline mode)...'
             if command -v pip3 >/dev/null 2>&1; then
-                pip3 install --no-index --find-links=vendor -r requirements.txt
+                pip3 install --user --no-index --find-links=vendor -r requirements.txt
             elif command -v pip >/dev/null 2>&1; then
-                pip install --no-index --find-links=vendor -r requirements.txt
+                pip install --user --no-index --find-links=vendor -r requirements.txt
             fi
         else
             if command -v pip3 >/dev/null 2>&1; then
-                pip3 install -r requirements.txt
+                pip3 install --user -r requirements.txt
             elif command -v pip >/dev/null 2>&1; then
-                pip install -r requirements.txt
+                pip install --user -r requirements.txt
             fi
         fi
     " || {
@@ -931,15 +946,15 @@ do_upgrade_remote() {
         if [ -d 'vendor' ] && [ \"\$(ls -A vendor 2>/dev/null)\" ]; then
             echo 'Installing from vendor directory (offline mode)...'
             if command -v pip3 >/dev/null 2>&1; then
-                pip3 install --no-index --find-links=vendor -r requirements.txt
+                pip3 install --user --no-index --find-links=vendor -r requirements.txt
             elif command -v pip >/dev/null 2>&1; then
-                pip install --no-index --find-links=vendor -r requirements.txt
+                pip install --user --no-index --find-links=vendor -r requirements.txt
             fi
         else
             if command -v pip3 >/dev/null 2>&1; then
-                pip3 install -r requirements.txt
+                pip3 install --user -r requirements.txt
             elif command -v pip >/dev/null 2>&1; then
-                pip install -r requirements.txt
+                pip install --user -r requirements.txt
             fi
         fi
     " || {
