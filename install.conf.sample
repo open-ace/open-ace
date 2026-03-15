@@ -22,6 +22,17 @@ DEPLOY_PATH=$HOME/ai-token-analyzer
 # DEPLOY_HOST=192.168.1.100
 
 # ============================================================================
+# Systemd Service Configuration (optional)
+# ============================================================================
+# If INSTALL_SERVICE=yes, the installer will create a systemd service
+# for easy management with systemctl commands.
+# Note: Root/sudo privileges are required to install systemd service.
+
+# INSTALL_SERVICE=yes
+# SERVICE_PORT=5001
+# SERVICE_HOST=0.0.0.0
+
+# ============================================================================
 # Examples
 # ============================================================================
 
@@ -33,3 +44,10 @@ DEPLOY_PATH=$HOME/ai-token-analyzer
 # DEPLOY_HOST=192.168.64.2
 # DEPLOY_USER=root
 # DEPLOY_PATH=/home/rhuang/ai-token-analyzer
+
+# Example 3: Local installation with systemd service
+# DEPLOY_USER=${USER}
+# DEPLOY_PATH=$HOME/ai-token-analyzer
+# INSTALL_SERVICE=yes
+# SERVICE_PORT=5001
+# SERVICE_HOST=0.0.0.0

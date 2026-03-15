@@ -33,6 +33,10 @@ DEPLOY_HOST=""        # Empty for local mode, required for deploy mode
 DEPLOY_USER="${USER}"
 DEPLOY_PATH="$HOME/ai-token-analyzer"
 
+# Systemd service settings
+SERVICE_PORT=""       # Web server port (will be read from config or use default)
+SERVICE_HOST="0.0.0.0" # Web server host
+
 # Data directories to preserve during upgrade
 DATA_DIRS=(
     "data"
@@ -120,6 +124,217 @@ prompt_yesno() {
 }
 
 # ============================================================================
+# Systemd Service Functions
+# ============================================================================
+
+get_web_port_from_config() {
+    local config_file="$HOME/.ai-token-analyzer/config.json"
+    local default_port="5001"
+
+    if [ -f "$config_file" ]; then
+        # Try to extract port from config.json
+        local port=$(grep -o '"web_port"[[:space:]]*:[[:space:]]*[0-9]*' "$config_file" 2>/dev/null | grep -o '[0-9]*$')
+        if [ -n "$port" ]; then
+            echo "$port"
+            return
+        fi
+    fi
+
+    echo "$default_port"
+}
+
+install_systemd_service() {
+    local target_path="$1"
+    local user="$2"
+    local port="${3:-5001}"
+    local host="${4:-0.0.0.0}"
+
+    local service_template="$SOURCE_DIR/scripts/ai-token-analyzer.service"
+    local service_file="/etc/systemd/system/ai-token-analyzer.service"
+
+    if [ ! -f "$service_template" ]; then
+        print_error "Service template not found: $service_template"
+        return 1
+    fi
+
+    # Check if systemd is available
+    if ! command -v systemctl &>/dev/null; then
+        print_warning "systemctl not found. Skipping systemd service installation."
+        print_info "You can manually run the web server with: cd $target_path && python3 web.py"
+        return 0
+    fi
+
+    # Check if running as root or with sudo
+    if [ "$EUID" -ne 0 ]; then
+        print_warning "Root privileges required to install systemd service."
+        print_info "Please run: sudo $0 --config $CONFIG_FILE"
+        print_info "Or manually install the service after installation."
+        return 1
+    fi
+
+    # Get user's primary group
+    local group=$(id -gn "$user")
+
+    # Create service file from template
+    print_info "Creating systemd service file..."
+    sed -e "s|__USER__|$user|g" \
+        -e "s|__GROUP__|$group|g" \
+        -e "s|__INSTALL_PATH__|$target_path|g" \
+        -e "s|__PORT__|$port|g" \
+        -e "s|__HOST__|$host|g" \
+        "$service_template" > "$service_file"
+
+    if [ $? -ne 0 ]; then
+        print_error "Failed to create service file"
+        return 1
+    fi
+
+    # Reload systemd daemon
+    print_info "Reloading systemd daemon..."
+    systemctl daemon-reload
+
+    # Enable the service
+    print_info "Enabling ai-token-analyzer service..."
+    systemctl enable ai-token-analyzer.service
+
+    # Check if service is already running
+    if systemctl is-active --quiet ai-token-analyzer.service; then
+        print_info "Restarting ai-token-analyzer service..."
+        systemctl restart ai-token-analyzer.service
+    else
+        print_info "Starting ai-token-analyzer service..."
+        systemctl start ai-token-analyzer.service
+    fi
+
+    # Check service status
+    sleep 2
+    if systemctl is-active --quiet ai-token-analyzer.service; then
+        print_success "Systemd service installed and started successfully"
+        print_info "Service name: ai-token-analyzer"
+        print_info "Status: systemctl status ai-token-analyzer"
+        print_info "Logs: journalctl -u ai-token-analyzer -f"
+        print_info "Web interface: http://localhost:$port"
+    else
+        print_error "Service failed to start. Check logs with: journalctl -u ai-token-analyzer -n 50"
+        return 1
+    fi
+
+    return 0
+}
+
+install_systemd_service_remote() {
+    local remote="$1"
+    local target_path="$2"
+    local user="$3"
+    local port="${4:-5001}"
+    local host="${5:-0.0.0.0}"
+
+    # Check if systemd is available on remote
+    if ! ssh "$remote" "command -v systemctl &>/dev/null"; then
+        print_warning "systemctl not found on remote machine. Skipping systemd service installation."
+        print_info "You can manually run the web server with: ssh $remote 'cd $target_path && python3 web.py'"
+        return 0
+    fi
+
+    # Create service file on remote
+    print_info "Creating systemd service on remote machine..."
+    ssh "$remote" "
+        # Check if we have sudo access
+        if ! sudo -n true 2>/dev/null; then
+            echo 'SUDO_REQUIRED'
+            exit 0
+        fi
+
+        # Get user's primary group
+        GROUP=\$(id -gn '$user')
+
+        # Create service file
+        sudo tee /etc/systemd/system/ai-token-analyzer.service > /dev/null << 'EOFSERVICE'
+[Unit]
+Description=AI Token Analyzer - Web Dashboard for AI Token Usage
+Documentation=https://github.com/richardhuang/ai-token-analyzer
+After=network.target
+
+[Service]
+Type=simple
+User=$user
+Group=\$GROUP
+WorkingDirectory=$target_path
+ExecStart=/usr/bin/python3 $target_path/web.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Environment variables
+Environment=AI_TOKEN_WEB_PORT=$port
+Environment=AI_TOKEN_WEB_HOST=$host
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+EOFSERVICE
+
+        # Reload and enable service
+        sudo systemctl daemon-reload
+        sudo systemctl enable ai-token-analyzer.service
+
+        # Start or restart service
+        if sudo systemctl is-active --quiet ai-token-analyzer.service; then
+            sudo systemctl restart ai-token-analyzer.service
+        else
+            sudo systemctl start ai-token-analyzer.service
+        fi
+
+        # Wait and check status
+        sleep 2
+        if sudo systemctl is-active --quiet ai-token-analyzer.service; then
+            echo 'SERVICE_STARTED'
+        else
+            echo 'SERVICE_FAILED'
+        fi
+    "
+
+    local result=$(ssh "$remote" "
+        if sudo -n true 2>/dev/null; then
+            if sudo systemctl is-active --quiet ai-token-analyzer.service; then
+                echo 'SERVICE_STARTED'
+            else
+                echo 'SERVICE_FAILED'
+            fi
+        else
+            echo 'SUDO_REQUIRED'
+        fi
+    ")
+
+    case "$result" in
+        SERVICE_STARTED)
+            print_success "Systemd service installed and started on remote machine"
+            print_info "Service name: ai-token-analyzer"
+            print_info "Status: ssh $remote 'sudo systemctl status ai-token-analyzer'"
+            print_info "Logs: ssh $remote 'sudo journalctl -u ai-token-analyzer -f'"
+            print_info "Web interface: http://$DEPLOY_HOST:$port"
+            ;;
+        SERVICE_FAILED)
+            print_error "Service failed to start on remote machine"
+            print_info "Check logs with: ssh $remote 'sudo journalctl -u ai-token-analyzer -n 50'"
+            return 1
+            ;;
+        SUDO_REQUIRED)
+            print_warning "Sudo privileges required on remote machine."
+            print_info "Please run the following on the remote machine:"
+            print_info "  sudo systemctl enable ai-token-analyzer"
+            print_info "  sudo systemctl start ai-token-analyzer"
+            ;;
+    esac
+
+    return 0
+}
+
+# ============================================================================
 # Config File Parsing
 # ============================================================================
 
@@ -139,6 +354,11 @@ parse_config_file() {
         INSTALL_MODE="local"
     else
         INSTALL_MODE="deploy"
+    fi
+
+    # Set default service port if not specified
+    if [ -z "$SERVICE_PORT" ]; then
+        SERVICE_PORT=$(get_web_port_from_config)
     fi
 }
 
@@ -180,11 +400,28 @@ configure_local() {
     prompt_input "Deployment user" "$DEPLOY_USER" DEPLOY_USER
     prompt_input "Deployment path" "$DEPLOY_PATH" DEPLOY_PATH
 
+    # Ask about systemd service
+    echo ""
+    prompt_yesno "Install as systemd service?" "y" install_service
+    if [ "$install_service" = "yes" ]; then
+        # Get default port from config or use 5001
+        local default_port=$(get_web_port_from_config)
+        prompt_input "Web server port" "$default_port" SERVICE_PORT
+        prompt_input "Web server host" "$SERVICE_HOST" SERVICE_HOST
+    fi
+
     echo ""
     print_info "Configuration Summary:"
     echo "  Mode: Local (this machine)"
     echo "  User: $DEPLOY_USER"
     echo "  Path: $DEPLOY_PATH"
+    if [ "$install_service" = "yes" ]; then
+        echo "  Systemd service: Yes"
+        echo "  Web port: $SERVICE_PORT"
+        echo "  Web host: $SERVICE_HOST"
+    else
+        echo "  Systemd service: No"
+    fi
     echo ""
 
     prompt_yesno "Proceed with installation?" "y" confirm
@@ -192,6 +429,9 @@ configure_local() {
         echo "Installation cancelled."
         exit 0
     fi
+
+    # Store service installation preference
+    INSTALL_SERVICE="$install_service"
 }
 
 configure_deploy() {
@@ -208,12 +448,27 @@ configure_deploy() {
     prompt_input "Remote user" "$DEPLOY_USER" DEPLOY_USER
     prompt_input "Deployment path" "/home/$DEPLOY_USER/ai-token-analyzer" DEPLOY_PATH
 
+    # Ask about systemd service
+    echo ""
+    prompt_yesno "Install as systemd service on remote?" "y" install_service
+    if [ "$install_service" = "yes" ]; then
+        prompt_input "Web server port" "5001" SERVICE_PORT
+        prompt_input "Web server host" "$SERVICE_HOST" SERVICE_HOST
+    fi
+
     echo ""
     print_info "Configuration Summary:"
     echo "  Mode: Deploy (via SSH)"
     echo "  Host: $DEPLOY_HOST"
     echo "  User: $DEPLOY_USER"
     echo "  Path: $DEPLOY_PATH"
+    if [ "$install_service" = "yes" ]; then
+        echo "  Systemd service: Yes"
+        echo "  Web port: $SERVICE_PORT"
+        echo "  Web host: $SERVICE_HOST"
+    else
+        echo "  Systemd service: No"
+    fi
     echo ""
 
     prompt_yesno "Proceed with installation?" "y" confirm
@@ -221,6 +476,9 @@ configure_deploy() {
         echo "Installation cancelled."
         exit 0
     fi
+
+    # Store service installation preference
+    INSTALL_SERVICE="$install_service"
 }
 
 # ============================================================================
@@ -248,12 +506,29 @@ install_local() {
         do_fresh_install "$target_path" "$config_dir"
     fi
 
+    # Install systemd service if requested
+    if [ "$INSTALL_SERVICE" = "yes" ]; then
+        print_header "Installing Systemd Service"
+        install_systemd_service "$target_path" "$DEPLOY_USER" "$SERVICE_PORT" "$SERVICE_HOST"
+    fi
+
     print_header "Local Installation Complete!"
     print_info "Installation path: $target_path"
     print_info "Config directory: $config_dir"
     echo ""
-    echo "To start the web server:"
-    echo "  cd $target_path && python3 web.py"
+    if [ "$INSTALL_SERVICE" = "yes" ] && command -v systemctl &>/dev/null; then
+        echo "Service management:"
+        echo "  systemctl status ai-token-analyzer"
+        echo "  systemctl start ai-token-analyzer"
+        echo "  systemctl stop ai-token-analyzer"
+        echo "  systemctl restart ai-token-analyzer"
+        echo ""
+        echo "View logs:"
+        echo "  journalctl -u ai-token-analyzer -f"
+    else
+        echo "To start the web server:"
+        echo "  cd $target_path && python3 web.py"
+    fi
     echo ""
 }
 
@@ -293,9 +568,29 @@ install_deploy() {
         do_fresh_install_remote "$remote" "$target_path"
     fi
 
+    # Install systemd service if requested
+    if [ "$INSTALL_SERVICE" = "yes" ]; then
+        print_header "Installing Systemd Service on Remote"
+        install_systemd_service_remote "$remote" "$target_path" "$DEPLOY_USER" "$SERVICE_PORT" "$SERVICE_HOST"
+    fi
+
     print_header "Remote Deployment Complete!"
     print_info "Remote host: $DEPLOY_HOST"
     print_info "Installation path: $target_path"
+    echo ""
+    if [ "$INSTALL_SERVICE" = "yes" ]; then
+        echo "Service management on remote:"
+        echo "  ssh $remote 'sudo systemctl status ai-token-analyzer'"
+        echo "  ssh $remote 'sudo systemctl start ai-token-analyzer'"
+        echo "  ssh $remote 'sudo systemctl stop ai-token-analyzer'"
+        echo "  ssh $remote 'sudo systemctl restart ai-token-analyzer'"
+        echo ""
+        echo "View logs on remote:"
+        echo "  ssh $remote 'sudo journalctl -u ai-token-analyzer -f'"
+    else
+        echo "To start the web server on remote:"
+        echo "  ssh $remote 'cd $target_path && python3 web.py'"
+    fi
     echo ""
 }
 
@@ -659,9 +954,21 @@ show_help() {
     echo "  DEPLOY_USER=openclaw"
     echo "  DEPLOY_PATH=/home/openclaw/ai-token-analyzer"
     echo ""
+    echo "  # Systemd service configuration (optional)"
+    echo "  INSTALL_SERVICE=yes              # Install as systemd service"
+    echo "  SERVICE_PORT=5001                # Web server port"
+    echo "  SERVICE_HOST=0.0.0.0             # Web server host"
+    echo ""
     echo "Examples:"
     echo "  $0                              # Interactive mode"
     echo "  $0 --config install.conf        # Use config file"
+    echo ""
+    echo "After installation with systemd service:"
+    echo "  systemctl status ai-token-analyzer   # Check service status"
+    echo "  systemctl start ai-token-analyzer    # Start service"
+    echo "  systemctl stop ai-token-analyzer     # Stop service"
+    echo "  systemctl restart ai-token-analyzer  # Restart service"
+    echo "  journalctl -u ai-token-analyzer -f   # View logs"
     echo ""
     exit 0
 }

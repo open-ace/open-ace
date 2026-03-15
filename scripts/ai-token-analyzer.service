@@ -1,0 +1,26 @@
+[Unit]
+Description=AI Token Analyzer - Web Dashboard for AI Token Usage
+Documentation=https://github.com/richardhuang/ai-token-analyzer
+After=network.target
+
+[Service]
+Type=simple
+User=__USER__
+Group=__GROUP__
+WorkingDirectory=__INSTALL_PATH__
+ExecStart=/usr/bin/python3 __INSTALL_PATH__/web.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Environment variables
+Environment=AI_TOKEN_WEB_PORT=__PORT__
+Environment=AI_TOKEN_WEB_HOST=__HOST__
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
