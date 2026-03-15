@@ -604,18 +604,30 @@ do_fresh_install() {
 
     print_info "Performing fresh installation..."
 
-    # Create directories
-    mkdir -p "$target_path"
+    # Check if source and target are the same directory
+    local source_abs="$(cd "$SOURCE_DIR" 2>/dev/null && pwd)"
+    local target_abs="$(cd "$target_path" 2>/dev/null && pwd 2>/dev/null || echo "$target_path")"
+
+    if [ "$source_abs" = "$target_abs" ]; then
+        print_warning "Source and target directories are the same: $target_path"
+        print_info "Skipping file copy (running from installation directory)"
+    else
+        # Create directories
+        mkdir -p "$target_path"
+        mkdir -p "$target_path/logs"
+
+        # Copy files
+        print_info "Copying files..."
+        cp -r "$SOURCE_DIR"/* "$target_path/"
+
+        # Set permissions
+        chmod +x "$target_path/scripts/"*.py 2>/dev/null || true
+        chmod +x "$target_path/scripts/"*.sh 2>/dev/null || true
+    fi
+
+    # Ensure logs directory exists
     mkdir -p "$target_path/logs"
     mkdir -p "$config_dir"
-
-    # Copy files
-    print_info "Copying files..."
-    cp -r "$SOURCE_DIR"/* "$target_path/"
-
-    # Set permissions
-    chmod +x "$target_path/scripts/"*.py 2>/dev/null || true
-    chmod +x "$target_path/scripts/"*.sh 2>/dev/null || true
 
     # Create default config if not exists
     if [ ! -f "$config_dir/config.json" ]; then
@@ -687,32 +699,41 @@ do_upgrade() {
 
     print_info "Upgrading existing installation..."
 
-    # Backup data files
-    local backup_dir="/tmp/ai-token-analyzer-backup-$(date +%Y%m%d%H%M%S)"
-    mkdir -p "$backup_dir"
+    # Check if source and target are the same directory
+    local source_abs="$(cd "$SOURCE_DIR" 2>/dev/null && pwd)"
+    local target_abs="$(cd "$target_path" 2>/dev/null && pwd 2>/dev/null || echo "$target_path")"
 
-    # Backup config directory
-    if [ -d "$config_dir" ]; then
-        print_info "Backing up config directory..."
-        cp -r "$config_dir" "$backup_dir/"
+    if [ "$source_abs" = "$target_abs" ]; then
+        print_warning "Source and target directories are the same: $target_path"
+        print_info "Skipping file copy (running from installation directory)"
+    else
+        # Backup data files
+        local backup_dir="/tmp/ai-token-analyzer-backup-$(date +%Y%m%d%H%M%S)"
+        mkdir -p "$backup_dir"
+
+        # Backup config directory
+        if [ -d "$config_dir" ]; then
+            print_info "Backing up config directory..."
+            cp -r "$config_dir" "$backup_dir/"
+        fi
+
+        # Backup database in target path (if any)
+        if [ -f "$target_path/usage.db" ]; then
+            print_info "Backing up database..."
+            cp "$target_path/usage.db" "$backup_dir/"
+        fi
+
+        # Update files (preserve logs and data)
+        print_info "Updating files..."
+        # Remove old files except logs and data
+        find "$target_path" -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' -exec rm -rf {} +
+        # Copy new files
+        cp -r "$SOURCE_DIR"/* "$target_path/"
+
+        # Set permissions
+        chmod +x "$target_path/scripts/"*.py 2>/dev/null || true
+        chmod +x "$target_path/scripts/"*.sh 2>/dev/null || true
     fi
-
-    # Backup database in target path (if any)
-    if [ -f "$target_path/usage.db" ]; then
-        print_info "Backing up database..."
-        cp "$target_path/usage.db" "$backup_dir/"
-    fi
-
-    # Update files (preserve logs and data)
-    print_info "Updating files..."
-    # Remove old files except logs and data
-    find "$target_path" -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' -exec rm -rf {} +
-    # Copy new files
-    cp -r "$SOURCE_DIR"/* "$target_path/"
-
-    # Set permissions
-    chmod +x "$target_path/scripts/"*.py 2>/dev/null || true
-    chmod +x "$target_path/scripts/"*.sh 2>/dev/null || true
 
     # Install Python dependencies
     print_info "Installing Python dependencies..."
