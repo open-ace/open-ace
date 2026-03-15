@@ -1,12 +1,13 @@
 #!/bin/bash
 #
 # AI Token Analyzer - Release Script
-# 
+#
 # This script creates a release package with version and date in the filename.
 #
 # Usage:
 #   ./release.sh                    # Use version from VERSION file
 #   ./release.sh --version 1.2.0    # Specify version
+#   ./release.sh --force-download   # Force re-download dependencies
 #   ./release.sh --help             # Show help
 #
 
@@ -22,6 +23,9 @@ NC='\033[0m' # No Color
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 DIST_DIR="$PROJECT_DIR/dist"
+
+# Force re-download dependencies
+FORCE_DOWNLOAD=false
 
 # Get version from git commit hash and date (same format as web UI)
 # Format: commit_hash (MM-DD HH:MM:SS)
@@ -51,6 +55,10 @@ while [[ $# -gt 0 ]]; do
             VERSION="$2"
             shift 2
             ;;
+        --force-download|-f)
+            FORCE_DOWNLOAD=true
+            shift
+            ;;
         --help|-h)
             echo "AI Token Analyzer - Release Script"
             echo ""
@@ -58,6 +66,7 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Options:"
             echo "  --version, -v VERSION   Specify version (default: from git commit)"
+            echo "  --force-download, -f    Force re-download dependencies"
             echo "  --help, -h              Show this help message"
             echo ""
             echo "Output:"
@@ -138,43 +147,90 @@ PACKAGE_DIR="$TEMP_DIR/$PACKAGE_NAME"
 mkdir -p "$PACKAGE_DIR"
 
 # Download Python dependencies to vendor directory
-echo -e "${YELLOW}Downloading Python dependencies...${NC}"
 VENDOR_DIR="$PACKAGE_DIR/vendor"
 mkdir -p "$VENDOR_DIR"
+
+# Check if we should skip download
+SKIP_DOWNLOAD=false
+CACHED_VENDOR_DIR="$DIST_DIR/.vendor_cache"
+REQUIREMENTS_HASH=""
+HASH_FILE="$CACHED_VENDOR_DIR/.requirements_hash"
+
+# Calculate requirements.txt hash
 if [ -f "$PROJECT_DIR/requirements.txt" ]; then
+    REQUIREMENTS_HASH=$(shasum -a 256 "$PROJECT_DIR/requirements.txt" | cut -d' ' -f1)
+fi
+
+# Check if we can use cached vendor directory
+if [ "$FORCE_DOWNLOAD" = false ] && [ -f "$PROJECT_DIR/requirements.txt" ]; then
+    if [ -d "$CACHED_VENDOR_DIR" ] && [ "$(ls -A $CACHED_VENDOR_DIR/*.whl 2>/dev/null)" ]; then
+        cached_pkg_count=$(ls -1 "$CACHED_VENDOR_DIR"/*.whl 2>/dev/null | wc -l | tr -d ' ')
+        
+        # Check if hash matches
+        if [ -f "$HASH_FILE" ]; then
+            OLD_HASH=$(cat "$HASH_FILE")
+            if [ "$REQUIREMENTS_HASH" = "$OLD_HASH" ] && [ "$cached_pkg_count" -gt 0 ]; then
+                echo -e "${GREEN}Using cached vendor directory ($cached_pkg_count packages, requirements unchanged)${NC}"
+                cp -r "$CACHED_VENDOR_DIR"/* "$VENDOR_DIR/"
+                SKIP_DOWNLOAD=true
+            else
+                echo -e "${YELLOW}Requirements changed or cache incomplete, re-downloading...${NC}"
+            fi
+        else
+            # No hash file, but has packages - use them but warn
+            if [ "$cached_pkg_count" -gt 10 ]; then
+                echo -e "${GREEN}Using cached vendor directory ($cached_pkg_count packages)${NC}"
+                cp -r "$CACHED_VENDOR_DIR"/* "$VENDOR_DIR/"
+                SKIP_DOWNLOAD=true
+            fi
+        fi
+    fi
+fi
+
+if [ "$SKIP_DOWNLOAD" = false ] && [ -f "$PROJECT_DIR/requirements.txt" ]; then
+    echo -e "${YELLOW}Downloading Python dependencies...${NC}"
+    
     # Download pure Python packages (platform independent)
     pip3 download -r "$PROJECT_DIR/requirements.txt" -d "$VENDOR_DIR" \
         --platform any --only-binary=:all: 2>/dev/null || true
-    
+
     # Download for Linux aarch64
     pip3 download -r "$PROJECT_DIR/requirements.txt" -d "$VENDOR_DIR" \
         --platform manylinux2014_aarch64 --platform manylinux_2_17_aarch64 \
         --only-binary=:all: 2>/dev/null || true
-    
+
     # Download for Linux x86_64
     pip3 download -r "$PROJECT_DIR/requirements.txt" -d "$VENDOR_DIR" \
         --platform manylinux2014_x86_64 --platform manylinux_2_17_x86_64 \
         --only-binary=:all: 2>/dev/null || true
-    
+
     # Download for macOS arm64 (Apple Silicon)
     pip3 download -r "$PROJECT_DIR/requirements.txt" -d "$VENDOR_DIR" \
         --platform macosx_11_0_arm64 \
         --only-binary=:all: 2>/dev/null || true
-    
+
     # Download for macOS x86_64 (Intel)
     pip3 download -r "$PROJECT_DIR/requirements.txt" -d "$VENDOR_DIR" \
         --platform macosx_10_9_x86_64 \
         --only-binary=:all: 2>/dev/null || true
-    
+
     # Fallback: download any missing packages
     pip3 download -r "$PROJECT_DIR/requirements.txt" -d "$VENDOR_DIR" --prefer-binary 2>/dev/null || \
         pip download -r "$PROJECT_DIR/requirements.txt" -d "$VENDOR_DIR" --prefer-binary 2>/dev/null || \
         echo -e "${YELLOW}Warning: Failed to download some dependencies. Install will require network.${NC}"
-    
+
     # Count downloaded packages
     pkg_count=$(ls -1 "$VENDOR_DIR"/*.whl 2>/dev/null | wc -l | tr -d ' ')
     echo "  ✓ Downloaded $pkg_count packages to vendor/ (multi-platform)"
-else
+    
+    # Cache the vendor directory for future use
+    echo -e "${YELLOW}Caching vendor directory for future releases...${NC}"
+    mkdir -p "$CACHED_VENDOR_DIR"
+    cp -r "$VENDOR_DIR"/* "$CACHED_VENDOR_DIR/"
+    
+    # Save requirements hash
+    echo "$REQUIREMENTS_HASH" > "$HASH_FILE"
+elif [ ! -f "$PROJECT_DIR/requirements.txt" ]; then
     echo -e "${YELLOW}Warning: requirements.txt not found${NC}"
 fi
 
