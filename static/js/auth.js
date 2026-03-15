@@ -217,8 +217,7 @@ const Auth = (function() {
             if (logoutLink) logoutLink.style.display = 'inline-block';
             if (profileLink) profileLink.textContent = user.username;
 
-            // Dashboard and Workspace are visible to all users
-            if (dashboardLink) dashboardLink.style.display = 'block';
+            // Workspace and Report are visible to all users
             if (workspaceLink) workspaceLink.style.display = 'block';
             if (reportLink) reportLink.style.display = 'block';
 
@@ -229,12 +228,15 @@ const Auth = (function() {
 
             // Show admin-only menus if user is admin
             if (isAdmin()) {
-                console.log('[updateNavMenu] User is admin, showing Messages, Analysis and Management');
+                console.log('[updateNavMenu] User is admin, showing Dashboard, Messages, Analysis and Management');
+                if (dashboardLink) dashboardLink.style.display = 'block';
                 if (messagesLink) messagesLink.style.display = 'block';
                 if (analysisLink) analysisLink.style.display = 'block';
                 if (managementLink) managementLink.style.display = 'block';
             } else {
-                console.log('[updateNavMenu] User is not admin, showing Dashboard, Workspace and Report');
+                console.log('[updateNavMenu] User is not admin, hiding Dashboard, showing Workspace and Report');
+                // Hide Dashboard for non-admin users
+                if (dashboardLink) dashboardLink.style.display = 'none';
             }
         } else {
             // User is not logged in

@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-UI Test for Issue 51: 普通用户登录后应该显示 Dashboard 页面
+UI Test for Issue 51: 普通用户登录后应该直接进入 Workspace 页面
 
 测试内容：
 1. 创建普通用户（如果不存在）
 2. 普通用户登录
-3. 验证 Dashboard 导航链接可见
-4. 验证 Dashboard section 显示
-5. 验证 Workspace 导航链接也可见
+3. 验证 Dashboard 导航链接不可见（仅管理员可见）
+4. 验证 Workspace section 默认显示
+5. 验证 Workspace 导航链接可见
+6. 验证 admin-only 菜单隐藏
 """
 
 import sys
@@ -46,7 +47,7 @@ def take_screenshot(page, name):
 
 
 def test_issue51():
-    """Test Issue 51: Normal user should see Dashboard after login"""
+    """Test Issue 51: Normal user should see Workspace after login (not Dashboard)"""
     screenshots = []
 
     with sync_playwright() as p:
@@ -58,7 +59,7 @@ def test_issue51():
 
         try:
             print("\n" + "=" * 60)
-            print("UI Test: Issue 51 - Normal User Dashboard Display")
+            print("UI Test: Issue 51 - Normal User Workspace Display")
             print("=" * 60)
 
             # Step 1: Login as admin to create test user
@@ -96,15 +97,15 @@ def test_issue51():
                 # Click Add User button
                 page.click('#add-user-btn')
                 time.sleep(1)
-                
+
                 # Fill in user details
                 page.fill('#add-username', TEST_USER_USERNAME)
                 page.fill('#add-password', TEST_USER_PASSWORD)
                 page.fill('#add-confirm-password', TEST_USER_PASSWORD)
-                
+
                 # Set role to user (not admin)
                 page.select_option('#add-role', 'user')
-                
+
                 # Click Create button
                 page.click('#addUserModal .btn-primary')
                 time.sleep(1)
@@ -133,39 +134,45 @@ def test_issue51():
             screenshots.append(take_screenshot(page, '05_normal_user_login.png'))
             print("  ✓ Normal user logged in successfully")
 
-            # Step 6: Verify Dashboard navigation link is visible
-            print("\n[Step 6] Verify Dashboard navigation link is visible")
+            # Step 6: Verify Dashboard navigation link is NOT visible (admin only)
+            print("\n[Step 6] Verify Dashboard navigation link is NOT visible (admin only)")
             dashboard_nav = page.locator('#nav-dashboard')
-            expect(dashboard_nav).to_be_visible()
-            print("  ✓ Dashboard navigation link is visible")
+            expect(dashboard_nav).not_to_be_visible()
+            print("  ✓ Dashboard navigation link is hidden (admin only)")
 
-            # Step 7: Verify Dashboard section is displayed
-            print("\n[Step 7] Verify Dashboard section is displayed")
-            dashboard_section = page.locator('#dashboard-section')
-            expect(dashboard_section).to_be_visible()
-            print("  ✓ Dashboard section is displayed")
+            # Step 7: Verify Workspace section is displayed by default
+            print("\n[Step 7] Verify Workspace section is displayed by default")
+            workspace_section = page.locator('#workspace-section')
+            expect(workspace_section).to_be_visible()
+            print("  ✓ Workspace section is displayed by default")
 
-            # Step 8: Verify Workspace navigation link is also visible
+            # Step 8: Verify Workspace navigation link is visible
             print("\n[Step 8] Verify Workspace navigation link is visible")
             workspace_nav = page.locator('#nav-workspace')
             expect(workspace_nav).to_be_visible()
             print("  ✓ Workspace navigation link is visible")
 
-            # Step 9: Verify admin-only menus are hidden
-            print("\n[Step 9] Verify admin-only menus are hidden")
+            # Step 9: Verify Dashboard section is NOT displayed
+            print("\n[Step 9] Verify Dashboard section is NOT displayed")
+            dashboard_section = page.locator('#dashboard-section')
+            expect(dashboard_section).not_to_be_visible()
+            print("  ✓ Dashboard section is hidden")
+
+            # Step 10: Verify admin-only menus are hidden
+            print("\n[Step 10] Verify admin-only menus are hidden")
             messages_nav = page.locator('#nav-messages')
             analysis_nav = page.locator('#nav-analysis')
             management_nav = page.locator('#nav-management')
-            
+
             # These should be hidden for normal user
             expect(messages_nav).not_to_be_visible()
             expect(analysis_nav).not_to_be_visible()
             expect(management_nav).not_to_be_visible()
             print("  ✓ Admin-only menus (Messages, Analysis, Management) are hidden")
 
-            # Step 10: Take final screenshot
-            print("\n[Step 10] Take final screenshot")
-            screenshots.append(take_screenshot(page, '06_final_dashboard.png'))
+            # Step 11: Take final screenshot
+            print("\n[Step 11] Take final screenshot")
+            screenshots.append(take_screenshot(page, '06_final_workspace.png'))
 
             # Summary
             print("\n" + "=" * 60)
@@ -173,9 +180,10 @@ def test_issue51():
             print("=" * 60)
             print("✓ All tests passed!")
             print("\nVerified:")
-            print("  - Normal user can see Dashboard navigation link")
-            print("  - Dashboard section is displayed after login")
+            print("  - Dashboard navigation link is hidden for normal user (admin only)")
+            print("  - Workspace section is displayed by default after login")
             print("  - Workspace navigation link is visible")
+            print("  - Dashboard section is hidden")
             print("  - Admin-only menus are hidden for normal user")
             print(f"\nScreenshots saved to: {SCREENSHOT_DIR}")
             for s in screenshots:

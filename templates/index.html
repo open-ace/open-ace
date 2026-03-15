@@ -596,8 +596,8 @@
             <h4><i class="bi bi-bar-chart-line"></i> <span id="sidebar-title">AI Token Analyzer</span></h4>
         </div>
         <div class="sidebar-nav" id="sidebar-nav">
-            <!-- Dashboard menu - visible to all users -->
-            <a href="#" class="nav-link active" id="nav-dashboard" style="display: block;" onclick="switchSection('dashboard'); return false;">
+            <!-- Dashboard menu - Admin only -->
+            <a href="#" class="nav-link" id="nav-dashboard" style="display: none;" onclick="switchSection('dashboard'); return false;">
                 <i class="bi bi-bar-chart-line"></i> <span id="nav-dashboard-text">Dashboard</span>
             </a>
             <!-- Messages menu - Admin only -->
@@ -631,11 +631,11 @@
             </a>
             {% endif %}
             <!-- Workspace menu - visible to all users -->
-            <a href="#" class="nav-link" id="nav-workspace" style="display: block;" onclick="switchSection('workspace'); return false;">
+            <a href="#" class="nav-link" id="nav-workspace" style="display: none;" onclick="switchSection('workspace'); return false;">
                 <i class="bi bi-window-split"></i> <span id="nav-workspace-text">Workspace</span>
             </a>
             <!-- Report menu - visible to all users -->
-            <a href="#" class="nav-link" id="nav-report" onclick="switchSection('report'); return false;">
+            <a href="#" class="nav-link" id="nav-report" style="display: none;" onclick="switchSection('report'); return false;">
                 <i class="bi bi-file-earmark-text"></i> <span id="nav-report-text">Report</span>
             </a>
             <!-- Profile link (shown when logged in) -->
@@ -683,7 +683,7 @@
         </nav>
 
         <!-- Dashboard Section -->
-        <div id="dashboard-section" class="content-section">
+        <div id="dashboard-section" class="content-section" style="display: none;">
             <!-- Dashboard Header with Auto-refresh -->
             <div class="d-flex justify-content-between align-items-center mb-4">
                 <h3><i class="bi bi-bar-chart-line"></i> <span id="dashboard-title">Dashboard</span></h3>
@@ -5143,6 +5143,28 @@
                     // Store the attempted URL for redirect after login
                     sessionStorage.setItem('redirect_after_login', window.location.href);
                     window.location.href = '/login';
+                }
+            } else {
+                // User is authenticated, set default page based on role
+                setDefaultPageByRole();
+            }
+        }
+
+        // Set default page based on user role
+        function setDefaultPageByRole() {
+            // Only set default page if no hash in URL
+            if (window.location.hash) {
+                return;
+            }
+
+            const user = Auth.getCurrentUser();
+            if (user) {
+                if (user.role === 'admin') {
+                    // Admin users see Dashboard by default
+                    switchSection('dashboard');
+                } else {
+                    // Non-admin users see Workspace by default
+                    switchSection('workspace');
                 }
             }
         }
