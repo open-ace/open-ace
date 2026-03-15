@@ -45,15 +45,7 @@
     "app_secret": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
   },
   "remote": {
-    "enabled": true,
-    "hosts": [
-      {
-        "name": "ai-lab",
-        "host": "<REMOTE_HOST>",
-        "user": "openclaw",
-        "base_dir": "/home/openclaw/ai-token-analyzer",
-        "tools": ["openclaw"]
-      }
-    ]
+    "enabled": false,
+    "hosts": []
   }
 }
