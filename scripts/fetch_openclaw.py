@@ -97,6 +97,12 @@ async def get_openclaw_usage(
         ws_scheme = "ws://"
         gateway_host = gateway_url
 
+    # Replace 127.0.0.1 with localhost for secure context
+    # OpenClaw requires "localhost secure context" for device identity
+    if gateway_host.startswith("127.0.0.1:"):
+        gateway_host = gateway_host.replace("127.0.0.1:", "localhost:", 1)
+        print(f"Using localhost instead of 127.0.0.1 for secure context")
+
     ws_url = f"{ws_scheme}{gateway_host}/gateway"
     print(f"Connecting to WebSocket: {ws_url}")
 
@@ -280,7 +286,7 @@ async def fetch_and_save_usage(
         openclaw_config = config.get('tools', {}).get('openclaw', {})
 
         if gateway_url is None:
-            gateway_url = openclaw_config.get('gateway_url', 'http://127.0.0.1:18789')
+            gateway_url = openclaw_config.get('gateway_url', 'http://localhost:18789')
 
         if token is None:
             # token_env can be either an environment variable name or the actual token

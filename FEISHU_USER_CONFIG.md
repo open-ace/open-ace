@@ -89,7 +89,7 @@ python3 scripts/shared/feishu_user_cache.py test ou_3e479c7f81f8674741d778e8f838
     "openclaw": {
       "enabled": true,
       "token_env": "OPENCLAW_TOKEN",
-      "gateway_url": "http://127.0.0.1:18789",
+      "gateway_url": "http://localhost:18789",
       "hostname": "your-machine-name"
     }
   },

@@ -92,7 +92,7 @@ sqlite3 ~/.ai-token-analyzer/usage.db "SELECT sender_name, group_subject, substr
     "openclaw": {
       "enabled": true,
       "token_env": "<OPENCLAW_TOKEN>",
-      "gateway_url": "http://127.0.0.1:18789",
+      "gateway_url": "http://localhost:18789",
       "hostname": "ai-lab"
     }
   },
