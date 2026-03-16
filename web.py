@@ -937,8 +937,9 @@ def _check_remote_host_status(host_info):
 
     try:
         # Try to SSH and get the last update time from the database
-        # Use a simple query to get the most recent timestamp
-        check_cmd = f"ssh -o ConnectTimeout=5 -o BatchMode=yes -o StrictHostKeyChecking=no {user}@{host} 'cd {base_dir} && python3 -c \"import sqlite3; conn = sqlite3.connect(\\\"data/usage.db\\\"); cursor = conn.cursor(); cursor.execute(\\\"SELECT MAX(timestamp) FROM token_usage\\\"); result = cursor.fetchone(); print(result[0] if result and result[0] else \\\"\\\"); conn.close()\"'"
+        # Database is located at ~/.ai-token-analyzer/usage.db
+        # Check both token_usage and daily_messages tables
+        check_cmd = f"ssh -o ConnectTimeout=5 -o BatchMode=yes -o StrictHostKeyChecking=no {user}@{host} 'python3 -c \"import sqlite3, os; db_path = os.path.expanduser(\\\"~/.ai-token-analyzer/usage.db\\\"); conn = sqlite3.connect(db_path); cursor = conn.cursor(); cursor.execute(\\\"SELECT MAX(timestamp) FROM daily_messages\\\"); result = cursor.fetchone(); print(result[0] if result and result[0] else \\\"\\\"); conn.close()\"'"
         result = subprocess.run(
             check_cmd,
             shell=True,
