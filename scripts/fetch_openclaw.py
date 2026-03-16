@@ -65,6 +65,27 @@ def parse_timestamp(ts_str: str) -> str:
         return "unknown"
 
 
+def get_openclaw_gateway_token() -> Optional[str]:
+    """
+    Get OpenClaw gateway token from openclaw.json.
+
+    The gateway token is stored in ~/.openclaw/openclaw.json under gateway.auth.token
+    This token is required for WebSocket API authentication.
+    """
+    openclaw_config_path = Path.home() / ".openclaw" / "openclaw.json"
+
+    if not openclaw_config_path.exists():
+        return None
+
+    try:
+        with open(openclaw_config_path, 'r') as f:
+            data = json.load(f)
+            return data.get("gateway", {}).get("auth", {}).get("token")
+    except Exception as e:
+        print(f"Warning: Failed to read OpenClaw gateway config: {e}")
+        return None
+
+
 # ============================================================================
 # WebSocket API Functions (for token usage)
 # ============================================================================
@@ -85,6 +106,17 @@ async def get_openclaw_usage(
 
     print(f"Fetching {days} days of OpenClaw usage data...")
     print(f"Date range: {start_date} to {end_date}")
+
+    # Try to get gateway token from OpenClaw config
+    # This is the preferred token for WebSocket API authentication
+    gateway_token = get_openclaw_gateway_token()
+    if gateway_token:
+        print(f"Using gateway token from OpenClaw config: {gateway_token[:16]}...")
+        auth_token = gateway_token
+    else:
+        # Fall back to provided token
+        print(f"Using provided token: {token[:16]}...")
+        auth_token = token
 
     # Parse gateway URL for WebSocket connection
     if gateway_url.startswith("https://"):
@@ -107,7 +139,7 @@ async def get_openclaw_usage(
     print(f"Connecting to WebSocket: {ws_url}")
 
     extra_headers = {
-        "Authorization": f"Bearer {token}",
+        "Authorization": f"Bearer {auth_token}",
         "Origin": gateway_url,
     }
 
@@ -123,21 +155,22 @@ async def get_openclaw_usage(
 
             nonce = response.get("payload", {}).get("nonce")
 
-            # Connect with openclaw-control-ui client
+            # Connect with cli client (not openclaw-control-ui which requires device identity)
+            # Using "cli" client id with "probe" mode for API access
             connect_params = {
                 "minProtocol": 3,
                 "maxProtocol": 3,
                 "client": {
-                    "id": "openclaw-control-ui",
+                    "id": "cli",
                     "displayName": "AI Token Usage Getter",
                     "version": "1.0.0",
-                    "platform": "web",
-                    "mode": "ui",
+                    "platform": "linux",
+                    "mode": "probe",
                 },
                 "role": "operator",
                 "scopes": ["operator.admin", "operator.read", "operator.write"],
                 "auth": {
-                    "token": token,
+                    "token": auth_token,
                 },
                 "userAgent": "AI-Token-Usage-Getter/1.0",
                 "locale": "en-US",
@@ -178,15 +211,24 @@ async def get_openclaw_usage(
 
             await websocket.send(json.dumps(usage_request))
 
-            # Wait for response
-            response = await asyncio.wait_for(websocket.recv(), timeout=10)
-            response = json.loads(response)
+            # Wait for response (may receive other events like health)
+            max_attempts = 10
+            for _ in range(max_attempts):
+                response = await asyncio.wait_for(websocket.recv(), timeout=10)
+                response = json.loads(response)
 
-            if response.get("type") == "res" and response.get("ok"):
-                return parse_usage_response(response)
-            else:
-                print(f"Usage request failed: {response}")
-                return None
+                # Check if this is the usage response
+                if response.get("type") == "res" and response.get("ok"):
+                    return parse_usage_response(response)
+                elif response.get("type") == "res" and not response.get("ok"):
+                    # Error response
+                    print(f"Usage request failed: {response.get('error', response)}")
+                    return None
+                # Otherwise, it's an event (like health), continue waiting
+                # print(f"Received event: {response.get('event', 'unknown')}")
+
+            print("Usage request failed: no response received")
+            return None
 
     except websockets.exceptions.ConnectionClosed as e:
         print(f"WebSocket connection closed: {e.code} {e.reason}")
