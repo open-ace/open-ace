@@ -5036,9 +5036,20 @@
         function formatRelativeTime(timestamp) {
             if (!timestamp) return 'N/A';
 
-            // 数据库中的时间是 UTC，需要转换为 GMT+8
-            // 格式: "2026-03-09 06:45:56"
-            const date = new Date(timestamp + ' UTC');  // 明确指定为 UTC 时间
+            // 支持两种时间格式：
+            // 1. ISO 格式: "2026-03-13T15:23:11.603Z" (已包含时区信息)
+            // 2. 数据库格式: "2026-03-09 06:45:56" (UTC 时间，需要指定时区)
+            let date;
+            if (timestamp.includes('T') && timestamp.includes('Z')) {
+                // ISO 格式，直接解析
+                date = new Date(timestamp);
+            } else {
+                // 数据库格式，指定为 UTC
+                date = new Date(timestamp + ' UTC');
+            }
+
+            if (isNaN(date.getTime())) return 'N/A';
+
             const now = new Date();
             const diffMs = now - date;
             const diffMins = Math.floor(diffMs / 60000);
@@ -5059,8 +5070,16 @@
             // Otherwise, fall back to time-based status
             if (!lastUpdated) return 'status-unknown';
 
-            // 数据库中的时间是 UTC，需要转换为 GMT+8
-            const date = new Date(lastUpdated + ' UTC');
+            // 支持两种时间格式
+            let date;
+            if (lastUpdated.includes('T') && lastUpdated.includes('Z')) {
+                date = new Date(lastUpdated);
+            } else {
+                date = new Date(lastUpdated + ' UTC');
+            }
+
+            if (isNaN(date.getTime())) return 'status-unknown';
+
             const now = new Date();
             const diffMins = (now - date) / 60000;
 
