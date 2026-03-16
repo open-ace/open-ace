@@ -439,6 +439,57 @@
             background-color: #6c757d;
         }
 
+        .data-status-item.status-online .status-indicator {
+            background-color: #28a745;
+        }
+
+        .data-status-item.status-offline .status-indicator {
+            background-color: #dc3545;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .data-status-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+
+        .data-status-header .refresh-btn {
+            background: none;
+            border: none;
+            color: var(--sidebar-text-muted);
+            cursor: pointer;
+            padding: 2px 4px;
+            font-size: 0.7rem;
+            opacity: 0.7;
+            transition: opacity 0.2s;
+        }
+
+        .data-status-header .refresh-btn:hover {
+            opacity: 1;
+        }
+
+        .data-status-header .refresh-btn.loading {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
+        .data-status-header .refresh-btn.loading i {
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
         /* Sortable table headers */
         .sortable {
             cursor: pointer;
@@ -4933,19 +4984,34 @@
         }
 
         // Data status functions
-        async function updateDataStatus() {
+        async function updateDataStatus(checkRemote = false) {
             try {
-                const response = await fetch('/api/data-status');
-                const data = await response.json();
-
                 const statusContainer = document.getElementById('data-status-container');
                 if (!statusContainer) return;
 
-                let html = '<div class="data-status-list">';
+                // Show loading state for refresh button
+                const refreshBtn = statusContainer.querySelector('.refresh-btn');
+                if (refreshBtn) {
+                    refreshBtn.classList.add('loading');
+                }
+
+                const url = checkRemote ? '/api/data-status?check_remote=true' : '/api/data-status';
+                const response = await fetch(url);
+                const data = await response.json();
+
+                let html = `
+                    <div class="data-status-header">
+                        <small class="text-muted">Data Status</small>
+                        <button class="refresh-btn" onclick="refreshDataStatus()" title="Check remote hosts status">
+                            <i class="bi bi-arrow-repeat"></i>
+                        </button>
+                    </div>
+                    <div class="data-status-list">
+                `;
 
                 for (const host of data.hosts) {
                     const lastUpdated = host.last_updated ? formatRelativeTime(host.last_updated) : 'N/A';
-                    const statusClass = getStatusClass(host.last_updated);
+                    const statusClass = getStatusClassWithStatus(host.last_updated, host.status);
 
                     html += `
                         <div class="data-status-item ${statusClass}">
@@ -4961,6 +5027,10 @@
             } catch (error) {
                 console.error('Error updating data status:', error);
             }
+        }
+
+        async function refreshDataStatus() {
+            await updateDataStatus(true);
         }
 
         function formatRelativeTime(timestamp) {
@@ -4981,7 +5051,12 @@
             return `${diffDays}d ago`;
         }
 
-        function getStatusClass(lastUpdated) {
+        function getStatusClassWithStatus(lastUpdated, status) {
+            // If we have explicit status from remote check, use it
+            if (status === 'online') return 'status-online';
+            if (status === 'offline') return 'status-offline';
+
+            // Otherwise, fall back to time-based status
             if (!lastUpdated) return 'status-unknown';
 
             // 数据库中的时间是 UTC，需要转换为 GMT+8
@@ -4992,6 +5067,10 @@
             if (diffMins < 30) return 'status-fresh';
             if (diffMins < 120) return 'status-recent';
             return 'status-stale';
+        }
+
+        function getStatusClass(lastUpdated) {
+            return getStatusClassWithStatus(lastUpdated, null);
         }
 
         // Simple searchable select dropdown implementation

@@ -910,6 +910,85 @@ def _fetch_local_data():
     return results
 
 
+def _check_remote_host_status(host_info):
+    """Check remote host status via SSH.
+
+    Args:
+        host_info: Dict with host configuration (name, host, user, base_dir)
+
+    Returns:
+        Dict with host status information
+    """
+    host_name = host_info.get('name', 'unknown')
+    host = host_info.get('host')
+    user = host_info.get('user', 'openclaw')
+    base_dir = host_info.get('base_dir', '/home/openclaw/ai-token-analyzer')
+
+    if not host:
+        return {
+            'name': host_name,
+            'host_name': host_name,
+            'is_remote': True,
+            'is_local': False,
+            'status': 'unknown',
+            'last_updated': None,
+            'error': 'No host address configured'
+        }
+
+    try:
+        # Try to SSH and get the last update time from the database
+        # Use a simple query to get the most recent timestamp
+        check_cmd = f"ssh -o ConnectTimeout=5 -o BatchMode=yes -o StrictHostKeyChecking=no {user}@{host} 'cd {base_dir} && python3 -c \"import sqlite3; conn = sqlite3.connect(\\\"data/usage.db\\\"); cursor = conn.cursor(); cursor.execute(\\\"SELECT MAX(timestamp) FROM token_usage\\\"); result = cursor.fetchone(); print(result[0] if result and result[0] else \\\"\\\"); conn.close()\"'"
+        result = subprocess.run(
+            check_cmd,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+
+        if result.returncode == 0:
+            last_updated = result.stdout.strip() if result.stdout.strip() else None
+            return {
+                'name': host_name,
+                'host_name': host_name,
+                'is_remote': True,
+                'is_local': False,
+                'status': 'online',
+                'last_updated': last_updated
+            }
+        else:
+            return {
+                'name': host_name,
+                'host_name': host_name,
+                'is_remote': True,
+                'is_local': False,
+                'status': 'offline',
+                'last_updated': None,
+                'error': result.stderr.strip()[-200:] if result.stderr else 'SSH command failed'
+            }
+    except subprocess.TimeoutExpired:
+        return {
+            'name': host_name,
+            'host_name': host_name,
+            'is_remote': True,
+            'is_local': False,
+            'status': 'offline',
+            'last_updated': None,
+            'error': 'Connection timeout'
+        }
+    except Exception as e:
+        return {
+            'name': host_name,
+            'host_name': host_name,
+            'is_remote': True,
+            'is_local': False,
+            'status': 'offline',
+            'last_updated': None,
+            'error': str(e)
+        }
+
+
 def _fetch_single_host(host_info, config):
     """Fetch data from a single remote machine via SSH.
 
@@ -1076,10 +1155,17 @@ def api_fetch_remote():
 
 @app.route('/api/data-status')
 def api_data_status():
-    """Get data status for all hosts (last update time, record counts)."""
+    """Get data status for all hosts (last update time, record counts).
+
+    Query parameters:
+        check_remote: If 'true', check remote hosts status via SSH (default: false)
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     config = utils.load_config()
     remote_config = config.get('remote', {})
     local_host_name = config.get('host_name', 'localhost')
+    check_remote = request.args.get('check_remote', 'false').lower() == 'true'
 
     status = {
         'hosts': [],
@@ -1092,12 +1178,15 @@ def api_data_status():
     # Create a map of host_name -> host_data for quick lookup
     host_data_map = {h.get('host_name', 'unknown'): h for h in all_hosts}
 
-    # Get configured remote hosts
+    # Get configured remote hosts with full info
+    remote_hosts_info = []
     remote_host_names = set()
     if remote_config.get('enabled', False):
         hosts = remote_config.get('hosts', [])
         for host_info in hosts:
-            remote_host_names.add(host_info.get('name', 'unknown'))
+            host_name = host_info.get('name', 'unknown')
+            remote_host_names.add(host_name)
+            remote_hosts_info.append(host_info)
 
     # Track which hosts have been added
     added_hosts = set()
@@ -1110,6 +1199,7 @@ def api_data_status():
             'host_name': local_host_name,
             'is_remote': False,
             'is_local': True,
+            'status': 'online',
             'last_updated': local_host_data.get('last_updated'),
             'usage_records': local_host_data.get('usage_records', 0),
             'message_records': local_host_data.get('message_records', 0)
@@ -1123,38 +1213,71 @@ def api_data_status():
             'host_name': local_host_name,
             'is_remote': False,
             'is_local': True,
+            'status': 'online',
             'last_updated': None,
             'usage_records': 0,
             'message_records': 0
         })
         added_hosts.add(local_host_name)
 
+    # Check remote hosts status if requested
+    remote_status_map = {}
+    if check_remote and remote_hosts_info:
+        with ThreadPoolExecutor(max_workers=len(remote_hosts_info)) as executor:
+            future_to_host = {
+                executor.submit(_check_remote_host_status, host_info): host_info.get('name', 'unknown')
+                for host_info in remote_hosts_info
+            }
+            for future in as_completed(future_to_host):
+                host_name = future_to_host[future]
+                try:
+                    result = future.result()
+                    remote_status_map[result['name']] = result
+                except Exception as e:
+                    remote_status_map[host_name] = {
+                        'name': host_name,
+                        'host_name': host_name,
+                        'is_remote': True,
+                        'is_local': False,
+                        'status': 'offline',
+                        'last_updated': None,
+                        'error': str(e)
+                    }
+
     # Add configured remote hosts
     for host_name in remote_host_names:
         if host_name in added_hosts:
             continue
-        host_data = host_data_map.get(host_name)
-        if host_data:
-            status['hosts'].append({
-                'name': host_name,
-                'host_name': host_name,
-                'is_remote': True,
-                'is_local': False,
-                'last_updated': host_data.get('last_updated'),
-                'usage_records': host_data.get('usage_records', 0),
-                'message_records': host_data.get('message_records', 0)
-            })
+
+        # Use real-time status if available
+        if check_remote and host_name in remote_status_map:
+            status['hosts'].append(remote_status_map[host_name])
         else:
-            # Remote host not in database yet
-            status['hosts'].append({
-                'name': host_name,
-                'host_name': host_name,
-                'is_remote': True,
-                'is_local': False,
-                'last_updated': None,
-                'usage_records': 0,
-                'message_records': 0
-            })
+            # Fall back to database data
+            host_data = host_data_map.get(host_name)
+            if host_data:
+                status['hosts'].append({
+                    'name': host_name,
+                    'host_name': host_name,
+                    'is_remote': True,
+                    'is_local': False,
+                    'status': 'unknown',
+                    'last_updated': host_data.get('last_updated'),
+                    'usage_records': host_data.get('usage_records', 0),
+                    'message_records': host_data.get('message_records', 0)
+                })
+            else:
+                # Remote host not in database yet
+                status['hosts'].append({
+                    'name': host_name,
+                    'host_name': host_name,
+                    'is_remote': True,
+                    'is_local': False,
+                    'status': 'unknown',
+                    'last_updated': None,
+                    'usage_records': 0,
+                    'message_records': 0
+                })
         added_hosts.add(host_name)
 
     # Add any remaining hosts from database that haven't been added yet
@@ -1166,6 +1289,7 @@ def api_data_status():
                 'host_name': host_name,
                 'is_remote': False,  # Unknown, assume local
                 'is_local': False,
+                'status': 'unknown',
                 'last_updated': host_data.get('last_updated'),
                 'usage_records': host_data.get('usage_records', 0),
                 'message_records': host_data.get('message_records', 0)
