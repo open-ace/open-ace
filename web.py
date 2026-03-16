@@ -407,7 +407,7 @@ def api_analysis_recommendations():
     anomalies = db.detect_usage_anomalies(start_date, end_date, tool_name=tool, host_name=host)
     
     # Get user segmentation
-    user_seg = db.get_user_segmentation(utils.get_today(), tool_name=tool, host_name=host)
+    user_seg = db.get_user_segmentation(start_date, end_date, tool_name=tool, host_name=host)
     
     # Generate recommendations based on data
     
