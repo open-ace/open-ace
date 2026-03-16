@@ -145,7 +145,7 @@ def index():
     config = utils.load_config()
     workspace_config = config.get('workspace', {})
     workspace_enabled = workspace_config.get('enabled', False)
-    workspace_url = workspace_config.get('url', 'http://localhost:3000')
+    workspace_url = workspace_config.get('url', 'http://localhost:8080')
 
     response = make_response(render_template(
         'index.html',
