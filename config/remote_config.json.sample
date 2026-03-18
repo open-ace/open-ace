@@ -1,8 +1,7 @@
 {
-  "host_name": "ai-lab",
+  "host_name": "<HOST_NAME>",
   "server": {
-    "upload_auth_key": "<UPLOAD_AUTH_KEY>",
-    "server_url": "http://<SERVER_IP>:5001"
+    "upload_auth_key": "<UPLOAD_AUTH_KEY>"
   },
   "tools": {
     "openclaw": {
@@ -16,9 +15,5 @@
     "qwen": {
       "enabled": true
     }
-  },
-  "cron": {
-    "enabled": true,
-    "run_time": "00:30"
   }
 }

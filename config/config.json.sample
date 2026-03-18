@@ -1,7 +1,7 @@
 {
-  "host_name": "localhost",
+  "host_name": "<HOST_NAME>",
   "server": {
-    "upload_auth_key": "your_upload_auth_key_here",
+    "upload_auth_key": "<UPLOAD_AUTH_KEY>",
     "server_url": "http://localhost:5001",
     "web_port": 5001,
     "web_host": "0.0.0.0"
@@ -10,34 +10,20 @@
     "enabled": false,
     "url": "http://localhost:8080"
   },
-  "authentication": {
-    "enabled": true,
-    "session_duration_days": 7,
-    "password_min_length": 8
-  },
-  "email": {
-    "smtp_server": "smtp.gmail.com",
-    "smtp_port": 587,
-    "smtp_username": "your_email@gmail.com",
-    "smtp_password": "your_app_password",
-    "from_email": "Your Name <your_email@gmail.com>",
-    "to_email": "recipient@example.com",
-    "use_tls": true
-  },
   "tools": {
     "openclaw": {
       "enabled": true,
       "token_env": "OPENCLAW_TOKEN",
       "gateway_url": "http://localhost:18789",
-      "hostname": "localhost"
+      "hostname": "<HOST_NAME>"
     },
     "claude": {
       "enabled": true,
-      "hostname": "localhost"
+      "hostname": "<HOST_NAME>"
     },
     "qwen": {
       "enabled": true,
-      "hostname": "localhost"
+      "hostname": "<HOST_NAME>"
     }
   },
   "cron": {
@@ -45,8 +31,8 @@
     "run_time": "00:30"
   },
   "feishu": {
-    "app_id": "cli_xxxxxxxxxxxxx",
-    "app_secret": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    "app_id": "<FEISHU_APP_ID>",
+    "app_secret": "<FEISHU_APP_SECRET>"
   },
   "remote": {
     "enabled": false,
