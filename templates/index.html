@@ -52,7 +52,6 @@
         .sidebar.collapsed #nav-management-text,
         .sidebar.collapsed #nav-workspace-text,
         .sidebar.collapsed #nav-report-text,
-        .sidebar.collapsed #nav-profile-text,
         .sidebar.collapsed #nav-logout-text,
         .sidebar.collapsed #nav-login-text {
             display: none !important;
@@ -186,25 +185,6 @@
             border-top: 1px solid #4b5259;
             font-size: 0.85rem;
             color: var(--sidebar-text-muted);
-        }
-
-        /* Profile link with hover username */
-        #nav-profile {
-            position: relative;
-        }
-
-        #nav-profile-text {
-            display: none;
-            margin-left: 10px;
-        }
-
-        #nav-profile:hover #nav-profile-text {
-            display: inline;
-        }
-
-        /* Collapsed sidebar: always hide profile text */
-        .sidebar.collapsed #nav-profile-text {
-            display: none !important;
         }
 
         /* Main content styles */
@@ -760,16 +740,6 @@
             <a href="#" class="nav-link" id="nav-report" style="display: none;" onclick="switchSection('report'); return false;">
                 <i class="bi bi-file-earmark-text"></i> <span id="nav-report-text">Report</span>
             </a>
-            <!-- Profile link (shown when logged in) -->
-            {% if is_authenticated %}
-            <a href="#" class="nav-link" id="nav-profile" onclick="handleProfile(); return false;" style="display: inline-block;">
-                <i class="bi bi-person-circle"></i> <span id="nav-profile-text">Profile</span>
-            </a>
-            {% else %}
-            <a href="#" class="nav-link" id="nav-profile" onclick="handleProfile(); return false;" style="display: none;">
-                <i class="bi bi-person-circle"></i> <span id="nav-profile-text">Profile</span>
-            </a>
-            {% endif %}
         </div>
         <div class="sidebar-footer">
             {% if is_admin %}
@@ -2646,7 +2616,7 @@
             const textIds = [
                 'sidebar-title', 'nav-dashboard-text', 'nav-messages-text',
                 'nav-analysis-text', 'nav-management-text', 'nav-workspace-text',
-                'nav-report-text', 'nav-profile-text', 'nav-logout-text', 'nav-login-text'
+                'nav-report-text', 'nav-logout-text', 'nav-login-text'
             ];
 
             textIds.forEach(id => {
@@ -2684,7 +2654,7 @@
                 const textIds = [
                     'sidebar-title', 'nav-dashboard-text', 'nav-messages-text',
                     'nav-analysis-text', 'nav-management-text', 'nav-workspace-text',
-                    'nav-report-text', 'nav-profile-text', 'nav-logout-text', 'nav-login-text'
+                    'nav-report-text', 'nav-logout-text', 'nav-login-text'
                 ];
 
                 textIds.forEach(id => {

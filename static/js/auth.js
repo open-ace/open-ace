@@ -198,7 +198,6 @@ const Auth = (function() {
     function updateNavMenu() {
         const loginLink = document.getElementById('nav-login');
         const logoutLink = document.getElementById('nav-logout');
-        const profileLink = document.getElementById('nav-profile');
         const dashboardLink = document.getElementById('nav-dashboard');
         const messagesLink = document.getElementById('nav-messages');
         const analysisLink = document.getElementById('nav-analysis');
@@ -214,12 +213,10 @@ const Auth = (function() {
         if (isAuthenticated() && user) {
             // User is logged in
             if (loginLink) loginLink.style.display = 'none';
-            if (profileLink) profileLink.style.display = 'inline-block';
-            if (logoutLink) logoutLink.style.display = 'block';  // Changed to block for button
-            // Update username in the profile text span, preserving the icon
-            const profileText = document.getElementById('nav-profile-text');
-            if (profileText) {
-                profileText.textContent = user.username;
+            if (logoutLink) {
+                logoutLink.style.display = 'block';
+                // Set title attribute to show username on hover
+                logoutLink.title = user.username;
             }
 
             // Messages, Analysis, Management are admin-only
@@ -248,8 +245,10 @@ const Auth = (function() {
         } else {
             // User is not logged in
             if (loginLink) loginLink.style.display = 'block';  // Changed to block for button
-            if (logoutLink) logoutLink.style.display = 'none';
-            if (profileLink) profileLink.style.display = 'none';
+            if (logoutLink) {
+                logoutLink.style.display = 'none';
+                logoutLink.title = '';
+            }
 
             // Hide protected menu items
             if (dashboardLink) dashboardLink.style.display = 'none';

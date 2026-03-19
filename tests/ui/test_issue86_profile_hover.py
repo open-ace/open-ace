@@ -6,9 +6,9 @@ Issue 86: 菜单栏用户名称移到 Logout 按钮上悬停显示
 
 测试用例：
 1. 登录系统
-2. 验证默认状态下只显示用户图标，不显示用户名
-3. 悬停在用户图标上，验证用户名显示
-4. 移开鼠标，验证用户名隐藏
+2. 验证 Profile 链接不存在
+3. 验证 Logout 按钮存在
+4. 验证 Logout 按钮的 title 属性显示用户名
 """
 
 import sys
@@ -27,19 +27,19 @@ SCREENSHOT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os
 
 def test_issue86():
     """测试 Issue 86"""
-    
+
     # 确保截图目录存在
     os.makedirs(os.path.join(SCREENSHOT_DIR, '86'), exist_ok=True)
-    
+
     results = []
-    
+
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=HEADLESS)
         context = browser.new_context(
             viewport={'width': 1280, 'height': 900}
         )
         page = context.new_page()
-        
+
         try:
             # Step 1: 登录系统
             print("Step 1: 登录系统...")
@@ -47,119 +47,79 @@ def test_issue86():
             page.fill('input[name="username"]', USERNAME)
             page.fill('input[name="password"]', PASSWORD)
             page.click('button[type="submit"]')
-            
+
             # 等待登录完成
             page.wait_for_url('**/', timeout=10000)
             time.sleep(1)
             print("  ✓ 登录成功")
             results.append(("登录系统", True, ""))
-            
-            # Step 2: 验证默认状态下只显示用户图标，不显示用户名
-            print("Step 2: 验证默认状态下只显示用户图标...")
-            
-            # 检查 nav-profile 存在
+
+            # Step 2: 验证 Profile 链接不存在
+            print("Step 2: 验证 Profile 链接不存在...")
+
             nav_profile = page.locator('#nav-profile')
-            expect(nav_profile).to_be_visible()
-            print("  ✓ nav-profile 可见")
-            
-            # 检查 nav-profile-text 默认隐藏
-            profile_text = page.locator('#nav-profile-text')
-            
-            # 使用 JavaScript 检查 CSS display 属性
-            is_hidden = page.evaluate('''() => {
-                const el = document.getElementById('nav-profile-text');
-                const style = window.getComputedStyle(el);
-                return style.display === 'none';
-            }''')
-            
-            if is_hidden:
-                print("  ✓ 默认状态下用户名隐藏")
-                results.append(("默认状态: 用户名隐藏", True, ""))
+            profile_count = nav_profile.count()
+
+            if profile_count == 0:
+                print("  ✓ Profile 链接已移除")
+                results.append(("Profile 链接已移除", True, ""))
             else:
-                print("  ✗ 默认状态下用户名未隐藏")
-                results.append(("默认状态: 用户名隐藏", False, "用户名仍然可见"))
-            
-            # 截图：默认状态
-            screenshot_path = os.path.join(SCREENSHOT_DIR, '86', 'profile_default.png')
+                print(f"  ✗ Profile 链接仍然存在 (count: {profile_count})")
+                results.append(("Profile 链接已移除", False, f"找到 {profile_count} 个"))
+
+            # 截图：当前状态
+            screenshot_path = os.path.join(SCREENSHOT_DIR, '86', 'sidebar_no_profile.png')
             page.screenshot(path=screenshot_path)
             print(f"  截图保存: {screenshot_path}")
-            
-            # Step 3: 悬停在用户图标上，验证用户名显示
-            print("Step 3: 悬停在用户图标上，验证用户名显示...")
-            
-            # 悬停在 nav-profile 上
-            nav_profile.hover()
-            time.sleep(0.5)
-            
-            # 检查 nav-profile-text 显示
-            is_visible = page.evaluate('''() => {
-                const el = document.getElementById('nav-profile-text');
-                const style = window.getComputedStyle(el);
-                return style.display !== 'none';
-            }''')
-            
-            if is_visible:
-                print("  ✓ 悬停状态下用户名显示")
-                results.append(("悬停状态: 用户名显示", True, ""))
+
+            # Step 3: 验证 Logout 按钮存在
+            print("Step 3: 验证 Logout 按钮存在...")
+
+            nav_logout = page.locator('#nav-logout')
+            expect(nav_logout).to_be_visible()
+            print("  ✓ Logout 按钮可见")
+            results.append(("Logout 按钮可见", True, ""))
+
+            # Step 4: 验证 Logout 按钮的 title 属性显示用户名
+            print("Step 4: 验证 Logout 按钮的 title 属性显示用户名...")
+
+            # 获取 Logout 按钮的 title 属性
+            logout_title = nav_logout.get_attribute('title')
+
+            if logout_title and logout_title.strip():
+                print(f"  ✓ Logout 按钮的 title 属性显示用户名: {logout_title}")
+                results.append(("Logout title 显示用户名", True, f"显示: {logout_title}"))
             else:
-                print("  ✗ 悬停状态下用户名未显示")
-                results.append(("悬停状态: 用户名显示", False, "用户名仍然隐藏"))
-            
-            # 截图：悬停状态
-            screenshot_path = os.path.join(SCREENSHOT_DIR, '86', 'profile_hover.png')
+                print("  ✗ Logout 按钮的 title 属性为空")
+                results.append(("Logout title 显示用户名", False, "title 属性为空"))
+
+            # 截图：Logout 按钮
+            screenshot_path = os.path.join(SCREENSHOT_DIR, '86', 'logout_button.png')
             page.screenshot(path=screenshot_path)
             print(f"  截图保存: {screenshot_path}")
-            
-            # Step 4: 验证用户名内容正确
-            print("Step 4: 验证用户名内容正确...")
-            
-            # 获取显示的用户名
-            displayed_username = profile_text.text_content()
-            if displayed_username and displayed_username.strip():
-                print(f"  ✓ 用户名显示为: {displayed_username}")
-                results.append(("用户名内容正确", True, f"显示: {displayed_username}"))
+
+            # Step 5: 验证用户名与登录用户一致
+            print("Step 5: 验证用户名与登录用户一致...")
+
+            if logout_title == USERNAME:
+                print(f"  ✓ 用户名一致: {logout_title}")
+                results.append(("用户名一致", True, f"显示: {logout_title}"))
             else:
-                print("  ✗ 用户名内容为空")
-                results.append(("用户名内容正确", False, "用户名为空"))
-            
-            # Step 5: 移开鼠标，验证用户名隐藏
-            print("Step 5: 移开鼠标，验证用户名隐藏...")
-            
-            # 移动鼠标到其他位置
-            page.mouse.move(0, 0)
-            time.sleep(0.5)
-            
-            # 检查 nav-profile-text 再次隐藏
-            is_hidden_again = page.evaluate('''() => {
-                const el = document.getElementById('nav-profile-text');
-                const style = window.getComputedStyle(el);
-                return style.display === 'none';
-            }''')
-            
-            if is_hidden_again:
-                print("  ✓ 移开鼠标后用户名隐藏")
-                results.append(("移开鼠标: 用户名隐藏", True, ""))
-            else:
-                print("  ✗ 移开鼠标后用户名未隐藏")
-                results.append(("移开鼠标: 用户名隐藏", False, "用户名仍然可见"))
-            
-            # 截图：最终状态
-            screenshot_path = os.path.join(SCREENSHOT_DIR, '86', 'profile_final.png')
-            page.screenshot(path=screenshot_path)
-            print(f"  截图保存: {screenshot_path}")
-            
+                print(f"  ✗ 用户名不一致: 期望 {USERNAME}, 实际 {logout_title}")
+                results.append(("用户名一致", False, f"期望 {USERNAME}, 实际 {logout_title}"))
+
         except Exception as e:
             print(f"  ✗ 测试失败: {e}")
             results.append(("测试执行", False, str(e)))
-            
+
             # 错误截图
             error_screenshot = os.path.join(SCREENSHOT_DIR, 'error.png')
             page.screenshot(path=error_screenshot)
             print(f"  错误截图: {error_screenshot}")
-            
+
         finally:
             browser.close()
-    
+
     # 打印测试报告
     print("\n" + "=" * 60)
     print("UI 功能测试报告 - Issue 86")
@@ -170,15 +130,15 @@ def test_issue86():
     print(f"通过: {passed} 个")
     print(f"失败: {failed} 个")
     print("-" * 60)
-    
+
     for name, success, detail in results:
         status = "✓ 通过" if success else "✗ 失败"
         print(f"  {status}: {name}")
         if detail:
             print(f"    详情: {detail}")
-    
+
     print("=" * 60)
-    
+
     return failed == 0
 
 if __name__ == '__main__':
