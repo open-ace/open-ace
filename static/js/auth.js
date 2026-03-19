@@ -216,7 +216,11 @@ const Auth = (function() {
             if (loginLink) loginLink.style.display = 'none';
             if (profileLink) profileLink.style.display = 'inline-block';
             if (logoutLink) logoutLink.style.display = 'block';  // Changed to block for button
-            if (profileLink) profileLink.textContent = user.username;
+            // Update username in the profile text span, preserving the icon
+            const profileText = document.getElementById('nav-profile-text');
+            if (profileText) {
+                profileText.textContent = user.username;
+            }
 
             // Messages, Analysis, Management are admin-only
             if (messagesLink) messagesLink.style.display = 'none';

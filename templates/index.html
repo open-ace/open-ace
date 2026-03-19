@@ -188,6 +188,25 @@
             color: var(--sidebar-text-muted);
         }
 
+        /* Profile link with hover username */
+        #nav-profile {
+            position: relative;
+        }
+
+        #nav-profile-text {
+            display: none;
+            margin-left: 10px;
+        }
+
+        #nav-profile:hover #nav-profile-text {
+            display: inline;
+        }
+
+        /* Collapsed sidebar: always hide profile text */
+        .sidebar.collapsed #nav-profile-text {
+            display: none !important;
+        }
+
         /* Main content styles */
         .main-content {
             margin-left: var(--sidebar-width);
