@@ -793,7 +793,7 @@
         </nav>
 
         <!-- Dashboard Section -->
-        <div id="dashboard-section" class="content-section" style="display: none;">
+        <div id="dashboard-section" class="content-section" style="display: none;" tabindex="-1">
             <!-- Dashboard Header with Auto-refresh -->
             <div class="d-flex justify-content-between align-items-center mb-4">
                 <h3><i class="bi bi-bar-chart-line"></i> <span id="dashboard-title">Dashboard</span></h3>
@@ -866,7 +866,7 @@
         </div>
 
         <!-- Messages Section -->
-        <div id="messages-section" class="content-section" style="display: none;">
+        <div id="messages-section" class="content-section" style="display: none;" tabindex="-1">
             <div class="d-flex justify-content-between align-items-center mb-4">
                 <h3><i class="bi bi-chat-dots"></i> <span id="messages-title">Messages</span></h3>
                 <div class="d-flex align-items-center gap-2">
@@ -974,7 +974,7 @@
         </div>
 
     <!-- Analysis Section -->
-    <div id="analysis-section" class="content-section" style="display: none; min-height: calc(100vh - 70px);">
+    <div id="analysis-section" class="content-section" style="display: none; min-height: calc(100vh - 70px);" tabindex="-1">
         <div class="d-flex justify-content-between align-items-center mb-3">
             <h3><i class="bi bi-graph-up"></i> <span id="analysis-title">Analysis</span></h3>
             <div class="d-flex gap-2">
@@ -1331,7 +1331,7 @@
     </div>
 
     <!-- Management Section -->
-    <div id="management-section" class="content-section" style="display: none; min-height: calc(100vh - 70px);">
+    <div id="management-section" class="content-section" style="display: none; min-height: calc(100vh - 70px);" tabindex="-1">
         <h3><i class="bi bi-gear"></i> <span id="management-title">Management</span></h3>
         <div class="management-nav mb-3">
             <ul class="nav nav-tabs" id="managementTabs" role="tablist">
@@ -1419,16 +1419,10 @@
     </div>
 
     <!-- Workspace Section -->
-    <div id="workspace-section" class="content-section" style="display: none;">
+    <div id="workspace-section" class="content-section" style="display: none;" tabindex="-1">
         <nav class="navbar navbar-expand navbar-dark bg-primary mb-3" style="padding: 0.5rem 1rem;">
             <div class="container-fluid">
                 <span class="navbar-brand mb-0 h1"><i class="bi bi-window-split"></i> Workspace</span>
-                <div class="d-flex align-items-center">
-                    <span class="text-white me-3"><i class="bi bi-person-circle"></i> User Workspace</span>
-                    <button class="btn btn-outline-light btn-sm" id="logout-workspace-btn">
-                        <i class="bi bi-box-arrow-right"></i> Logout
-                    </button>
-                </div>
             </div>
         </nav>
         {% if workspace_enabled %}
@@ -1570,7 +1564,7 @@
     </div>
 
     <!-- Report Section -->
-    <div id="report-section" class="content-section" style="display: none; min-height: calc(100vh - 70px);">
+    <div id="report-section" class="content-section" style="display: none; min-height: calc(100vh - 70px);" tabindex="-1">
         <h3><i class="bi bi-file-earmark-text"></i> <span id="report-title">My Usage Report</span></h3>
         <div class="row mt-4" id="report-summary">
             <div class="col-12 text-center text-muted py-5">
@@ -2719,6 +2713,10 @@
                 const activeSection = document.querySelector(`#${section}-section`);
                 if (activeSection) {
                     activeSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    // Auto-focus the section to enable keyboard navigation
+                    if (activeSection.hasAttribute('tabindex')) {
+                        activeSection.focus();
+                    }
                 }
                 
                 // Force a reflow to ensure layout is recalculated
