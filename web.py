@@ -21,18 +21,9 @@ def get_git_commit():
     Returns:
         str: Format "commit_hash (MM-DD HH:MM:SS)" or "unknown" if version info unavailable.
     """
-    # Try to read from VERSION file first (for deployed environments without .git)
     version_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'VERSION')
-    if os.path.exists(version_file):
-        try:
-            with open(version_file, 'r') as f:
-                version = f.read().strip()
-                if version:
-                    return version
-        except Exception:
-            pass
 
-    # Fallback to git command (for development environments)
+    # Try to get version from git (for development environments)
     try:
         # Get commit hash
         hash_result = subprocess.run(
@@ -51,9 +42,29 @@ def get_git_commit():
         if hash_result.returncode == 0 and date_result.returncode == 0:
             commit_hash = hash_result.stdout.strip()
             commit_date = date_result.stdout.strip()
-            return f"{commit_hash} ({commit_date})"
+            version = f"{commit_hash} ({commit_date})"
+
+            # Auto-update VERSION file in development environment
+            try:
+                with open(version_file, 'w') as f:
+                    f.write(version)
+            except Exception:
+                pass
+
+            return version
     except Exception:
         pass
+
+    # Fallback: read from VERSION file (for deployed environments without .git)
+    if os.path.exists(version_file):
+        try:
+            with open(version_file, 'r') as f:
+                version = f.read().strip()
+                if version:
+                    return version
+        except Exception:
+            pass
+
     return 'unknown'
 
 # Dynamically load shared modules
