@@ -5818,14 +5818,69 @@
 
             // Add page size change event listener
             conversationHistoryTable.on("pageSizeChanged", function(pageSize) {
+                // Show loading state before fetching data
+                showConversationHistoryLoading();
                 // Reset to page 1 and reload data with new page size
                 loadConversationHistoryData();
             });
 
             // Add page change event listener
             conversationHistoryTable.on("pageChanged", function(page) {
+                // Show loading state before fetching data
+                showConversationHistoryLoading();
                 loadConversationHistoryData();
             });
+
+            // Add renderStarted event to show loading state immediately when table starts rendering
+            conversationHistoryTable.on("renderStarted", function() {
+                // Only show loading if we're in a loading state and table is empty
+                if (isLoadingConversationHistory) {
+                    const rows = document.querySelectorAll('#conversation-history-table .tabulator-row');
+                    if (rows.length === 0) {
+                        const loadingHtml = `
+                            <div class="text-center py-4">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">${t('loading')}</span>
+                                </div>
+                                <p class="mt-2 text-muted">${t('loadingData')}</p>
+                            </div>
+                        `;
+                        const placeholderEl = document.querySelector('#conversation-history-table .tabulator-placeholder');
+                        if (placeholderEl) {
+                            placeholderEl.innerHTML = loadingHtml;
+                        }
+                    }
+                }
+            });
+
+            // Set up MutationObserver to immediately replace "No sessions found" with loading state
+            const tableEl = document.getElementById('conversation-history-table');
+            if (tableEl) {
+                const observer = new MutationObserver(function(mutations) {
+                    if (isLoadingConversationHistory) {
+                        const placeholderEl = tableEl.querySelector('.tabulator-placeholder');
+                        if (placeholderEl) {
+                            const text = placeholderEl.innerText || '';
+                            if (text.includes('No sessions found') || text.includes('未找到会话')) {
+                                const loadingHtml = `
+                                    <div class="text-center py-4">
+                                        <div class="spinner-border text-primary" role="status">
+                                            <span class="visually-hidden">${t('loading')}</span>
+                                        </div>
+                                        <p class="mt-2 text-muted">${t('loadingData')}</p>
+                                    </div>
+                                `;
+                                placeholderEl.innerHTML = loadingHtml;
+                            }
+                        }
+                    }
+                });
+                observer.observe(tableEl, {
+                    childList: true,
+                    subtree: true,
+                    characterData: true
+                });
+            }
 
             // Load data after initialization
             loadConversationHistoryData();
@@ -5834,6 +5889,29 @@
         // Current sort state for Conversation History table
         let currentSortField = 'start_time';
         let currentSortDir = 'desc';
+        let isLoadingConversationHistory = false; // Flag to track loading state
+
+        // Show loading state for Conversation History table
+        function showConversationHistoryLoading() {
+            if (!conversationHistoryTable) return;
+            isLoadingConversationHistory = true;
+            const loadingHtml = `
+                <div class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">${t('loading')}</span>
+                    </div>
+                    <p class="mt-2 text-muted">${t('loadingData')}</p>
+                </div>
+            `;
+            // Use requestAnimationFrame to ensure DOM is updated before setting loading state
+            requestAnimationFrame(() => {
+                // Directly update the placeholder element in the DOM
+                const placeholderEl = document.querySelector('#conversation-history-table .tabulator-placeholder');
+                if (placeholderEl) {
+                    placeholderEl.innerHTML = loadingHtml;
+                }
+            });
+        }
 
         // Load Session History data from API
         async function loadConversationHistoryData() {
@@ -5867,8 +5945,20 @@
                 const response = await fetch(`/api/conversation-history?${params.toString()}`);
                 const data = await response.json();
                 conversationHistoryTable.setData(data.sessions || []);
+                // Restore default placeholder after data is loaded
+                const placeholderEl = document.querySelector('#conversation-history-table .tabulator-placeholder');
+                if (placeholderEl) {
+                    placeholderEl.innerHTML = t('shNoSessions');
+                }
+                isLoadingConversationHistory = false;
             } catch (error) {
                 console.error('Error loading session history:', error);
+                // Restore default placeholder on error
+                const placeholderEl = document.querySelector('#conversation-history-table .tabulator-placeholder');
+                if (placeholderEl) {
+                    placeholderEl.innerHTML = t('shNoSessions');
+                }
+                isLoadingConversationHistory = false;
             }
         }
 
