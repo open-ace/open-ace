@@ -285,6 +285,20 @@ def cmd_summary(host: Optional[str] = None) -> None:
         print(f"  Date range:     {stats['first_date']} to {stats['last_date']}")
 
 
+def cmd_aggregate_quota(start_date: Optional[str] = None, end_date: Optional[str] = None) -> None:
+    """Aggregate quota usage from daily_messages table."""
+    print("Aggregating quota usage from daily_messages...")
+    
+    records_created = db.aggregate_quota_usage_from_messages(start_date, end_date)
+    
+    print(f"Created {records_created} quota_usage records.")
+    
+    if start_date:
+        print(f"Start date: {start_date}")
+    if end_date:
+        print(f"End date: {end_date}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='AI Token Usage CLI',
@@ -322,6 +336,11 @@ def main():
     config_parser = subparsers.add_parser('config', help='Configuration management')
     config_parser.add_argument('action', choices=['show', 'edit', 'init'], help='Action: show, edit, or init')
 
+    # aggregate-quota command
+    aggregate_parser = subparsers.add_parser('aggregate-quota', help='Aggregate quota usage from messages')
+    aggregate_parser.add_argument('--start', help='Start date in YYYY-MM-DD format')
+    aggregate_parser.add_argument('--end', help='End date in YYYY-MM-DD format')
+
     args = parser.parse_args()
 
     if not args.command:
@@ -343,6 +362,8 @@ def main():
         cmd_summary(args.host)
     elif args.command == 'config':
         cmd_config(args.action)
+    elif args.command == 'aggregate-quota':
+        cmd_aggregate_quota(args.start, args.end)
 
 
 if __name__ == "__main__":
