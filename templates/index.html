@@ -44,13 +44,18 @@
             width: 60px;
         }
 
-        .sidebar.collapsed .sidebar-header h4 span,
-        .sidebar.collapsed .nav-link span,
-        .sidebar.collapsed .sidebar-footer .lang-select-container,
-        .sidebar.collapsed .sidebar-footer .version-text,
-        .sidebar.collapsed .sidebar-footer .logout-btn-text,
-        .sidebar.collapsed .sidebar-footer .login-btn-text {
-            display: none;
+        /* Hide all text in collapsed sidebar */
+        .sidebar.collapsed #sidebar-title,
+        .sidebar.collapsed #nav-dashboard-text,
+        .sidebar.collapsed #nav-messages-text,
+        .sidebar.collapsed #nav-analysis-text,
+        .sidebar.collapsed #nav-management-text,
+        .sidebar.collapsed #nav-workspace-text,
+        .sidebar.collapsed #nav-report-text,
+        .sidebar.collapsed #nav-profile-text,
+        .sidebar.collapsed #nav-logout-text,
+        .sidebar.collapsed #nav-login-text {
+            display: none !important;
         }
 
         .sidebar.collapsed .sidebar-header h4 {
@@ -60,6 +65,8 @@
         .sidebar.collapsed .nav-link {
             justify-content: center;
             padding: 12px;
+            white-space: nowrap;
+            overflow: hidden;
         }
 
         .sidebar.collapsed .nav-link .bi {
@@ -71,16 +78,20 @@
         }
 
         .sidebar.collapsed .sidebar-footer select {
-            display: none;
+            display: none !important;
         }
 
         .sidebar.collapsed .sidebar-footer small {
-            display: none;
+            display: none !important;
         }
 
         .sidebar.collapsed .sidebar-footer .btn {
             padding: 6px;
             font-size: 0.8rem;
+        }
+
+        .sidebar.collapsed .sidebar-footer .btn span {
+            display: none !important;
         }
 
         .sidebar-header {
@@ -2121,6 +2132,7 @@
         }
 
         // Render sidebar navigation with translations
+        // Issue 82 fix: Added span elements for text hiding
         function renderSidebarNav() {
             const navDashboard = document.getElementById('nav-dashboard');
             const navMessages = document.getElementById('nav-messages');
@@ -2131,22 +2143,22 @@
             const sidebarTitle = document.getElementById('sidebar-title');
 
             if (navDashboard) {
-                navDashboard.innerHTML = `<i class="bi bi-bar-chart-line"></i> ${t('dashboardNav')}`;
+                navDashboard.innerHTML = `<i class="bi bi-bar-chart-line"></i> <span id="nav-dashboard-text">${t('dashboardNav')}</span>`;
             }
             if (navMessages) {
-                navMessages.innerHTML = `<i class="bi bi-chat-dots"></i> ${t('messagesNav')}`;
+                navMessages.innerHTML = `<i class="bi bi-chat-dots"></i> <span id="nav-messages-text">${t('messagesNav')}</span>`;
             }
             if (navAnalysis) {
-                navAnalysis.innerHTML = `<i class="bi bi-graph-up"></i> ${t('analysisText')}`;
+                navAnalysis.innerHTML = `<i class="bi bi-graph-up"></i> <span id="nav-analysis-text">${t('analysisText')}</span>`;
             }
             if (navManagement) {
-                navManagement.innerHTML = `<i class="bi bi-gear"></i> ${t('managementText')}`;
+                navManagement.innerHTML = `<i class="bi bi-gear"></i> <span id="nav-management-text">${t('managementText')}</span>`;
             }
             if (navWorkspace) {
-                navWorkspace.innerHTML = `<i class="bi bi-window-split"></i> ${t('workspaceText')}`;
+                navWorkspace.innerHTML = `<i class="bi bi-window-split"></i> <span id="nav-workspace-text">${t('workspaceText')}</span>`;
             }
             if (navReport) {
-                navReport.innerHTML = `<i class="bi bi-file-earmark-text"></i> ${t('reportText')}`;
+                navReport.innerHTML = `<i class="bi bi-file-earmark-text"></i> <span id="nav-report-text">${t('reportText')}</span>`;
             }
             if (sidebarTitle) {
                 sidebarTitle.textContent = t('sidebarTitle');
@@ -2617,6 +2629,20 @@
             const mainContent = document.getElementById('main-content');
             const isCollapsed = sidebar.classList.toggle('collapsed');
 
+            // Hide/show text elements
+            const textIds = [
+                'sidebar-title', 'nav-dashboard-text', 'nav-messages-text',
+                'nav-analysis-text', 'nav-management-text', 'nav-workspace-text',
+                'nav-report-text', 'nav-profile-text', 'nav-logout-text', 'nav-login-text'
+            ];
+
+            textIds.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) {
+                    el.style.display = isCollapsed ? 'none' : '';
+                }
+            });
+
             // Update main content margin
             if (isCollapsed) {
                 mainContent.style.marginLeft = '60px';
@@ -2640,6 +2666,20 @@
                 sidebar.classList.add('collapsed');
                 mainContent.style.marginLeft = '60px';
                 mainContent.style.width = 'calc(100% - 60px)';
+
+                // Hide text elements
+                const textIds = [
+                    'sidebar-title', 'nav-dashboard-text', 'nav-messages-text',
+                    'nav-analysis-text', 'nav-management-text', 'nav-workspace-text',
+                    'nav-report-text', 'nav-profile-text', 'nav-logout-text', 'nav-login-text'
+                ];
+
+                textIds.forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) {
+                        el.style.display = 'none';
+                    }
+                });
             }
         }
 

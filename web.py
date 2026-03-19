@@ -83,6 +83,7 @@ config_module = importlib.util.module_from_spec(spec_config)
 spec_config.loader.exec_module(config_module)
 
 app = Flask(__name__, static_folder='static', template_folder='templates')
+app.config['TEMPLATES_AUTO_RELOAD'] = True
 
 
 @app.route('/')
