@@ -215,16 +215,28 @@ const Auth = (function() {
             if (loginLink) loginLink.style.display = 'none';
             if (logoutLink) {
                 logoutLink.style.display = 'block';
-            }
-            // Update logout button text to show username
-            const logoutText = document.getElementById('nav-logout-text');
-            if (logoutText) {
-                // Truncate username if too long (max 10 chars)
-                let displayName = user.username;
-                if (displayName.length > 10) {
-                    displayName = displayName.substring(0, 10) + '...';
+
+                // Setup hover to show username
+                const logoutText = document.getElementById('nav-logout-text');
+                if (logoutText) {
+                    // Default: show "Logout"
+                    logoutText.textContent = 'Logout';
+
+                    // Truncate username if too long (max 10 chars)
+                    let displayName = user.username;
+                    if (displayName.length > 10) {
+                        displayName = displayName.substring(0, 10) + '...';
+                    }
+                    const textWithUsername = 'Logout ' + displayName;
+
+                    // Remove old listeners and add new ones
+                    logoutLink.onmouseenter = function() {
+                        logoutText.textContent = textWithUsername;
+                    };
+                    logoutLink.onmouseleave = function() {
+                        logoutText.textContent = 'Logout';
+                    };
                 }
-                logoutText.textContent = 'Logout ' + displayName;
             }
 
             // Messages, Analysis, Management are admin-only
@@ -255,6 +267,9 @@ const Auth = (function() {
             if (loginLink) loginLink.style.display = 'block';  // Changed to block for button
             if (logoutLink) {
                 logoutLink.style.display = 'none';
+                // Clear hover listeners
+                logoutLink.onmouseenter = null;
+                logoutLink.onmouseleave = null;
             }
             // Reset logout button text
             const logoutText = document.getElementById('nav-logout-text');

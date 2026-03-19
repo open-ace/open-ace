@@ -8,8 +8,9 @@ Issue 86: 菜单栏用户名称移到 Logout 按钮上悬停显示
 1. 登录系统
 2. 验证 Profile 链接不存在
 3. 验证 Logout 按钮存在
-4. 验证 Logout 按钮文字显示 "Logout 用户名"
-5. 验证用户名太长时会被截短
+4. 验证默认状态显示 "Logout"
+5. 验证悬停时显示 "Logout 用户名"
+6. 验证移开鼠标后恢复 "Logout"
 """
 
 import sys
@@ -81,55 +82,68 @@ def test_issue86():
             print("  ✓ Logout 按钮可见")
             results.append(("Logout 按钮可见", True, ""))
 
-            # Step 4: 验证 Logout 按钮文字显示 "Logout 用户名"
-            print("Step 4: 验证 Logout 按钮文字显示 'Logout 用户名'...")
+            # Step 4: 验证默认状态显示 "Logout"
+            print("Step 4: 验证默认状态显示 'Logout'...")
 
             logout_text_el = page.locator('#nav-logout-text')
             logout_text = logout_text_el.text_content()
 
-            expected_text = f'Logout {USERNAME}'
-            if logout_text == expected_text:
-                print(f"  ✓ Logout 按钮文字正确: {logout_text}")
-                results.append(("Logout 按钮文字正确", True, f"显示: {logout_text}"))
+            if logout_text == 'Logout':
+                print(f"  ✓ 默认状态正确: {logout_text}")
+                results.append(("默认状态显示 Logout", True, f"显示: {logout_text}"))
             else:
-                print(f"  ✗ Logout 按钮文字不正确: 期望 '{expected_text}', 实际 '{logout_text}'")
-                results.append(("Logout 按钮文字正确", False, f"期望 '{expected_text}', 实际 '{logout_text}'"))
+                print(f"  ✗ 默认状态不正确: 期望 'Logout', 实际 '{logout_text}'")
+                results.append(("默认状态显示 Logout", False, f"期望 'Logout', 实际 '{logout_text}'"))
 
-            # 截图：Logout 按钮
-            screenshot_path = os.path.join(SCREENSHOT_DIR, '86', 'logout_button.png')
+            # 截图：默认状态
+            screenshot_path = os.path.join(SCREENSHOT_DIR, '86', 'logout_default.png')
             page.screenshot(path=screenshot_path)
             print(f"  截图保存: {screenshot_path}")
 
-            # Step 5: 验证用户名截短功能（使用长用户名测试）
-            print("Step 5: 验证用户名截短功能...")
+            # Step 5: 验证悬停时显示 "Logout 用户名"
+            print("Step 5: 验证悬停时显示 'Logout 用户名'...")
 
-            # 使用 JavaScript 模拟长用户名
-            truncated = page.evaluate('''() => {
-                const logoutText = document.getElementById('nav-logout-text');
-                const originalText = logoutText.textContent;
-                
-                // 模拟长用户名
-                const longUsername = 'verylongusername123';
-                let displayName = longUsername;
-                if (displayName.length > 10) {
-                    displayName = displayName.substring(0, 10) + '...';
-                }
-                logoutText.textContent = 'Logout ' + displayName;
-                
-                const newText = logoutText.textContent;
-                // 恢复原始文字
-                logoutText.textContent = originalText;
-                
-                return { displayName, newText };
-            }''')
+            # 悬停在 Logout 按钮上
+            nav_logout.hover()
+            time.sleep(0.3)
 
-            expected_truncated = 'verylongus...'
-            if truncated['displayName'] == expected_truncated:
-                print(f"  ✓ 用户名截短正确: {truncated['displayName']}")
-                results.append(("用户名截短功能", True, f"截短后: {truncated['displayName']}"))
+            # 获取悬停后的文字
+            hover_text = logout_text_el.text_content()
+            expected_hover_text = f'Logout {USERNAME}'
+
+            if hover_text == expected_hover_text:
+                print(f"  ✓ 悬停状态正确: {hover_text}")
+                results.append(("悬停显示用户名", True, f"显示: {hover_text}"))
             else:
-                print(f"  ✗ 用户名截短不正确: 期望 '{expected_truncated}', 实际 '{truncated['displayName']}'")
-                results.append(("用户名截短功能", False, f"期望 '{expected_truncated}', 实际 '{truncated['displayName']}'"))
+                print(f"  ✗ 悬停状态不正确: 期望 '{expected_hover_text}', 实际 '{hover_text}'")
+                results.append(("悬停显示用户名", False, f"期望 '{expected_hover_text}', 实际 '{hover_text}'"))
+
+            # 截图：悬停状态
+            screenshot_path = os.path.join(SCREENSHOT_DIR, '86', 'logout_hover.png')
+            page.screenshot(path=screenshot_path)
+            print(f"  截图保存: {screenshot_path}")
+
+            # Step 6: 验证移开鼠标后恢复 "Logout"
+            print("Step 6: 验证移开鼠标后恢复 'Logout'...")
+
+            # 移动鼠标到其他位置
+            page.mouse.move(0, 0)
+            time.sleep(0.3)
+
+            # 获取移开后的文字
+            final_text = logout_text_el.text_content()
+
+            if final_text == 'Logout':
+                print(f"  ✓ 移开鼠标后恢复: {final_text}")
+                results.append(("移开鼠标恢复 Logout", True, f"显示: {final_text}"))
+            else:
+                print(f"  ✗ 移开鼠标后未恢复: 期望 'Logout', 实际 '{final_text}'")
+                results.append(("移开鼠标恢复 Logout", False, f"期望 'Logout', 实际 '{final_text}'"))
+
+            # 截图：最终状态
+            screenshot_path = os.path.join(SCREENSHOT_DIR, '86', 'logout_final.png')
+            page.screenshot(path=screenshot_path)
+            print(f"  截图保存: {screenshot_path}")
 
         except Exception as e:
             print(f"  ✗ 测试失败: {e}")
