@@ -1438,7 +1438,11 @@ def workspace():
 @app.route('/login')
 def login_page():
     """Render login page."""
-    response = make_response(render_template('login.html'))
+    # Check if admin is using default password
+    show_default_credentials = db.is_default_admin_password()
+    
+    response = make_response(render_template('login.html', 
+                                              show_default_credentials=show_default_credentials))
     response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     response.headers['Pragma'] = 'no-cache'
     response.headers['Expires'] = '0'

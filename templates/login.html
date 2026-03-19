@@ -189,10 +189,12 @@
             </button>
         </form>
 
+        {% if show_default_credentials %}
         <div class="form-footer">
             <p>Default admin credentials: <strong>admin / admin123</strong></p>
             <p>Change the default password after first login!</p>
         </div>
+        {% endif %}
 
         <div class="login-footer">
             <p>&copy; 2026 AI Token Analyzer. All rights reserved.</p>

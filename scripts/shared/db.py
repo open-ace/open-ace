@@ -889,6 +889,24 @@ def get_user_by_id(user_id: int) -> Optional[Dict]:
     return None
 
 
+def is_default_admin_password() -> bool:
+    """Check if admin user is using the default password 'admin123'.
+    
+    Returns:
+        True if admin user exists and has default password, False otherwise.
+    """
+    import hashlib
+    
+    admin_user = get_user_by_username('admin')
+    if not admin_user:
+        return False
+    
+    # Calculate the default password hash
+    default_password_hash = hashlib.sha256('admin123'.encode()).hexdigest()
+    
+    return admin_user['password_hash'] == default_password_hash
+
+
 def get_all_users() -> List[Dict]:
     """Get all users (admin only)."""
     conn = get_connection()
