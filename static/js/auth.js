@@ -215,8 +215,16 @@ const Auth = (function() {
             if (loginLink) loginLink.style.display = 'none';
             if (logoutLink) {
                 logoutLink.style.display = 'block';
-                // Set title attribute to show username on hover
-                logoutLink.title = user.username;
+            }
+            // Update logout button text to show username
+            const logoutText = document.getElementById('nav-logout-text');
+            if (logoutText) {
+                // Truncate username if too long (max 10 chars)
+                let displayName = user.username;
+                if (displayName.length > 10) {
+                    displayName = displayName.substring(0, 10) + '...';
+                }
+                logoutText.textContent = 'Logout ' + displayName;
             }
 
             // Messages, Analysis, Management are admin-only
@@ -247,7 +255,11 @@ const Auth = (function() {
             if (loginLink) loginLink.style.display = 'block';  // Changed to block for button
             if (logoutLink) {
                 logoutLink.style.display = 'none';
-                logoutLink.title = '';
+            }
+            // Reset logout button text
+            const logoutText = document.getElementById('nav-logout-text');
+            if (logoutText) {
+                logoutText.textContent = 'Logout';
             }
 
             // Hide protected menu items
