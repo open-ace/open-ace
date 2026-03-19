@@ -97,6 +97,22 @@ app = Flask(__name__, static_folder='static', template_folder='templates')
 app.config['TEMPLATES_AUTO_RELOAD'] = True
 
 
+# =============================================================================
+# Error Handlers - 确保 API 错误返回 JSON 格式
+# =============================================================================
+
+# Register error handler for all HTTP exceptions
+from werkzeug.exceptions import HTTPException
+
+@app.errorhandler(HTTPException)
+def handle_http_exception(e):
+    """Handle all HTTP exceptions and return JSON for API routes."""
+    if request.path.startswith('/api/'):
+        return jsonify({'error': e.description}), e.code
+    # For non-API routes, return HTML error page
+    return e.get_response()
+
+
 @app.route('/')
 def index():
     """Render the main dashboard page."""
@@ -1454,7 +1470,11 @@ def api_login():
     import secrets
     from datetime import timedelta
 
-    data = request.get_json()
+    try:
+        data = request.get_json(force=True, silent=False)
+    except Exception as e:
+        return jsonify({'error': 'Invalid JSON body or Content-Type. Please use application/json'}), 400
+
     if not data:
         return jsonify({'error': 'Missing JSON body'}), 400
 
