@@ -1126,6 +1126,180 @@ def save_quota_usage(user_id: int, date: str, tool_name: str = None,
     return True
 
 
+def aggregate_quota_usage_from_messages(start_date: str = None, end_date: str = None) -> int:
+    """Aggregate quota usage from daily_messages table.
+    
+    This function aggregates token and request usage from daily_messages
+    and populates the quota_usage table. It matches sender_name to users
+    by username.
+    
+    The aggregation strategy:
+    1. Count user messages (role='user') as requests
+    2. Sum tokens from assistant messages that are responses to user messages
+       (linked via parent_id chain)
+    
+    Args:
+        start_date: Optional start date in YYYY-MM-DD format. If None, processes all data.
+        end_date: Optional end date in YYYY-MM-DD format. If None, processes all data.
+    
+    Returns:
+        Number of quota_usage records created.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    # Build date filter conditions
+    date_conditions = []
+    params = []
+    
+    if start_date:
+        date_conditions.append("date >= ?")
+        params.append(start_date)
+    
+    if end_date:
+        date_conditions.append("date <= ?")
+        params.append(end_date)
+    
+    date_clause = " AND ".join(date_conditions) if date_conditions else "1=1"
+    
+    # Step 1: Get all user messages with their sender info
+    cursor.execute(f'''
+        SELECT
+            date,
+            tool_name,
+            message_id,
+            COALESCE(sender_name, sender_id) as sender
+        FROM daily_messages
+        WHERE role = 'user'
+          AND (sender_name IS NOT NULL OR sender_id IS NOT NULL)
+          AND {date_clause}
+    ''', params)
+    
+    user_messages = cursor.fetchall()
+    
+    # Build a map: user_message_id -> (date, tool_name, sender)
+    user_msg_map = {}
+    for msg in user_messages:
+        user_msg_map[msg['message_id']] = {
+            'date': msg['date'],
+            'tool_name': msg['tool_name'],
+            'sender': msg['sender']
+        }
+    
+    # Step 2: Get all assistant messages and their tokens
+    cursor.execute(f'''
+        SELECT
+            date,
+            tool_name,
+            message_id,
+            parent_id,
+            tokens_used,
+            input_tokens,
+            output_tokens
+        FROM daily_messages
+        WHERE role = 'assistant'
+          AND {date_clause}
+    ''', params)
+    
+    assistant_messages = cursor.fetchall()
+    
+    # Build a map: assistant_message_id -> (parent_id, tokens)
+    # And track which user each assistant message belongs to
+    assistant_map = {}
+    for msg in assistant_messages:
+        assistant_map[msg['message_id']] = {
+            'parent_id': msg['parent_id'],
+            'tokens_used': msg['tokens_used'] or 0,
+            'input_tokens': msg['input_tokens'] or 0,
+            'output_tokens': msg['output_tokens'] or 0,
+            'date': msg['date'],
+            'tool_name': msg['tool_name']
+        }
+    
+    # Step 3: For each assistant message, find the user it belongs to
+    # by following the parent_id chain
+    def find_user_for_assistant(assistant_msg_id, visited=None):
+        """Find the user message that this assistant message is responding to."""
+        if visited is None:
+            visited = set()
+        
+        if assistant_msg_id in visited:
+            return None
+        visited.add(assistant_msg_id)
+        
+        if assistant_msg_id not in assistant_map:
+            return None
+        
+        assistant = assistant_map[assistant_msg_id]
+        parent_id = assistant['parent_id']
+        
+        if not parent_id:
+            return None
+        
+        # Check if parent is a user message
+        if parent_id in user_msg_map:
+            return user_msg_map[parent_id]
+        
+        # Otherwise, follow the chain (e.g., assistant -> toolResult -> user)
+        if parent_id in assistant_map:
+            return find_user_for_assistant(parent_id, visited)
+        
+        return None
+    
+    # Step 4: Aggregate tokens by (date, tool_name, sender)
+    usage_data = {}  # (date, tool_name, sender) -> {tokens, requests}
+    
+    # Count requests from user messages
+    for msg_id, msg_info in user_msg_map.items():
+        key = (msg_info['date'], msg_info['tool_name'], msg_info['sender'])
+        if key not in usage_data:
+            usage_data[key] = {'tokens': 0, 'requests': 0}
+        usage_data[key]['requests'] += 1
+    
+    # Sum tokens from assistant messages
+    for assistant_msg_id in assistant_map:
+        user_msg = find_user_for_assistant(assistant_msg_id)
+        if user_msg:
+            key = (user_msg['date'], user_msg['tool_name'], user_msg['sender'])
+            if key not in usage_data:
+                usage_data[key] = {'tokens': 0, 'requests': 0}
+            # Use output_tokens for user quota (the tokens generated for the user)
+            assistant = assistant_map[assistant_msg_id]
+            usage_data[key]['tokens'] += assistant['output_tokens']
+    
+    # Step 5: Get all users for matching
+    cursor.execute("SELECT id, username FROM users")
+    users = {row['username']: row['id'] for row in cursor.fetchall()}
+    
+    # Step 6: Clear existing quota_usage data for the date range
+    if start_date and end_date:
+        cursor.execute("DELETE FROM quota_usage WHERE date >= ? AND date <= ?", (start_date, end_date))
+    elif start_date:
+        cursor.execute("DELETE FROM quota_usage WHERE date >= ?", (start_date,))
+    elif end_date:
+        cursor.execute("DELETE FROM quota_usage WHERE date <= ?", (end_date,))
+    else:
+        cursor.execute("DELETE FROM quota_usage")
+    
+    # Step 7: Insert aggregated data into quota_usage
+    records_created = 0
+    for (date, tool_name, sender), data in usage_data.items():
+        # Try to match sender to a user
+        user_id = users.get(sender)
+        
+        if user_id:
+            cursor.execute('''
+                INSERT INTO quota_usage (user_id, date, tool_name, tokens_used, requests_used)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (user_id, date, tool_name, data['tokens'], data['requests']))
+            records_created += 1
+    
+    conn.commit()
+    conn.close()
+    
+    return records_created
+
+
 def get_quota_usage(user_id: int, start_date: str, end_date: str) -> List[Dict]:
     """Get quota usage for a user within a date range."""
     conn = get_connection()
