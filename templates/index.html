@@ -5580,7 +5580,7 @@
                     z-index: 9999 !important;
                     background: white !important;
                     padding: 20px !important;
-                    overflow: auto !important;
+                    overflow: hidden !important;
                 `;
                 
                 if (btn) {
@@ -5589,9 +5589,12 @@
                 
                 isConversationHistoryFullscreen = true;
                 
-                // Redraw table to fit new size
+                // Adjust table height to fill fullscreen container and redraw
                 if (conversationHistoryTable) {
-                    setTimeout(() => conversationHistoryTable.redraw(true), 100);
+                    setTimeout(() => {
+                        conversationHistoryTable.setHeight("calc(100vh - 60px)");
+                        conversationHistoryTable.redraw(true);
+                    }, 100);
                 }
             } else {
                 // Exit fullscreen
@@ -5612,9 +5615,12 @@
                 
                 isConversationHistoryFullscreen = false;
                 
-                // Redraw table to fit new size
+                // Restore table height and redraw
                 if (conversationHistoryTable) {
-                    setTimeout(() => conversationHistoryTable.redraw(true), 100);
+                    setTimeout(() => {
+                        conversationHistoryTable.setHeight("500px");
+                        conversationHistoryTable.redraw(true);
+                    }, 100);
                 }
             }
         }
@@ -5636,7 +5642,10 @@
                 isConversationHistoryFullscreen = false;
                 
                 if (conversationHistoryTable) {
-                    setTimeout(() => conversationHistoryTable.redraw(true), 100);
+                    setTimeout(() => {
+                        conversationHistoryTable.setHeight("500px");
+                        conversationHistoryTable.redraw(true);
+                    }, 100);
                 }
             }
         });
