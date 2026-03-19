@@ -31,7 +31,7 @@ async def test_menu(username: str, password: str, user_type: str):
         print(f'当前 URL: {page.url}')
         
         # 等待一下让 JS 执行完成
-        await asyncio.sleep(1)
+        await asyncio.sleep(2)
         
         # 获取所有菜单项的显示状态
         menu_items = {
@@ -46,6 +46,29 @@ async def test_menu(username: str, password: str, user_type: str):
         print(f'{user_type} 登录后菜单状态:')
         for item, style in menu_items.items():
             print(f'  {item}: {style}')
+        
+        # 检查 Data Status Panel
+        print()
+        print('检查 Data Status Panel...')
+        data_status_exists = await page.locator('#data-status-container').count()
+        print(f'Data Status Panel 元素数量: {data_status_exists}')
+        if data_status_exists > 0:
+            data_status = await page.locator('#data-status-container').inner_html()
+            print(f'Data Status Panel 内容: {data_status[:200]}...')
+        
+        # 检查页面源代码中是否有 data-status-container
+        page_content = await page.content()
+        has_data_status_in_html = 'id="data-status-container"' in page_content
+        print(f'页面源代码中有 data-status-container: {has_data_status_in_html}')
+        
+        # 检查服务端渲染的菜单初始状态
+        # Dashboard 菜单在服务端渲染时的初始 display 状态
+        dashboard_initial = 'style="display: block;"' in page_content or 'style="display:block;"' in page_content
+        print(f'服务端渲染的 Dashboard 初始状态: {dashboard_initial}')
+        
+        # 检查 cookies
+        cookies = await context.cookies()
+        print(f'Cookies: {[c for c in cookies if c["name"] == "session_token"]}')
         
         # 获取用户信息
         print()

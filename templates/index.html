@@ -36,7 +36,51 @@
             flex-direction: column;
             border-right: 1px solid #4b5259;
             z-index: 1000;
-            transition: transform 0.3s ease;
+            transition: width 0.3s ease, transform 0.3s ease;
+        }
+
+        /* Collapsed sidebar */
+        .sidebar.collapsed {
+            width: 60px;
+        }
+
+        .sidebar.collapsed .sidebar-header h4 span,
+        .sidebar.collapsed .nav-link span,
+        .sidebar.collapsed .sidebar-footer .lang-select-container,
+        .sidebar.collapsed .sidebar-footer .version-text,
+        .sidebar.collapsed .sidebar-footer .logout-btn-text,
+        .sidebar.collapsed .sidebar-footer .login-btn-text {
+            display: none;
+        }
+
+        .sidebar.collapsed .sidebar-header h4 {
+            text-align: center;
+        }
+
+        .sidebar.collapsed .nav-link {
+            justify-content: center;
+            padding: 12px;
+        }
+
+        .sidebar.collapsed .nav-link .bi {
+            margin-right: 0;
+        }
+
+        .sidebar.collapsed .sidebar-footer {
+            padding: 10px;
+        }
+
+        .sidebar.collapsed .sidebar-footer select {
+            display: none;
+        }
+
+        .sidebar.collapsed .sidebar-footer small {
+            display: none;
+        }
+
+        .sidebar.collapsed .sidebar-footer .btn {
+            padding: 6px;
+            font-size: 0.8rem;
         }
 
         .sidebar-header {
@@ -50,6 +94,40 @@
             font-size: 1.1rem;
         }
 
+        /* Sidebar toggle button */
+        .sidebar-toggle {
+            position: absolute;
+            top: 50%;
+            right: -12px;
+            transform: translateY(-50%);
+            width: 24px;
+            height: 24px;
+            background-color: var(--sidebar-bg);
+            border: 1px solid #4b5259;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--sidebar-text-muted);
+            transition: all 0.2s;
+            z-index: 1001;
+        }
+
+        .sidebar-toggle:hover {
+            background-color: #2b3035;
+            color: white;
+        }
+
+        .sidebar-toggle i {
+            font-size: 0.8rem;
+            transition: transform 0.3s ease;
+        }
+
+        .sidebar.collapsed .sidebar-toggle i {
+            transform: rotate(180deg);
+        }
+
         .sidebar-nav {
             flex: 1;
             padding: 10px 0;
@@ -60,6 +138,12 @@
 
         .sidebar-nav::-webkit-scrollbar {
             display: none; /* Chrome, Safari, Opera */
+        }
+
+        #sidebar-nav-bottom {
+            flex: none;
+            padding: 10px 0;
+            border-top: 1px solid #4b5259;
         }
 
         .nav-link {
@@ -596,6 +680,10 @@
 <body>
     <!-- Sidebar -->
     <nav class="sidebar" id="sidebar">
+        <!-- Sidebar toggle button -->
+        <button class="sidebar-toggle" id="sidebar-toggle" onclick="toggleSidebar()" title="Toggle sidebar">
+            <i class="bi bi-chevron-left"></i>
+        </button>
         <div class="sidebar-header">
             <h4><i class="bi bi-bar-chart-line"></i> <span id="sidebar-title">AI Token Analyzer</span></h4>
         </div>
@@ -653,28 +741,31 @@
             </a>
             {% endif %}
         </div>
-        <div class="sidebar-nav" id="sidebar-nav-bottom">
-            {% if is_authenticated %}
-            <a href="#" class="nav-link" id="nav-logout" onclick="handleLogout(); return false;" style="display: inline-block;">
-                <i class="bi bi-box-arrow-right"></i> <span id="nav-logout-text">Logout</span>
-            </a>
-            {% else %}
-            <a href="#" class="nav-link" id="nav-login" onclick="handleLogin(); return false;" style="display: inline-block;">
-                <i class="bi bi-box-arrow-in-right"></i> <span id="nav-login-text">Login</span>
-            </a>
-            {% endif %}
-        </div>
         <div class="sidebar-footer">
-            <!-- Data Status Panel -->
+            {% if is_admin %}
+            <!-- Data Status Panel - Admin only -->
             <div id="data-status-container" class="data-status-panel mb-2">
                 <small class="text-muted">Loading data status...</small>
             </div>
+            {% endif %}
             <!-- Language Selector -->
             <select class="form-select form-select-sm mb-2" id="lang-select" onchange="switchLang(this.value)" style="background-color: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; font-size: 0.8rem;">
                 <option value="en" style="color: #333;">English</option>
                 <option value="zh" style="color: #333;">中文</option>
             </select>
             <small class="d-block">Version: {{git_commit}}</small>
+            <!-- Logout/Login Button -->
+            <div class="mt-2">
+                {% if is_authenticated %}
+                <a href="#" class="btn btn-sm btn-outline-light w-100" id="nav-logout" onclick="handleLogout(); return false;">
+                    <i class="bi bi-box-arrow-right"></i> <span id="nav-logout-text">Logout</span>
+                </a>
+                {% else %}
+                <a href="#" class="btn btn-sm btn-outline-light w-100" id="nav-login" onclick="handleLogin(); return false;">
+                    <i class="bi bi-box-arrow-in-right"></i> <span id="nav-login-text">Login</span>
+                </a>
+                {% endif %}
+            </div>
         </div>
     </nav>
 
@@ -2518,6 +2609,38 @@
             const d = new Date();
             d.setDate(d.getDate() - days);
             return d.toISOString().split('T')[0];
+        }
+
+        // Sidebar toggle function
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const mainContent = document.getElementById('main-content');
+            const isCollapsed = sidebar.classList.toggle('collapsed');
+
+            // Update main content margin
+            if (isCollapsed) {
+                mainContent.style.marginLeft = '60px';
+                mainContent.style.width = 'calc(100% - 60px)';
+            } else {
+                mainContent.style.marginLeft = '';
+                mainContent.style.width = '';
+            }
+
+            // Save state to localStorage
+            localStorage.setItem('sidebar_collapsed', isCollapsed);
+        }
+
+        // Initialize sidebar state from localStorage
+        function initSidebarState() {
+            const isCollapsed = localStorage.getItem('sidebar_collapsed') === 'true';
+            const sidebar = document.getElementById('sidebar');
+            const mainContent = document.getElementById('main-content');
+
+            if (isCollapsed) {
+                sidebar.classList.add('collapsed');
+                mainContent.style.marginLeft = '60px';
+                mainContent.style.width = 'calc(100% - 60px)';
+            }
         }
 
         // Section switching function
@@ -4708,6 +4831,9 @@
 
         // Initialize on page load
         document.addEventListener('DOMContentLoaded', function() {
+            // Initialize sidebar state
+            initSidebarState();
+
             // Set initial text based on current language
             updatePaginationText();
             updateDashboardText();
@@ -4946,6 +5072,11 @@
             try {
                 const statusContainer = document.getElementById('data-status-container');
                 if (!statusContainer) return;
+
+                // Only update for admin users
+                if (!Auth.isAdmin()) {
+                    return;
+                }
 
                 // Show loading state for refresh button
                 const refreshBtn = statusContainer.querySelector('.refresh-btn');

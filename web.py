@@ -108,6 +108,7 @@ def index():
         if session_data:
             is_authenticated = True
             user_role = session_data.get('role', 'user')
+            print(f"[DEBUG index] token: {token[:20]}..., user_role: {user_role}, is_admin: {user_role == 'admin'}")
 
     # If not authenticated, show login page
     if not is_authenticated:

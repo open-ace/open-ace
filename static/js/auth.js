@@ -215,7 +215,7 @@ const Auth = (function() {
             // User is logged in
             if (loginLink) loginLink.style.display = 'none';
             if (profileLink) profileLink.style.display = 'inline-block';
-            if (logoutLink) logoutLink.style.display = 'inline-block';
+            if (logoutLink) logoutLink.style.display = 'block';  // Changed to block for button
             if (profileLink) profileLink.textContent = user.username;
 
             // Messages, Analysis, Management are admin-only
@@ -243,7 +243,7 @@ const Auth = (function() {
             }
         } else {
             // User is not logged in
-            if (loginLink) loginLink.style.display = 'inline-block';
+            if (loginLink) loginLink.style.display = 'block';  // Changed to block for button
             if (logoutLink) logoutLink.style.display = 'none';
             if (profileLink) profileLink.style.display = 'none';
 
