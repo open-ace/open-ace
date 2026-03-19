@@ -50,27 +50,16 @@
             font-size: 1.1rem;
         }
 
-        .lang-switch {
-            margin-top: 10px;
-            padding: 8px 15px;
-            background: rgba(255,255,255,0.1);
-            border: none;
-            border-radius: 4px;
-            color: white;
-            cursor: pointer;
-            font-size: 0.85rem;
-            width: 100%;
-            transition: background 0.2s;
-        }
-
-        .lang-switch:hover {
-            background: rgba(255,255,255,0.2);
-        }
-
         .sidebar-nav {
             flex: 1;
             padding: 10px 0;
             overflow-y: auto;
+            scrollbar-width: none; /* Firefox */
+            -ms-overflow-style: none; /* IE and Edge */
+        }
+
+        .sidebar-nav::-webkit-scrollbar {
+            display: none; /* Chrome, Safari, Opera */
         }
 
         .nav-link {
@@ -454,42 +443,6 @@
             100% { opacity: 1; }
         }
 
-        .data-status-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 6px;
-        }
-
-        .data-status-header .refresh-btn {
-            background: none;
-            border: none;
-            color: var(--sidebar-text-muted);
-            cursor: pointer;
-            padding: 2px 4px;
-            font-size: 0.7rem;
-            opacity: 0.7;
-            transition: opacity 0.2s;
-        }
-
-        .data-status-header .refresh-btn:hover {
-            opacity: 1;
-        }
-
-        .data-status-header .refresh-btn.loading {
-            opacity: 0.5;
-            pointer-events: none;
-        }
-
-        .data-status-header .refresh-btn.loading i {
-            animation: spin 1s linear infinite;
-        }
-
-        @keyframes spin {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
-        }
-
         /* Sortable table headers */
         .sortable {
             cursor: pointer;
@@ -712,12 +665,16 @@
             {% endif %}
         </div>
         <div class="sidebar-footer">
-            <button class="lang-switch" id="lang-switch-btn" onclick="switchLang(currentLang === 'en' ? 'zh' : 'en')">中文</button>
             <!-- Data Status Panel -->
-            <div id="data-status-container" class="data-status-panel mt-2">
+            <div id="data-status-container" class="data-status-panel mb-2">
                 <small class="text-muted">Loading data status...</small>
             </div>
-            <small class="d-block mt-2">Version: {{git_commit}}</small>
+            <!-- Language Selector -->
+            <select class="form-select form-select-sm mb-2" id="lang-select" onchange="switchLang(this.value)" style="background-color: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; font-size: 0.8rem;">
+                <option value="en" style="color: #333;">English</option>
+                <option value="zh" style="color: #333;">中文</option>
+            </select>
+            <small class="d-block">Version: {{git_commit}}</small>
         </div>
     </nav>
 
@@ -2035,10 +1992,10 @@
         // Switch language function
         function switchLang(lang) {
             currentLang = lang;
-            // Update button text
-            const langBtn = document.getElementById('lang-switch-btn');
-            if (langBtn) {
-                langBtn.textContent = lang === 'en' ? '中文' : 'English';
+            // Update language selector dropdown
+            const langSelect = document.getElementById('lang-select');
+            if (langSelect) {
+                langSelect.value = lang;
             }
             // Re-render sidebar navigation
             renderSidebarNav();
@@ -5000,15 +4957,7 @@
                 const response = await fetch(url);
                 const data = await response.json();
 
-                let html = `
-                    <div class="data-status-header">
-                        <small class="text-muted">Data Status</small>
-                        <button class="refresh-btn" onclick="refreshDataStatus()" title="Check remote hosts status">
-                            <i class="bi bi-arrow-repeat"></i>
-                        </button>
-                    </div>
-                    <div class="data-status-list">
-                `;
+                let html = `<div class="data-status-list">`;
 
                 for (const host of data.hosts) {
                     const lastUpdated = host.last_updated ? formatRelativeTime(host.last_updated) : 'N/A';
@@ -5028,10 +4977,6 @@
             } catch (error) {
                 console.error('Error updating data status:', error);
             }
-        }
-
-        async function refreshDataStatus() {
-            await updateDataStatus(true);
         }
 
         function formatRelativeTime(timestamp) {

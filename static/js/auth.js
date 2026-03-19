@@ -207,8 +207,9 @@ const Auth = (function() {
         const reportLink = document.getElementById('nav-report');
 
         const user = getCurrentUser();
+        const adminCheck = isAdmin();
 
-        console.log('[updateNavMenu] user:', user, 'isAuthenticated:', isAuthenticated());
+        console.log('[updateNavMenu] user:', user, 'isAuthenticated:', isAuthenticated(), 'isAdmin:', adminCheck);
 
         if (isAuthenticated() && user) {
             // User is logged in
@@ -217,7 +218,8 @@ const Auth = (function() {
             if (logoutLink) logoutLink.style.display = 'inline-block';
             if (profileLink) profileLink.textContent = user.username;
 
-            // Workspace and Report are visible to all users
+            // Workspace and Report are visible to all logged-in users
+            console.log('[updateNavMenu] Setting Workspace and Report to display: block');
             if (workspaceLink) workspaceLink.style.display = 'block';
             if (reportLink) reportLink.style.display = 'block';
 
@@ -227,14 +229,14 @@ const Auth = (function() {
             if (managementLink) managementLink.style.display = 'none';
 
             // Show admin-only menus if user is admin
-            if (isAdmin()) {
+            if (adminCheck) {
                 console.log('[updateNavMenu] User is admin, showing Dashboard, Messages, Analysis and Management');
                 if (dashboardLink) dashboardLink.style.display = 'block';
                 if (messagesLink) messagesLink.style.display = 'block';
                 if (analysisLink) analysisLink.style.display = 'block';
                 if (managementLink) managementLink.style.display = 'block';
             } else {
-                console.log('[updateNavMenu] User is not admin, hiding Dashboard, showing Workspace and Report');
+                console.log('[updateNavMenu] User is not admin, hiding Dashboard');
                 // Hide Dashboard for non-admin users
                 if (dashboardLink) dashboardLink.style.display = 'none';
             }

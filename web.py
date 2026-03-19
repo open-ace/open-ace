@@ -1193,6 +1193,10 @@ def api_data_status():
     added_hosts = set()
 
     # Add local host first
+    # For local host, use current time as last_updated since data is always real-time
+    from datetime import datetime, timezone
+    current_time = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+
     local_host_data = host_data_map.get(local_host_name) or host_data_map.get('localhost')
     if local_host_data:
         status['hosts'].append({
@@ -1201,7 +1205,7 @@ def api_data_status():
             'is_remote': False,
             'is_local': True,
             'status': 'online',
-            'last_updated': local_host_data.get('last_updated'),
+            'last_updated': current_time,  # Use current time for local host
             'usage_records': local_host_data.get('usage_records', 0),
             'message_records': local_host_data.get('message_records', 0)
         })
@@ -1215,7 +1219,7 @@ def api_data_status():
             'is_remote': False,
             'is_local': True,
             'status': 'online',
-            'last_updated': None,
+            'last_updated': current_time,  # Use current time for local host
             'usage_records': 0,
             'message_records': 0
         })
