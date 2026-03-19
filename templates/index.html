@@ -1417,6 +1417,7 @@
         {% if workspace_enabled %}
         <iframe src="{{ workspace_url }}/"
                 id="workspace-frame"
+                tabindex="0"
                 style="width: 100%; height: calc(100vh - 160px); border: none; display: block;">
         </iframe>
         {% else %}
@@ -2743,6 +2744,19 @@
             } else if (section === 'workspace') {
                 if (navWorkspace) navWorkspace.classList.add('active');
                 updateWorkspaceText();
+                // Focus the iframe to enable keyboard navigation inside it
+                setTimeout(() => {
+                    const iframe = document.getElementById('workspace-frame');
+                    if (iframe) {
+                        iframe.focus();
+                        // Also try to focus the iframe's content window
+                        try {
+                            iframe.contentWindow.focus();
+                        } catch (e) {
+                            // Cross-origin iframe may throw error, ignore
+                        }
+                    }
+                }, 100);
             } else if (section === 'report') {
                 if (navReport) navReport.classList.add('active');
                 updateReportText();

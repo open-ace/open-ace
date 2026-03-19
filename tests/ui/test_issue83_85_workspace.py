@@ -114,14 +114,19 @@ def test_issue83_85():
                 print("  ✗ workspace-section 没有 tabindex 属性")
                 results.append(("Issue 83: tabindex 属性存在", False, "未找到 tabindex"))
             
-            # 检查焦点是否在 workspace-section 上
+            # 检查焦点是否在 workspace-frame (iframe) 上
+            # 对于 iframe，焦点应该在 iframe 元素上，这样键盘操作才能传递到 iframe 内部
             focused_element = page.evaluate('document.activeElement.id')
-            if focused_element == 'workspace-section':
+            focused_tag = page.evaluate('document.activeElement.tagName')
+            if focused_element == 'workspace-frame' or focused_tag == 'IFRAME':
+                print("  ✓ workspace-frame (iframe) 已获得焦点，键盘操作可传递到 iframe 内部")
+                results.append(("Issue 83: 页面自动获得焦点", True, "焦点在 iframe 上"))
+            elif focused_element == 'workspace-section':
                 print("  ✓ workspace-section 已获得焦点")
                 results.append(("Issue 83: 页面自动获得焦点", True, ""))
             else:
                 # 焦点可能在其他元素上，但只要 tabindex 存在就说明功能已实现
-                print(f"  ! 当前焦点在: {focused_element} (焦点可能因其他操作而改变)")
+                print(f"  ! 当前焦点在: {focused_element} ({focused_tag})")
                 results.append(("Issue 83: 页面自动获得焦点", True, f"焦点在 {focused_element}，但 tabindex 已设置"))
             
             # 截图：最终状态
