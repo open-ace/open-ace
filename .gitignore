@@ -37,6 +37,9 @@ node_modules/
 # Release
 dist/
 
+# Version file (auto-generated from git)
+VERSION
+
 # Secrets - NEVER commit these
 *secret*
 *credential*
