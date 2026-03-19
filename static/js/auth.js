@@ -218,27 +218,28 @@ const Auth = (function() {
             if (logoutLink) logoutLink.style.display = 'inline-block';
             if (profileLink) profileLink.textContent = user.username;
 
-            // Workspace and Report are visible to all logged-in users
-            console.log('[updateNavMenu] Setting Workspace and Report to display: block');
-            if (workspaceLink) workspaceLink.style.display = 'block';
-            if (reportLink) reportLink.style.display = 'block';
-
             // Messages, Analysis, Management are admin-only
             if (messagesLink) messagesLink.style.display = 'none';
             if (analysisLink) analysisLink.style.display = 'none';
             if (managementLink) managementLink.style.display = 'none';
+            // Workspace and Report are for non-admin users only
+            if (workspaceLink) workspaceLink.style.display = 'none';
+            if (reportLink) reportLink.style.display = 'none';
 
-            // Show admin-only menus if user is admin
+            // Show menus based on user role
             if (adminCheck) {
+                // Admin: show Dashboard, Messages, Analysis, Management; hide Workspace, Report
                 console.log('[updateNavMenu] User is admin, showing Dashboard, Messages, Analysis and Management');
                 if (dashboardLink) dashboardLink.style.display = 'block';
                 if (messagesLink) messagesLink.style.display = 'block';
                 if (analysisLink) analysisLink.style.display = 'block';
                 if (managementLink) managementLink.style.display = 'block';
             } else {
-                console.log('[updateNavMenu] User is not admin, hiding Dashboard');
-                // Hide Dashboard for non-admin users
+                // Non-admin: show Workspace, Report; hide Dashboard, Messages, Analysis, Management
+                console.log('[updateNavMenu] User is not admin, showing Workspace and Report');
                 if (dashboardLink) dashboardLink.style.display = 'none';
+                if (workspaceLink) workspaceLink.style.display = 'block';
+                if (reportLink) reportLink.style.display = 'block';
             }
         } else {
             // User is not logged in
