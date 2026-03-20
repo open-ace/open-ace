@@ -748,14 +748,8 @@
                 <small class="text-muted">Loading data status...</small>
             </div>
             {% endif %}
-            <!-- Language Selector -->
-            <select class="form-select form-select-sm mb-2" id="lang-select" onchange="switchLang(this.value)" style="background-color: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; font-size: 0.8rem; text-align: center; text-align-last: center;">
-                <option value="en" style="color: #333;">English</option>
-                <option value="zh" style="color: #333;">中文</option>
-            </select>
-            <small class="d-block">Version: {{git_commit}}</small>
             <!-- Logout/Login Button -->
-            <div class="mt-2">
+            <div class="mb-2">
                 {% if is_authenticated %}
                 <a href="#" class="btn btn-sm btn-outline-light w-100" id="nav-logout" onclick="handleLogout(); return false;">
                     <i class="bi bi-box-arrow-right"></i> <span id="nav-logout-text">Logout</span>
@@ -766,6 +760,12 @@
                 </a>
                 {% endif %}
             </div>
+            <!-- Language Selector -->
+            <select class="form-select form-select-sm mb-2" id="lang-select" onchange="switchLang(this.value)" style="background-color: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; font-size: 0.8rem; text-align: center; text-align-last: center;">
+                <option value="en" style="color: #333;">English</option>
+                <option value="zh" style="color: #333;">中文</option>
+            </select>
+            <small class="d-block">Version: {{git_commit}}</small>
         </div>
     </nav>
 
