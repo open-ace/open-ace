@@ -691,7 +691,7 @@
     <!-- Sidebar -->
     <nav class="sidebar" id="sidebar">
         <!-- Sidebar toggle button -->
-        <button class="sidebar-toggle" id="sidebar-toggle" onclick="toggleSidebar()" title="Toggle sidebar">
+        <button class="sidebar-toggle" id="sidebar-toggle" onclick="toggleSidebar()" title="">
             <i class="bi bi-chevron-left"></i>
         </button>
         <div class="sidebar-header">
@@ -1760,6 +1760,7 @@
                 reportUsageByTool: 'Usage by Tool',
                 reportTokenUsage: 'Token Usage',
                 reportRequestChart: 'Request Chart',
+                date: 'Date',
                 analysisComingSoon: 'Analysis page coming soon',
                 managementComingSoon: 'Quota management coming soon',
                 securityComingSoon: 'Security settings coming soon',
@@ -1790,7 +1791,78 @@
                 // Column selector and fullscreen
                 columnSelectorText: 'Columns',
                 fullscreenText: 'Fullscreen',
-                exitFullscreenText: 'Exit Fullscreen'
+                exitFullscreenText: 'Exit Fullscreen',
+                // Title attributes
+                toggleSidebarTitle: 'Toggle sidebar',
+                editTitle: 'Edit',
+                resetPasswordTitle: 'Reset Password',
+                deleteTitle: 'Delete',
+                viewTimelineTitle: 'View Timeline',
+                viewLatencyCurveTitle: 'View Latency Curve',
+                // Placeholders
+                enterUsername: 'Enter username',
+                enterLinuxUsername: 'Enter Linux username',
+                enterPassword: 'Enter password',
+                confirmPassword: 'Confirm password',
+                enterEmail: 'Enter email',
+                egUser1: 'e.g., user1',
+                // Management page
+                noUsersFound: 'No users found',
+                errorLoadingUsers: 'Error loading users',
+                userNotFound: 'User not found',
+                userUpdatedSuccessfully: 'User updated successfully',
+                errorUpdatingUser: 'Error updating user',
+                failedToUpdateUser: 'Failed to update user',
+                enterNewPassword: 'Enter new password for',
+                leaveEmptyToAutoGenerate: '(leave empty to auto-generate)',
+                passwordResetSuccessfully: 'Password reset successfully',
+                newPassword: 'New password',
+                confirmDeleteUser: 'Are you sure you want to delete user',
+                userDeletedSuccessfully: 'User deleted successfully',
+                failedToDeleteUser: 'Failed to delete user',
+                // Quota page
+                totalQuota: 'Total Quota',
+                tokensAllocatedGlobally: 'Tokens allocated globally',
+                totalUsed: 'Total Used',
+                tokensConsumed: 'Tokens consumed',
+                userQuotaBreakdown: 'User Quota Breakdown',
+                noUserQuotaData: 'No user quota data',
+                errorLoadingQuotaUsage: 'Error loading quota usage',
+                remaining: 'Remaining',
+                // Analysis filters
+                analysisAllTools: 'All Tools',
+                analysisAllHosts: 'All Hosts',
+                // Date range
+                to: 'to',
+                // Loading states
+                loadingMessages: 'Loading messages...',
+                loadingTable: 'Loading...',
+                noAnomaliesDetected: 'No anomalies detected',
+                // Modal titles
+                editUserTitle: 'Edit User',
+                addNewUser: 'Add New User',
+                // Form labels
+                linuxAccount: 'Linux Account',
+                role: 'Role',
+                quotaTokens: 'Quota Tokens',
+                quotaRequests: 'Quota Requests',
+                isActive: 'Is Active',
+                yes: 'Yes',
+                no: 'No',
+                // Status
+                activeStatus: 'Active',
+                inactiveStatus: 'Inactive',
+                // Buttons
+                saveChanges: 'Save Changes',
+                addUser: 'Add User',
+                // Messages
+                usernameRequired: 'Username is required',
+                passwordRequired: 'Password is required',
+                passwordsDoNotMatch: 'Passwords do not match',
+                userCreatedSuccessfully: 'User created successfully',
+                failedToCreateUser: 'Failed to create user',
+                errorOccurred: 'An error occurred',
+                failedToResetPassword: 'Failed to reset password'
             },
             zh: {
                 sidebarTitle: 'AI Token Analyzer',
@@ -1960,6 +2032,7 @@
                 reportUsageByTool: '按工具用量',
                 reportTokenUsage: 'Token 用量',
                 reportRequestChart: '请求图表',
+                date: '日期',
                 analysisComingSoon: '分析页面即将推出',
                 managementComingSoon: '配额管理即将推出',
                 securityComingSoon: '安全设置即将推出',
@@ -1988,7 +2061,78 @@
                 // Column selector and fullscreen
                 columnSelectorText: '列选择',
                 fullscreenText: '全屏',
-                exitFullscreenText: '退出全屏'
+                exitFullscreenText: '退出全屏',
+                // Title attributes
+                toggleSidebarTitle: '切换侧边栏',
+                editTitle: '编辑',
+                resetPasswordTitle: '重置密码',
+                deleteTitle: '删除',
+                viewTimelineTitle: '查看时间线',
+                viewLatencyCurveTitle: '查看延迟曲线',
+                // Placeholders
+                enterUsername: '请输入用户名',
+                enterLinuxUsername: '请输入 Linux 用户名',
+                enterPassword: '请输入密码',
+                confirmPassword: '确认密码',
+                enterEmail: '请输入邮箱',
+                egUser1: '例如：user1',
+                // Management page
+                noUsersFound: '未找到用户',
+                errorLoadingUsers: '加载用户失败',
+                userNotFound: '用户不存在',
+                userUpdatedSuccessfully: '用户更新成功',
+                errorUpdatingUser: '更新用户出错',
+                failedToUpdateUser: '更新用户失败',
+                enterNewPassword: '请输入新密码',
+                leaveEmptyToAutoGenerate: '（留空则自动生成）',
+                passwordResetSuccessfully: '密码重置成功',
+                newPassword: '新密码',
+                confirmDeleteUser: '确定要删除用户',
+                userDeletedSuccessfully: '用户删除成功',
+                failedToDeleteUser: '删除用户失败',
+                // Quota page
+                totalQuota: '总配额',
+                tokensAllocatedGlobally: '全局分配的 Token',
+                totalUsed: '已使用总量',
+                tokensConsumed: '已消耗的 Token',
+                userQuotaBreakdown: '用户配额明细',
+                noUserQuotaData: '无用户配额数据',
+                errorLoadingQuotaUsage: '加载配额使用情况失败',
+                remaining: '剩余',
+                // Analysis filters
+                analysisAllTools: '全部工具',
+                analysisAllHosts: '全部主机',
+                // Date range
+                to: '至',
+                // Loading states
+                loadingMessages: '加载消息中...',
+                loadingTable: '加载中...',
+                noAnomaliesDetected: '未检测到异常',
+                // Modal titles
+                editUserTitle: '编辑用户',
+                addNewUser: '添加新用户',
+                // Form labels
+                linuxAccount: 'Linux 账号',
+                role: '角色',
+                quotaTokens: 'Token 配额',
+                quotaRequests: '请求配额',
+                isActive: '是否激活',
+                yes: '是',
+                no: '否',
+                // Status
+                activeStatus: '激活',
+                inactiveStatus: '停用',
+                // Buttons
+                saveChanges: '保存更改',
+                addUser: '添加用户',
+                // Messages
+                usernameRequired: '用户名不能为空',
+                passwordRequired: '密码不能为空',
+                passwordsDoNotMatch: '两次密码输入不一致',
+                userCreatedSuccessfully: '用户创建成功',
+                failedToCreateUser: '创建用户失败',
+                errorOccurred: '发生错误',
+                failedToResetPassword: '重置密码失败'
             }
         };
 
@@ -2105,6 +2249,12 @@
             updateSidebarText();
             // Update pagination text
             updatePaginationText();
+            // Update title attributes
+            updateTitleAttributes();
+            // Update placeholders
+            updatePlaceholders();
+            // Update management text
+            updateManagementText();
             // Update dashboard text if visible
             if (document.getElementById('dashboard-section').style.display !== 'none') {
                 updateDashboardText();
@@ -2133,6 +2283,33 @@
             if (document.getElementById('report-section').style.display !== 'none') {
                 updateReportText();
             }
+        }
+
+        // Update title attributes based on current language
+        function updateTitleAttributes() {
+            const sidebarToggle = document.getElementById('sidebar-toggle');
+            if (sidebarToggle) sidebarToggle.title = t('toggleSidebarTitle');
+        }
+
+        // Update placeholder attributes based on current language
+        function updatePlaceholders() {
+            const editLinuxAccount = document.getElementById('edit-linux-account');
+            if (editLinuxAccount) editLinuxAccount.placeholder = t('egUser1');
+
+            const addUsername = document.getElementById('add-username');
+            if (addUsername) addUsername.placeholder = t('enterUsername');
+
+            const addLinuxAccount = document.getElementById('add-linux-account');
+            if (addLinuxAccount) addLinuxAccount.placeholder = t('enterLinuxUsername');
+
+            const addPassword = document.getElementById('add-password');
+            if (addPassword) addPassword.placeholder = t('enterPassword');
+
+            const addConfirmPassword = document.getElementById('add-confirm-password');
+            if (addConfirmPassword) addConfirmPassword.placeholder = t('confirmPassword');
+
+            const addEmail = document.getElementById('add-email');
+            if (addEmail) addEmail.placeholder = t('enterEmail');
         }
 
         // Render sidebar navigation with translations
@@ -2187,6 +2364,22 @@
             if (quickDate30) quickDate30.textContent = t('quickDate30');
             if (quickDate90) quickDate90.textContent = t('quickDate90');
             if (quickDateAll) quickDateAll.textContent = t('quickDateAll');
+
+            // Update analysis filter dropdowns
+            const analysisToolFilter = document.getElementById('analysis-tool-filter');
+            const analysisHostFilter = document.getElementById('analysis-host-filter');
+            if (analysisToolFilter && analysisToolFilter.options[0]) {
+                analysisToolFilter.options[0].textContent = t('analysisAllTools');
+            }
+            if (analysisHostFilter && analysisHostFilter.options[0]) {
+                analysisHostFilter.options[0].textContent = t('analysisAllHosts');
+            }
+
+            // Update "to" text in date range
+            const dateRangeTo = document.querySelector('#analysis-section .input-group-text');
+            if (dateRangeTo && dateRangeTo.textContent === 'to') {
+                dateRangeTo.textContent = t('to');
+            }
         }
 
         // Update management text based on current language
@@ -2229,7 +2422,7 @@
                     usersData = data.users || [];
 
                     if (usersData.length === 0) {
-                        tableBody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">No users found</td></tr>';
+                        tableBody.innerHTML = `<tr><td colspan="8" class="text-center text-muted">${t('noUsersFound')}</td></tr>`;
                         return;
                     }
 
@@ -2245,11 +2438,11 @@
                                 <td>${escapeHtmlForDisplay(user.linux_account || '')}</td>
                                 <td><span class="${roleClass}">${user.role}</span></td>
                                 <td>${formatTokens(user.quota_tokens || 0)}</td>
-                                <td><span class="${statusClass}">${user.is_active ? 'Active' : 'Inactive'}</span></td>
+                                <td><span class="${statusClass}">${user.is_active ? t('activeStatus') : t('inactiveStatus')}</span></td>
                                 <td>
-                                    <button class="btn btn-sm btn-warning" onclick="Admin.editUser(${user.id})" title="Edit"><i class="bi bi-pencil"></i></button>
-                                    <button class="btn btn-sm btn-info" onclick="Admin.resetPassword(${user.id})" title="Reset Password"><i class="bi bi-key"></i></button>
-                                    <button class="btn btn-sm btn-danger" onclick="Admin.deleteUser(${user.id})" title="Delete"><i class="bi bi-trash"></i></button>
+                                    <button class="btn btn-sm btn-warning" onclick="Admin.editUser(${user.id})" title="${t('editTitle')}"><i class="bi bi-pencil"></i></button>
+                                    <button class="btn btn-sm btn-info" onclick="Admin.resetPassword(${user.id})" title="${t('resetPasswordTitle')}"><i class="bi bi-key"></i></button>
+                                    <button class="btn btn-sm btn-danger" onclick="Admin.deleteUser(${user.id})" title="${t('deleteTitle')}"><i class="bi bi-trash"></i></button>
                                 </td>
                             </tr>
                         `;
@@ -2257,7 +2450,7 @@
                     tableBody.innerHTML = html;
                 } catch (error) {
                     console.error('Error rendering users table:', error);
-                    tableBody.innerHTML = '<tr><td colspan="8" class="text-center text-danger">Error loading users</td></tr>';
+                    tableBody.innerHTML = `<tr><td colspan="8" class="text-center text-danger">${t('errorLoadingUsers')}</td></tr>`;
                 }
             }
 
@@ -2284,34 +2477,34 @@
                         <div class="col-md-6">
                             <div class="card">
                                 <div class="card-body">
-                                    <h6 class="card-subtitle mb-2">Total Quota</h6>
+                                    <h6 class="card-subtitle mb-2">${t('totalQuota')}</h6>
                                     <h3 class="text-primary">${formatTokens(usage.total_quota || 0)}</h3>
-                                    <small class="text-muted">Tokens allocated globally</small>
+                                    <small class="text-muted">${t('tokensAllocatedGlobally')}</small>
                                 </div>
                             </div>
                         </div>
                         <div class="col-md-6">
                             <div class="card">
                                 <div class="card-body">
-                                    <h6 class="card-subtitle mb-2">Total Used</h6>
+                                    <h6 class="card-subtitle mb-2">${t('totalUsed')}</h6>
                                     <h3 class="text-success">${formatTokens(usage.total_used || 0)}</h3>
-                                    <small class="text-muted">Tokens consumed</small>
+                                    <small class="text-muted">${t('tokensConsumed')}</small>
                                 </div>
                             </div>
                         </div>
                     </div>`;
 
                     // User quota breakdown
-                    html += '<h5 class="mt-4">User Quota Breakdown</h5><div class="table-responsive mt-3"><table class="table table-sm table-hover"><thead class="table-light"><tr><th>User</th><th>Quota</th><th>Used</th><th>Remaining</th></tr></thead><tbody>';
+                    html += `<h5 class="mt-4">${t('userQuotaBreakdown')}</h5><div class="table-responsive mt-3"><table class="table table-sm table-hover"><thead class="table-light"><tr><th>${t('rankingUser')}</th><th>${t('quotaTokens')}</th><th>${t('totalUsed')}</th><th>${t('remaining')}</th></tr></thead><tbody>`;
 
                     const userQuotas = usage.user_quotas || [];
                     if (userQuotas.length === 0) {
-                        html += '<tr><td colspan="4" class="text-center text-muted">No user quota data</td></tr>';
+                        html += `<tr><td colspan="4" class="text-center text-muted">${t('noUserQuotaData')}</td></tr>`;
                     } else {
                         userQuotas.forEach(uq => {
                             const remaining = (uq.quota || 0) - (uq.used || 0);
                             html += `<tr>
-                                <td>${escapeHtmlForDisplay(uq.username || 'Unknown')}</td>
+                                <td>${escapeHtmlForDisplay(uq.username || t('unknown'))}</td>
                                 <td>${formatTokens(uq.quota || 0)}</td>
                                 <td>${formatTokens(uq.used || 0)}</td>
                                 <td class="${remaining < 0 ? 'text-danger' : 'text-success'}">${formatTokens(remaining)}</td>
@@ -2323,7 +2516,7 @@
                     container.innerHTML = html;
                 } catch (error) {
                     console.error('Error rendering quota usage:', error);
-                    container.innerHTML = '<div class="text-center text-muted">Error loading quota usage</div>';
+                    container.innerHTML = `<div class="text-center text-muted">${t('errorLoadingQuotaUsage')}</div>`;
                 }
             }
 
@@ -2331,7 +2524,7 @@
             function editUser(userId) {
                 const user = usersData.find(u => u.id === userId);
                 if (!user) {
-                    alert('User not found');
+                    alert(t('userNotFound'));
                     return;
                 }
 
@@ -2385,13 +2578,13 @@
                         modal.hide();
                         // Refresh table
                         await renderUsersTable();
-                        alert('User updated successfully');
+                        alert(t('userUpdatedSuccessfully'));
                     } else {
-                        alert('Error: ' + (data.error || 'Failed to update user'));
+                        alert(t('errorUpdatingUser') + ': ' + (data.error || t('failedToUpdateUser')));
                     }
                 } catch (error) {
                     console.error('Error updating user:', error);
-                    alert('Error updating user: ' + error.message);
+                    alert(t('errorUpdatingUser') + ': ' + error.message);
                 }
             }
 
@@ -2399,11 +2592,11 @@
             async function resetPassword(userId) {
                 const user = usersData.find(u => u.id === userId);
                 if (!user) {
-                    alert('User not found');
+                    alert(t('userNotFound'));
                     return;
                 }
 
-                const newPassword = prompt(`Enter new password for ${user.username} (leave empty to auto-generate):`);
+                const newPassword = prompt(`${t('enterNewPassword')} ${user.username} ${t('leaveEmptyToAutoGenerate')}`);
 
                 if (newPassword === null) {
                     // User cancelled
@@ -2425,13 +2618,13 @@
                     const data = await response.json();
 
                     if (response.ok) {
-                        alert(`Password reset successfully!\n\nNew password for ${user.username}: ${data.new_password}\n\nPlease save this password as it won't be shown again.`);
+                        alert(`${t('passwordResetSuccessfully')}\n\n${t('newPassword')} ${user.username}: ${data.new_password}`);
                     } else {
-                        alert('Error: ' + (data.error || 'Failed to reset password'));
+                        alert(t('errorOccurred') + ': ' + (data.error || t('failedToResetPassword')));
                     }
                 } catch (error) {
                     console.error('Error resetting password:', error);
-                    alert('Error resetting password: ' + error.message);
+                    alert(t('errorOccurred') + ': ' + error.message);
                 }
             }
 
@@ -2439,11 +2632,11 @@
             async function deleteUser(userId) {
                 const user = usersData.find(u => u.id === userId);
                 if (!user) {
-                    alert('User not found');
+                    alert(t('userNotFound'));
                     return;
                 }
 
-                if (!confirm(`Are you sure you want to delete user "${user.username}"? This action cannot be undone.`)) {
+                if (!confirm(`${t('confirmDeleteUser')} "${user.username}"?`)) {
                     return;
                 }
 
@@ -2459,13 +2652,13 @@
 
                     if (response.ok) {
                         await renderUsersTable();
-                        alert('User deleted successfully');
+                        alert(t('userDeletedSuccessfully'));
                     } else {
-                        alert('Error: ' + (data.error || 'Failed to delete user'));
+                        alert(t('errorOccurred') + ': ' + (data.error || t('failedToDeleteUser')));
                     }
                 } catch (error) {
                     console.error('Error deleting user:', error);
-                    alert('Error deleting user: ' + error.message);
+                    alert(t('errorOccurred') + ': ' + error.message);
                 }
             }
 
@@ -2503,7 +2696,7 @@
                 const isActive = document.getElementById('add-is-active').value === '1' ? 1 : 0;
 
                 if (!username || !password) {
-                    alert('Username and password are required');
+                    alert(t('usernameRequired') + ' / ' + t('passwordRequired'));
                     return;
                 }
 
@@ -2541,13 +2734,13 @@
                         modal.hide();
                         // Refresh table
                         await renderUsersTable();
-                        alert('User created successfully');
+                        alert(t('userCreatedSuccessfully'));
                     } else {
-                        alert('Error: ' + (data.error || 'Failed to create user'));
+                        alert(t('errorOccurred') + ': ' + (data.error || t('failedToCreateUser')));
                     }
                 } catch (error) {
                     console.error('Error creating user:', error);
-                    alert('Error creating user: ' + error.message);
+                    alert(t('errorOccurred') + ': ' + error.message);
                 }
             }
 
@@ -5526,8 +5719,8 @@
                 `;
                 summaryContainer.innerHTML = html;
 
-                // Load usage by tool charts
-                loadReportCharts(data.usage_by_tool || []);
+                // Load usage by day charts
+                loadReportCharts(data.usage_by_day || []);
             } catch (error) {
                 console.error('Error loading report:', error);
                 summaryContainer.innerHTML = `<div class="col-12 text-center text-danger">Error loading report: ${escapeHtmlForDisplay(error.message)}</div>`;
@@ -5538,22 +5731,27 @@
         let reportTokenUsageChart = null;
         let reportRequestChart = null;
 
-        function loadReportCharts(toolData) {
-            const toolNames = toolData.map(d => d.tool_name || 'Unknown');
-            const tokenValues = toolData.map(d => d.total_tokens || 0);
-            const requestValues = toolData.map(d => d.total_requests || 0);
+        function loadReportCharts(dayData) {
+            // Extract dates, tokens and requests from daily data
+            const dates = dayData.map(d => d.date || '');
+            const tokenValues = dayData.map(d => d.total_tokens || 0);
+            const requestValues = dayData.map(d => d.total_requests || 0);
 
-            // Color palette for tools
-            const getToolColors = (name) => {
-                if (name === 'claude') return { bg: 'rgba(75, 192, 192, 0.6)', border: 'rgba(75, 192, 192, 1)' };
-                if (name === 'qwen') return { bg: 'rgba(54, 162, 235, 0.6)', border: 'rgba(54, 162, 235, 1)' };
-                return { bg: 'rgba(255, 99, 132, 0.6)', border: 'rgba(255, 99, 132, 1)' };
+            // Format dates for display (MM-DD)
+            const formatDate = (dateStr) => {
+                if (!dateStr) return '';
+                const parts = dateStr.split('-');
+                return parts.length >= 3 ? `${parts[1]}-${parts[2]}` : dateStr;
             };
+            const formattedDates = dates.map(formatDate);
 
-            const backgroundColors = toolNames.map(name => getToolColors(name).bg);
-            const borderColors = toolNames.map(name => getToolColors(name).border);
+            // Chart colors
+            const tokenBgColor = 'rgba(75, 192, 192, 0.6)';
+            const tokenBorderColor = 'rgba(75, 192, 192, 1)';
+            const requestBgColor = 'rgba(54, 162, 235, 0.6)';
+            const requestBorderColor = 'rgba(54, 162, 235, 1)';
 
-            // Token Usage Chart
+            // Token Usage Chart - Y axis in K (thousands), no decimals
             const tokenCtx = document.getElementById('reportTokenUsageChart');
             if (tokenCtx) {
                 if (reportTokenUsageChart) {
@@ -5562,12 +5760,12 @@
                 reportTokenUsageChart = new Chart(tokenCtx, {
                     type: 'bar',
                     data: {
-                        labels: toolNames,
+                        labels: formattedDates,
                         datasets: [{
                             label: t('reportTokenUsage') || 'Token Usage',
                             data: tokenValues,
-                            backgroundColor: backgroundColors,
-                            borderColor: borderColors,
+                            backgroundColor: tokenBgColor,
+                            borderColor: tokenBorderColor,
                             borderWidth: 1
                         }]
                     },
@@ -5586,11 +5784,23 @@
                             }
                         },
                         scales: {
+                            x: {
+                                title: {
+                                    display: true,
+                                    text: t('date') || 'Date'
+                                }
+                            },
                             y: {
                                 beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Tokens (K)'
+                                },
                                 ticks: {
                                     callback: function(value) {
-                                        return formatTokens(value) + 't';
+                                        // Convert to K (thousands), no decimals
+                                        const kValue = value / 1000;
+                                        return Math.round(kValue) + 'K';
                                     }
                                 }
                             }
@@ -5608,12 +5818,12 @@
                 reportRequestChart = new Chart(requestCtx, {
                     type: 'bar',
                     data: {
-                        labels: toolNames,
+                        labels: formattedDates,
                         datasets: [{
                             label: t('reportRequestChart') || 'Request Chart',
                             data: requestValues,
-                            backgroundColor: backgroundColors,
-                            borderColor: borderColors,
+                            backgroundColor: requestBgColor,
+                            borderColor: requestBorderColor,
                             borderWidth: 1
                         }]
                     },
@@ -5632,6 +5842,12 @@
                             }
                         },
                         scales: {
+                            x: {
+                                title: {
+                                    display: true,
+                                    text: t('date') || 'Date'
+                                }
+                            },
                             y: {
                                 beginAtZero: true,
                                 ticks: {

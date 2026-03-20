@@ -6,7 +6,7 @@
     <title>AI Token Analyzer - Login</title>
     <script src="/static/js/Chart.min.js"></script>
     <link href="/static/css/bootstrap.min.css" rel="stylesheet">
-    <link href="/static/css/bootstrap-icons.css" rel="stylesheet">
+    <link href="/static/css/bootstrap-icons.css">
     <style>
         :root {
             --primary-color: #667eea;
@@ -161,13 +161,41 @@
             font-size: 12px;
             color: #666;
         }
+
+        .lang-selector-container {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+        }
+
+        .lang-selector {
+            background: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 6px;
+            padding: 6px 12px;
+            color: white;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        .lang-selector option {
+            color: #333;
+        }
     </style>
 </head>
 <body>
+    <!-- Language Selector -->
+    <div class="lang-selector-container">
+        <select class="lang-selector" id="lang-select" onchange="switchLang(this.value)">
+            <option value="en">English</option>
+            <option value="zh">中文</option>
+        </select>
+    </div>
+
     <div class="login-container">
         <div class="login-header">
             <h1><i class="bi bi-bar-chart-line"></i> AI Token Analyzer</h1>
-            <p>Please sign in to continue</p>
+            <p id="login-subtitle">Please sign in to continue</p>
         </div>
 
         <div id="error-message" class="error-message"></div>
@@ -175,24 +203,24 @@
 
         <form id="login-form">
             <div class="form-group">
-                <label for="username">Username</label>
-                <input type="text" id="username" name="username" placeholder="Enter your username" required autofocus>
+                <label for="username" id="username-label">Username</label>
+                <input type="text" id="username" name="username" placeholder="" required autofocus>
             </div>
 
             <div class="form-group">
-                <label for="password">Password</label>
-                <input type="password" id="password" name="password" placeholder="Enter your password" required>
+                <label for="password" id="password-label">Password</label>
+                <input type="password" id="password" name="password" placeholder="" required>
             </div>
 
             <button type="submit" class="btn-login" id="login-btn">
-                Sign In
+                <span id="login-btn-text">Sign In</span>
             </button>
         </form>
 
         {% if show_default_credentials %}
-        <div class="form-footer">
-            <p>Default admin credentials: <strong>admin / admin123</strong></p>
-            <p>Change the default password after first login!</p>
+        <div class="form-footer" id="default-credentials-notice">
+            <p id="default-credentials-text">Default admin credentials: <strong>admin / admin123</strong></p>
+            <p id="change-password-notice">Change the default password after first login!</p>
         </div>
         {% endif %}
 
@@ -203,9 +231,85 @@
 
     <script src="/static/js/auth.js"></script>
     <script>
+        // i18n translations for login page
+        const i18n = {
+            en: {
+                loginSubtitle: 'Please sign in to continue',
+                usernameLabel: 'Username',
+                passwordLabel: 'Password',
+                usernamePlaceholder: 'Enter your username',
+                passwordPlaceholder: 'Enter your password',
+                signInBtn: 'Sign In',
+                signingIn: 'Signing in...',
+                loginSuccess: 'Login successful! Redirecting...',
+                invalidCredentials: 'Invalid username or password',
+                errorOccurred: 'An error occurred',
+                defaultCredentials: 'Default admin credentials:',
+                changePasswordNotice: 'Change the default password after first login!'
+            },
+            zh: {
+                loginSubtitle: '请登录以继续',
+                usernameLabel: '用户名',
+                passwordLabel: '密码',
+                usernamePlaceholder: '请输入用户名',
+                passwordPlaceholder: '请输入密码',
+                signInBtn: '登录',
+                signingIn: '登录中...',
+                loginSuccess: '登录成功！正在跳转...',
+                invalidCredentials: '用户名或密码错误',
+                errorOccurred: '发生错误',
+                defaultCredentials: '默认管理员账号：',
+                changePasswordNotice: '首次登录后请修改默认密码！'
+            }
+        };
+
+        // Current language
+        let currentLang = localStorage.getItem('ai_token_lang') || 'en';
+
+        // Get translation
+        function t(key) {
+            return i18n[currentLang][key] || i18n['en'][key] || key;
+        }
+
+        // Switch language
+        function switchLang(lang) {
+            currentLang = lang;
+            localStorage.setItem('ai_token_lang', lang);
+            updatePageText();
+        }
+
+        // Update page text based on current language
+        function updatePageText() {
+            document.getElementById('login-subtitle').textContent = t('loginSubtitle');
+            document.getElementById('username-label').textContent = t('usernameLabel');
+            document.getElementById('password-label').textContent = t('passwordLabel');
+            document.getElementById('username').placeholder = t('usernamePlaceholder');
+            document.getElementById('password').placeholder = t('passwordPlaceholder');
+            document.getElementById('login-btn-text').textContent = t('signInBtn');
+
+            // Update default credentials notice if visible
+            const defaultCredentialsText = document.getElementById('default-credentials-text');
+            const changePasswordNotice = document.getElementById('change-password-notice');
+            if (defaultCredentialsText) {
+                defaultCredentialsText.innerHTML = t('defaultCredentials') + ' <strong>admin / admin123</strong>';
+            }
+            if (changePasswordNotice) {
+                changePasswordNotice.textContent = t('changePasswordNotice');
+            }
+
+            // Update language selector
+            document.getElementById('lang-select').value = currentLang;
+        }
+
+        // Initialize on page load
         document.addEventListener('DOMContentLoaded', function() {
+            // Set initial language
+            document.getElementById('lang-select').value = currentLang;
+            updatePageText();
+
             const loginForm = document.getElementById('login-form');
             const loginBtn = document.getElementById('login-btn');
+            const loginBtnText = document.getElementById('login-btn-text');
             const errorMessage = document.getElementById('error-message');
             const successMessage = document.getElementById('success-message');
 
@@ -224,7 +328,7 @@
 
                 // Show loading state
                 loginBtn.disabled = true;
-                loginBtn.innerHTML = '<span class="loading"></span> Signing in...';
+                loginBtnText.innerHTML = '<span class="loading"></span> ' + t('signingIn');
 
                 try {
                     console.log('Attempting login for:', username);
@@ -233,7 +337,7 @@
 
                     if (result.success) {
                         console.log('Login successful, waiting for auth init...');
-                        successMessage.textContent = 'Login successful! Redirecting...';
+                        successMessage.textContent = t('loginSuccess');
                         successMessage.classList.add('show');
 
                         // Wait for auth initialization to complete
@@ -255,16 +359,16 @@
                         }, 500);
                     } else {
                         console.error('Login failed:', result.error);
-                        errorMessage.textContent = result.error || 'Invalid username or password';
+                        errorMessage.textContent = result.error || t('invalidCredentials');
                         errorMessage.classList.add('show');
                     }
                 } catch (error) {
                     console.error('Login error:', error);
-                    errorMessage.textContent = 'An error occurred: ' + error.message;
+                    errorMessage.textContent = t('errorOccurred') + ': ' + error.message;
                     errorMessage.classList.add('show');
                 } finally {
                     loginBtn.disabled = false;
-                    loginBtn.innerHTML = 'Sign In';
+                    loginBtnText.textContent = t('signInBtn');
                 }
             });
         });

@@ -6,7 +6,7 @@
     <title>AI Token Analyzer - Logged Out</title>
     <script src="/static/js/Chart.min.js"></script>
     <link href="/static/css/bootstrap.min.css" rel="stylesheet">
-    <link href="/static/css/bootstrap-icons.css" rel="stylesheet">
+    <link href="/static/css/bootstrap-icons.css">
     <style>
         body {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -64,21 +64,93 @@
             color: #667eea;
             margin-top: 20px;
         }
+
+        .lang-selector-container {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+        }
+
+        .lang-selector {
+            background: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 6px;
+            padding: 6px 12px;
+            color: white;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        .lang-selector option {
+            color: #333;
+        }
     </style>
 </head>
 <body>
+    <!-- Language Selector -->
+    <div class="lang-selector-container">
+        <select class="lang-selector" id="lang-select" onchange="switchLang(this.value)">
+            <option value="en">English</option>
+            <option value="zh">中文</option>
+        </select>
+    </div>
+
     <div class="logout-container">
         <div class="logout-icon">
             <i class="bi bi-box-arrow-right"></i>
         </div>
-        <h1 class="logout-title">Logged Out Successfully</h1>
-        <p class="logout-message">You have been logged out of AI Token Analyzer.</p>
-        <button class="btn-primary" onclick="window.location.href='/login'">Go to Login</button>
-        <p class="redirecting">Redirecting to login page...</p>
+        <h1 class="logout-title" id="logout-title">Logged Out Successfully</h1>
+        <p class="logout-message" id="logout-message">You have been logged out of AI Token Analyzer.</p>
+        <button class="btn-primary" id="go-to-login-btn" onclick="window.location.href='/login'">Go to Login</button>
+        <p class="redirecting" id="redirecting-text">Redirecting to login page...</p>
     </div>
 
     <script>
+        // i18n translations for logout page
+        const i18n = {
+            en: {
+                logoutTitle: 'Logged Out Successfully',
+                logoutMessage: 'You have been logged out of AI Token Analyzer.',
+                goToLogin: 'Go to Login',
+                redirecting: 'Redirecting to login page...'
+            },
+            zh: {
+                logoutTitle: '已成功退出登录',
+                logoutMessage: '您已退出 AI Token Analyzer。',
+                goToLogin: '前往登录',
+                redirecting: '正在跳转到登录页面...'
+            }
+        };
+
+        // Current language
+        let currentLang = localStorage.getItem('ai_token_lang') || 'en';
+
+        // Get translation
+        function t(key) {
+            return i18n[currentLang][key] || i18n['en'][key] || key;
+        }
+
+        // Switch language
+        function switchLang(lang) {
+            currentLang = lang;
+            localStorage.setItem('ai_token_lang', lang);
+            updatePageText();
+        }
+
+        // Update page text based on current language
+        function updatePageText() {
+            document.getElementById('logout-title').textContent = t('logoutTitle');
+            document.getElementById('logout-message').textContent = t('logoutMessage');
+            document.getElementById('go-to-login-btn').textContent = t('goToLogin');
+            document.getElementById('redirecting-text').textContent = t('redirecting');
+            document.getElementById('lang-select').value = currentLang;
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
+            // Set initial language
+            document.getElementById('lang-select').value = currentLang;
+            updatePageText();
+
             // Clear session storage
             sessionStorage.clear();
             localStorage.clear();
