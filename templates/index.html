@@ -1564,10 +1564,22 @@
                 <p class="mt-2">Loading your usage report...</p>
             </div>
         </div>
-        <div class="card mt-4">
-            <div class="card-body">
-                <h5 class="card-title">Usage by Tool</h5>
-                <canvas id="reportByToolChart"></canvas>
+        <div class="row mt-4">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title" id="token-usage-title">Token Usage</h5>
+                        <canvas id="reportTokenUsageChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title" id="request-chart-title">Request Chart</h5>
+                        <canvas id="reportRequestChart"></canvas>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -1746,6 +1758,8 @@
                 reportTotalTokens: 'Total Tokens',
                 reportTotalRequests: 'Total Requests',
                 reportUsageByTool: 'Usage by Tool',
+                reportTokenUsage: 'Token Usage',
+                reportRequestChart: 'Request Chart',
                 analysisComingSoon: 'Analysis page coming soon',
                 managementComingSoon: 'Quota management coming soon',
                 securityComingSoon: 'Security settings coming soon',
@@ -1944,6 +1958,8 @@
                 reportTotalTokens: '总 Token',
                 reportTotalRequests: '总请求',
                 reportUsageByTool: '按工具用量',
+                reportTokenUsage: 'Token 用量',
+                reportRequestChart: '请求图表',
                 analysisComingSoon: '分析页面即将推出',
                 managementComingSoon: '配额管理即将推出',
                 securityComingSoon: '安全设置即将推出',
@@ -2112,6 +2128,10 @@
                 if (fullscreenBtnText) fullscreenBtnText.textContent = isConversationHistoryFullscreen ? t('exitFullscreenText') : t('fullscreenText');
                 // Re-initialize column selector with new translations
                 initColumnSelector();
+            }
+            // Update report text if visible
+            if (document.getElementById('report-section').style.display !== 'none') {
+                updateReportText();
             }
         }
 
@@ -2554,8 +2574,12 @@
         function updateReportText() {
             const reportTitle = document.getElementById('report-title');
             const navReportText = document.getElementById('nav-report-text');
+            const tokenUsageTitle = document.getElementById('token-usage-title');
+            const requestChartTitle = document.getElementById('request-chart-title');
             if (navReportText) navReportText.textContent = t('reportText');
             if (reportTitle) reportTitle.textContent = t('reportText');
+            if (tokenUsageTitle) tokenUsageTitle.textContent = t('reportTokenUsage');
+            if (requestChartTitle) requestChartTitle.textContent = t('reportRequestChart');
         }
 
         // Store summary data for reuse to avoid duplicate API calls
@@ -5502,75 +5526,124 @@
                 `;
                 summaryContainer.innerHTML = html;
 
-                // Load usage by tool chart
-                loadReportByToolChart(data.usage_by_tool || []);
+                // Load usage by tool charts
+                loadReportCharts(data.usage_by_tool || []);
             } catch (error) {
                 console.error('Error loading report:', error);
                 summaryContainer.innerHTML = `<div class="col-12 text-center text-danger">Error loading report: ${escapeHtmlForDisplay(error.message)}</div>`;
             }
         }
 
-        // Load usage by tool chart for report page
-        let reportByToolChart = null;
+        // Load charts for report page
+        let reportTokenUsageChart = null;
+        let reportRequestChart = null;
 
-        function loadReportByToolChart(toolData) {
-            const ctx = document.getElementById('reportByToolChart');
-            if (!ctx) return;
-
-            // Clear previous chart
-            if (reportByToolChart) {
-                reportByToolChart.destroy();
-            }
-
+        function loadReportCharts(toolData) {
             const toolNames = toolData.map(d => d.tool_name || 'Unknown');
             const tokenValues = toolData.map(d => d.total_tokens || 0);
+            const requestValues = toolData.map(d => d.total_requests || 0);
 
-            reportByToolChart = new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: toolNames,
-                    datasets: [{
-                        label: t('reportUsageByTool') || 'Usage by Tool',
-                        data: tokenValues,
-                        backgroundColor: toolNames.map(name => {
-                            if (name === 'claude') return 'rgba(75, 192, 192, 0.6)';
-                            if (name === 'qwen') return 'rgba(54, 162, 235, 0.6)';
-                            return 'rgba(255, 99, 132, 0.6)';
-                        }),
-                        borderColor: toolNames.map(name => {
-                            if (name === 'claude') return 'rgba(75, 192, 192, 1)';
-                            if (name === 'qwen') return 'rgba(54, 162, 235, 1)';
-                            return 'rgba(255, 99, 132, 1)';
-                        }),
-                        borderWidth: 1
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    plugins: {
-                        legend: {
-                            display: false
-                        },
-                        tooltip: {
-                            callbacks: {
-                                label: function(context) {
-                                    return formatTokens(context.raw) + ' tokens';
+            // Color palette for tools
+            const getToolColors = (name) => {
+                if (name === 'claude') return { bg: 'rgba(75, 192, 192, 0.6)', border: 'rgba(75, 192, 192, 1)' };
+                if (name === 'qwen') return { bg: 'rgba(54, 162, 235, 0.6)', border: 'rgba(54, 162, 235, 1)' };
+                return { bg: 'rgba(255, 99, 132, 0.6)', border: 'rgba(255, 99, 132, 1)' };
+            };
+
+            const backgroundColors = toolNames.map(name => getToolColors(name).bg);
+            const borderColors = toolNames.map(name => getToolColors(name).border);
+
+            // Token Usage Chart
+            const tokenCtx = document.getElementById('reportTokenUsageChart');
+            if (tokenCtx) {
+                if (reportTokenUsageChart) {
+                    reportTokenUsageChart.destroy();
+                }
+                reportTokenUsageChart = new Chart(tokenCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: toolNames,
+                        datasets: [{
+                            label: t('reportTokenUsage') || 'Token Usage',
+                            data: tokenValues,
+                            backgroundColor: backgroundColors,
+                            borderColor: borderColors,
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            legend: {
+                                display: false
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        return formatTokens(context.raw) + ' tokens';
+                                    }
                                 }
                             }
-                        }
-                    },
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            ticks: {
-                                callback: function(value) {
-                                    return formatTokens(value) + 't';
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                ticks: {
+                                    callback: function(value) {
+                                        return formatTokens(value) + 't';
+                                    }
                                 }
                             }
                         }
                     }
+                });
+            }
+
+            // Request Chart
+            const requestCtx = document.getElementById('reportRequestChart');
+            if (requestCtx) {
+                if (reportRequestChart) {
+                    reportRequestChart.destroy();
                 }
-            });
+                reportRequestChart = new Chart(requestCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: toolNames,
+                        datasets: [{
+                            label: t('reportRequestChart') || 'Request Chart',
+                            data: requestValues,
+                            backgroundColor: backgroundColors,
+                            borderColor: borderColors,
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            legend: {
+                                display: false
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        return context.raw + ' requests';
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                ticks: {
+                                    callback: function(value) {
+                                        return value;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            }
         }
         
         // Handle window resize to adjust layout
