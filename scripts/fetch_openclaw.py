@@ -11,6 +11,7 @@ import asyncio
 import getpass
 import json
 import os
+import re
 import socket
 import sys
 import uuid
