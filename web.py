@@ -745,9 +745,11 @@ def api_upload_messages():
             sender_id=entry.get('sender_id'),
             sender_name=entry.get('sender_name'),
             message_source=entry.get('message_source'),
-            conversation_label=entry.get('conversation_label'),
+            feishu_conversation_id=entry.get('feishu_conversation_id'),
             group_subject=entry.get('group_subject'),
-            is_group_chat=entry.get('is_group_chat')
+            is_group_chat=entry.get('is_group_chat'),
+            agent_session_id=entry.get('agent_session_id'),
+            conversation_id=entry.get('conversation_id')
         )
 
         if result:
@@ -859,9 +861,11 @@ def api_upload_batch():
                 sender_id=entry.get('sender_id'),
                 sender_name=entry.get('sender_name'),
                 message_source=entry.get('message_source'),
-                conversation_label=entry.get('conversation_label'),
+                feishu_conversation_id=entry.get('feishu_conversation_id'),
                 group_subject=entry.get('group_subject'),
-                is_group_chat=entry.get('is_group_chat')
+                is_group_chat=entry.get('is_group_chat'),
+                agent_session_id=entry.get('agent_session_id'),
+                conversation_id=entry.get('conversation_id')
             ):
                 messages_saved += 1
 
@@ -1914,6 +1918,7 @@ def api_report_my_usage():
     # Get usage summary
     usage_summary = db.get_total_quota_usage(user_id, start_date, end_date)
     usage_by_tool = db.get_quota_usage_by_tool(user_id, start_date, end_date)
+    usage_by_day = db.get_quota_usage_by_day(user_id, start_date, end_date)
 
     return jsonify({
         'success': True,
@@ -1929,7 +1934,8 @@ def api_report_my_usage():
             'total_tokens': usage_summary['total_tokens'],
             'total_requests': usage_summary['total_requests']
         },
-        'usage_by_tool': usage_by_tool
+        'usage_by_tool': usage_by_tool,
+        'usage_by_day': usage_by_day
     })
 
 

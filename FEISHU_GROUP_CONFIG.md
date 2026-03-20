@@ -118,24 +118,28 @@ python3 scripts/feishu_group_cache.py clear
 
 ### 方案三：修改 OpenClaw 采集逻辑（高级）
 
-如果 OpenClaw 记录的 conversation_label 是 `oc_` 前缀而不是飞书的 `chat_` 格式，可能需要：
+如果 OpenClaw 记录的 feishu_conversation_id 是 `oc_` 前缀而不是飞书的 `chat_` 格式，可能需要：
 
 1. 检查 OpenClaw 是否正确解析了飞书消息元数据
 2. 修改 `scripts/fetch_openclaw.py` 中的元数据解析逻辑
 3. 确保提取正确的飞书 chat_id
 
+**注意**：`feishu_conversation_id` 字段替代了旧的 `conversation_label` 字段（Issue #94）
+
 ## 当前问题分析
 
-### 为什么 conversation_label 是 `oc_` 开头？
+### 为什么 feishu_conversation_id 是 `oc_` 开头？
 
 从数据库中看到的示例：
 ```
 sender_id: ou_c3163dee8efb941dcb735e0d2bbb4623
-conversation_label: oc_76de7975e9c3543658a7c13a80b0251e
+feishu_conversation_id: oc_76de7975e9c3543658a7c13a80b0251e
 is_group_chat: true
 ```
 
 `oc_` 开头的值是 OpenClaw 内部生成的群聊标识符，它不是飞书的 chat_id。这可能导致无法通过飞书 API 查询群聊名称。
+
+**注意**：`feishu_conversation_id` 字段替代了旧的 `conversation_label` 字段（Issue #94）
 
 ### 如何获取真实的飞书 chat_id？
 
@@ -146,7 +150,7 @@ is_group_chat: true
   "message_id": "om_xxxxx",
   "sender_id": "ou_xxxxx",
   "chat_id": "chat_xxxxx",  // 这才是飞书的群聊 ID
-  "conversation_label": "oc_xxxxx",  // 这是 OpenClaw 的内部 ID
+  "feishu_conversation_id": "oc_xxxxx",  // 这是 OpenClaw 的内部 ID（替代 conversation_label）
   "is_group_chat": true
 }
 ```
@@ -156,6 +160,8 @@ is_group_chat: true
 1. 更新 OpenClaw 到最新版本
 2. 检查 OpenClaw 的飞书消息处理器
 3. 修改 OpenClaw 的采集逻辑
+
+**注意**：`feishu_conversation_id` 字段替代了旧的 `conversation_label` 字段（Issue #94）
 
 ## 推荐的解决方案
 
@@ -192,9 +198,9 @@ sys.path.insert(0, 'scripts/shared')
 import db
 conn = db.get_connection()
 cursor = conn.cursor()
-cursor.execute('SELECT sender_id, conversation_label, group_subject, is_group_chat FROM daily_messages WHERE is_group_chat = 1 LIMIT 5')
+cursor.execute('SELECT sender_id, feishu_conversation_id, group_subject, is_group_chat FROM daily_messages WHERE is_group_chat = 1 LIMIT 5')
 for row in cursor.fetchall():
-    print(f'sender_id: {row[0]}, conversation_label: {row[1]}, group_subject: {row[2]}, is_group_chat: {row[3]}')
+    print(f'sender_id: {row[0]}, feishu_conversation_id: {row[1]}, group_subject: {row[2]}, is_group_chat: {row[3]}')
 conn.close()
 "
 ```
@@ -204,6 +210,7 @@ conn.close()
 - 2026-03-07: 创建配置指南
 - 添加 `feishu_group_cache.py` 模块
 - 前端支持显示 `oc_` 开头的群聊标识符
+- 2026-03-20: 更新字段名 `conversation_label` → `feishu_conversation_id`（Issue #94）
 
 ## 参考资料
 

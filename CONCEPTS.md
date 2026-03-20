@@ -140,11 +140,56 @@ Conversation 2:
 
 ---
 
-## 相关 Issue
+## 修复完成 ✅
 
+### 修复内容
+
+已根据 Issue #94 完成概念定义和实现的修正：
+
+| 概念 | 修复前 | 修复后 |
+|------|--------|--------|
+| **Request** | `role='user'` 消息数 | API 调用次数（日志中有 `auth_type` 字段） |
+| **Message** | 所有消息数 | 所有消息数（按角色细分：user, assistant, toolResult, error） |
+| **Session** | 按 `(sender, date, tool_name)` 分组 | 工具进程会话（`agent_session_id` 字段） |
+| **Conversation** | `COUNT(DISTINCT parent_id)` | 一轮对话（`conversation_id` 字段） |
+
+### 数据库修改
+
+1. **daily_messages 表新增字段**：
+   - `agent_session_id` TEXT - 工具会话标识（进程级别）
+   - `conversation_id` TEXT - 一轮对话标识
+   - `feishu_conversation_id` TEXT - 飞书会话标识符（重命名自 `conversation_label`）
+
+2. **字段重命名**：
+   - `conversation_label` → `feishu_conversation_id`（避免与 Conversation 概念混淆）
+
+### 代码修改
+
+1. **fetch_claude.py**：新增 `get_agent_session_id_from_path()` 函数，从项目路径提取 `agent_session_id`
+2. **fetch_qwen.py**：新增 `get_agent_session_id_from_path()` 函数，从项目路径提取 `agent_session_id`
+3. **fetch_openclaw.py**：新增 `get_agent_session_id_from_path()` 函数，从项目路径提取 `agent_session_id`
+4. **web.py**：更新 API 端点，支持新字段 `agent_session_id` 和 `conversation_id`
+5. **templates/index.html**：更新 UI 文本，将 "Session Statistics" 改为 "Agent Session Statistics"
+
+### 迁移脚本
+
+运行以下脚本迁移现有数据：
+```bash
+python3 scripts/migrate_concepts.py
+```
+
+该脚本会：
+- 重命名 `conversation_label` 字段为 `feishu_conversation_id`
+- 添加 `agent_session_id` 和 `conversation_id` 字段
+- 为现有数据计算 `agent_session_id` 和 `conversation_id`
+- 创建新字段的索引
+
+### 相关 Issue
+
+- #94 [重构] 澄清 Request、Message、Conversation、Session 概念的定义和区别，修正代码实现
 - #91 My Usage Report 页面 Token Usage 和 Request Chart 数据验证
 
 ---
 
-*文档版本：1.0.0*
+*文档版本：2.0.0*
 *最后更新：2026-03-20*

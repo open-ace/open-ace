@@ -38,6 +38,33 @@ import utils
 from shared import db
 
 
+def get_agent_session_id_from_path(project_path: str) -> Optional[str]:
+    """
+    Extract agent_session_id from project path.
+    
+    Project path format: /path/to/{tool_name}_{session_id}/...
+    Example: /path/to/openclaw_12345/... -> openclaw_12345
+    
+    Args:
+        project_path: The project directory path
+        
+    Returns:
+        agent_session_id string or None if not found
+    """
+    if not project_path:
+        return None
+    
+    # Try to match pattern: toolname_sessionid
+    # Examples: openclaw_abc123, claude_def456, qwen_ghi789
+    match = re.search(r'([a-z]+)_([a-f0-9]+)', project_path)
+    if match:
+        tool_name = match.group(1)
+        session_id = match.group(2)
+        return f"{tool_name}_{session_id}"
+    
+    return None
+
+
 def get_default_sender_name(tool: str = "openclaw") -> str:
     """Generate default sender name in format: {user}-{hostname}-{tool}."""
     user = getpass.getuser()
@@ -921,6 +948,13 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                                 toolResult_senders[message_id] = (sender_id, sender_name)
 
                             # Save message to database with sender info and message source
+                            # Extract agent_session_id from project directory path
+                            agent_session_id = None
+                            if 'project_path' in entry:
+                                agent_session_id = get_agent_session_id_from_path(entry['project_path'])
+                            elif 'project' in entry:
+                                agent_session_id = get_agent_session_id_from_path(entry['project'])
+
                             db.save_message(
                                 date=date_key,
                                 tool_name="openclaw",
@@ -938,9 +972,10 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                                 sender_id=sender_id,
                                 sender_name=sender_name,
                                 message_source=message_source,
-                                conversation_label=conversation_label,
+                                feishu_conversation_id=conversation_label,
                                 group_subject=group_subject,
-                                is_group_chat=is_group_chat
+                                is_group_chat=is_group_chat,
+                                agent_session_id=agent_session_id
                             )
 
                 elif entry_type == "custom":
@@ -983,6 +1018,13 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                             full_entry_json = json.dumps(entry, ensure_ascii=False)
 
                             # Save error message to database with 0 tokens
+                            # Extract agent_session_id from project directory path
+                            agent_session_id = None
+                            if 'project_path' in entry:
+                                agent_session_id = get_agent_session_id_from_path(entry['project_path'])
+                            elif 'project' in entry:
+                                agent_session_id = get_agent_session_id_from_path(entry['project'])
+
                             db.save_message(
                                 date=date_key,
                                 tool_name="openclaw",
@@ -1000,9 +1042,10 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                                 sender_id=sender_id,
                                 sender_name=sender_name,
                                 message_source="openclaw",
-                                conversation_label=None,
+                                feishu_conversation_id=None,
                                 group_subject=None,
-                                is_group_chat=None
+                                is_group_chat=None,
+                                agent_session_id=agent_session_id
                             )
                             # Store error sender for future messages (assistant can inherit from error)
                             if sender_id or sender_name:

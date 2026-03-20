@@ -159,12 +159,13 @@ def init_database() -> None:
         cursor.execute("ALTER TABLE daily_messages ADD COLUMN message_source TEXT")
         conn.commit()
 
-    # Check if conversation_label column exists in daily_messages, add it if not (for old databases)
+    # Check if feishu_conversation_id column exists in daily_messages, add it if not (for old databases)
+    # conversation_label was renamed to feishu_conversation_id (Issue #94)
     cursor.execute("PRAGMA table_info(daily_messages)")
     columns = [col[1] for col in cursor.fetchall()]
-    if 'conversation_label' not in columns:
-        print("Adding conversation_label column to existing daily_messages table...")
-        cursor.execute("ALTER TABLE daily_messages ADD COLUMN conversation_label TEXT")
+    if 'feishu_conversation_id' not in columns:
+        print("Adding feishu_conversation_id column to existing daily_messages table...")
+        cursor.execute("ALTER TABLE daily_messages ADD COLUMN feishu_conversation_id TEXT")
         conn.commit()
 
     # Check if group_subject column exists in daily_messages, add it if not (for old databases)
@@ -502,9 +503,11 @@ def save_message(
     sender_id: Optional[str] = None,
     sender_name: Optional[str] = None,
     message_source: Optional[str] = None,
-    conversation_label: Optional[str] = None,
+    feishu_conversation_id: Optional[str] = None,
     group_subject: Optional[str] = None,
-    is_group_chat: Optional[bool] = None
+    is_group_chat: Optional[bool] = None,
+    agent_session_id: Optional[str] = None,
+    conversation_id: Optional[str] = None
 ) -> bool:
     """Save an individual message to the database.
 
@@ -512,6 +515,29 @@ def save_message(
     - If message exists and new tokens_used > 0, update all fields
     - If message exists and new tokens_used == 0, preserve existing token values
     - For other fields (sender_id, sender_name, etc.), always update if new value is not None
+    
+    Args:
+        date: Date in YYYY-MM-DD format
+        tool_name: Tool name (claude, qwen, openclaw)
+        message_id: Unique message identifier
+        role: Message role (user, assistant, toolResult, error)
+        content: Message content
+        full_entry: Full JSON entry for reference
+        tokens_used: Total tokens used
+        input_tokens: Input token count
+        output_tokens: Output token count
+        model: Model name used
+        timestamp: Message timestamp
+        parent_id: Parent message ID for threading
+        host_name: Host machine name
+        sender_id: Sender identifier
+        sender_name: Sender name
+        message_source: Source (openclaw, feishu, slack)
+        feishu_conversation_id: Feishu conversation identifier (renamed from conversation_label)
+        group_subject: Group subject (for group chats)
+        is_group_chat: Whether this is a group chat
+        agent_session_id: Agent session identifier (tool process session)
+        conversation_id: Conversation identifier (one round of conversation)
     """
     conn = get_connection()
     cursor = conn.cursor()
@@ -544,9 +570,9 @@ def save_message(
 
     cursor.execute('''
         INSERT OR REPLACE INTO daily_messages
-        (date, tool_name, host_name, message_id, parent_id, role, content, full_entry, tokens_used, input_tokens, output_tokens, model, timestamp, sender_id, sender_name, message_source, conversation_label, group_subject, is_group_chat)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (date, tool_name, host_name, message_id, parent_id, role, content, full_entry, tokens_used, input_tokens, output_tokens, model, timestamp, sender_id, sender_name, message_source, conversation_label, group_subject, is_group_chat))
+        (date, tool_name, host_name, message_id, parent_id, role, content, full_entry, tokens_used, input_tokens, output_tokens, model, timestamp, sender_id, sender_name, message_source, feishu_conversation_id, group_subject, is_group_chat, agent_session_id, conversation_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (date, tool_name, host_name, message_id, parent_id, role, content, full_entry, tokens_used, input_tokens, output_tokens, model, timestamp, sender_id, sender_name, message_source, feishu_conversation_id, group_subject, is_group_chat, agent_session_id, conversation_id))
 
     conn.commit()
     conn.close()
@@ -1216,34 +1242,50 @@ def aggregate_quota_usage_from_messages(start_date: str = None, end_date: str = 
             'tool_name': msg['tool_name']
         }
     
+    # Step 2.5: Get all messages (including toolResult) for parent_id chain lookup
+    cursor.execute(f'''
+        SELECT message_id, parent_id
+        FROM daily_messages
+        WHERE {date_clause}
+    ''', params)
+
+    all_messages = cursor.fetchall()
+    # Build a map: message_id -> parent_id for chain lookup
+    parent_map = {msg['message_id']: msg['parent_id'] for msg in all_messages}
+
     # Step 3: For each assistant message, find the user it belongs to
     # by following the parent_id chain
-    def find_user_for_assistant(assistant_msg_id, visited=None):
-        """Find the user message that this assistant message is responding to."""
-        if visited is None:
-            visited = set()
-        
-        if assistant_msg_id in visited:
-            return None
-        visited.add(assistant_msg_id)
-        
+    def find_user_for_assistant(assistant_msg_id):
+        """Find the user message that this assistant message is responding to.
+
+        Follows the parent_id chain through any message type (assistant, toolResult, etc.)
+        to find the originating user message.
+        """
         if assistant_msg_id not in assistant_map:
             return None
-        
+
         assistant = assistant_map[assistant_msg_id]
         parent_id = assistant['parent_id']
-        
+
         if not parent_id:
             return None
-        
+
         # Check if parent is a user message
         if parent_id in user_msg_map:
             return user_msg_map[parent_id]
-        
-        # Otherwise, follow the chain (e.g., assistant -> toolResult -> user)
-        if parent_id in assistant_map:
-            return find_user_for_assistant(parent_id, visited)
-        
+
+        # Follow the parent_id chain through any message type (assistant, toolResult, etc.)
+        # Max depth of 30 to prevent infinite loops
+        current_id = parent_id
+        for _ in range(30):
+            if current_id in user_msg_map:
+                return user_msg_map[current_id]
+            if current_id not in parent_map:
+                return None
+            current_id = parent_map[current_id]
+            if not current_id:
+                return None
+
         return None
     
     # Step 4: Aggregate tokens by (date, tool_name, sender)
@@ -1263,9 +1305,9 @@ def aggregate_quota_usage_from_messages(start_date: str = None, end_date: str = 
             key = (user_msg['date'], user_msg['tool_name'], user_msg['sender'])
             if key not in usage_data:
                 usage_data[key] = {'tokens': 0, 'requests': 0}
-            # Use output_tokens for user quota (the tokens generated for the user)
+            # Use tokens_used for user quota (total tokens including input + output + cache)
             assistant = assistant_map[assistant_msg_id]
-            usage_data[key]['tokens'] += assistant['output_tokens']
+            usage_data[key]['tokens'] += assistant['tokens_used']
     
     # Step 5: Get all users for matching
     cursor.execute("SELECT id, username FROM users")
@@ -1360,6 +1402,66 @@ def get_quota_usage_by_tool(user_id: int, start_date: str, end_date: str) -> Lis
     conn.close()
 
     return [dict(row) for row in rows]
+
+
+def get_quota_usage_by_day(user_id: int, start_date: str, end_date: str) -> List[Dict]:
+    """Get quota usage grouped by day for a user.
+
+    Returns data from the first day with usage to the end_date,
+    filling in zero values for days with no usage.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # First, get the earliest date with usage for this user
+    cursor.execute('''
+        SELECT MIN(date) as first_date
+        FROM quota_usage
+        WHERE user_id = ? AND tokens_used > 0
+    ''', (user_id,))
+
+    row = cursor.fetchone()
+    first_usage_date = row['first_date'] if row else None
+
+    # If no usage data, return empty list
+    if not first_usage_date:
+        conn.close()
+        return []
+
+    # Get daily usage data
+    cursor.execute('''
+        SELECT
+            date,
+            SUM(tokens_used) as total_tokens,
+            SUM(requests_used) as total_requests
+        FROM quota_usage
+        WHERE user_id = ? AND date >= ? AND date <= ?
+        GROUP BY date
+        ORDER BY date ASC
+    ''', (user_id, first_usage_date, end_date))
+
+    rows = cursor.fetchall()
+    conn.close()
+
+    # Create a dictionary for quick lookup
+    usage_by_date = {row['date']: {'total_tokens': row['total_tokens'], 'total_requests': row['total_requests']} for row in rows}
+
+    # Fill in all dates from first_usage_date to end_date
+    result = []
+    current_date = datetime.strptime(first_usage_date, '%Y-%m-%d')
+    end = datetime.strptime(end_date, '%Y-%m-%d')
+
+    while current_date <= end:
+        date_str = current_date.strftime('%Y-%m-%d')
+        usage = usage_by_date.get(date_str, {'total_tokens': 0, 'total_requests': 0})
+        result.append({
+            'date': date_str,
+            'total_tokens': usage['total_tokens'],
+            'total_requests': usage['total_requests']
+        })
+        current_date += timedelta(days=1)
+
+    return result
 
 
 # =============================================================================
@@ -1596,69 +1698,90 @@ def get_conversation_statistics(start_date: str, end_date: str,
                            tool_name: Optional[str] = None,
                            host_name: Optional[str] = None) -> Dict:
     """Get conversation statistics.
-    
-    Analyzes conversation patterns based on parent_id relationships.
-    
+
+    Analyzes conversation patterns based on conversation_id field.
+    A conversation is one round of dialogue (user message → AI complete).
+
     Args:
         start_date: Start date in YYYY-MM-DD format
         end_date: End date in YYYY-MM-DD format
         tool_name: Optional tool name filter
         host_name: Optional host name filter
-    
+
     Returns:
-        Dict with session statistics
+        Dict with conversation statistics including:
+        - total_messages: Total message count
+        - unique_conversations: Count of unique conversations
+        - single_turn: Single-turn conversations count
+        - multi_turn_ratio: Ratio of multi-turn conversations
+        - message_stats: Message counts by role (user, assistant, toolResult, error)
     """
     conn = get_connection()
     cursor = conn.cursor()
-    
+
     conditions = ['date >= ?', 'date <= ?']
     params = [start_date, end_date]
-    
+
     if tool_name:
         conditions.append('tool_name = ?')
         params.append(tool_name)
-    
+
     if host_name:
         conditions.append('host_name = ?')
         params.append(host_name)
-    
+
     where_clause = ' AND '.join(conditions)
-    
+
     # Get total messages and messages with parent_id (replies)
     cursor.execute(f'''
-        SELECT 
+        SELECT
             COUNT(*) as total_messages,
             SUM(CASE WHEN parent_id IS NOT NULL THEN 1 ELSE 0 END) as reply_messages,
-            COUNT(DISTINCT parent_id) as unique_conversations
+            COUNT(DISTINCT conversation_id) as unique_conversations
         FROM daily_messages
         WHERE {where_clause}
     ''', params)
-    
+
     row = cursor.fetchone()
-    
+
     # Calculate conversation length distribution
     cursor.execute(f'''
-        SELECT 
+        SELECT
             COUNT(*) as conversation_count,
             AVG(conv_length) as avg_length,
             MIN(conv_length) as min_length,
             MAX(conv_length) as max_length
         FROM (
-            SELECT parent_id, COUNT(*) as conv_length
+            SELECT conversation_id, COUNT(*) as conv_length
             FROM daily_messages
-            WHERE {where_clause} AND parent_id IS NOT NULL
-            GROUP BY parent_id
+            WHERE {where_clause} AND conversation_id IS NOT NULL
+            GROUP BY conversation_id
         )
     ''', params)
-    
+
     conv_row = cursor.fetchone()
-    
+
+    # Get message counts by role
+    cursor.execute(f'''
+        SELECT
+            role,
+            COUNT(*) as count
+        FROM daily_messages
+        WHERE {where_clause}
+        GROUP BY role
+    ''', params)
+
+    role_rows = cursor.fetchall()
+    message_stats = {}
+    for row in role_rows:
+        message_stats[row['role']] = row['count']
+
     conn.close()
-    
-    total = row['total_messages'] or 0
-    replies = row['reply_messages'] or 0
-    conversations = row['unique_conversations'] or 0
-    
+
+    total = row['total_messages'] if row else 0
+    replies = row['reply_messages'] if row else 0
+    conversations = row['unique_conversations'] if row else 0
+
     return {
         'total_messages': total,
         'reply_messages': replies,
@@ -1670,7 +1793,8 @@ def get_conversation_statistics(start_date: str, end_date: str,
             'avg_length': round(conv_row['avg_length'], 2) if conv_row and conv_row['avg_length'] else 0,
             'min_length': conv_row['min_length'] if conv_row else 0,
             'max_length': conv_row['max_length'] if conv_row else 0
-        }
+        },
+        'message_stats': message_stats
     }
 
 
@@ -2283,10 +2407,10 @@ def get_conversation_history(
     sort_by: str = 'start_time',
     sort_order: str = 'desc'
 ) -> Dict:
-    """Get session history with pagination and sorting.
+    """Get agent session history with pagination and sorting.
 
-    A session is identified by conversation_label or parent_id relationships.
-    For messages without conversation_label, we group by (sender_id/sender_name, date)
+    An agent session is identified by agent_session_id field (tool process session).
+    For messages without agent_session_id, we group by (sender_id/sender_name, date)
     and order by timestamp to form sessions.
 
     Args:
@@ -2321,7 +2445,7 @@ def get_conversation_history(
     where_clause = ' AND '.join(conditions)
 
     # First, get all messages ordered by timestamp to identify sessions
-    # We use conversation_label as primary session identifier, fallback to sender+date grouping
+    # We use agent_session_id as primary session identifier, fallback to sender+date grouping
     cursor.execute(f'''
         SELECT
             id,
@@ -2337,7 +2461,8 @@ def get_conversation_history(
             timestamp,
             sender_id,
             sender_name,
-            conversation_label
+            agent_session_id,
+            conversation_id
         FROM daily_messages
         WHERE {where_clause}
         ORDER BY timestamp ASC
@@ -2347,9 +2472,8 @@ def get_conversation_history(
 
     # Group messages into sessions
     # Strategy:
-    # - Group by (sender, date, tool_name) to ensure all messages from the same user
-    #   on the same day with the same tool are in the same session
-    # - This ensures user_messages and ai_messages are correctly counted
+    # - Group by agent_session_id if available
+    # - Fallback to (sender, date, tool_name) for older data
     sessions = {}
     session_counter = 0
 
@@ -2357,12 +2481,15 @@ def get_conversation_history(
         row_dict = dict(row)
         sender = row_dict.get('sender_name') or row_dict.get('sender_id') or 'Unknown'
         timestamp = row_dict.get('timestamp')
+        agent_session_id = row_dict.get('agent_session_id')
 
-        # Use sender + date + tool_name as session identifier
-        # This ensures all messages from the same user on the same day with the same tool
-        # are grouped together, regardless of conversation_label
-        session_key = f"{sender}_{row_dict['date']}_{row_dict['tool_name']}"
-        session_id = session_key
+        # Use agent_session_id as primary session identifier
+        # Fallback to sender + date + tool_name for older data without agent_session_id
+        if agent_session_id:
+            session_id = agent_session_id
+        else:
+            session_key = f"{sender}_{row_dict['date']}_{row_dict['tool_name']}"
+            session_id = session_key
 
         if session_id not in sessions:
             session_counter += 1
@@ -2411,7 +2538,8 @@ def get_conversation_history(
         session['messages'].append({
             'timestamp': timestamp,
             'role': role,
-            'tokens': row_dict.get('tokens_used') or 0
+            'tokens': row_dict.get('tokens_used') or 0,
+            'conversation_id': row_dict.get('conversation_id')
         })
 
     # Calculate average and max latency for each session
@@ -2594,25 +2722,25 @@ def get_conversation_timeline(session_id: str) -> Dict:
     """Get detailed timeline data for a specific conversation.
 
     Args:
-        session_id: The session identifier (conversation_label or generated key)
+        session_id: The session identifier (agent_session_id or conversation_id)
 
     Returns:
         Dict with timeline data for rendering charts
     """
     # GMT+8 timezone
     gmt_plus_8 = timezone(timedelta(hours=8))
-    
+
     def convert_to_gmt8(dt: datetime) -> datetime:
         """Convert datetime to GMT+8 timezone."""
         # If the datetime is naive (no timezone), assume it's UTC
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         return dt.astimezone(gmt_plus_8)
-    
+
     conn = get_connection()
     cursor = conn.cursor()
 
-    # Try to find messages by conversation_label first
+    # Try to find messages by agent_session_id first
     cursor.execute('''
         SELECT
             timestamp,
@@ -2621,15 +2749,34 @@ def get_conversation_timeline(session_id: str) -> Dict:
             model,
             sender_name,
             sender_id,
-            parent_id
+            parent_id,
+            conversation_id
         FROM daily_messages
-        WHERE conversation_label = ?
+        WHERE agent_session_id = ?
         ORDER BY timestamp ASC
     ''', [session_id])
 
     rows = cursor.fetchall()
 
-    # If no results, try parsing the session_id (format: sender_date_tool)
+    # If no results, try conversation_id
+    if not rows:
+        cursor.execute('''
+            SELECT
+                timestamp,
+                role,
+                tokens_used,
+                model,
+                sender_name,
+                sender_id,
+                parent_id,
+                conversation_id
+            FROM daily_messages
+            WHERE conversation_id = ?
+            ORDER BY timestamp ASC
+        ''', [session_id])
+        rows = cursor.fetchall()
+
+    # If still no results, try parsing the session_id (format: sender_date_tool)
     if not rows:
         parts = session_id.rsplit('_', 2)
         if len(parts) >= 3:
@@ -2647,7 +2794,8 @@ def get_conversation_timeline(session_id: str) -> Dict:
                         model,
                         sender_name,
                         sender_id,
-                        parent_id
+                        parent_id,
+                        conversation_id
                     FROM daily_messages
                     WHERE date = ? AND tool_name = ?
                       AND sender_name IS NULL AND sender_id IS NULL
@@ -2662,7 +2810,8 @@ def get_conversation_timeline(session_id: str) -> Dict:
                         model,
                         sender_name,
                         sender_id,
-                        parent_id
+                        parent_id,
+                        conversation_id
                     FROM daily_messages
                     WHERE date = ? AND tool_name = ?
                       AND (sender_name = ? OR sender_id = ?)
@@ -2808,7 +2957,7 @@ def get_conversation_details(session_id: str) -> Dict:
     """Get complete conversation details for a specific conversation.
 
     Args:
-        session_id: The session identifier (format: sender_date_tool)
+        session_id: The session identifier (agent_session_id, conversation_id, or format: sender_date_tool)
 
     Returns:
         Dict with conversation info and list of messages with full content
@@ -2818,53 +2967,99 @@ def get_conversation_details(session_id: str) -> Dict:
 
     rows = []
 
-    # Try parsing the session_id (format: sender_date_tool)
-    parts = session_id.rsplit('_', 2)
-    if len(parts) >= 3:
-        sender = parts[0]
-        date = parts[1]
-        tool = parts[2]
+    # Try to find messages by agent_session_id first
+    cursor.execute('''
+        SELECT
+            message_id,
+            parent_id,
+            role,
+            content,
+            tokens_used,
+            input_tokens,
+            output_tokens,
+            model,
+            timestamp,
+            sender_name,
+            sender_id,
+            conversation_id
+        FROM daily_messages
+        WHERE agent_session_id = ?
+        ORDER BY timestamp ASC
+    ''', [session_id])
+    rows = cursor.fetchall()
 
-        # Handle 'Unknown' sender (sender_name and sender_id are both NULL)
-        if sender == 'Unknown':
-            cursor.execute('''
-                SELECT
-                    message_id,
-                    parent_id,
-                    role,
-                    content,
-                    tokens_used,
-                    input_tokens,
-                    output_tokens,
-                    model,
-                    timestamp,
-                    sender_name,
-                    sender_id
-                FROM daily_messages
-                WHERE date = ? AND tool_name = ?
-                  AND sender_name IS NULL AND sender_id IS NULL
-                ORDER BY timestamp ASC
-            ''', [date, tool])
-        else:
-            cursor.execute('''
-                SELECT
-                    message_id,
-                    parent_id,
-                    role,
-                    content,
-                    tokens_used,
-                    input_tokens,
-                    output_tokens,
-                    model,
-                    timestamp,
-                    sender_name,
-                    sender_id
-                FROM daily_messages
-                WHERE date = ? AND tool_name = ?
-                  AND (sender_name = ? OR sender_id = ?)
-                ORDER BY timestamp ASC
-            ''', [date, tool, sender, sender])
+    # If no results, try conversation_id
+    if not rows:
+        cursor.execute('''
+            SELECT
+                message_id,
+                parent_id,
+                role,
+                content,
+                tokens_used,
+                input_tokens,
+                output_tokens,
+                model,
+                timestamp,
+                sender_name,
+                sender_id,
+                conversation_id
+            FROM daily_messages
+            WHERE conversation_id = ?
+            ORDER BY timestamp ASC
+        ''', [session_id])
         rows = cursor.fetchall()
+
+    # If still no results, try parsing the session_id (format: sender_date_tool)
+    if not rows:
+        parts = session_id.rsplit('_', 2)
+        if len(parts) >= 3:
+            sender = parts[0]
+            date = parts[1]
+            tool = parts[2]
+
+            # Handle 'Unknown' sender (sender_name and sender_id are both NULL)
+            if sender == 'Unknown':
+                cursor.execute('''
+                    SELECT
+                        message_id,
+                        parent_id,
+                        role,
+                        content,
+                        tokens_used,
+                        input_tokens,
+                        output_tokens,
+                        model,
+                        timestamp,
+                        sender_name,
+                        sender_id,
+                        conversation_id
+                    FROM daily_messages
+                    WHERE date = ? AND tool_name = ?
+                      AND sender_name IS NULL AND sender_id IS NULL
+                    ORDER BY timestamp ASC
+                ''', [date, tool])
+            else:
+                cursor.execute('''
+                    SELECT
+                        message_id,
+                        parent_id,
+                        role,
+                        content,
+                        tokens_used,
+                        input_tokens,
+                        output_tokens,
+                        model,
+                        timestamp,
+                        sender_name,
+                        sender_id,
+                        conversation_id
+                    FROM daily_messages
+                    WHERE date = ? AND tool_name = ?
+                      AND (sender_name = ? OR sender_id = ?)
+                    ORDER BY timestamp ASC
+                ''', [date, tool, sender, sender])
+            rows = cursor.fetchall()
 
     conn.close()
 
@@ -2930,5 +3125,6 @@ def get_conversation_details(session_id: str) -> Dict:
         'start_time': first_msg.get('formatted_time'),
         'end_time': last_msg.get('formatted_time'),
         'models': list(set(m.get('model') for m in messages if m.get('model'))),
-        'sender_name': first_msg.get('sender_name') or first_msg.get('sender_id') or 'Unknown'
+        'sender_name': first_msg.get('sender_name') or first_msg.get('sender_id') or 'Unknown',
+        'conversation_id': first_msg.get('conversation_id')
     }

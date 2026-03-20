@@ -31,6 +31,33 @@ if shared_dir not in sys.path:
 from shared import db
 
 
+def get_agent_session_id_from_path(project_path: str) -> Optional[str]:
+    """
+    Extract agent_session_id from project path.
+    
+    Project path format: /path/to/{tool_name}_{session_id}/...
+    Example: /path/to/qwen_12345/... -> qwen_12345
+    
+    Args:
+        project_path: The project directory path
+        
+    Returns:
+        agent_session_id string or None if not found
+    """
+    if not project_path:
+        return None
+    
+    # Try to match pattern: toolname_sessionid
+    # Examples: qwen_abc123, claude_def456, openclaw_ghi789
+    match = re.search(r'([a-z]+)_([a-f0-9]+)', project_path)
+    if match:
+        tool_name = match.group(1)
+        session_id = match.group(2)
+        return f"{tool_name}_{session_id}"
+    
+    return None
+
+
 def parse_timestamp(ts_str: str) -> str:
     """Extract date from ISO timestamp."""
     if not ts_str:
@@ -207,6 +234,13 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                             # Save full entry as JSON for complete original data
                             full_entry_json = json.dumps(entry, ensure_ascii=False)
 
+                            # Extract agent_session_id from project directory path
+                            agent_session_id = None
+                            if 'project_path' in entry:
+                                agent_session_id = get_agent_session_id_from_path(entry['project_path'])
+                            elif 'project' in entry:
+                                agent_session_id = get_agent_session_id_from_path(entry['project'])
+
                             # Save message to database with default sender for Qwen
                             db.save_message(
                                 date=date_key,
@@ -223,7 +257,8 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                                 model=model,
                                 timestamp=ts,
                                 sender_id="qwen_user",
-                                sender_name=get_default_sender_name("qwen")
+                                sender_name=get_default_sender_name("qwen"),
+                                agent_session_id=agent_session_id
                             )
 
                 if tokens["total_tokens"] == 0:
