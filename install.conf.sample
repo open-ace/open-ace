@@ -1,4 +1,4 @@
-# AI Token Analyzer - Installation Configuration
+# Open ACE - Installation Configuration
 # Copy this file to install.conf and modify as needed
 #
 # Usage: ./scripts/install.sh --config install.conf
@@ -11,7 +11,7 @@
 DEPLOY_USER=${USER}
 
 # Installation path
-DEPLOY_PATH=$HOME/ai-token-analyzer
+DEPLOY_PATH=$HOME/open-ace
 
 # ============================================================================
 # Remote Deployment (optional)
@@ -38,16 +38,16 @@ DEPLOY_PATH=$HOME/ai-token-analyzer
 
 # Example 1: Local installation (single machine deployment)
 # DEPLOY_USER=${USER}
-# DEPLOY_PATH=$HOME/ai-token-analyzer
+# DEPLOY_PATH=$HOME/open-ace
 
 # Example 2: Deploy to 192.168.64.2 via SSH
 # DEPLOY_HOST=192.168.64.2
 # DEPLOY_USER=root
-# DEPLOY_PATH=/home/rhuang/ai-token-analyzer
+# DEPLOY_PATH=/home/rhuang/open-ace
 
 # Example 3: Local installation with systemd service
 # DEPLOY_USER=${USER}
-# DEPLOY_PATH=$HOME/ai-token-analyzer
+# DEPLOY_PATH=$HOME/open-ace
 # INSTALL_SERVICE=yes
 # SERVICE_PORT=5001
 # SERVICE_HOST=0.0.0.0

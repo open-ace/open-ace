@@ -2,7 +2,7 @@
 """Initialize database on remote machine."""
 
 import sys
-sys.path.insert(0, '/opt/ai-token-analyzer/scripts/shared')
+sys.path.insert(0, '/opt/open-ace/scripts/shared')
 
 from db import init_database
 

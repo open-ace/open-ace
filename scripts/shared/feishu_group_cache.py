@@ -13,7 +13,7 @@ from typing import Optional, Dict
 from pathlib import Path
 
 # Cache file location
-CACHE_DIR = Path.home() / ".ai-token-analyzer"
+CACHE_DIR = Path.home() / ".open-ace"
 CACHE_FILE = CACHE_DIR / "feishu_groups.json"
 CACHE_TTL = 86400  # Cache TTL in seconds (24 hours) - groups don't change often
 

@@ -82,7 +82,7 @@ async def test_menu(username: str, password: str, user_type: str):
         print(f'localStorage token: {user_info["token"]}')
         
         # 截图
-        screenshot_path = f'/Users/rhuang/workspace/ai-token-analyzer/screenshots/issues/76/{user_type.lower()}_menu_test.png'
+        screenshot_path = f'/Users/rhuang/workspace/open-ace/screenshots/issues/76/{user_type.lower()}_menu_test.png'
         await page.screenshot(path=screenshot_path)
         print()
         print(f'截图已保存到 {screenshot_path}')

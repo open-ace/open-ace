@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-AI Token Analyzer - Setup Script
+Open ACE - Setup Script
 
-This script helps set up the ai-token-analyzer configuration directory
+This script helps set up the open-ace configuration directory
 and can be used during installation to ensure consistent paths.
 """
 
@@ -62,21 +62,21 @@ def setup_config_dir(config_dir: str) -> str:
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Setup AI Token Analyzer configuration',
+        description='Setup Open ACE configuration',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''
 Example usage:
-  python setup.py --config-dir ~/.ai-token-analyzer
+  python setup.py --config-dir ~/.open-ace
   python setup.py --init
 
-The default configuration directory is ~/.ai-token-analyzer
+The default configuration directory is ~/.open-ace
         '''
     )
 
     parser.add_argument(
         '--config-dir',
-        default='~/.ai-token-analyzer',
-        help=f'Configuration directory (default: ~/.ai-token-analyzer)'
+        default='~/.open-ace',
+        help=f'Configuration directory (default: ~/.open-ace)'
     )
 
     parser.add_argument(

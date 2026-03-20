@@ -99,7 +99,7 @@ async def test_sidebar_collapse_normal_user():
             print(f'   #nav-report-text 可见: {report_text_visible}')
 
             # 截图
-            await page.screenshot(path='/Users/rhuang/workspace/ai-token-analyzer/screenshots/issues/82/normal_user_sidebar_collapsed.png')
+            await page.screenshot(path='/Users/rhuang/workspace/open-ace/screenshots/issues/82/normal_user_sidebar_collapsed.png')
             print(f'\n5. 截图已保存: screenshots/issues/82/normal_user_sidebar_collapsed.png')
 
             # 验证结果
@@ -126,7 +126,7 @@ async def test_sidebar_collapse_normal_user():
             print(f'\n6. 展开后 Sidebar 宽度: {sidebar_width_final}px')
 
             # 截图
-            await page.screenshot(path='/Users/rhuang/workspace/ai-token-analyzer/screenshots/issues/82/normal_user_sidebar_expanded.png')
+            await page.screenshot(path='/Users/rhuang/workspace/open-ace/screenshots/issues/82/normal_user_sidebar_expanded.png')
             print(f'   截图已保存: screenshots/issues/82/normal_user_sidebar_expanded.png')
 
         finally:

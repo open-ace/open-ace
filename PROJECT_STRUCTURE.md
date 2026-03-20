@@ -1,4 +1,4 @@
-# AI Token Analyzer - 项目结构与部署脚本设计文档
+# Open ACE - 项目结构与部署脚本设计文档
 
 本文档记录项目结构设计、发布脚本和安装脚本的设计思路，供将来优化参考。
 
@@ -9,7 +9,7 @@
 ### 1.1 目录结构概览
 
 ```
-ai-token-analyzer/
+open-ace/
 ├── cli.py                    # 命令行工具入口
 ├── web.py                    # Web 服务入口
 ├── requirements.txt          # Python 依赖
@@ -38,7 +38,7 @@ ai-token-analyzer/
 │   ├── create_db.py              # 数据库创建
 │   ├── init_db.py                # 数据库初始化
 │   ├── init_auth_db.py           # 认证数据库初始化
-│   ├── com.ai-token-analyzer.web.plist  # macOS launchd 配置
+│   ├── com.open-ace.web.plist  # macOS launchd 配置
 │   └── shared/                   # 共享模块
 │       ├── __init__.py
 │       ├── config.py             # 配置加载
@@ -151,7 +151,7 @@ ai-token-analyzer/
 |----------|----------|------|
 | `contrib/fetch-openclaw.service` | Linux (systemd) | systemd 服务定义 |
 | `contrib/fetch-openclaw.timer` | Linux (systemd) | systemd 定时器 |
-| `scripts/com.ai-token-analyzer.web.plist` | macOS | launchd 服务配置 |
+| `scripts/com.open-ace.web.plist` | macOS | launchd 服务配置 |
 | `cron/daily_run.sh` | 通用 | cron 定时脚本模板 |
 
 **注意：** `fetch-openclaw.service/timer` 只是示例配置，实际应根据机器上运行的 AI 工具调整：
@@ -209,10 +209,10 @@ ai-token-analyzer/
 ### 2.4 输出格式
 
 ```
-dist/ai-token-analyzer-v{VERSION}-{DATE}.tar.gz
+dist/open-ace-v{VERSION}-{DATE}.tar.gz
 ```
 
-示例：`ai-token-analyzer-v1.0.0-20260309.tar.gz`
+示例：`open-ace-v1.0.0-20260309.tar.gz`
 
 ---
 
@@ -243,10 +243,10 @@ dist/ai-token-analyzer-v{VERSION}-{DATE}.tar.gz
 
 | 文件/目录 | 位置 | 说明 |
 |-----------|------|------|
-| `config.json` | `~/.ai-token-analyzer/` | 用户配置 |
-| `usage.db` | `~/.ai-token-analyzer/` 或部署目录 | 数据库 |
-| `feishu_users.json` | `~/.ai-token-analyzer/` | 飞书用户缓存 |
-| `upload_marker.json` | `~/.ai-token-analyzer/` | 上传标记 |
+| `config.json` | `~/.open-ace/` | 用户配置 |
+| `usage.db` | `~/.open-ace/` 或部署目录 | 数据库 |
+| `feishu_users.json` | `~/.open-ace/` | 飞书用户缓存 |
+| `upload_marker.json` | `~/.open-ace/` | 上传标记 |
 | `logs/` | 部署目录 | 日志文件 |
 
 ### 3.4 调度方式对比
@@ -268,13 +268,13 @@ INSTALL_MODE=local|remote
 
 # 本地配置
 LOCAL_USER=${USER}
-LOCAL_PATH=$HOME/ai-token-analyzer
+LOCAL_PATH=$HOME/open-ace
 LOCAL_INTERVAL=30
 
 # 远程配置
 REMOTE_HOST=<REMOTE_HOST>
 REMOTE_USER=openclaw
-REMOTE_PATH=/home/openclaw/ai-token-analyzer
+REMOTE_PATH=/home/openclaw/open-ace
 REMOTE_INTERVAL=30
 REMOTE_SCHEDULER=systemd  # 或 cron
 ```
@@ -374,8 +374,8 @@ screenshots/                  # 被 .gitignore 忽略，不提交到 git
 ### 5.1 项目结构优化
 
 1. **统一配置目录**
-   - 当前：配置文件分散在 `~/.ai-token-analyzer/` 和部署目录
-   - 建议：统一使用 `~/.ai-token-analyzer/` 存放所有配置和数据
+   - 当前：配置文件分散在 `~/.open-ace/` 和部署目录
+   - 建议：统一使用 `~/.open-ace/` 存放所有配置和数据
 
 2. **日志管理**
    - 当前：日志直接写入 `logs/` 目录
@@ -440,7 +440,7 @@ screenshots/                  # 被 .gitignore 忽略，不提交到 git
 **发布包包含的文件：**
 
 ```
-ai-token-analyzer-v1.0.0-20260309/
+open-ace-v1.0.0-20260309/
 ├── cli.py
 ├── web.py
 ├── README.md
@@ -468,7 +468,7 @@ ai-token-analyzer-v1.0.0-20260309/
 │   ├── create_db.py
 │   ├── init_db.py
 │   ├── init_auth_db.py
-│   ├── com.ai-token-analyzer.web.plist
+│   ├── com.open-ace.web.plist
 │   └── shared/
 │       ├── __init__.py
 │       ├── config.py

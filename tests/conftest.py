@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Pytest fixtures for AI Token Analyzer tests.
+Pytest fixtures for Open ACE tests.
 
 IMPORTANT: All database tests use isolated temporary databases.
 NO test data should ever be written to the production database.
@@ -71,7 +71,7 @@ def isolated_db(tmp_path):
         
         # Verify we're using the test database, not production
         assert db_module.DB_PATH == test_config.DB_PATH
-        assert not db_module.DB_PATH.endswith('.ai-token-analyzer/usage.db')
+        assert not db_module.DB_PATH.endswith('.open-ace/usage.db')
         
         yield db_module
         

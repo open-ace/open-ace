@@ -46,7 +46,7 @@ python3 "$BASE_DIR/scripts/fetch_qwen.py" --days 7 2>&1 | tee -a "$LOG_FILE"
 if python3 -c "
 import json
 import os
-config_path = os.path.expanduser('~/.ai-token-analyzer/config.json')
+config_path = os.path.expanduser('~/.open-ace/config.json')
 if os.path.exists(config_path):
     with open(config_path) as f:
         config = json.load(f)

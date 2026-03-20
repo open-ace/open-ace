@@ -36,7 +36,7 @@
 配置完成后，运行以下命令测试：
 
 ```bash
-cd /Users/rhuang/workspace/ai-token-analyzer
+cd /Users/rhuang/workspace/open-ace
 python3 scripts/shared/feishu_user_cache.py test ou_3e479c7f81f8674741d778e8f838f8ed <your_app_id> <your_app_secret>
 ```
 
@@ -51,7 +51,7 @@ python3 scripts/shared/feishu_user_cache.py test ou_3e479c7f81f8674741d778e8f838
 1. 访问飞书开放平台：https://open.feishu.cn/app
 2. 点击"创建应用"
 3. 选择"企业自建应用"
-4. 填写应用名称（如：AI Token Analyzer）
+4. 填写应用名称（如：Open ACE）
 5. 创建完成后记录 **App ID** 和 **App Secret**
 
 ### 2. 配置应用权限
@@ -76,7 +76,7 @@ python3 scripts/shared/feishu_user_cache.py test ou_3e479c7f81f8674741d778e8f838
 
 ### 4. 配置本地配置文件
 
-编辑 `~/.ai-token-analyzer/config.json`：
+编辑 `~/.open-ace/config.json`：
 
 ```json
 {
@@ -107,10 +107,10 @@ python3 scripts/shared/feishu_user_cache.py test ou_3e479c7f81f8674741d778e8f838
 ```bash
 # 在远程机器上编辑配置
 ssh openclaw@<REMOTE_HOST>
-nano /home/openclaw/.ai-token-analyzer/config.json
+nano /home/openclaw/.open-ace/config.json
 
 # 或者从本地同步
-scp ~/.ai-token-analyzer/config.json openclaw@<REMOTE_HOST>:/home/openclaw/.ai-token-analyzer/
+scp ~/.open-ace/config.json openclaw@<REMOTE_HOST>:/home/openclaw/.open-ace/
 ```
 
 ## 测试配置
@@ -118,7 +118,7 @@ scp ~/.ai-token-analyzer/config.json openclaw@<REMOTE_HOST>:/home/openclaw/.ai-t
 ### 测试用户信息查询
 
 ```bash
-cd /opt/ai-token-analyzer
+cd /opt/open-ace
 python3 scripts/shared/feishu_user_cache.py test ou_3e479c7f81f8674741d778e8f838f8ed <your_app_id>
 ```
 
@@ -136,7 +136,7 @@ python3 scripts/shared/feishu_user_cache.py clear
 
 ## 缓存说明
 
-- 用户信息会缓存在 `~/.ai-token-analyzer/feishu_users.json`
+- 用户信息会缓存在 `~/.open-ace/feishu_users.json`
 - 缓存有效期：1 小时（3600 秒）
 - 缓存避免频繁调用飞书 API
 
@@ -163,7 +163,7 @@ A: 确保应用已发布，并且权限申请已提交审核。
 A: 检查 App ID 和 App Secret 是否正确，确保应用已发布。
 
 ### Q: 缓存文件在哪里？
-A: `~/.ai-token-analyzer/feishu_users.json`
+A: `~/.open-ace/feishu_users.json`
 
 ### Q: 如何禁用用户信息查询？
 A: 从配置文件中删除 `feishu_app_id` 和 `feishu_app_secret` 字段即可。

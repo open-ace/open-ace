@@ -14,7 +14,7 @@ from typing import Optional, Dict
 from pathlib import Path
 
 # Cache file location
-CACHE_DIR = Path.home() / ".ai-token-analyzer"
+CACHE_DIR = Path.home() / ".open-ace"
 CACHE_FILE = CACHE_DIR / "feishu_users.json"
 CACHE_TTL = 3600  # Cache TTL in seconds (1 hour)
 

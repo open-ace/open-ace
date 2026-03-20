@@ -1,4 +1,4 @@
-# AI Token Analyzer
+# Open ACE
 
 [English](#english) | [中文](#中文)
 
@@ -20,7 +20,7 @@
 ### 项目结构
 
 ```
-ai-token-analyzer/
+open-ace/
 ├── scripts/
 │   ├── shared/           # 共享模块 (db, utils, config, email_notifier, feishu_user_cache)
 │   ├── manage.py         # 统一部署和管理脚本
@@ -52,14 +52,14 @@ pip install -r requirements.txt
 
 #### 开发目录 vs 部署目录
 
-- **开发目录**：`/Users/rhuang/workspace/ai-token-analyzer/` - 源代码和开发使用
-- **部署目录**：`~/ai-token-analyzer/` - 实际运行和部署使用
+- **开发目录**：`/Users/rhuang/workspace/open-ace/` - 源代码和开发使用
+- **部署目录**：`~/open-ace/` - 实际运行和部署使用
 
 #### 部署到本地（中央服务器）
 
 ```bash
-# 从开发目录部署到 ~/ai-token-analyzer/
-cd /Users/rhuang/workspace/ai-token-analyzer
+# 从开发目录部署到 ~/open-ace/
+cd /Users/rhuang/workspace/open-ace
 python3 scripts/manage.py local deploy
 ```
 
@@ -67,13 +67,13 @@ python3 scripts/manage.py local deploy
 
 ```bash
 # 切换到部署目录
-cd ~/ai-token-analyzer
+cd ~/open-ace
 
 # 启动 Web 服务
 python3 web.py
 
 # 或使用管理脚本（从开发目录）
-python3 /Users/rhuang/workspace/ai-token-analyzer/scripts/manage.py local start
+python3 /Users/rhuang/workspace/open-ace/scripts/manage.py local start
 ```
 
 #### 初始化配置
@@ -82,7 +82,7 @@ python3 /Users/rhuang/workspace/ai-token-analyzer/scripts/manage.py local start
 python3 cli.py config init
 ```
 
-编辑配置文件 `~/.ai-token-analyzer/config.json`，设置：
+编辑配置文件 `~/.open-ace/config.json`，设置：
 
 - 各 AI 工具的日志文件路径
 - 邮件服务器设置（用于每日报告）
@@ -180,7 +180,7 @@ GET /api/messages?date=2025-03-01&tool=claude&roles=user,assistant&search=test&p
 
 ```bash
 # 每天 00:30 运行数据收集和报告
-30 0 * * * cd /path/to/ai-token-analyzer && python3 scripts/fetch_claude.py && python3 scripts/fetch_qwen.py && python3 scripts/fetch_openclaw.py && python3 cli.py report >> /path/to/logs/cron.log 2>&1
+30 0 * * * cd /path/to/open-ace && python3 scripts/fetch_claude.py && python3 scripts/fetch_qwen.py && python3 scripts/fetch_openclaw.py && python3 cli.py report >> /path/to/logs/cron.log 2>&1
 ```
 
 ---
@@ -203,7 +203,7 @@ An AI tool token usage tracking and analysis project, supporting OpenClaw, Claud
 ### Project Structure
 
 ```
-ai-token-analyzer/
+open-ace/
 ├── scripts/
 │   ├── shared/          # Shared modules (db, utils, email)
 │   ├── fetch_claude.py  # Claude log fetcher
@@ -235,7 +235,7 @@ pip install -r requirements.txt
 python3 cli.py config init
 ```
 
-Edit the config file at `~/.ai-token-analyzer/config.json` to configure:
+Edit the config file at `~/.open-ace/config.json` to configure:
 
 - Log file paths for each AI tool
 - SMTP settings for email reports
@@ -311,5 +311,5 @@ Add to crontab:
 
 ```bash
 # Run data collection and report daily at 00:30
-30 0 * * * cd /path/to/ai-token-analyzer && python3 scripts/fetch_claude.py && python3 scripts/fetch_qwen.py && python3 scripts/fetch_openclaw.py && python3 cli.py report >> /path/to/logs/cron.log 2>&1
+30 0 * * * cd /path/to/open-ace && python3 scripts/fetch_claude.py && python3 scripts/fetch_qwen.py && python3 scripts/fetch_openclaw.py && python3 cli.py report >> /path/to/logs/cron.log 2>&1
 ```

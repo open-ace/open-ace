@@ -45,7 +45,7 @@ async def test_issue25():
             print(f"Fullscreen button visible: {is_visible}")
             
             # Take screenshot before fullscreen
-            await page.screenshot(path='/Users/rhuang/workspace/ai-token-analyzer/screenshots/issue25_before_fullscreen.png', full_page=True)
+            await page.screenshot(path='/Users/rhuang/workspace/open-ace/screenshots/issue25_before_fullscreen.png', full_page=True)
             print("✓ Saved: issue25_before_fullscreen.png")
             
             if is_visible:
@@ -54,7 +54,7 @@ async def test_issue25():
                 await asyncio.sleep(1)
                 
                 # Take screenshot in fullscreen mode
-                await page.screenshot(path='/Users/rhuang/workspace/ai-token-analyzer/screenshots/issue25_fullscreen.png', full_page=True)
+                await page.screenshot(path='/Users/rhuang/workspace/open-ace/screenshots/issue25_fullscreen.png', full_page=True)
                 print("✓ Saved: issue25_fullscreen.png")
                 
                 # Exit fullscreen
@@ -63,7 +63,7 @@ async def test_issue25():
         else:
             print("Fullscreen button not found!")
             # Take screenshot anyway
-            await page.screenshot(path='/Users/rhuang/workspace/ai-token-analyzer/screenshots/issue25_debug.png', full_page=True)
+            await page.screenshot(path='/Users/rhuang/workspace/open-ace/screenshots/issue25_debug.png', full_page=True)
         
         await browser.close()
         print("\nTest completed!")

@@ -31,7 +31,7 @@ def upload_data(server_url: str, auth_key: str, hostname: str, days: int = 1, in
     print(f"Hostname: {hostname}")
     
     # Get marker file for incremental uploads
-    marker_file = Path.home() / ".ai-token-analyzer" / "upload_marker.json"
+    marker_file = Path.home() / ".open-ace" / "upload_marker.json"
     last_upload = None
     
     if incremental and marker_file.exists():

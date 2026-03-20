@@ -8,7 +8,7 @@ import os
 BASE_URL = "http://127.0.0.1:5001"
 USERNAME = "admin"
 PASSWORD = "admin123"
-SCREENSHOT_DIR = "/Users/rhuang/workspace/ai-token-analyzer/screenshots"
+SCREENSHOT_DIR = "/Users/rhuang/workspace/open-ace/screenshots"
 
 async def test_issue30_v4():
     """测试工具标签显示"""

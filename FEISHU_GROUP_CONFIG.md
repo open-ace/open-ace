@@ -76,7 +76,7 @@ Authorization: Bearer {token}
 
 #### 3. 配置本地配置文件
 
-编辑 `~/.ai-token-analyzer/config.json`：
+编辑 `~/.open-ace/config.json`：
 
 ```json
 {
@@ -106,7 +106,7 @@ Authorization: Bearer {token}
 
 ```bash
 # 测试获取群聊名称
-cd /Users/rhuang/workspace/ai-token-analyzer
+cd /Users/rhuang/workspace/open-ace
 python3 scripts/feishu_group_cache.py test chat_xxxxx <your_app_id> <your_app_secret>
 
 # 查看缓存的群聊
@@ -184,7 +184,7 @@ is_group_chat: true
 运行以下命令测试群聊名称获取：
 
 ```bash
-cd /Users/rhuang/workspace/ai-token-analyzer
+cd /Users/rhuang/workspace/open-ace
 python3 scripts/feishu_group_cache.py test <chat_id> <app_id> <app_secret>
 ```
 

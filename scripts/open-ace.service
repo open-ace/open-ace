@@ -1,6 +1,6 @@
 [Unit]
-Description=AI Token Analyzer - Web Dashboard for AI Token Usage
-Documentation=https://github.com/richardhuang/ai-token-analyzer
+Description=Open ACE - Web Dashboard for AI Token Usage
+Documentation=https://github.com/richardhuang/open-ace
 After=network.target
 
 [Service]

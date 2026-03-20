@@ -1,14 +1,14 @@
 [Unit]
-Description=AI Token Analyzer - OpenClaw Data Collection
+Description=Open ACE - OpenClaw Data Collection
 After=network.target
 
 [Service]
 Type=simple
 User=openclaw
 Group=openclaw
-WorkingDirectory=/home/openclaw/ai-token-analyzer
+WorkingDirectory=/home/openclaw/open-ace
 Environment="PYTHONUNBUFFERED=1"
-ExecStart=/usr/bin/python3 /home/openclaw/ai-token-analyzer/scripts/fetch_openclaw.py --days 1
+ExecStart=/usr/bin/python3 /home/openclaw/open-ace/scripts/fetch_openclaw.py --days 1
 
 [Install]
 WantedBy=multi-user.target

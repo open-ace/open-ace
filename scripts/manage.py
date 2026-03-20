@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-AI Token Analyzer - Deploy and Manage Script
+Open ACE - Deploy and Manage Script
 
 Unified script for:
 - Local deployment (central server)
@@ -19,14 +19,14 @@ from typing import Optional
 
 # Project directories
 BASE_DIR = Path(__file__).parent.parent  # Development directory
-DEV_DIR = BASE_DIR  # Development directory (/Users/rhuang/workspace/ai-token-analyzer)
-DEPLOY_DIR = Path.home() / "ai-token-analyzer"  # Deployment directory (~/ai-token-analyzer)
+DEV_DIR = BASE_DIR  # Development directory (/Users/rhuang/workspace/open-ace)
+DEPLOY_DIR = Path.home() / "open-ace"  # Deployment directory (~/open-ace)
 SCRIPTS_DIR = DEPLOY_DIR / "scripts"
 CONFIG_DIR = DEPLOY_DIR / "config"
 LOG_DIR = DEPLOY_DIR / "logs"
 
 # Remote machine configuration - loaded from config file or environment
-# Set REMOTE_HOST environment variable or configure in ~/.ai-token-analyzer/config.json
+# Set REMOTE_HOST environment variable or configure in ~/.open-ace/config.json
 REMOTE_USER = os.environ.get("REMOTE_USER", "openclaw")
 REMOTE_HOST = os.environ.get("REMOTE_HOST", "")
 
@@ -40,7 +40,7 @@ except ImportError:
     # Fallback defaults if config module not available
     WEB_PORT = int(os.environ.get('AI_TOKEN_WEB_PORT', '5001'))
     WEB_HOST = os.environ.get('AI_TOKEN_WEB_HOST', '0.0.0.0')
-REMOTE_DIR = os.environ.get("REMOTE_DIR", "/home/openclaw/ai-token-analyzer")
+REMOTE_DIR = os.environ.get("REMOTE_DIR", "/home/openclaw/open-ace")
 
 
 def get_remote_config() -> dict:
@@ -59,7 +59,7 @@ def get_remote_config() -> dict:
         }
     
     # Otherwise, try to load from config file
-    config_file = Path.home() / ".ai-token-analyzer" / "config.json"
+    config_file = Path.home() / ".open-ace" / "config.json"
     if config_file.exists():
         try:
             with open(config_file) as f:
@@ -71,7 +71,7 @@ def get_remote_config() -> dict:
                 return {
                     "host": host_info.get("host", ""),
                     "user": host_info.get("user", "openclaw"),
-                    "dir": host_info.get("base_dir", "/home/openclaw/ai-token-analyzer")
+                    "dir": host_info.get("base_dir", "/home/openclaw/open-ace")
                 }
         except (json.JSONDecodeError, IOError) as e:
             print_error(f"Failed to load config: {e}")
@@ -116,7 +116,7 @@ def setup_local_config():
     """Setup local configuration."""
     print_header("Setting up Local Configuration")
     
-    config_path = Path.home() / ".ai-token-analyzer"
+    config_path = Path.home() / ".open-ace"
     config_path.mkdir(parents=True, exist_ok=True)
     
     config_file = config_path / "config.json"
@@ -150,7 +150,7 @@ def setup_local_config():
 
 
 def deploy_local():
-    """Deploy to local ~/ai-token-analyzer directory."""
+    """Deploy to local ~/open-ace directory."""
     print_header("Deploying to Local Directory")
     print(f"Target: {DEPLOY_DIR}")
     
@@ -177,7 +177,7 @@ def deploy_local():
     
     # Step 3: Setup config
     print("\n3. Setting up configuration...")
-    config_path = Path.home() / ".ai-token-analyzer"
+    config_path = Path.home() / ".open-ace"
     config_path.mkdir(parents=True, exist_ok=True)
     
     config_file = config_path / "config.json"
@@ -230,7 +230,7 @@ def install_local_service():
             print_error("Service file not found")
     
     elif system == "Darwin":  # macOS
-        plist_file = DEPLOY_DIR / "scripts" / "com.ai-token-analyzer.web.plist"
+        plist_file = DEPLOY_DIR / "scripts" / "com.open-ace.web.plist"
         launch_dir = Path.home() / "Library" / "LaunchAgents"
         
         if plist_file.exists():
@@ -341,7 +341,7 @@ rm -f check_*.py db_info.py test_*.py fix_timestamps.py
 rm -f deploy_remote.py fetch_remote.py upload_to_server.py
 rm -f fetch_all_tools.py fetch_claude.py fetch_qwen.py
 rm -f install_web_service.sh start_web.sh stop_web.sh
-rm -f com.ai-token-analyzer.web.plist
+rm -f com.open-ace.web.plist
 rm -f sync_remote.sh clean_deploy_remote.sh
 rm -f ../scripts/shared/email_notifier.py
 """
@@ -369,7 +369,7 @@ rm -f ../scripts/shared/email_notifier.py
     # Get remote config to determine host info
     remote_cfg = get_remote_config()
     if not remote_cfg["host"]:
-        print_error("Remote host not configured. Set REMOTE_HOST environment variable or configure in ~/.ai-token-analyzer/config.json")
+        print_error("Remote host not configured. Set REMOTE_HOST environment variable or configure in ~/.open-ace/config.json")
         return
     
     # Generate config template - user should edit with actual credentials
@@ -393,7 +393,7 @@ rm -f ../scripts/shared/email_notifier.py
   }}
 }}"""
     print("\n  ⚠️  IMPORTANT: Please edit the config file with your actual credentials!")
-    print(f"  Config location: ~{REMOTE_USER}/.ai-token-analyzer/config.json")
+    print(f"  Config location: ~{REMOTE_USER}/.open-ace/config.json")
     print("  Required fields to update:")
     print("    - server.upload_auth_key")
     print("    - server.server_url")
@@ -401,7 +401,7 @@ rm -f ../scripts/shared/email_notifier.py
     print("    - feishu.app_id")
     print("    - feishu.app_secret")
     
-    run_command(f"ssh {REMOTE_USER}@{REMOTE_HOST} \"mkdir -p ~{REMOTE_USER}/.ai-token-analyzer && cat > ~{REMOTE_USER}/.ai-token-analyzer/config.json << 'EOF'\n{config_content}\nEOF\"")
+    run_command(f"ssh {REMOTE_USER}@{REMOTE_HOST} \"mkdir -p ~{REMOTE_USER}/.open-ace && cat > ~{REMOTE_USER}/.open-ace/config.json << 'EOF'\n{config_content}\nEOF\"")
     print_success("Configuration template created")
     
     # Step 8: Test deployment
@@ -453,11 +453,11 @@ def status_remote():
 
 def main():
     parser = argparse.ArgumentParser(
-        description="AI Token Analyzer - Deploy and Manage",
+        description="Open ACE - Deploy and Manage",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  %(prog)s local deploy    - Deploy to ~/ai-token-analyzer/
+  %(prog)s local deploy    - Deploy to ~/open-ace/
   %(prog)s local setup     - Setup local configuration
   %(prog)s local install   - Install local service
   %(prog)s local start     - Start local web server

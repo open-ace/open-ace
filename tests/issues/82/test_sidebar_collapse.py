@@ -57,7 +57,7 @@ async def test_sidebar_collapse():
         print(f'localStorage sidebar_collapsed: {is_collapsed}')
         
         # 截图
-        await page.screenshot(path='/Users/rhuang/workspace/ai-token-analyzer/screenshots/issues/82/sidebar_collapsed.png')
+        await page.screenshot(path='/Users/rhuang/workspace/open-ace/screenshots/issues/82/sidebar_collapsed.png')
         print()
         print('截图已保存到 screenshots/issues/82/sidebar_collapsed.png')
         
@@ -72,7 +72,7 @@ async def test_sidebar_collapse():
         print(f'再次点击后 Sidebar 宽度: {sidebar_width_final}px')
         
         # 截图
-        await page.screenshot(path='/Users/rhuang/workspace/ai-token-analyzer/screenshots/issues/82/sidebar_expanded.png')
+        await page.screenshot(path='/Users/rhuang/workspace/open-ace/screenshots/issues/82/sidebar_expanded.png')
         print('截图已保存到 screenshots/issues/82/sidebar_expanded.png')
         
         await browser.close()

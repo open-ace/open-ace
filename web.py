@@ -955,7 +955,7 @@ def _check_remote_host_status(host_info):
     host_name = host_info.get('name', 'unknown')
     host = host_info.get('host')
     user = host_info.get('user', 'openclaw')
-    base_dir = host_info.get('base_dir', '/home/openclaw/ai-token-analyzer')
+    base_dir = host_info.get('base_dir', '/home/openclaw/open-ace')
 
     if not host:
         return {
@@ -970,9 +970,9 @@ def _check_remote_host_status(host_info):
 
     try:
         # Try to SSH and get the last update time from the database
-        # Database is located at ~/.ai-token-analyzer/usage.db
+        # Database is located at ~/.open-ace/usage.db
         # Check both token_usage and daily_messages tables
-        check_cmd = f"ssh -o ConnectTimeout=5 -o BatchMode=yes -o StrictHostKeyChecking=no {user}@{host} 'python3 -c \"import sqlite3, os; db_path = os.path.expanduser(\\\"~/.ai-token-analyzer/usage.db\\\"); conn = sqlite3.connect(db_path); cursor = conn.cursor(); cursor.execute(\\\"SELECT MAX(timestamp) FROM daily_messages\\\"); result = cursor.fetchone(); print(result[0] if result and result[0] else \\\"\\\"); conn.close()\"'"
+        check_cmd = f"ssh -o ConnectTimeout=5 -o BatchMode=yes -o StrictHostKeyChecking=no {user}@{host} 'python3 -c \"import sqlite3, os; db_path = os.path.expanduser(\\\"~/.open-ace/usage.db\\\"); conn = sqlite3.connect(db_path); cursor = conn.cursor(); cursor.execute(\\\"SELECT MAX(timestamp) FROM daily_messages\\\"); result = cursor.fetchone(); print(result[0] if result and result[0] else \\\"\\\"); conn.close()\"'"
         result = subprocess.run(
             check_cmd,
             shell=True,
@@ -1038,7 +1038,7 @@ def _fetch_single_host(host_info, config):
     host_name = host_info.get('name', 'unknown')
     host = host_info.get('host')
     user = host_info.get('user', 'openclaw')
-    base_dir = host_info.get('base_dir', '/home/openclaw/ai-token-analyzer')
+    base_dir = host_info.get('base_dir', '/home/openclaw/open-ace')
 
     if not host:
         return None

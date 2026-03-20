@@ -56,7 +56,7 @@
       "name": "ai-lab",
       "host": "<REMOTE_HOST>",
       "user": "openclaw",
-      "base_dir": "/home/openclaw/ai-token-analyzer",
+      "base_dir": "/home/openclaw/open-ace",
       "tools": ["openclaw"]
     }
   ]
@@ -93,7 +93,7 @@ def _fetch_remote_data():
         host_name = host_info.get('name', 'unknown')
         host = host_info.get('host')
         user = host_info.get('user', 'openclaw')
-        base_dir = host_info.get('base_dir', '/home/openclaw/ai-token-analyzer')
+        base_dir = host_info.get('base_dir', '/home/openclaw/open-ace')
 
         # Execute fetch on remote machine
         fetch_cmd = f"ssh {user}@{host} 'cd {base_dir} && python3 scripts/fetch_openclaw.py --days 7'"
@@ -257,7 +257,7 @@ ssh-copy-id openclaw@<REMOTE_HOST>
 
 ### 7.2 配置文件
 
-在 `~/.ai-token-analyzer/config.json` 中添加远程配置：
+在 `~/.open-ace/config.json` 中添加远程配置：
 
 ```json
 {
@@ -268,7 +268,7 @@ ssh-copy-id openclaw@<REMOTE_HOST>
         "name": "ai-lab",
         "host": "<REMOTE_HOST>",
         "user": "openclaw",
-        "base_dir": "/home/openclaw/ai-token-analyzer"
+        "base_dir": "/home/openclaw/open-ace"
       }
     ]
   }

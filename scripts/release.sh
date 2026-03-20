@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# AI Token Analyzer - Release Script
+# Open ACE - Release Script
 #
 # This script creates a release package with version and date in the filename.
 #
@@ -60,7 +60,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --help|-h)
-            echo "AI Token Analyzer - Release Script"
+            echo "Open ACE - Release Script"
             echo ""
             echo "Usage: $0 [OPTIONS]"
             echo ""
@@ -70,7 +70,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --help, -h              Show this help message"
             echo ""
             echo "Output:"
-            echo "  Creates: dist/ai-token-analyzer-{VERSION}.tar.gz"
+            echo "  Creates: dist/open-ace-{VERSION}.tar.gz"
             echo ""
             exit 0
             ;;
@@ -82,11 +82,11 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Package name (version already includes date from git)
-PACKAGE_NAME="ai-token-analyzer-${VERSION}"
+PACKAGE_NAME="open-ace-${VERSION}"
 ARCHIVE_NAME="${PACKAGE_NAME}.tar.gz"
 
 echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}  AI Token Analyzer - Release Builder${NC}"
+echo -e "${GREEN}  Open ACE - Release Builder${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 echo "Version: $VERSION"

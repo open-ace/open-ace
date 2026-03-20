@@ -1,5 +1,5 @@
 [Unit]
-Description=AI Token Analyzer - OpenClaw Data Collection Timer
+Description=Open ACE - OpenClaw Data Collection Timer
 Requires=fetch-openclaw.service
 
 [Timer]

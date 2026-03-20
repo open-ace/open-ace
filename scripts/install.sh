@@ -1,8 +1,8 @@
 #!/bin/bash
 #
-# AI Token Analyzer - Installation Script
+# Open ACE - Installation Script
 #
-# This script installs or upgrades AI Token Analyzer.
+# This script installs or upgrades Open ACE.
 # Supports both local installation and remote deployment via SSH.
 #
 # Usage:
@@ -31,7 +31,7 @@ INSTALL_MODE=""  # "local" or "deploy"
 # Deployment settings (for both local and deploy modes)
 DEPLOY_HOST=""        # Empty for local mode, required for deploy mode
 DEPLOY_USER="${USER}"
-DEPLOY_PATH="$HOME/ai-token-analyzer"
+DEPLOY_PATH="$HOME/open-ace"
 
 # Systemd service settings
 SERVICE_PORT=""       # Web server port (will be read from config or use default)
@@ -43,7 +43,7 @@ DATA_DIRS=(
     "logs"
 )
 
-# Data files to preserve (in ~/.ai-token-analyzer/)
+# Data files to preserve (in ~/.open-ace/)
 DATA_FILES=(
     "usage.db"
     "config.json"
@@ -128,7 +128,7 @@ prompt_yesno() {
 # ============================================================================
 
 get_web_port_from_config() {
-    local config_file="$HOME/.ai-token-analyzer/config.json"
+    local config_file="$HOME/.open-ace/config.json"
     local default_port="5001"
 
     if [ -f "$config_file" ]; then
@@ -164,8 +164,8 @@ install_systemd_service() {
     local port="${3:-5001}"
     local host="${4:-0.0.0.0}"
 
-    local service_template="$SOURCE_DIR/scripts/ai-token-analyzer.service"
-    local service_file="/etc/systemd/system/ai-token-analyzer.service"
+    local service_template="$SOURCE_DIR/scripts/open-ace.service"
+    local service_file="/etc/systemd/system/open-ace.service"
 
     if [ ! -f "$service_template" ]; then
         print_error "Service template not found: $service_template"
@@ -209,28 +209,28 @@ install_systemd_service() {
     systemctl daemon-reload
 
     # Enable the service
-    print_info "Enabling ai-token-analyzer service..."
-    systemctl enable ai-token-analyzer.service
+    print_info "Enabling open-ace service..."
+    systemctl enable open-ace.service
 
     # Check if service is already running
-    if systemctl is-active --quiet ai-token-analyzer.service; then
-        print_info "Restarting ai-token-analyzer service..."
-        systemctl restart ai-token-analyzer.service
+    if systemctl is-active --quiet open-ace.service; then
+        print_info "Restarting open-ace service..."
+        systemctl restart open-ace.service
     else
-        print_info "Starting ai-token-analyzer service..."
-        systemctl start ai-token-analyzer.service
+        print_info "Starting open-ace service..."
+        systemctl start open-ace.service
     fi
 
     # Check service status
     sleep 2
-    if systemctl is-active --quiet ai-token-analyzer.service; then
+    if systemctl is-active --quiet open-ace.service; then
         print_success "Systemd service installed and started successfully"
-        print_info "Service name: ai-token-analyzer"
-        print_info "Status: systemctl status ai-token-analyzer"
-        print_info "Logs: journalctl -u ai-token-analyzer -f"
+        print_info "Service name: open-ace"
+        print_info "Status: systemctl status open-ace"
+        print_info "Logs: journalctl -u open-ace -f"
         print_info "Web interface: http://localhost:$port"
     else
-        print_error "Service failed to start. Check logs with: journalctl -u ai-token-analyzer -n 50"
+        print_error "Service failed to start. Check logs with: journalctl -u open-ace -n 50"
         return 1
     fi
 
@@ -264,10 +264,10 @@ install_systemd_service_remote() {
         GROUP=\$(id -gn '$user')
 
         # Create service file
-        sudo tee /etc/systemd/system/ai-token-analyzer.service > /dev/null << 'EOFSERVICE'
+        sudo tee /etc/systemd/system/open-ace.service > /dev/null << 'EOFSERVICE'
 [Unit]
-Description=AI Token Analyzer - Web Dashboard for AI Token Usage
-Documentation=https://github.com/richardhuang/ai-token-analyzer
+Description=Open ACE - Web Dashboard for AI Token Usage
+Documentation=https://github.com/richardhuang/open-ace
 After=network.target
 
 [Service]
@@ -295,18 +295,18 @@ EOFSERVICE
 
         # Reload and enable service
         sudo systemctl daemon-reload
-        sudo systemctl enable ai-token-analyzer.service
+        sudo systemctl enable open-ace.service
 
         # Start or restart service
-        if sudo systemctl is-active --quiet ai-token-analyzer.service; then
-            sudo systemctl restart ai-token-analyzer.service
+        if sudo systemctl is-active --quiet open-ace.service; then
+            sudo systemctl restart open-ace.service
         else
-            sudo systemctl start ai-token-analyzer.service
+            sudo systemctl start open-ace.service
         fi
 
         # Wait and check status
         sleep 2
-        if sudo systemctl is-active --quiet ai-token-analyzer.service; then
+        if sudo systemctl is-active --quiet open-ace.service; then
             echo 'SERVICE_STARTED'
         else
             echo 'SERVICE_FAILED'
@@ -315,7 +315,7 @@ EOFSERVICE
 
     local result=$(ssh "$remote" "
         if sudo -n true 2>/dev/null; then
-            if sudo systemctl is-active --quiet ai-token-analyzer.service; then
+            if sudo systemctl is-active --quiet open-ace.service; then
                 echo 'SERVICE_STARTED'
             else
                 echo 'SERVICE_FAILED'
@@ -328,21 +328,21 @@ EOFSERVICE
     case "$result" in
         SERVICE_STARTED)
             print_success "Systemd service installed and started on remote machine"
-            print_info "Service name: ai-token-analyzer"
-            print_info "Status: ssh $remote 'sudo systemctl status ai-token-analyzer'"
-            print_info "Logs: ssh $remote 'sudo journalctl -u ai-token-analyzer -f'"
+            print_info "Service name: open-ace"
+            print_info "Status: ssh $remote 'sudo systemctl status open-ace'"
+            print_info "Logs: ssh $remote 'sudo journalctl -u open-ace -f'"
             print_info "Web interface: http://$DEPLOY_HOST:$port"
             ;;
         SERVICE_FAILED)
             print_error "Service failed to start on remote machine"
-            print_info "Check logs with: ssh $remote 'sudo journalctl -u ai-token-analyzer -n 50'"
+            print_info "Check logs with: ssh $remote 'sudo journalctl -u open-ace -n 50'"
             return 1
             ;;
         SUDO_REQUIRED)
             print_warning "Sudo privileges required on remote machine."
             print_info "Please run the following on the remote machine:"
-            print_info "  sudo systemctl enable ai-token-analyzer"
-            print_info "  sudo systemctl start ai-token-analyzer"
+            print_info "  sudo systemctl enable open-ace"
+            print_info "  sudo systemctl start open-ace"
             ;;
     esac
 
@@ -382,7 +382,7 @@ parse_config_file() {
 # ============================================================================
 
 interactive_config() {
-    print_header "AI Token Analyzer - Installation Configuration"
+    print_header "Open ACE - Installation Configuration"
 
     # Ask for installation mode
     echo -e "${BLUE}Select installation mode:${NC}"
@@ -461,7 +461,7 @@ configure_deploy() {
     fi
 
     prompt_input "Remote user" "$DEPLOY_USER" DEPLOY_USER
-    prompt_input "Deployment path" "/home/$DEPLOY_USER/ai-token-analyzer" DEPLOY_PATH
+    prompt_input "Deployment path" "/home/$DEPLOY_USER/open-ace" DEPLOY_PATH
 
     # Ask about systemd service
     echo ""
@@ -504,7 +504,7 @@ install_local() {
     print_header "Installing on Local Machine"
 
     local target_path="$DEPLOY_PATH"
-    local config_dir="$HOME/.ai-token-analyzer"
+    local config_dir="$HOME/.open-ace"
 
     # Check if already installed
     if [ -d "$target_path" ]; then
@@ -533,13 +533,13 @@ install_local() {
     echo ""
     if [ "$INSTALL_SERVICE" = "yes" ] && command -v systemctl &>/dev/null; then
         echo "Service management:"
-        echo "  systemctl status ai-token-analyzer"
-        echo "  systemctl start ai-token-analyzer"
-        echo "  systemctl stop ai-token-analyzer"
-        echo "  systemctl restart ai-token-analyzer"
+        echo "  systemctl status open-ace"
+        echo "  systemctl start open-ace"
+        echo "  systemctl stop open-ace"
+        echo "  systemctl restart open-ace"
         echo ""
         echo "View logs:"
-        echo "  journalctl -u ai-token-analyzer -f"
+        echo "  journalctl -u open-ace -f"
     else
         echo "To start the web server:"
         echo "  cd $target_path && python3 web.py"
@@ -595,13 +595,13 @@ install_deploy() {
     echo ""
     if [ "$INSTALL_SERVICE" = "yes" ]; then
         echo "Service management on remote:"
-        echo "  ssh $remote 'sudo systemctl status ai-token-analyzer'"
-        echo "  ssh $remote 'sudo systemctl start ai-token-analyzer'"
-        echo "  ssh $remote 'sudo systemctl stop ai-token-analyzer'"
-        echo "  ssh $remote 'sudo systemctl restart ai-token-analyzer'"
+        echo "  ssh $remote 'sudo systemctl status open-ace'"
+        echo "  ssh $remote 'sudo systemctl start open-ace'"
+        echo "  ssh $remote 'sudo systemctl stop open-ace'"
+        echo "  ssh $remote 'sudo systemctl restart open-ace'"
         echo ""
         echo "View logs on remote:"
-        echo "  ssh $remote 'sudo journalctl -u ai-token-analyzer -f'"
+        echo "  ssh $remote 'sudo journalctl -u open-ace -f'"
     else
         echo "To start the web server on remote:"
         echo "  ssh $remote 'cd $target_path && python3 web.py'"
@@ -732,7 +732,7 @@ do_upgrade() {
         print_info "Skipping file copy (running from installation directory)"
     else
         # Backup data files
-        local backup_dir="/tmp/ai-token-analyzer-backup-$(date +%Y%m%d%H%M%S)"
+        local backup_dir="/tmp/open-ace-backup-$(date +%Y%m%d%H%M%S)"
         mkdir -p "$backup_dir"
 
         # Backup config directory
@@ -839,7 +839,7 @@ do_fresh_install_remote() {
     ssh "$remote" "chmod +x '$target_path/scripts/'*.py '$target_path/scripts/'*.sh 2>/dev/null || true"
 
     # Create config directory
-    ssh "$remote" "mkdir -p '~/.ai-token-analyzer'"
+    ssh "$remote" "mkdir -p '~/.open-ace'"
 
     # Install Python dependencies
     print_info "Installing Python dependencies on remote..."
@@ -906,11 +906,11 @@ do_upgrade_remote() {
     print_info "Upgrading remote installation..."
 
     # Backup data files
-    local backup_dir="/tmp/ai-token-analyzer-backup-$(date +%Y%m%d%H%M%S)"
+    local backup_dir="/tmp/open-ace-backup-$(date +%Y%m%d%H%M%S)"
     ssh "$remote" "mkdir -p '$backup_dir'"
 
     # Backup config directory
-    ssh "$remote" "if [ -d '~/.ai-token-analyzer' ]; then cp -r ~/.ai-token-analyzer '$backup_dir/'; fi"
+    ssh "$remote" "if [ -d '~/.open-ace' ]; then cp -r ~/.open-ace '$backup_dir/'; fi"
 
     # Backup database
     ssh "$remote" "if [ -f '$target_path/usage.db' ]; then cp '$target_path/usage.db' '$backup_dir/'; fi"
@@ -987,7 +987,7 @@ do_upgrade_remote() {
 # ============================================================================
 
 show_help() {
-    echo "AI Token Analyzer - Installation Script"
+    echo "Open ACE - Installation Script"
     echo ""
     echo "Usage: $0 [OPTIONS]"
     echo ""
@@ -999,12 +999,12 @@ show_help() {
     echo ""
     echo "  # Local installation (install on this machine)"
     echo "  DEPLOY_USER=\${USER}"
-    echo "  DEPLOY_PATH=\$HOME/ai-token-analyzer"
+    echo "  DEPLOY_PATH=\$HOME/open-ace"
     echo ""
     echo "  # Remote deployment (deploy via SSH)"
     echo "  DEPLOY_HOST=192.168.1.100"
     echo "  DEPLOY_USER=openclaw"
-    echo "  DEPLOY_PATH=/home/openclaw/ai-token-analyzer"
+    echo "  DEPLOY_PATH=/home/openclaw/open-ace"
     echo ""
     echo "  # Systemd service configuration (optional)"
     echo "  INSTALL_SERVICE=yes              # Install as systemd service"
@@ -1016,11 +1016,11 @@ show_help() {
     echo "  $0 --config install.conf        # Use config file"
     echo ""
     echo "After installation with systemd service:"
-    echo "  systemctl status ai-token-analyzer   # Check service status"
-    echo "  systemctl start ai-token-analyzer    # Start service"
-    echo "  systemctl stop ai-token-analyzer     # Stop service"
-    echo "  systemctl restart ai-token-analyzer  # Restart service"
-    echo "  journalctl -u ai-token-analyzer -f   # View logs"
+    echo "  systemctl status open-ace   # Check service status"
+    echo "  systemctl start open-ace    # Start service"
+    echo "  systemctl stop open-ace     # Stop service"
+    echo "  systemctl restart open-ace  # Restart service"
+    echo "  journalctl -u open-ace -f   # View logs"
     echo ""
     exit 0
 }
@@ -1044,7 +1044,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Main execution
-print_header "AI Token Analyzer - Installer"
+print_header "Open ACE - Installer"
 
 if [ -n "$CONFIG_FILE" ]; then
     parse_config_file

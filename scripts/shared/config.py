@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-AI Token Analyzer - Configuration Module
+Open ACE - Configuration Module
 
-Provides centralized configuration for the ai-token-analyzer project.
+Provides centralized configuration for the open-ace project.
 
 This module should be the single source of truth for all path configurations.
 For remote machine configurations, edit the config.json file or use the
@@ -14,7 +14,7 @@ import json
 
 # Configuration directory path
 # This is the main configuration that should be set during installation
-CONFIG_DIR = os.path.expanduser("~/.ai-token-analyzer")
+CONFIG_DIR = os.path.expanduser("~/.open-ace")
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
 DB_DIR = CONFIG_DIR  # Database is stored in the same directory
 DB_PATH = os.path.join(DB_DIR, "usage.db")
@@ -25,7 +25,7 @@ REMOTE_USER = os.environ.get('AI_TOKEN_REMOTE_USER', 'openclaw')
 
 # Remote configuration directory on remote machines
 # This is used when deploying to or fetching data from remote machines
-REMOTE_CONFIG_DIR = f"/home/{REMOTE_USER}/.ai-token-analyzer"
+REMOTE_CONFIG_DIR = f"/home/{REMOTE_USER}/.open-ace"
 REMOTE_DB_PATH = f"{REMOTE_CONFIG_DIR}/usage.db"
 
 def _load_user_config() -> dict:

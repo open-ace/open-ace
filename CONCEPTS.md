@@ -1,4 +1,4 @@
-# AI Token Analyzer - 核心概念定义
+# Open ACE - 核心概念定义
 
 本文档澄清项目中使用的核心概念：Request、Message、Conversation、Session。
 

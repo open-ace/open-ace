@@ -3,21 +3,21 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.ai-token-analyzer.web</string>
+    <string>com.open-ace.web</string>
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>/Users/rhuang/workspace/ai-token-analyzer/start_web.sh</string>
+        <string>/Users/rhuang/workspace/open-ace/start_web.sh</string>
     </array>
     <key>RunAtLoad</key>
     <false/>
     <key>KeepAlive</key>
     <true/>
     <key>WorkingDirectory</key>
-    <string>/Users/rhuang/workspace/ai-token-analyzer</string>
+    <string>/Users/rhuang/workspace/open-ace</string>
     <key>StandardErrorPath</key>
-    <string>/Users/rhuang/workspace/ai-token-analyzer/logs/web_server.err</string>
+    <string>/Users/rhuang/workspace/open-ace/logs/web_server.err</string>
     <key>StandardOutPath</key>
-    <string>/Users/rhuang/workspace/ai-token-analyzer/logs/web_server.out</string>
+    <string>/Users/rhuang/workspace/open-ace/logs/web_server.out</string>
 </dict>
 </plist>

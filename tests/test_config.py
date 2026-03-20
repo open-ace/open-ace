@@ -23,7 +23,7 @@ class TestConfigPaths:
         """Test that CONFIG_DIR path is expanded from ~."""
         # Should not contain ~
         assert '~' not in config.CONFIG_DIR
-        assert config.CONFIG_DIR.endswith('.ai-token-analyzer')
+        assert config.CONFIG_DIR.endswith('.open-ace')
     
     def test_db_path_in_config_dir(self):
         """Test that DB_PATH is within CONFIG_DIR."""
@@ -36,7 +36,7 @@ class TestConfigPaths:
     
     def test_remote_paths(self):
         """Test remote path configuration."""
-        assert '/.ai-token-analyzer' in config.REMOTE_CONFIG_DIR
+        assert '/.open-ace' in config.REMOTE_CONFIG_DIR
         assert 'usage.db' in config.REMOTE_DB_PATH
 
 

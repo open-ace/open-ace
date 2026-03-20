@@ -108,7 +108,7 @@ def get_conversation_id_from_parent_id_chain(messages: List[Dict]) -> Tuple[Dict
 def migrate_database():
     """Main migration function."""
     print("=" * 60)
-    print("AI Token Analyzer - Concept Migration")
+    print("Open ACE - Concept Migration")
     print("=" * 60)
     print(f"Database: {DB_PATH}")
     print()

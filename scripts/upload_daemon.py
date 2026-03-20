@@ -118,7 +118,7 @@ def fetch_and_upload():
 def main():
     """Main daemon loop."""
     log("=" * 60)
-    log("Starting AI Token Analyzer Upload Daemon")
+    log("Starting Open ACE Upload Daemon")
     log("=" * 60)
     log(f"Server: {SERVER_URL}")
     log(f"Hostname: {HOSTNAME}")

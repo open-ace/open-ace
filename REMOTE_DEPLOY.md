@@ -4,12 +4,12 @@
 
 远程机器：**<REMOTE_HOST> (ai-lab)**
 用户：**openclaw**
-部署目录：**/home/openclaw/ai-token-analyzer/**
+部署目录：**/home/openclaw/open-ace/**
 
 ## 目录结构
 
 ```
-/home/openclaw/ai-token-analyzer/
+/home/openclaw/open-ace/
 ├── cli.py                          # CLI 工具
 ├── web.py                          # Web 服务器（如果需要）
 ├── README.md                       # 项目说明
@@ -50,22 +50,22 @@
 
 ```bash
 # 1. 从中央服务器清除飞书消息
-sqlite3 ~/.ai-token-analyzer/usage.db "DELETE FROM daily_messages WHERE message_source='feishu';"
+sqlite3 ~/.open-ace/usage.db "DELETE FROM daily_messages WHERE message_source='feishu';"
 
 # 2. 从远程机器清除飞书消息
-ssh openclaw@<REMOTE_HOST> "python3 -c \"import sqlite3; conn=sqlite3.connect('/home/openclaw/.ai-token-analyzer/usage.db'); c=conn.cursor(); c.execute(\\\"DELETE FROM daily_messages WHERE message_source='feishu'\\\"); conn.commit(); conn.close()\""
+ssh openclaw@<REMOTE_HOST> "python3 -c \"import sqlite3; conn=sqlite3.connect('/home/openclaw/.open-ace/usage.db'); c=conn.cursor(); c.execute(\\\"DELETE FROM daily_messages WHERE message_source='feishu'\\\"); conn.commit(); conn.close()\""
 
 # 3. 清除上传标记
-ssh openclaw@<REMOTE_HOST> "rm -f ~openclaw/.ai-token-analyzer/upload_marker.json"
+ssh openclaw@<REMOTE_HOST> "rm -f ~openclaw/.open-ace/upload_marker.json"
 
 # 4. 重新从原始日志提取（建议提取 30 天）
-ssh openclaw@<REMOTE_HOST> "cd /home/openclaw/ai-token-analyzer && python3 scripts/fetch_openclaw.py --days 30"
+ssh openclaw@<REMOTE_HOST> "cd /home/openclaw/open-ace && python3 scripts/fetch_openclaw.py --days 30"
 
 # 5. 上传到中央服务器
-ssh openclaw@<REMOTE_HOST> "cd /home/openclaw/ai-token-analyzer && python3 scripts/upload_to_server.py --server http://<SERVER_IP>:5001 --auth-key <UPLOAD_AUTH_KEY> --hostname ai-lab --days 30"
+ssh openclaw@<REMOTE_HOST> "cd /home/openclaw/open-ace && python3 scripts/upload_to_server.py --server http://<SERVER_IP>:5001 --auth-key <UPLOAD_AUTH_KEY> --hostname ai-lab --days 30"
 
 # 6. 验证数据
-sqlite3 ~/.ai-token-analyzer/usage.db "SELECT sender_name, group_subject, substr(content, 1, 50) FROM daily_messages WHERE message_source='feishu' LIMIT 10;"
+sqlite3 ~/.open-ace/usage.db "SELECT sender_name, group_subject, substr(content, 1, 50) FROM daily_messages WHERE message_source='feishu' LIMIT 10;"
 ```
 
 ### 验收标准
@@ -79,7 +79,7 @@ sqlite3 ~/.ai-token-analyzer/usage.db "SELECT sender_name, group_subject, substr
 
 ## 配置文件
 
-### 本地配置 (~/.ai-token-analyzer/config.json)
+### 本地配置 (~/.open-ace/config.json)
 
 ```json
 {
@@ -109,7 +109,7 @@ sqlite3 ~/.ai-token-analyzer/usage.db "SELECT sender_name, group_subject, substr
 
 ```bash
 # 完整部署到远程机器
-cd /Users/rhuang/workspace/ai-token-analyzer
+cd /Users/rhuang/workspace/open-ace
 python3 scripts/manage.py remote deploy
 
 # 快速同步（不执行清理）
@@ -122,7 +122,7 @@ python3 scripts/manage.py remote sync
 
 ```bash
 # 创建部署目录
-ssh openclaw@<REMOTE_HOST> "mkdir -p /home/openclaw/ai-token-analyzer"
+ssh openclaw@<REMOTE_HOST> "mkdir -p /home/openclaw/open-ace"
 ```
 
 ### 3. 同步文件
@@ -136,7 +136,7 @@ rsync -avz \
     --exclude='__pycache__' \
     --exclude='*.pyc' \
     --exclude='.DS_Store' \
-    ./ openclaw@<REMOTE_HOST>:/home/openclaw/ai-token-analyzer/
+    ./ openclaw@<REMOTE_HOST>:/home/openclaw/open-ace/
 ```
 
 ### 4. 清理不必要的脚本
@@ -144,12 +144,12 @@ rsync -avz \
 ```bash
 # 在远程机器上清理
 ssh openclaw@<REMOTE_HOST> "
-cd /home/openclaw/ai-token-analyzer/scripts
+cd /home/openclaw/open-ace/scripts
 rm -f check_*.py db_info.py test_*.py
 rm -f deploy_remote.py fetch_remote.py upload_to_server.py
 rm -f fetch_all_tools.py fetch_claude.py fetch_qwen.py fetch_openclaw.py
 rm -f install_web_service.sh start_web.sh stop_web.sh
-rm -f com.ai-token-analyzer.web.plist
+rm -f com.open-ace.web.plist
 "
 ```
 
@@ -157,13 +157,13 @@ rm -f com.ai-token-analyzer.web.plist
 
 ```bash
 # 确保所有文件属于 openclaw 用户
-ssh root@<REMOTE_HOST> "chown -R openclaw:openclaw /home/openclaw/ai-token-analyzer"
+ssh root@<REMOTE_HOST> "chown -R openclaw:openclaw /home/openclaw/open-ace"
 
 # 设置可执行权限
 ssh openclaw@<REMOTE_HOST> "
-chmod +x /home/openclaw/ai-token-analyzer/scripts/fetch_openclaw.py
-chmod +x /home/openclaw/ai-token-analyzer/web.py
-chmod +x /home/openclaw/ai-token-analyzer/cli.py
+chmod +x /home/openclaw/open-ace/scripts/fetch_openclaw.py
+chmod +x /home/openclaw/open-ace/web.py
+chmod +x /home/openclaw/open-ace/cli.py
 "
 ```
 
@@ -187,13 +187,13 @@ systemctl status fetch-openclaw.timer
 ```bash
 # 测试数据收集
 ssh openclaw@<REMOTE_HOST> "
-cd /home/openclaw/ai-token-analyzer
+cd /home/openclaw/open-ace
 python3 scripts/fetch_openclaw.py --days 1
 "
 
 # 检查数据库
 ssh openclaw@<REMOTE_HOST> "
-sqlite3 ~/.ai-token-analyzer/usage.db 'SELECT date, host_name, tokens_used FROM daily_usage ORDER BY date DESC LIMIT 5;'
+sqlite3 ~/.open-ace/usage.db 'SELECT date, host_name, tokens_used FROM daily_usage ORDER BY date DESC LIMIT 5;'
 "
 ```
 
@@ -203,7 +203,7 @@ sqlite3 ~/.ai-token-analyzer/usage.db 'SELECT date, host_name, tokens_used FROM 
 
 ```bash
 ssh openclaw@<REMOTE_HOST> "
-cd /home/openclaw/ai-token-analyzer
+cd /home/openclaw/open-ace
 python3 scripts/fetch_openclaw.py --days 7
 "
 ```
@@ -212,7 +212,7 @@ python3 scripts/fetch_openclaw.py --days 7
 
 ```bash
 ssh openclaw@<REMOTE_HOST> "
-tail -f /home/openclaw/ai-token-analyzer/logs/*.log
+tail -f /home/openclaw/open-ace/logs/*.log
 "
 ```
 
@@ -230,19 +230,19 @@ systemctl list-timers
 
 ```bash
 # 运行自动部署脚本
-cd /Users/rhuang/workspace/ai-token-analyzer
+cd /Users/rhuang/workspace/open-ace
 bash scripts/clean_deploy_remote.sh
 ```
 
 ## 飞书用户名解析
 
-飞书用户缓存位于：`~openclaw/.ai-token-analyzer/feishu_users.json`
+飞书用户缓存位于：`~openclaw/.open-ace/feishu_users.json`
 
 ### 查看缓存用户
 
 ```bash
 ssh openclaw@<REMOTE_HOST> "
-cd /home/openclaw/ai-token-analyzer
+cd /home/openclaw/open-ace
 python3 scripts/shared/feishu_user_cache.py list
 "
 ```
@@ -251,7 +251,7 @@ python3 scripts/shared/feishu_user_cache.py list
 
 ```bash
 ssh openclaw@<REMOTE_HOST> "
-cd /home/openclaw/ai-token-analyzer
+cd /home/openclaw/open-ace
 python3 scripts/shared/feishu_user_cache.py clear
 "
 ```
@@ -262,7 +262,7 @@ python3 scripts/shared/feishu_user_cache.py clear
 
 ```bash
 ssh openclaw@<REMOTE_HOST> "
-cd /home/openclaw/ai-token-analyzer
+cd /home/openclaw/open-ace
 pip3 list | grep -E 'requests|flask|sqlite'
 "
 ```
@@ -271,8 +271,8 @@ pip3 list | grep -E 'requests|flask|sqlite'
 
 ```bash
 ssh openclaw@<REMOTE_HOST> "
-sqlite3 ~/.ai-token-analyzer/usage.db '.tables'
-sqlite3 ~/.ai-token-analyzer/usage.db 'SELECT COUNT(*) FROM daily_usage;'
+sqlite3 ~/.open-ace/usage.db '.tables'
+sqlite3 ~/.open-ace/usage.db 'SELECT COUNT(*) FROM daily_usage;'
 "
 ```
 
@@ -280,12 +280,12 @@ sqlite3 ~/.ai-token-analyzer/usage.db 'SELECT COUNT(*) FROM daily_usage;'
 
 ```bash
 ssh openclaw@<REMOTE_HOST> "
-ls -la /home/openclaw/ai-token-analyzer/
-ls -la /home/openclaw/ai-token-analyzer/scripts/
+ls -la /home/openclaw/open-ace/
+ls -la /home/openclaw/open-ace/scripts/
 "
 ```
 
 ## 更新历史
 
-- **2026-03-06**: 清理部署，统一使用 `/home/openclaw/ai-token-analyzer/` 目录
-- **2026-03-05**: 初始部署到 `/opt/ai-token-analyzer/`
+- **2026-03-06**: 清理部署，统一使用 `/home/openclaw/open-ace/` 目录
+- **2026-03-05**: 初始部署到 `/opt/open-ace/`

@@ -70,7 +70,7 @@ def detect_message_source(content: str) -> tuple:
             sender_name = cached_name
         else:
             # Try API
-            config_path = Path.home() / ".ai-token-analyzer" / "config.json"
+            config_path = Path.home() / ".open-ace" / "config.json"
             if config_path.exists():
                 with open(config_path) as f:
                     config = json.load(f)
