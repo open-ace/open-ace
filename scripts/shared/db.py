@@ -806,9 +806,9 @@ def init_auth_database() -> None:
         )
     ''')
 
-    # Create sessions table
+    # Create web_user_auth_sessions table
     cursor.execute('''
-        CREATE TABLE IF NOT EXISTS sessions (
+        CREATE TABLE IF NOT EXISTS web_user_auth_sessions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
             session_token TEXT NOT NULL UNIQUE,
@@ -1033,7 +1033,7 @@ def create_session(user_id: int, session_token: str, expires_at: datetime) -> bo
 
     try:
         cursor.execute('''
-            INSERT INTO sessions (user_id, session_token, expires_at)
+            INSERT INTO web_user_auth_sessions (user_id, session_token, expires_at)
             VALUES (?, ?, ?)
         ''', (user_id, session_token, expires_at))
         conn.commit()
@@ -1051,7 +1051,7 @@ def get_session_by_token(session_token: str) -> Optional[Dict]:
 
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     cursor.execute('''
-        SELECT s.*, u.* FROM sessions s
+        SELECT s.*, u.* FROM web_user_auth_sessions s
         JOIN users u ON s.user_id = u.id
         WHERE s.session_token = ? AND s.expires_at > ?
     ''', (session_token, now))
@@ -1069,7 +1069,7 @@ def delete_session(session_token: str) -> bool:
     conn = get_connection()
     cursor = conn.cursor()
 
-    cursor.execute('DELETE FROM sessions WHERE session_token = ?', (session_token,))
+    cursor.execute('DELETE FROM web_user_auth_sessions WHERE session_token = ?', (session_token,))
     conn.commit()
     conn.close()
     return True
