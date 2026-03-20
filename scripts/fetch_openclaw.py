@@ -779,10 +779,14 @@ def extract_user_message_metadata(text: str) -> Optional[dict]:
                         sender_id = data.get("sender_id")
                     if "sender" in data and not sender_id:
                         sender_id = data.get("sender")
-                    if "label" in data and data.get("label") != sender_id:
-                        sender_name = data.get("label")
-                    if "name" in data and data.get("name") != sender_id:
-                        sender_name = data.get("name")
+                    # Only extract sender_name from Sender metadata blocks (have 'id' field starting with ou_/on_/oc_)
+                    # This prevents extracting 'name' from other JSON blocks like Gitee repo lists
+                    block_id = data.get("id", "")
+                    if block_id and isinstance(block_id, str) and (block_id.startswith("ou_") or block_id.startswith("on_") or block_id.startswith("oc_")):
+                        if "label" in data and data.get("label") != sender_id:
+                            sender_name = data.get("label")
+                        if "name" in data and data.get("name") != sender_id:
+                            sender_name = data.get("name")
                     # Extract conversation info
                     if "conversation_label" in data and not conversation_label:
                         conversation_label = data.get("conversation_label")

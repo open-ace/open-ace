@@ -1640,13 +1640,6 @@ def get_daily_hourly_usage(start_date: str, end_date: str,
     return results
 
 
-# System account blacklist - these accounts should be excluded from user rankings
-SYSTEM_ACCOUNT_BLACKLIST = [
-    'HPCinsights',  # HPC system service account
-    # Add more system accounts here as needed
-]
-
-
 def get_user_activity_ranking(start_date: str, end_date: str,
                                limit: int = 10,
                                tool_name: Optional[str] = None,
@@ -1676,12 +1669,6 @@ def get_user_activity_ranking(start_date: str, end_date: str,
     if host_name:
         conditions.append('host_name = ?')
         params.append(host_name)
-
-    # Exclude system accounts
-    if SYSTEM_ACCOUNT_BLACKLIST:
-        placeholders = ','.join(['?' for _ in SYSTEM_ACCOUNT_BLACKLIST])
-        conditions.append(f'COALESCE(sender_name, sender_id) NOT IN ({placeholders})')
-        params.extend(SYSTEM_ACCOUNT_BLACKLIST)
 
     where_clause = ' AND '.join(conditions)
 
