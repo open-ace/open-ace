@@ -167,7 +167,7 @@ Conversation 2:
 
 1. **fetch_claude.py**：新增 `get_agent_session_id_from_path()` 函数，从项目路径提取 `agent_session_id`
 2. **fetch_qwen.py**：新增 `get_agent_session_id_from_path()` 函数，从项目路径提取 `agent_session_id`
-3. **fetch_openclaw.py**：新增 `get_agent_session_id_from_path()` 函数，从项目路径提取 `agent_session_id`
+3. **fetch_openclaw.py**：新增 `get_agent_session_id_from_path()` 函数，从日志文件路径提取 `agent_session_id`
 4. **web.py**：更新 API 端点，支持新字段 `agent_session_id` 和 `conversation_id`
 5. **templates/index.html**：更新 UI 文本，将 "Session Statistics" 改为 "Agent Session Statistics"
 
@@ -184,7 +184,7 @@ python3 scripts/migrate_concepts.py
 - 为现有数据计算 `conversation_id`
 - 创建新字段的索引
 
-**注意**：`agent_session_id` 字段需要重新运行 fetch 脚本来更新，因为旧数据中没有保存日志文件路径信息。
+**注意**：`agent_session_id` 字段需要重新运行 fetch 脚本来更新，因为旧数据中没有保存日志文件路径信息。对于 openclaw，日志文件路径格式为 `~/.openclaw/agents/main/sessions/{uuid}.jsonl`，可以从文件名中提取 UUID 生成 `agent_session_id`。
 
 ### 相关 Issue
 
