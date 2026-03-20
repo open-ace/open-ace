@@ -36,6 +36,7 @@ ai-token-analyzer/
 ├── web.py                # Flask Web 服务器
 ├── cli.py                # 命令行工具
 ├── requirements.txt      # Python 依赖
+├── CONCEPTS.md           # 核心概念定义（Request、Message、Conversation、Session）
 └── config/
     ├── config.json.sample        # 本地配置文件模板
     └── remote_config.json.sample # 远程机器配置模板
@@ -215,6 +216,7 @@ ai-token-analyzer/
 ├── web.py               # Flask web server
 ├── cli.py               # Command-line interface
 ├── requirements.txt     # Python dependencies
+├── CONCEPTS.md          # Core concepts definition (Request, Message, Conversation, Session)
 └── config/
     └── settings.json.sample  # Configuration template
 ```
