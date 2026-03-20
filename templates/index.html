@@ -5342,6 +5342,8 @@
 
                 // Only update for admin users
                 if (!Auth.isAdmin()) {
+                    // Hide the panel for non-admin users
+                    statusContainer.style.display = 'none';
                     return;
                 }
 
