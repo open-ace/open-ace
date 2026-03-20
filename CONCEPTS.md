@@ -181,8 +181,10 @@ python3 scripts/migrate_concepts.py
 该脚本会：
 - 重命名 `conversation_label` 字段为 `feishu_conversation_id`
 - 添加 `agent_session_id` 和 `conversation_id` 字段
-- 为现有数据计算 `agent_session_id` 和 `conversation_id`
+- 为现有数据计算 `conversation_id`
 - 创建新字段的索引
+
+**注意**：`agent_session_id` 字段需要重新运行 fetch 脚本来更新，因为旧数据中没有保存日志文件路径信息。
 
 ### 相关 Issue
 
