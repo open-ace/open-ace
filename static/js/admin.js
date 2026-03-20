@@ -5,11 +5,13 @@
  */
 
 const Admin = (function() {
-    const Auth = (typeof Auth !== 'undefined') ? Auth : null;
+    // Use window.Auth to safely reference the global Auth object
+    const getAuth = () => typeof window.Auth !== 'undefined' ? window.Auth : null;
 
     // Get all users
     async function getUsers() {
-        const token = Auth ? Auth.getSessionToken() : null;
+        const auth = getAuth();
+        const token = auth ? auth.getSessionToken() : null;
         if (!token) return { success: false, error: 'No session token' };
 
         try {
@@ -30,7 +32,8 @@ const Admin = (function() {
 
     // Create a new user
     async function createUser(userData) {
-        const token = Auth ? Auth.getSessionToken() : null;
+        const auth = getAuth();
+        const token = auth ? auth.getSessionToken() : null;
         if (!token) return { success: false, error: 'No session token' };
 
         try {
@@ -52,7 +55,8 @@ const Admin = (function() {
 
     // Update user information
     async function updateUser(userId, userData) {
-        const token = Auth ? Auth.getSessionToken() : null;
+        const auth = getAuth();
+        const token = auth ? auth.getSessionToken() : null;
         if (!token) return { success: false, error: 'No session token' };
 
         try {
@@ -74,7 +78,8 @@ const Admin = (function() {
 
     // Delete a user
     async function deleteUser(userId) {
-        const token = Auth ? Auth.getSessionToken() : null;
+        const auth = getAuth();
+        const token = auth ? auth.getSessionToken() : null;
         if (!token) return { success: false, error: 'No session token' };
 
         try {
@@ -94,7 +99,8 @@ const Admin = (function() {
 
     // Update user quota
     async function updateUserQuota(userId, quotaTokens, quotaRequests) {
-        const token = Auth ? Auth.getSessionToken() : null;
+        const auth = getAuth();
+        const token = auth ? auth.getSessionToken() : null;
         if (!token) return { success: false, error: 'No session token' };
 
         try {
@@ -119,7 +125,8 @@ const Admin = (function() {
 
     // Get quota usage statistics
     async function getQuotaUsage(startDate, endDate) {
-        const token = Auth ? Auth.getSessionToken() : null;
+        const auth = getAuth();
+        const token = auth ? auth.getSessionToken() : null;
         if (!token) return { success: false, error: 'No session token' };
 
         try {

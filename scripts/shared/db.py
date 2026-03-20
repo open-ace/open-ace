@@ -1640,40 +1640,53 @@ def get_daily_hourly_usage(start_date: str, end_date: str,
     return results
 
 
-def get_user_activity_ranking(start_date: str, end_date: str, 
+# System account blacklist - these accounts should be excluded from user rankings
+SYSTEM_ACCOUNT_BLACKLIST = [
+    'HPCinsights',  # HPC system service account
+    # Add more system accounts here as needed
+]
+
+
+def get_user_activity_ranking(start_date: str, end_date: str,
                                limit: int = 10,
                                tool_name: Optional[str] = None,
                                host_name: Optional[str] = None) -> List[Dict]:
     """Get user activity ranking.
-    
+
     Args:
         start_date: Start date in YYYY-MM-DD format
         end_date: End date in YYYY-MM-DD format
         limit: Number of users to return
         tool_name: Optional tool name filter
         host_name: Optional host name filter
-    
+
     Returns:
         List of dicts with sender_id, sender_name, message_count, tokens_used, active_days
     """
     conn = get_connection()
     cursor = conn.cursor()
-    
+
     conditions = ['date >= ?', 'date <= ?', '(sender_id IS NOT NULL OR sender_name IS NOT NULL)']
     params = [start_date, end_date]
-    
+
     if tool_name:
         conditions.append('tool_name = ?')
         params.append(tool_name)
-    
+
     if host_name:
         conditions.append('host_name = ?')
         params.append(host_name)
-    
+
+    # Exclude system accounts
+    if SYSTEM_ACCOUNT_BLACKLIST:
+        placeholders = ','.join(['?' for _ in SYSTEM_ACCOUNT_BLACKLIST])
+        conditions.append(f'COALESCE(sender_name, sender_id) NOT IN ({placeholders})')
+        params.extend(SYSTEM_ACCOUNT_BLACKLIST)
+
     where_clause = ' AND '.join(conditions)
-    
+
     cursor.execute(f'''
-        SELECT 
+        SELECT
             COALESCE(sender_name, sender_id) as sender_name,
             MAX(sender_id) as sender_id,
             COUNT(*) as message_count,
@@ -1687,10 +1700,10 @@ def get_user_activity_ranking(start_date: str, end_date: str,
         ORDER BY tokens_used DESC
         LIMIT ?
     ''', params + [limit])
-    
+
     rows = cursor.fetchall()
     conn.close()
-    
+
     return [dict(row) for row in rows]
 
 
@@ -1773,8 +1786,8 @@ def get_conversation_statistics(start_date: str, end_date: str,
 
     role_rows = cursor.fetchall()
     message_stats = {}
-    for row in role_rows:
-        message_stats[row['role']] = row['count']
+    for role_row in role_rows:
+        message_stats[role_row['role']] = role_row['count']
 
     conn.close()
 
