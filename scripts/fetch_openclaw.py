@@ -38,22 +38,26 @@ import utils
 from shared import db
 
 
-def get_agent_session_id_from_path(project_path: str) -> Optional[str]:
+def get_agent_session_id_from_path(project_path: str, tool_name: str = "openclaw") -> Optional[str]:
     """
     Extract agent_session_id from project path.
-    
+
     Project path format: /path/to/{tool_name}_{session_id}/...
     Example: /path/to/openclaw_12345/... -> openclaw_12345
     
+    For openclaw, also supports UUID session IDs from session files:
+    Example: ~/.openclaw/agents/main/sessions/abc123-def4.jsonl -> openclaw_abc123
+
     Args:
         project_path: The project directory path
-        
+        tool_name: The tool name (default: openclaw)
+
     Returns:
         agent_session_id string or None if not found
     """
     if not project_path:
         return None
-    
+
     # Try to match pattern: toolname_sessionid
     # Examples: openclaw_abc123, claude_def456, qwen_ghi789
     match = re.search(r'([a-z]+)_([a-f0-9]+)', project_path)
@@ -61,7 +65,15 @@ def get_agent_session_id_from_path(project_path: str) -> Optional[str]:
         tool_name = match.group(1)
         session_id = match.group(2)
         return f"{tool_name}_{session_id}"
-    
+
+    # For openclaw, try to extract UUID from session file path
+    # Format: ~/.openclaw/agents/main/sessions/{uuid}.jsonl
+    if tool_name == "openclaw":
+        match = re.search(r'sessions/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})', project_path)
+        if match:
+            session_id = match.group(1)[:8]  # Use first 8 chars of UUID
+            return f"openclaw_{session_id}"
+
     return None
 
 
@@ -804,6 +816,10 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
         "models_used": set(),
     })
 
+    # Extract agent_session_id from file path
+    # Format: ~/.openclaw/agents/main/sessions/{uuid}.jsonl
+    agent_session_id = get_agent_session_id_from_path(str(filepath), tool_name="openclaw")
+
     # First pass: collect user message senders for assistant message attribution
     # Map: message_id -> (sender_id, sender_name)
     user_senders = {}
@@ -948,12 +964,8 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                                 toolResult_senders[message_id] = (sender_id, sender_name)
 
                             # Save message to database with sender info and message source
-                            # Extract agent_session_id from project directory path
-                            agent_session_id = None
-                            if 'project_path' in entry:
-                                agent_session_id = get_agent_session_id_from_path(entry['project_path'])
-                            elif 'project' in entry:
-                                agent_session_id = get_agent_session_id_from_path(entry['project'])
+                            # Use agent_session_id from file path (already extracted at function start)
+                            # No need to extract from entry as it's not available in message entries
 
                             db.save_message(
                                 date=date_key,
@@ -1018,12 +1030,7 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                             full_entry_json = json.dumps(entry, ensure_ascii=False)
 
                             # Save error message to database with 0 tokens
-                            # Extract agent_session_id from project directory path
-                            agent_session_id = None
-                            if 'project_path' in entry:
-                                agent_session_id = get_agent_session_id_from_path(entry['project_path'])
-                            elif 'project' in entry:
-                                agent_session_id = get_agent_session_id_from_path(entry['project'])
+                            # Use agent_session_id from file path (already extracted at function start)
 
                             db.save_message(
                                 date=date_key,

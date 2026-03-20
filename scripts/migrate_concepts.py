@@ -60,40 +60,49 @@ def get_agent_session_id_from_path(project_path: str) -> Optional[str]:
     return None
 
 
-def get_conversation_id_from_parent_id_chain(messages: List[Dict]) -> Dict[str, str]:
+def get_conversation_id_from_parent_id_chain(messages: List[Dict]) -> Tuple[Dict[str, str], Dict[str, str]]:
     """
     Build conversation_id based on parent_id chain.
-    
+
     A conversation starts when a user sends a message (parent_id is null or from different session)
     and ends when AI completes the final response.
-    
+
     Args:
         messages: List of messages sorted by timestamp
-        
+
     Returns:
-        Dict mapping message_id to conversation_id
+        Tuple of (conversation_map, agent_session_map)
+        - conversation_map: Dict mapping message_id to conversation_id
+        - agent_session_map: Dict mapping message_id to agent_session_id
     """
     conversation_map = {}
+    agent_session_map = {}
     conversation_counter = 0
     current_conversation_id = None
-    
+    current_agent_session_id = None
+
     for msg in messages:
         msg_id = msg.get('message_id')
         parent_id = msg.get('parent_id')
         role = msg.get('role')
-        
+        agent_session_id = msg.get('agent_session_id')
+
         # Determine if this starts a new conversation
         is_user_message = role == 'user'
         has_no_parent = parent_id is None or parent_id == ''
-        
+
         if is_user_message or has_no_parent:
             # Start a new conversation
             conversation_counter += 1
             current_conversation_id = f"conv_{conversation_counter}"
-        
+            # Update current agent_session_id if available
+            if agent_session_id:
+                current_agent_session_id = agent_session_id
+
         conversation_map[msg_id] = current_conversation_id
-    
-    return conversation_map
+        agent_session_map[msg_id] = current_agent_session_id
+
+    return conversation_map, agent_session_map
 
 
 def migrate_database():
@@ -247,17 +256,22 @@ def migrate_database():
         group_messages.sort(key=lambda x: x.get('timestamp') or '')
         
         # Compute conversation_id based on parent_id chain
-        conversation_map = get_conversation_id_from_parent_id_chain(group_messages)
-        
+        conversation_map, agent_session_map = get_conversation_id_from_parent_id_chain(group_messages)
+
         for msg in group_messages:
             msg_id = msg['id']
+            message_id = msg.get('message_id')
             full_entry = msg.get('full_entry')
             parent_id = msg.get('parent_id')
             role = msg.get('role')
-            
-            # Compute agent_session_id from full_entry
-            agent_session_id = None
-            if full_entry:
+
+            # Get conversation_id from conversation_map
+            conversation_id = conversation_map.get(message_id)
+
+            # Get agent_session_id from agent_session_map first
+            # If not available, try to extract from full_entry
+            agent_session_id = agent_session_map.get(message_id)
+            if not agent_session_id and full_entry:
                 try:
                     entry = json.loads(full_entry)
                     # Try to get project path from entry
@@ -266,10 +280,7 @@ def migrate_database():
                         agent_session_id = get_agent_session_id_from_path(project_path)
                 except (json.JSONDecodeError, TypeError):
                     pass
-            
-            # Compute conversation_id
-            conversation_id = conversation_map.get(msg.get('message_id'))
-            
+
             # Update database
             if agent_session_id or conversation_id:
                 cursor.execute('''
