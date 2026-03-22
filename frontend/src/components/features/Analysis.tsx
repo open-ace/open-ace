@@ -1,5 +1,5 @@
 /**
- * Analysis Component - Data analysis and visualization
+ * Analysis Component - Data analysis and visualization with tabs
  */
 
 import React, { useState, useMemo } from 'react';
@@ -16,9 +16,11 @@ import {
   BarChart,
   PieChart,
   LineChart,
+  SimpleTabs,
 } from '@/components/common';
 import { formatTokens, formatDate } from '@/utils';
 import { useKeyMetrics, useDailyHourlyUsage, useToolComparison } from '@/hooks';
+import { ConversationHistory } from './ConversationHistory';
 
 export const Analysis: React.FC = () => {
   const language = useLanguage();
@@ -61,43 +63,13 @@ export const Analysis: React.FC = () => {
 
   const isLoading = metricsLoading || dailyLoading || toolsLoading;
 
-  if (metricsError) {
-    return (
-      <Error
-        message={metricsErrorMsg?.message || t('error', language)}
-        onRetry={() => refetchMetrics()}
-      />
-    );
-  }
-
   // Prepare chart data
   const dailyTrend = dailyHourly?.daily || [];
   const tools = toolComparison?.tools || [];
 
-  return (
-    <div className="analysis">
-      {/* Header */}
-      <div className="analysis-header d-flex justify-content-between align-items-center mb-4">
-        <h2>{t('analysis', language)}</h2>
-        <div className="d-flex gap-2">
-          <Select
-            options={groupByOptions}
-            value={groupBy}
-            onChange={(value) => setGroupBy(value as 'day' | 'week' | 'month')}
-            size="sm"
-          />
-          <Button
-            variant="primary"
-            size="sm"
-            icon={metricsFetching ? undefined : <i className="bi bi-arrow-clockwise" />}
-            onClick={() => refetchMetrics()}
-            loading={metricsFetching}
-          >
-            {t('refresh', language)}
-          </Button>
-        </div>
-      </div>
-
+  // Overview tab content
+  const OverviewContent = (
+    <div className="analysis-overview">
       {/* Date Range */}
       <div className="mb-4">
         <div className="row g-3">
@@ -124,6 +96,11 @@ export const Analysis: React.FC = () => {
 
       {isLoading ? (
         <Loading size="lg" text={t('loading', language)} />
+      ) : metricsError ? (
+        <Error
+          message={metricsErrorMsg?.message || t('error', language)}
+          onRetry={() => refetchMetrics()}
+        />
       ) : (
         <>
           {/* Stats Overview */}
@@ -248,6 +225,51 @@ export const Analysis: React.FC = () => {
           </div>
         </>
       )}
+    </div>
+  );
+
+  // Tabs configuration
+  const tabs = [
+    {
+      id: 'overview',
+      label: t('overview', language),
+      icon: <i className="bi bi-graph-up" />,
+      content: OverviewContent,
+    },
+    {
+      id: 'conversation-history',
+      label: t('conversationHistory', language),
+      icon: <i className="bi bi-chat-history" />,
+      content: <ConversationHistory />,
+    },
+  ];
+
+  return (
+    <div className="analysis">
+      {/* Header */}
+      <div className="analysis-header d-flex justify-content-between align-items-center mb-4">
+        <h2>{t('analysis', language)}</h2>
+        <div className="d-flex gap-2">
+          <Select
+            options={groupByOptions}
+            value={groupBy}
+            onChange={(value) => setGroupBy(value as 'day' | 'week' | 'month')}
+            size="sm"
+          />
+          <Button
+            variant="primary"
+            size="sm"
+            icon={metricsFetching ? undefined : <i className="bi bi-arrow-clockwise" />}
+            onClick={() => refetchMetrics()}
+            loading={metricsFetching}
+          >
+            {t('refresh', language)}
+          </Button>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <SimpleTabs tabs={tabs} defaultTab="overview" />
     </div>
   );
 };
