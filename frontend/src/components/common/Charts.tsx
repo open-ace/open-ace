@@ -145,6 +145,8 @@ interface LineChartProps {
     backgroundColor?: string;
     fill?: boolean;
     tension?: number;
+    pointRadius?: number;
+    pointHoverRadius?: number;
   }>;
   title?: string;
   height?: number;
@@ -201,7 +203,8 @@ export const LineChart: React.FC<LineChartProps> = ({
   // Calculate max value for y-axis
   const allValues = datasets.flatMap((d) => d.data.map(formatValue));
   const maxValue = Math.max(...allValues, 1);
-  const yMax = unit !== 'none' ? Math.ceil(maxValue) : undefined;
+  // Add 10% padding to y-axis max so the highest point doesn't go outside
+  const yMax = unit !== 'none' ? Math.ceil(maxValue * 1.1) : undefined;
 
   const options = {
     ...defaultOptions,
@@ -230,6 +233,13 @@ export const LineChart: React.FC<LineChartProps> = ({
       },
     },
     scales: {
+      x: {
+        // Center the label when there's only one data point
+        offset: hasSinglePoint,
+        ticks: {
+          display: true,
+        },
+      },
       y: {
         beginAtZero: true,
         max: yMax,
