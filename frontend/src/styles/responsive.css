@@ -2,6 +2,7 @@
  * Open ACE Frontend - Responsive Styles
  *
  * This file contains responsive design styles for different screen sizes.
+ * Modern responsive design with mobile-first approach.
  */
 
 /* ===== Breakpoints ===== */
@@ -14,31 +15,48 @@
 
 /* ===== Mobile First Base Styles ===== */
 
-/* Default mobile styles */
+/* Default mobile styles - optimized for touch */
 .container {
   width: 100%;
   padding: 0 var(--spacing-sm);
 }
 
+/* Touch-friendly tap targets */
+button,
+.btn,
+a,
+input,
+select,
+textarea {
+  min-height: 44px;
+  min-width: 44px;
+}
+
 /* ===== Extra Small Devices (xs) - < 576px ===== */
 
-/* Typography */
-h1 { font-size: 1.5rem; }
-h2 { font-size: 1.25rem; }
-h3 { font-size: 1.125rem; }
-h4 { font-size: 1rem; }
-h5 { font-size: 0.9375rem; }
+/* Typography - Optimized for mobile reading */
+h1 { font-size: 1.75rem; }
+h2 { font-size: 1.5rem; }
+h3 { font-size: 1.25rem; }
+h4 { font-size: 1.125rem; }
+h5 { font-size: 1rem; }
 h6 { font-size: 0.875rem; }
 
-/* Sidebar - Hidden on mobile */
+body {
+  font-size: 0.9375rem;
+}
+
+/* Sidebar - Hidden on mobile with overlay */
 .sidebar {
   transform: translateX(-100%);
   position: fixed;
-  z-index: 1050;
+  z-index: var(--z-fixed);
+  transition: transform var(--transition-normal);
 }
 
 .sidebar.show {
   transform: translateX(0);
+  box-shadow: var(--shadow-2xl);
 }
 
 .main-content {
@@ -50,8 +68,10 @@ h6 { font-size: 0.875rem; }
   display: none;
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  z-index: 1040;
+  background: var(--bg-overlay);
+  z-index: calc(var(--z-fixed) - 1);
+  backdrop-filter: blur(4px);
+  animation: fadeIn 0.2s ease-out;
 }
 
 .sidebar.show + .sidebar-overlay {
@@ -64,10 +84,11 @@ h6 { font-size: 0.875rem; }
 }
 
 .header-title {
-  font-size: 1rem;
+  font-size: 1.125rem;
+  font-weight: var(--font-weight-semibold);
 }
 
-/* Dashboard cards - Stack vertically */
+/* Dashboard cards - Stack vertically with spacing */
 .dashboard .row,
 .messages .row,
 .analysis .row {
@@ -95,22 +116,24 @@ h6 { font-size: 0.875rem; }
   width: 100%;
 }
 
-/* Tables - Horizontal scroll */
+/* Tables - Horizontal scroll with gradient fade */
 .table-responsive {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  position: relative;
 }
 
 .table-responsive > .table {
   min-width: 600px;
 }
 
-/* Cards - Full width */
+/* Cards - Full width with enhanced spacing */
 .card {
   margin-bottom: var(--spacing-md);
+  padding: var(--spacing-md);
 }
 
-/* Buttons - Full width on mobile */
+/* Buttons - Full width on mobile for primary actions */
 .btn-mobile-full {
   width: 100%;
 }
@@ -136,6 +159,7 @@ h6 { font-size: 0.875rem; }
 .toast-container {
   left: var(--spacing-sm) !important;
   right: var(--spacing-sm) !important;
+  bottom: var(--spacing-lg) !important;
 }
 
 .toast {
@@ -151,28 +175,50 @@ h6 { font-size: 0.875rem; }
   background: var(--bg-primary);
   border-top: 1px solid var(--border-color);
   padding: var(--spacing-xs) 0;
-  z-index: 1030;
+  z-index: var(--z-sticky);
+  display: flex;
+  justify-content: space-around;
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
 }
 
 .mobile-nav .nav-item {
   flex: 1;
   text-align: center;
+  padding: var(--spacing-xs);
 }
 
 .mobile-nav .nav-link {
   padding: var(--spacing-xs);
   font-size: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  color: var(--text-secondary);
 }
 
 .mobile-nav .nav-link i {
   font-size: 1.25rem;
-  display: block;
-  margin-bottom: 2px;
+}
+
+.mobile-nav .nav-link.active {
+  color: var(--color-primary);
 }
 
 /* Add padding at bottom for mobile nav */
 .has-mobile-nav {
-  padding-bottom: 60px;
+  padding-bottom: 70px;
+}
+
+/* Safe area for notched devices */
+@supports (padding: max(0px)) {
+  .mobile-nav {
+    padding-bottom: max(var(--spacing-xs), env(safe-area-inset-bottom));
+  }
+  
+  .header {
+    padding-top: max(var(--spacing-sm), env(safe-area-inset-top));
+  }
 }
 
 /* ===== Small Devices (sm) - 576px - 767px ===== */
