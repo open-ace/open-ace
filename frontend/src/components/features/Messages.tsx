@@ -7,7 +7,15 @@ import { cn } from '@/utils';
 import { useMessages, useMessageCount, useHosts, useSenders } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
-import { Card, Button, Select, SearchableSelect, Loading, Error, EmptyState } from '@/components/common';
+import {
+  Card,
+  Button,
+  Select,
+  SearchableSelect,
+  Loading,
+  Error,
+  EmptyState,
+} from '@/components/common';
 import { formatDateTime, formatDate, formatTokens } from '@/utils';
 import type { Message, MessageFilters } from '@/types';
 
@@ -18,13 +26,14 @@ const getTodayDate = () => formatDate(new Date(), 'iso');
 
 export const Messages: React.FC = () => {
   const language = useLanguage();
+  const [selectedRoles, setSelectedRoles] = useState<string[]>(['user']);
   const [filters, setFilters] = useState<MessageFilters>(() => ({
     startDate: getTodayDate(),
     endDate: getTodayDate(),
+    role: ['user'],
   }));
   const [page, setPage] = useState(1);
   const [autoRefresh, setAutoRefresh] = useState<boolean>(true);
-  const [selectedRoles, setSelectedRoles] = useState<string[]>(['user']);
 
   // Get hosts for filter
   const { data: hostsData } = useHosts();
@@ -87,9 +96,7 @@ export const Messages: React.FC = () => {
 
   // Handle role checkbox change
   const handleRoleChange = (role: string, checked: boolean) => {
-    const newRoles = checked
-      ? [...selectedRoles, role]
-      : selectedRoles.filter((r) => r !== role);
+    const newRoles = checked ? [...selectedRoles, role] : selectedRoles.filter((r) => r !== role);
     setSelectedRoles(newRoles);
     setFilters((prev) => ({ ...prev, role: newRoles.length > 0 ? newRoles : undefined }));
     setPage(1);
@@ -249,7 +256,9 @@ export const Messages: React.FC = () => {
       {/* Stats */}
       {totalCount !== undefined && (
         <div className="mb-3">
-          <span className="text-muted">{t('total', language)}: {totalCount.toLocaleString()} {t('messages', language)}</span>
+          <span className="text-muted">
+            {t('total', language)}: {totalCount.toLocaleString()} {t('messages', language)}
+          </span>
         </div>
       )}
 
@@ -315,7 +324,7 @@ export const Messages: React.FC = () => {
 
 /**
  * Message Card Component
- * 
+ *
  * Features:
  * - Click entire card to expand/collapse
  * - Smooth shadow transition on hover and expand
@@ -351,11 +360,7 @@ const MessageCard: React.FC<MessageCardProps> = ({ message, language }) => {
 
   return (
     <div
-      className={cn(
-        'message-item',
-        roleColors[message.role] || '',
-        expanded && 'expanded'
-      )}
+      className={cn('message-item', roleColors[message.role] || '', expanded && 'expanded')}
       onClick={handleToggle}
       style={{ cursor: canExpand ? 'pointer' : 'default' }}
     >
@@ -427,10 +432,7 @@ const MessageCard: React.FC<MessageCardProps> = ({ message, language }) => {
 
       {/* Expanded content */}
       {canExpand && (
-        <div
-          className="message-content-expanded"
-          style={{ display: expanded ? 'block' : 'none' }}
-        >
+        <div className="message-content-expanded" style={{ display: expanded ? 'block' : 'none' }}>
           <pre className="mb-0" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
             {expanded && message.full_entry
               ? JSON.stringify(message.full_entry, null, 2)
@@ -442,11 +444,7 @@ const MessageCard: React.FC<MessageCardProps> = ({ message, language }) => {
       {/* Footer */}
       <div className="message-footer">
         <small>{formatDateTime(message.timestamp)}</small>
-        {message.model && (
-          <small className="text-muted">
-            Model: {message.model}
-          </small>
-        )}
+        {message.model && <small className="text-muted">Model: {message.model}</small>}
       </div>
     </div>
   );
