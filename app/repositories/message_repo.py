@@ -544,6 +544,7 @@ class MessageRepository:
 
         Returns:
             List[Dict]: List of hourly usage data with hour, tokens, requests.
+            Hour is converted from UTC to CST (UTC+8).
         """
         from app.repositories.database import is_postgresql
 
@@ -590,7 +591,33 @@ class MessageRepository:
                 ORDER BY hour
             '''
 
-        return self.db.fetch_all(query, tuple(params))
+        rows = self.db.fetch_all(query, tuple(params))
+
+        # Convert UTC hour to CST (UTC+8)
+        # Note: This assumes the timestamp in database is stored in UTC
+        # For SQLite, strftime('%H', timestamp) returns the hour as stored
+        # We need to add 8 hours and handle day overflow
+        aggregated = {}
+        for row in rows:
+            utc_hour = row['hour']
+            cst_hour = (utc_hour + 8) % 24
+
+            key = cst_hour
+            if key not in aggregated:
+                aggregated[key] = {
+                    'hour': cst_hour,
+                    'tokens': 0,
+                    'requests': 0
+                }
+
+            aggregated[key]['tokens'] += row['tokens'] or 0
+            aggregated[key]['requests'] += row['requests'] or 0
+
+        # Convert to list and sort by hour
+        result = list(aggregated.values())
+        result.sort(key=lambda x: x['hour'])
+
+        return result
 
     def get_daily_token_totals(
         self,
