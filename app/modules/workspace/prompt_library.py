@@ -15,7 +15,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
-from app.repositories.database import DB_PATH, is_postgresql
+from app.repositories.database import DB_PATH, is_postgresql, get_database_url
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +128,7 @@ class PromptLibrary:
             try:
                 import psycopg2
                 from psycopg2.extras import RealDictCursor
-                url = os.environ['DATABASE_URL']
+                url = get_database_url()
                 conn = psycopg2.connect(url)
                 conn.cursor_factory = RealDictCursor
                 return conn
@@ -385,12 +385,13 @@ class PromptLibrary:
 
         # Get paginated results
         offset = (page - 1) * limit
-        cursor.execute(f'''
+        from app.repositories.database import adapt_sql
+        cursor.execute(adapt_sql(f'''
             SELECT * FROM prompt_templates
             WHERE {where_clause}
             ORDER BY is_featured DESC, use_count DESC, created_at DESC
             LIMIT ? OFFSET ?
-        ''', params + [limit, offset])
+        '''), params + [limit, offset])
 
         rows = cursor.fetchall()
         conn.close()

@@ -115,7 +115,7 @@ def get_postgresql_connection() -> Any:
         import psycopg2
         from psycopg2.extras import RealDictCursor
 
-        url = os.environ['DATABASE_URL']
+        url = get_database_url()
         conn = psycopg2.connect(url)
         # Store cursor factory for later use
         conn._cursor_factory = RealDictCursor

@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Set, Union
 
-from app.repositories.database import DB_PATH, is_postgresql
+from app.repositories.database import DB_PATH, is_postgresql, get_database_url
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +149,7 @@ class StateSyncManager:
             try:
                 import psycopg2
                 from psycopg2.extras import RealDictCursor
-                url = os.environ['DATABASE_URL']
+                url = get_database_url()
                 conn = psycopg2.connect(url)
                 conn.cursor_factory = RealDictCursor
                 return conn
