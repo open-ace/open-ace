@@ -18,7 +18,13 @@ export type {
   ConversationMessage,
 } from './messages';
 export { sessionsApi } from './sessions';
-export type { SessionsResponse, SessionDetail } from './sessions';
+export type {
+  AgentSession,
+  SessionMessage,
+  SessionFilters,
+  SessionsListResponse,
+  SessionStatsResponse,
+} from './sessions';
 export { authApi } from './auth';
 export type { AuthCheckResponse, LoginRequest, LoginResponse } from './auth';
 export { adminApi } from './admin';
@@ -54,3 +60,15 @@ export type {
   ToolComparison,
   Recommendation,
 } from './analysis';
+export { promptsApi } from './prompts';
+export type {
+  PromptTemplate,
+  PromptVariable,
+  PromptListResponse,
+  PromptFilters,
+  CreatePromptRequest,
+  UpdatePromptRequest,
+  RenderPromptRequest,
+  RenderPromptResponse,
+  CategoryInfo,
+} from './prompts';

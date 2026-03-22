@@ -3,6 +3,7 @@
 测试 Issue #29: 去掉 conversation history 表格的 conversation id 一列
 """
 
+import pytest
 import asyncio
 from playwright.async_api import async_playwright
 import os
@@ -15,6 +16,7 @@ PASSWORD = os.environ.get('PASSWORD', 'admin123')
 SCREENSHOT_DIR = 'screenshots'
 
 
+@pytest.mark.asyncio
 async def test_issue29():
     """测试 Conversation History 表格不包含 Conversation ID 列"""
     

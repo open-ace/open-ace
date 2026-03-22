@@ -3,63 +3,133 @@
 AI Token Usage - Database Module
 
 Provides database operations for the ai_token_usage project.
+Supports both SQLite (default) and PostgreSQL databases.
 """
 
-import sqlite3
 import json
 import os
+import sqlite3
 import sys
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict, List, Tuple
+from typing import Dict, List, Optional, Union, Any
 
-# Import shared configuration - support both relative and absolute imports
-def _get_config():
-    """Get config module, trying relative then absolute imports."""
-    try:
-        from . import config
-        return config
-    except ImportError:
-        try:
-            import config
-            return config
-        except ImportError:
-            # Try adding shared_dir to path
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            shared_dir = os.path.dirname(script_dir)
-            if shared_dir not in sys.path:
-                sys.path.insert(0, shared_dir)
-            import config
-            return config
+# Ensure scripts directory is in path for standalone script execution
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+_scripts_dir = os.path.dirname(_script_dir)
+if _scripts_dir not in sys.path:
+    sys.path.insert(0, _scripts_dir)
 
-config = _get_config()
+# Use standard import after path setup
+from shared import config
+
 DB_DIR = config.DB_DIR
 DB_PATH = config.DB_PATH
 
+# Cache for database URL
+_db_url_cache = None
+
+
+def _get_db_url() -> str:
+    """Get database URL from config."""
+    global _db_url_cache
+    if _db_url_cache is None:
+        _db_url_cache = config.get_database_url()
+    return _db_url_cache
+
+
+def is_postgresql() -> bool:
+    """Check if using PostgreSQL database."""
+    return _get_db_url().startswith('postgresql')
+
 
 def ensure_db_dir() -> None:
-    """Ensure the database directory exists."""
+    """Ensure the database directory exists (for SQLite)."""
     os.makedirs(DB_DIR, exist_ok=True)
 
 
-def get_connection() -> sqlite3.Connection:
-    """Get a database connection."""
-    ensure_db_dir()
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+def get_connection() -> Union[sqlite3.Connection, Any]:
+    """Get a database connection (SQLite or PostgreSQL)."""
+    url = _get_db_url()
+    if url.startswith('postgresql'):
+        try:
+            import psycopg2
+            from psycopg2.extras import RealDictCursor
+            conn = psycopg2.connect(url)
+            conn.cursor_factory = RealDictCursor
+            return conn
+        except ImportError:
+            raise ImportError(
+                "psycopg2 is required for PostgreSQL. "
+                "Install it with: pip install psycopg2-binary"
+            )
+    else:
+        ensure_db_dir()
+        # Extract path from sqlite:/// URL or use default
+        if url.startswith('sqlite:///'):
+            db_path = url[10:]
+        else:
+            db_path = DB_PATH
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+
+def _get_id_type() -> str:
+    """Get the appropriate ID type for the current database."""
+    if is_postgresql():
+        return "SERIAL PRIMARY KEY"
+    else:
+        return "INTEGER PRIMARY KEY AUTOINCREMENT"
+
+
+def _table_exists(cursor, table_name: str) -> bool:
+    """Check if a table exists."""
+    if is_postgresql():
+        cursor.execute(
+            "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = %s)",
+            (table_name,)
+        )
+        return cursor.fetchone()[0]
+    else:
+        cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+            (table_name,)
+        )
+        return cursor.fetchone() is not None
+
+
+def _column_exists(cursor, table_name: str, column_name: str) -> bool:
+    """Check if a column exists in a table."""
+    if is_postgresql():
+        cursor.execute(
+            "SELECT EXISTS (SELECT FROM information_schema.columns WHERE table_name = %s AND column_name = %s)",
+            (table_name, column_name)
+        )
+        result = cursor.fetchone()
+        # Handle both dict-like (RealDictRow) and tuple results
+        if isinstance(result, dict):
+            return result['exists']
+        return result[0]
+    else:
+        cursor.execute(f"PRAGMA table_info({table_name})")
+        columns = [col[1] for col in cursor.fetchall()]
+        return column_name in columns
 
 
 def init_database() -> None:
     """Initialize the database with the required schema."""
-    ensure_db_dir()
+    if not is_postgresql():
+        ensure_db_dir()
 
     conn = get_connection()
     cursor = conn.cursor()
 
+    id_type = _get_id_type()
+
     # Create daily_usage table
-    cursor.execute('''
+    cursor.execute(f'''
         CREATE TABLE IF NOT EXISTS daily_usage (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {id_type},
             date TEXT NOT NULL,
             tool_name TEXT NOT NULL,
             host_name TEXT NOT NULL DEFAULT 'localhost',
@@ -75,9 +145,9 @@ def init_database() -> None:
     ''')
 
     # Create daily_messages table first (before checking for full_entry)
-    cursor.execute('''
+    cursor.execute(f'''
         CREATE TABLE IF NOT EXISTS daily_messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {id_type},
             date TEXT NOT NULL,
             tool_name TEXT NOT NULL,
             host_name TEXT NOT NULL DEFAULT 'localhost',
@@ -100,9 +170,7 @@ def init_database() -> None:
     ''')
 
     # Check if host_name column exists in daily_usage, add it if not (for old databases)
-    cursor.execute("PRAGMA table_info(daily_usage)")
-    columns = [col[1] for col in cursor.fetchall()]
-    if 'host_name' not in columns:
+    if not _column_exists(cursor, 'daily_usage', 'host_name'):
         print("Adding host_name column to existing daily_usage table...")
         cursor.execute("ALTER TABLE daily_usage ADD COLUMN host_name TEXT DEFAULT 'localhost'")
         # Update existing records with 'localhost'
@@ -110,9 +178,7 @@ def init_database() -> None:
         conn.commit()
 
     # Check if host_name column exists in daily_messages, add it if not (for old databases)
-    cursor.execute("PRAGMA table_info(daily_messages)")
-    columns = [col[1] for col in cursor.fetchall()]
-    if 'host_name' not in columns:
+    if not _column_exists(cursor, 'daily_messages', 'host_name'):
         print("Adding host_name column to existing daily_messages table...")
         cursor.execute("ALTER TABLE daily_messages ADD COLUMN host_name TEXT DEFAULT 'localhost'")
         # Update existing records with 'localhost'
@@ -120,68 +186,64 @@ def init_database() -> None:
         conn.commit()
 
     # Check if request_count column exists, add it if not (for old databases)
-    cursor.execute("PRAGMA table_info(daily_usage)")
-    columns = [col[1] for col in cursor.fetchall()]
-    if 'request_count' not in columns:
+    if not _column_exists(cursor, 'daily_usage', 'request_count'):
         print("Adding request_count column to existing database...")
         cursor.execute("ALTER TABLE daily_usage ADD COLUMN request_count INTEGER DEFAULT 0")
         conn.commit()
 
     # Check if full_entry column exists in daily_messages, add it if not (for old databases)
-    cursor.execute("PRAGMA table_info(daily_messages)")
-    columns = [col[1] for col in cursor.fetchall()]
-    if 'full_entry' not in columns:
+    if not _column_exists(cursor, 'daily_messages', 'full_entry'):
         print("Adding full_entry column to existing database...")
         cursor.execute("ALTER TABLE daily_messages ADD COLUMN full_entry TEXT")
         conn.commit()
 
     # Check if sender_id column exists in daily_messages, add it if not (for old databases)
-    cursor.execute("PRAGMA table_info(daily_messages)")
-    columns = [col[1] for col in cursor.fetchall()]
-    if 'sender_id' not in columns:
+    if not _column_exists(cursor, 'daily_messages', 'sender_id'):
         print("Adding sender_id column to existing daily_messages table...")
         cursor.execute("ALTER TABLE daily_messages ADD COLUMN sender_id TEXT")
         conn.commit()
 
     # Check if sender_name column exists in daily_messages, add it if not (for old databases)
-    cursor.execute("PRAGMA table_info(daily_messages)")
-    columns = [col[1] for col in cursor.fetchall()]
-    if 'sender_name' not in columns:
+    if not _column_exists(cursor, 'daily_messages', 'sender_name'):
         print("Adding sender_name column to existing daily_messages table...")
         cursor.execute("ALTER TABLE daily_messages ADD COLUMN sender_name TEXT")
         conn.commit()
 
     # Check if message_source column exists in daily_messages, add it if not (for old databases)
-    cursor.execute("PRAGMA table_info(daily_messages)")
-    columns = [col[1] for col in cursor.fetchall()]
-    if 'message_source' not in columns:
+    if not _column_exists(cursor, 'daily_messages', 'message_source'):
         print("Adding message_source column to existing daily_messages table...")
         cursor.execute("ALTER TABLE daily_messages ADD COLUMN message_source TEXT")
         conn.commit()
 
     # Check if feishu_conversation_id column exists in daily_messages, add it if not (for old databases)
     # conversation_label was renamed to feishu_conversation_id (Issue #94)
-    cursor.execute("PRAGMA table_info(daily_messages)")
-    columns = [col[1] for col in cursor.fetchall()]
-    if 'feishu_conversation_id' not in columns:
+    if not _column_exists(cursor, 'daily_messages', 'feishu_conversation_id'):
         print("Adding feishu_conversation_id column to existing daily_messages table...")
         cursor.execute("ALTER TABLE daily_messages ADD COLUMN feishu_conversation_id TEXT")
         conn.commit()
 
     # Check if group_subject column exists in daily_messages, add it if not (for old databases)
-    cursor.execute("PRAGMA table_info(daily_messages)")
-    columns = [col[1] for col in cursor.fetchall()]
-    if 'group_subject' not in columns:
+    if not _column_exists(cursor, 'daily_messages', 'group_subject'):
         print("Adding group_subject column to existing daily_messages table...")
         cursor.execute("ALTER TABLE daily_messages ADD COLUMN group_subject TEXT")
         conn.commit()
 
     # Check if is_group_chat column exists in daily_messages, add it if not (for old databases)
-    cursor.execute("PRAGMA table_info(daily_messages)")
-    columns = [col[1] for col in cursor.fetchall()]
-    if 'is_group_chat' not in columns:
+    if not _column_exists(cursor, 'daily_messages', 'is_group_chat'):
         print("Adding is_group_chat column to existing daily_messages table...")
         cursor.execute("ALTER TABLE daily_messages ADD COLUMN is_group_chat INTEGER")
+        conn.commit()
+
+    # Check if agent_session_id column exists in daily_messages, add it if not (for old databases)
+    if not _column_exists(cursor, 'daily_messages', 'agent_session_id'):
+        print("Adding agent_session_id column to existing daily_messages table...")
+        cursor.execute("ALTER TABLE daily_messages ADD COLUMN agent_session_id TEXT")
+        conn.commit()
+
+    # Check if conversation_id column exists in daily_messages, add it if not (for old databases)
+    if not _column_exists(cursor, 'daily_messages', 'conversation_id'):
+        print("Adding conversation_id column to existing daily_messages table...")
+        cursor.execute("ALTER TABLE daily_messages ADD COLUMN conversation_id TEXT")
         conn.commit()
 
     conn.commit()
@@ -219,7 +281,10 @@ def init_database() -> None:
     init_auth_database()
 
     conn.close()
-    print(f"Database initialized at {DB_PATH}")
+    if is_postgresql():
+        print("Database initialized (PostgreSQL)")
+    else:
+        print(f"Database initialized at {DB_PATH}")
 
 
 def save_usage(
@@ -239,11 +304,25 @@ def save_usage(
 
     models_json = json.dumps(models_used) if models_used else None
 
-    cursor.execute('''
-        INSERT OR REPLACE INTO daily_usage
-        (date, tool_name, host_name, tokens_used, input_tokens, output_tokens, cache_tokens, request_count, models_used)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (date, tool_name, host_name, tokens_used, input_tokens, output_tokens, cache_tokens, request_count, models_json))
+    if is_postgresql():
+        cursor.execute('''
+            INSERT INTO daily_usage
+            (date, tool_name, host_name, tokens_used, input_tokens, output_tokens, cache_tokens, request_count, models_used)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (date, tool_name, host_name) DO UPDATE SET
+                tokens_used = EXCLUDED.tokens_used,
+                input_tokens = EXCLUDED.input_tokens,
+                output_tokens = EXCLUDED.output_tokens,
+                cache_tokens = EXCLUDED.cache_tokens,
+                request_count = EXCLUDED.request_count,
+                models_used = EXCLUDED.models_used
+        ''', (date, tool_name, host_name, tokens_used, input_tokens, output_tokens, cache_tokens, request_count, models_json))
+    else:
+        cursor.execute('''
+            INSERT OR REPLACE INTO daily_usage
+            (date, tool_name, host_name, tokens_used, input_tokens, output_tokens, cache_tokens, request_count, models_used)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (date, tool_name, host_name, tokens_used, input_tokens, output_tokens, cache_tokens, request_count, models_json))
 
     conn.commit()
     conn.close()
@@ -579,6 +658,182 @@ def save_message(
     return True
 
 
+def save_messages_batch(messages: List[Dict], batch_size: int = 1000) -> int:
+    """Save multiple messages to the database using batch insert with transaction.
+
+    This is much faster than calling save_message() for each message individually
+    because it uses a single transaction and batch inserts.
+
+    Args:
+        messages: List of message dictionaries with keys:
+            - date: Date in YYYY-MM-DD format
+            - tool_name: Tool name (claude, qwen, openclaw)
+            - message_id: Unique message identifier
+            - role: Message role (user, assistant, system, tool_result)
+            - content: Message content
+            - full_entry: Full JSON entry for reference (optional)
+            - tokens_used: Total tokens used (default 0)
+            - input_tokens: Input token count (default 0)
+            - output_tokens: Output token count (default 0)
+            - model: Model name used (optional)
+            - timestamp: Message timestamp (optional)
+            - parent_id: Parent message ID (optional)
+            - host_name: Host machine name (default 'localhost')
+            - sender_id: Sender identifier (optional)
+            - sender_name: Sender name (optional)
+            - message_source: Source (optional)
+            - feishu_conversation_id: Feishu conversation identifier (optional)
+            - group_subject: Group subject (optional)
+            - is_group_chat: Whether this is a group chat (optional)
+            - agent_session_id: Agent session identifier (optional)
+            - conversation_id: Conversation identifier (optional)
+        batch_size: Number of messages to insert per batch (default 1000)
+
+    Returns:
+        Number of messages saved
+    """
+    if not messages:
+        return 0
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    saved = 0
+
+    try:
+        # Build a map of existing messages for this batch
+        # Get unique (date, tool_name, host_name) combinations
+        keys = set()
+        for msg in messages:
+            key = (msg.get('date'), msg.get('tool_name'), msg.get('host_name', 'localhost'))
+            keys.add(key)
+
+        # Query existing messages in one go
+        existing_map = {}
+        for date, tool_name, host_name in keys:
+            if is_postgresql():
+                cursor.execute('''
+                    SELECT message_id, tokens_used, input_tokens, output_tokens, sender_id, sender_name, model
+                    FROM daily_messages
+                    WHERE date = %s AND tool_name = %s AND host_name = %s
+                ''', (date, tool_name, host_name))
+            else:
+                cursor.execute('''
+                    SELECT message_id, tokens_used, input_tokens, output_tokens, sender_id, sender_name, model
+                    FROM daily_messages
+                    WHERE date = ? AND tool_name = ? AND host_name = ?
+                ''', (date, tool_name, host_name))
+
+            for row in cursor.fetchall():
+                if isinstance(row, dict):
+                    msg_id = row['message_id']
+                    existing_map[(date, tool_name, host_name, msg_id)] = row
+                else:
+                    msg_id = row[0]
+                    existing_map[(date, tool_name, host_name, msg_id)] = {
+                        'tokens_used': row[1],
+                        'input_tokens': row[2],
+                        'output_tokens': row[3],
+                        'sender_id': row[4],
+                        'sender_name': row[5],
+                        'model': row[6]
+                    }
+
+        # Process messages in batches
+        for i in range(0, len(messages), batch_size):
+            batch = messages[i:i + batch_size]
+
+            for msg in batch:
+                date = msg.get('date')
+                tool_name = msg.get('tool_name')
+                host_name = msg.get('host_name', 'localhost')
+                message_id = msg.get('message_id')
+
+                tokens_used = msg.get('tokens_used', 0)
+                input_tokens = msg.get('input_tokens', 0)
+                output_tokens = msg.get('output_tokens', 0)
+                sender_id = msg.get('sender_id')
+                sender_name = msg.get('sender_name')
+                model = msg.get('model')
+
+                # Check for existing message
+                key = (date, tool_name, host_name, message_id)
+                if key in existing_map:
+                    existing = existing_map[key]
+                    # Preserve existing token values if new values are 0
+                    if tokens_used == 0 and existing.get('tokens_used', 0) > 0:
+                        tokens_used = existing['tokens_used']
+                    if input_tokens == 0 and existing.get('input_tokens', 0) > 0:
+                        input_tokens = existing['input_tokens']
+                    if output_tokens == 0 and existing.get('output_tokens', 0) > 0:
+                        output_tokens = existing['output_tokens']
+                    # Preserve sender info if new values are None
+                    if sender_id is None and existing.get('sender_id'):
+                        sender_id = existing['sender_id']
+                    if sender_name is None and existing.get('sender_name'):
+                        sender_name = existing['sender_name']
+                    # Preserve model if new value is None and existing value exists
+                    if model is None and existing.get('model'):
+                        model = existing['model']
+
+                if is_postgresql():
+                    cursor.execute('''
+                        INSERT INTO daily_messages
+                        (date, tool_name, host_name, message_id, parent_id, role, content, full_entry, tokens_used, input_tokens, output_tokens, model, timestamp, sender_id, sender_name, message_source, feishu_conversation_id, group_subject, is_group_chat, agent_session_id, conversation_id)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (date, tool_name, host_name, message_id) DO UPDATE SET
+                            parent_id = EXCLUDED.parent_id,
+                            role = EXCLUDED.role,
+                            content = EXCLUDED.content,
+                            full_entry = EXCLUDED.full_entry,
+                            tokens_used = EXCLUDED.tokens_used,
+                            input_tokens = EXCLUDED.input_tokens,
+                            output_tokens = EXCLUDED.output_tokens,
+                            model = EXCLUDED.model,
+                            timestamp = EXCLUDED.timestamp,
+                            sender_id = EXCLUDED.sender_id,
+                            sender_name = EXCLUDED.sender_name,
+                            message_source = EXCLUDED.message_source,
+                            feishu_conversation_id = EXCLUDED.feishu_conversation_id,
+                            group_subject = EXCLUDED.group_subject,
+                            is_group_chat = EXCLUDED.is_group_chat,
+                            agent_session_id = EXCLUDED.agent_session_id,
+                            conversation_id = EXCLUDED.conversation_id
+                    ''', (
+                        date, tool_name, host_name, message_id, msg.get('parent_id'),
+                        msg.get('role'), msg.get('content'), msg.get('full_entry'),
+                        tokens_used, input_tokens, output_tokens, model, msg.get('timestamp'),
+                        sender_id, sender_name, msg.get('message_source'),
+                        msg.get('feishu_conversation_id'), msg.get('group_subject'),
+                        msg.get('is_group_chat'), msg.get('agent_session_id'), msg.get('conversation_id')
+                    ))
+                else:
+                    cursor.execute('''
+                        INSERT OR REPLACE INTO daily_messages
+                        (date, tool_name, host_name, message_id, parent_id, role, content, full_entry, tokens_used, input_tokens, output_tokens, model, timestamp, sender_id, sender_name, message_source, feishu_conversation_id, group_subject, is_group_chat, agent_session_id, conversation_id)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        date, tool_name, host_name, message_id, msg.get('parent_id'),
+                        msg.get('role'), msg.get('content'), msg.get('full_entry'),
+                        tokens_used, input_tokens, output_tokens, model, msg.get('timestamp'),
+                        sender_id, sender_name, msg.get('message_source'),
+                        msg.get('feishu_conversation_id'), msg.get('group_subject'),
+                        msg.get('is_group_chat'), msg.get('agent_session_id'), msg.get('conversation_id')
+                    ))
+
+                saved += 1
+
+            # Commit after each batch
+            conn.commit()
+
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
+
+    return saved
+
+
 def get_messages_by_date(
     date: str,
     tool_name: Optional[str] = None,
@@ -790,16 +1045,20 @@ def init_auth_database() -> None:
     conn = get_connection()
     cursor = conn.cursor()
 
+    id_type = _get_id_type()
+
     # Create users table
-    cursor.execute('''
+    cursor.execute(f'''
         CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {id_type},
             username TEXT NOT NULL UNIQUE,
             password_hash TEXT NOT NULL,
             email TEXT,
             role TEXT NOT NULL DEFAULT 'user',
-            quota_tokens INTEGER DEFAULT 1000000,
-            quota_requests INTEGER DEFAULT 1000,
+            daily_token_quota INTEGER DEFAULT 1000000,
+            monthly_token_quota INTEGER DEFAULT 30000000,
+            daily_request_quota INTEGER DEFAULT 1000,
+            monthly_request_quota INTEGER DEFAULT 30000,
             is_active INTEGER DEFAULT 1,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -807,9 +1066,9 @@ def init_auth_database() -> None:
     ''')
 
     # Create web_user_auth_sessions table
-    cursor.execute('''
+    cursor.execute(f'''
         CREATE TABLE IF NOT EXISTS web_user_auth_sessions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {id_type},
             user_id INTEGER NOT NULL,
             session_token TEXT NOT NULL UNIQUE,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -818,10 +1077,22 @@ def init_auth_database() -> None:
         )
     ''')
 
+    # Create sessions table for user authentication
+    cursor.execute(f'''
+        CREATE TABLE IF NOT EXISTS sessions (
+            id {id_type},
+            user_id INTEGER NOT NULL,
+            token TEXT NOT NULL UNIQUE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            expires_at TIMESTAMP NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    ''')
+
     # Create quota_usage table
-    cursor.execute('''
+    cursor.execute(f'''
         CREATE TABLE IF NOT EXISTS quota_usage (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {id_type},
             user_id INTEGER NOT NULL,
             date TEXT NOT NULL,
             tool_name TEXT,
@@ -835,9 +1106,7 @@ def init_auth_database() -> None:
     conn.commit()
 
     # Add linux_account column if not exists (migration for existing databases)
-    cursor.execute("PRAGMA table_info(users)")
-    columns = [col[1] for col in cursor.fetchall()]
-    if 'linux_account' not in columns:
+    if not _column_exists(cursor, 'users', 'linux_account'):
         print("Adding linux_account column to users table...")
         cursor.execute("ALTER TABLE users ADD COLUMN linux_account TEXT")
         conn.commit()
@@ -847,17 +1116,17 @@ def init_auth_database() -> None:
 
 
 def create_user(username: str, password_hash: str, email: str = None,
-                role: str = 'user', quota_tokens: int = 1000000,
-                quota_requests: int = 1000) -> bool:
+                role: str = 'user', daily_token_quota: int = 1000000,
+                daily_request_quota: int = 1000) -> bool:
     """Create a new user."""
     conn = get_connection()
     cursor = conn.cursor()
 
     try:
         cursor.execute('''
-            INSERT INTO users (username, password_hash, email, role, quota_tokens, quota_requests)
+            INSERT INTO users (username, password_hash, email, role, daily_token_quota, daily_request_quota)
             VALUES (?, ?, ?, ?, ?, ?)
-        ''', (username, password_hash, email, role, quota_tokens, quota_requests))
+        ''', (username, password_hash, email, role, daily_token_quota, daily_request_quota))
         conn.commit()
         return True
     except sqlite3.IntegrityError:
@@ -867,8 +1136,8 @@ def create_user(username: str, password_hash: str, email: str = None,
 
 
 def create_user_with_is_active(username: str, password_hash: str, email: str = None,
-                               role: str = 'user', quota_tokens: int = 1000000,
-                               quota_requests: int = 1000, is_active: int = 1,
+                               role: str = 'user', daily_token_quota: int = 1000000,
+                               daily_request_quota: int = 1000, is_active: int = 1,
                                linux_account: str = None) -> bool:
     """Create a new user with is_active flag."""
     conn = get_connection()
@@ -876,9 +1145,9 @@ def create_user_with_is_active(username: str, password_hash: str, email: str = N
 
     try:
         cursor.execute('''
-            INSERT INTO users (username, password_hash, email, role, quota_tokens, quota_requests, is_active, linux_account)
+            INSERT INTO users (username, password_hash, email, role, daily_token_quota, daily_request_quota, is_active, linux_account)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (username, password_hash, email, role, quota_tokens, quota_requests, is_active, linux_account))
+        ''', (username, password_hash, email, role, daily_token_quota, daily_request_quota, is_active, linux_account))
         conn.commit()
         return True
     except sqlite3.IntegrityError:
@@ -922,14 +1191,14 @@ def is_default_admin_password() -> bool:
         True if admin user exists and has default password, False otherwise.
     """
     import hashlib
-    
+
     admin_user = get_user_by_username('admin')
     if not admin_user:
         return False
-    
+
     # Calculate the default password hash
-    default_password_hash = hashlib.sha256('admin123'.encode()).hexdigest()
-    
+    default_password_hash = hashlib.sha256(b'admin123').hexdigest()
+
     return admin_user['password_hash'] == default_password_hash
 
 
@@ -939,7 +1208,7 @@ def get_all_users() -> List[Dict]:
     cursor = conn.cursor()
 
     cursor.execute('''
-        SELECT id, username, email, role, quota_tokens, quota_requests,
+        SELECT id, username, email, role, daily_token_quota, daily_request_quota,
                is_active, created_at
         FROM users
         ORDER BY id DESC
@@ -957,7 +1226,7 @@ def get_global_quota_summary(start_date: str, end_date: str) -> Dict:
 
     # Get total quota allocated to all users
     cursor.execute('''
-        SELECT COALESCE(SUM(quota_tokens), 0) as total_quota
+        SELECT COALESCE(SUM(daily_token_quota), 0) as total_quota
         FROM users
     ''')
     total_quota = cursor.fetchone()[0] or 0
@@ -989,12 +1258,12 @@ def get_user_quota_breakdown(start_date: str, end_date: str) -> List[Dict]:
             u.id as user_id,
             u.username,
             u.email,
-            u.quota_tokens as quota,
+            u.daily_token_quota as quota,
             COALESCE(SUM(q.tokens_used), 0) as used
         FROM users u
         LEFT JOIN quota_usage q ON u.id = q.user_id
             AND q.date >= ? AND q.date <= ?
-        GROUP BY u.id, u.username, u.email, u.quota_tokens
+        GROUP BY u.id, u.username, u.email, u.daily_token_quota
         ORDER BY used DESC
     ''', (start_date, end_date))
 
@@ -1089,7 +1358,7 @@ def get_all_users() -> List[Dict]:
 
 def update_user(user_id: int, **kwargs) -> bool:
     """Update user information."""
-    allowed_fields = ['email', 'role', 'quota_tokens', 'quota_requests', 'is_active', 'linux_account']
+    allowed_fields = ['email', 'role', 'daily_token_quota', 'monthly_token_quota', 'daily_request_quota', 'monthly_request_quota', 'is_active', 'linux_account']
     updates = []
     params = []
 
@@ -1173,21 +1442,21 @@ def aggregate_quota_usage_from_messages(start_date: str = None, end_date: str = 
     """
     conn = get_connection()
     cursor = conn.cursor()
-    
+
     # Build date filter conditions
     date_conditions = []
     params = []
-    
+
     if start_date:
         date_conditions.append("date >= ?")
         params.append(start_date)
-    
+
     if end_date:
         date_conditions.append("date <= ?")
         params.append(end_date)
-    
+
     date_clause = " AND ".join(date_conditions) if date_conditions else "1=1"
-    
+
     # Step 1: Get all user messages with their sender info
     cursor.execute(f'''
         SELECT
@@ -1200,9 +1469,9 @@ def aggregate_quota_usage_from_messages(start_date: str = None, end_date: str = 
           AND (sender_name IS NOT NULL OR sender_id IS NOT NULL)
           AND {date_clause}
     ''', params)
-    
+
     user_messages = cursor.fetchall()
-    
+
     # Build a map: user_message_id -> (date, tool_name, sender)
     user_msg_map = {}
     for msg in user_messages:
@@ -1211,7 +1480,7 @@ def aggregate_quota_usage_from_messages(start_date: str = None, end_date: str = 
             'tool_name': msg['tool_name'],
             'sender': msg['sender']
         }
-    
+
     # Step 2: Get all assistant messages and their tokens
     cursor.execute(f'''
         SELECT
@@ -1226,9 +1495,9 @@ def aggregate_quota_usage_from_messages(start_date: str = None, end_date: str = 
         WHERE role = 'assistant'
           AND {date_clause}
     ''', params)
-    
+
     assistant_messages = cursor.fetchall()
-    
+
     # Build a map: assistant_message_id -> (parent_id, tokens)
     # And track which user each assistant message belongs to
     assistant_map = {}
@@ -1241,7 +1510,7 @@ def aggregate_quota_usage_from_messages(start_date: str = None, end_date: str = 
             'date': msg['date'],
             'tool_name': msg['tool_name']
         }
-    
+
     # Step 2.5: Get all messages (including toolResult) for parent_id chain lookup
     cursor.execute(f'''
         SELECT message_id, parent_id
@@ -1287,17 +1556,17 @@ def aggregate_quota_usage_from_messages(start_date: str = None, end_date: str = 
                 return None
 
         return None
-    
+
     # Step 4: Aggregate tokens by (date, tool_name, sender)
     usage_data = {}  # (date, tool_name, sender) -> {tokens, requests}
-    
+
     # Count requests from user messages
     for msg_id, msg_info in user_msg_map.items():
         key = (msg_info['date'], msg_info['tool_name'], msg_info['sender'])
         if key not in usage_data:
             usage_data[key] = {'tokens': 0, 'requests': 0}
         usage_data[key]['requests'] += 1
-    
+
     # Sum tokens from assistant messages
     for assistant_msg_id in assistant_map:
         user_msg = find_user_for_assistant(assistant_msg_id)
@@ -1308,11 +1577,11 @@ def aggregate_quota_usage_from_messages(start_date: str = None, end_date: str = 
             # Use tokens_used for user quota (total tokens including input + output + cache)
             assistant = assistant_map[assistant_msg_id]
             usage_data[key]['tokens'] += assistant['tokens_used']
-    
+
     # Step 5: Get all users for matching
     cursor.execute("SELECT id, username FROM users")
     users = {row['username']: row['id'] for row in cursor.fetchall()}
-    
+
     # Step 6: Clear existing quota_usage data for the date range
     if start_date and end_date:
         cursor.execute("DELETE FROM quota_usage WHERE date >= ? AND date <= ?", (start_date, end_date))
@@ -1322,23 +1591,23 @@ def aggregate_quota_usage_from_messages(start_date: str = None, end_date: str = 
         cursor.execute("DELETE FROM quota_usage WHERE date <= ?", (end_date,))
     else:
         cursor.execute("DELETE FROM quota_usage")
-    
+
     # Step 7: Insert aggregated data into quota_usage
     records_created = 0
     for (date, tool_name, sender), data in usage_data.items():
         # Try to match sender to a user
         user_id = users.get(sender)
-        
+
         if user_id:
             cursor.execute('''
                 INSERT INTO quota_usage (user_id, date, tool_name, tokens_used, requests_used)
                 VALUES (?, ?, ?, ?, ?)
             ''', (user_id, date, tool_name, data['tokens'], data['requests']))
             records_created += 1
-    
+
     conn.commit()
     conn.close()
-    
+
     return records_created
 
 
@@ -1938,7 +2207,7 @@ def get_user_segmentation(start_date: str,
     period_days = (end_date_obj - start_date_obj).days + 1
     thirty_days_ago = (end_date_obj - timedelta(days=30)).strftime('%Y-%m-%d')
 
-    cursor.execute(f'''
+    cursor.execute('''
         SELECT COUNT(DISTINCT COALESCE(sender_name, sender_id)) as dormant_count
         FROM daily_messages
         WHERE date >= ? AND date < ? AND (sender_id IS NOT NULL OR sender_name IS NOT NULL)
@@ -1972,16 +2241,16 @@ def get_tool_comparison_metrics(start_date: str, end_date: str,
     """
     conn = get_connection()
     cursor = conn.cursor()
-    
+
     conditions = ['date >= ?', 'date <= ?']
     params = [start_date, end_date]
-    
+
     if host_name:
         conditions.append('host_name = ?')
         params.append(host_name)
-    
+
     where_clause = ' AND '.join(conditions)
-    
+
     # Get usage metrics from daily_usage
     cursor.execute(f'''
         SELECT 
@@ -1997,9 +2266,9 @@ def get_tool_comparison_metrics(start_date: str, end_date: str,
         GROUP BY tool_name
         ORDER BY total_tokens DESC
     ''', params)
-    
+
     usage_rows = cursor.fetchall()
-    
+
     # Get message metrics from daily_messages
     cursor.execute(f'''
         SELECT 
@@ -2011,12 +2280,12 @@ def get_tool_comparison_metrics(start_date: str, end_date: str,
         WHERE {where_clause}
         GROUP BY tool_name
     ''', params)
-    
+
     message_rows = cursor.fetchall()
     message_data = {row['tool_name']: dict(row) for row in message_rows}
-    
+
     conn.close()
-    
+
     results = []
     for row in usage_rows:
         result = dict(row)
@@ -2025,7 +2294,7 @@ def get_tool_comparison_metrics(start_date: str, end_date: str,
         result['unique_users'] = msg_data.get('unique_users', 0)
         result['avg_tokens_per_message'] = round(msg_data.get('avg_tokens_per_message', 0), 2)
         results.append(result)
-    
+
     return results
 
 
@@ -2047,20 +2316,20 @@ def detect_usage_anomalies(start_date: str, end_date: str,
     """
     conn = get_connection()
     cursor = conn.cursor()
-    
+
     conditions = ['date >= ?', 'date <= ?']
     params = [start_date, end_date]
-    
+
     if tool_name:
         conditions.append('tool_name = ?')
         params.append(tool_name)
-    
+
     if host_name:
         conditions.append('host_name = ?')
         params.append(host_name)
-    
+
     where_clause = ' AND '.join(conditions)
-    
+
     # Get daily usage statistics
     cursor.execute(f'''
         SELECT 
@@ -2072,17 +2341,17 @@ def detect_usage_anomalies(start_date: str, end_date: str,
         WHERE {where_clause}
         ORDER BY date
     ''', params)
-    
+
     rows = cursor.fetchall()
-    
+
     if not rows:
         conn.close()
         return []
-    
+
     # Calculate mean and std for each tool
-    from collections import defaultdict
     import math
-    
+    from collections import defaultdict
+
     tool_data = defaultdict(list)
     for row in rows:
         tool_data[row['tool_name']].append({
@@ -2090,21 +2359,21 @@ def detect_usage_anomalies(start_date: str, end_date: str,
             'tokens_used': row['tokens_used'],
             'request_count': row['request_count'] or 0
         })
-    
+
     anomalies = []
-    
+
     for tool_name, data in tool_data.items():
         if len(data) < 3:  # Need at least 3 data points
             continue
-        
+
         tokens = [d['tokens_used'] for d in data]
         mean = sum(tokens) / len(tokens)
         variance = sum((x - mean) ** 2 for x in tokens) / len(tokens)
         std = math.sqrt(variance)
-        
+
         if std == 0:
             continue
-        
+
         # Detect anomalies
         for d in data:
             z_score = (d['tokens_used'] - mean) / std
@@ -2119,12 +2388,12 @@ def detect_usage_anomalies(start_date: str, end_date: str,
                     'anomaly_type': 'spike' if z_score > 0 else 'drop',
                     'severity': 'high' if abs(z_score) > 4 else 'medium'
                 })
-    
+
     conn.close()
-    
+
     # Sort by severity and z_score magnitude
     anomalies.sort(key=lambda x: (0 if x['severity'] == 'high' else 1, -abs(x['z_score'])))
-    
+
     return anomalies
 
 
@@ -2851,7 +3120,7 @@ def get_conversation_timeline(session_id: str) -> Dict:
                     msg_time = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S.%f")
                 else:
                     msg_time = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
-            
+
             # Convert to GMT+8
             msg_time = convert_to_gmt8(msg_time)
         except (ValueError, TypeError):
@@ -2887,7 +3156,7 @@ def get_conversation_timeline(session_id: str) -> Dict:
                     msg_time = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S.%f")
                 else:
                     msg_time = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
-            
+
             # Convert to GMT+8
             msg_time = convert_to_gmt8(msg_time)
         except (ValueError, TypeError):

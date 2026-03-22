@@ -1,0 +1,1908 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Open ACE 数据库分析与优化方案</title>
+
+    <!-- Mermaid.js for diagram rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script>
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'default',
+            er: {
+                useMaxWidth: true
+            },
+            securityLevel: 'loose'
+        });
+    </script>
+
+    <style>
+        :root {
+            --primary-color: #667eea;
+            --secondary-color: #764ba2;
+            --bg-color: #f8f9fa;
+            --card-bg: #ffffff;
+            --text-color: #333;
+            --text-muted: #6c757d;
+            --border-color: #dee2e6;
+            --code-bg: #f4f4f4;
+            --success-color: #28a745;
+            --warning-color: #ffc107;
+            --danger-color: #dc3545;
+            --info-color: #17a2b8;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.8;
+            color: var(--text-color);
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: var(--card-bg);
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+
+        .header h1 {
+            margin: 0 0 10px 0;
+            font-size: 2.5em;
+        }
+
+        .header p {
+            margin: 0;
+            opacity: 0.9;
+        }
+
+        .content {
+            padding: 40px;
+        }
+
+        h1 {
+            color: var(--primary-color);
+            border-bottom: 3px solid var(--primary-color);
+            padding-bottom: 10px;
+            margin-top: 40px;
+        }
+
+        h2 {
+            color: var(--secondary-color);
+            border-left: 4px solid var(--secondary-color);
+            padding-left: 15px;
+            margin-top: 35px;
+        }
+
+        h3 {
+            color: var(--text-color);
+            margin-top: 25px;
+        }
+
+        h4 {
+            color: var(--text-muted);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            font-size: 14px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        th {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            color: white;
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+        }
+
+        td {
+            padding: 12px 15px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        tr:nth-child(even) {
+            background-color: #f8f9fa;
+        }
+
+        tr:hover {
+            background-color: #e9ecef;
+        }
+
+        code {
+            background: var(--code-bg);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'SF Mono', Monaco, Consolas, monospace;
+            font-size: 0.9em;
+            color: #e83e8c;
+        }
+
+        pre {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 20px 0;
+        }
+
+        pre code {
+            background: none;
+            padding: 0;
+            color: inherit;
+            font-size: 14px;
+        }
+
+        blockquote {
+            border-left: 4px solid var(--primary-color);
+            margin: 20px 0;
+            padding: 15px 20px;
+            background: #f0f4ff;
+            border-radius: 0 8px 8px 0;
+        }
+
+        blockquote p {
+            margin: 0;
+        }
+
+        ul, ol {
+            padding-left: 25px;
+        }
+
+        li {
+            margin: 8px 0;
+        }
+
+        hr {
+            border: none;
+            height: 2px;
+            background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));
+            margin: 40px 0;
+            border-radius: 2px;
+        }
+
+        a {
+            color: var(--primary-color);
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        .toc {
+            background: #f8f9fa;
+            padding: 20px 30px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+        }
+
+        .toc ul {
+            list-style: none;
+            padding-left: 0;
+        }
+
+        .toc li {
+            margin: 5px 0;
+        }
+
+        .toc a {
+            color: var(--text-color);
+        }
+
+        .footer {
+            text-align: center;
+            padding: 20px;
+            color: var(--text-muted);
+            font-size: 14px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        /* Mermaid diagram styles */
+        .mermaid {
+            background: #ffffff;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            text-align: center;
+            overflow-x: auto;
+        }
+
+        .mermaid svg {
+            max-width: 100%;
+            height: auto;
+        }
+
+        /* Status badges */
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+            margin: 2px;
+        }
+
+        .badge-danger {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+
+        .badge-warning {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+
+        .badge-success {
+            background-color: #d4edda;
+            color: #155724;
+        }
+
+        .badge-info {
+            background-color: #d1ecf1;
+            color: #0c5460;
+        }
+
+        .badge-new {
+            background-color: #cce5ff;
+            color: #004085;
+        }
+
+        /* Severity indicators */
+        .severity-high {
+            color: var(--danger-color);
+            font-weight: bold;
+        }
+
+        .severity-medium {
+            color: var(--warning-color);
+            font-weight: bold;
+        }
+
+        .severity-low {
+            color: var(--success-color);
+        }
+
+        .severity-critical {
+            color: #721c24;
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+
+        /* Card styles for sections */
+        .card {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            border-left: 4px solid var(--primary-color);
+        }
+
+        .card h4 {
+            margin-top: 0;
+            color: var(--primary-color);
+        }
+
+        .card-danger {
+            border-left-color: var(--danger-color);
+            background: #fff5f5;
+        }
+
+        .card-danger h4 {
+            color: var(--danger-color);
+        }
+
+        /* Comparison table styles */
+        .comparison-table th:first-child {
+            width: 30%;
+        }
+
+        /* Phase timeline */
+        .phase {
+            display: flex;
+            align-items: flex-start;
+            margin: 20px 0;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+
+        .phase-number {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            color: white;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin-right: 15px;
+            flex-shrink: 0;
+        }
+
+        .phase-critical {
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+        }
+
+        .phase-content {
+            flex: 1;
+        }
+
+        .phase-content h4 {
+            margin: 0 0 10px 0;
+            color: var(--text-color);
+        }
+
+        /* Alert box */
+        .alert {
+            padding: 15px 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+
+        .alert-danger {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+
+        .alert-warning {
+            background: #fff3cd;
+            border: 1px solid #ffeeba;
+            color: #856404;
+        }
+
+        .alert-info {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+        }
+
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+
+            .header {
+                padding: 20px;
+            }
+
+            .header h1 {
+                font-size: 1.8em;
+            }
+
+            .content {
+                padding: 20px;
+            }
+
+            table {
+                font-size: 12px;
+            }
+
+            th, td {
+                padding: 8px 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🗄️ Open ACE 数据库分析与优化方案</h1>
+            <p>SQLite 架构分析 · 问题诊断 · PostgreSQL 迁移建议</p>
+        </div>
+
+        <div class="content">
+            <blockquote>
+                <p><strong>文档版本:</strong> 2.0<br>
+                <strong>创建日期:</strong> 2026-03-22<br>
+                <strong>更新日期:</strong> 2026-03-22<br>
+                <strong>作者:</strong> Qwen Code</p>
+                <p style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed #ccc;">
+                    <strong>v2.0 更新说明:</strong> 基于代码审阅，补充了迁移文件与代码不一致的问题、缺失的表定义、动态建表问题等关键发现。
+                </p>
+            </blockquote>
+
+            <hr>
+
+            <h2 id="toc">目录</h2>
+            <div class="toc">
+                <ol>
+                    <li><a href="#section1">当前架构概览</a></li>
+                    <li><a href="#section2">表结构设计</a></li>
+                    <li><a href="#section3">发现的问题</a></li>
+                    <li><a href="#section4">优化方案</a></li>
+                    <li><a href="#section5">SQLite vs PostgreSQL 对比</a></li>
+                    <li><a href="#section6">迁移建议</a></li>
+                    <li><a href="#section7">执行计划</a></li>
+                </ol>
+            </div>
+
+            <hr>
+
+            <h2 id="section1">1. 当前架构概览</h2>
+
+            <h3>1.1 技术栈</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>项目</th>
+                        <th>值</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>数据库类型</strong></td>
+                        <td><code>SQLite</code></td>
+                    </tr>
+                    <tr>
+                        <td><strong>存储位置</strong></td>
+                        <td><code>~/.open-ace/usage.db</code></td>
+                    </tr>
+                    <tr>
+                        <td><strong>ORM/访问方式</strong></td>
+                        <td>原生 sqlite3 + Alembic 迁移</td>
+                    </tr>
+                    <tr>
+                        <td><strong>连接管理</strong></td>
+                        <td>每次请求新建连接，无连接池</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3>1.2 表统计</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>表名</th>
+                        <th>用途</th>
+                        <th>预估字段数</th>
+                        <th>定义位置</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>users</code></td>
+                        <td>用户账户</td>
+                        <td>12+</td>
+                        <td><span class="badge badge-success">迁移文件 ✅</span></td>
+                    </tr>
+                    <tr>
+                        <td><code>sessions</code></td>
+                        <td>会话管理</td>
+                        <td>6</td>
+                        <td><span class="badge badge-success">迁移文件 ✅</span></td>
+                    </tr>
+                    <tr>
+                        <td><code>daily_usage</code></td>
+                        <td>使用量统计</td>
+                        <td>11</td>
+                        <td><span class="badge badge-success">迁移文件 ✅</span></td>
+                    </tr>
+                    <tr>
+                        <td><code>daily_messages</code></td>
+                        <td>消息记录</td>
+                        <td>22</td>
+                        <td><span class="badge badge-success">迁移文件 ✅</span></td>
+                    </tr>
+                    <tr>
+                        <td><code>tenants</code></td>
+                        <td>租户信息</td>
+                        <td>16</td>
+                        <td><span class="badge badge-warning">动态创建 ⚠️</span></td>
+                    </tr>
+                    <tr>
+                        <td><code>tenant_usage</code></td>
+                        <td>租户使用量</td>
+                        <td>8</td>
+                        <td><span class="badge badge-warning">动态创建 ⚠️</span></td>
+                    </tr>
+                    <tr>
+                        <td><code>content_filter_rules</code></td>
+                        <td>内容过滤规则</td>
+                        <td>9</td>
+                        <td><span class="badge badge-warning">动态创建 ⚠️</span></td>
+                    </tr>
+                    <tr>
+                        <td><code>quota_usage</code></td>
+                        <td>用户配额使用</td>
+                        <td>8</td>
+                        <td><span class="badge badge-warning">动态创建 ⚠️</span></td>
+                    </tr>
+                    <tr>
+                        <td><code>quota_alerts</code></td>
+                        <td>配额告警</td>
+                        <td>13</td>
+                        <td><span class="badge badge-warning">动态创建 ⚠️</span></td>
+                    </tr>
+                    <tr>
+                        <td><code>audit_logs</code></td>
+                        <td>审计日志</td>
+                        <td>13</td>
+                        <td><span class="badge badge-warning">动态创建 ⚠️</span></td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="alert alert-warning">
+                <strong>⚠️ 注意:</strong> 迁移文件 <code>migrations/versions/20260321_001_initial_schema.py</code> 仅定义了 4 个表，其余 6 个表通过代码动态创建，存在维护风险。
+            </div>
+
+            <h3>1.3 项目特点</h3>
+            <div class="card">
+                <ul>
+                    <li><strong>多租户架构</strong>: 支持 tenants 表，具备 SaaS 能力</li>
+                    <li><strong>用户认证</strong>: 完整的 users/sessions 表</li>
+                    <li><strong>消息追踪</strong>: daily_messages 高频写入</li>
+                    <li><strong>使用量统计</strong>: daily_usage 聚合统计</li>
+                    <li><strong>配额管理</strong>: quota_usage + quota_alerts 表支持用户配额和告警</li>
+                    <li><strong>审计日志</strong>: audit_logs 表记录操作审计</li>
+                    <li><strong>内容安全</strong>: content_filter_rules 表支持内容过滤</li>
+                </ul>
+            </div>
+
+            <hr>
+
+            <h2 id="section2">2. 表结构设计</h2>
+
+            <h3>2.1 ERD 图</h3>
+            <pre class="mermaid">
+erDiagram
+    users ||--o{ sessions : has
+    users ||--o{ daily_messages : creates
+    users ||--o{ quota_usage : consumes
+    users ||--o{ quota_alerts : receives
+    users ||--o{ audit_logs : generates
+    tenants ||--o{ tenant_usage : tracks
+    tenants ||--o{ users : contains
+
+    users {
+        integer id PK
+        string username UK
+        string email
+        string password_hash
+        string role
+        integer is_active
+        timestamp created_at
+        timestamp last_login
+        integer daily_token_quota
+        integer monthly_token_quota
+        integer daily_request_quota
+        integer monthly_request_quota
+    }
+
+    sessions {
+        integer id PK
+        string token UK
+        integer user_id FK
+        timestamp created_at
+        timestamp expires_at
+        integer is_active
+    }
+
+    daily_usage {
+        integer id PK
+        string date
+        string tool_name
+        string host_name
+        integer tokens_used
+        integer input_tokens
+        integer output_tokens
+        integer cache_tokens
+        integer request_count
+        text models_used
+        timestamp created_at
+    }
+
+    daily_messages {
+        integer id PK
+        string date
+        string tool_name
+        string host_name
+        string message_id
+        string parent_id
+        string role
+        text content
+        text full_entry
+        integer tokens_used
+        integer input_tokens
+        integer output_tokens
+        string model
+        string timestamp
+        string sender_id
+        string sender_name
+        string message_source
+        string feishu_conversation_id
+        string group_subject
+        integer is_group_chat
+        string agent_session_id
+        string conversation_id
+        timestamp created_at
+    }
+
+    tenants {
+        integer id PK
+        string name
+        string slug UK
+        string status
+        string plan
+        string contact_email
+        string contact_phone
+        string contact_name
+        text quota
+        text settings
+        timestamp created_at
+        timestamp updated_at
+        timestamp trial_ends_at
+        timestamp subscription_ends_at
+        integer user_count
+        integer total_tokens_used
+        integer total_requests_made
+    }
+
+    tenant_usage {
+        integer id PK
+        integer tenant_id FK
+        string date
+        integer tokens_used
+        integer requests_made
+        integer active_users
+        integer new_users
+        timestamp created_at
+    }
+
+    content_filter_rules {
+        integer id PK
+        string pattern
+        string type
+        string severity
+        string action
+        integer is_enabled
+        string description
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    quota_usage {
+        integer id PK
+        integer user_id FK
+        string date
+        string period
+        integer tokens_used
+        integer requests_used
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    quota_alerts {
+        integer id PK
+        integer user_id FK
+        string alert_type
+        string quota_type
+        string period
+        real threshold
+        integer current_usage
+        integer quota_limit
+        real percentage
+        string message
+        timestamp created_at
+        integer acknowledged
+        timestamp acknowledged_at
+        integer acknowledged_by
+    }
+
+    audit_logs {
+        integer id PK
+        timestamp timestamp
+        integer user_id
+        string username
+        string action
+        string severity
+        string resource_type
+        string resource_id
+        text details
+        string ip_address
+        string user_agent
+        string session_id
+        integer success
+        string error_message
+    }
+            </pre>
+
+            <div class="card">
+                <h4>ERD 更新说明</h4>
+                <ul>
+                    <li>移除了 <code>user_permissions</code> 表（代码中未实现）</li>
+                    <li>添加了 <code>quota_alerts</code> 和 <code>audit_logs</code> 表</li>
+                    <li>修正了 <code>sessions</code> 表的 <code>session_id</code> 为 <code>token</code>（与代码一致）</li>
+                    <li>补充了 <code>users</code> 表的配额字段</li>
+                    <li>补充了 <code>tenants</code> 表的联系人和统计字段</li>
+                </ul>
+            </div>
+
+            <h3>2.2 表详细结构</h3>
+
+            <h4>users 表</h4>
+            <table>
+                <thead>
+                    <tr>
+                        <th>列名</th>
+                        <th>类型</th>
+                        <th>约束</th>
+                        <th>说明</th>
+                        <th>代码使用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>id</td><td>INTEGER</td><td>PRIMARY KEY</td><td>自增主键</td><td><span class="badge badge-success">✅</span></td></tr>
+                    <tr><td>username</td><td>VARCHAR</td><td>UNIQUE, NOT NULL</td><td>用户名</td><td><span class="badge badge-success">✅</span></td></tr>
+                    <tr><td>email</td><td>VARCHAR</td><td></td><td>邮箱</td><td><span class="badge badge-success">✅</span></td></tr>
+                    <tr><td>password_hash</td><td>VARCHAR</td><td>NOT NULL</td><td>密码哈希</td><td><span class="badge badge-success">✅</span></td></tr>
+                    <tr><td>role</td><td>VARCHAR</td><td>DEFAULT 'user'</td><td>角色</td><td><span class="badge badge-danger">代码使用，迁移缺失</span></td></tr>
+                    <tr><td>is_active</td><td>INTEGER</td><td>DEFAULT 1</td><td>是否激活</td><td><span class="badge badge-success">✅</span></td></tr>
+                    <tr><td>created_at</td><td>TIMESTAMP</td><td>DEFAULT NOW</td><td>创建时间</td><td><span class="badge badge-success">✅</span></td></tr>
+                    <tr><td>last_login</td><td>TIMESTAMP</td><td></td><td>最后登录</td><td><span class="badge badge-success">✅</span></td></tr>
+                    <tr><td>daily_token_quota</td><td>INTEGER</td><td></td><td>每日 Token 配额</td><td><span class="badge badge-danger">代码使用，迁移缺失</span></td></tr>
+                    <tr><td>monthly_token_quota</td><td>INTEGER</td><td></td><td>每月 Token 配额</td><td><span class="badge badge-danger">代码使用，迁移缺失</span></td></tr>
+                    <tr><td>daily_request_quota</td><td>INTEGER</td><td></td><td>每日请求配额</td><td><span class="badge badge-danger">代码使用，迁移缺失</span></td></tr>
+                    <tr><td>monthly_request_quota</td><td>INTEGER</td><td></td><td>每月请求配额</td><td><span class="badge badge-danger">代码使用，迁移缺失</span></td></tr>
+                </tbody>
+            </table>
+
+            <div class="alert alert-danger">
+                <strong>⚠️ 问题:</strong> 迁移文件定义了 <code>is_admin</code> 列，但代码使用 <code>role</code> 列。迁移文件缺少 <code>role</code> 和配额相关字段。
+            </div>
+
+            <h4>sessions 表</h4>
+            <table>
+                <thead>
+                    <tr>
+                        <th>列名</th>
+                        <th>类型</th>
+                        <th>约束</th>
+                        <th>说明</th>
+                        <th>代码使用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>id</td><td>INTEGER</td><td>PRIMARY KEY</td><td>自增主键</td><td><span class="badge badge-success">✅</span></td></tr>
+                    <tr><td>token</td><td>VARCHAR</td><td>UNIQUE, NOT NULL</td><td>会话令牌</td><td><span class="badge badge-success">✅ 代码使用 token</span></td></tr>
+                    <tr><td>session_id</td><td>VARCHAR</td><td>UNIQUE, NOT NULL</td><td>会话 ID</td><td><span class="badge badge-warning">⚠️ 迁移定义，代码未用</span></td></tr>
+                    <tr><td>user_id</td><td>INTEGER</td><td>NOT NULL</td><td>用户 ID</td><td><span class="badge badge-success">✅</span></td></tr>
+                    <tr><td>created_at</td><td>TIMESTAMP</td><td>DEFAULT NOW</td><td>创建时间</td><td><span class="badge badge-success">✅</span></td></tr>
+                    <tr><td>expires_at</td><td>TIMESTAMP</td><td>NOT NULL</td><td>过期时间</td><td><span class="badge badge-success">✅</span></td></tr>
+                    <tr><td>is_active</td><td>INTEGER</td><td>DEFAULT 1</td><td>是否活跃</td><td><span class="badge badge-success">✅</span></td></tr>
+                </tbody>
+            </table>
+
+            <div class="alert alert-danger">
+                <strong>⚠️ 问题:</strong> 迁移文件定义 <code>session_id</code> 列，但代码使用 <code>token</code> 列。需要统一命名。
+            </div>
+
+            <h4>tenants 表（动态创建）</h4>
+            <table>
+                <thead>
+                    <tr>
+                        <th>列名</th>
+                        <th>类型</th>
+                        <th>约束</th>
+                        <th>说明</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>id</td><td>INTEGER</td><td>PRIMARY KEY</td><td>自增主键</td></tr>
+                    <tr><td>name</td><td>TEXT</td><td>NOT NULL</td><td>租户名称</td></tr>
+                    <tr><td>slug</td><td>TEXT</td><td>UNIQUE, NOT NULL</td><td>URL 友好标识</td></tr>
+                    <tr><td>status</td><td>TEXT</td><td>DEFAULT 'active'</td><td>状态</td></tr>
+                    <tr><td>plan</td><td>TEXT</td><td>DEFAULT 'standard'</td><td>套餐</td></tr>
+                    <tr><td>contact_email</td><td>TEXT</td><td></td><td>联系邮箱</td></tr>
+                    <tr><td>contact_phone</td><td>TEXT</td><td></td><td>联系电话</td></tr>
+                    <tr><td>contact_name</td><td>TEXT</td><td></td><td>联系人</td></tr>
+                    <tr><td>quota</td><td>TEXT</td><td></td><td>配额配置 (JSON)</td></tr>
+                    <tr><td>settings</td><td>TEXT</td><td></td><td>设置 (JSON)</td></tr>
+                    <tr><td>created_at</td><td>TIMESTAMP</td><td>DEFAULT NOW</td><td>创建时间</td></tr>
+                    <tr><td>updated_at</td><td>TIMESTAMP</td><td>DEFAULT NOW</td><td>更新时间</td></tr>
+                    <tr><td>trial_ends_at</td><td>TIMESTAMP</td><td></td><td>试用结束时间</td></tr>
+                    <tr><td>subscription_ends_at</td><td>TIMESTAMP</td><td></td><td>订阅结束时间</td></tr>
+                    <tr><td>user_count</td><td>INTEGER</td><td>DEFAULT 0</td><td>用户数</td></tr>
+                    <tr><td>total_tokens_used</td><td>INTEGER</td><td>DEFAULT 0</td><td>总 Token 使用量</td></tr>
+                    <tr><td>total_requests_made</td><td>INTEGER</td><td>DEFAULT 0</td><td>总请求数</td></tr>
+                </tbody>
+            </table>
+
+            <h4>quota_usage 表（动态创建）</h4>
+            <table>
+                <thead>
+                    <tr>
+                        <th>列名</th>
+                        <th>类型</th>
+                        <th>约束</th>
+                        <th>说明</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>id</td><td>INTEGER</td><td>PRIMARY KEY</td><td>自增主键</td></tr>
+                    <tr><td>user_id</td><td>INTEGER</td><td>NOT NULL</td><td>用户 ID</td></tr>
+                    <tr><td>date</td><td>TEXT</td><td>NOT NULL</td><td>日期</td></tr>
+                    <tr><td>period</td><td>TEXT</td><td>DEFAULT 'daily'</td><td>周期类型</td></tr>
+                    <tr><td>tokens_used</td><td>INTEGER</td><td>DEFAULT 0</td><td>Token 使用量</td></tr>
+                    <tr><td>requests_used</td><td>INTEGER</td><td>DEFAULT 0</td><td>请求数</td></tr>
+                    <tr><td>created_at</td><td>TIMESTAMP</td><td>DEFAULT NOW</td><td>创建时间</td></tr>
+                    <tr><td>updated_at</td><td>TIMESTAMP</td><td>DEFAULT NOW</td><td>更新时间</td></tr>
+                </tbody>
+            </table>
+
+            <h4>audit_logs 表（动态创建）</h4>
+            <table>
+                <thead>
+                    <tr>
+                        <th>列名</th>
+                        <th>类型</th>
+                        <th>约束</th>
+                        <th>说明</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>id</td><td>INTEGER</td><td>PRIMARY KEY</td><td>自增主键</td></tr>
+                    <tr><td>timestamp</td><td>TIMESTAMP</td><td>DEFAULT NOW</td><td>时间戳</td></tr>
+                    <tr><td>user_id</td><td>INTEGER</td><td></td><td>用户 ID</td></tr>
+                    <tr><td>username</td><td>TEXT</td><td></td><td>用户名</td></tr>
+                    <tr><td>action</td><td>TEXT</td><td>NOT NULL</td><td>操作类型</td></tr>
+                    <tr><td>severity</td><td>TEXT</td><td>DEFAULT 'info'</td><td>严重程度</td></tr>
+                    <tr><td>resource_type</td><td>TEXT</td><td></td><td>资源类型</td></tr>
+                    <tr><td>resource_id</td><td>TEXT</td><td></td><td>资源 ID</td></tr>
+                    <tr><td>details</td><td>TEXT</td><td></td><td>详情 (JSON)</td></tr>
+                    <tr><td>ip_address</td><td>TEXT</td><td></td><td>IP 地址</td></tr>
+                    <tr><td>user_agent</td><td>TEXT</td><td></td><td>用户代理</td></tr>
+                    <tr><td>session_id</td><td>TEXT</td><td></td><td>会话 ID</td></tr>
+                    <tr><td>success</td><td>INTEGER</td><td>DEFAULT 1</td><td>是否成功</td></tr>
+                    <tr><td>error_message</td><td>TEXT</td><td></td><td>错误消息</td></tr>
+                </tbody>
+            </table>
+
+            <hr>
+
+            <h2 id="section3">3. 发现的问题</h2>
+
+            <h3>3.0 迁移文件与代码不一致 <span class="badge badge-danger">🔴 严重</span></h3>
+
+            <h4>3.0.1 迁移文件缺失表定义</h4>
+            <div class="card card-danger">
+                <p><strong>问题描述:</strong> 迁移文件 <code>migrations/versions/20260321_001_initial_schema.py</code> 仅定义了 4 个表，但代码中实际使用了 10 个表。</p>
+            </div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>表名</th>
+                        <th>迁移定义</th>
+                        <th>代码定义</th>
+                        <th>位置</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>daily_usage</td>
+                        <td><span class="badge badge-success">✅</span></td>
+                        <td>-</td>
+                        <td>迁移文件</td>
+                    </tr>
+                    <tr>
+                        <td>daily_messages</td>
+                        <td><span class="badge badge-success">✅</span></td>
+                        <td>-</td>
+                        <td>迁移文件</td>
+                    </tr>
+                    <tr>
+                        <td>users</td>
+                        <td><span class="badge badge-success">✅</span></td>
+                        <td>-</td>
+                        <td>迁移文件</td>
+                    </tr>
+                    <tr>
+                        <td>sessions</td>
+                        <td><span class="badge badge-success">✅</span></td>
+                        <td>-</td>
+                        <td>迁移文件</td>
+                    </tr>
+                    <tr>
+                        <td>tenants</td>
+                        <td><span class="badge badge-danger">❌</span></td>
+                        <td><span class="badge badge-warning">✅</span></td>
+                        <td>tenant_repo.py</td>
+                    </tr>
+                    <tr>
+                        <td>tenant_usage</td>
+                        <td><span class="badge badge-danger">❌</span></td>
+                        <td><span class="badge badge-warning">✅</span></td>
+                        <td>tenant_repo.py</td>
+                    </tr>
+                    <tr>
+                        <td>content_filter_rules</td>
+                        <td><span class="badge badge-danger">❌</span></td>
+                        <td><span class="badge badge-warning">✅</span></td>
+                        <td>governance_repo.py</td>
+                    </tr>
+                    <tr>
+                        <td>quota_usage</td>
+                        <td><span class="badge badge-danger">❌</span></td>
+                        <td><span class="badge badge-warning">✅</span></td>
+                        <td>quota_manager.py</td>
+                    </tr>
+                    <tr>
+                        <td>quota_alerts</td>
+                        <td><span class="badge badge-danger">❌</span></td>
+                        <td><span class="badge badge-warning">✅</span></td>
+                        <td>quota_manager.py</td>
+                    </tr>
+                    <tr>
+                        <td>audit_logs</td>
+                        <td><span class="badge badge-danger">❌</span></td>
+                        <td><span class="badge badge-warning">✅</span></td>
+                        <td>audit_logger.py</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="alert alert-danger">
+                <strong>影响:</strong>
+                <ul>
+                    <li>新环境部署时表结构不完整</li>
+                    <li>无法通过 Alembic 管理所有表变更</li>
+                    <li>团队协作时数据库状态不一致</li>
+                </ul>
+            </div>
+
+            <h4>3.0.2 users 表字段不一致</h4>
+            <table>
+                <thead>
+                    <tr>
+                        <th>字段</th>
+                        <th>迁移定义</th>
+                        <th>代码使用</th>
+                        <th>说明</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>is_admin</td>
+                        <td><span class="badge badge-success">✅</span></td>
+                        <td><span class="badge badge-danger">❌</span></td>
+                        <td>迁移定义，代码未使用</td>
+                    </tr>
+                    <tr>
+                        <td>role</td>
+                        <td><span class="badge badge-danger">❌</span></td>
+                        <td><span class="badge badge-success">✅</span></td>
+                        <td>代码使用，迁移缺失</td>
+                    </tr>
+                    <tr>
+                        <td>daily_token_quota</td>
+                        <td><span class="badge badge-danger">❌</span></td>
+                        <td><span class="badge badge-success">✅</span></td>
+                        <td>代码使用，迁移缺失</td>
+                    </tr>
+                    <tr>
+                        <td>monthly_token_quota</td>
+                        <td><span class="badge badge-danger">❌</span></td>
+                        <td><span class="badge badge-success">✅</span></td>
+                        <td>代码使用，迁移缺失</td>
+                    </tr>
+                    <tr>
+                        <td>daily_request_quota</td>
+                        <td><span class="badge badge-danger">❌</span></td>
+                        <td><span class="badge badge-success">✅</span></td>
+                        <td>代码使用，迁移缺失</td>
+                    </tr>
+                    <tr>
+                        <td>monthly_request_quota</td>
+                        <td><span class="badge badge-danger">❌</span></td>
+                        <td><span class="badge badge-success">✅</span></td>
+                        <td>代码使用，迁移缺失</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h4>3.0.3 sessions 表字段不一致</h4>
+            <table>
+                <thead>
+                    <tr>
+                        <th>字段</th>
+                        <th>迁移定义</th>
+                        <th>代码使用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>session_id</td>
+                        <td><span class="badge badge-success">✅ UNIQUE</span></td>
+                        <td><span class="badge badge-danger">❌ 未使用</span></td>
+                    </tr>
+                    <tr>
+                        <td>token</td>
+                        <td><span class="badge badge-danger">❌</span></td>
+                        <td><span class="badge badge-success">✅ UNIQUE</span></td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="alert alert-danger">
+                <strong>影响:</strong> 运行时会因列不存在而报错。
+            </div>
+
+            <h4>3.0.4 动态建表问题汇总</h4>
+            <table>
+                <thead>
+                    <tr>
+                        <th>模块</th>
+                        <th>文件</th>
+                        <th>创建的表</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>TenantRepository</td><td>tenant_repo.py</td><td>tenants, tenant_usage</td></tr>
+                    <tr><td>GovernanceRepository</td><td>governance_repo.py</td><td>content_filter_rules</td></tr>
+                    <tr><td>QuotaManager</td><td>quota_manager.py</td><td>quota_usage, quota_alerts</td></tr>
+                    <tr><td>AuditLogger</td><td>audit_logger.py</td><td>audit_logs</td></tr>
+                </tbody>
+            </table>
+
+            <div class="card card-danger">
+                <h4>风险</h4>
+                <ol>
+                    <li>表结构变更无法追踪</li>
+                    <li>无法回滚到特定版本</li>
+                    <li>多开发者协作时产生冲突</li>
+                    <li>生产环境部署时可能遗漏表</li>
+                </ol>
+            </div>
+
+            <h3>3.1 索引问题</h3>
+
+            <h4>3.1.1 索引过多</h4>
+            <div class="card">
+                <p><strong>问题描述:</strong> <code>daily_messages</code> 表有 <strong>12 个索引</strong>，过多的索引会：</p>
+                <ul>
+                    <li>降低 INSERT/UPDATE 性能</li>
+                    <li>增加存储空间</li>
+                    <li>增加维护成本</li>
+                </ul>
+            </div>
+
+            <h4>3.1.2 缺少关键索引</h4>
+            <table>
+                <thead>
+                    <tr>
+                        <th>表</th>
+                        <th>列</th>
+                        <th>查询场景</th>
+                        <th>状态</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>daily_messages</td>
+                        <td>feishu_conversation_id</td>
+                        <td>会话历史查询</td>
+                        <td><span class="badge badge-danger">缺失</span></td>
+                    </tr>
+                    <tr>
+                        <td>daily_messages</td>
+                        <td>conversation_id</td>
+                        <td>会话关联</td>
+                        <td><span class="badge badge-danger">缺失</span></td>
+                    </tr>
+                    <tr>
+                        <td>sessions</td>
+                        <td>expires_at</td>
+                        <td>过期会话清理</td>
+                        <td><span class="badge badge-danger">缺失</span></td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3>3.2 数据类型问题</h3>
+
+            <h4>3.2.1 日期/时间存储为字符串</h4>
+            <pre><code class="language-sql">-- 当前定义
+date VARCHAR NOT NULL
+timestamp VARCHAR
+
+-- 建议定义
+date DATE NOT NULL
+timestamp TIMESTAMP</code></pre>
+
+            <h4>3.2.2 布尔值使用 INTEGER</h4>
+            <pre><code class="language-sql">-- 当前定义
+is_active INTEGER DEFAULT 1
+is_group_chat INTEGER
+
+-- PostgreSQL 建议定义
+is_active BOOLEAN DEFAULT TRUE
+is_group_chat BOOLEAN</code></pre>
+
+            <h3>3.3 表设计问题</h3>
+
+            <h4>3.3.1 缺少外键约束</h4>
+            <table>
+                <thead>
+                    <tr>
+                        <th>表</th>
+                        <th>列</th>
+                        <th>应引用</th>
+                        <th>风险</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>sessions</td>
+                        <td>user_id</td>
+                        <td>users.id</td>
+                        <td><span class="badge badge-danger">孤儿记录</span></td>
+                    </tr>
+                    <tr>
+                        <td>tenant_usage</td>
+                        <td>tenant_id</td>
+                        <td>tenants.id</td>
+                        <td><span class="badge badge-danger">孤儿记录</span></td>
+                    </tr>
+                    <tr>
+                        <td>quota_usage</td>
+                        <td>user_id</td>
+                        <td>users.id</td>
+                        <td><span class="badge badge-danger">孤儿记录</span></td>
+                    </tr>
+                    <tr>
+                        <td>quota_alerts</td>
+                        <td>user_id</td>
+                        <td>users.id</td>
+                        <td><span class="badge badge-danger">孤儿记录</span></td>
+                    </tr>
+                    <tr>
+                        <td>audit_logs</td>
+                        <td>user_id</td>
+                        <td>users.id</td>
+                        <td><span class="badge badge-danger">孤儿记录</span></td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3>3.4 问题严重程度汇总</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>问题类别</th>
+                        <th>严重程度</th>
+                        <th>影响范围</th>
+                        <th>状态</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>迁移文件缺失表定义</td>
+                        <td><span class="severity-critical">🔴 高</span></td>
+                        <td>部署失败</td>
+                        <td><span class="badge badge-new">🆕 新增</span></td>
+                    </tr>
+                    <tr>
+                        <td>users 表字段不一致</td>
+                        <td><span class="severity-critical">🔴 高</span></td>
+                        <td>运行时错误</td>
+                        <td><span class="badge badge-new">🆕 新增</span></td>
+                    </tr>
+                    <tr>
+                        <td>sessions 表字段不一致</td>
+                        <td><span class="severity-critical">🔴 高</span></td>
+                        <td>运行时错误</td>
+                        <td><span class="badge badge-new">🆕 新增</span></td>
+                    </tr>
+                    <tr>
+                        <td>动态建表绕过迁移</td>
+                        <td><span class="severity-critical">🔴 高</span></td>
+                        <td>可维护性</td>
+                        <td><span class="badge badge-new">🆕 新增</span></td>
+                    </tr>
+                    <tr>
+                        <td>索引引用不存在的列</td>
+                        <td><span class="severity-high">🔴 高</span></td>
+                        <td>代码错误</td>
+                        <td>原有</td>
+                    </tr>
+                    <tr>
+                        <td>缺少外键约束</td>
+                        <td><span class="severity-high">🔴 高</span></td>
+                        <td>数据完整性</td>
+                        <td>原有</td>
+                    </tr>
+                    <tr>
+                        <td>索引过多</td>
+                        <td><span class="severity-medium">🟡 中</span></td>
+                        <td>写入性能</td>
+                        <td>原有</td>
+                    </tr>
+                    <tr>
+                        <td>缺少关键索引</td>
+                        <td><span class="severity-medium">🟡 中</span></td>
+                        <td>查询性能</td>
+                        <td>原有</td>
+                    </tr>
+                    <tr>
+                        <td>JSON 存储问题</td>
+                        <td><span class="severity-medium">🟡 中</span></td>
+                        <td>查询性能</td>
+                        <td>原有</td>
+                    </tr>
+                    <tr>
+                        <td>数据类型问题</td>
+                        <td><span class="severity-medium">🟡 中</span></td>
+                        <td>语义清晰度</td>
+                        <td>原有</td>
+                    </tr>
+                    <tr>
+                        <td>缺少软删除</td>
+                        <td><span class="severity-low">🟢 低</span></td>
+                        <td>数据恢复</td>
+                        <td>原有</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="alert alert-danger">
+                <strong>优先级建议:</strong> 必须先解决 🔴 高严重程度问题，特别是迁移文件与代码不一致的问题，否则系统无法正常运行。
+            </div>
+
+            <hr>
+
+            <h2 id="section4">4. 优化方案</h2>
+
+            <h3>4.0 方案零：迁移文件修复 <span class="badge badge-danger">🔴 最高优先级</span></h3>
+
+            <div class="alert alert-danger">
+                <strong>必须首先执行此方案</strong>，否则系统无法正常运行。
+            </div>
+
+            <h4>4.0.1 创建新的迁移文件补充缺失的表</h4>
+            <pre><code class="language-bash"># 创建迁移文件
+alembic revision -m "add_missing_tables"</code></pre>
+
+            <pre><code class="language-python"># migrations/versions/xxxx_add_missing_tables.py
+
+def upgrade() -> None:
+    # 创建 tenants 表
+    op.create_table(
+        'tenants',
+        sa.Column('id', sa.Integer(), primary_key=True, autoincrement=True),
+        sa.Column('name', sa.Text(), nullable=False),
+        sa.Column('slug', sa.Text(), unique=True, nullable=False),
+        sa.Column('status', sa.Text(), server_default='active'),
+        sa.Column('plan', sa.Text(), server_default='standard'),
+        sa.Column('contact_email', sa.Text()),
+        sa.Column('contact_phone', sa.Text()),
+        sa.Column('contact_name', sa.Text()),
+        sa.Column('quota', sa.Text()),
+        sa.Column('settings', sa.Text()),
+        sa.Column('created_at', sa.TIMESTAMP(), server_default=sa.text('CURRENT_TIMESTAMP')),
+        sa.Column('updated_at', sa.TIMESTAMP(), server_default=sa.text('CURRENT_TIMESTAMP')),
+        sa.Column('trial_ends_at', sa.TIMESTAMP()),
+        sa.Column('subscription_ends_at', sa.TIMESTAMP()),
+        sa.Column('user_count', sa.Integer(), server_default='0'),
+        sa.Column('total_tokens_used', sa.Integer(), server_default='0'),
+        sa.Column('total_requests_made', sa.Integer(), server_default='0'),
+    )
+    op.create_index('idx_tenants_slug', 'tenants', ['slug'])
+    op.create_index('idx_tenants_status', 'tenants', ['status'])
+
+    # 创建 tenant_usage 表
+    op.create_table(
+        'tenant_usage',
+        sa.Column('id', sa.Integer(), primary_key=True, autoincrement=True),
+        sa.Column('tenant_id', sa.Integer(), sa.ForeignKey('tenants.id', ondelete='CASCADE'), nullable=False),
+        sa.Column('date', sa.Text(), nullable=False),
+        sa.Column('tokens_used', sa.Integer(), server_default='0'),
+        sa.Column('requests_made', sa.Integer(), server_default='0'),
+        sa.Column('active_users', sa.Integer(), server_default='0'),
+        sa.Column('new_users', sa.Integer(), server_default='0'),
+        sa.Column('created_at', sa.TIMESTAMP(), server_default=sa.text('CURRENT_TIMESTAMP')),
+        sa.UniqueConstraint('tenant_id', 'date', name='uq_tenant_usage_tenant_date'),
+    )
+
+    # 创建 content_filter_rules 表
+    op.create_table(
+        'content_filter_rules',
+        sa.Column('id', sa.Integer(), primary_key=True, autoincrement=True),
+        sa.Column('pattern', sa.Text(), nullable=False),
+        sa.Column('type', sa.Text(), server_default='keyword'),
+        sa.Column('severity', sa.Text(), server_default='medium'),
+        sa.Column('action', sa.Text(), server_default='warn'),
+        sa.Column('is_enabled', sa.Integer(), server_default='1'),
+        sa.Column('description', sa.Text()),
+        sa.Column('created_at', sa.Text(), nullable=False),
+        sa.Column('updated_at', sa.Text()),
+    )
+
+    # 创建 quota_usage 表
+    op.create_table(
+        'quota_usage',
+        sa.Column('id', sa.Integer(), primary_key=True, autoincrement=True),
+        sa.Column('user_id', sa.Integer(), sa.ForeignKey('users.id', ondelete='CASCADE'), nullable=False),
+        sa.Column('date', sa.Text(), nullable=False),
+        sa.Column('period', sa.Text(), server_default='daily'),
+        sa.Column('tokens_used', sa.Integer(), server_default='0'),
+        sa.Column('requests_used', sa.Integer(), server_default='0'),
+        sa.Column('created_at', sa.TIMESTAMP(), server_default=sa.text('CURRENT_TIMESTAMP')),
+        sa.Column('updated_at', sa.TIMESTAMP(), server_default=sa.text('CURRENT_TIMESTAMP')),
+        sa.UniqueConstraint('user_id', 'date', 'period', name='uq_quota_usage_user_date_period'),
+    )
+
+    # 创建 quota_alerts 表
+    op.create_table(
+        'quota_alerts',
+        sa.Column('id', sa.Integer(), primary_key=True, autoincrement=True),
+        sa.Column('user_id', sa.Integer(), sa.ForeignKey('users.id', ondelete='CASCADE'), nullable=False),
+        sa.Column('alert_type', sa.Text(), nullable=False),
+        sa.Column('quota_type', sa.Text(), nullable=False),
+        sa.Column('period', sa.Text(), server_default='daily'),
+        sa.Column('threshold', sa.REAL(), nullable=False),
+        sa.Column('current_usage', sa.Integer(), nullable=False),
+        sa.Column('quota_limit', sa.Integer(), nullable=False),
+        sa.Column('percentage', sa.REAL(), nullable=False),
+        sa.Column('message', sa.Text()),
+        sa.Column('created_at', sa.TIMESTAMP(), server_default=sa.text('CURRENT_TIMESTAMP')),
+        sa.Column('acknowledged', sa.Integer(), server_default='0'),
+        sa.Column('acknowledged_at', sa.TIMESTAMP()),
+        sa.Column('acknowledged_by', sa.Integer()),
+    )
+
+    # 创建 audit_logs 表
+    op.create_table(
+        'audit_logs',
+        sa.Column('id', sa.Integer(), primary_key=True, autoincrement=True),
+        sa.Column('timestamp', sa.TIMESTAMP(), server_default=sa.text('CURRENT_TIMESTAMP')),
+        sa.Column('user_id', sa.Integer()),
+        sa.Column('username', sa.Text()),
+        sa.Column('action', sa.Text(), nullable=False),
+        sa.Column('severity', sa.Text(), server_default='info'),
+        sa.Column('resource_type', sa.Text()),
+        sa.Column('resource_id', sa.Text()),
+        sa.Column('details', sa.Text()),
+        sa.Column('ip_address', sa.Text()),
+        sa.Column('user_agent', sa.Text()),
+        sa.Column('session_id', sa.Text()),
+        sa.Column('success', sa.Integer(), server_default='1'),
+        sa.Column('error_message', sa.Text()),
+    )
+    op.create_index('idx_audit_timestamp', 'audit_logs', ['timestamp'])
+    op.create_index('idx_audit_user_id', 'audit_logs', ['user_id'])
+    op.create_index('idx_audit_action', 'audit_logs', ['action'])</code></pre>
+
+            <h4>4.0.2 修复 users 表字段</h4>
+            <pre><code class="language-bash">alembic revision -m "fix_users_table_fields"</code></pre>
+
+            <pre><code class="language-python">def upgrade() -> None:
+    # 添加 role 列（替换 is_admin）
+    op.add_column('users', sa.Column('role', sa.String(), server_default='user'))
+
+    # 迁移数据：is_admin -> role
+    op.execute("UPDATE users SET role = 'admin' WHERE is_admin = 1")
+
+    # 添加配额字段
+    op.add_column('users', sa.Column('daily_token_quota', sa.Integer(), nullable=True))
+    op.add_column('users', sa.Column('monthly_token_quota', sa.Integer(), nullable=True))
+    op.add_column('users', sa.Column('daily_request_quota', sa.Integer(), nullable=True))
+    op.add_column('users', sa.Column('monthly_request_quota', sa.Integer(), nullable=True))
+
+    # 添加索引
+    op.create_index('idx_users_role', 'users', ['role'])
+    op.create_index('idx_users_email', 'users', ['email'])</code></pre>
+
+            <h4>4.0.3 修复 sessions 表字段</h4>
+            <pre><code class="language-bash">alembic revision -m "fix_sessions_table_fields"</code></pre>
+
+            <pre><code class="language-python">def upgrade() -> None:
+    # SQLite 不支持直接重命名列，需要重建表
+    op.create_table(
+        'sessions_new',
+        sa.Column('id', sa.Integer(), primary_key=True, autoincrement=True),
+        sa.Column('token', sa.String(), nullable=False, unique=True),
+        sa.Column('user_id', sa.Integer(), sa.ForeignKey('users.id', ondelete='CASCADE'), nullable=False),
+        sa.Column('created_at', sa.TIMESTAMP(), server_default=sa.text('CURRENT_TIMESTAMP')),
+        sa.Column('expires_at', sa.TIMESTAMP(), nullable=False),
+        sa.Column('is_active', sa.Integer(), server_default='1'),
+    )
+
+    # 迁移数据
+    op.execute("""
+        INSERT INTO sessions_new (id, token, user_id, created_at, expires_at, is_active)
+        SELECT id, session_id, user_id, created_at, expires_at, is_active FROM sessions
+    """)
+
+    # 删除旧表，重命名新表
+    op.drop_table('sessions')
+    op.rename_table('sessions_new', 'sessions')
+
+    # 创建索引
+    op.create_index('idx_sessions_user_id', 'sessions', ['user_id'])
+    op.create_index('idx_sessions_token', 'sessions', ['token'])
+    op.create_index('idx_sessions_expires', 'sessions', ['expires_at'])</code></pre>
+
+            <h4>4.0.4 移除动态建表代码</h4>
+            <div class="card">
+                <p>迁移完成后，需要移除各模块中的 <code>_ensure_tables</code> 方法：</p>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>文件</th>
+                            <th>需要移除的方法</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td><code>app/repositories/tenant_repo.py</code></td><td><code>_ensure_tables()</code></td></tr>
+                        <tr><td><code>app/repositories/governance_repo.py</code></td><td><code>_ensure_tables()</code></td></tr>
+                        <tr><td><code>app/modules/governance/quota_manager.py</code></td><td><code>_ensure_tables()</code></td></tr>
+                        <tr><td><code>app/modules/governance/audit_logger.py</code></td><td><code>_ensure_table()</code></td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <h3>4.1 方案一：索引优化（立即执行）</h3>
+
+            <h4>4.1.1 添加缺失索引</h4>
+            <pre><code class="language-sql">-- 会话查询索引
+CREATE INDEX IF NOT EXISTS idx_messages_feishu_conv
+    ON daily_messages(feishu_conversation_id);
+
+CREATE INDEX IF NOT EXISTS idx_messages_conv_id
+    ON daily_messages(conversation_id);
+
+-- 会话历史查询优化
+CREATE INDEX IF NOT EXISTS idx_messages_date_conv
+    ON daily_messages(date, feishu_conversation_id);
+
+-- sessions 表索引
+CREATE INDEX IF NOT EXISTS idx_sessions_expires
+    ON sessions(expires_at);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_active
+    ON sessions(is_active, expires_at);</code></pre>
+
+            <h3>4.2 方案二：添加外键约束</h3>
+            <pre><code class="language-python"># 为 quota_usage 表添加外键
+def upgrade():
+    op.create_table(
+        'quota_usage_new',
+        sa.Column('id', sa.Integer(), primary_key=True),
+        sa.Column('user_id', sa.Integer(), sa.ForeignKey('users.id', ondelete='CASCADE'), nullable=False),
+        sa.Column('date', sa.String(), nullable=False),
+        sa.Column('period', sa.String(), server_default='daily'),
+        sa.Column('tokens_used', sa.Integer(), server_default='0'),
+        sa.Column('requests_used', sa.Integer(), server_default='0'),
+        sa.Column('created_at', sa.TIMESTAMP(), server_default=sa.text('CURRENT_TIMESTAMP')),
+        sa.Column('updated_at', sa.TIMESTAMP(), server_default=sa.text('CURRENT_TIMESTAMP')),
+    )
+
+    op.execute("INSERT INTO quota_usage_new SELECT * FROM quota_usage")
+
+    op.drop_table('quota_usage')
+    op.rename_table('quota_usage_new', 'quota_usage')
+
+    op.create_index('idx_quota_user_date', 'quota_usage', ['user_id', 'date'])</code></pre>
+
+            <hr>
+
+            <h2 id="section5">5. SQLite vs PostgreSQL 对比</h2>
+
+            <h3>5.1 功能对比</h3>
+            <table class="comparison-table">
+                <thead>
+                    <tr>
+                        <th>功能</th>
+                        <th>SQLite</th>
+                        <th>PostgreSQL</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>并发写入</strong></td>
+                        <td><span class="badge badge-danger">❌ 单写者锁</span></td>
+                        <td><span class="badge badge-success">✅ MVCC 多写者</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>JSON 支持</strong></td>
+                        <td><span class="badge badge-warning">⚠️ 基础</span></td>
+                        <td><span class="badge badge-success">✅ JSONB + GIN 索引</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>全文搜索</strong></td>
+                        <td><span class="badge badge-warning">⚠️ FTS5</span></td>
+                        <td><span class="badge badge-success">✅ 内置 tsvector</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>窗口函数</strong></td>
+                        <td><span class="badge badge-warning">⚠️ 有限</span></td>
+                        <td><span class="badge badge-success">✅ 完整支持</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>行级锁</strong></td>
+                        <td><span class="badge badge-danger">❌</span></td>
+                        <td><span class="badge badge-success">✅</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>外键约束</strong></td>
+                        <td><span class="badge badge-warning">⚠️ 可选</span></td>
+                        <td><span class="badge badge-success">✅ 强制</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>复制/HA</strong></td>
+                        <td><span class="badge badge-danger">❌</span></td>
+                        <td><span class="badge badge-success">✅ 流复制</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>分区表</strong></td>
+                        <td><span class="badge badge-danger">❌</span></td>
+                        <td><span class="badge badge-success">✅</span></td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3>5.2 适用场景</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>场景</th>
+                        <th>SQLite</th>
+                        <th>PostgreSQL</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>单机/个人使用</td>
+                        <td><span class="badge badge-success">✅ 推荐</span></td>
+                        <td>过度设计</td>
+                    </tr>
+                    <tr>
+                        <td>开发/测试环境</td>
+                        <td><span class="badge badge-success">✅ 推荐</span></td>
+                        <td><span class="badge badge-success">✅ 推荐</span></td>
+                    </tr>
+                    <tr>
+                        <td>小团队 (&lt;10 人)</td>
+                        <td><span class="badge badge-success">✅ 可接受</span></td>
+                        <td><span class="badge badge-warning">⚠️ 可选</span></td>
+                    </tr>
+                    <tr>
+                        <td>中团队 (10-50 人)</td>
+                        <td><span class="badge badge-warning">⚠️ 性能瓶颈</span></td>
+                        <td><span class="badge badge-success">✅ 推荐</span></td>
+                    </tr>
+                    <tr>
+                        <td>生产环境/多租户</td>
+                        <td><span class="badge badge-danger">❌ 不推荐</span></td>
+                        <td><span class="badge badge-success">✅ 推荐</span></td>
+                    </tr>
+                    <tr>
+                        <td>需要高可用</td>
+                        <td><span class="badge badge-danger">❌ 不支持</span></td>
+                        <td><span class="badge badge-success">✅ 推荐</span></td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="card">
+                <h4>🎯 结论</h4>
+                <p><strong>建议迁移到 PostgreSQL</strong>，特别是如果：</p>
+                <ul>
+                    <li>用户数 > 10</li>
+                    <li>需要多实例部署</li>
+                    <li>需要高可用</li>
+                    <li>需要复杂查询/分析</li>
+                </ul>
+            </div>
+
+            <hr>
+
+            <h2 id="section6">6. 迁移建议</h2>
+
+            <h3>6.1 迁移前准备</h3>
+
+            <h4>添加依赖</h4>
+            <pre><code class="language-txt"># requirements.txt 添加
+psycopg2-binary>=2.9.0  # PostgreSQL 驱动</code></pre>
+
+            <h3>6.2 迁移检查清单</h3>
+            <div class="card">
+                <ul>
+                    <li>⬜ 备份 SQLite 数据库</li>
+                    <li>⬜ 安装 PostgreSQL 驱动</li>
+                    <li>⬜ 配置 DATABASE_URL 环境变量</li>
+                    <li>⬜ 运行 Alembic 迁移创建表结构</li>
+                    <li>⬜ 执行数据迁移脚本</li>
+                    <li>⬜ 验证数据完整性</li>
+                    <li>⬜ 更新应用配置</li>
+                    <li>⬜ 运行测试套件</li>
+                    <li>⬜ 切换生产流量</li>
+                    <li>⬜ 监控性能指标</li>
+                </ul>
+            </div>
+
+            <hr>
+
+            <h2 id="section7">7. 执行计划</h2>
+
+            <h3>7.1 阶段划分</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>阶段</th>
+                        <th>任务</th>
+                        <th>优先级</th>
+                        <th>风险</th>
+                        <th>预计时间</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr style="background-color: #fff5f5;">
+                        <td><strong>阶段 0</strong></td>
+                        <td><strong>🔴 迁移文件修复（必须首先执行）</strong></td>
+                        <td><span class="severity-critical">🔴 最高</span></td>
+                        <td>中</td>
+                        <td>2 天</td>
+                    </tr>
+                    <tr>
+                        <td><strong>阶段 1</strong></td>
+                        <td>修复索引问题</td>
+                        <td><span class="severity-medium">🟡 中</span></td>
+                        <td>低</td>
+                        <td>1 天</td>
+                    </tr>
+                    <tr>
+                        <td><strong>阶段 2</strong></td>
+                        <td>添加外键约束</td>
+                        <td><span class="severity-medium">🟡 中</span></td>
+                        <td>中</td>
+                        <td>1 天</td>
+                    </tr>
+                    <tr>
+                        <td><strong>阶段 3</strong></td>
+                        <td>JSON 字段拆分</td>
+                        <td><span class="severity-low">🟢 低</span></td>
+                        <td>高</td>
+                        <td>3 天</td>
+                    </tr>
+                    <tr>
+                        <td><strong>阶段 4</strong></td>
+                        <td>迁移到 PostgreSQL</td>
+                        <td><span class="severity-low">🟢 低</span></td>
+                        <td>高</td>
+                        <td>3 天</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="alert alert-danger">
+                <strong>重要:</strong> 阶段 0 是前置条件，必须先完成迁移文件修复，否则后续阶段无法正常执行。
+            </div>
+
+            <h3>7.2 详细执行步骤</h3>
+
+            <div class="phase" style="border: 2px solid #dc3545;">
+                <div class="phase-number phase-critical">0</div>
+                <div class="phase-content">
+                    <h4>阶段 0: 迁移文件修复 <span class="badge badge-danger">🔴 必须首先执行</span></h4>
+                    <pre><code class="language-bash"># 1. 备份现有数据库
+cp ~/.open-ace/usage.db ~/.open-ace/usage.db.backup
+
+# 2. 创建迁移文件补充缺失的表
+alembic revision -m "add_missing_tables"
+
+# 3. 创建迁移文件修复 users 表
+alembic revision -m "fix_users_table_fields"
+
+# 4. 创建迁移文件修复 sessions 表
+alembic revision -m "fix_sessions_table_fields"
+
+# 5. 执行所有迁移
+alembic upgrade head
+
+# 6. 验证表结构
+sqlite3 ~/.open-ace/usage.db ".tables"
+sqlite3 ~/.open-ace/usage.db ".schema users"
+sqlite3 ~/.open-ace/usage.db ".schema sessions"
+
+# 7. 移除动态建表代码
+# 编辑以下文件，移除 _ensure_tables 方法调用：
+# - app/repositories/tenant_repo.py
+# - app/repositories/governance_repo.py
+# - app/modules/governance/quota_manager.py
+# - app/modules/governance/audit_logger.py
+
+# 8. 运行测试验证
+python -m pytest tests/</code></pre>
+                </div>
+            </div>
+
+            <div class="phase">
+                <div class="phase-number">1</div>
+                <div class="phase-content">
+                    <h4>阶段 1: 索引优化</h4>
+                    <pre><code class="language-bash"># 1. 创建迁移脚本
+alembic revision -m "optimize_indexes"
+
+# 2. 执行迁移
+alembic upgrade head
+
+# 3. 验证索引
+sqlite3 ~/.open-ace/usage.db ".indices"</code></pre>
+                </div>
+            </div>
+
+            <div class="phase">
+                <div class="phase-number">2</div>
+                <div class="phase-content">
+                    <h4>阶段 2: 外键约束</h4>
+                    <pre><code class="language-bash"># 1. 创建迁移脚本
+alembic revision -m "add_foreign_keys"
+
+# 2. 执行迁移
+alembic upgrade head
+
+# 3. 验证约束
+sqlite3 ~/.open-ace/usage.db "PRAGMA foreign_key_list(sessions)"</code></pre>
+                </div>
+            </div>
+
+            <div class="phase">
+                <div class="phase-number">4</div>
+                <div class="phase-content">
+                    <h4>阶段 4: PostgreSQL 迁移</h4>
+                    <pre><code class="language-bash"># 1. 安装依赖
+pip install psycopg2-binary
+
+# 2. 启动 PostgreSQL
+docker-compose --profile database up -d postgres
+
+# 3. 配置环境变量
+export DATABASE_URL="postgresql://openace:password@localhost:5432/openace"
+
+# 4. 运行迁移
+alembic upgrade head
+
+# 5. 迁移数据
+python scripts/migrate_to_postgres.py
+
+# 6. 验证
+python -m pytest tests/</code></pre>
+                </div>
+            </div>
+
+            <h3>7.3 回滚方案</h3>
+            <div class="card">
+                <p>每个阶段都应准备回滚脚本：</p>
+                <pre><code class="language-bash"># 回滚到指定版本
+alembic downgrade -1
+
+# 恢复备份
+cp ~/.open-ace/usage.db.backup ~/.open-ace/usage.db</code></pre>
+            </div>
+
+            <hr>
+
+            <h2>附录</h2>
+
+            <h3>A. 推荐索引清单</h3>
+            <pre><code class="language-sql">-- ============================================
+-- daily_usage 表
+-- ============================================
+CREATE INDEX idx_usage_date ON daily_usage(date);
+CREATE INDEX idx_usage_tool ON daily_usage(tool_name);
+CREATE INDEX idx_usage_host ON daily_usage(host_name);
+CREATE INDEX idx_usage_date_tool ON daily_usage(date, tool_name);
+
+-- ============================================
+-- daily_messages 表
+-- ============================================
+CREATE INDEX idx_messages_date ON daily_messages(date);
+CREATE INDEX idx_messages_sender ON daily_messages(sender_name);
+CREATE INDEX idx_messages_feishu_conv ON daily_messages(feishu_conversation_id);
+CREATE INDEX idx_messages_date_conv ON daily_messages(date, feishu_conversation_id);
+CREATE INDEX idx_messages_query ON daily_messages(date, tool_name, host_name, timestamp DESC);
+
+-- ============================================
+-- users 表
+-- ============================================
+CREATE INDEX idx_users_username ON users(username);
+CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_role ON users(role);
+CREATE INDEX idx_users_active ON users(is_active);
+
+-- ============================================
+-- sessions 表
+-- ============================================
+CREATE INDEX idx_sessions_user ON sessions(user_id);
+CREATE INDEX idx_sessions_token ON sessions(token);
+CREATE INDEX idx_sessions_expires ON sessions(expires_at);
+
+-- ============================================
+-- tenants 表
+-- ============================================
+CREATE INDEX idx_tenants_slug ON tenants(slug);
+CREATE INDEX idx_tenants_status ON tenants(status);
+
+-- ============================================
+-- tenant_usage 表
+-- ============================================
+CREATE INDEX idx_tenant_usage_tenant ON tenant_usage(tenant_id);
+CREATE INDEX idx_tenant_usage_date ON tenant_usage(date);
+CREATE INDEX idx_tenant_usage_tenant_date ON tenant_usage(tenant_id, date);
+
+-- ============================================
+-- content_filter_rules 表
+-- ============================================
+CREATE INDEX idx_filter_rules_type ON content_filter_rules(type);
+CREATE INDEX idx_filter_rules_enabled ON content_filter_rules(is_enabled);
+
+-- ============================================
+-- quota_usage 表
+-- ============================================
+CREATE INDEX idx_quota_usage_user ON quota_usage(user_id);
+CREATE INDEX idx_quota_usage_date ON quota_usage(date);
+CREATE INDEX idx_quota_usage_user_date ON quota_usage(user_id, date);
+
+-- ============================================
+-- quota_alerts 表
+-- ============================================
+CREATE INDEX idx_quota_alerts_user ON quota_alerts(user_id);
+CREATE INDEX idx_quota_alerts_created ON quota_alerts(created_at);
+CREATE INDEX idx_quota_alerts_unack ON quota_alerts(acknowledged, created_at);
+
+-- ============================================
+-- audit_logs 表
+-- ============================================
+CREATE INDEX idx_audit_timestamp ON audit_logs(timestamp);
+CREATE INDEX idx_audit_user_id ON audit_logs(user_id);
+CREATE INDEX idx_audit_action ON audit_logs(action);
+CREATE INDEX idx_audit_resource ON audit_logs(resource_type, resource_id);
+CREATE INDEX idx_audit_severity ON audit_logs(severity);</code></pre>
+
+            <h3>B. 参考资料</h3>
+            <ul>
+                <li><a href="https://www.postgresql.org/docs/" target="_blank">PostgreSQL 官方文档</a></li>
+                <li><a href="https://www.sqlite.org/docs.html" target="_blank">SQLite 官方文档</a></li>
+                <li><a href="https://alembic.sqlalchemy.org/en/latest/tutorial.html" target="_blank">Alembic 迁移指南</a></li>
+                <li><a href="https://use-the-index-luke.com/" target="_blank">Use The Index, Luke</a> - SQL 索引优化指南</li>
+            </ul>
+
+        </div>
+
+        <div class="footer">
+            <p>📄 Open ACE 数据库分析与优化方案 | 文档版本 2.0 | 2026-03-22</p>
+        </div>
+    </div>
+</body>
+</html>

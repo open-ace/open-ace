@@ -14,6 +14,7 @@ UI 测试: Issue 68 - Data Status 远程机器状态检查功能
 5. 验证远程机器状态更新
 """
 
+import pytest
 import sys
 import os
 import time
@@ -21,7 +22,7 @@ import time
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from playwright.sync_api import sync_playwright, expect
+from playwright.async_api import async_playwright, expect
 
 # Test configuration
 BASE_URL = os.environ.get('BASE_URL', 'http://localhost:5001')
@@ -35,15 +36,16 @@ def ensure_screenshot_dir():
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
 
-def take_screenshot(page, name):
+async def take_screenshot(page, name):
     """Take screenshot and save to issue directory."""
     path = os.path.join(SCREENSHOT_DIR, name)
-    page.screenshot(path=path)
+    await page.screenshot(path=path)
     print(f"  截图保存: {path}")
     return path
 
 
-def test_data_status():
+@pytest.mark.asyncio
+async def test_data_status():
     """Test Data Status remote host check functionality."""
     print("\n" + "=" * 60)
     print("UI 测试: Issue 68 - Data Status 远程机器状态检查")
@@ -53,24 +55,24 @@ def test_data_status():
     screenshots = []
     test_passed = True
     
-    with sync_playwright() as p:
+    async with async_playwright() as p:
         # Launch browser
-        browser = p.chromium.launch(headless=False)
-        context = browser.new_context(
+        browser = await p.chromium.launch(headless=False)
+        context = await browser.new_context(
             viewport={'width': 1280, 'height': 800}
         )
-        page = context.new_page()
+        page = await context.new_page()
         
         try:
             # Step 1: Login
             print("\n步骤 1: 登录系统")
-            page.goto(f'{BASE_URL}/login')
-            page.fill('input[name="username"]', USERNAME)
-            page.fill('input[name="password"]', PASSWORD)
-            page.click('button[type="submit"]')
+            await page.goto(f'{BASE_URL}/login')
+            await page.fill('input[name="username"]', USERNAME)
+            await page.fill('input[name="password"]', PASSWORD)
+            await page.click('button[type="submit"]')
             
             # Wait for redirect (could be / or /dashboard)
-            page.wait_for_url('**/', timeout=10000)
+            await page.wait_for_url('**/', timeout=10000)
             print("  ✓ 登录成功")
             screenshots.append(take_screenshot(page, '01_login.png'))
             
@@ -81,7 +83,7 @@ def test_data_status():
             time.sleep(3)
             
             # Wait for sidebar to load
-            page.wait_for_selector('#data-status-container', timeout=10000)
+            await page.wait_for_selector('#data-status-container', timeout=10000)
             
             # Wait for data status to be populated
             time.sleep(2)
@@ -89,13 +91,13 @@ def test_data_status():
             print("  ✓ Data Status 面板已加载")
             
             # Check if refresh button exists
-            refresh_btn = page.locator('#data-status-container .refresh-btn')
+            refresh_btn = await page.locator('#data-status-container .refresh-btn')
             if refresh_btn.count() > 0:
                 print("  ✓ 刷新按钮存在")
             else:
                 print("  ⚠ 刷新按钮不存在，等待加载...")
                 time.sleep(3)
-                refresh_btn = page.locator('#data-status-container .refresh-btn')
+                refresh_btn = await page.locator('#data-status-container .refresh-btn')
                 if refresh_btn.count() > 0:
                     print("  ✓ 刷新按钮存在")
                 else:
@@ -106,7 +108,7 @@ def test_data_status():
             
             # Step 3: Check host items
             print("\n步骤 3: 检查主机状态项")
-            host_items = page.locator('.data-status-item')
+            host_items = await page.locator('.data-status-item')
             host_count = host_items.count()
             print(f"  发现 {host_count} 个主机")
             
@@ -146,7 +148,7 @@ def test_data_status():
                 time.sleep(10)
                 
                 # Check if refresh button is no longer loading
-                refresh_btn_after = page.locator('#data-status-container .refresh-btn')
+                refresh_btn_after = await page.locator('#data-status-container .refresh-btn')
                 if refresh_btn_after.count() > 0:
                     btn_class = refresh_btn_after.get_attribute('class')
                     if 'loading' not in btn_class:
@@ -158,7 +160,7 @@ def test_data_status():
                 
                 # Step 5: Verify remote host status
                 print("\n步骤 5: 验证远程机器状态")
-                host_items_after = page.locator('.data-status-item')
+                host_items_after = await page.locator('.data-status-item')
                 for i in range(host_items_after.count()):
                     item = host_items_after.nth(i)
                     host_name = item.locator('.host-name').text_content()
@@ -184,7 +186,7 @@ def test_data_status():
             screenshots.append(take_screenshot(page, 'error.png'))
         
         finally:
-            browser.close()
+            await browser.close()
     
     # Print test report
     print("\n" + "=" * 60)

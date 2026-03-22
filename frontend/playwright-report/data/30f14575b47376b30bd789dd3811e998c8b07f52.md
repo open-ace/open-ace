@@ -1,0 +1,127 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - navigation [ref=e4]:
+    - generic [ref=e6]:
+      - generic [ref=e7]: 
+      - generic [ref=e8]: Open ACE
+    - list [ref=e9]:
+      - listitem [ref=e10]:
+        - button " Dashboard" [ref=e11] [cursor=pointer]:
+          - generic [ref=e12]: 
+          - generic [ref=e13]: Dashboard
+      - listitem [ref=e14]:
+        - button " Messages" [ref=e15] [cursor=pointer]:
+          - generic [ref=e16]: 
+          - generic [ref=e17]: Messages
+      - listitem [ref=e18]:
+        - button " Analysis" [ref=e19] [cursor=pointer]:
+          - generic [ref=e20]: 
+          - generic [ref=e21]: Analysis
+      - listitem [ref=e22]:
+        - button " Management" [ref=e23] [cursor=pointer]:
+          - generic [ref=e24]: 
+          - generic [ref=e25]: Management
+      - listitem [ref=e26]:
+        - button " Sessions" [ref=e27] [cursor=pointer]:
+          - generic [ref=e28]: 
+          - generic [ref=e29]: Sessions
+      - listitem [ref=e30]:
+        - button " Prompts" [ref=e31] [cursor=pointer]:
+          - generic [ref=e32]: 
+          - generic [ref=e33]: Prompts
+      - listitem [ref=e34]:
+        - button " Report" [ref=e35] [cursor=pointer]:
+          - generic [ref=e36]: 
+          - generic [ref=e37]: Report
+      - listitem [ref=e38]:
+        - button " Workspace" [ref=e39] [cursor=pointer]:
+          - generic [ref=e40]: 
+          - generic [ref=e41]: Workspace
+      - listitem [ref=e42]:
+        - button " Security" [ref=e43] [cursor=pointer]:
+          - generic [ref=e44]: 
+          - generic [ref=e45]: Security
+    - generic [ref=e47]:
+      - button "" [ref=e48] [cursor=pointer]:
+        - generic [ref=e49]: 
+      - generic [ref=e50]: v0.2.0
+  - generic [ref=e51]:
+    - banner [ref=e52]:
+      - generic [ref=e53]:
+        - button "Toggle sidebar" [ref=e54] [cursor=pointer]:
+          - generic [ref=e55]: 
+        - heading "Dashboard" [level=5] [ref=e56]
+      - generic [ref=e57]:
+        - button "" [ref=e59] [cursor=pointer]:
+          - generic [ref=e60]: 
+        - button "" [ref=e61] [cursor=pointer]:
+          - generic [ref=e62]: 
+        - generic [ref=e63]:
+          - button "" [ref=e64] [cursor=pointer]:
+            - generic [ref=e65]: 
+          - text: 
+    - main [ref=e66]:
+      - generic [ref=e67]:
+        - generic [ref=e68]:
+          - heading "Dashboard" [level=2] [ref=e69]
+          - generic [ref=e70]:
+            - combobox [ref=e71]:
+              - option "All Hosts" [selected]
+            - combobox [ref=e72]:
+              - option "All Tools" [selected]
+              - option "OpenClaw"
+              - option "Claude"
+              - option "Qwen"
+            - button " Refresh" [ref=e73] [cursor=pointer]:
+              - generic [ref=e75]: 
+              - text: Refresh
+        - generic [ref=e76]:
+          - heading "Today's Usage" [level=5] [ref=e77]
+          - generic [ref=e78]:
+            - generic [ref=e79]: 
+            - heading "No data available" [level=5] [ref=e80]
+        - generic [ref=e81]:
+          - heading "Total Overview" [level=5] [ref=e82]
+          - generic [ref=e83]:
+            - generic [ref=e86]:
+              - heading "CLAUDE" [level=5] [ref=e87]
+              - paragraph [ref=e88]:
+                - strong [ref=e89]: 827.29M
+                - text: tokens
+                - text: 14 days tracked
+                - text: "Avg: 59.09M/day"
+                - strong [ref=e90]: "Requests:"
+                - text: "13567"
+              - generic [ref=e91]: "Date Range: 2026-02-27 - 2026-03-15"
+            - generic [ref=e94]:
+              - heading "OPENCLAW" [level=5] [ref=e95]
+              - paragraph [ref=e96]:
+                - strong [ref=e97]: 477.58M
+                - text: tokens
+                - text: 31 days tracked
+                - text: "Avg: 15.41M/day"
+                - strong [ref=e98]: "Requests:"
+                - text: "1442"
+              - generic [ref=e99]: "Date Range: 2026-02-27 - 2026-03-20"
+            - generic [ref=e102]:
+              - heading "QWEN" [level=5] [ref=e103]
+              - paragraph [ref=e104]:
+                - strong [ref=e105]: 1.19B
+                - text: tokens
+                - text: 16 days tracked
+                - text: "Avg: 74.59M/day"
+                - strong [ref=e106]: "Requests:"
+                - text: "18577"
+              - generic [ref=e107]: "Date Range: 2026-03-05 - 2026-03-20"
+        - generic [ref=e109]:
+          - generic [ref=e111]:
+            - heading "Trend Chart" [level=5] [ref=e114]
+            - img [ref=e117]
+          - generic [ref=e119]:
+            - heading "Token Distribution" [level=5] [ref=e122]
+            - generic [ref=e124]:
+              - generic [ref=e125]: 
+              - heading "No data available" [level=5] [ref=e126]
+```

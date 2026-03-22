@@ -1,5 +1,10 @@
 {
   "host_name": "<HOST_NAME>",
+  "database": {
+    "type": "sqlite",
+    "path": "~/.open-ace/ace.db",
+    "url": null
+  },
   "server": {
     "upload_auth_key": "<UPLOAD_AUTH_KEY>",
     "server_url": "http://localhost:5001",

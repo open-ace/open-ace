@@ -28,6 +28,7 @@ USERNAME = "admin"
 PASSWORD = "admin123"
 
 
+@pytest.mark.asyncio
 async def test_timeline_no_toolresult():
     """测试 Timeline 不显示 ToolResult 消息"""
     results = []
@@ -214,6 +215,7 @@ async def test_timeline_no_toolresult():
     return results
 
 
+@pytest.mark.asyncio
 async def test_api_timeline_no_toolresult():
     """测试 API 返回的 timeline 数据不包含 toolResult"""
     import aiohttp

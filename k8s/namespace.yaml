@@ -1,0 +1,8 @@
+# Open ACE - Kubernetes Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: open-ace
+  labels:
+    app.kubernetes.io/name: open-ace
+    app.kubernetes.io/component: namespace

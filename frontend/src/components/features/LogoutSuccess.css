@@ -1,0 +1,79 @@
+/**
+ * Logout Success Page Styles
+ */
+
+.logout-success-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 20px;
+}
+
+.logout-success-container {
+  background: white;
+  border-radius: 15px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  padding: 48px;
+  width: 100%;
+  max-width: 400px;
+  text-align: center;
+}
+
+.logout-success-icon {
+  width: 80px;
+  height: 80px;
+  margin: 0 auto 24px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.logout-success-icon svg {
+  width: 40px;
+  height: 40px;
+  color: white;
+}
+
+.logout-success-container h1 {
+  color: #333;
+  font-size: 24px;
+  margin: 0 0 16px 0;
+}
+
+.logout-message {
+  color: #666;
+  font-size: 16px;
+  margin: 0 0 12px 0;
+  line-height: 1.5;
+}
+
+.logout-redirect {
+  color: #999;
+  font-size: 14px;
+  margin: 0 0 24px 0;
+}
+
+/* Responsive */
+@media (max-width: 576px) {
+  .logout-success-container {
+    padding: 32px 24px;
+  }
+
+  .logout-success-icon {
+    width: 64px;
+    height: 64px;
+  }
+
+  .logout-success-icon svg {
+    width: 32px;
+    height: 32px;
+  }
+
+  .logout-success-container h1 {
+    font-size: 20px;
+  }
+}

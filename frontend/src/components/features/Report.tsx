@@ -29,23 +29,41 @@ export const Report: React.FC = () => {
 
   const { data: report, isLoading, isFetching, isError, error, refetch } = useMyUsage(startDate, endDate);
 
-  // Prepare chart data
+  // Prepare chart data - by tool
   const chartData = useMemo(() => {
     if (!report?.daily_usage) return [];
 
-    // Aggregate by date
-    const aggregated: Record<string, { tokens: number; requests: number; date: string }> = {};
+    // Aggregate by date and tool
+    const aggregated: Record<string, { date: string; tool: string; tokens: number }> = {};
 
     report.daily_usage.forEach((item) => {
-      const date = item.date;
-      if (!aggregated[date]) {
-        aggregated[date] = { date, tokens: 0, requests: 0 };
+      const toolName = item.tool_name || 'unknown';
+      const key = `${item.date}-${toolName}`;
+      if (!aggregated[key]) {
+        aggregated[key] = { date: item.date, tool: toolName, tokens: 0 };
       }
-      aggregated[date].tokens += item.tokens_used || 0;
-      aggregated[date].requests += item.request_count || 0;
+      aggregated[key].tokens += item.tokens_used || 0;
     });
 
     return Object.values(aggregated).sort((a, b) => a.date.localeCompare(b.date));
+  }, [report?.daily_usage]);
+
+  // Prepare token distribution data - by tool
+  const tokenDistributionData = useMemo(() => {
+    if (!report?.daily_usage) return [];
+
+    // Aggregate by tool
+    const aggregated: Record<string, { tool: string; tokens: number }> = {};
+
+    report.daily_usage.forEach((item) => {
+      const toolName = item.tool_name || 'unknown';
+      if (!aggregated[toolName]) {
+        aggregated[toolName] = { tool: toolName, tokens: 0 };
+      }
+      aggregated[toolName].tokens += item.tokens_used || 0;
+    });
+
+    return Object.values(aggregated).sort((a, b) => b.tokens - a.tokens);
   }, [report?.daily_usage]);
 
   if (isLoading) {
@@ -164,12 +182,9 @@ export const Report: React.FC = () => {
         </div>
         <div className="col-md-4 mb-4">
           <Card title={t('tokenDistribution', language)}>
-            {report && report.totals.tokens > 0 ? (
+            {tokenDistributionData.length > 0 ? (
               <TokenDistributionChart
-                data={{
-                  input: report.totals.input_tokens,
-                  output: report.totals.output_tokens,
-                }}
+                data={tokenDistributionData}
                 height={300}
               />
             ) : (

@@ -5,10 +5,12 @@ Issue: When sidebar is collapsed, menu text like "Wo", "My" is still visible
 because the span elements were removed by renderSidebarNav function.
 """
 
+import pytest
 import asyncio
 from playwright.async_api import async_playwright
 
 
+@pytest.mark.asyncio
 async def test_sidebar_collapse_normal_user():
     """Test that sidebar collapse hides all menu text for normal user."""
     async with async_playwright() as p:

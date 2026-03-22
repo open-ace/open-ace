@@ -11,3 +11,5 @@ export { LogoutSuccess } from './LogoutSuccess';
 export { Management } from './Management';
 export { Report } from './Report';
 export { Workspace } from './Workspace';
+export { Sessions } from './Sessions';
+export { Prompts } from './Prompts';

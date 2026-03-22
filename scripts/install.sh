@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Open ACE - Installation Script
+# Open ACE - AI Computing Explorer - Installation Script
 #
 # This script installs or upgrades Open ACE.
 # Supports both local installation and remote deployment via SSH.

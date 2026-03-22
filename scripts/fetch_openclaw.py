@@ -810,8 +810,12 @@ def extract_user_message_metadata(text: str) -> Optional[dict]:
     }
 
 
-def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str, dict]:
-    """Process a single JSONL file and return daily token aggregates."""
+def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> tuple:
+    """Process a single JSONL file and return daily token aggregates and messages.
+
+    Returns:
+        tuple: (daily_stats dict, messages list)
+    """
     daily = defaultdict(lambda: {
         "input_tokens": 0,
         "output_tokens": 0,
@@ -820,6 +824,7 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
         "request_count": 0,
         "models_used": set(),
     })
+    messages = []
 
     # Extract agent_session_id from file path
     # Format: ~/.openclaw/agents/main/sessions/{uuid}.jsonl
@@ -854,7 +859,7 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                 role = ""
                 model = None
 
-                # Extract and save individual message
+                # Extract individual message
                 entry_type = entry.get("type")
 
                 # Process different entry types
@@ -968,32 +973,29 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                             if role == "toolResult" and (sender_id or sender_name):
                                 toolResult_senders[message_id] = (sender_id, sender_name)
 
-                            # Save message to database with sender info and message source
-                            # Use agent_session_id from file path (already extracted at function start)
-                            # No need to extract from entry as it's not available in message entries
-
-                            db.save_message(
-                                date=date_key,
-                                tool_name="openclaw",
-                                host_name=hostname,
-                                message_id=message_id,
-                                parent_id=parent_id,
-                                role=role,
-                                content=content,
-                                full_entry=full_entry_json,
-                                tokens_used=total_tokens,
-                                input_tokens=input_tokens,
-                                output_tokens=output_tokens,
-                                model=model,
-                                timestamp=ts,
-                                sender_id=sender_id,
-                                sender_name=sender_name,
-                                message_source=message_source,
-                                feishu_conversation_id=conversation_label,
-                                group_subject=group_subject,
-                                is_group_chat=is_group_chat,
-                                agent_session_id=agent_session_id
-                            )
+                            # Collect message for batch insert
+                            messages.append({
+                                "date": date_key,
+                                "tool_name": "openclaw",
+                                "host_name": hostname,
+                                "message_id": message_id,
+                                "parent_id": parent_id,
+                                "role": role,
+                                "content": content,
+                                "full_entry": full_entry_json,
+                                "tokens_used": total_tokens,
+                                "input_tokens": input_tokens,
+                                "output_tokens": output_tokens,
+                                "model": model,
+                                "timestamp": ts,
+                                "sender_id": sender_id,
+                                "sender_name": sender_name,
+                                "message_source": message_source,
+                                "feishu_conversation_id": conversation_label,
+                                "group_subject": group_subject,
+                                "is_group_chat": is_group_chat,
+                                "agent_session_id": agent_session_id
+                            })
 
                 elif entry_type == "custom":
                     # Process custom entries (e.g., openclaw:prompt-error)
@@ -1034,31 +1036,29 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                             # Save full entry as JSON for complete original data
                             full_entry_json = json.dumps(entry, ensure_ascii=False)
 
-                            # Save error message to database with 0 tokens
-                            # Use agent_session_id from file path (already extracted at function start)
-
-                            db.save_message(
-                                date=date_key,
-                                tool_name="openclaw",
-                                host_name=hostname,
-                                message_id=message_id,
-                                parent_id=parent_id,
-                                role="error",
-                                content=content,
-                                full_entry=full_entry_json,
-                                tokens_used=0,
-                                input_tokens=0,
-                                output_tokens=0,
-                                model=model,
-                                timestamp=ts,
-                                sender_id=sender_id,
-                                sender_name=sender_name,
-                                message_source="openclaw",
-                                feishu_conversation_id=None,
-                                group_subject=None,
-                                is_group_chat=None,
-                                agent_session_id=agent_session_id
-                            )
+                            # Collect error message for batch insert
+                            messages.append({
+                                "date": date_key,
+                                "tool_name": "openclaw",
+                                "host_name": hostname,
+                                "message_id": message_id,
+                                "parent_id": parent_id,
+                                "role": "error",
+                                "content": content,
+                                "full_entry": full_entry_json,
+                                "tokens_used": 0,
+                                "input_tokens": 0,
+                                "output_tokens": 0,
+                                "model": model,
+                                "timestamp": ts,
+                                "sender_id": sender_id,
+                                "sender_name": sender_name,
+                                "message_source": "openclaw",
+                                "feishu_conversation_id": None,
+                                "group_subject": None,
+                                "is_group_chat": None,
+                                "agent_session_id": agent_session_id
+                            })
                             # Store error sender for future messages (assistant can inherit from error)
                             if sender_id or sender_name:
                                 error_senders[message_id] = (sender_id, sender_name)
@@ -1091,7 +1091,7 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                 # Silently skip problematic entries
                 continue
 
-    return dict(daily)
+    return dict(daily), messages
 
 
 def fetch_and_save_messages(days: int = 7, sessions_dir: Optional[Path] = None, hostname: Optional[str] = None) -> bool:
@@ -1156,12 +1156,24 @@ def fetch_and_save_messages(days: int = 7, sessions_dir: Optional[Path] = None, 
         "models_used": set(),
     })
 
+    # Collect all messages for batch insert
+    all_messages = []
+
     for f in sorted(jsonl_files, key=lambda x: x.name):
-        daily = process_jsonl_file(f, hostname)
+        daily, messages = process_jsonl_file(f, hostname)
         for date, stats in daily.items():
             for key in ["input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "request_count"]:
                 aggregated[date][key] += stats[key]
             aggregated[date]["models_used"].update(stats["models_used"])
+        all_messages.extend(messages)
+
+    print(f"Processed {len(jsonl_files)} files, {len(all_messages)} messages")
+
+    # Batch insert messages
+    if all_messages:
+        print("Saving messages to database...")
+        saved_count = db.save_messages_batch(all_messages, batch_size=500)
+        print(f"Saved {saved_count} messages")
 
     # Filter by date range
     today = datetime.now().strftime("%Y-%m-%d")

@@ -9,6 +9,7 @@ import argparse
 import getpass
 import json
 import os
+import re
 import socket
 import sys
 from collections import defaultdict
@@ -173,8 +174,12 @@ def extract_content_from_entry(entry: dict) -> Optional[str]:
     return None
 
 
-def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str, dict]:
-    """Process a single JSONL file and return daily token aggregates."""
+def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> tuple:
+    """Process a single JSONL file and return daily token aggregates and messages.
+
+    Returns:
+        tuple: (daily_stats dict, messages list)
+    """
     daily = defaultdict(lambda: {
         "input_tokens": 0,
         "output_tokens": 0,
@@ -183,6 +188,7 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
         "request_count": 0,
         "models_used": set(),
     })
+    messages = []
 
     with open(filepath, "r", encoding="utf-8") as f:
         for line in f:
@@ -201,7 +207,7 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                 date_key = parse_timestamp(ts)
                 tokens = extract_tokens_from_entry(entry)
 
-                # Extract and save individual message
+                # Extract individual message
                 entry_type = entry.get("type")
                 if entry_type in ["user", "assistant", "system"]:
                     msg = entry.get("message", {})
@@ -245,25 +251,25 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                             elif 'project' in entry:
                                 agent_session_id = get_agent_session_id_from_path(entry['project'])
 
-                            # Save message to database with default sender for Claude
-                            db.save_message(
-                                date=date_key,
-                                tool_name="claude",
-                                host_name=hostname,
-                                message_id=message_id,
-                                parent_id=entry.get("parent_id") or entry.get("parentUuid"),
-                                role=role,
-                                content=content or "",
-                                full_entry=full_entry_json,
-                                tokens_used=total_tokens,
-                                input_tokens=input_tokens,
-                                output_tokens=output_tokens,
-                                model=model,
-                                timestamp=ts,
-                                sender_id="claude_user",
-                                sender_name=get_default_sender_name("claude"),
-                                agent_session_id=agent_session_id
-                            )
+                            # Collect message for batch insert
+                            messages.append({
+                                "date": date_key,
+                                "tool_name": "claude",
+                                "host_name": hostname,
+                                "message_id": message_id,
+                                "parent_id": entry.get("parent_id") or entry.get("parentUuid"),
+                                "role": role,
+                                "content": content or "",
+                                "full_entry": full_entry_json,
+                                "tokens_used": total_tokens,
+                                "input_tokens": input_tokens,
+                                "output_tokens": output_tokens,
+                                "model": model,
+                                "timestamp": ts,
+                                "sender_id": "claude_user",
+                                "sender_name": get_default_sender_name("claude"),
+                                "agent_session_id": agent_session_id
+                            })
 
                 if sum([
                     tokens["input_tokens"],
@@ -291,7 +297,7 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> Dict[str,
                 # Silently skip problematic entries
                 continue
 
-    return dict(daily)
+    return dict(daily), messages
 
 
 def find_claude_project_dir() -> Optional[Path]:
@@ -396,17 +402,33 @@ def fetch_and_save(days: int = 7, project_dir: Optional[Path] = None, hostname: 
         "models_used": set(),
     })
 
+    # Collect all messages for batch insert
+    all_messages = []
+    total_files = 0
+
     for proj_dir in projects_to_scan:
         jsonl_files = list(proj_dir.glob("*.jsonl"))
         if not jsonl_files:
             continue
-        print(f"Scanning: {proj_dir.name}")
+        print(f"Scanning: {proj_dir.name} ({len(jsonl_files)} files)")
         for f in jsonl_files:
-            daily = process_jsonl_file(f, hostname)
+            total_files += 1
+            daily, messages = process_jsonl_file(f, hostname)
+            # Aggregate daily stats
             for date, stats in daily.items():
                 for key in ["input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens", "request_count"]:
                     aggregated[date][key] += stats[key]
                 aggregated[date]["models_used"].update(stats["models_used"])
+            # Collect messages for batch insert
+            all_messages.extend(messages)
+
+    print(f"Processed {total_files} files, {len(all_messages)} messages")
+
+    # Batch insert messages
+    if all_messages:
+        print("Saving messages to database...")
+        saved_count = db.save_messages_batch(all_messages, batch_size=500)
+        print(f"Saved {saved_count} messages")
 
     # Filter by date range
     today = datetime.now().strftime("%Y-%m-%d")

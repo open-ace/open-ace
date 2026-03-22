@@ -1,5 +1,5 @@
 [Unit]
-Description=Open ACE - Web Dashboard for AI Token Usage
+Description=Open ACE - AI Computing Explorer - Web Dashboard
 Documentation=https://github.com/richardhuang/open-ace
 After=network.target
 

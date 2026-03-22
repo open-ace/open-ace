@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Open ACE 重构后功能修复报告</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f8f9fa;
+        }
+        h1 {
+            color: #2c3e50;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
+            margin-bottom: 30px;
+        }
+        h2 {
+            color: #2980b9;
+            margin-top: 40px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #bdc3c7;
+        }
+        h3 {
+            color: #27ae60;
+            margin-top: 30px;
+        }
+        h4 {
+            color: #8e44ad;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            background: white;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }
+        th {
+            background-color: #3498db;
+            color: white;
+        }
+        tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+        tr:hover {
+            background-color: #e8f4f8;
+        }
+        code {
+            background-color: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            font-size: 0.9em;
+        }
+        pre {
+            background-color: #2d2d2d;
+            color: #f8f8f2;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 15px 0;
+        }
+        pre code {
+            background-color: transparent;
+            padding: 0;
+            color: inherit;
+        }
+        blockquote {
+            border-left: 4px solid #3498db;
+            margin: 20px 0;
+            padding: 10px 20px;
+            background-color: #e8f4f8;
+            color: #2c3e50;
+        }
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            font-weight: bold;
+        }
+        .badge-red { background-color: #e74c3c; color: white; }
+        .badge-yellow { background-color: #f39c12; color: white; }
+        .badge-green { background-color: #27ae60; color: white; }
+        ul, ol {
+            margin: 10px 0;
+            padding-left: 25px;
+        }
+        li {
+            margin: 5px 0;
+        }
+        .task-list-item {
+            list-style: none;
+        }
+        .task-list-item input {
+            margin-right: 8px;
+        }
+        hr {
+            border: none;
+            border-top: 2px solid #bdc3c7;
+            margin: 30px 0;
+        }
+        .toc {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .toc ul {
+            list-style: none;
+            padding-left: 0;
+        }
+        .toc li {
+            margin: 8px 0;
+        }
+        .toc a {
+            color: #3498db;
+            text-decoration: none;
+        }
+        .toc a:hover {
+            text-decoration: underline;
+        }
+        .summary-card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .icon-success { color: #27ae60; }
+        .icon-warning { color: #f39c12; }
+        .icon-danger { color: #e74c3c; }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <h1 id="open-ace">Open ACE 重构后功能修复报告</h1>
+<blockquote>
+<p><strong>文档创建时间</strong>: 2026-03-21
+<strong>修复目的</strong>: 恢复因前端 React 重构丢失的功能页面</p>
+</blockquote>
+<hr />
+<h2 id="1">1. 问题概述</h2>
+<p>根据 <code>FEATURE_STATUS.md</code> 2.2 已完整实现的功能清单，前端 React 重构后以下功能丢失或损坏：</p>
+<table>
+<thead>
+<tr>
+<th>页面</th>
+<th>影响用户</th>
+<th>问题描述</th>
+<th>严重程度</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Management</strong></td>
+<td>Admin 用户</td>
+<td>页面完全丢失，显示 "under development"</td>
+<td>🔴 严重</td>
+</tr>
+<tr>
+<td><strong>Report</strong></td>
+<td>普通用户</td>
+<td>页面完全丢失，显示 "under development"</td>
+<td>🔴 严重</td>
+</tr>
+<tr>
+<td><strong>Workspace</strong></td>
+<td>普通用户</td>
+<td>页面完全丢失，显示 "under development"</td>
+<td>🔴 严重</td>
+</tr>
+<tr>
+<td><strong>Analysis</strong></td>
+<td>Admin 用户</td>
+<td>使用硬编码 mock 数据，未连接真实 API</td>
+<td>⚠️ 中等</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="2">2. 修复内容</h2>
+<h3 id="21-management-admin">2.1 Management 页面 (Admin 用户)</h3>
+<p><strong>功能</strong>: 用户管理、配额管理、审计日志、内容过滤、安全设置</p>
+<p><strong>新增文件</strong>:</p>
+<pre><code>frontend/src/components/features/Management.tsx
+frontend/src/components/features/management/
+├── index.ts
+├── UserManagement.tsx      # 用户 CRUD 操作
+├── QuotaManagement.tsx     # 配额管理与监控
+├── AuditLog.tsx            # 审计日志查看
+├── ContentFilter.tsx       # 内容过滤规则管理
+└── SecuritySettings.tsx    # 安全设置配置
+</code></pre>
+<p><strong>API 端点</strong> (后端已存在):
+- <code>GET /api/admin/users</code> - 获取用户列表
+- <code>POST /api/admin/users</code> - 创建用户
+- <code>PUT /api/admin/users/&lt;id&gt;</code> - 更新用户
+- <code>DELETE /api/admin/users/&lt;id&gt;</code> - 删除用户
+- <code>PUT /api/admin/users/&lt;id&gt;/quota</code> - 更新配额
+- <code>GET /api/admin/quota/usage</code> - 获取配额使用情况
+- <code>GET /api/governance/audit-logs</code> - 获取审计日志
+- <code>GET /api/governance/filter-rules</code> - 获取过滤规则
+- <code>GET /api/governance/security-settings</code> - 获取安全设置</p>
+<hr />
+<h3 id="22-report">2.2 Report 页面 (普通用户)</h3>
+<p><strong>功能</strong>: 个人用量报告、Token 使用图表、请求统计</p>
+<p><strong>新增文件</strong>:</p>
+<pre><code>frontend/src/components/features/Report.tsx
+frontend/src/api/report.ts
+frontend/src/hooks/useReport.ts
+</code></pre>
+<p><strong>API 端点</strong> (后端已存在):
+- <code>GET /api/report/my-usage</code> - 获取个人用量报告</p>
+<p><strong>功能特性</strong>:
+- 日期范围筛选
+- Token 使用统计卡片
+- Token 趋势图表
+- Token 分布饼图
+- 每日用量明细表</p>
+<hr />
+<h3 id="23-workspace">2.3 Workspace 页面 (普通用户)</h3>
+<p><strong>功能</strong>: AI 工作空间（iframe 嵌入外部工具）</p>
+<p><strong>新增文件</strong>:</p>
+<pre><code>frontend/src/components/features/Workspace.tsx
+frontend/src/api/workspace.ts
+</code></pre>
+<p><strong>新增后端端点</strong>:</p>
+<pre><code class="language-python"># app/routes/workspace.py
+@workspace_bp.route('/config', methods=['GET'])
+def get_workspace_config():
+    &quot;&quot;&quot;Get workspace configuration.&quot;&quot;&quot;
+    # 从 ~/.open-ace/config.json 读取 workspace 配置
+    # 返回 { enabled: bool, url: string }
+</code></pre>
+<p><strong>配置示例</strong> (<code>~/.open-ace/config.json</code>):</p>
+<pre><code class="language-json">{
+  &quot;workspace&quot;: {
+    &quot;enabled&quot;: true,
+    &quot;url&quot;: &quot;http://your-workspace-url&quot;
+  }
+}
+</code></pre>
+<hr />
+<h3 id="24-analysis-admin">2.4 Analysis 页面修复 (Admin 用户)</h3>
+<p><strong>问题</strong>: 使用硬编码 mock 数据，未连接真实 API</p>
+<p><strong>修复</strong>: 连接真实后端 API</p>
+<p><strong>新增文件</strong>:</p>
+<pre><code>frontend/src/api/analysis.ts
+frontend/src/hooks/useAnalysis.ts
+</code></pre>
+<p><strong>API 端点</strong> (后端已存在):
+- <code>GET /api/analysis/key-metrics</code> - 关键指标
+- <code>GET /api/analysis/daily-hourly-usage</code> - 每日/每小时用量
+- <code>GET /api/analysis/peak-usage</code> - 峰值使用
+- <code>GET /api/analysis/user-ranking</code> - 用户排名
+- <code>GET /api/analysis/conversation-stats</code> - 对话统计
+- <code>GET /api/analysis/tool-comparison</code> - 工具对比</p>
+<hr />
+<h2 id="3">3. 新增文件清单</h2>
+<h3 id="31-api">3.1 API 客户端</h3>
+<table>
+<thead>
+<tr>
+<th>文件</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>frontend/src/api/admin.ts</code></td>
+<td>Admin API (用户管理、配额管理)</td>
+</tr>
+<tr>
+<td><code>frontend/src/api/governance.ts</code></td>
+<td>Governance API (审计日志、内容过滤、安全设置)</td>
+</tr>
+<tr>
+<td><code>frontend/src/api/report.ts</code></td>
+<td>Report API (个人用量报告)</td>
+</tr>
+<tr>
+<td><code>frontend/src/api/workspace.ts</code></td>
+<td>Workspace API (工作空间配置)</td>
+</tr>
+<tr>
+<td><code>frontend/src/api/analysis.ts</code></td>
+<td>Analysis API (数据分析)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="32-hooks">3.2 Hooks</h3>
+<table>
+<thead>
+<tr>
+<th>文件</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>frontend/src/hooks/useAdmin.ts</code></td>
+<td>Admin 相关 hooks</td>
+</tr>
+<tr>
+<td><code>frontend/src/hooks/useReport.ts</code></td>
+<td>Report 相关 hooks</td>
+</tr>
+<tr>
+<td><code>frontend/src/hooks/useAnalysis.ts</code></td>
+<td>Analysis 相关 hooks</td>
+</tr>
+</tbody>
+</table>
+<h3 id="33">3.3 组件</h3>
+<table>
+<thead>
+<tr>
+<th>文件</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>frontend/src/components/features/Management.tsx</code></td>
+<td>Management 主页面</td>
+</tr>
+<tr>
+<td><code>frontend/src/components/features/management/UserManagement.tsx</code></td>
+<td>用户管理组件</td>
+</tr>
+<tr>
+<td><code>frontend/src/components/features/management/QuotaManagement.tsx</code></td>
+<td>配额管理组件</td>
+</tr>
+<tr>
+<td><code>frontend/src/components/features/management/AuditLog.tsx</code></td>
+<td>审计日志组件</td>
+</tr>
+<tr>
+<td><code>frontend/src/components/features/management/ContentFilter.tsx</code></td>
+<td>内容过滤组件</td>
+</tr>
+<tr>
+<td><code>frontend/src/components/features/management/SecuritySettings.tsx</code></td>
+<td>安全设置组件</td>
+</tr>
+<tr>
+<td><code>frontend/src/components/features/Report.tsx</code></td>
+<td>Report 页面</td>
+</tr>
+<tr>
+<td><code>frontend/src/components/features/Workspace.tsx</code></td>
+<td>Workspace 页面</td>
+</tr>
+</tbody>
+</table>
+<h3 id="34">3.4 后端更新</h3>
+<table>
+<thead>
+<tr>
+<th>文件</th>
+<th>修改内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>app/routes/workspace.py</code></td>
+<td>添加 <code>/api/workspace/config</code> 端点</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="4">4. 测试建议</h2>
+<h3 id="41">4.1 功能测试清单</h3>
+<h4 id="management-admin">Management 页面 (Admin 用户)</h4>
+<ul>
+<li>[ ] <strong>用户管理</strong></li>
+<li>[ ] 用户列表加载</li>
+<li>[ ] 创建新用户</li>
+<li>[ ] 编辑用户信息</li>
+<li>[ ] 删除用户</li>
+<li>
+<p>[ ] 角色切换 (admin/user/viewer)</p>
+</li>
+<li>
+<p>[ ] <strong>配额管理</strong></p>
+</li>
+<li>[ ] 配额使用概览加载</li>
+<li>[ ] 编辑用户配额</li>
+<li>
+<p>[ ] 配额进度条显示正确</p>
+</li>
+<li>
+<p>[ ] <strong>审计日志</strong></p>
+</li>
+<li>[ ] 日志列表加载</li>
+<li>[ ] 按操作类型筛选</li>
+<li>[ ] 按资源类型筛选</li>
+<li>[ ] 按日期范围筛选</li>
+<li>
+<p>[ ] 分页功能</p>
+</li>
+<li>
+<p>[ ] <strong>内容过滤</strong></p>
+</li>
+<li>[ ] 规则列表加载</li>
+<li>[ ] 创建新规则</li>
+<li>[ ] 编辑规则</li>
+<li>[ ] 删除规则</li>
+<li>
+<p>[ ] 启用/禁用规则开关</p>
+</li>
+<li>
+<p>[ ] <strong>安全设置</strong></p>
+</li>
+<li>[ ] 设置加载</li>
+<li>[ ] 修改会话超时</li>
+<li>[ ] 修改登录尝试次数</li>
+<li>[ ] 修改密码策略</li>
+<li>[ ] 保存设置</li>
+</ul>
+<h4 id="report">Report 页面 (普通用户)</h4>
+<ul>
+<li>[ ] 页面加载</li>
+<li>[ ] 日期范围筛选</li>
+<li>[ ] 统计卡片显示正确</li>
+<li>[ ] Token 趋势图表渲染</li>
+<li>[ ] Token 分布饼图渲染</li>
+<li>[ ] 每日用量表格显示</li>
+</ul>
+<h4 id="workspace">Workspace 页面 (普通用户)</h4>
+<ul>
+<li>[ ] 未配置时显示提示信息</li>
+<li>[ ] 已配置时 iframe 正确加载</li>
+<li>[ ] iframe 高度自适应</li>
+</ul>
+<h4 id="analysis-admin">Analysis 页面 (Admin 用户)</h4>
+<ul>
+<li>[ ] 关键指标加载</li>
+<li>[ ] 日期范围筛选</li>
+<li>[ ] Token 趋势图表渲染</li>
+<li>[ ] 工具对比图表渲染</li>
+<li>[ ] 会话统计表格显示</li>
+</ul>
+<h3 id="42-api">4.2 API 测试</h3>
+<pre><code class="language-bash"># 测试 Management API
+curl -X GET http://localhost:5001/api/admin/users \
+  -H &quot;Authorization: Bearer &lt;admin_token&gt;&quot;
+
+curl -X GET http://localhost:5001/api/admin/quota/usage \
+  -H &quot;Authorization: Bearer &lt;admin_token&gt;&quot;
+
+# 测试 Governance API
+curl -X GET &quot;http://localhost:5001/api/governance/audit-logs?page=1&amp;limit=20&quot; \
+  -H &quot;Authorization: Bearer &lt;admin_token&gt;&quot;
+
+curl -X GET http://localhost:5001/api/governance/filter-rules \
+  -H &quot;Authorization: Bearer &lt;admin_token&gt;&quot;
+
+curl -X GET http://localhost:5001/api/governance/security-settings \
+  -H &quot;Authorization: Bearer &lt;admin_token&gt;&quot;
+
+# 测试 Report API
+curl -X GET &quot;http://localhost:5001/api/report/my-usage?start=2026-02-21&amp;end=2026-03-21&quot; \
+  -H &quot;Authorization: Bearer &lt;user_token&gt;&quot;
+
+# 测试 Workspace API
+curl -X GET http://localhost:5001/api/workspace/config
+
+# 测试 Analysis API
+curl -X GET &quot;http://localhost:5001/api/analysis/key-metrics?start=2026-02-21&amp;end=2026-03-21&quot;
+curl -X GET &quot;http://localhost:5001/api/analysis/daily-hourly-usage?start=2026-02-21&amp;end=2026-03-21&quot;
+curl -X GET &quot;http://localhost:5001/api/analysis/tool-comparison?start=2026-02-21&amp;end=2026-03-21&quot;
+</code></pre>
+<h3 id="43-e2e">4.3 E2E 测试建议</h3>
+<p>建议使用 Playwright 创建以下测试用例：</p>
+<pre><code class="language-typescript">// tests/management.spec.ts
+test('Management page - User CRUD', async ({ page }) =&gt; {
+  // 登录 Admin 用户
+  await page.goto('/login');
+  // ... 登录流程
+
+  // 导航到 Management
+  await page.click('[data-testid=&quot;nav-management&quot;]');
+
+  // 验证用户列表加载
+  await expect(page.locator('.user-management table')).toBeVisible();
+
+  // 测试创建用户
+  await page.click('button:has-text(&quot;Add User&quot;)');
+  // ... 填写表单并提交
+});
+
+// tests/report.spec.ts
+test('Report page - Usage display', async ({ page }) =&gt; {
+  // 登录普通用户
+  await page.goto('/login');
+  // ... 登录流程
+
+  // 导航到 Report
+  await page.click('[data-testid=&quot;nav-report&quot;]');
+
+  // 验证统计卡片
+  await expect(page.locator('.stat-card')).toHaveCount(4);
+
+  // 验证图表渲染
+  await expect(page.locator('canvas')).toBeVisible();
+});
+
+// tests/workspace.spec.ts
+test('Workspace page - iframe loading', async ({ page }) =&gt; {
+  // 登录普通用户
+  await page.goto('/login');
+  // ... 登录流程
+
+  // 导航到 Workspace
+  await page.click('[data-testid=&quot;nav-workspace&quot;]');
+
+  // 验证 iframe 或提示信息
+  const iframe = page.locator('iframe');
+  if (await iframe.isVisible()) {
+    await expect(iframe).toHaveAttribute('src', /.+/);
+  } else {
+    await expect(page.locator('.workspace-not-configured')).toBeVisible();
+  }
+});
+</code></pre>
+<h3 id="44">4.4 构建验证</h3>
+<pre><code class="language-bash"># 前端构建
+cd frontend &amp;&amp; npm run build
+
+# 类型检查
+cd frontend &amp;&amp; npm run type-check
+
+# Lint 检查
+cd frontend &amp;&amp; npm run lint
+</code></pre>
+<hr />
+<h2 id="5">5. 已知限制</h2>
+<ol>
+<li><strong>Governance API 部分端点可能需要后端实现</strong></li>
+<li><code>/api/governance/audit-logs</code> - 需确认后端是否已实现</li>
+<li><code>/api/governance/filter-rules</code> - 需确认后端是否已实现</li>
+<li>
+<p><code>/api/governance/security-settings</code> - 需确认后端是否已实现</p>
+</li>
+<li>
+<p><strong>Workspace 配置</strong></p>
+</li>
+<li>需要在 <code>~/.open-ace/config.json</code> 中配置 workspace URL</li>
+<li>
+<p>如果未配置，页面会显示 "Workspace Not Configured"</p>
+</li>
+<li>
+<p><strong>权限控制</strong></p>
+</li>
+<li>Management 页面仅 Admin 用户可见</li>
+<li>Report 和 Workspace 页面普通用户可见</li>
+<li>前端路由已实现保护，但需确认后端 API 也有权限验证</li>
+</ol>
+<hr />
+<h2 id="6">6. 后续建议</h2>
+<ol>
+<li><strong>添加 E2E 测试</strong>: 为新页面创建 Playwright 测试用例</li>
+<li><strong>完善 Governance 后端</strong>: 确认并实现缺失的 API 端点</li>
+<li><strong>添加国际化</strong>: 为新增的 UI 文本添加 i18n 翻译</li>
+<li><strong>错误处理优化</strong>: 添加更友好的错误提示和重试机制</li>
+<li><strong>性能优化</strong>: 考虑添加数据缓存和懒加载</li>
+</ol>
+<hr />
+<p><strong>文档版本</strong>: 1.0
+<strong>最后更新</strong>: 2026-03-21</p>
+    </div>
+</body>
+</html>

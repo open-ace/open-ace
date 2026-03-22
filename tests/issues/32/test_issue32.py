@@ -3,6 +3,7 @@
 测试 Issue #32: Conversation Timeline 显示不直观
 """
 
+import pytest
 import asyncio
 from playwright.async_api import async_playwright
 import os
@@ -15,6 +16,7 @@ PASSWORD = os.environ.get('PASSWORD', 'admin123')
 SCREENSHOT_DIR = 'screenshots'
 
 
+@pytest.mark.asyncio
 async def test_issue32():
     """测试 Conversation Timeline 的改进显示"""
 

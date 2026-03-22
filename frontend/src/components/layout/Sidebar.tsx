@@ -5,6 +5,7 @@
 import React from 'react';
 import { cn } from '@/utils';
 import { useSidebarCollapsed, useLanguage } from '@/store';
+import { useAppStore } from '@/store';
 import { t } from '@/i18n';
 
 interface NavItem {
@@ -42,6 +43,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeSection, onNavigate }) =
     }
   };
 
+  const toggleSidebar = () => {
+    useAppStore.getState().toggleSidebar();
+  };
+
   return (
     <nav className={cn('sidebar bg-dark text-white', collapsed ? 'sidebar-collapsed' : '')}>
       {/* Logo */}
@@ -70,6 +75,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeSection, onNavigate }) =
           </li>
         ))}
       </ul>
+
+      {/* Collapse Toggle Button */}
+      <button
+        className="sidebar-toggle-btn"
+        onClick={toggleSidebar}
+        aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+      >
+        <i className={cn('bi', collapsed ? 'bi-chevron-right' : 'bi-chevron-left')} />
+      </button>
     </nav>
   );
 };

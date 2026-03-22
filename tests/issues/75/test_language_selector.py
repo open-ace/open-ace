@@ -7,6 +7,7 @@ Issue: Language selector should be a dropdown above Version.
 Fix: Change from button to select element, move above Version.
 """
 
+import pytest
 import sys
 import os
 from datetime import datetime
@@ -15,7 +16,7 @@ from datetime import datetime
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 sys.path.insert(0, PROJECT_ROOT)
 
-from playwright.sync_api import sync_playwright, expect
+from playwright.async_api import async_playwright, expect
 
 # Configuration
 BASE_URL = "http://localhost:5001"
@@ -25,41 +26,42 @@ SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "issues", "75")
 HEADLESS = True
 
 
-def take_screenshot(page, name):
+async def take_screenshot(page, name):
     """Take a screenshot and return the path."""
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
     path = os.path.join(SCREENSHOT_DIR, name)
-    page.screenshot(path=path)
+    await page.screenshot(path=path)
     return path
 
 
-def test_language_selector():
+@pytest.mark.asyncio
+async def test_language_selector():
     """Test #75: Language selector is a dropdown above Version."""
     print("\n" + "=" * 50)
     print("Test #75: Language selector as dropdown")
     print("=" * 50)
     
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=HEADLESS)
-        context = browser.new_context()
-        page = context.new_page()
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=HEADLESS)
+        context = await browser.new_context()
+        page = await context.new_page()
         
         try:
             # Login first
-            page.goto(f"{BASE_URL}/login")
-            page.wait_for_load_state("networkidle")
-            page.fill("#username", USERNAME)
-            page.fill("#password", PASSWORD)
-            page.click("#login-btn")
-            page.wait_for_url(f"{BASE_URL}/", timeout=10000)
-            page.wait_for_load_state("networkidle")
+            await page.goto(f"{BASE_URL}/login")
+            await page.wait_for_load_state("networkidle")
+            await page.fill("#username", USERNAME)
+            await page.fill("#password", PASSWORD)
+            await page.click("#login-btn")
+            await page.wait_for_url(f"{BASE_URL}/", timeout=10000)
+            await page.wait_for_load_state("networkidle")
             
             # Take screenshot
-            screenshot_path = take_screenshot(page, "01_language_selector.png")
+            screenshot_path = await take_screenshot(page, "01_language_selector.png")
             print(f"  Screenshot: {screenshot_path}")
             
             # Check language selector is a select element (dropdown)
-            lang_select = page.locator("#lang-select")
+            lang_select = await page.locator("#lang-select")
             expect(lang_select).to_be_visible()
             print("  ✓ Language selector is visible")
             
@@ -75,7 +77,7 @@ def test_language_selector():
             print(f"  ✓ Found {option_count} language options")
             
             # Check language selector is above Version
-            version_text = page.locator(".sidebar-footer").locator("text=Version:")
+            version_text = await page.locator(".sidebar-footer").locator("text=Version:")
             expect(version_text).to_be_visible()
             print("  ✓ Version text is visible below language selector")
             
@@ -84,10 +86,10 @@ def test_language_selector():
             
         except Exception as e:
             print(f"  ✗ Test #75 FAILED: {e}")
-            take_screenshot(page, "error_75.png")
+            await take_screenshot(page, "error_75.png")
             return False
         finally:
-            browser.close()
+            await browser.close()
 
 
 def main():

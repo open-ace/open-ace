@@ -37,7 +37,7 @@ class TestConfigPaths:
     def test_remote_paths(self):
         """Test remote path configuration."""
         assert '/.open-ace' in config.REMOTE_CONFIG_DIR
-        assert 'usage.db' in config.REMOTE_DB_PATH
+        assert 'ace.db' in config.REMOTE_DB_PATH
 
 
 class TestConfigFunctions:

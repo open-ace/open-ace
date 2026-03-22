@@ -1,0 +1,74 @@
+# Open ACE - Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: open-ace
+  namespace: open-ace
+  labels:
+    app.kubernetes.io/name: open-ace
+    app.kubernetes.io/component: service
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: open-ace
+    app.kubernetes.io/component: web
+
+---
+# Open ACE - Headless Service (for StatefulSet if needed)
+apiVersion: v1
+kind: Service
+metadata:
+  name: open-ace-headless
+  namespace: open-ace
+  labels:
+    app.kubernetes.io/name: open-ace
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - port: 5001
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: open-ace
+    app.kubernetes.io/component: web
+
+---
+# Open ACE - Ingress
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: open-ace
+  namespace: open-ace
+  labels:
+    app.kubernetes.io/name: open-ace
+    app.kubernetes.io/component: ingress
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  tls:
+    - hosts:
+        - open-ace.example.com
+      secretName: open-ace-tls
+  rules:
+    - host: open-ace.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: open-ace
+                port:
+                  number: 80

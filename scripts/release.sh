@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Open ACE - Release Script
+# Open ACE - AI Computing Explorer - Release Script
 #
 # This script creates a release package with version and date in the filename.
 #

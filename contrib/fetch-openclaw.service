@@ -1,5 +1,5 @@
 [Unit]
-Description=Open ACE - OpenClaw Data Collection
+Description=Open ACE - AI Computing Explorer - OpenClaw Data Collection
 After=network.target
 
 [Service]

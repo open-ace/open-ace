@@ -35,15 +35,22 @@ const TOOL_COLORS: Record<string, { border: string; background: string; card: st
   qwen: { border: 'rgba(54, 162, 235, 1)', background: 'rgba(54, 162, 235, 0.2)', card: 'bg-info' },
 };
 
+// Sort configuration type
+type SortKey = 'total_tokens' | 'total_requests' | 'avg_tokens' | 'total_input_tokens' | 'total_output_tokens' | 'days_count';
+type SortDirection = 'asc' | 'desc';
+
 export const Dashboard: React.FC = () => {
   const language = useLanguage();
   const [selectedHost, setSelectedHost] = useState<string>('');
   const [selectedTool, setSelectedTool] = useState<string>('');
+  const [autoRefresh, setAutoRefresh] = useState<boolean>(true);
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
   const { todayData, summaryData, hosts, isLoading, isFetching, isError, error, refetch } = useDashboard({
     tool: selectedTool || undefined,
     host: selectedHost || undefined,
-    autoRefresh: true,
+    autoRefresh,
     refreshInterval: 60000,
   });
 
@@ -58,6 +65,28 @@ export const Dashboard: React.FC = () => {
   }, []);
 
   const trendQuery = useTrendData(startDate, endDate, selectedHost || undefined);
+
+  // Sort handler
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortKey(key);
+      setSortDirection('desc');
+    }
+  };
+
+  // Sorted summary data
+  const sortedSummaryData = useMemo(() => {
+    if (!sortKey) return summaryData;
+    const entries = Object.entries(summaryData);
+    entries.sort(([, a], [, b]) => {
+      const aVal = a[sortKey] || 0;
+      const bVal = b[sortKey] || 0;
+      return sortDirection === 'asc' ? aVal - bVal : bVal - aVal;
+    });
+    return Object.fromEntries(entries);
+  }, [summaryData, sortKey, sortDirection]);
 
   // Host options for select
   const hostOptions = useMemo(
@@ -92,9 +121,22 @@ export const Dashboard: React.FC = () => {
       {/* Header */}
       <div className="dashboard-header d-flex justify-content-between align-items-center mb-4">
         <h2>{t('dashboardTitle', language)}</h2>
-        <div className="dashboard-controls d-flex gap-2">
+        <div className="page-header-controls">
           <Select options={hostOptions} value={selectedHost} onChange={setSelectedHost} size="sm" />
           <Select options={toolOptions} value={selectedTool} onChange={setSelectedTool} size="sm" />
+          {/* Auto-refresh toggle */}
+          <div className="form-check form-switch">
+            <input
+              className="form-check-input"
+              type="checkbox"
+              id="autoRefreshSwitch"
+              checked={autoRefresh}
+              onChange={(e) => setAutoRefresh(e.target.checked)}
+            />
+            <label className="form-check-label" htmlFor="autoRefreshSwitch">
+              {t('autoRefresh', language)}
+            </label>
+          </div>
           <Button
             variant="primary"
             size="sm"
@@ -136,7 +178,7 @@ export const Dashboard: React.FC = () => {
       </section>
 
       {/* Charts */}
-      <section className="dashboard-section">
+      <section className="dashboard-section mb-4">
         <div className="row">
           <div className="col-md-8 mb-4">
             <Card title={t('trendChart', language)}>
@@ -151,12 +193,18 @@ export const Dashboard: React.FC = () => {
           </div>
           <div className="col-md-4 mb-4">
             <Card title={t('tokenDistribution', language)}>
-              {todayData.length > 0 ? (
+              {trendQuery.data && trendQuery.data.length > 0 ? (
                 <TokenDistributionChart
-                  data={{
-                    input: todayData.reduce((sum, item) => sum + item.input_tokens, 0),
-                    output: todayData.reduce((sum, item) => sum + item.output_tokens, 0),
-                  }}
+                  data={Object.values(
+                    trendQuery.data.reduce((acc, item) => {
+                      const tool = item.tool;
+                      if (!acc[tool]) {
+                        acc[tool] = { tool, tokens: 0 };
+                      }
+                      acc[tool].tokens += item.tokens;
+                      return acc;
+                    }, {} as Record<string, { tool: string; tokens: number }>)
+                  ).sort((a, b) => b.tokens - a.tokens)}
                   height={300}
                 />
               ) : (
@@ -165,6 +213,108 @@ export const Dashboard: React.FC = () => {
             </Card>
           </div>
         </div>
+      </section>
+
+      {/* Tools Info Table */}
+      <section className="dashboard-section">
+        <Card title={t('toolsInfo', language)}>
+          {Object.keys(summaryData).length === 0 ? (
+            <EmptyState icon="bi-tools" title={t('noData', language)} />
+          ) : (
+            <div className="table-responsive">
+              <table className="table table-hover">
+                <thead>
+                  <tr>
+                    <th>{t('tableTool', language)}</th>
+                    <th
+                      className="text-end sortable"
+                      onClick={() => handleSort('total_tokens')}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      {t('tableTokens', language)}
+                      {sortKey === 'total_tokens' && (
+                        <i className={`bi bi-caret-${sortDirection === 'asc' ? 'up' : 'down'}-fill ms-1`} />
+                      )}
+                    </th>
+                    <th
+                      className="text-end sortable"
+                      onClick={() => handleSort('total_requests')}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      {t('tableRequests', language)}
+                      {sortKey === 'total_requests' && (
+                        <i className={`bi bi-caret-${sortDirection === 'asc' ? 'up' : 'down'}-fill ms-1`} />
+                      )}
+                    </th>
+                    <th
+                      className="text-end sortable"
+                      onClick={() => handleSort('avg_tokens')}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      {t('tableAverage', language)}
+                      {sortKey === 'avg_tokens' && (
+                        <i className={`bi bi-caret-${sortDirection === 'asc' ? 'up' : 'down'}-fill ms-1`} />
+                      )}
+                    </th>
+                    <th
+                      className="text-end sortable"
+                      onClick={() => handleSort('total_input_tokens')}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      {t('tableInput', language)}
+                      {sortKey === 'total_input_tokens' && (
+                        <i className={`bi bi-caret-${sortDirection === 'asc' ? 'up' : 'down'}-fill ms-1`} />
+                      )}
+                    </th>
+                    <th
+                      className="text-end sortable"
+                      onClick={() => handleSort('total_output_tokens')}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      {t('tableOutput', language)}
+                      {sortKey === 'total_output_tokens' && (
+                        <i className={`bi bi-caret-${sortDirection === 'asc' ? 'up' : 'down'}-fill ms-1`} />
+                      )}
+                    </th>
+                    <th
+                      className="text-end sortable"
+                      onClick={() => handleSort('days_count')}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      {t('days_tracked', language)}
+                      {sortKey === 'days_count' && (
+                        <i className={`bi bi-caret-${sortDirection === 'asc' ? 'up' : 'down'}-fill ms-1`} />
+                      )}
+                    </th>
+                    <th>{t('date_range', language)}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(sortedSummaryData).map(([tool, stats]) => (
+                    <tr key={tool}>
+                      <td>
+                        <span className={cn('badge', TOOL_COLORS[tool]?.card || 'bg-secondary')}>
+                          {tool.toUpperCase()}
+                        </span>
+                      </td>
+                      <td className="text-end">{formatTokens(stats.total_tokens)}</td>
+                      <td className="text-end">{stats.total_requests || '-'}</td>
+                      <td className="text-end">{(stats.avg_tokens / 1000000).toFixed(2)} M/day</td>
+                      <td className="text-end">{formatTokens(stats.total_input_tokens || 0)}</td>
+                      <td className="text-end">{formatTokens(stats.total_output_tokens || 0)}</td>
+                      <td className="text-end">{stats.days_count}</td>
+                      <td>
+                        <small className="text-muted">
+                          {stats.first_date} ~ {stats.last_date}
+                        </small>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
       </section>
     </div>
   );

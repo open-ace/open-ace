@@ -1,0 +1,174 @@
+# Architecture
+
+> **ACE** = **AI Computing Explorer**
+
+This document describes the system architecture of Open ACE.
+
+## System Overview
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        Data Collection Layer                     │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  │
+│  │ fetch_claude.py │  │  fetch_qwen.py  │  │fetch_openclaw.py│  │
+│  │   Claude Logs   │  │   Qwen Logs     │  │  OpenClaw Logs  │  │
+│  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘  │
+│           │                    │                    │           │
+│           └────────────────────┼────────────────────┘           │
+│                                │                                │
+│                                ▼                                │
+│                    ┌─────────────────────┐                      │
+│                    │   SQLite Database   │                      │
+│                    │   (~/.open-ace/)    │                      │
+│                    └─────────────────────┘                      │
+└─────────────────────────────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                        Presentation Layer                        │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ┌─────────────────┐          ┌─────────────────┐              │
+│  │    web.py       │          │     cli.py      │              │
+│  │  (Flask Web)    │          │   (CLI Tool)    │              │
+│  └────────┬────────┘          └────────┬────────┘              │
+│           │                            │                        │
+│           ▼                            ▼                        │
+│  ┌─────────────────┐          ┌─────────────────┐              │
+│  │  Web Dashboard  │          │  Command Line   │              │
+│  │  - Summary      │          │  - today        │              │
+│  │  - Messages     │          │  - top          │              │
+│  │  - Analysis     │          │  - summary      │              │
+│  └─────────────────┘          └─────────────────┘              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Deployment Scenarios
+
+### Single Machine
+
+```
+┌─────────────────────────────────────┐
+│           Local Machine             │
+│                                     │
+│  ┌─────────────┐  ┌─────────────┐  │
+│  │ fetch_*.py  │  │   web.py    │  │
+│  │ (collect)   │  │  (serve)    │  │
+│  └──────┬──────┘  └──────┬──────┘  │
+│         │                │         │
+│         └────────┬───────┘         │
+│                  ▼                 │
+│         ┌─────────────┐            │
+│         │   SQLite    │            │
+│         │  Database   │            │
+│         └─────────────┘            │
+└─────────────────────────────────────┘
+```
+
+### Distributed (Central + Remote)
+
+```
+┌───────────────────────┐       ┌───────────────────────┐
+│   Central Server      │       │    Remote Machine     │
+│                       │       │                       │
+│  ┌─────────────────┐  │       │  ┌─────────────────┐  │
+│  │ fetch_claude.py │  │       │  │fetch_openclaw.py│  │
+│  │ fetch_qwen.py   │  │       │  │                 │  │
+│  └────────┬────────┘  │       │  └────────┬────────┘  │
+│           │           │       │           │           │
+│           ▼           │       │           ▼           │
+│  ┌─────────────────┐  │       │  ┌─────────────────┐  │
+│  │ Central SQLite  │◄─┼───────┼──│ Remote SQLite   │  │
+│  │    Database     │  │ upload│  │    Database     │  │
+│  └────────┬────────┘  │       │  └─────────────────┘  │
+│           │           │       │                       │
+│           ▼           │       │                       │
+│  ┌─────────────────┐  │       │                       │
+│  │     web.py      │  │       │                       │
+│  │   (Dashboard)   │  │       │                       │
+│  └─────────────────┘  │       │                       │
+└───────────────────────┘       └───────────────────────┘
+```
+
+## Core Modules
+
+| Module | Location | Description |
+|--------|----------|-------------|
+| `config.py` | `scripts/shared/` | Configuration loading |
+| `db.py` | `scripts/shared/` | Database CRUD operations |
+| `utils.py` | `scripts/shared/` | Utility functions |
+| `email_notifier.py` | `scripts/shared/` | Email report sender |
+| `feishu_user_cache.py` | `scripts/shared/` | Feishu user info cache |
+| `feishu_group_cache.py` | `scripts/shared/` | Feishu group info cache |
+
+## Data Model
+
+### Tables
+
+#### `daily_usage`
+Token usage statistics by date and tool.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `date` | TEXT | Date (YYYY-MM-DD) |
+| `tool_name` | TEXT | Tool name (claude, qwen, openclaw) |
+| `host_name` | TEXT | Machine hostname |
+| `tokens_used` | INTEGER | Total tokens |
+| `input_tokens` | INTEGER | Input tokens |
+| `output_tokens` | INTEGER | Output tokens |
+
+#### `daily_messages`
+Individual message records.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | INTEGER | Primary key |
+| `date` | TEXT | Date |
+| `tool_name` | TEXT | Tool name |
+| `message_id` | TEXT | Message identifier |
+| `role` | TEXT | Message role (user, assistant, toolResult) |
+| `content` | TEXT | Message content |
+| `tokens_used` | INTEGER | Tokens used |
+| `sender_id` | TEXT | Sender ID |
+| `sender_name` | TEXT | Sender name |
+| `agent_session_id` | TEXT | Agent session ID |
+| `conversation_id` | TEXT | Conversation ID |
+
+## API Design
+
+### RESTful Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/summary` | Get usage summary |
+| GET | `/api/today` | Get today's usage |
+| GET | `/api/messages` | Get messages with filters |
+| GET | `/api/data-status` | Get data collection status |
+| GET | `/api/fetch` | Trigger data collection |
+
+### Messages API Parameters
+
+```
+GET /api/messages?date=2026-03-21&tool=claude&roles=user,assistant&search=test&page=1&limit=50
+```
+
+| Parameter | Description |
+|-----------|-------------|
+| `date` | Date filter (YYYY-MM-DD) |
+| `tool` | Tool filter (claude, qwen, openclaw) |
+| `roles` | Role filter (comma-separated) |
+| `search` | Content search |
+| `page` | Page number |
+| `limit` | Items per page |
+
+## Technology Stack
+
+| Component | Technology |
+|-----------|------------|
+| Backend | Python 3.9+, Flask |
+| Database | SQLite |
+| Frontend | Bootstrap, Chart.js, Tabulator |
+| Testing | pytest, Playwright |
+| Deployment | systemd, launchd, cron |

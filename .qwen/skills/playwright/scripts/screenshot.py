@@ -39,6 +39,11 @@ SCREENSHOT_TARGETS = {
         'selector': '#dashboard-section',
         'full_page': False
     },
+    'messages': {
+        'description': 'Messages section',
+        'selector': '.messages',
+        'full_page': False
+    },
     'analysis': {
         'description': 'Analysis section',
         'selector': '#analysis-section',
@@ -128,7 +133,7 @@ def take_screenshots(url: str, output_dir: str, targets: list, title: str = None
             try:
                 page.fill('#username', DEFAULT_USERNAME)
                 page.fill('#password', DEFAULT_PASSWORD)
-                page.click('#login-btn')
+                page.click('button[type="submit"]')
                 page.wait_for_url('**/', timeout=10000)
                 print("Login successful")
             except Exception as e:
@@ -139,6 +144,37 @@ def take_screenshots(url: str, output_dir: str, targets: list, title: str = None
         # Hard refresh to ensure fresh content (bypass cache)
         page.reload(wait_until='networkidle', timeout=TIMEOUT)
         
+        # Check if we need to navigate to Messages section
+        needs_messages = 'messages' in targets
+        if needs_messages:
+            try:
+                # Try multiple selectors for Messages link
+                messages_selectors = [
+                    '#nav-messages',
+                    'a:has-text("Messages")',
+                    'text=Messages'
+                ]
+                clicked = False
+                for selector in messages_selectors:
+                    try:
+                        elem = page.locator(selector).first
+                        if elem.is_visible(timeout=1000):
+                            elem.click()
+                            print(f"Clicked Messages tab (using: {selector})")
+                            clicked = True
+                            break
+                    except Exception:
+                        continue
+
+                if clicked:
+                    page.wait_for_timeout(2000)
+                    # Wait for messages section to be visible
+                    page.wait_for_selector('.messages', state='visible', timeout=5000)
+                else:
+                    print("Warning: Could not find Messages tab")
+            except Exception as e:
+                print(f"Warning: Could not click Messages tab: {e}")
+
         # Check if we need to navigate to Analysis section
         needs_analysis = any(t in ['analysis', 'datepicker', 'heatmap', 'metrics', 'tokens', 'peak', 'session-history'] for t in targets)
         if needs_analysis:

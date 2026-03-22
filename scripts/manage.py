@@ -1,34 +1,35 @@
 #!/usr/bin/env python3
 """
-Open ACE - Deploy and Manage Script
+Open ACE - AI Computing Explorer - Manage Script
 
 Unified script for:
-- Local deployment (central server)
-- Remote machine deployment (ai-lab)
-- Service management (start/stop/status)
-- Configuration setup
+- Configuration setup (init)
+- Local deployment and service management (default mode)
+- Remote machine deployment (--remote mode)
+
+Usage:
+  python3 scripts/manage.py init       # Initialize configuration
+  python3 scripts/manage.py deploy     # Deploy to ~/open-ace/
+  python3 scripts/manage.py start      # Start local web server
+  python3 scripts/manage.py stop       # Stop local web server
+  python3 scripts/manage.py status     # Check service status
+  python3 scripts/manage.py --remote deploy  # Deploy to remote machine
 """
 
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 from typing import Optional
 
 # Project directories
-BASE_DIR = Path(__file__).parent.parent  # Development directory
-DEV_DIR = BASE_DIR  # Development directory (/Users/rhuang/workspace/open-ace)
-DEPLOY_DIR = Path.home() / "open-ace"  # Deployment directory (~/open-ace)
-SCRIPTS_DIR = DEPLOY_DIR / "scripts"
-CONFIG_DIR = DEPLOY_DIR / "config"
+DEV_DIR = Path(__file__).parent.parent  # Development directory
+DEPLOY_DIR = Path.home() / "open-ace"   # Deployment directory
+CONFIG_DIR = Path.home() / ".open-ace"  # Configuration directory
 LOG_DIR = DEPLOY_DIR / "logs"
-
-# Remote machine configuration - loaded from config file or environment
-# Set REMOTE_HOST environment variable or configure in ~/.open-ace/config.json
-REMOTE_USER = os.environ.get("REMOTE_USER", "openclaw")
-REMOTE_HOST = os.environ.get("REMOTE_HOST", "")
 
 # Import shared config for web server settings
 sys.path.insert(0, str(DEV_DIR / "scripts" / "shared"))
@@ -37,46 +38,8 @@ try:
     WEB_PORT = config.WEB_PORT
     WEB_HOST = config.WEB_HOST
 except ImportError:
-    # Fallback defaults if config module not available
     WEB_PORT = int(os.environ.get('AI_TOKEN_WEB_PORT', '5001'))
     WEB_HOST = os.environ.get('AI_TOKEN_WEB_HOST', '0.0.0.0')
-REMOTE_DIR = os.environ.get("REMOTE_DIR", "/home/openclaw/open-ace")
-
-
-def get_remote_config() -> dict:
-    """Get remote configuration from config file.
-    
-    Returns dict with host, user, dir, and other settings.
-    """
-    global REMOTE_HOST, REMOTE_USER, REMOTE_DIR
-    
-    # If REMOTE_HOST is set via environment, use it
-    if REMOTE_HOST:
-        return {
-            "host": REMOTE_HOST,
-            "user": REMOTE_USER,
-            "dir": REMOTE_DIR
-        }
-    
-    # Otherwise, try to load from config file
-    config_file = Path.home() / ".open-ace" / "config.json"
-    if config_file.exists():
-        try:
-            with open(config_file) as f:
-                config = json.load(f)
-            
-            remote_config = config.get("remote", {})
-            if remote_config.get("enabled") and remote_config.get("hosts"):
-                host_info = remote_config["hosts"][0]
-                return {
-                    "host": host_info.get("host", ""),
-                    "user": host_info.get("user", "openclaw"),
-                    "dir": host_info.get("base_dir", "/home/openclaw/open-ace")
-                }
-        except (json.JSONDecodeError, IOError) as e:
-            print_error(f"Failed to load config: {e}")
-    
-    return {"host": "", "user": REMOTE_USER, "dir": REMOTE_DIR}
 
 
 def print_header(text: str):
@@ -109,32 +72,67 @@ def run_command(cmd: str, capture: bool = False, check: bool = True) -> Optional
 
 
 # ============================================================================
-# Local Deployment (Central Server)
+# Configuration Setup (from setup.py)
 # ============================================================================
 
-def setup_local_config():
-    """Setup local configuration."""
-    print_header("Setting up Local Configuration")
-    
-    config_path = Path.home() / ".open-ace"
-    config_path.mkdir(parents=True, exist_ok=True)
-    
-    config_file = config_path / "config.json"
-    sample_file = CONFIG_DIR / "config.json.sample"
-    
+def get_remote_config() -> dict:
+    """Get remote configuration from config file."""
+    config_file = CONFIG_DIR / "config.json"
+    if config_file.exists():
+        try:
+            with open(config_file) as f:
+                cfg = json.load(f)
+
+            remote_cfg = cfg.get("remote", {})
+            if remote_cfg.get("enabled") and remote_cfg.get("hosts"):
+                host_info = remote_cfg["hosts"][0]
+                return {
+                    "host": host_info.get("host", ""),
+                    "user": host_info.get("user", "openclaw"),
+                    "dir": host_info.get("base_dir", "/home/openclaw/open-ace")
+                }
+        except (json.JSONDecodeError, IOError) as e:
+            print_error(f"Failed to load config: {e}")
+
+    return {"host": "", "user": "openclaw", "dir": "/home/openclaw/open-ace"}
+
+
+def init_config():
+    """Initialize configuration directory and create config file."""
+    print_header("Initializing Configuration")
+
+    # Create config directory
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    print_success(f"Config directory: {CONFIG_DIR}")
+
+    # Create deployment directory
+    DEPLOY_DIR.mkdir(parents=True, exist_ok=True)
+    (DEPLOY_DIR / "logs").mkdir(parents=True, exist_ok=True)
+    print_success(f"Deploy directory: {DEPLOY_DIR}")
+
+    # Copy sample config
+    config_file = CONFIG_DIR / "config.json"
+    sample_file = DEV_DIR / "config" / "config.json.sample"
+
     if not config_file.exists():
         if sample_file.exists():
-            import shutil
             shutil.copy(sample_file, config_file)
             print_success(f"Created config file: {config_file}")
-            print(f"  Please edit {config_file} with your settings")
+            print(f"\n  Please edit {config_file} with your settings")
         else:
-            # Create default config using WEB_PORT from environment or config
+            # Create default config
             default_config = {
                 "host_name": "localhost",
+                "database": {
+                    "type": "sqlite",
+                    "path": str(CONFIG_DIR / "ace.db"),
+                    "url": None
+                },
                 "server": {
                     "upload_auth_key": "your-auth-key-here",
-                    "server_url": f"http://localhost:{WEB_PORT}"
+                    "server_url": f"http://localhost:{WEB_PORT}",
+                    "web_port": WEB_PORT,
+                    "web_host": WEB_HOST
                 },
                 "tools": {
                     "openclaw": {"enabled": True, "hostname": "localhost"},
@@ -148,79 +146,102 @@ def setup_local_config():
     else:
         print(f"Config file already exists: {config_file}")
 
+    print("\n" + "=" * 60)
+    print("Configuration initialized!")
+    print(f"Config file: {config_file}")
+    print("=" * 60)
+
+
+def show_config():
+    """Show current configuration."""
+    print_header("Configuration Info")
+
+    print(f"Config directory: {CONFIG_DIR}")
+    print(f"Config file: {CONFIG_DIR / 'config.json'}")
+    print(f"Deploy directory: {DEPLOY_DIR}")
+    print(f"Log directory: {LOG_DIR}")
+
+    config_file = CONFIG_DIR / "config.json"
+    if config_file.exists():
+        print(f"\nCurrent configuration:")
+        with open(config_file) as f:
+            print(f.read())
+    else:
+        print("\nConfig file not found. Run 'init' to create it.")
+
+
+# ============================================================================
+# Local Deployment
+# ============================================================================
 
 def deploy_local():
     """Deploy to local ~/open-ace directory."""
     print_header("Deploying to Local Directory")
+    print(f"Source: {DEV_DIR}")
     print(f"Target: {DEPLOY_DIR}")
-    
-    # Step 1: Create directory
-    print("\n1. Creating deployment directory...")
+
+    # Step 1: Create directories
+    print("\n1. Creating directories...")
     DEPLOY_DIR.mkdir(parents=True, exist_ok=True)
     (DEPLOY_DIR / "logs").mkdir(parents=True, exist_ok=True)
     (DEPLOY_DIR / "config").mkdir(parents=True, exist_ok=True)
-    print_success("Deployment directory created")
-    
-    # Step 2: Sync files (exclude dev-only files)
+    print_success("Directories created")
+
+    # Step 2: Sync files
     print("\n2. Syncing files...")
     exclude_patterns = [
-        ".git", ".qwen", "__pycache__", "*.pyc", ".DS_Store"
+        ".git", ".qwen", "__pycache__", "*.pyc", ".DS_Store",
+        "logs/*", ".pytest_cache", "*.egg-info"
     ]
-    
-    rsync_cmd = f"rsync -avz"
+
+    rsync_cmd = "rsync -avz"
     for pattern in exclude_patterns:
         rsync_cmd += f" --exclude='{pattern}'"
     rsync_cmd += f" {DEV_DIR}/ {DEPLOY_DIR}/"
-    
+
     run_command(rsync_cmd)
     print_success("Files synced")
-    
-    # Step 3: Setup config
-    print("\n3. Setting up configuration...")
-    config_path = Path.home() / ".open-ace"
-    config_path.mkdir(parents=True, exist_ok=True)
-    
-    config_file = config_path / "config.json"
-    sample_file = DEPLOY_DIR / "config" / "config.json.sample"
-    
-    if not config_file.exists() and sample_file.exists():
-        import shutil
-        shutil.copy(sample_file, config_file)
-        print_success(f"Created config file: {config_file}")
-    else:
-        print("Config already exists")
-    
-    # Step 4: Set permissions
-    print("\n4. Setting executable permissions...")
-    run_command(f"chmod +x {DEPLOY_DIR}/scripts/*.py")
+
+    # Step 3: Set permissions
+    print("\n3. Setting executable permissions...")
+    run_command(f"chmod +x {DEPLOY_DIR}/scripts/*.py 2>/dev/null || true")
     print_success("Permissions set")
-    
-    # Step 5: Test deployment
-    print("\n5. Testing deployment...")
-    os.chdir(DEPLOY_DIR)
-    result = run_command(f"cd {DEPLOY_DIR} && python3 scripts/fetch_openclaw.py --days 1 2>&1 | tail -5", capture=True)
-    if result:
-        print(f"Test output:\n{result.stdout}")
-        print_success("Local deployment successful!")
+
+    # Step 4: Verify deployment
+    print("\n4. Verifying deployment...")
+    if (DEPLOY_DIR / "web.py").exists():
+        print_success("Deployment successful!")
     else:
-        print_error("Deployment test failed")
-    
+        print_error("Deployment failed - web.py not found")
+        return
+
     print("\n" + "=" * 60)
     print("Local deployment completed!")
-    print(f"Deployment directory: {DEPLOY_DIR}")
-    print(f"To run: cd {DEPLOY_DIR} && python3 web.py")
+    print(f"Deploy directory: {DEPLOY_DIR}")
+    print(f"To start: python3 scripts/manage.py start")
     print("=" * 60)
 
 
-def install_local_service():
+def install_service():
     """Install local systemd/launchd service."""
     print_header("Installing Local Service")
-    
+
     system = os.uname().sysname
-    service_file = DEPLOY_DIR / "contrib" / "fetch-openclaw.service"
-    
-    if system == "Linux":
-        # systemd service
+
+    if system == "Darwin":  # macOS
+        plist_file = DEV_DIR / "scripts" / "com.open-ace.web.plist"
+        launch_dir = Path.home() / "Library" / "LaunchAgents"
+
+        if plist_file.exists():
+            launch_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy(plist_file, launch_dir / plist_file.name)
+            run_command(f"launchctl load {launch_dir / plist_file.name} 2>/dev/null || true")
+            print_success("Installed launchd agent")
+            print(f"Plist: {launch_dir / plist_file.name}")
+        else:
+            print_error("Plist file not found")
+    else:  # Linux
+        service_file = DEV_DIR / "contrib" / "fetch-openclaw.service"
         if service_file.exists():
             run_command(f"sudo cp {service_file} /etc/systemd/system/")
             run_command("sudo systemctl daemon-reload")
@@ -228,44 +249,40 @@ def install_local_service():
             print_success("Installed systemd service")
         else:
             print_error("Service file not found")
-    
-    elif system == "Darwin":  # macOS
-        plist_file = DEPLOY_DIR / "scripts" / "com.open-ace.web.plist"
-        launch_dir = Path.home() / "Library" / "LaunchAgents"
-        
-        if plist_file.exists():
-            launch_dir.mkdir(parents=True, exist_ok=True)
-            import shutil
-            shutil.copy(plist_file, launch_dir / plist_file.name)
-            run_command(f"launchctl load {launch_dir / plist_file.name}")
-            print_success("Installed launchd agent")
-        else:
-            print_error("Plist file not found")
 
 
-def start_local_service():
+def start_service(dev_mode: bool = False):
     """Start local web server."""
-    print_header("Starting Local Web Server")
-    
+    print_header("Starting Web Server")
+
+    # Determine working directory
+    work_dir = DEV_DIR if dev_mode else DEPLOY_DIR
+    mode_str = "development" if dev_mode else "deployment"
+    print(f"Mode: {mode_str}")
+    print(f"Directory: {work_dir}")
+
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_file = LOG_DIR / "web_server.log"
-    
-    os.chdir(DEPLOY_DIR)
-    
+
     # Check if already running
     result = run_command(f"lsof -i :{WEB_PORT}", capture=True, check=False)
     if result and result.returncode == 0:
         print(f"Web server is already running on port {WEB_PORT}")
+        print(f"Process info:\n{result.stdout}")
         return
 
     # Start web server
-    print(f"Starting web server on port {WEB_PORT}... (log: {log_file})")
+    print(f"Starting web server on port {WEB_PORT}...")
+    print(f"Log file: {log_file}")
+
+    os.chdir(work_dir)
+
     with open(log_file, 'a') as log:
         subprocess.Popen(
-            [sys.executable, str(DEPLOY_DIR / "web.py")],
+            [sys.executable, str(work_dir / "web.py")],
             stdout=log,
             stderr=log,
-            cwd=DEPLOY_DIR
+            cwd=work_dir
         )
 
     import time
@@ -277,66 +294,91 @@ def start_local_service():
         print_success(f"Web server started on http://localhost:{WEB_PORT}")
     else:
         print_error("Failed to start web server")
+        print(f"Check log: {log_file}")
 
 
-def stop_local_service():
+def stop_service():
     """Stop local web server."""
-    print_header("Stopping Local Web Server")
+    print_header("Stopping Web Server")
 
     # Find and kill process on web port
-    if os.uname().sysname == "Darwin":  # macOS
-        run_command(f"lsof -ti :{WEB_PORT} | xargs kill -9", check=False)
-    else:  # Linux
-        run_command(f"fuser -k {WEB_PORT}/tcp", check=False)
+    result = run_command(f"lsof -ti :{WEB_PORT}", capture=True, check=False)
+    if result and result.stdout.strip():
+        pids = result.stdout.strip().split('\n')
+        for pid in pids:
+            run_command(f"kill -9 {pid}", check=False)
+        print_success(f"Web server stopped (killed PIDs: {', '.join(pids)})")
+    else:
+        print("Web server is not running")
 
-    print_success("Web server stopped")
 
-
-def status_local_service():
+def status_service():
     """Check local web server status."""
-    print_header("Local Service Status")
+    print_header("Service Status")
 
     result = run_command(f"lsof -i :{WEB_PORT}", capture=True, check=False)
     if result and result.returncode == 0:
         print(f"Web server is RUNNING on http://localhost:{WEB_PORT}")
         print(f"\nProcess info:\n{result.stdout}")
+
+        # Show process start time
+        pid = result.stdout.split('\n')[1].split()[1] if '\n' in result.stdout else None
+        if pid:
+            time_result = run_command(f"ps -p {pid} -o lstart=", capture=True, check=False)
+            if time_result and time_result.stdout.strip():
+                print(f"Started at: {time_result.stdout.strip()}")
     else:
         print("Web server is NOT RUNNING")
 
+    # Show config info
+    print(f"\nConfig: {CONFIG_DIR / 'config.json'}")
+    print(f"Deploy: {DEPLOY_DIR}")
+    print(f"Logs: {LOG_DIR}")
+
 
 # ============================================================================
-# Remote Deployment (ai-lab)
+# Remote Deployment
 # ============================================================================
 
 def deploy_remote():
     """Deploy to remote machine."""
+    remote_cfg = get_remote_config()
+    host = remote_cfg["host"]
+    user = remote_cfg["user"]
+    remote_dir = remote_cfg["dir"]
+
+    if not host:
+        print_error("Remote host not configured")
+        print("Set REMOTE_HOST environment variable or configure in ~/.open-ace/config.json")
+        return
+
     print_header("Deploying to Remote Machine")
-    print(f"Target: {REMOTE_USER}@{REMOTE_HOST}:{REMOTE_DIR}")
-    
+    print(f"Target: {user}@{host}:{remote_dir}")
+
     # Step 1: Create directory
     print("\n1. Creating remote directory...")
-    run_command(f"ssh {REMOTE_USER}@{REMOTE_HOST} 'mkdir -p {REMOTE_DIR}'")
+    run_command(f"ssh {user}@{host} 'mkdir -p {remote_dir}'")
     print_success("Remote directory created")
-    
+
     # Step 2: Sync files
     print("\n2. Syncing files...")
     exclude_patterns = [
         ".git", ".qwen", "logs/*", "__pycache__", "*.pyc", ".DS_Store",
         "scripts/shared/email_notifier.py"
     ]
-    
-    rsync_cmd = f"rsync -avz"
+
+    rsync_cmd = "rsync -avz"
     for pattern in exclude_patterns:
         rsync_cmd += f" --exclude='{pattern}'"
-    rsync_cmd += f" ./ {REMOTE_USER}@{REMOTE_HOST}:{REMOTE_DIR}/"
-    
+    rsync_cmd += f" ./ {user}@{host}:{remote_dir}/"
+
     run_command(rsync_cmd)
     print_success("Files synced")
-    
+
     # Step 3: Clean unnecessary scripts
     print("\n3. Cleaning unnecessary scripts...")
     clean_script = f"""
-cd {REMOTE_DIR}/scripts
+cd {remote_dir}/scripts
 rm -f check_*.py db_info.py test_*.py fix_timestamps.py
 rm -f deploy_remote.py fetch_remote.py upload_to_server.py
 rm -f fetch_all_tools.py fetch_claude.py fetch_qwen.py
@@ -345,69 +387,28 @@ rm -f com.open-ace.web.plist
 rm -f sync_remote.sh clean_deploy_remote.sh
 rm -f ../scripts/shared/email_notifier.py
 """
-    run_command(f"ssh {REMOTE_USER}@{REMOTE_HOST} '{clean_script}'")
+    run_command(f"ssh {user}@{host} '{clean_script}'")
     print_success("Unnecessary scripts removed")
-    
+
     # Step 4: Update __init__.py
     print("\n4. Updating __init__.py...")
-    run_command(f"ssh {REMOTE_USER}@{REMOTE_HOST} \"cat > {REMOTE_DIR}/scripts/shared/__init__.py << 'EOF'\nfrom . import db, utils, config\n\n__all__ = ['db', 'utils', 'config']\nEOF\"")
+    run_command(f"ssh {user}@{host} \"cat > {remote_dir}/scripts/shared/__init__.py << 'EOF'\nfrom . import db, utils, config\n\n__all__ = ['db', 'utils', 'config']\nEOF\"")
     print_success("__init__.py updated")
-    
+
     # Step 5: Fix ownership
     print("\n5. Fixing file ownership...")
-    run_command(f"ssh root@{REMOTE_HOST} 'chown -R {REMOTE_USER}:{REMOTE_USER} {REMOTE_DIR}'")
+    run_command(f"ssh root@{host} 'chown -R {user}:{user} {remote_dir}' 2>/dev/null || true")
     print_success("Ownership fixed")
-    
+
     # Step 6: Set permissions
     print("\n6. Setting executable permissions...")
-    run_command(f"ssh {REMOTE_USER}@{REMOTE_HOST} 'chmod +x {REMOTE_DIR}/scripts/fetch_openclaw.py'")
+    run_command(f"ssh {user}@{host} 'chmod +x {remote_dir}/scripts/*.py'")
     print_success("Permissions set")
-    
-    # Step 7: Setup config
-    print("\n7. Setting up configuration...")
-    
-    # Get remote config to determine host info
-    remote_cfg = get_remote_config()
-    if not remote_cfg["host"]:
-        print_error("Remote host not configured. Set REMOTE_HOST environment variable or configure in ~/.open-ace/config.json")
-        return
-    
-    # Generate config template - user should edit with actual credentials
-    config_content = f"""{{
-  "host_name": "ai-lab",
-  "server": {{
-    "upload_auth_key": "<UPLOAD_AUTH_KEY>",
-    "server_url": "http://<SERVER_IP>:{WEB_PORT}"
-  }},
-  "tools": {{
-    "openclaw": {{
-      "enabled": true,
-      "token_env": "<OPENCLAW_TOKEN>",
-      "gateway_url": "http://localhost:18789",
-      "hostname": "ai-lab"
-    }}
-  }},
-  "feishu": {{
-    "app_id": "cli_xxxxxxxxxxxxxxxx",
-    "app_secret": "your_feishu_app_secret_here"
-  }}
-}}"""
-    print("\n  ⚠️  IMPORTANT: Please edit the config file with your actual credentials!")
-    print(f"  Config location: ~{REMOTE_USER}/.open-ace/config.json")
-    print("  Required fields to update:")
-    print("    - server.upload_auth_key")
-    print("    - server.server_url")
-    print("    - tools.openclaw.token_env")
-    print("    - feishu.app_id")
-    print("    - feishu.app_secret")
-    
-    run_command(f"ssh {REMOTE_USER}@{REMOTE_HOST} \"mkdir -p ~{REMOTE_USER}/.open-ace && cat > ~{REMOTE_USER}/.open-ace/config.json << 'EOF'\n{config_content}\nEOF\"")
-    print_success("Configuration template created")
-    
-    # Step 8: Test deployment
-    print("\n8. Testing deployment...")
+
+    # Step 7: Test deployment
+    print("\n7. Testing deployment...")
     result = run_command(
-        f"ssh {REMOTE_USER}@{REMOTE_HOST} 'cd {REMOTE_DIR} && python3 scripts/fetch_openclaw.py --days 1 2>&1 | tail -5'",
+        f"ssh {user}@{host} 'cd {remote_dir} && python3 scripts/fetch_openclaw.py --days 1 2>&1 | tail -5'",
         capture=True
     )
     if result:
@@ -415,36 +416,56 @@ rm -f ../scripts/shared/email_notifier.py
         print_success("Deployment successful!")
     else:
         print_error("Deployment test failed")
-    
+
     print("\n" + "=" * 60)
     print("Remote deployment completed!")
     print("=" * 60)
 
 
 def sync_remote():
-    """Quick sync to remote machine (without full cleanup)."""
+    """Quick sync to remote machine."""
+    remote_cfg = get_remote_config()
+    host = remote_cfg["host"]
+    user = remote_cfg["user"]
+    remote_dir = remote_cfg["dir"]
+
+    if not host:
+        print_error("Remote host not configured")
+        return
+
     print_header("Syncing Files to Remote Machine")
-    
+
     # Sync shared modules
     print("Syncing shared modules...")
-    run_command(f"rsync -avz scripts/shared/__init__.py scripts/shared/db.py scripts/shared/config.py scripts/shared/utils.py scripts/shared/feishu_user_cache.py scripts/shared/email_notifier.py {REMOTE_USER}@{REMOTE_HOST}:{REMOTE_DIR}/scripts/shared/")
-    
+    run_command(f"rsync -avz scripts/shared/__init__.py scripts/shared/db.py scripts/shared/config.py scripts/shared/utils.py scripts/shared/feishu_user_cache.py {user}@{host}:{remote_dir}/scripts/shared/")
+
     # Sync main scripts
     print("Syncing main scripts...")
-    run_command(f"rsync -avz scripts/fetch_openclaw.py scripts/upload_to_server.py {REMOTE_USER}@{REMOTE_HOST}:{REMOTE_DIR}/scripts/")
-    
+    run_command(f"rsync -avz scripts/fetch_openclaw.py scripts/upload_to_server.py {user}@{host}:{remote_dir}/scripts/")
+
     print_success("Sync completed!")
 
 
 def status_remote():
     """Check remote machine status."""
+    remote_cfg = get_remote_config()
+    host = remote_cfg["host"]
+    user = remote_cfg["user"]
+    remote_dir = remote_cfg["dir"]
+
+    if not host:
+        print_error("Remote host not configured")
+        return
+
     print_header("Remote Machine Status")
-    
-    print("Checking remote deployment...")
-    run_command(f"ssh {REMOTE_USER}@{REMOTE_HOST} 'ls -la {REMOTE_DIR}/scripts/'")
-    
+    print(f"Host: {user}@{host}")
+    print(f"Directory: {remote_dir}")
+
+    print("\nChecking remote deployment...")
+    run_command(f"ssh {user}@{host} 'ls -la {remote_dir}/scripts/'")
+
     print("\nTesting data collection...")
-    run_command(f"ssh {REMOTE_USER}@{REMOTE_HOST} 'cd {REMOTE_DIR} && python3 scripts/fetch_openclaw.py --days 1 2>&1 | tail -5'")
+    run_command(f"ssh {user}@{host} 'cd {remote_dir} && python3 scripts/fetch_openclaw.py --days 1 2>&1 | tail -5'")
 
 
 # ============================================================================
@@ -453,57 +474,78 @@ def status_remote():
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Open ACE - Deploy and Manage",
+        description="Open ACE - Manage Script",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  %(prog)s local deploy    - Deploy to ~/open-ace/
-  %(prog)s local setup     - Setup local configuration
-  %(prog)s local install   - Install local service
-  %(prog)s local start     - Start local web server
-  %(prog)s local stop      - Stop local web server
-  %(prog)s local status    - Check local service status
-  %(prog)s remote deploy   - Full deployment to remote machine
-  %(prog)s remote sync     - Quick sync to remote machine
-  %(prog)s remote status   - Check remote machine status
+  python3 scripts/manage.py init       # Initialize configuration
+  python3 scripts/manage.py deploy     # Deploy to ~/open-ace/
+  python3 scripts/manage.py start      # Start web server (deployment dir)
+  python3 scripts/manage.py --dev start    # Start web server (dev dir)
+  python3 scripts/manage.py stop       # Stop web server
+  python3 scripts/manage.py restart    # Restart web server
+  python3 scripts/manage.py status     # Check service status
+  python3 scripts/manage.py --remote deploy  # Deploy to remote machine
         """
     )
-    
-    parser.add_argument(
-        'target',
-        choices=['local', 'remote'],
-        help='Target: local (central server) or remote (ai-lab)'
-    )
-    
+
     parser.add_argument(
         'action',
-        choices=['setup', 'install', 'start', 'stop', 'status', 'deploy', 'sync'],
+        choices=['init', 'deploy', 'install', 'start', 'stop', 'restart', 'status', 'sync', 'show'],
         help='Action to perform'
     )
-    
+
+    parser.add_argument(
+        '--remote',
+        action='store_true',
+        help='Operate on remote machine instead of local'
+    )
+
+    parser.add_argument(
+        '--dev',
+        action='store_true',
+        help='Run in development directory instead of deployment directory'
+    )
+
     args = parser.parse_args()
-    
-    if args.target == 'local':
-        if args.action == 'setup':
-            setup_local_config()
-        elif args.action == 'install':
-            install_local_service()
-        elif args.action == 'start':
-            start_local_service()
-        elif args.action == 'stop':
-            stop_local_service()
-        elif args.action == 'status':
-            status_local_service()
-        elif args.action == 'deploy':
-            deploy_local()
-    elif args.target == 'remote':
+
+    # Remote operations
+    if args.remote:
         if args.action == 'deploy':
             deploy_remote()
         elif args.action == 'sync':
             sync_remote()
         elif args.action == 'status':
             status_remote()
+        else:
+            print_error(f"Action '{args.action}' not supported for remote mode")
+            print("Supported remote actions: deploy, sync, status")
+            return 1
+        return 0
+
+    # Local operations (default)
+    if args.action == 'init':
+        init_config()
+    elif args.action == 'show':
+        show_config()
+    elif args.action == 'deploy':
+        deploy_local()
+    elif args.action == 'install':
+        install_service()
+    elif args.action == 'start':
+        start_service(dev_mode=args.dev)
+    elif args.action == 'stop':
+        stop_service()
+    elif args.action == 'restart':
+        stop_service()
+        start_service(dev_mode=args.dev)
+    elif args.action == 'status':
+        status_service()
+    elif args.action == 'sync':
+        print_error("sync is only available in remote mode (--remote)")
+
+    return 0
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

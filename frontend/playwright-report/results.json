@@ -1,0 +1,419 @@
+{
+  "config": {
+    "configFile": "/Users/rhuang/workspace/open-ace/frontend/playwright.config.ts",
+    "rootDir": "/Users/rhuang/workspace/open-ace/frontend/e2e",
+    "forbidOnly": false,
+    "fullyParallel": true,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 4
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/Users/rhuang/workspace/open-ace/frontend/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 4
+        },
+        "id": "chromium",
+        "name": "chromium",
+        "testDir": "/Users/rhuang/workspace/open-ace/frontend/e2e",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 30000
+      },
+      {
+        "outputDir": "/Users/rhuang/workspace/open-ace/frontend/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 4
+        },
+        "id": "firefox",
+        "name": "firefox",
+        "testDir": "/Users/rhuang/workspace/open-ace/frontend/e2e",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 30000
+      },
+      {
+        "outputDir": "/Users/rhuang/workspace/open-ace/frontend/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 4
+        },
+        "id": "webkit",
+        "name": "webkit",
+        "testDir": "/Users/rhuang/workspace/open-ace/frontend/e2e",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 30000
+      },
+      {
+        "outputDir": "/Users/rhuang/workspace/open-ace/frontend/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 4
+        },
+        "id": "Mobile Chrome",
+        "name": "Mobile Chrome",
+        "testDir": "/Users/rhuang/workspace/open-ace/frontend/e2e",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 30000
+      },
+      {
+        "outputDir": "/Users/rhuang/workspace/open-ace/frontend/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 4
+        },
+        "id": "Mobile Safari",
+        "name": "Mobile Safari",
+        "testDir": "/Users/rhuang/workspace/open-ace/frontend/e2e",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "html",
+        {
+          "outputFolder": "playwright-report"
+        }
+      ],
+      [
+        "json",
+        {
+          "outputFile": "playwright-report/results.json"
+        }
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "runAgents": "none",
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.58.2",
+    "workers": 4,
+    "webServer": {
+      "command": "cd .. && python3 web.py",
+      "url": "http://localhost:5001",
+      "reuseExistingServer": true,
+      "timeout": 120000
+    }
+  },
+  "suites": [
+    {
+      "title": "data-verification.spec.ts",
+      "file": "data-verification.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "Data Verification Test",
+          "file": "data-verification.spec.ts",
+          "line": 8,
+          "column": 6,
+          "specs": [
+            {
+              "title": "verify Dashboard data",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 21324,
+                      "error": {
+                        "message": "Error: locator.count: Unexpected token \"=\" while parsing css selector \".empty-state, .no-data, text=暂无数据\". Did you mean to CSS.escape it?",
+                        "stack": "Error: locator.count: Unexpected token \"=\" while parsing css selector \".empty-state, .no-data, text=暂无数据\". Did you mean to CSS.escape it?\n    at /Users/rhuang/workspace/open-ace/frontend/e2e/data-verification.spec.ts:39:80",
+                        "location": {
+                          "file": "/Users/rhuang/workspace/open-ace/frontend/e2e/data-verification.spec.ts",
+                          "column": 80,
+                          "line": 39
+                        },
+                        "snippet": "  37 |     \n  38 |     // Check for empty state\n> 39 |     const emptyState = await page.locator('.empty-state, .no-data, text=暂无数据').count();\n     |                                                                                ^\n  40 |     console.log(`Empty state elements: ${emptyState}`);\n  41 |   });\n  42 |"
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "/Users/rhuang/workspace/open-ace/frontend/e2e/data-verification.spec.ts",
+                            "column": 80,
+                            "line": 39
+                          },
+                          "message": "Error: locator.count: Unexpected token \"=\" while parsing css selector \".empty-state, .no-data, text=暂无数据\". Did you mean to CSS.escape it?\n\n  37 |     \n  38 |     // Check for empty state\n> 39 |     const emptyState = await page.locator('.empty-state, .no-data, text=暂无数据').count();\n     |                                                                                ^\n  40 |     console.log(`Empty state elements: ${emptyState}`);\n  41 |   });\n  42 |\n    at /Users/rhuang/workspace/open-ace/frontend/e2e/data-verification.spec.ts:39:80"
+                        }
+                      ],
+                      "stdout": [
+                        {
+                          "text": "Dashboard summary data elements: 0\n"
+                        },
+                        {
+                          "text": "Dashboard today section: 0\n"
+                        },
+                        {
+                          "text": "Dashboard charts: 1\n"
+                        },
+                        {
+                          "text": "Dashboard text content (first 500 chars):\n"
+                        },
+                        {
+                          "text": "DashboardAll HostsAll ToolsOpenClawClaudeQwenRefreshToday's UsageNo data availableTotal OverviewCLAUDE827.29M tokens14 days trackedAvg: 59.09M/dayRequests: 13567Date Range: 2026-02-27 - 2026-03-15OPENCLAW477.58M tokens31 days trackedAvg: 15.41M/dayRequests: 1442Date Range: 2026-02-27 - 2026-03-20QWEN1.19B tokens16 days trackedAvg: 74.59M/dayRequests: 18577Date Range: 2026-03-05 - 2026-03-20Trend ChartToken DistributionNo data available\n"
+                        }
+                      ],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-03-21T16:24:14.437Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/Users/rhuang/workspace/open-ace/frontend/test-results/data-verification-Data-Ver-a4066--Test-verify-Dashboard-data-chromium/test-failed-1.png"
+                        },
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "/Users/rhuang/workspace/open-ace/frontend/test-results/data-verification-Data-Ver-a4066--Test-verify-Dashboard-data-chromium/video.webm"
+                        },
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/Users/rhuang/workspace/open-ace/frontend/test-results/data-verification-Data-Ver-a4066--Test-verify-Dashboard-data-chromium/error-context.md"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "/Users/rhuang/workspace/open-ace/frontend/e2e/data-verification.spec.ts",
+                        "column": 80,
+                        "line": 39
+                      }
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "e37f662cb7f4478f6925-bd580323997da2a16164",
+              "file": "data-verification.spec.ts",
+              "line": 14,
+              "column": 3
+            },
+            {
+              "title": "verify Messages data",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 1,
+                      "parallelIndex": 1,
+                      "status": "failed",
+                      "duration": 21230,
+                      "error": {
+                        "message": "Error: locator.count: Unexpected token \"=\" while parsing css selector \".empty-state, .no-data, text=暂无数据, text=No messages\". Did you mean to CSS.escape it?",
+                        "stack": "Error: locator.count: Unexpected token \"=\" while parsing css selector \".empty-state, .no-data, text=暂无数据, text=No messages\". Did you mean to CSS.escape it?\n    at /Users/rhuang/workspace/open-ace/frontend/e2e/data-verification.spec.ts:54:98",
+                        "location": {
+                          "file": "/Users/rhuang/workspace/open-ace/frontend/e2e/data-verification.spec.ts",
+                          "column": 98,
+                          "line": 54
+                        },
+                        "snippet": "  52 |     \n  53 |     // Check for empty state\n> 54 |     const emptyState = await page.locator('.empty-state, .no-data, text=暂无数据, text=No messages').count();\n     |                                                                                                  ^\n  55 |     console.log(`Empty state elements: ${emptyState}`);\n  56 |     \n  57 |     // Get visible text content"
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "/Users/rhuang/workspace/open-ace/frontend/e2e/data-verification.spec.ts",
+                            "column": 98,
+                            "line": 54
+                          },
+                          "message": "Error: locator.count: Unexpected token \"=\" while parsing css selector \".empty-state, .no-data, text=暂无数据, text=No messages\". Did you mean to CSS.escape it?\n\n  52 |     \n  53 |     // Check for empty state\n> 54 |     const emptyState = await page.locator('.empty-state, .no-data, text=暂无数据, text=No messages').count();\n     |                                                                                                  ^\n  55 |     console.log(`Empty state elements: ${emptyState}`);\n  56 |     \n  57 |     // Get visible text content\n    at /Users/rhuang/workspace/open-ace/frontend/e2e/data-verification.spec.ts:54:98"
+                        }
+                      ],
+                      "stdout": [
+                        {
+                          "text": "Message rows: 0\n"
+                        }
+                      ],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-03-21T16:24:14.419Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/Users/rhuang/workspace/open-ace/frontend/test-results/data-verification-Data-Ver-12512-n-Test-verify-Messages-data-chromium/test-failed-1.png"
+                        },
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "/Users/rhuang/workspace/open-ace/frontend/test-results/data-verification-Data-Ver-12512-n-Test-verify-Messages-data-chromium/video.webm"
+                        },
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/Users/rhuang/workspace/open-ace/frontend/test-results/data-verification-Data-Ver-12512-n-Test-verify-Messages-data-chromium/error-context.md"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "/Users/rhuang/workspace/open-ace/frontend/e2e/data-verification.spec.ts",
+                        "column": 98,
+                        "line": 54
+                      }
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "e37f662cb7f4478f6925-0b744909539c5fb4fe26",
+              "file": "data-verification.spec.ts",
+              "line": 43,
+              "column": 3
+            },
+            {
+              "title": "verify Analysis data",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 2,
+                      "parallelIndex": 2,
+                      "status": "passed",
+                      "duration": 21173,
+                      "errors": [],
+                      "stdout": [
+                        {
+                          "text": "Analysis metric cards: 4\n"
+                        },
+                        {
+                          "text": "Analysis charts: 1\n"
+                        },
+                        {
+                          "text": "Analysis text content (first 500 chars):\n"
+                        },
+                        {
+                          "text": "AnalysisDailyWeeklyMonthlyRefreshstartDateendDatetotalSessions0totalMessages0totalTokens2.50BavgTokensPerSession0tokenTrendtopToolsNo data availablesessionStatisticsavgMessagesPerSession0avgTokensPerSession0totalSessions0Token DistributionNo data available\n"
+                        }
+                      ],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-03-21T16:24:14.420Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "e37f662cb7f4478f6925-85bfaa412f10c61f3aca",
+              "file": "data-verification.spec.ts",
+              "line": 63,
+              "column": 3
+            },
+            {
+              "title": "verify Report data",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 3,
+                      "parallelIndex": 3,
+                      "status": "passed",
+                      "duration": 21309,
+                      "errors": [],
+                      "stdout": [
+                        {
+                          "text": "Report sections: 0\n"
+                        },
+                        {
+                          "text": "Report text content (first 500 chars):\n"
+                        },
+                        {
+                          "text": "myUsageReportRefreshstartDateendDateApplyuser: admindateRange: 2026-02-19 - 2026-03-21totalTokens2.50BInput Tokens2.36BOutput Tokens6.40MtotalRequests33,586tokenTrendToken DistributiondailyUsageDateToolInputOutputtableTokensRequests2026-03-20qwen110.71M286.00K111.00M16592026-03-20openclaw63.06M163.88K63.22M3842026-03-20openclaw000602026-03-19qwen90.42M344.49K90.77M20102026-03-19openclaw63.11M130.50K63.24M02026-03-19openclaw000252026-03-18qwen85.79M243.70K86.04M11822026-03-18openclaw157.29M174.22\n"
+                        }
+                      ],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-03-21T16:24:14.423Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "e37f662cb7f4478f6925-b3e9eb5cba9e1177a479",
+              "file": "data-verification.spec.ts",
+              "line": 83,
+              "column": 3
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-03-21T16:24:13.015Z",
+    "duration": 23843.326,
+    "expected": 2,
+    "skipped": 0,
+    "unexpected": 2,
+    "flaky": 0
+  }
+}

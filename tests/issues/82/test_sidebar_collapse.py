@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Test script for issue 82: Sidebar collapse functionality."""
 
+import pytest
 import asyncio
 from playwright.async_api import async_playwright
 
 
+@pytest.mark.asyncio
 async def test_sidebar_collapse():
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)

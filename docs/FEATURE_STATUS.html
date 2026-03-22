@@ -1,0 +1,1877 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Open ACE 功能实现情况分析报告</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.7;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 30px;
+            color: #333;
+            background-color: #f5f7fa;
+        }
+        h1 {
+            color: #1a365d;
+            border-bottom: 4px solid #3182ce;
+            padding-bottom: 15px;
+            font-size: 2em;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        h2 {
+            color: #2d3748;
+            border-bottom: 2px solid #4299e1;
+            padding-bottom: 10px;
+            margin-top: 40px;
+            font-size: 1.5em;
+        }
+        h3 { color: #3182ce; margin-top: 25px; font-size: 1.2em; }
+        h4 { color: #4a5568; margin-top: 20px; }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 20px 0;
+            background: white;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.07);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        th, td { border: 1px solid #e2e8f0; padding: 14px 16px; text-align: left; }
+        th {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 0.85em;
+            letter-spacing: 0.5px;
+        }
+        tr:nth-child(even) { background-color: #f7fafc; }
+        tr:hover { background-color: #edf2f7; }
+        td { vertical-align: top; }
+        code {
+            background-color: #edf2f7;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', monospace;
+            font-size: 0.88em;
+            color: #e53e3e;
+        }
+        pre {
+            background-color: #1a202c;
+            color: #e2e8f0;
+            padding: 20px;
+            border-radius: 10px;
+            overflow-x: auto;
+            font-size: 0.85em;
+            line-height: 1.6;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        pre code { background-color: transparent; padding: 0; color: inherit; }
+        blockquote {
+            border-left: 5px solid #667eea;
+            margin: 20px 0;
+            padding: 15px 25px;
+            background: linear-gradient(135deg, rgba(102,126,234,0.1) 0%, rgba(118,75,162,0.1) 100%);
+            color: #4a5568;
+            border-radius: 0 8px 8px 0;
+        }
+        blockquote p { margin: 0; }
+        ul, ol { padding-left: 30px; }
+        li { margin: 8px 0; }
+        hr { border: none; border-top: 2px solid #e2e8f0; margin: 40px 0; }
+        a { color: #3182ce; text-decoration: none; border-bottom: 1px dotted #3182ce; }
+        a:hover { color: #2b6cb0; border-bottom-style: solid; }
+        strong { color: #2d3748; }
+        em { color: #4a5568; }
+    </style>
+</head>
+<body>
+<h1 id="open-ace">Open ACE 功能实现情况分析报告</h1>
+<blockquote>
+<p>文档创建时间：2026-03-21
+文档目的：分析当前后端和前端功能实现情况，提出未实现功能的实现方案</p>
+</blockquote>
+<hr />
+<h2 id="_1">目录</h2>
+<ol>
+<li><a href="#1-后端功能实现情况">后端功能实现情况</a></li>
+<li><a href="#2-前端功能实现情况">前端功能实现情况</a></li>
+<li><a href="#3-尚未实现功能的实现方案">尚未实现功能的实现方案</a></li>
+<li><a href="#4-实施优先级建议">实施优先级建议</a></li>
+<li><a href="#5-总结">总结</a></li>
+</ol>
+<hr />
+<h2 id="1">1. 后端功能实现情况</h2>
+<h3 id="11">1.1 已完整实现的模块</h3>
+<table>
+<thead>
+<tr>
+<th>模块</th>
+<th>文件位置</th>
+<th>功能描述</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>核心路由</strong></td>
+<td><code>app/routes/</code></td>
+<td>usage, messages, analysis, auth, admin, upload, pages, fetch, report</td>
+</tr>
+<tr>
+<td><strong>Governance</strong></td>
+<td><code>app/modules/governance/</code></td>
+<td>audit_logger（审计日志）、content_filter（内容过滤）、quota_manager（配额管理）</td>
+</tr>
+<tr>
+<td><strong>Analytics</strong></td>
+<td><code>app/modules/analytics/</code></td>
+<td>usage_analytics（用量分析）</td>
+</tr>
+<tr>
+<td><strong>Workspace</strong></td>
+<td><code>app/modules/workspace/</code></td>
+<td>prompt_library（模板库）、session_manager（会话管理）、tool_connector（工具连接）、state_sync（状态同步）、collaboration（协作）</td>
+</tr>
+<tr>
+<td><strong>SSO</strong></td>
+<td><code>app/modules/sso/</code></td>
+<td>provider, oauth2, oidc, manager</td>
+</tr>
+<tr>
+<td><strong>Compliance</strong></td>
+<td><code>app/modules/compliance/</code></td>
+<td>report（合规报告）、audit（审计分析）、retention（数据保留）</td>
+</tr>
+<tr>
+<td><strong>Tenant</strong></td>
+<td><code>app/models/tenant.py</code></td>
+<td>多租户模型、租户服务、租户仓库</td>
+</tr>
+<tr>
+<td><strong>Services 层</strong></td>
+<td><code>app/services/</code></td>
+<td>usage, message, auth, analysis, permission, workspace, tenant</td>
+</tr>
+<tr>
+<td><strong>Repositories 层</strong></td>
+<td><code>app/repositories/</code></td>
+<td>usage, message, user, tenant, database</td>
+</tr>
+</tbody>
+</table>
+<h3 id="12">1.2 模块详细说明</h3>
+<h4 id="governance">Governance 模块</h4>
+<pre><code>app/modules/governance/
+├── __init__.py
+├── audit_logger.py      # 审计日志记录
+├── content_filter.py    # 敏感内容过滤
+└── quota_manager.py     # 配额管理和告警
+</code></pre>
+<p><strong>已实现功能</strong>：
+- ✅ 操作审计日志记录
+- ✅ 敏感词检测和 PII 识别
+- ✅ 用户配额追踪
+- ✅ 配额告警生成（80%、95%、100%）</p>
+<h4 id="workspace">Workspace 模块</h4>
+<pre><code>app/modules/workspace/
+├── __init__.py
+├── prompt_library.py    # Prompt 模板库
+├── session_manager.py   # 会话持久化管理
+├── tool_connector.py    # AI 工具连接器
+├── state_sync.py        # 状态同步管理
+└── collaboration.py     # 团队协作功能
+</code></pre>
+<p><strong>已实现功能</strong>：
+- ✅ Prompt 模板 CRUD 操作
+- ✅ 模板分类和标签管理
+- ✅ 模板变量渲染
+- ✅ 会话创建、恢复、归档
+- ✅ 会话消息管理
+- ✅ 工具健康检查
+- ✅ 实时状态同步
+- ✅ 团队管理和会话共享</p>
+<h4 id="sso">SSO 模块</h4>
+<pre><code>app/modules/sso/
+├── __init__.py
+├── provider.py          # SSO 提供者基类
+├── oauth2.py            # OAuth2 实现
+├── oidc.py              # OIDC 实现
+└── manager.py           # SSO 管理器
+</code></pre>
+<p><strong>已实现功能</strong>：
+- ✅ OAuth2 认证流程
+- ✅ OIDC 认证流程
+- ✅ 多提供者支持</p>
+<h4 id="compliance">Compliance 模块</h4>
+<pre><code>app/modules/compliance/
+├── __init__.py
+├── report.py            # 合规报告生成
+├── audit.py             # 审计分析
+└── retention.py         # 数据保留管理
+</code></pre>
+<p><strong>已实现功能</strong>：
+- ✅ 合规报告生成
+- ✅ 审计数据分析
+- ✅ 数据保留策略</p>
+<h3 id="13">1.3 部分实现/待完善的模块</h3>
+<table>
+<thead>
+<tr>
+<th>模块</th>
+<th>当前状态</th>
+<th>缺失部分</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>ROI Calculator</strong></td>
+<td>未实现</td>
+<td>成本效益分析、价值评估</td>
+</tr>
+<tr>
+<td><strong>Cost Optimizer</strong></td>
+<td>未实现</td>
+<td>成本优化建议、节省报告</td>
+</tr>
+<tr>
+<td><strong>实时告警</strong></td>
+<td>框架存在</td>
+<td>WebSocket 推送、邮件/消息通知</td>
+</tr>
+<tr>
+<td><strong>移动端 API</strong></td>
+<td>未实现</td>
+<td>响应式 API 优化</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="2">2. 前端功能实现情况</h2>
+<h3 id="21">2.1 页面与用户角色对应关系</h3>
+<p>根据 <code>static/js/auth.js</code> 中的 <code>updateNavMenu</code> 函数，页面按用户角色区分显示：</p>
+<table>
+<thead>
+<tr>
+<th>用户角色</th>
+<th>可见页面</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Admin 用户</strong></td>
+<td>Dashboard、Messages、Analysis、Management</td>
+</tr>
+<tr>
+<td><strong>普通用户</strong></td>
+<td>Workspace、Report</td>
+</tr>
+</tbody>
+</table>
+<h3 id="22">2.2 已完整实现的功能</h3>
+<table>
+<thead>
+<tr>
+<th>页面</th>
+<th>功能</th>
+<th>可见用户</th>
+<th>状态</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Dashboard</strong></td>
+<td>用量监视、图表展示、数据概览</td>
+<td>Admin</td>
+<td>✅ 完整</td>
+</tr>
+<tr>
+<td><strong>Messages</strong></td>
+<td>消息追踪、搜索、过滤、详情查看</td>
+<td>Admin</td>
+<td>✅ 完整</td>
+</tr>
+<tr>
+<td><strong>Analysis</strong></td>
+<td>深度分析、趋势图表、对比分析、对话历史（Conversation History tab）</td>
+<td>Admin</td>
+<td>✅ 完整</td>
+</tr>
+<tr>
+<td><strong>Management</strong></td>
+<td>用户管理、配额管理、审计日志、内容过滤、安全设置</td>
+<td>Admin</td>
+<td>✅ 完整</td>
+</tr>
+<tr>
+<td><strong>Workspace</strong></td>
+<td>AI 工作空间（iframe 嵌入外部工具）</td>
+<td>普通用户</td>
+<td>✅ 完整</td>
+</tr>
+<tr>
+<td><strong>Report</strong></td>
+<td>个人用量报告、Token 使用图表、请求统计</td>
+<td>普通用户</td>
+<td>✅ 完整</td>
+</tr>
+</tbody>
+</table>
+<h3 id="23-workspace">2.3 Workspace 页面实现详情</h3>
+<p>Workspace 页面通过 iframe 嵌入外部 AI 工具，配置方式：</p>
+<pre><code class="language-json">// config.json
+{
+    &quot;workspace&quot;: {
+        &quot;enabled&quot;: true,
+        &quot;url&quot;: &quot;http://your-workspace-url&quot;
+    }
+}
+</code></pre>
+<p><strong>前端代码</strong>（<code>templates/index.html</code>）：</p>
+<pre><code class="language-html">&lt;div id=&quot;workspace-section&quot; class=&quot;content-section&quot; style=&quot;display: none;&quot;&gt;
+    {% if workspace_enabled %}
+    &lt;iframe src=&quot;{{ workspace_url }}/&quot; id=&quot;workspace-frame&quot;
+            style=&quot;width: 100%; height: calc(100vh - 160px); border: none;&quot;&gt;
+    &lt;/iframe&gt;
+    {% else %}
+    &lt;div&gt;Workspace Not Configured&lt;/div&gt;
+    {% endif %}
+&lt;/div&gt;
+</code></pre>
+<h3 id="24-report">2.4 Report 页面实现详情</h3>
+<p>Report 页面为普通用户提供个人用量报告：</p>
+<ul>
+<li>Token 使用统计</li>
+<li>请求次数统计</li>
+<li>按工具分类的使用图表</li>
+<li>趋势图表展示</li>
+</ul>
+<h3 id="25">2.5 待完善的前端功能</h3>
+<table>
+<thead>
+<tr>
+<th>功能</th>
+<th>说明</th>
+<th>优先级</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Prompt 模板库 UI</strong></td>
+<td>模板管理、分类、搜索、使用界面（后端 API 已实现）</td>
+<td>中</td>
+</tr>
+<tr>
+<td><strong>会话管理 UI</strong></td>
+<td>会话列表、恢复、归档界面（后端 API 已实现）</td>
+<td>中</td>
+</tr>
+<tr>
+<td><strong>团队协作 UI</strong></td>
+<td>团队管理、会话共享、知识库界面（后端 API 已实现）</td>
+<td>低</td>
+</tr>
+<tr>
+<td><strong>实时告警通知</strong></td>
+<td>前端通知组件、告警中心</td>
+<td>中</td>
+</tr>
+<tr>
+<td><strong>SSO 登录适配</strong></td>
+<td>前端登录页面适配 SSO 流程</td>
+<td>低</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="3">3. 尚未实现功能的实现方案</h2>
+<h3 id="31-prompt-ui">3.1 Prompt 模板库 UI 实现方案</h3>
+<p><strong>目标</strong>：为用户提供 Prompt 模板管理界面</p>
+<p><strong>当前状态</strong>：后端 API 已完整实现（<code>app/modules/workspace/prompt_library.py</code>），前端 UI 待开发</p>
+<h4 id="_2">实施步骤</h4>
+<pre><code>Phase 1: 模板列表页面 (1-2 天)
+├── 模板列表表格/卡片视图
+├── 分类筛选器
+├── 标签筛选器
+├── 搜索功能
+└── 分页组件
+
+Phase 2: 模板创建/编辑 (1-2 天)
+├── 模板创建表单
+├── 模板编辑表单
+├── 变量定义界面
+└── 模板预览
+
+Phase 3: 模板使用 (1 天)
+├── 变量填充界面
+├── 模板渲染预览
+└── 一键复制/发送到 Workspace
+</code></pre>
+<h4 id="api">API 接口</h4>
+<table>
+<thead>
+<tr>
+<th>接口</th>
+<th>方法</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/api/workspace/prompts</code></td>
+<td>GET</td>
+<td>获取模板列表</td>
+</tr>
+<tr>
+<td><code>/api/workspace/prompts</code></td>
+<td>POST</td>
+<td>创建模板</td>
+</tr>
+<tr>
+<td><code>/api/workspace/prompts/&lt;id&gt;</code></td>
+<td>GET</td>
+<td>获取模板详情</td>
+</tr>
+<tr>
+<td><code>/api/workspace/prompts/&lt;id&gt;</code></td>
+<td>PUT</td>
+<td>更新模板</td>
+</tr>
+<tr>
+<td><code>/api/workspace/prompts/&lt;id&gt;</code></td>
+<td>DELETE</td>
+<td>删除模板</td>
+</tr>
+<tr>
+<td><code>/api/workspace/prompts/&lt;id&gt;/render</code></td>
+<td>POST</td>
+<td>渲染模板</td>
+</tr>
+<tr>
+<td><code>/api/workspace/prompts/categories</code></td>
+<td>GET</td>
+<td>获取分类列表</td>
+</tr>
+<tr>
+<td><code>/api/workspace/prompts/featured</code></td>
+<td>GET</td>
+<td>获取精选模板</td>
+</tr>
+</tbody>
+</table>
+<h4 id="_3">前端代码示例</h4>
+<pre><code class="language-html">&lt;!-- Prompt 模板库面板 --&gt;
+&lt;div id=&quot;prompt-library-panel&quot; class=&quot;card&quot;&gt;
+    &lt;div class=&quot;card-header d-flex justify-content-between&quot;&gt;
+        &lt;h5&gt;Prompt Templates&lt;/h5&gt;
+        &lt;button class=&quot;btn btn-primary btn-sm&quot; onclick=&quot;showCreateTemplateModal()&quot;&gt;
+            &lt;i class=&quot;bi bi-plus&quot;&gt;&lt;/i&gt; New Template
+        &lt;/button&gt;
+    &lt;/div&gt;
+    &lt;div class=&quot;card-body&quot;&gt;
+        &lt;!-- 筛选器 --&gt;
+        &lt;div class=&quot;row mb-3&quot;&gt;
+            &lt;div class=&quot;col-md-4&quot;&gt;
+                &lt;select id=&quot;category-filter&quot; class=&quot;form-select&quot; onchange=&quot;loadTemplates()&quot;&gt;
+                    &lt;option value=&quot;&quot;&gt;All Categories&lt;/option&gt;
+                &lt;/select&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;col-md-4&quot;&gt;
+                &lt;input type=&quot;text&quot; id=&quot;search-input&quot; class=&quot;form-control&quot; 
+                       placeholder=&quot;Search templates...&quot; onkeyup=&quot;debounce(loadTemplates, 300)&quot;&gt;
+            &lt;/div&gt;
+        &lt;/div&gt;
+        &lt;!-- 模板列表 --&gt;
+        &lt;div id=&quot;template-list&quot; class=&quot;row&quot;&gt;&lt;/div&gt;
+    &lt;/div&gt;
+&lt;/div&gt;
+</code></pre>
+<pre><code class="language-javascript">// 加载模板列表
+async function loadTemplates() {
+    const category = document.getElementById('category-filter').value;
+    const search = document.getElementById('search-input').value;
+
+    const params = new URLSearchParams();
+    if (category) params.append('category', category);
+    if (search) params.append('search', search);
+
+    const response = await fetch(`/api/workspace/prompts?${params}`);
+    const data = await response.json();
+
+    if (data.success) {
+        renderTemplateList(data.data.templates);
+    }
+}
+
+// 渲染模板列表
+function renderTemplateList(templates) {
+    const container = document.getElementById('template-list');
+    container.innerHTML = templates.map(t =&gt; `
+        &lt;div class=&quot;col-md-4 mb-3&quot;&gt;
+            &lt;div class=&quot;card h-100&quot;&gt;
+                &lt;div class=&quot;card-body&quot;&gt;
+                    &lt;h6 class=&quot;card-title&quot;&gt;${t.name}&lt;/h6&gt;
+                    &lt;p class=&quot;card-text small text-muted&quot;&gt;${t.description}&lt;/p&gt;
+                    &lt;div class=&quot;d-flex gap-1&quot;&gt;
+                        ${t.tags.map(tag =&gt; `&lt;span class=&quot;badge bg-secondary&quot;&gt;${tag}&lt;/span&gt;`).join('')}
+                    &lt;/div&gt;
+                &lt;/div&gt;
+                &lt;div class=&quot;card-footer bg-transparent&quot;&gt;
+                    &lt;button class=&quot;btn btn-sm btn-outline-primary&quot; onclick=&quot;useTemplate(${t.id})&quot;&gt;
+                        Use
+                    &lt;/button&gt;
+                    &lt;button class=&quot;btn btn-sm btn-outline-secondary&quot; onclick=&quot;editTemplate(${t.id})&quot;&gt;
+                        Edit
+                    &lt;/button&gt;
+                &lt;/div&gt;
+            &lt;/div&gt;
+        &lt;/div&gt;
+    `).join('');
+}
+</code></pre>
+<hr />
+<h3 id="32-ui">3.2 会话管理 UI 实现方案</h3>
+<p><strong>目标</strong>：提供会话持久化管理界面</p>
+<p><strong>当前状态</strong>：后端 API 已完整实现（<code>app/modules/workspace/session_manager.py</code>），前端 UI 待开发</p>
+<h4 id="api_1">API 接口</h4>
+<table>
+<thead>
+<tr>
+<th>接口</th>
+<th>方法</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/api/workspace/sessions</code></td>
+<td>GET</td>
+<td>获取会话列表</td>
+</tr>
+<tr>
+<td><code>/api/workspace/sessions</code></td>
+<td>POST</td>
+<td>创建会话</td>
+</tr>
+<tr>
+<td><code>/api/workspace/sessions/&lt;id&gt;</code></td>
+<td>GET</td>
+<td>获取会话详情</td>
+</tr>
+<tr>
+<td><code>/api/workspace/sessions/&lt;id&gt;/messages</code></td>
+<td>POST</td>
+<td>添加消息</td>
+</tr>
+<tr>
+<td><code>/api/workspace/sessions/&lt;id&gt;/complete</code></td>
+<td>POST</td>
+<td>完成会话</td>
+</tr>
+<tr>
+<td><code>/api/workspace/sessions/&lt;id&gt;</code></td>
+<td>DELETE</td>
+<td>删除会话</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="33">3.3 实时告警系统实现方案</h3>
+<p><strong>目标</strong>：实时推送配额告警、系统通知</p>
+<h4 id="_4">后端实现</h4>
+<pre><code class="language-python"># app/modules/governance/alert_notifier.py
+
+import asyncio
+import logging
+from typing import List, Callable, Set
+from dataclasses import dataclass, asdict
+from datetime import datetime
+import aiohttp
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class Alert:
+    &quot;&quot;&quot;告警数据结构&quot;&quot;&quot;
+    alert_id: str
+    alert_type: str  # quota, system, security
+    severity: str    # info, warning, critical
+    title: str
+    message: str
+    user_id: int
+    created_at: datetime
+
+    def to_dict(self):
+        return {
+            **asdict(self),
+            'created_at': self.created_at.isoformat()
+        }
+
+
+class AlertNotifier:
+    &quot;&quot;&quot;实时告警通知器&quot;&quot;&quot;
+
+    def __init__(self):
+        self._subscribers: List[Callable] = []
+        self._websocket_clients: Set = set()
+        self._email_config = {}
+        self._webhooks = {}
+
+    def subscribe(self, callback: Callable):
+        &quot;&quot;&quot;订阅告警&quot;&quot;&quot;
+        self._subscribers.append(callback)
+
+    def register_websocket(self, ws):
+        &quot;&quot;&quot;注册 WebSocket 客户端&quot;&quot;&quot;
+        self._websocket_clients.add(ws)
+
+    def unregister_websocket(self, ws):
+        &quot;&quot;&quot;注销 WebSocket 客户端&quot;&quot;&quot;
+        self._websocket_clients.discard(ws)
+
+    async def broadcast(self, alert: Alert):
+        &quot;&quot;&quot;广播告警到所有订阅者&quot;&quot;&quot;
+        # 1. 调用订阅者回调
+        for callback in self._subscribers:
+            try:
+                if asyncio.iscoroutinefunction(callback):
+                    await callback(alert)
+                else:
+                    callback(alert)
+            except Exception as e:
+                logger.error(f&quot;Error in alert callback: {e}&quot;)
+
+        # 2. WebSocket 推送
+        alert_dict = alert.to_dict()
+        for ws in list(self._websocket_clients):
+            try:
+                await ws.send_json(alert_dict)
+            except Exception as e:
+                logger.error(f&quot;Error sending to WebSocket: {e}&quot;)
+                self._websocket_clients.discard(ws)
+
+    async def send_email_alert(self, alert: Alert, user_email: str):
+        &quot;&quot;&quot;发送邮件告警&quot;&quot;&quot;
+        # TODO: 实现邮件发送逻辑
+        logger.info(f&quot;Sending email alert to {user_email}: {alert.title}&quot;)
+
+    async def send_webhook_alert(self, alert: Alert, webhook_url: str):
+        &quot;&quot;&quot;发送 Webhook 告警&quot;&quot;&quot;
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    webhook_url,
+                    json=alert.to_dict(),
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as response:
+                    if response.status &gt;= 400:
+                        logger.error(f&quot;Webhook failed: {response.status}&quot;)
+        except Exception as e:
+            logger.error(f&quot;Error sending webhook: {e}&quot;)
+
+    async def notify_user(self, user_id: int, alert: Alert):
+        &quot;&quot;&quot;通知特定用户&quot;&quot;&quot;
+        # 获取用户通知偏好
+        preferences = await self._get_user_preferences(user_id)
+
+        # WebSocket 推送
+        # (通过用户关联的 WebSocket 连接)
+
+        # 邮件通知
+        if preferences.get('email_enabled') and alert.severity in ['warning', 'critical']:
+            await self.send_email_alert(alert, preferences.get('email'))
+
+        # Webhook 通知
+        if preferences.get('webhook_url'):
+            await self.send_webhook_alert(alert, preferences['webhook_url'])
+
+    async def _get_user_preferences(self, user_id: int) -&gt; dict:
+        &quot;&quot;&quot;获取用户通知偏好&quot;&quot;&quot;
+        # TODO: 从数据库获取
+        return {
+            'email_enabled': True,
+            'email': f'user{user_id}@example.com',
+            'webhook_url': None
+        }
+
+
+# 全局告警通知器实例
+_alert_notifier: AlertNotifier = None
+
+
+def get_alert_notifier() -&gt; AlertNotifier:
+    &quot;&quot;&quot;获取全局告警通知器&quot;&quot;&quot;
+    global _alert_notifier
+    if _alert_notifier is None:
+        _alert_notifier = AlertNotifier()
+    return _alert_notifier
+</code></pre>
+<h4 id="websocket">WebSocket 路由</h4>
+<pre><code class="language-python"># app/routes/alerts.py
+
+from flask import Blueprint, request
+from flask_socketio import emit, join_room, leave_room
+import logging
+
+logger = logging.getLogger(__name__)
+
+alerts_bp = Blueprint('alerts', __name__)
+
+
+# Socket.IO 事件处理
+def register_socket_events(socketio):
+    @socketio.on('connect', namespace='/alerts')
+    def handle_connect():
+        logger.info(f&quot;Client connected to alerts: {request.sid}&quot;)
+
+    @socketio.on('disconnect', namespace='/alerts')
+    def handle_disconnect():
+        logger.info(f&quot;Client disconnected from alerts: {request.sid}&quot;)
+
+    @socketio.on('subscribe', namespace='/alerts')
+    def handle_subscribe(data):
+        user_id = data.get('user_id')
+        if user_id:
+            join_room(f'user_{user_id}')
+            logger.info(f&quot;User {user_id} subscribed to alerts&quot;)
+
+    @socketio.on('unsubscribe', namespace='/alerts')
+    def handle_unsubscribe(data):
+        user_id = data.get('user_id')
+        if user_id:
+            leave_room(f'user_{user_id}')
+</code></pre>
+<h4 id="_5">前端实现</h4>
+<pre><code class="language-javascript">// WebSocket 连接管理
+class AlertManager {
+    constructor() {
+        this.socket = null;
+        this.connected = false;
+        this.reconnectAttempts = 0;
+        this.maxReconnectAttempts = 5;
+    }
+
+    connect(userId) {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/api/alerts/ws`;
+
+        this.socket = new WebSocket(wsUrl);
+
+        this.socket.onopen = () =&gt; {
+            console.log('Alert WebSocket connected');
+            this.connected = true;
+            this.reconnectAttempts = 0;
+
+            // 订阅用户告警
+            this.socket.send(JSON.stringify({
+                type: 'subscribe',
+                user_id: userId
+            }));
+        };
+
+        this.socket.onmessage = (event) =&gt; {
+            const alert = JSON.parse(event.data);
+            this.handleAlert(alert);
+        };
+
+        this.socket.onclose = () =&gt; {
+            console.log('Alert WebSocket disconnected');
+            this.connected = false;
+            this.attemptReconnect(userId);
+        };
+
+        this.socket.onerror = (error) =&gt; {
+            console.error('Alert WebSocket error:', error);
+        };
+    }
+
+    attemptReconnect(userId) {
+        if (this.reconnectAttempts &lt; this.maxReconnectAttempts) {
+            this.reconnectAttempts++;
+            const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
+            console.log(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
+            setTimeout(() =&gt; this.connect(userId), delay);
+        }
+    }
+
+    handleAlert(alert) {
+        console.log('Received alert:', alert);
+
+        // 显示通知
+        this.showNotification(alert);
+
+        // 更新告警计数
+        this.updateAlertBadge();
+
+        // 如果是严重告警，显示模态框
+        if (alert.severity === 'critical') {
+            this.showCriticalAlertModal(alert);
+        }
+    }
+
+    showNotification(alert) {
+        // 使用 Bootstrap Toast
+        const toastContainer = document.getElementById('alert-toast-container');
+        if (!toastContainer) return;
+
+        const severityClass = {
+            'info': 'bg-info',
+            'warning': 'bg-warning',
+            'critical': 'bg-danger'
+        }[alert.severity] || 'bg-secondary';
+
+        const toastHtml = `
+            &lt;div class=&quot;toast ${severityClass} text-white&quot; role=&quot;alert&quot;&gt;
+                &lt;div class=&quot;toast-header&quot;&gt;
+                    &lt;strong class=&quot;me-auto&quot;&gt;${alert.title}&lt;/strong&gt;
+                    &lt;small&gt;${new Date(alert.created_at).toLocaleTimeString()}&lt;/small&gt;
+                    &lt;button type=&quot;button&quot; class=&quot;btn-close&quot; data-bs-dismiss=&quot;toast&quot;&gt;&lt;/button&gt;
+                &lt;/div&gt;
+                &lt;div class=&quot;toast-body&quot;&gt;
+                    ${alert.message}
+                &lt;/div&gt;
+            &lt;/div&gt;
+        `;
+
+        toastContainer.insertAdjacentHTML('beforeend', toastHtml);
+        const toastEl = toastContainer.lastElementChild;
+        const toast = new bootstrap.Toast(toastEl, { delay: 5000 });
+        toast.show();
+
+        toastEl.addEventListener('hidden.bs.toast', () =&gt; {
+            toastEl.remove();
+        });
+    }
+
+    updateAlertBadge() {
+        const badge = document.getElementById('alert-badge');
+        if (badge) {
+            const count = parseInt(badge.textContent || '0') + 1;
+            badge.textContent = count;
+            badge.style.display = count &gt; 0 ? 'inline' : 'none';
+        }
+    }
+
+    showCriticalAlertModal(alert) {
+        // 显示严重告警模态框
+        const modal = new bootstrap.Modal(document.getElementById('critical-alert-modal'));
+        document.getElementById('critical-alert-title').textContent = alert.title;
+        document.getElementById('critical-alert-message').textContent = alert.message;
+        modal.show();
+    }
+}
+
+// 初始化
+const alertManager = new AlertManager();
+</code></pre>
+<hr />
+<h3 id="34-roi">3.4 ROI 分析模块实现方案</h3>
+<p><strong>目标</strong>：计算和展示 AI 使用的投资回报率</p>
+<h4 id="_6">后端实现</h4>
+<pre><code class="language-python"># app/modules/analytics/roi_calculator.py
+
+&quot;&quot;&quot;
+Open ACE - ROI Calculator Module
+
+Calculates Return on Investment for AI usage.
+&quot;&quot;&quot;
+
+import logging
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ROIMetrics:
+    &quot;&quot;&quot;ROI 指标数据结构&quot;&quot;&quot;
+    period: str
+    start_date: str
+    end_date: str
+    total_cost: float = 0.0
+    tokens_used: int = 0
+    requests_made: int = 0
+    estimated_hours_saved: float = 0.0
+    estimated_savings: float = 0.0
+    productivity_gain: float = 0.0
+    roi_percentage: float = 0.0
+    cost_per_request: float = 0.0
+    cost_per_token: float = 0.0
+
+    def to_dict(self) -&gt; dict:
+        return {
+            'period': self.period,
+            'start_date': self.start_date,
+            'end_date': self.end_date,
+            'total_cost': round(self.total_cost, 4),
+            'tokens_used': self.tokens_used,
+            'requests_made': self.requests_made,
+            'estimated_hours_saved': round(self.estimated_hours_saved, 2),
+            'estimated_savings': round(self.estimated_savings, 2),
+            'productivity_gain': round(self.productivity_gain, 2),
+            'roi_percentage': round(self.roi_percentage, 2),
+            'cost_per_request': round(self.cost_per_request, 6),
+            'cost_per_token': round(self.cost_per_token, 8),
+        }
+
+
+@dataclass
+class ModelPricing:
+    &quot;&quot;&quot;模型定价&quot;&quot;&quot;
+    input_price: float   # per 1K tokens
+    output_price: float  # per 1K tokens
+
+
+class ROICalculator:
+    &quot;&quot;&quot;ROI 计算器&quot;&quot;&quot;
+
+    # 模型定价（每 1K tokens，美元）
+    MODEL_PRICING = {
+        'claude-3-opus': ModelPricing(input_price=0.015, output_price=0.075),
+        'claude-3-sonnet': ModelPricing(input_price=0.003, output_price=0.015),
+        'claude-3-haiku': ModelPricing(input_price=0.00025, output_price=0.00125),
+        'claude-3-5-sonnet': ModelPricing(input_price=0.003, output_price=0.015),
+        'qwen-max': ModelPricing(input_price=0.02, output_price=0.06),
+        'qwen-plus': ModelPricing(input_price=0.004, output_price=0.012),
+        'qwen-turbo': ModelPricing(input_price=0.002, output_price=0.006),
+        'gpt-4': ModelPricing(input_price=0.03, output_price=0.06),
+        'gpt-4-turbo': ModelPricing(input_price=0.01, output_price=0.03),
+        'gpt-3.5-turbo': ModelPricing(input_price=0.0005, output_price=0.0015),
+    }
+
+    # 默认定价（未知模型）
+    DEFAULT_PRICING = ModelPricing(input_price=0.01, output_price=0.03)
+
+    # 假设人工处理成本
+    HOURLY_LABOR_COST = 50.0  # 美元/小时
+
+    # AI 效率提升倍数
+    PRODUCTIVITY_MULTIPLIER = 10.0
+
+    # 平均每个请求节省的时间（分钟）
+    AVG_TIME_SAVED_PER_REQUEST = 5.0
+
+    def __init__(self, db_path: str):
+        self.db_path = db_path
+
+    def calculate_roi(
+        self,
+        start_date: str,
+        end_date: str,
+        user_id: Optional[int] = None,
+        tool_name: Optional[str] = None
+    ) -&gt; ROIMetrics:
+        &quot;&quot;&quot;
+        计算指定时间段的 ROI
+
+        Args:
+            start_date: 开始日期 (YYYY-MM-DD)
+            end_date: 结束日期 (YYYY-MM-DD)
+            user_id: 可选的用户 ID 筛选
+            tool_name: 可选的工具名称筛选
+
+        Returns:
+            ROIMetrics: ROI 指标
+        &quot;&quot;&quot;
+        import sqlite3
+
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        # 构建查询
+        query = '''
+            SELECT 
+                COUNT(*) as request_count,
+                SUM(input_tokens) as total_input_tokens,
+                SUM(output_tokens) as total_output_tokens,
+                SUM(input_tokens + output_tokens) as total_tokens
+            FROM daily_usage
+            WHERE date &gt;= ? AND date &lt;= ?
+        '''
+        params = [start_date, end_date]
+
+        if user_id:
+            query += ' AND user_id = ?'
+            params.append(user_id)
+
+        if tool_name:
+            query += ' AND tool_name = ?'
+            params.append(tool_name)
+
+        cursor.execute(query, params)
+        row = cursor.fetchone()
+
+        # 获取模型使用详情
+        model_query = '''
+            SELECT tool_name, model, 
+                   SUM(input_tokens) as input_tokens,
+                   SUM(output_tokens) as output_tokens
+            FROM daily_usage
+            WHERE date &gt;= ? AND date &lt;= ?
+        '''
+        model_params = [start_date, end_date]
+
+        if user_id:
+            model_query += ' AND user_id = ?'
+            model_params.append(user_id)
+
+        if tool_name:
+            model_query += ' AND tool_name = ?'
+            model_params.append(tool_name)
+
+        model_query += ' GROUP BY tool_name, model'
+
+        cursor.execute(model_query, model_params)
+        model_rows = cursor.fetchall()
+        conn.close()
+
+        # 计算成本
+        total_cost = 0.0
+        for model_row in model_rows:
+            model_name = model_row['model'] or 'default'
+            pricing = self.MODEL_PRICING.get(model_name, self.DEFAULT_PRICING)
+
+            input_cost = (model_row['input_tokens'] or 0) / 1000 * pricing.input_price
+            output_cost = (model_row['output_tokens'] or 0) / 1000 * pricing.output_price
+            total_cost += input_cost + output_cost
+
+        # 获取统计数据
+        requests = row['request_count'] or 0
+        tokens = row['total_tokens'] or 0
+
+        # 计算节省
+        estimated_hours_saved = requests * self.AVG_TIME_SAVED_PER_REQUEST / 60
+        estimated_savings = estimated_hours_saved * self.HOURLY_LABOR_COST
+
+        # 计算 ROI
+        if total_cost &gt; 0:
+            roi_percentage = ((estimated_savings - total_cost) / total_cost) * 100
+        else:
+            roi_percentage = 0.0
+
+        # 效率提升
+        productivity_gain = (self.PRODUCTIVITY_MULTIPLIER - 1) * 100
+
+        # 单位成本
+        cost_per_request = total_cost / requests if requests &gt; 0 else 0
+        cost_per_token = total_cost / tokens if tokens &gt; 0 else 0
+
+        return ROIMetrics(
+            period=f&quot;{start_date} to {end_date}&quot;,
+            start_date=start_date,
+            end_date=end_date,
+            total_cost=total_cost,
+            tokens_used=tokens,
+            requests_made=requests,
+            estimated_hours_saved=estimated_hours_saved,
+            estimated_savings=estimated_savings,
+            productivity_gain=productivity_gain,
+            roi_percentage=roi_percentage,
+            cost_per_request=cost_per_request,
+            cost_per_token=cost_per_token,
+        )
+
+    def get_roi_trend(
+        self,
+        months: int = 6,
+        user_id: Optional[int] = None
+    ) -&gt; List[ROIMetrics]:
+        &quot;&quot;&quot;
+        获取 ROI 趋势
+
+        Args:
+            months: 月数
+            user_id: 可选的用户 ID
+
+        Returns:
+            List[ROIMetrics]: ROI 趋势列表
+        &quot;&quot;&quot;
+        trends = []
+        today = datetime.utcnow()
+
+        for i in range(months):
+            end_date = today - timedelta(days=i*30)
+            start_date = end_date - timedelta(days=30)
+
+            roi = self.calculate_roi(
+                start_date.strftime('%Y-%m-%d'),
+                end_date.strftime('%Y-%m-%d'),
+                user_id
+            )
+            trends.append(roi)
+
+        return list(reversed(trends))
+
+    def get_roi_by_tool(
+        self,
+        start_date: str,
+        end_date: str
+    ) -&gt; Dict[str, ROIMetrics]:
+        &quot;&quot;&quot;
+        按工具获取 ROI
+
+        Args:
+            start_date: 开始日期
+            end_date: 结束日期
+
+        Returns:
+            Dict[str, ROIMetrics]: 工具名称到 ROI 的映射
+        &quot;&quot;&quot;
+        import sqlite3
+
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            SELECT DISTINCT tool_name FROM daily_usage
+            WHERE date &gt;= ? AND date &lt;= ?
+        ''', (start_date, end_date))
+
+        tools = [row[0] for row in cursor.fetchall()]
+        conn.close()
+
+        result = {}
+        for tool in tools:
+            if tool:
+                result[tool] = self.calculate_roi(start_date, end_date, tool_name=tool)
+
+        return result
+
+    def get_roi_by_user(
+        self,
+        start_date: str,
+        end_date: str
+    ) -&gt; Dict[int, ROIMetrics]:
+        &quot;&quot;&quot;
+        按用户获取 ROI
+
+        Args:
+            start_date: 开始日期
+            end_date: 结束日期
+
+        Returns:
+            Dict[int, ROIMetrics]: 用户 ID 到 ROI 的映射
+        &quot;&quot;&quot;
+        import sqlite3
+
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            SELECT DISTINCT user_id FROM daily_usage
+            WHERE date &gt;= ? AND date &lt;= ? AND user_id IS NOT NULL
+        ''', (start_date, end_date))
+
+        users = [row[0] for row in cursor.fetchall()]
+        conn.close()
+
+        result = {}
+        for user_id in users:
+            result[user_id] = self.calculate_roi(start_date, end_date, user_id=user_id)
+
+        return result
+</code></pre>
+<h4 id="api_2">API 路由</h4>
+<pre><code class="language-python"># app/routes/roi.py
+
+from flask import Blueprint, jsonify, request
+from app.modules.analytics.roi_calculator import ROICalculator
+from pathlib import Path
+import logging
+
+logger = logging.getLogger(__name__)
+
+roi_bp = Blueprint('roi', __name__)
+
+CONFIG_DIR = Path.home() / &quot;.open-ace&quot;
+DB_PATH = CONFIG_DIR / &quot;usage.db&quot;
+
+
+@roi_bp.route('/roi', methods=['GET'])
+def get_roi():
+    &quot;&quot;&quot;获取 ROI 指标&quot;&quot;&quot;
+    try:
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        user_id = request.args.get('user_id', type=int)
+        tool_name = request.args.get('tool_name')
+
+        if not start_date or not end_date:
+            return jsonify({
+                'success': False,
+                'error': 'start_date and end_date are required'
+            }), 400
+
+        calculator = ROICalculator(str(DB_PATH))
+        roi = calculator.calculate_roi(start_date, end_date, user_id, tool_name)
+
+        return jsonify({
+            'success': True,
+            'data': roi.to_dict()
+        })
+    except Exception as e:
+        logger.error(f&quot;Error calculating ROI: {e}&quot;)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@roi_bp.route('/roi/trend', methods=['GET'])
+def get_roi_trend():
+    &quot;&quot;&quot;获取 ROI 趋势&quot;&quot;&quot;
+    try:
+        months = request.args.get('months', default=6, type=int)
+        user_id = request.args.get('user_id', type=int)
+
+        calculator = ROICalculator(str(DB_PATH))
+        trends = calculator.get_roi_trend(months, user_id)
+
+        return jsonify({
+            'success': True,
+            'data': [t.to_dict() for t in trends]
+        })
+    except Exception as e:
+        logger.error(f&quot;Error getting ROI trend: {e}&quot;)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@roi_bp.route('/roi/by-tool', methods=['GET'])
+def get_roi_by_tool():
+    &quot;&quot;&quot;按工具获取 ROI&quot;&quot;&quot;
+    try:
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+
+        if not start_date or not end_date:
+            return jsonify({
+                'success': False,
+                'error': 'start_date and end_date are required'
+            }), 400
+
+        calculator = ROICalculator(str(DB_PATH))
+        roi_by_tool = calculator.get_roi_by_tool(start_date, end_date)
+
+        return jsonify({
+            'success': True,
+            'data': {k: v.to_dict() for k, v in roi_by_tool.items()}
+        })
+    except Exception as e:
+        logger.error(f&quot;Error getting ROI by tool: {e}&quot;)
+        return jsonify({'success': False, 'error': str(e)}), 500
+</code></pre>
+<hr />
+<h3 id="35">3.5 成本优化建议模块实现方案</h3>
+<pre><code class="language-python"># app/modules/analytics/cost_optimizer.py
+
+&quot;&quot;&quot;
+Open ACE - Cost Optimizer Module
+
+Analyzes usage patterns and provides cost optimization suggestions.
+&quot;&quot;&quot;
+
+import logging
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from typing import List, Dict, Optional, Any
+from enum import Enum
+import sqlite3
+
+logger = logging.getLogger(__name__)
+
+
+class OptimizationType(Enum):
+    &quot;&quot;&quot;优化类型&quot;&quot;&quot;
+    MODEL_SWITCH = 'model_switch'
+    USAGE_PATTERN = 'usage_pattern'
+    QUOTA_ADJUSTMENT = 'quota_adjustment'
+    TOOL_CONSOLIDATION = 'tool_consolidation'
+    TIME_OPTIMIZATION = 'time_optimization'
+
+
+class Priority(Enum):
+    &quot;&quot;&quot;优先级&quot;&quot;&quot;
+    HIGH = 'high'
+    MEDIUM = 'medium'
+    LOW = 'low'
+
+
+@dataclass
+class OptimizationSuggestion:
+    &quot;&quot;&quot;优化建议&quot;&quot;&quot;
+    suggestion_id: str
+    suggestion_type: str
+    title: str
+    description: str
+    potential_savings: float
+    priority: str
+    action_items: List[str] = field(default_factory=list)
+    affected_users: List[int] = field(default_factory=list)
+    affected_tools: List[str] = field(default_factory=list)
+    implementation_effort: str = 'medium'  # low, medium, high
+    created_at: datetime = field(default_factory=datetime.utcnow)
+
+    def to_dict(self) -&gt; dict:
+        return {
+            'suggestion_id': self.suggestion_id,
+            'suggestion_type': self.suggestion_type,
+            'title': self.title,
+            'description': self.description,
+            'potential_savings': round(self.potential_savings, 2),
+            'priority': self.priority,
+            'action_items': self.action_items,
+            'affected_users': self.affected_users,
+            'affected_tools': self.affected_tools,
+            'implementation_effort': self.implementation_effort,
+            'created_at': self.created_at.isoformat(),
+        }
+
+
+class CostOptimizer:
+    &quot;&quot;&quot;成本优化分析器&quot;&quot;&quot;
+
+    # 模型定价（每 1K tokens）
+    MODEL_PRICING = {
+        'claude-3-opus': {'input': 0.015, 'output': 0.075},
+        'claude-3-sonnet': {'input': 0.003, 'output': 0.015},
+        'claude-3-haiku': {'input': 0.00025, 'output': 0.00125},
+        'claude-3-5-sonnet': {'input': 0.003, 'output': 0.015},
+        'qwen-max': {'input': 0.02, 'output': 0.06},
+        'qwen-plus': {'input': 0.004, 'output': 0.012},
+        'qwen-turbo': {'input': 0.002, 'output': 0.006},
+    }
+
+    # 模型层级（从贵到便宜）
+    MODEL_HIERARCHY = {
+        'claude': ['claude-3-opus', 'claude-3-sonnet', 'claude-3-haiku'],
+        'qwen': ['qwen-max', 'qwen-plus', 'qwen-turbo'],
+    }
+
+    def __init__(self, db_path: str):
+        self.db_path = db_path
+
+    def analyze(self, days: int = 30) -&gt; List[OptimizationSuggestion]:
+        &quot;&quot;&quot;
+        分析使用数据并生成优化建议
+
+        Args:
+            days: 分析最近多少天的数据
+
+        Returns:
+            List[OptimizationSuggestion]: 优化建议列表
+        &quot;&quot;&quot;
+        suggestions = []
+
+        end_date = datetime.utcnow().strftime('%Y-%m-%d')
+        start_date = (datetime.utcnow() - timedelta(days=days)).strftime('%Y-%m-%d')
+
+        # 获取使用数据
+        usage_data = self._get_usage_data(start_date, end_date)
+
+        # 1. 分析模型使用
+        model_suggestions = self._analyze_model_usage(usage_data)
+        suggestions.extend(model_suggestions)
+
+        # 2. 分析使用模式
+        pattern_suggestions = self._analyze_usage_patterns(usage_data)
+        suggestions.extend(pattern_suggestions)
+
+        # 3. 分析配额效率
+        quota_suggestions = self._analyze_quota_efficiency(usage_data)
+        suggestions.extend(quota_suggestions)
+
+        # 4. 分析工具使用
+        tool_suggestions = self._analyze_tool_usage(usage_data)
+        suggestions.extend(tool_suggestions)
+
+        # 按潜在节省排序
+        suggestions.sort(key=lambda x: x.potential_savings, reverse=True)
+
+        return suggestions
+
+    def _get_usage_data(self, start_date: str, end_date: str) -&gt; Dict[str, Any]:
+        &quot;&quot;&quot;获取使用数据&quot;&quot;&quot;
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        # 总体统计
+        cursor.execute('''
+            SELECT 
+                COUNT(*) as total_requests,
+                SUM(input_tokens) as total_input_tokens,
+                SUM(output_tokens) as total_output_tokens
+            FROM daily_usage
+            WHERE date &gt;= ? AND date &lt;= ?
+        ''', (start_date, end_date))
+        overall = cursor.fetchone()
+
+        # 按模型统计
+        cursor.execute('''
+            SELECT tool_name, model,
+                   COUNT(*) as requests,
+                   SUM(input_tokens) as input_tokens,
+                   SUM(output_tokens) as output_tokens,
+                   AVG(input_tokens + output_tokens) as avg_tokens_per_request
+            FROM daily_usage
+            WHERE date &gt;= ? AND date &lt;= ?
+            GROUP BY tool_name, model
+        ''', (start_date, end_date))
+        by_model = cursor.fetchall()
+
+        # 按用户统计
+        cursor.execute('''
+            SELECT user_id,
+                   COUNT(*) as requests,
+                   SUM(input_tokens + output_tokens) as total_tokens
+            FROM daily_usage
+            WHERE date &gt;= ? AND date &lt;= ? AND user_id IS NOT NULL
+            GROUP BY user_id
+        ''', (start_date, end_date))
+        by_user = cursor.fetchall()
+
+        # 按时间段统计
+        cursor.execute('''
+            SELECT strftime('%H', timestamp) as hour,
+                   COUNT(*) as requests
+            FROM daily_usage
+            WHERE date &gt;= ? AND date &lt;= ?
+            GROUP BY hour
+            ORDER BY requests DESC
+        ''', (start_date, end_date))
+        by_hour = cursor.fetchall()
+
+        conn.close()
+
+        return {
+            'overall': overall,
+            'by_model': by_model,
+            'by_user': by_user,
+            'by_hour': by_hour,
+        }
+
+    def _analyze_model_usage(self, data: Dict) -&gt; List[OptimizationSuggestion]:
+        &quot;&quot;&quot;分析模型使用情况&quot;&quot;&quot;
+        suggestions = []
+
+        for row in data['by_model']:
+            model = row['model'] or 'unknown'
+            avg_tokens = row['avg_tokens_per_request'] or 0
+            requests = row['requests'] or 0
+
+            # 检查是否使用昂贵模型处理简单任务
+            if model in ['claude-3-opus', 'qwen-max']:
+                if avg_tokens &lt; 500:  # 短对话
+                    # 找到更便宜的替代模型
+                    tool_prefix = 'claude' if 'claude' in model else 'qwen'
+                    hierarchy = self.MODEL_HIERARCHY.get(tool_prefix, [])
+                    current_idx = hierarchy.index(model) if model in hierarchy else 0
+
+                    if current_idx &lt; len(hierarchy) - 1:
+                        cheaper_model = hierarchy[current_idx + 1]
+                        savings = self._calculate_model_savings(
+                            model, cheaper_model, 
+                            row['input_tokens'], row['output_tokens']
+                        )
+
+                        suggestions.append(OptimizationSuggestion(
+                            suggestion_id=f'model_switch_{model}_{cheaper_model}',
+                            suggestion_type=OptimizationType.MODEL_SWITCH.value,
+                            title=f&quot;考虑使用 {cheaper_model} 处理简单任务&quot;,
+                            description=f&quot;当前 {model} 平均每请求仅 {avg_tokens:.0f} tokens，&quot;
+                                      f&quot;切换到 {cheaper_model} 可节省成本&quot;,
+                            potential_savings=savings,
+                            priority=Priority.HIGH.value,
+                            action_items=[
+                                f&quot;将短对话（&lt;500 tokens）路由到 {cheaper_model}&quot;,
+                                &quot;保留复杂任务使用当前模型&quot;,
+                                &quot;实现自动模型选择逻辑&quot;,
+                            ],
+                            affected_tools=[row['tool_name']],
+                        ))
+
+        return suggestions
+
+    def _analyze_usage_patterns(self, data: Dict) -&gt; List[OptimizationSuggestion]:
+        &quot;&quot;&quot;分析使用模式&quot;&quot;&quot;
+        suggestions = []
+
+        # 分析高峰时段
+        if data['by_hour']:
+            peak_hours = sorted(data['by_hour'], key=lambda x: x['requests'], reverse=True)[:3]
+            peak_hours_list = [h['hour'] for h in peak_hours]
+
+            # 如果高峰时段请求集中，建议错峰使用
+            total_requests = data['overall']['total_requests'] or 1
+            peak_requests = sum(h['requests'] for h in peak_hours)
+            peak_percentage = peak_requests / total_requests * 100
+
+            if peak_percentage &gt; 50:
+                suggestions.append(OptimizationSuggestion(
+                    suggestion_id='time_optimization_peak',
+                    suggestion_type=OptimizationType.TIME_OPTIMIZATION.value,
+                    title=&quot;优化使用时段分布&quot;,
+                    description=f&quot;高峰时段（{', '.join(peak_hours_list)}时）集中了 {peak_percentage:.1f}% 的请求，&quot;
+                              &quot;建议错峰使用以提高响应速度&quot;,
+                    potential_savings=0,  # 时间优化不直接节省成本
+                    priority=Priority.MEDIUM.value,
+                    action_items=[
+                        &quot;将批量任务安排在非高峰时段&quot;,
+                        &quot;实现请求队列和调度&quot;,
+                        &quot;监控响应时间并动态调整&quot;,
+                    ],
+                ))
+
+        return suggestions
+
+    def _analyze_quota_efficiency(self, data: Dict) -&gt; List[OptimizationSuggestion]:
+        &quot;&quot;&quot;分析配额效率&quot;&quot;&quot;
+        suggestions = []
+
+        # 找出配额使用不均衡的用户
+        if data['by_user']:
+            total_tokens = sum(u['total_tokens'] or 0 for u in data['by_user'])
+            user_count = len(data['by_user'])
+            avg_tokens = total_tokens / user_count if user_count &gt; 0 else 0
+
+            # 找出使用量远低于平均的用户
+            low_usage_users = [
+                u['user_id'] for u in data['by_user']
+                if (u['total_tokens'] or 0) &lt; avg_tokens * 0.2
+            ]
+
+            if len(low_usage_users) &gt; user_count * 0.3:
+                suggestions.append(OptimizationSuggestion(
+                    suggestion_id='quota_adjustment_low_usage',
+                    suggestion_type=OptimizationType.QUOTA_ADJUSTMENT.value,
+                    title=&quot;优化配额分配&quot;,
+                    description=f&quot;发现 {len(low_usage_users)} 个用户使用量远低于平均，&quot;
+                              &quot;建议重新评估配额分配&quot;,
+                    potential_savings=0,
+                    priority=Priority.LOW.value,
+                    action_items=[
+                        &quot;审查低使用量用户的配额设置&quot;,
+                        &quot;考虑将未使用配额重新分配&quot;,
+                        &quot;设置配额过期和回收机制&quot;,
+                    ],
+                    affected_users=low_usage_users[:10],  # 只显示前10个
+                ))
+
+        return suggestions
+
+    def _analyze_tool_usage(self, data: Dict) -&gt; List[OptimizationSuggestion]:
+        &quot;&quot;&quot;分析工具使用&quot;&quot;&quot;
+        suggestions = []
+
+        # 检查是否有多个工具提供类似功能
+        tools = set(row['tool_name'] for row in data['by_model'] if row['tool_name'])
+
+        if len(tools) &gt; 2:
+            suggestions.append(OptimizationSuggestion(
+                suggestion_id='tool_consolidation',
+                suggestion_type=OptimizationType.TOOL_CONSOLIDATION.value,
+                title=&quot;考虑整合 AI 工具&quot;,
+                description=f&quot;当前使用 {len(tools)} 个不同的 AI 工具，&quot;
+                          &quot;整合可能带来更好的价格谈判空间&quot;,
+                potential_savings=0,
+                priority=Priority.LOW.value,
+                action_items=[
+                    &quot;评估各工具的使用频率和成本&quot;,
+                    &quot;与供应商谈判批量折扣&quot;,
+                    &quot;考虑统一使用主要工具&quot;,
+                ],
+                affected_tools=list(tools),
+            ))
+
+        return suggestions
+
+    def _calculate_model_savings(
+        self,
+        current_model: str,
+        cheaper_model: str,
+        input_tokens: int,
+        output_tokens: int
+    ) -&gt; float:
+        &quot;&quot;&quot;计算切换模型的节省&quot;&quot;&quot;
+        current_pricing = self.MODEL_PRICING.get(current_model, {'input': 0.01, 'output': 0.03})
+        cheaper_pricing = self.MODEL_PRICING.get(cheaper_model, {'input': 0.01, 'output': 0.03})
+
+        current_cost = (input_tokens / 1000 * current_pricing['input'] +
+                       output_tokens / 1000 * current_pricing['output'])
+
+        cheaper_cost = (input_tokens / 1000 * cheaper_pricing['input'] +
+                       output_tokens / 1000 * cheaper_pricing['output'])
+
+        return current_cost - cheaper_cost
+
+    def get_cost_breakdown(self, start_date: str, end_date: str) -&gt; Dict[str, Any]:
+        &quot;&quot;&quot;获取成本分解&quot;&quot;&quot;
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        # 按模型分解
+        cursor.execute('''
+            SELECT tool_name, model,
+                   COUNT(*) as requests,
+                   SUM(input_tokens) as input_tokens,
+                   SUM(output_tokens) as output_tokens
+            FROM daily_usage
+            WHERE date &gt;= ? AND date &lt;= ?
+            GROUP BY tool_name, model
+        ''', (start_date, end_date))
+
+        breakdown = []
+        for row in cursor.fetchall():
+            model = row['model'] or 'unknown'
+            pricing = self.MODEL_PRICING.get(model, {'input': 0.01, 'output': 0.03})
+
+            input_cost = (row['input_tokens'] or 0) / 1000 * pricing['input']
+            output_cost = (row['output_tokens'] or 0) / 1000 * pricing['output']
+            total_cost = input_cost + output_cost
+
+            breakdown.append({
+                'tool_name': row['tool_name'],
+                'model': model,
+                'requests': row['requests'],
+                'input_tokens': row['input_tokens'],
+                'output_tokens': row['output_tokens'],
+                'input_cost': round(input_cost, 4),
+                'output_cost': round(output_cost, 4),
+                'total_cost': round(total_cost, 4),
+            })
+
+        conn.close()
+
+        return {
+            'breakdown': breakdown,
+            'total_cost': round(sum(b['total_cost'] for b in breakdown), 4),
+        }
+</code></pre>
+<hr />
+<h2 id="4">4. 实施优先级建议</h2>
+<h3 id="41">4.1 优先级矩阵</h3>
+<table>
+<thead>
+<tr>
+<th>优先级</th>
+<th>功能</th>
+<th>预计工时</th>
+<th>业务价值</th>
+<th>依赖关系</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>🟠 P1</td>
+<td>实时告警系统</td>
+<td>3-4 天</td>
+<td>运维保障，及时响应问题</td>
+<td>无</td>
+</tr>
+<tr>
+<td>🟠 P1</td>
+<td>Prompt 模板库 UI</td>
+<td>3-4 天</td>
+<td>提升用户使用效率</td>
+<td>无（后端已实现）</td>
+</tr>
+<tr>
+<td>🟡 P2</td>
+<td>ROI 分析模块</td>
+<td>2-3 天</td>
+<td>管理决策支持</td>
+<td>无</td>
+</tr>
+<tr>
+<td>🟡 P2</td>
+<td>成本优化建议</td>
+<td>2-3 天</td>
+<td>成本控制</td>
+<td>ROI 模块</td>
+</tr>
+<tr>
+<td>🟡 P2</td>
+<td>会话管理 UI</td>
+<td>2-3 天</td>
+<td>会话持久化管理</td>
+<td>无（后端已实现）</td>
+</tr>
+<tr>
+<td>🟢 P3</td>
+<td>团队协作 UI</td>
+<td>4-5 天</td>
+<td>协作增强</td>
+<td>无（后端已实现）</td>
+</tr>
+<tr>
+<td>🟢 P3</td>
+<td>SSO 登录适配</td>
+<td>1-2 天</td>
+<td>企业级认证</td>
+<td>无（后端已实现）</td>
+</tr>
+</tbody>
+</table>
+<h3 id="42">4.2 实施路线图</h3>
+<pre><code>Week 1-2: P1 功能
+├── 实时告警系统
+│   ├── WebSocket 推送
+│   ├── 前端通知组件
+│   └── 邮件/Webhook 通知
+└── Prompt 模板库 UI
+    ├── 模板列表页面
+    ├── 模板创建/编辑表单
+    └── 模板渲染预览
+
+Week 3: P2 功能
+├── ROI 分析模块
+│   ├── 后端计算逻辑
+│   └── 前端图表展示
+├── 成本优化建议
+│   ├── 分析算法
+│   └── 建议展示界面
+└── 会话管理 UI
+    ├── 会话历史列表
+    └── 会话恢复功能
+
+Week 4+: P3 功能
+├── 团队协作 UI
+│   ├── 团队管理界面
+│   └── 会话共享设置
+└── SSO 登录适配
+    └── 前端登录页面适配
+</code></pre>
+<hr />
+<h2 id="5">5. 总结</h2>
+<h3 id="51">5.1 当前项目状态</h3>
+<p><strong>后端架构</strong>：
+- ✅ 已完成模块化重构
+- ✅ 分层架构清晰（Routes → Services → Repositories → Models）
+- ✅ 企业级特性（SSO、多租户、合规）后端已就绪
+- ✅ Workspace 模块（Prompt 模板库、会话管理、工具连接、协作）后端已完整实现</p>
+<p><strong>前端实现</strong>：
+- ✅ 核心管理功能（Dashboard、Messages、Analysis、Management）已完整实现（Admin 用户）
+- ✅ Workspace 页面已实现（普通用户，iframe 嵌入外部工具）
+- ✅ Report 页面已实现（普通用户，个人用量报告）
+- ⚠️ 部分高级功能 UI 待实现（Prompt 模板库、会话管理、团队协作等）</p>
+<h3 id="52">5.2 主要差距</h3>
+<table>
+<thead>
+<tr>
+<th>类别</th>
+<th>差距</th>
+<th>影响</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>高级分析</td>
+<td>ROI 分析未实现</td>
+<td>管理层无法评估投资回报</td>
+</tr>
+<tr>
+<td>高级分析</td>
+<td>成本优化未实现</td>
+<td>无法优化成本</td>
+</tr>
+<tr>
+<td>实时功能</td>
+<td>告警推送未实现</td>
+<td>无法及时响应问题</td>
+</tr>
+<tr>
+<td>前端 UI</td>
+<td>Prompt 模板库 UI 未实现</td>
+<td>后端 API 已就绪，缺少前端界面</td>
+</tr>
+<tr>
+<td>前端 UI</td>
+<td>会话管理 UI 未实现</td>
+<td>后端 API 已就绪，缺少前端界面</td>
+</tr>
+<tr>
+<td>前端 UI</td>
+<td>团队协作 UI 未实现</td>
+<td>后端 API 已就绪，缺少前端界面</td>
+</tr>
+</tbody>
+</table>
+<h3 id="53">5.3 建议下一步行动</h3>
+<ol>
+<li><strong>优先实现</strong>：实时告警系统</li>
+<li>提升运维响应能力</li>
+<li>
+<p>WebSocket 推送 + 前端通知组件</p>
+</li>
+<li>
+<p><strong>并行开发</strong>：Prompt 模板库 UI</p>
+</li>
+<li>后端 API 已完整实现</li>
+<li>
+<p>只需前端界面开发</p>
+</li>
+<li>
+<p><strong>短期规划</strong>：ROI 分析和成本优化</p>
+</li>
+<li>为管理层提供决策支持</li>
+<li>
+<p>可逐步完善</p>
+</li>
+<li>
+<p><strong>中期规划</strong>：会话管理和团队协作 UI</p>
+</li>
+<li>后端 API 已就绪</li>
+<li>按需实现前端界面</li>
+</ol>
+<h3 id="54">5.4 项目完成度评估</h3>
+<table>
+<thead>
+<tr>
+<th>维度</th>
+<th>完成度</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>后端核心功能</td>
+<td>95%</td>
+<td>主要功能已实现，ROI/成本优化待补充</td>
+</tr>
+<tr>
+<td>前端核心页面</td>
+<td>100%</td>
+<td>所有核心页面已实现</td>
+</tr>
+<tr>
+<td>企业级特性</td>
+<td>90%</td>
+<td>SSO、多租户、合规已实现，告警待完善</td>
+</tr>
+<tr>
+<td>高级分析功能</td>
+<td>60%</td>
+<td>ROI、成本优化待实现</td>
+</tr>
+<tr>
+<td>前端高级 UI</td>
+<td>50%</td>
+<td>模板库、会话管理、协作 UI 待实现</td>
+</tr>
+</tbody>
+</table>
+<p><strong>总体完成度：约 85%</strong></p>
+<hr />
+<p><em>文档版本：1.0</em>
+<em>最后更新：2026-03-21</em></p>
+</body>
+</html>

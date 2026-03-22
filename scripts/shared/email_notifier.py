@@ -6,10 +6,9 @@ Provides email sending functionality for the ai_token_usage project.
 """
 
 import smtplib
-import os
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from datetime import datetime
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from typing import Dict, List, Optional
 
 

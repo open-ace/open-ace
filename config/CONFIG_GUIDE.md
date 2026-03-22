@@ -13,6 +13,35 @@
 
 ### 可选配置
 
+#### 数据库配置
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `database.type` | 数据库类型，可选 `sqlite` 或 `postgresql` | `sqlite` |
+| `database.path` | SQLite 数据库路径（仅 SQLite 有效） | `~/.open-ace/ace.db` |
+| `database.url` | PostgreSQL 连接 URL（仅 PostgreSQL 有效） | `null` |
+
+**SQLite 配置示例：**
+```json
+{
+  "database": {
+    "type": "sqlite",
+    "path": "~/.open-ace/ace.db"
+  }
+}
+```
+
+**PostgreSQL 配置示例：**
+```json
+{
+  "database": {
+    "type": "postgresql",
+    "url": "postgresql://user:password@localhost:5432/ace"
+  }
+}
+```
+
+> **注意：** 环境变量 `DATABASE_URL` 优先级高于配置文件。如果设置了 `DATABASE_URL`，将忽略配置文件中的数据库配置。
+
 #### Workspace
 | 参数 | 说明 | 默认值 |
 |------|------|--------|

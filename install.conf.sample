@@ -1,4 +1,4 @@
-# Open ACE - Installation Configuration
+# Open ACE - AI Computing Explorer - Installation Configuration
 # Copy this file to install.conf and modify as needed
 #
 # Usage: ./scripts/install.sh --config install.conf

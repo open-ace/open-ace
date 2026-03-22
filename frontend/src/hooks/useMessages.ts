@@ -88,3 +88,11 @@ export function useConversationTimeline(sessionId: string, enabled = true) {
     staleTime: 60 * 1000,
   });
 }
+
+export function useSenders(host?: string) {
+  return useQuery<string[]>({
+    queryKey: ['senders', host],
+    queryFn: () => messagesApi.getSenders(host),
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+}

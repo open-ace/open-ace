@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Open ACE - Configuration Module
+Open ACE - AI Computing Explorer - Configuration Module
 
 Provides centralized configuration for the open-ace project.
 
@@ -9,15 +9,15 @@ For remote machine configurations, edit the config.json file or use the
 environment variables to override defaults.
 """
 
-import os
 import json
+import os
 
 # Configuration directory path
 # This is the main configuration that should be set during installation
 CONFIG_DIR = os.path.expanduser("~/.open-ace")
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
 DB_DIR = CONFIG_DIR  # Database is stored in the same directory
-DB_PATH = os.path.join(DB_DIR, "usage.db")
+DB_PATH = os.path.join(DB_DIR, "ace.db")
 
 # Remote user name - default is 'openclaw' but can be overridden
 # This is used for remote deployment and fetching data from remote machines
@@ -26,15 +26,15 @@ REMOTE_USER = os.environ.get('AI_TOKEN_REMOTE_USER', 'openclaw')
 # Remote configuration directory on remote machines
 # This is used when deploying to or fetching data from remote machines
 REMOTE_CONFIG_DIR = f"/home/{REMOTE_USER}/.open-ace"
-REMOTE_DB_PATH = f"{REMOTE_CONFIG_DIR}/usage.db"
+REMOTE_DB_PATH = f"{REMOTE_CONFIG_DIR}/ace.db"
 
 def _load_user_config() -> dict:
     """Load user configuration from config.json if it exists."""
     if os.path.exists(CONFIG_PATH):
         try:
-            with open(CONFIG_PATH, 'r') as f:
+            with open(CONFIG_PATH) as f:
                 return json.load(f)
-        except (json.JSONDecodeError, IOError):
+        except (OSError, json.JSONDecodeError):
             pass
     return {}
 
@@ -102,9 +102,9 @@ def load_remote_config() -> dict:
     remote_config_path = os.path.join(CONFIG_DIR, "remote_config.json")
     if os.path.exists(remote_config_path):
         try:
-            with open(remote_config_path, 'r') as f:
+            with open(remote_config_path) as f:
                 return json.load(f)
-        except (json.JSONDecodeError, IOError):
+        except (OSError, json.JSONDecodeError):
             pass
     return {}
 
@@ -115,3 +115,55 @@ def get_remote_users() -> list:
     if 'remote_users' in config:
         return config['remote_users']
     return [REMOTE_USER]
+
+
+def get_database_config() -> dict:
+    """
+    Get database configuration from config.json.
+
+    Returns:
+        dict: Database configuration with keys:
+            - type: 'sqlite' or 'postgresql'
+            - url: Database URL (for PostgreSQL)
+            - path: Database path (for SQLite, optional)
+    """
+    user_config = _load_user_config()
+    db_config = user_config.get('database', {})
+
+    # Default configuration
+    default_config = {
+        'type': 'sqlite',
+        'path': DB_PATH,
+        'url': None
+    }
+
+    # Merge with user config
+    default_config.update(db_config)
+    return default_config
+
+
+def get_database_url() -> str:
+    """
+    Get database URL with priority: environment variable > config file > default SQLite.
+
+    Returns:
+        str: Database URL.
+    """
+    # Priority 1: Environment variable DATABASE_URL
+    if os.environ.get('DATABASE_URL'):
+        return os.environ['DATABASE_URL']
+
+    # Priority 2: Config file
+    db_config = get_database_config()
+    db_type = db_config.get('type', 'sqlite').lower()
+
+    if db_type == 'postgresql':
+        url = db_config.get('url')
+        if url:
+            return url
+        # If type is postgresql but no url, fall back to SQLite
+        print(f"Warning: database type is postgresql but no url configured, using SQLite")
+
+    # Priority 3: Default SQLite
+    db_path = db_config.get('path', DB_PATH)
+    return f"sqlite:///{db_path}"

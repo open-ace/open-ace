@@ -1,0 +1,54 @@
+# Open ACE - ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: open-ace-config
+  namespace: open-ace
+  labels:
+    app.kubernetes.io/name: open-ace
+    app.kubernetes.io/component: config
+data:
+  # Application settings
+  FLASK_APP: "web.py"
+  FLASK_ENV: "production"
+  PYTHONUNBUFFERED: "1"
+  LOG_LEVEL: "INFO"
+
+  # Database settings (for PostgreSQL)
+  DB_HOST: "postgres"
+  DB_PORT: "5432"
+  DB_NAME: "openace"
+
+  # Redis settings
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6379"
+
+  # Feature flags
+  ENABLE_SSO: "true"
+  ENABLE_MULTI_TENANT: "true"
+  ENABLE_AUDIT_LOG: "true"
+  ENABLE_CONTENT_FILTER: "true"
+
+  # Retention settings
+  AUDIT_LOG_RETENTION_DAYS: "90"
+  DATA_RETENTION_DAYS: "365"
+
+---
+# Open ACE - Secrets
+# NOTE: In production, use sealed-secrets or external secret management
+apiVersion: v1
+kind: Secret
+metadata:
+  name: open-ace-secrets
+  namespace: open-ace
+  labels:
+    app.kubernetes.io/name: open-ace
+    app.kubernetes.io/component: secrets
+type: Opaque
+stringData:
+  # These should be changed in production
+  SECRET_KEY: "change-me-in-production-use-strong-secret"
+  UPLOAD_AUTH_KEY: "change-me-in-production"
+  DB_USER: "openace"
+  DB_PASSWORD: "change-me-in-production"
+  REDIS_PASSWORD: ""

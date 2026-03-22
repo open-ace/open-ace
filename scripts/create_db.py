@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
-"""Initialize database on remote machine."""
+"""Initialize database on remote machine.
 
-import sqlite3
+Supports both SQLite (default) and PostgreSQL databases.
+For PostgreSQL, set the DATABASE_URL environment variable.
+"""
+
 import os
 import sys
 
@@ -13,16 +16,53 @@ if shared_dir not in sys.path:
 
 from shared.config import DB_DIR, DB_PATH
 
-# Ensure directory exists
-os.makedirs(DB_DIR, exist_ok=True)
+
+def is_postgresql() -> bool:
+    """Check if using PostgreSQL database."""
+    return os.environ.get('DATABASE_URL', '').startswith('postgresql')
+
+
+def get_connection():
+    """Get a database connection (SQLite or PostgreSQL)."""
+    if is_postgresql():
+        try:
+            import psycopg2
+            from psycopg2.extras import RealDictCursor
+            url = os.environ['DATABASE_URL']
+            conn = psycopg2.connect(url)
+            conn.cursor_factory = RealDictCursor
+            return conn
+        except ImportError:
+            raise ImportError(
+                "psycopg2 is required for PostgreSQL. "
+                "Install it with: pip install psycopg2-binary"
+            )
+    else:
+        import sqlite3
+        # Ensure directory exists (for SQLite)
+        os.makedirs(DB_DIR, exist_ok=True)
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+
+def get_id_type() -> str:
+    """Get the appropriate ID type for the current database."""
+    if is_postgresql():
+        return "SERIAL PRIMARY KEY"
+    else:
+        return "INTEGER PRIMARY KEY AUTOINCREMENT"
+
 
 # Create database
-conn = sqlite3.connect(DB_PATH)
+conn = get_connection()
 cursor = conn.cursor()
 
-cursor.execute('''
+id_type = get_id_type()
+
+cursor.execute(f'''
     CREATE TABLE IF NOT EXISTS daily_usage (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id {id_type},
         date TEXT NOT NULL,
         tool_name TEXT NOT NULL,
         host_name TEXT NOT NULL DEFAULT 'localhost',
@@ -37,9 +77,9 @@ cursor.execute('''
     )
 ''')
 
-cursor.execute('''
+cursor.execute(f'''
     CREATE TABLE IF NOT EXISTS daily_messages (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id {id_type},
         date TEXT NOT NULL,
         tool_name TEXT NOT NULL,
         host_name TEXT NOT NULL DEFAULT 'localhost',
@@ -60,4 +100,8 @@ cursor.execute('''
 
 conn.commit()
 conn.close()
-print(f"Database created at {DB_PATH}")
+
+if is_postgresql():
+    print(f"Database created at PostgreSQL: {os.environ.get('DATABASE_URL', '').split('@')[-1]}")
+else:
+    print(f"Database created at {DB_PATH}")

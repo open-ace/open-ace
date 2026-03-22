@@ -14,6 +14,7 @@
 6. 验证表格内容是否仍然存在
 """
 
+import pytest
 import asyncio
 from playwright.async_api import async_playwright
 import os
@@ -48,6 +49,7 @@ def print_test_report(results):
     return failed == 0
 
 
+@pytest.mark.asyncio
 async def test_issue34():
     """测试 Conversation History 表格排序功能"""
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)

@@ -8,9 +8,10 @@ This test verifies that:
 3. Host filter shows simplified names
 """
 
+import pytest
 import time
 import re
-from playwright.sync_api import sync_playwright
+from playwright.async_api import async_playwright
 
 # Test configuration
 BASE_URL = "http://localhost:5001"
@@ -33,14 +34,15 @@ def simplify_display_name(name):
     return name
 
 
-def test_issue36_simplified_display():
+@pytest.mark.asyncio
+async def test_issue36_simplified_display():
     """Test that Messages page shows simplified user names."""
-    p = sync_playwright().start()
+    p = async_playwright().start()
     browser = p.chromium.launch(headless=False)
-    context = browser.new_context()
-    page = context.new_page()
+    context = await browser.new_context()
+    page = await context.new_page()
 
-    page.set_default_timeout(TIMEOUT)
+    await page.set_default_timeout(TIMEOUT)
 
     try:
         print("=" * 60)
@@ -49,30 +51,30 @@ def test_issue36_simplified_display():
 
         # Step 1: Login
         print("\n[Step 1] Logging in...")
-        page.goto(f"{BASE_URL}/login")
-        page.fill('input[name="username"]', USERNAME)
-        page.fill('input[name="password"]', PASSWORD)
-        page.click('button[type="submit"]')
-        page.wait_for_url(f"{BASE_URL}/", timeout=15000)
+        await page.goto(f"{BASE_URL}/login")
+        await page.fill('input[name="username"]', USERNAME)
+        await page.fill('input[name="password"]', PASSWORD)
+        await page.click('button[type="submit"]')
+        await page.wait_for_url(f"{BASE_URL}/", timeout=15000)
         print("✓ Login successful")
 
         # Step 2: Navigate to Messages page
         print("\n[Step 2] Navigating to Messages page...")
-        page.click('#nav-messages')
-        page.wait_for_selector('#messages-container', state='visible', timeout=5000)
+        await page.click('#nav-messages')
+        await page.wait_for_selector('#messages-container', state='visible', timeout=5000)
         time.sleep(2)  # Wait for messages to load
         print("✓ Messages page loaded")
 
         # Step 3: Check message items for simplified display
         print("\n[Step 3] Checking message items for simplified display...")
-        messages = page.locator('.message-item')
+        messages = await page.locator('.message-item')
         message_count = messages.count()
 
         if message_count > 0:
             print(f"✓ Found {message_count} messages")
 
             # Check the first user message
-            user_messages = page.locator('.message-item:has(.role-badge.user)')
+            user_messages = await page.locator('.message-item:has(.role-badge.user)')
             if user_messages.count() > 0:
                 first_user_msg = user_messages.first
 
@@ -107,7 +109,7 @@ def test_issue36_simplified_display():
 
         # Step 4: Check sender dropdown
         print("\n[Step 4] Checking sender dropdown...")
-        sender_filter = page.locator('#sender-filter')
+        sender_filter = await page.locator('#sender-filter')
         if sender_filter.count() > 0:
             # Get all options
             options = sender_filter.locator('option')
@@ -129,7 +131,7 @@ def test_issue36_simplified_display():
 
         # Step 5: Check host dropdown
         print("\n[Step 5] Checking host dropdown...")
-        host_filter = page.locator('#host-filter')
+        host_filter = await page.locator('#host-filter')
         if host_filter.count() > 0:
             options = host_filter.locator('option')
             option_count = options.count()
@@ -147,7 +149,7 @@ def test_issue36_simplified_display():
             print("  Host filter not found")
 
         # Take screenshot
-        page.screenshot(path="screenshots/test_issue36_simplified_display.png")
+        await page.screenshot(path="screenshots/test_issue36_simplified_display.png")
         print("\n✓ Screenshot saved to screenshots/test_issue36_simplified_display.png")
 
         print("\n" + "=" * 60)
@@ -156,12 +158,12 @@ def test_issue36_simplified_display():
 
     except Exception as e:
         print(f"\n✗ Test failed: {e}")
-        page.screenshot(path="screenshots/test_issue36_error.png")
+        await page.screenshot(path="screenshots/test_issue36_error.png")
         print("Error screenshot saved to screenshots/test_issue36_error.png")
         raise
 
     finally:
-        browser.close()
+        await browser.close()
 
 
 if __name__ == "__main__":

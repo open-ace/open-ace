@@ -7,6 +7,7 @@ Issue: Data Status panel shows local host status not updating.
 Fix: Use current time for local host last_updated since data is real-time.
 """
 
+import pytest
 import sys
 import os
 import time
@@ -16,7 +17,7 @@ from datetime import datetime
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 sys.path.insert(0, PROJECT_ROOT)
 
-from playwright.sync_api import sync_playwright, expect
+from playwright.async_api import async_playwright, expect
 
 # Configuration
 BASE_URL = "http://localhost:5001"
@@ -26,45 +27,46 @@ SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "issues", "73")
 HEADLESS = True
 
 
-def take_screenshot(page, name):
+async def take_screenshot(page, name):
     """Take a screenshot and return the path."""
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
     path = os.path.join(SCREENSHOT_DIR, name)
-    page.screenshot(path=path)
+    await page.screenshot(path=path)
     return path
 
 
-def test_data_status_local():
+@pytest.mark.asyncio
+async def test_data_status_local():
     """Test #73: Data Status local host shows current time."""
     print("\n" + "=" * 50)
     print("Test #73: Data Status local host status updates")
     print("=" * 50)
     
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=HEADLESS)
-        context = browser.new_context()
-        page = context.new_page()
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=HEADLESS)
+        context = await browser.new_context()
+        page = await context.new_page()
         
         try:
             # Login first
-            page.goto(f"{BASE_URL}/login")
-            page.wait_for_load_state("networkidle")
-            page.fill("#username", USERNAME)
-            page.fill("#password", PASSWORD)
-            page.click("#login-btn")
-            page.wait_for_url(f"{BASE_URL}/", timeout=10000)
-            page.wait_for_load_state("networkidle")
+            await page.goto(f"{BASE_URL}/login")
+            await page.wait_for_load_state("networkidle")
+            await page.fill("#username", USERNAME)
+            await page.fill("#password", PASSWORD)
+            await page.click("#login-btn")
+            await page.wait_for_url(f"{BASE_URL}/", timeout=10000)
+            await page.wait_for_load_state("networkidle")
             
             # Wait for data status to load
-            page.wait_for_selector("#data-status-container", timeout=10000)
+            await page.wait_for_selector("#data-status-container", timeout=10000)
             time.sleep(1)
             
             # Take screenshot
-            screenshot_path = take_screenshot(page, "01_data_status.png")
+            screenshot_path = await take_screenshot(page, "01_data_status.png")
             print(f"  Screenshot: {screenshot_path}")
             
             # Check at least one host item exists
-            host_items = page.locator(".data-status-item")
+            host_items = await page.locator(".data-status-item")
             host_count = host_items.count()
             assert host_count > 0, "Should have at least one host item"
             print(f"  ✓ Found {host_count} host item(s)")
@@ -84,10 +86,10 @@ def test_data_status_local():
             
         except Exception as e:
             print(f"  ✗ Test #73 FAILED: {e}")
-            take_screenshot(page, "error_73.png")
+            await take_screenshot(page, "error_73.png")
             return False
         finally:
-            browser.close()
+            await browser.close()
 
 
 def main():

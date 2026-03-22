@@ -1,0 +1,552 @@
+#!/usr/bin/env python3
+"""
+Open ACE - Quota Manager Module
+
+Provides quota management and alerting for enterprise usage control.
+Tracks user quotas, generates alerts, and enforces limits.
+"""
+
+import logging
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from enum import Enum
+from typing import Any, Dict, List, Optional
+
+from app.repositories.database import Database
+from app.repositories.user_repo import UserRepository
+
+logger = logging.getLogger(__name__)
+
+
+class AlertType(Enum):
+    """Types of quota alerts."""
+    WARNING = 'warning'  # 80% of quota
+    CRITICAL = 'critical'  # 95% of quota
+    EXCEEDED = 'exceeded'  # Over quota
+    RESET = 'reset'  # Quota reset
+
+
+class QuotaPeriod(Enum):
+    """Quota period types."""
+    DAILY = 'daily'
+    WEEKLY = 'weekly'
+    MONTHLY = 'monthly'
+
+
+@dataclass
+class QuotaAlert:
+    """Quota alert data model."""
+    id: Optional[int] = None
+    user_id: int = 0
+    alert_type: str = 'warning'
+    quota_type: str = 'tokens'  # tokens or requests
+    period: str = 'daily'
+    threshold: float = 0.0
+    current_usage: int = 0
+    quota_limit: int = 0
+    percentage: float = 0.0
+    message: str = ''
+    created_at: datetime = field(default_factory=datetime.utcnow)
+    acknowledged: bool = False
+    acknowledged_at: Optional[datetime] = None
+    acknowledged_by: Optional[int] = None
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary."""
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'alert_type': self.alert_type,
+            'quota_type': self.quota_type,
+            'period': self.period,
+            'threshold': self.threshold,
+            'current_usage': self.current_usage,
+            'quota_limit': self.quota_limit,
+            'percentage': self.percentage,
+            'message': self.message,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'acknowledged': self.acknowledged,
+            'acknowledged_at': self.acknowledged_at.isoformat() if self.acknowledged_at else None,
+            'acknowledged_by': self.acknowledged_by,
+        }
+
+
+@dataclass
+class QuotaStatus:
+    """Current quota status for a user."""
+    user_id: int
+    username: str = ''
+    period: str = 'daily'
+
+    # Token quotas
+    token_limit: int = 0
+    tokens_used: int = 0
+    token_percentage: float = 0.0
+
+    # Request quotas
+    request_limit: int = 0
+    requests_used: int = 0
+    request_percentage: float = 0.0
+
+    # Status
+    is_over_token_quota: bool = False
+    is_over_request_quota: bool = False
+    alerts: List[QuotaAlert] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary."""
+        return {
+            'user_id': self.user_id,
+            'username': self.username,
+            'period': self.period,
+            'tokens': {
+                'limit': self.token_limit,
+                'used': self.tokens_used,
+                'percentage': self.token_percentage,
+                'over_quota': self.is_over_token_quota,
+            },
+            'requests': {
+                'limit': self.request_limit,
+                'used': self.requests_used,
+                'percentage': self.request_percentage,
+                'over_quota': self.is_over_request_quota,
+            },
+            'alerts': [a.to_dict() for a in self.alerts],
+        }
+
+
+class QuotaManager:
+    """
+    Quota management service for enterprise usage control.
+
+    Features:
+    - Track user token and request quotas
+    - Generate alerts at configurable thresholds
+    - Enforce quota limits
+    - Support for daily, weekly, and monthly periods
+    """
+
+    # Default alert thresholds (percentage of quota)
+    DEFAULT_THRESHOLDS = [0.8, 0.95, 1.0]  # 80%, 95%, 100%
+
+    def __init__(
+        self,
+        db: Optional[Database] = None,
+        user_repo: Optional[UserRepository] = None,
+        thresholds: Optional[List[float]] = None
+    ):
+        """
+        Initialize quota manager.
+
+        Args:
+            db: Optional Database instance.
+            user_repo: Optional UserRepository instance.
+            thresholds: Alert thresholds (default: [0.8, 0.95, 1.0]).
+        """
+        self.db = db or Database()
+        self.user_repo = user_repo or UserRepository()
+        self.thresholds = thresholds or self.DEFAULT_THRESHOLDS
+        # Table structure managed by Alembic migrations
+
+    def record_usage(
+        self,
+        user_id: int,
+        tokens: int = 0,
+        requests: int = 1,
+        date: Optional[str] = None
+    ) -> bool:
+        """
+        Record usage for a user.
+
+        Args:
+            user_id: User ID.
+            tokens: Number of tokens used.
+            requests: Number of requests made.
+            date: Date string (YYYY-MM-DD), defaults to today.
+
+        Returns:
+            bool: True if successful.
+        """
+        if date is None:
+            date = datetime.utcnow().strftime('%Y-%m-%d')
+
+        try:
+            with self.db.connection() as conn:
+                cursor = conn.cursor()
+
+                # Try to insert or update
+                cursor.execute('''
+                    INSERT INTO quota_usage (user_id, date, tokens_used, requests_used)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(user_id, date) DO UPDATE SET
+                        tokens_used = tokens_used + ?,
+                        requests_used = requests_used + ?,
+                        updated_at = CURRENT_TIMESTAMP
+                ''', (user_id, date, tokens, requests, tokens, requests))
+
+                conn.commit()
+
+            # Check for alerts
+            self._check_and_create_alerts(user_id, date)
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to record usage: {e}")
+            return False
+
+    def get_user_quota_status(
+        self,
+        user_id: int,
+        period: str = 'daily'
+    ) -> QuotaStatus:
+        """
+        Get quota status for a user.
+
+        Args:
+            user_id: User ID.
+            period: Quota period (daily, weekly, monthly).
+
+        Returns:
+            QuotaStatus: Current quota status.
+        """
+        # Get user info
+        user = self.user_repo.get_user_by_id(user_id)
+        username = user.get('username', '') if user else ''
+
+        # Get quota limits from user
+        token_limit = user.get('daily_token_quota') if user else None
+        request_limit = user.get('daily_request_quota') if user else None
+
+        # Default limits if not set
+        if token_limit is None:
+            token_limit = 1000000  # 1M tokens default
+        if request_limit is None:
+            request_limit = 1000  # 1000 requests default
+
+        # Get usage for period
+        start_date, end_date = self._get_period_dates(period)
+        usage = self._get_usage_in_range(user_id, start_date, end_date)
+
+        tokens_used = usage.get('tokens', 0)
+        requests_used = usage.get('requests', 0)
+
+        # Calculate percentages
+        token_pct = (tokens_used / token_limit * 100) if token_limit > 0 else 0
+        request_pct = (requests_used / request_limit * 100) if request_limit > 0 else 0
+
+        # Get recent alerts
+        alerts = self._get_recent_alerts(user_id, limit=5)
+
+        return QuotaStatus(
+            user_id=user_id,
+            username=username,
+            period=period,
+            token_limit=token_limit,
+            tokens_used=tokens_used,
+            token_percentage=round(token_pct, 2),
+            request_limit=request_limit,
+            requests_used=requests_used,
+            request_percentage=round(request_pct, 2),
+            is_over_token_quota=tokens_used > token_limit,
+            is_over_request_quota=requests_used > request_limit,
+            alerts=alerts,
+        )
+
+    def check_quota(
+        self,
+        user_id: int,
+        tokens: int = 0,
+        requests: int = 1
+    ) -> Dict[str, Any]:
+        """
+        Check if user has quota available.
+
+        Args:
+            user_id: User ID.
+            tokens: Tokens to check.
+            requests: Requests to check.
+
+        Returns:
+            Dict with 'allowed', 'reason', and 'status' keys.
+        """
+        status = self.get_user_quota_status(user_id)
+
+        # Check if would exceed after this usage
+        would_exceed_tokens = (status.tokens_used + tokens) > status.token_limit
+        would_exceed_requests = (status.requests_used + requests) > status.request_limit
+
+        if would_exceed_tokens:
+            return {
+                'allowed': False,
+                'reason': f"Token quota exceeded. Used: {status.tokens_used}/{status.token_limit}",
+                'status': status.to_dict(),
+            }
+
+        if would_exceed_requests:
+            return {
+                'allowed': False,
+                'reason': f"Request quota exceeded. Used: {status.requests_used}/{status.request_limit}",
+                'status': status.to_dict(),
+            }
+
+        return {
+            'allowed': True,
+            'reason': None,
+            'status': status.to_dict(),
+        }
+
+    def _check_and_create_alerts(self, user_id: int, date: str) -> None:
+        """Check usage and create alerts if thresholds crossed."""
+        status = self.get_user_quota_status(user_id)
+
+        # Check token percentage
+        self._create_alert_if_needed(
+            user_id=user_id,
+            quota_type='tokens',
+            current_usage=status.tokens_used,
+            quota_limit=status.token_limit,
+            percentage=status.token_percentage / 100
+        )
+
+        # Check request percentage
+        self._create_alert_if_needed(
+            user_id=user_id,
+            quota_type='requests',
+            current_usage=status.requests_used,
+            quota_limit=status.request_limit,
+            percentage=status.request_percentage / 100
+        )
+
+    def _create_alert_if_needed(
+        self,
+        user_id: int,
+        quota_type: str,
+        current_usage: int,
+        quota_limit: int,
+        percentage: float
+    ) -> None:
+        """Create alert if threshold is crossed."""
+        for threshold in sorted(self.thresholds, reverse=True):
+            if percentage >= threshold:
+                # Check if we already have an alert for this threshold today
+                today = datetime.utcnow().strftime('%Y-%m-%d')
+
+                existing = self.db.fetch_one('''
+                    SELECT id FROM quota_alerts
+                    WHERE user_id = ? AND quota_type = ?
+                    AND date(created_at) = ?
+                    AND threshold >= ?
+                ''', (user_id, quota_type, today, threshold))
+
+                if existing:
+                    return
+
+                # Determine alert type
+                if percentage >= 1.0:
+                    alert_type = 'exceeded'
+                elif percentage >= 0.95:
+                    alert_type = 'critical'
+                else:
+                    alert_type = 'warning'
+
+                # Create alert
+                message = self._generate_alert_message(
+                    alert_type, quota_type, current_usage, quota_limit, percentage
+                )
+
+                try:
+                    with self.db.connection() as conn:
+                        cursor = conn.cursor()
+                        cursor.execute('''
+                            INSERT INTO quota_alerts
+                            (user_id, alert_type, quota_type, threshold,
+                             current_usage, quota_limit, percentage, message)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (
+                            user_id, alert_type, quota_type, threshold,
+                            current_usage, quota_limit, percentage, message
+                        ))
+                        conn.commit()
+
+                    logger.warning(f"Quota alert created: user={user_id}, type={alert_type}, {quota_type}={percentage*100:.1f}%")
+
+                except Exception as e:
+                    logger.error(f"Failed to create quota alert: {e}")
+
+                return
+
+    def _generate_alert_message(
+        self,
+        alert_type: str,
+        quota_type: str,
+        current: int,
+        limit: int,
+        percentage: float
+    ) -> str:
+        """Generate alert message."""
+        pct_str = f"{percentage * 100:.1f}%"
+
+        if alert_type == 'exceeded':
+            return f"Quota exceeded: {quota_type} usage at {pct_str} ({current:,}/{limit:,})"
+        elif alert_type == 'critical':
+            return f"Critical: {quota_type} usage at {pct_str} ({current:,}/{limit:,})"
+        else:
+            return f"Warning: {quota_type} usage at {pct_str} ({current:,}/{limit:,})"
+
+    def _get_period_dates(self, period: str) -> tuple:
+        """Get start and end dates for a period."""
+        today = datetime.utcnow()
+
+        if period == 'daily':
+            start = today.strftime('%Y-%m-%d')
+            end = start
+        elif period == 'weekly':
+            start = (today - timedelta(days=today.weekday())).strftime('%Y-%m-%d')
+            end = today.strftime('%Y-%m-%d')
+        elif period == 'monthly':
+            start = today.replace(day=1).strftime('%Y-%m-%d')
+            end = today.strftime('%Y-%m-%d')
+        else:
+            start = today.strftime('%Y-%m-%d')
+            end = start
+
+        return start, end
+
+    def _get_usage_in_range(self, user_id: int, start_date: str, end_date: str) -> Dict[str, int]:
+        """Get total usage in a date range."""
+        result = self.db.fetch_one('''
+            SELECT
+                COALESCE(SUM(tokens_used), 0) as tokens,
+                COALESCE(SUM(requests_used), 0) as requests
+            FROM quota_usage
+            WHERE user_id = ? AND date >= ? AND date <= ?
+        ''', (user_id, start_date, end_date))
+
+        return {
+            'tokens': result['tokens'] if result else 0,
+            'requests': result['requests'] if result else 0,
+        }
+
+    def _get_recent_alerts(self, user_id: int, limit: int = 10) -> List[QuotaAlert]:
+        """Get recent alerts for a user."""
+        rows = self.db.fetch_all('''
+            SELECT * FROM quota_alerts
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+        ''', (user_id, limit))
+
+        alerts = []
+        for row in rows:
+            alerts.append(QuotaAlert(
+                id=row.get('id'),
+                user_id=row.get('user_id', 0),
+                alert_type=row.get('alert_type', 'warning'),
+                quota_type=row.get('quota_type', 'tokens'),
+                period=row.get('period', 'daily'),
+                threshold=row.get('threshold', 0),
+                current_usage=row.get('current_usage', 0),
+                quota_limit=row.get('quota_limit', 0),
+                percentage=row.get('percentage', 0),
+                message=row.get('message', ''),
+                created_at=datetime.fromisoformat(row['created_at']) if row.get('created_at') else None,
+                acknowledged=bool(row.get('acknowledged', 0)),
+                acknowledged_at=datetime.fromisoformat(row['acknowledged_at']) if row.get('acknowledged_at') else None,
+                acknowledged_by=row.get('acknowledged_by'),
+            ))
+
+        return alerts
+
+    def acknowledge_alert(self, alert_id: int, acknowledged_by: int) -> bool:
+        """Acknowledge an alert."""
+        try:
+            with self.db.connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE quota_alerts
+                    SET acknowledged = 1,
+                        acknowledged_at = ?,
+                        acknowledged_by = ?
+                    WHERE id = ?
+                ''', (datetime.utcnow(), acknowledged_by, alert_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Failed to acknowledge alert: {e}")
+            return False
+
+    def get_all_quota_statuses(self) -> List[QuotaStatus]:
+        """Get quota status for all users."""
+        users = self.user_repo.get_all_users(include_inactive=False)
+        statuses = []
+
+        for user in users:
+            user_id = user.get('id')
+            if user_id:
+                status = self.get_user_quota_status(user_id)
+                statuses.append(status)
+
+        return statuses
+
+    def get_all_alerts(
+        self,
+        unacknowledged_only: bool = False,
+        limit: int = 100
+    ) -> List[QuotaAlert]:
+        """Get all quota alerts."""
+        if unacknowledged_only:
+            rows = self.db.fetch_all('''
+                SELECT * FROM quota_alerts
+                WHERE acknowledged = 0
+                ORDER BY created_at DESC
+                LIMIT ?
+            ''', (limit,))
+        else:
+            rows = self.db.fetch_all('''
+                SELECT * FROM quota_alerts
+                ORDER BY created_at DESC
+                LIMIT ?
+            ''', (limit,))
+
+        alerts = []
+        for row in rows:
+            alerts.append(QuotaAlert(
+                id=row.get('id'),
+                user_id=row.get('user_id', 0),
+                alert_type=row.get('alert_type', 'warning'),
+                quota_type=row.get('quota_type', 'tokens'),
+                period=row.get('period', 'daily'),
+                threshold=row.get('threshold', 0),
+                current_usage=row.get('current_usage', 0),
+                quota_limit=row.get('quota_limit', 0),
+                percentage=row.get('percentage', 0),
+                message=row.get('message', ''),
+                created_at=datetime.fromisoformat(row['created_at']) if row.get('created_at') else None,
+                acknowledged=bool(row.get('acknowledged', 0)),
+                acknowledged_at=datetime.fromisoformat(row['acknowledged_at']) if row.get('acknowledged_at') else None,
+                acknowledged_by=row.get('acknowledged_by'),
+            ))
+
+        return alerts
+
+    def cleanup_old_alerts(self, days: int = 30) -> int:
+        """Delete old acknowledged alerts."""
+        cutoff = datetime.utcnow() - timedelta(days=days)
+
+        try:
+            with self.db.connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    DELETE FROM quota_alerts
+                    WHERE acknowledged = 1 AND created_at < ?
+                ''', (cutoff,))
+                deleted = cursor.rowcount
+                conn.commit()
+
+            logger.info(f"Cleaned up {deleted} old quota alerts")
+            return deleted
+
+        except Exception as e:
+            logger.error(f"Failed to cleanup alerts: {e}")
+            return 0

@@ -9,6 +9,7 @@
 - 点击 Page Size 后，表格应按照新的每页显示数量重新加载数据
 """
 
+import pytest
 import asyncio
 from playwright.async_api import async_playwright
 import os
@@ -21,6 +22,7 @@ PASSWORD = os.environ.get('PASSWORD', 'admin123')
 SCREENSHOT_DIR = 'screenshots'
 
 
+@pytest.mark.asyncio
 async def test_issue38():
     """测试 Conversation History Page Size 功能"""
 

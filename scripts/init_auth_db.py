@@ -37,8 +37,8 @@ def create_default_admin(username: str = 'admin', password: str = 'admin123',
         password_hash=password_hash,
         email=email,
         role='admin',
-        quota_tokens=10000000,  # 10M tokens
-        quota_requests=10000
+        daily_token_quota=10000000,  # 10M tokens
+        daily_request_quota=10000
     )
 
     if result:

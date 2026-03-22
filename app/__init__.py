@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+"""
+Open ACE - Flask Application Factory
+
+This module provides the Flask application factory for the Open ACE platform.
+"""
+
+import logging
+import os
+
+from flask import Flask, jsonify, request
+from werkzeug.exceptions import HTTPException
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+
+def create_app(config=None):
+    """
+    Flask application factory.
+    
+    Args:
+        config: Optional configuration dictionary or object.
+    
+    Returns:
+        Flask application instance.
+    """
+    app = Flask(__name__,
+                static_folder='../static',
+                template_folder='../templates')
+
+    # Load configuration
+    app.config['TEMPLATES_AUTO_RELOAD'] = True
+    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
+
+    if config:
+        if isinstance(config, dict):
+            app.config.update(config)
+        else:
+            app.config.from_object(config)
+
+    # Register error handlers
+    register_error_handlers(app)
+
+    # Register blueprints
+    register_blueprints(app)
+
+    # Health check endpoint
+    @app.route('/health')
+    def health_check():
+        """Health check endpoint for Docker and load balancers."""
+        from app.utils.version import get_git_commit
+        return jsonify({
+            'status': 'healthy',
+            'service': 'open-ace',
+            'version': get_git_commit()
+        })
+
+    logger.info("Open ACE application initialized")
+    return app
+
+
+def register_error_handlers(app):
+    """Register error handlers for the application."""
+
+    @app.errorhandler(HTTPException)
+    def handle_http_exception(e):
+        """Handle all HTTP exceptions and return JSON for API routes."""
+        if request.path.startswith('/api/'):
+            return jsonify({'error': e.description}), e.code
+        return e.get_response()
+
+    @app.errorhandler(Exception)
+    def handle_generic_exception(e):
+        """Handle unexpected exceptions."""
+        logger.exception("Unexpected error occurred")
+        if request.path.startswith('/api/'):
+            return jsonify({'error': 'Internal server error'}), 500
+        raise e
+
+
+def register_blueprints(app):
+    """Register all application blueprints."""
+    from app.routes.admin import admin_bp
+    from app.routes.alerts import alerts_bp
+    from app.routes.analysis import analysis_bp
+    from app.routes.analytics import analytics_bp
+    from app.routes.auth import auth_bp
+    from app.routes.compliance import compliance_bp
+    from app.routes.fetch import fetch_bp
+    from app.routes.governance import governance_bp
+    from app.routes.messages import messages_bp
+    from app.routes.pages import pages_bp
+    from app.routes.report import report_bp
+    from app.routes.roi import roi_bp
+    from app.routes.sso import sso_bp
+    from app.routes.tenant import tenant_bp
+    from app.routes.upload import upload_bp
+    from app.routes.usage import usage_bp
+    from app.routes.workspace import workspace_bp
+
+    app.register_blueprint(usage_bp, url_prefix='/api')
+    app.register_blueprint(messages_bp, url_prefix='/api')
+    app.register_blueprint(analysis_bp, url_prefix='/api')
+    app.register_blueprint(auth_bp, url_prefix='/api')
+    app.register_blueprint(admin_bp, url_prefix='/api')
+    app.register_blueprint(upload_bp, url_prefix='/api')
+    app.register_blueprint(fetch_bp, url_prefix='/api')
+    app.register_blueprint(report_bp, url_prefix='/api')
+    app.register_blueprint(governance_bp, url_prefix='/api')
+    app.register_blueprint(analytics_bp, url_prefix='/api')
+    app.register_blueprint(workspace_bp, url_prefix='/api/workspace')
+    app.register_blueprint(tenant_bp, url_prefix='/api')
+    app.register_blueprint(sso_bp, url_prefix='/api')
+    app.register_blueprint(compliance_bp, url_prefix='/api')
+    app.register_blueprint(alerts_bp, url_prefix='/api')
+    app.register_blueprint(roi_bp, url_prefix='/api')
+    app.register_blueprint(pages_bp)
+
+    logger.info("All blueprints registered")

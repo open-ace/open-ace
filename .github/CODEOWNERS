@@ -1,0 +1,28 @@
+# CODEOWNERS - Define code owners for pull request reviews
+#
+# For more information, see:
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owners for everything
+* @your-username
+
+# Core scripts
+/scripts/ @your-username
+
+# Shared modules
+/scripts/shared/ @your-username
+
+# Web interface
+/web.py @your-username
+/templates/ @your-username
+/static/ @your-username
+
+# Documentation
+/docs/ @your-username
+/README.md @your-username
+
+# Tests
+/tests/ @your-username
+
+# CI/CD
+/.github/ @your-username

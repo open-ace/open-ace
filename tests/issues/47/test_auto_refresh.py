@@ -8,8 +8,9 @@ This test verifies that:
 3. currentMessageCount is updated correctly after loadMessages()
 """
 
+import pytest
 import time
-from playwright.sync_api import sync_playwright, expect
+from playwright.async_api import async_playwright, expect
 
 # Test configuration
 BASE_URL = "http://localhost:5001"
@@ -18,48 +19,49 @@ PASSWORD = "admin123"
 TIMEOUT = 15000  # 15 seconds timeout
 
 
-def test_auto_refresh_today():
+@pytest.mark.asyncio
+async def test_auto_refresh_today():
     """Test auto-refresh when viewing today's messages."""
     print("=" * 60)
     print("[Test 1] Auto-refresh when viewing today")
     print("=" * 60)
 
-    with sync_playwright() as p:
+    with async_playwright() as p:
         browser = p.chromium.launch(headless=False)
-        context = browser.new_context()
-        page = context.new_page()
-        page.set_default_timeout(TIMEOUT)
+        context = await browser.new_context()
+        page = await context.new_page()
+        await page.set_default_timeout(TIMEOUT)
 
         try:
             # Login
             print("\n[Step 1] Logging in...")
-            page.goto(f"{BASE_URL}/login")
-            page.fill('input[name="username"]', USERNAME)
-            page.fill('input[name="password"]', PASSWORD)
-            page.click('button[type="submit"]')
-            page.wait_for_url(f"{BASE_URL}/", timeout=15000)
+            await page.goto(f"{BASE_URL}/login")
+            await page.fill('input[name="username"]', USERNAME)
+            await page.fill('input[name="password"]', PASSWORD)
+            await page.click('button[type="submit"]')
+            await page.wait_for_url(f"{BASE_URL}/", timeout=15000)
             print("✓ Login successful")
 
             # Navigate to Messages page
             print("\n[Step 2] Navigating to Messages page...")
-            page.click('#nav-messages')
-            page.wait_for_selector('#messages-container', state='visible', timeout=5000)
+            await page.click('#nav-messages')
+            await page.wait_for_selector('#messages-container', state='visible', timeout=5000)
             print("✓ Messages page loaded")
 
             # Check current date filter
-            date_filter = page.locator('#date-filter')
+            date_filter = await page.locator('#date-filter')
             current_date = date_filter.input_value()
             print(f"  Current date filter: {current_date}")
 
             # Get initial message count
             time.sleep(2)  # Wait for messages to load
-            messages = page.locator('.message-item')
+            messages = await page.locator('.message-item')
             initial_count = messages.count()
             print(f"  Initial message count: {initial_count}")
 
             # Enable auto-refresh
             print("\n[Step 3] Enabling auto-refresh...")
-            auto_refresh_checkbox = page.locator('#auto-refresh')
+            auto_refresh_checkbox = await page.locator('#auto-refresh')
             auto_refresh_checkbox.check()
             print("✓ Auto-refresh enabled")
 
@@ -70,7 +72,7 @@ def test_auto_refresh_today():
             # Check if page is still responsive
             print("\n[Step 5] Checking page responsiveness...")
             try:
-                page.hover('#nav-dashboard')
+                await page.hover('#nav-dashboard')
                 print("✓ Page is responsive after auto-refresh")
             except Exception as e:
                 print(f"✗ Page became unresponsive: {e}")
@@ -85,7 +87,7 @@ def test_auto_refresh_today():
             print("✓ Auto-refresh disabled")
 
             # Take screenshot
-            page.screenshot(path="screenshots/issues/47/test_auto_refresh_today.png")
+            await page.screenshot(path="screenshots/issues/47/test_auto_refresh_today.png")
             print("✓ Screenshot saved")
 
             print("\n" + "=" * 60)
@@ -94,43 +96,44 @@ def test_auto_refresh_today():
 
         except Exception as e:
             print(f"\n✗ Test failed: {e}")
-            page.screenshot(path="screenshots/issues/47/test_auto_refresh_today_error.png")
+            await page.screenshot(path="screenshots/issues/47/test_auto_refresh_today_error.png")
             raise
         finally:
-            browser.close()
+            await browser.close()
 
 
-def test_auto_refresh_historical_date():
+@pytest.mark.asyncio
+async def test_auto_refresh_historical_date():
     """Test auto-refresh when viewing a historical date."""
     print("\n" + "=" * 60)
     print("[Test 2] Auto-refresh when viewing historical date")
     print("=" * 60)
 
-    with sync_playwright() as p:
+    with async_playwright() as p:
         browser = p.chromium.launch(headless=False)
-        context = browser.new_context()
-        page = context.new_page()
-        page.set_default_timeout(TIMEOUT)
+        context = await browser.new_context()
+        page = await context.new_page()
+        await page.set_default_timeout(TIMEOUT)
 
         try:
             # Login
             print("\n[Step 1] Logging in...")
-            page.goto(f"{BASE_URL}/login")
-            page.fill('input[name="username"]', USERNAME)
-            page.fill('input[name="password"]', PASSWORD)
-            page.click('button[type="submit"]')
-            page.wait_for_url(f"{BASE_URL}/", timeout=15000)
+            await page.goto(f"{BASE_URL}/login")
+            await page.fill('input[name="username"]', USERNAME)
+            await page.fill('input[name="password"]', PASSWORD)
+            await page.click('button[type="submit"]')
+            await page.wait_for_url(f"{BASE_URL}/", timeout=15000)
             print("✓ Login successful")
 
             # Navigate to Messages page
             print("\n[Step 2] Navigating to Messages page...")
-            page.click('#nav-messages')
-            page.wait_for_selector('#messages-container', state='visible', timeout=5000)
+            await page.click('#nav-messages')
+            await page.wait_for_selector('#messages-container', state='visible', timeout=5000)
             print("✓ Messages page loaded")
 
             # Set date to yesterday
             print("\n[Step 3] Setting date to yesterday...")
-            date_filter = page.locator('#date-filter')
+            date_filter = await page.locator('#date-filter')
             # Calculate yesterday's date
             from datetime import datetime, timedelta
             yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
@@ -143,7 +146,7 @@ def test_auto_refresh_historical_date():
 
             # Enable auto-refresh
             print("\n[Step 4] Enabling auto-refresh...")
-            auto_refresh_checkbox = page.locator('#auto-refresh')
+            auto_refresh_checkbox = await page.locator('#auto-refresh')
             auto_refresh_checkbox.check()
             print("✓ Auto-refresh enabled")
 
@@ -162,7 +165,7 @@ def test_auto_refresh_historical_date():
             print("✓ Auto-refresh disabled")
 
             # Take screenshot
-            page.screenshot(path="screenshots/issues/47/test_auto_refresh_historical.png")
+            await page.screenshot(path="screenshots/issues/47/test_auto_refresh_historical.png")
             print("✓ Screenshot saved")
 
             print("\n" + "=" * 60)
@@ -171,10 +174,10 @@ def test_auto_refresh_historical_date():
 
         except Exception as e:
             print(f"\n✗ Test failed: {e}")
-            page.screenshot(path="screenshots/issues/47/test_auto_refresh_historical_error.png")
+            await page.screenshot(path="screenshots/issues/47/test_auto_refresh_historical_error.png")
             raise
         finally:
-            browser.close()
+            await browser.close()
 
 
 def main():

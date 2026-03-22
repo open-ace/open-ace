@@ -109,9 +109,9 @@ export const Messages: React.FC = () => {
       {/* Header */}
       <div className="messages-header d-flex justify-content-between align-items-center mb-4">
         <h2>{t('messages', language)}</h2>
-        <div className="d-flex gap-2 align-items-center">
+        <div className="page-header-controls">
           {/* Auto-refresh toggle */}
-          <div className="form-check form-switch me-2">
+          <div className="form-check form-switch">
             <input
               className="form-check-input"
               type="checkbox"

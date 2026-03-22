@@ -5,30 +5,19 @@ AI Token Usage - Utils Module
 Provides utility functions for the ai_token_usage project.
 """
 
-from typing import Dict, List, Optional
 import os
 import sys
+from typing import Dict, List, Optional
 
-# Import shared configuration - support both relative and absolute imports
-def _get_config():
-    """Get config module, trying relative then absolute imports."""
-    try:
-        from . import config
-        return config
-    except ImportError:
-        try:
-            import config
-            return config
-        except ImportError:
-            # Try adding shared_dir to path
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            shared_dir = os.path.dirname(script_dir)
-            if shared_dir not in sys.path:
-                sys.path.insert(0, shared_dir)
-            import config
-            return config
+# Ensure scripts directory is in path for standalone script execution
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+_scripts_dir = os.path.dirname(_script_dir)
+if _scripts_dir not in sys.path:
+    sys.path.insert(0, _scripts_dir)
 
-config = _get_config()
+# Use standard import after path setup
+from shared import config
+
 CONFIG_PATH = config.CONFIG_PATH
 
 
@@ -67,7 +56,7 @@ def load_config(config_path: str = None) -> Dict:
 
     config = {}
     if os.path.exists(config_path):
-        with open(config_path, 'r') as f:
+        with open(config_path) as f:
             config = json.load(f)
 
     # If host_name is not set in config, use system hostname

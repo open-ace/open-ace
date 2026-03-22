@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Test script for issue 76: Admin menu visibility."""
 
+import pytest
 import asyncio
 from playwright.async_api import async_playwright
 
 
+@pytest.mark.asyncio
 async def test_menu(username: str, password: str, user_type: str):
     """Test menu visibility for a specific user type."""
     async with async_playwright() as p:

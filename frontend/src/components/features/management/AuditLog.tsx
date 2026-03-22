@@ -73,7 +73,8 @@ export const AuditLog: React.FC = () => {
   }
 
   const logs = data?.logs || [];
-  const pagination = data;
+  const total = data?.total || 0;
+  const totalPages = Math.ceil(total / ITEMS_PER_PAGE);
 
   return (
     <div className="audit-log">
@@ -132,10 +133,10 @@ export const AuditLog: React.FC = () => {
       </Card>
 
       {/* Stats */}
-      {pagination && (
+      {total > 0 && (
         <div className="mb-3">
           <span className="text-muted">
-            {t('total', language)}: {pagination.total.toLocaleString()} {t('records', language)}
+            {t('total', language)}: {total.toLocaleString()} {t('records', language)}
           </span>
         </div>
       )}
@@ -194,7 +195,7 @@ export const AuditLog: React.FC = () => {
           </div>
 
           {/* Pagination */}
-          {pagination && pagination.total_pages > 1 && (
+          {totalPages > 1 && (
             <div className="d-flex justify-content-center mt-4">
               <nav>
                 <ul className="pagination">
@@ -207,7 +208,7 @@ export const AuditLog: React.FC = () => {
                       {t('previous', language)}
                     </button>
                   </li>
-                  {Array.from({ length: Math.min(5, pagination.total_pages) }, (_, i) => {
+                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
                     const pageNum = i + 1;
                     return (
                       <li key={pageNum} className={`page-item ${page === pageNum ? 'active' : ''}`}>
@@ -217,11 +218,11 @@ export const AuditLog: React.FC = () => {
                       </li>
                     );
                   })}
-                  <li className={`page-item ${page === pagination.total_pages ? 'disabled' : ''}`}>
+                  <li className={`page-item ${page === totalPages ? 'disabled' : ''}`}>
                     <button
                       className="page-link"
                       onClick={() => setPage(page + 1)}
-                      disabled={page === pagination.total_pages}
+                      disabled={page === totalPages}
                     >
                       {t('next', language)}
                     </button>

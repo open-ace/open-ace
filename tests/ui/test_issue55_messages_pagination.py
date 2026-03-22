@@ -9,8 +9,9 @@ This test verifies that:
 4. Page numbers update correctly when navigating
 """
 
+import pytest
 import time
-from playwright.sync_api import sync_playwright, expect
+from playwright.async_api import async_playwright, expect
 
 # Test configuration
 BASE_URL = "http://localhost:5001"
@@ -19,128 +20,136 @@ PASSWORD = "admin123"
 TIMEOUT = 10000  # 10 seconds timeout
 
 
-def test_messages_pagination():
+@pytest.mark.asyncio
+async def test_messages_pagination():
     """Test that Messages page pagination works correctly."""
-    p = sync_playwright().start()
-    browser = p.chromium.launch(headless=False)
-    context = browser.new_context()
-    page = context.new_page()
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=False)
+        context = await browser.new_context()
+        page = await context.new_page()
 
-    # Set default timeout
-    page.set_default_timeout(TIMEOUT)
+        try:
+            print("=" * 60)
+            print("[UI] Testing: Messages page pagination (Issue #55)")
+            print("=" * 60)
 
-    try:
-        print("=" * 60)
-        print("[UI] Testing: Messages page pagination (Issue #55)")
-        print("=" * 60)
+            # Step 1: Login
+            print("\n[Step 1] Logging in...")
+            await page.goto(f"{BASE_URL}/login")
+            await page.fill('#username', USERNAME)
+            await page.fill('#password', PASSWORD)
+            await page.click('button[type="submit"]')
 
-        # Step 1: Login
-        print("\n[Step 1] Logging in...")
-        page.goto(f"{BASE_URL}/login")
-        page.fill('input[name="username"]', USERNAME)
-        page.fill('input[name="password"]', PASSWORD)
-        page.click('button[type="submit"]')
+            # Wait for redirect to dashboard
+            await page.wait_for_url(f"{BASE_URL}/", timeout=15000)
+            print("✓ Login successful")
 
-        # Wait for redirect to dashboard
-        page.wait_for_url(f"{BASE_URL}/", timeout=15000)
-        print("✓ Login successful")
+            # Step 2: Navigate to Messages page
+            print("\n[Step 2] Navigating to Messages page...")
+            # Wait for sidebar to be visible
+            await page.wait_for_selector('.sidebar', timeout=10000)
+            # Click on Messages nav item (using text content in span)
+            await page.click('.sidebar .nav-link:has-text("Messages")')
+            await page.wait_for_selector('#messages-container', state='visible', timeout=5000)
+            time.sleep(3)  # Wait for messages to load
 
-        # Step 2: Navigate to Messages page
-        print("\n[Step 2] Navigating to Messages page...")
-        page.click('#nav-messages')
-        page.wait_for_selector('#messages-container', state='visible', timeout=5000)
-        time.sleep(3)  # Wait for messages to load
+            # Step 3: Check if pagination controls exist
+            print("\n[Step 3] Checking pagination controls...")
+            pagination_controls = page.locator('#pagination-controls')
+            pagination_count = await pagination_controls.count()
 
-        # Step 3: Check if pagination controls exist
-        print("\n[Step 3] Checking pagination controls...")
-        pagination_controls = page.locator('#pagination-controls')
-        
-        if pagination_controls.count() > 0:
-            print("✓ Pagination controls found")
-            
-            # Check if Next button exists and is visible
-            next_button = page.locator('#next-page')
-            if next_button.count() > 0:
-                print("✓ Next button found")
-                
-                # Check if Next button is clickable (not disabled)
-                next_button_class = next_button.get_attribute('class')
-                if 'disabled' not in next_button_class:
-                    print("✓ Next button is clickable (not disabled)")
-                    
-                    # Get current page number
-                    current_page_el = page.locator('#current-page')
-                    total_pages_el = page.locator('#total-pages')
-                    
-                    if current_page_el.count() > 0 and total_pages_el.count() > 0:
-                        current_page_text = current_page_el.inner_text()
-                        total_pages_text = total_pages_el.inner_text()
-                        print(f"  Current page: {current_page_text}, Total pages: {total_pages_text}")
-                        
-                        # Step 4: Click Next button
-                        print("\n[Step 4] Clicking Next button...")
-                        next_button.click()
-                        time.sleep(2)  # Wait for page to load
-                        
-                        # Check if page number updated
-                        new_current_page = current_page_el.inner_text()
-                        print(f"  New page: {new_current_page}")
-                        
-                        if new_current_page != current_page_text:
-                            print("✓ Page number updated after clicking Next")
-                            
-                            # Verify messages are loaded
-                            messages = page.locator('.message-item')
-                            if messages.count() > 0:
-                                print(f"✓ New page loaded with {messages.count()} messages")
-                            else:
-                                print("⚠ No messages on new page")
-                            
-                            # Step 5: Test Previous button
-                            print("\n[Step 5] Testing Previous button...")
-                            prev_button = page.locator('#prev-page')
-                            if prev_button.count() > 0:
-                                prev_button_class = prev_button.get_attribute('class')
-                                if 'disabled' not in prev_button_class:
-                                    print("✓ Previous button is clickable")
-                                    prev_button.click()
-                                    time.sleep(2)
-                                    
-                                    final_page = current_page_el.inner_text()
-                                    print(f"  Page after Previous: {final_page}")
-                                    
-                                    if final_page == current_page_text:
-                                        print("✓ Previous button works correctly")
-                                    else:
-                                        print(f"⚠ Page number mismatch: expected {current_page_text}, got {final_page}")
+            if pagination_count > 0:
+                print("✓ Pagination controls found")
+
+                # Check if Next button exists and is visible
+                next_button = page.locator('#next-page')
+                next_count = await next_button.count()
+                if next_count > 0:
+                    print("✓ Next button found")
+
+                    # Check if Next button is clickable (not disabled)
+                    next_button_class = await next_button.get_attribute('class')
+                    if next_button_class and 'disabled' not in next_button_class:
+                        print("✓ Next button is clickable (not disabled)")
+
+                        # Get current page number
+                        current_page_el = page.locator('#current-page')
+                        total_pages_el = page.locator('#total-pages')
+
+                        current_count = await current_page_el.count()
+                        total_count = await total_pages_el.count()
+
+                        if current_count > 0 and total_count > 0:
+                            current_page_text = await current_page_el.inner_text()
+                            total_pages_text = await total_pages_el.inner_text()
+                            print(f"  Current page: {current_page_text}, Total pages: {total_pages_text}")
+
+                            # Step 4: Click Next button
+                            print("\n[Step 4] Clicking Next button...")
+                            await next_button.click()
+                            time.sleep(2)  # Wait for page to load
+
+                            # Check if page number updated
+                            new_current_page = await current_page_el.inner_text()
+                            print(f"  New page: {new_current_page}")
+
+                            if new_current_page != current_page_text:
+                                print("✓ Page number updated after clicking Next")
+
+                                # Verify messages are loaded
+                                messages = page.locator('.message-item')
+                                msg_count = await messages.count()
+                                if msg_count > 0:
+                                    print(f"✓ New page loaded with {msg_count} messages")
                                 else:
-                                    print("⚠ Previous button is disabled")
+                                    print("⚠ No messages on new page")
+
+                                # Step 5: Test Previous button
+                                print("\n[Step 5] Testing Previous button...")
+                                prev_button = page.locator('#prev-page')
+                                prev_count = await prev_button.count()
+                                if prev_count > 0:
+                                    prev_button_class = await prev_button.get_attribute('class')
+                                    if prev_button_class and 'disabled' not in prev_button_class:
+                                        print("✓ Previous button is clickable")
+                                        await prev_button.click()
+                                        time.sleep(2)
+
+                                        final_page = await current_page_el.inner_text()
+                                        print(f"  Page after Previous: {final_page}")
+
+                                        if final_page == current_page_text:
+                                            print("✓ Previous button works correctly")
+                                        else:
+                                            print(f"⚠ Page number mismatch: expected {current_page_text}, got {final_page}")
+                                    else:
+                                        print("⚠ Previous button is disabled")
+                                else:
+                                    print("⚠ Previous button not found")
                             else:
-                                print("⚠ Previous button not found")
+                                print("✗ Page number did not update after clicking Next - THIS IS THE BUG!")
                         else:
-                            print("✗ Page number did not update after clicking Next - THIS IS THE BUG!")
+                            print("⚠ Page number elements not found")
                     else:
-                        print("⚠ Page number elements not found")
+                        print("⚠ Next button is disabled (may be on last page)")
                 else:
-                    print("⚠ Next button is disabled (may be on last page)")
+                    print("⚠ Next button not found")
             else:
-                print("⚠ Next button not found")
-        else:
-            print("ℹ Pagination controls not displayed (may be only one page of messages)")
-        
-        print("\n" + "=" * 60)
-        print("Test completed!")
-        print("=" * 60)
+                print("ℹ Pagination controls not displayed (may be only one page of messages)")
 
-    except Exception as e:
-        print(f"\n✗ Test failed: {e}")
-        page.screenshot(path="screenshots/issues/55/test_error.png")
-        print("Error screenshot saved to screenshots/issues/55/test_error.png")
-        browser.close()
-        raise
+            print("\n" + "=" * 60)
+            print("Test completed!")
+            print("=" * 60)
 
-    browser.close()
+        except Exception as e:
+            print(f"\n✗ Test failed: {e}")
+            await page.screenshot(path="screenshots/issues/55/test_error.png")
+            print("Error screenshot saved to screenshots/issues/55/test_error.png")
+            raise
+
+        finally:
+            await browser.close()
 
 
 if __name__ == "__main__":
-    test_messages_pagination()
+    pytest.main([__file__, "-v"])

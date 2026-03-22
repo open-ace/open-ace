@@ -1,0 +1,60 @@
+# Open ACE - PersistentVolumeClaim
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: open-ace-data
+  namespace: open-ace
+  labels:
+    app.kubernetes.io/name: open-ace
+    app.kubernetes.io/component: storage
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: standard
+
+---
+# Open ACE - ServiceAccount
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: open-ace
+  namespace: open-ace
+  labels:
+    app.kubernetes.io/name: open-ace
+
+---
+# Open ACE - RBAC
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: open-ace
+  namespace: open-ace
+  labels:
+    app.kubernetes.io/name: open-ace
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: open-ace
+  namespace: open-ace
+  labels:
+    app.kubernetes.io/name: open-ace
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: open-ace
+subjects:
+  - kind: ServiceAccount
+    name: open-ace
+    namespace: open-ace

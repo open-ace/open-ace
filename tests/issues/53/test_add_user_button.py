@@ -11,6 +11,7 @@ UI Test for Issue 53: Management页面User Management的Add User按钮点不了
 6. 检查模态框中的表单字段是否完整
 """
 
+import pytest
 import sys
 import os
 import time
@@ -20,7 +21,7 @@ skill_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, skill_dir)
 
 try:
-    from playwright.sync_api import sync_playwright, expect
+    from playwright.async_api import async_playwright, expect
 except ImportError:
     print("Error: playwright not installed. Run: pip install playwright && playwright install chromium")
     sys.exit(1)
@@ -36,24 +37,25 @@ TIMEOUT = 60000  # 60 seconds timeout
 os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
 
-def take_screenshot(page, name):
+async def take_screenshot(page, name):
     """Take screenshot and save to issue directory"""
     path = os.path.join(SCREENSHOT_DIR, name)
-    page.screenshot(path=path)
+    await page.screenshot(path=path)
     print(f"  Screenshot saved: {path}")
     return path
 
 
-def test_issue53():
+@pytest.mark.asyncio
+async def test_issue53():
     """Test Issue 53: Add User button functionality in Management Users tab"""
     screenshots = []
 
-    with sync_playwright() as p:
+    async with async_playwright() as p:
         # Launch browser
-        browser = p.chromium.launch(headless=False)
-        context = browser.new_context(viewport={'width': 1280, 'height': 900})
-        page = context.new_page()
-        page.set_default_timeout(TIMEOUT)
+        browser = await p.chromium.launch(headless=False)
+        context = await browser.new_context(viewport={'width': 1280, 'height': 900})
+        page = await context.new_page()
+        await page.set_default_timeout(TIMEOUT)
 
         try:
             print("\n" + "=" * 60)
@@ -62,17 +64,17 @@ def test_issue53():
 
             # Step 1: Navigate to login page
             print("\n[Step 1] Navigate to login page")
-            page.goto(f'{BASE_URL}/login')
-            page.wait_for_load_state('networkidle')
+            await page.goto(f'{BASE_URL}/login')
+            await page.wait_for_load_state('networkidle')
             screenshots.append(take_screenshot(page, '01_login_page.png'))
             print("  ✓ Login page loaded")
 
             # Step 2: Login
             print("\n[Step 2] Login as admin")
-            page.fill('input[name="username"]', USERNAME)
-            page.fill('input[name="password"]', PASSWORD)
-            page.click('button[type="submit"]')
-            page.wait_for_load_state('networkidle')
+            await page.fill('input[name="username"]', USERNAME)
+            await page.fill('input[name="password"]', PASSWORD)
+            await page.click('button[type="submit"]')
+            await page.wait_for_load_state('networkidle')
             time.sleep(2)
             screenshots.append(take_screenshot(page, '02_after_login.png'))
             print("  ✓ Logged in successfully")
@@ -84,7 +86,7 @@ def test_issue53():
             time.sleep(2)
 
             # Check if Management nav is visible (admin only)
-            nav_management = page.locator('#nav-management:visible')
+            nav_management = await page.locator('#nav-management:visible')
             nav_count = nav_management.count()
             print(f"  Found {nav_count} visible Management nav links")
 
@@ -95,11 +97,11 @@ def test_issue53():
                 return False
 
             nav_management.first.click()
-            page.wait_for_load_state('networkidle')
+            await page.wait_for_load_state('networkidle')
             time.sleep(2)
 
             # Wait for management section to be visible
-            management_section = page.locator('#management-section')
+            management_section = await page.locator('#management-section')
             expect(management_section).to_be_visible()
             print("  ✓ Management section is visible")
 
@@ -108,13 +110,13 @@ def test_issue53():
 
             # Step 4: Check Users tab is active
             print("\n[Step 4] Check Users tab")
-            users_tab = page.locator('#users-tab')
+            users_tab = await page.locator('#users-tab')
             expect(users_tab).to_be_visible()
             print("  ✓ Users tab is visible")
 
             # Step 5: Check Add User button exists and is visible
             print("\n[Step 5] Check Add User button")
-            add_user_btn = page.locator('#add-user-btn')
+            add_user_btn = await page.locator('#add-user-btn')
             expect(add_user_btn).to_be_visible()
             print("  ✓ Add User button is visible")
 
@@ -137,12 +139,12 @@ def test_issue53():
 
             # Step 7: Verify Add User modal appears
             print("\n[Step 7] Verify Add User modal")
-            modal = page.locator('#addUserModal')
+            modal = await page.locator('#addUserModal')
             expect(modal).to_be_visible()
             print("  ✓ Add User modal is visible")
 
             # Check modal title
-            modal_title = page.locator('#addUserModalLabel')
+            modal_title = await page.locator('#addUserModalLabel')
             expect(modal_title).to_be_visible()
             print(f"  Modal title: {modal_title.inner_text()}")
 
@@ -152,42 +154,42 @@ def test_issue53():
             print("\n[Step 8] Check form fields in modal")
 
             # Check username field
-            username_input = page.locator('#add-username')
+            username_input = await page.locator('#add-username')
             expect(username_input).to_be_visible()
             print("  ✓ Username input field found")
 
             # Check password field
-            password_input = page.locator('#add-password')
+            password_input = await page.locator('#add-password')
             expect(password_input).to_be_visible()
             print("  ✓ Password input field found")
 
             # Check email field
-            email_input = page.locator('#add-email')
+            email_input = await page.locator('#add-email')
             expect(email_input).to_be_visible()
             print("  ✓ Email input field found")
 
             # Check role select
-            role_select = page.locator('#add-role')
+            role_select = await page.locator('#add-role')
             expect(role_select).to_be_visible()
             print("  ✓ Role select field found")
 
             # Check quota tokens field
-            quota_tokens_input = page.locator('#add-quota-tokens')
+            quota_tokens_input = await page.locator('#add-quota-tokens')
             expect(quota_tokens_input).to_be_visible()
             print("  ✓ Quota Tokens input field found")
 
             # Check quota requests field
-            quota_requests_input = page.locator('#add-quota-requests')
+            quota_requests_input = await page.locator('#add-quota-requests')
             expect(quota_requests_input).to_be_visible()
             print("  ✓ Quota Requests input field found")
 
             # Check status select
-            status_select = page.locator('#add-is-active')
+            status_select = await page.locator('#add-is-active')
             expect(status_select).to_be_visible()
             print("  ✓ Status select field found")
 
             # Check Create User button
-            create_btn = page.locator('#addUserModal .btn-primary:not(.btn-secondary)')
+            create_btn = await page.locator('#addUserModal .btn-primary:not(.btn-secondary)')
             expect(create_btn).to_be_visible()
             print("  ✓ Create User button found")
 
@@ -195,11 +197,11 @@ def test_issue53():
 
             # Step 9: Close modal
             print("\n[Step 9] Close modal")
-            page.click('#addUserModal .btn-close')
+            await page.click('#addUserModal .btn-close')
             time.sleep(0.5)
 
             # Verify modal is closed
-            modal = page.locator('#addUserModal')
+            modal = await page.locator('#addUserModal')
             expect(modal).to_be_hidden()
             print("  ✓ Modal closed successfully")
 
@@ -225,7 +227,7 @@ def test_issue53():
             return False
 
         finally:
-            browser.close()
+            await browser.close()
 
 
 if __name__ == '__main__':

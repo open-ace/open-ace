@@ -76,9 +76,10 @@ export const messagesApi = {
 
     if (filters.tool) params.tool = filters.tool;
     if (filters.host) params.host = filters.host;
+    if (filters.sender) params.sender = filters.sender;
     if (filters.startDate) params.start_date = filters.startDate;
     if (filters.endDate) params.end_date = filters.endDate;
-    if (filters.role) params.role = filters.role;
+    if (filters.role && filters.role.length > 0) params.role = filters.role.join(',');
     if (filters.search) params.search = filters.search;
 
     const response = await apiClient.get<BackendMessagesResponse>('/api/messages', params);
@@ -111,8 +112,11 @@ export const messagesApi = {
 
     if (filters.tool) params.tool = filters.tool;
     if (filters.host) params.host = filters.host;
+    if (filters.sender) params.sender = filters.sender;
     if (filters.startDate) params.start_date = filters.startDate;
     if (filters.endDate) params.end_date = filters.endDate;
+    if (filters.role && filters.role.length > 0) params.role = filters.role.join(',');
+    if (filters.search) params.search = filters.search;
 
     const response = await apiClient.get<{ count: number }>('/api/messages/count', params);
     return response.count;
@@ -162,6 +166,26 @@ export const messagesApi = {
   },
 
   /**
+   * Get conversation timeline with latency data
+   */
+  async getConversationTimelineWithLatency(sessionId: string): Promise<{
+    timeline: Array<{
+      timestamp: string;
+      role: string;
+      tokens_used: number;
+      model?: string;
+      sender_name?: string;
+    }>;
+    latency_curve: Array<{
+      index: number;
+      role: string;
+      latency: number;
+    }>;
+  }> {
+    return apiClient.get(`/api/conversation-timeline/${sessionId}`);
+  },
+
+  /**
    * Get conversation details
    */
   async getConversationDetails(
@@ -170,5 +194,15 @@ export const messagesApi = {
     return apiClient.get<ConversationHistory & { messages: ConversationMessage[] } | null>(
       `/api/conversation-details/${sessionId}`
     );
+  },
+
+  /**
+   * Get list of all senders
+   */
+  async getSenders(host?: string): Promise<string[]> {
+    const params: Record<string, string> = {};
+    if (host) params.host = host;
+
+    return apiClient.get<string[]>('/api/senders', params);
   },
 };

@@ -1,0 +1,39 @@
+# EditorConfig - Maintain consistent coding style
+# https://editorconfig.org
+
+root = true
+
+# Default settings
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# Python
+[*.py]
+indent_style = space
+indent_size = 4
+
+# JavaScript, HTML, CSS
+[*.{js,html,css}]
+indent_style = space
+indent_size = 2
+
+# JSON, YAML
+[*.{json,yaml,yml}]
+indent_style = space
+indent_size = 2
+
+# Markdown
+[*.md]
+trim_trailing_whitespace = false
+
+# Shell scripts
+[*.sh]
+indent_style = space
+indent_size = 2
+
+# Makefile
+[Makefile]
+indent_style = tab

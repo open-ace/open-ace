@@ -1,0 +1,1459 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>旧版本与新版本页面元素对比分析</title>
+    <style>
+        :root {
+            --primary-color: #667eea;
+            --secondary-color: #764ba2;
+            --bg-color: #f8f9fa;
+            --card-bg: #ffffff;
+            --text-color: #333;
+            --text-muted: #6c757d;
+            --border-color: #dee2e6;
+            --code-bg: #f4f4f4;
+            --success-color: #28a745;
+            --danger-color: #dc3545;
+            --warning-color: #ffc107;
+            --info-color: #17a2b8;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.8;
+            color: var(--text-color);
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: var(--card-bg);
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+
+        .header h1 {
+            margin: 0 0 10px 0;
+            font-size: 2.5em;
+        }
+
+        .header p {
+            margin: 0;
+            opacity: 0.9;
+        }
+
+        .content {
+            padding: 40px;
+        }
+
+        h1 {
+            color: var(--primary-color);
+            border-bottom: 3px solid var(--primary-color);
+            padding-bottom: 10px;
+            margin-top: 40px;
+        }
+
+        h2 {
+            color: var(--secondary-color);
+            border-left: 4px solid var(--secondary-color);
+            padding-left: 15px;
+            margin-top: 35px;
+        }
+
+        h3 {
+            color: var(--text-color);
+            margin-top: 25px;
+        }
+
+        h4 {
+            color: var(--text-muted);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            font-size: 14px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        th {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            color: white;
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+        }
+
+        td {
+            padding: 12px 15px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        tr:nth-child(even) {
+            background-color: #f8f9fa;
+        }
+
+        tr:hover {
+            background-color: #e9ecef;
+        }
+
+        code {
+            background: var(--code-bg);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'SF Mono', Monaco, Consolas, monospace;
+            font-size: 0.9em;
+            color: #e83e8c;
+        }
+
+        pre {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 20px 0;
+        }
+
+        pre code {
+            background: none;
+            padding: 0;
+            color: inherit;
+            font-size: 14px;
+        }
+
+        blockquote {
+            border-left: 4px solid var(--primary-color);
+            margin: 20px 0;
+            padding: 15px 20px;
+            background: #f0f4ff;
+            border-radius: 0 8px 8px 0;
+        }
+
+        blockquote p {
+            margin: 0;
+        }
+
+        ul, ol {
+            padding-left: 25px;
+        }
+
+        li {
+            margin: 8px 0;
+        }
+
+        hr {
+            border: none;
+            height: 2px;
+            background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));
+            margin: 40px 0;
+            border-radius: 2px;
+        }
+
+        a {
+            color: var(--primary-color);
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        .toc {
+            background: #f8f9fa;
+            padding: 20px 30px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+        }
+
+        .toc ul {
+            list-style: none;
+            padding-left: 0;
+        }
+
+        .toc li {
+            margin: 5px 0;
+        }
+
+        .toc a {
+            color: var(--text-color);
+        }
+
+        .footer {
+            text-align: center;
+            padding: 20px;
+            color: var(--text-muted);
+            font-size: 14px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        /* Status badges */
+        .status-exists {
+            color: var(--success-color);
+            font-weight: 600;
+        }
+
+        .status-missing {
+            color: var(--danger-color);
+            font-weight: 600;
+        }
+
+        .status-partial {
+            color: var(--warning-color);
+            font-weight: 600;
+        }
+
+        .status-new {
+            color: var(--info-color);
+            font-weight: 600;
+        }
+
+        /* Priority badges */
+        .priority-high {
+            background: var(--danger-color);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        .priority-medium {
+            background: var(--warning-color);
+            color: #333;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        .priority-low {
+            background: var(--info-color);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        /* Summary cards */
+        .summary-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+
+        .summary-card {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 12px;
+            text-align: center;
+        }
+
+        .summary-card h3 {
+            margin: 0 0 10px 0;
+            font-size: 2em;
+            color: white;
+        }
+
+        .summary-card p {
+            margin: 0;
+            opacity: 0.9;
+        }
+
+        /* Phase timeline */
+        .phase-timeline {
+            position: relative;
+            padding-left: 30px;
+        }
+
+        .phase-timeline::before {
+            content: '';
+            position: absolute;
+            left: 10px;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: var(--primary-color);
+        }
+
+        .phase-item {
+            position: relative;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border-left: 4px solid var(--primary-color);
+        }
+
+        .phase-item::before {
+            content: '';
+            position: absolute;
+            left: -24px;
+            top: 25px;
+            width: 12px;
+            height: 12px;
+            background: var(--primary-color);
+            border-radius: 50%;
+        }
+
+        .phase-item h4 {
+            margin-top: 0;
+            color: var(--primary-color);
+        }
+
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+
+            .header {
+                padding: 20px;
+            }
+
+            .header h1 {
+                font-size: 1.8em;
+            }
+
+            .content {
+                padding: 20px;
+            }
+
+            table {
+                font-size: 12px;
+            }
+
+            th, td {
+                padding: 8px 10px;
+            }
+
+            .summary-cards {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔍 旧版本与新版本页面元素对比分析</h1>
+            <p>Open ACE 前端重构 · 功能完整性检查 · 差异分析</p>
+        </div>
+
+        <div class="content">
+<h1 id="overview">概述</h1>
+<blockquote>
+<p>本文档对比分析旧版本（http://127.0.0.1:5002/）与新版本（React 前端）的页面元素差异，帮助识别新版本缺失的功能和需要调整的内容。</p>
+</blockquote>
+
+<div class="summary-cards">
+    <div class="summary-card">
+        <h3>4</h3>
+        <p>分析页面</p>
+    </div>
+    <div class="summary-card">
+        <h3>25+</h3>
+        <p>缺失元素</p>
+    </div>
+    <div class="summary-card">
+        <h3>3</h3>
+        <p>实施阶段</p>
+    </div>
+</div>
+
+<hr />
+
+<h2 id="toc">目录</h2>
+<div class="toc">
+<ol>
+<li><a href="#dashboard">Dashboard 页面对比</a></li>
+<li><a href="#messages">Messages 页面对比</a></li>
+<li><a href="#analysis">Analysis 页面对比</a></li>
+<li><a href="#conversation">Conversation History 页面对比</a></li>
+<li><a href="#common">通用功能对比</a></li>
+<li><a href="#summary">总结与建议</a></li>
+<li><a href="#roadmap">实施路线图</a></li>
+</ol>
+</div>
+
+<hr />
+
+<h2 id="dashboard">1. Dashboard 页面</h2>
+
+<h3>1.1 元素对比表</h3>
+<table>
+<thead>
+<tr>
+<th>元素类型</th>
+<th>元素名称</th>
+<th>功能描述</th>
+<th>新版本状态</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>开关</td>
+<td>Auto-refresh</td>
+<td>自动刷新开关，可开启/关闭自动刷新功能</td>
+<td><span class="status-missing">❌ 缺失</span></td>
+</tr>
+<tr>
+<td>下拉列表</td>
+<td>Host Filter</td>
+<td>主机筛选器，可选择特定主机或"All Hosts"</td>
+<td><span class="status-exists">✅ 存在</span></td>
+</tr>
+<tr>
+<td>下拉列表</td>
+<td>Tool Filter</td>
+<td>工具筛选器</td>
+<td><span class="status-new">🆕 新增</span></td>
+</tr>
+<tr>
+<td>按钮</td>
+<td>Refresh</td>
+<td>手动刷新按钮</td>
+<td><span class="status-exists">✅ 存在</span></td>
+</tr>
+<tr>
+<td>卡片</td>
+<td>Today's Usage</td>
+<td>今日使用量卡片，显示各工具的 token 使用量</td>
+<td><span class="status-exists">✅ 存在</span></td>
+</tr>
+<tr>
+<td>图表</td>
+<td>Total Overview (Pie Chart)</td>
+<td>总览饼图，显示各工具的 token 分布</td>
+<td><span class="status-exists">✅ 存在</span></td>
+</tr>
+<tr>
+<td>图表</td>
+<td>Trend Chart (Line Chart)</td>
+<td>趋势折线图，显示最近30天的 token 使用趋势</td>
+<td><span class="status-exists">✅ 存在</span></td>
+</tr>
+<tr>
+<td>卡片</td>
+<td>Tools Info</td>
+<td>工具信息卡片（tokens、days、avg、requests、date range）</td>
+<td><span class="status-partial">⚠️ 部分缺失</span></td>
+</tr>
+<tr>
+<td>图表</td>
+<td>Token Distribution</td>
+<td>Token 分布图（输入/输出 token）</td>
+<td><span class="status-exists">✅ 存在</span></td>
+</tr>
+</tbody>
+</table>
+
+<h3>1.2 缺失项详情</h3>
+<table>
+<thead>
+<tr>
+<th>缺失项</th>
+<th>描述</th>
+<th>优先级</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Auto-refresh 开关</strong></td>
+<td>旧版本有自动刷新开关，新版本虽然代码中有 <code>autoRefresh: true</code>，但没有 UI 控件让用户控制</td>
+<td><span class="priority-high">高</span></td>
+</tr>
+<tr>
+<td><strong>Tools Info 卡片详情</strong></td>
+<td>旧版本的 Tools Info 卡片显示更详细的信息（days tracked、avg/day、requests、date range）</td>
+<td><span class="priority-low">低</span></td>
+</tr>
+</tbody>
+</table>
+
+<hr />
+
+<h2 id="messages">2. Messages 页面</h2>
+
+<h3>2.1 元素对比表</h3>
+<table>
+<thead>
+<tr>
+<th>元素类型</th>
+<th>元素名称</th>
+<th>功能描述</th>
+<th>新版本状态</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>开关</td>
+<td>Auto-refresh</td>
+<td>自动刷新开关</td>
+<td><span class="status-missing">❌ 缺失</span></td>
+</tr>
+<tr>
+<td>日期选择器</td>
+<td>Date Filter</td>
+<td>单日期筛选器</td>
+<td><span class="status-partial">⚠️ 改为日期范围</span></td>
+</tr>
+<tr>
+<td>下拉列表</td>
+<td>Host Filter</td>
+<td>主机筛选器</td>
+<td><span class="status-missing">❌ 缺失</span></td>
+</tr>
+<tr>
+<td>下拉列表</td>
+<td>Tool Filter</td>
+<td>工具筛选器</td>
+<td><span class="status-exists">✅ 存在</span></td>
+</tr>
+<tr>
+<td>下拉列表</td>
+<td>Sender Filter</td>
+<td>发送者筛选器（可搜索的下拉列表）</td>
+<td><span class="status-missing">❌ 缺失</span></td>
+</tr>
+<tr>
+<td>搜索框</td>
+<td>Search Filter</td>
+<td>消息内容搜索框</td>
+<td><span class="status-missing">❌ 缺失</span></td>
+</tr>
+<tr>
+<td>勾选框组</td>
+<td>Role Filter</td>
+<td>角色筛选（User/Assistant/System 勾选框）</td>
+<td><span class="status-partial">⚠️ 改为下拉列表</span></td>
+</tr>
+<tr>
+<td>按钮</td>
+<td>Refresh</td>
+<td>刷新按钮</td>
+<td><span class="status-exists">✅ 存在</span></td>
+</tr>
+<tr>
+<td>列表</td>
+<td>Messages List</td>
+<td>消息列表，可展开/折叠</td>
+<td><span class="status-exists">✅ 存在</span></td>
+</tr>
+<tr>
+<td>分页</td>
+<td>Pagination</td>
+<td>分页控件（Previous/Next）</td>
+<td><span class="status-exists">✅ 存在</span></td>
+</tr>
+<tr>
+<td>统计</td>
+<td>Total Count</td>
+<td>消息总数统计</td>
+<td><span class="status-exists">✅ 存在</span></td>
+</tr>
+</tbody>
+</table>
+
+<h3>2.2 缺失项详情</h3>
+<table>
+<thead>
+<tr>
+<th>缺失项</th>
+<th>描述</th>
+<th>优先级</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Auto-refresh 开关</strong></td>
+<td>旧版本有自动刷新开关</td>
+<td><span class="priority-high">高</span></td>
+</tr>
+<tr>
+<td><strong>Host Filter</strong></td>
+<td>主机筛选器缺失</td>
+<td><span class="priority-high">高</span></td>
+</tr>
+<tr>
+<td><strong>Sender Filter</strong></td>
+<td>发送者筛选器缺失（旧版本是可搜索的下拉列表）</td>
+<td><span class="priority-high">高</span></td>
+</tr>
+<tr>
+<td><strong>Search Filter</strong></td>
+<td>消息内容搜索框缺失</td>
+<td><span class="priority-high">高</span></td>
+</tr>
+<tr>
+<td><strong>Role Filter 改变</strong></td>
+<td>旧版本是勾选框组（可多选），新版本改为下拉列表（单选）</td>
+<td><span class="priority-high">高</span></td>
+</tr>
+</tbody>
+</table>
+
+<h3>2.3 新版本改进项</h3>
+<ul>
+<li><strong>日期范围筛选</strong> - 新版本支持开始日期和结束日期，比旧版本的单日期筛选更灵活</li>
+</ul>
+
+<h3>2.4 消息卡片详情</h3>
+
+<h4>2.4.1 消息卡片结构</h4>
+<p>旧版本的消息卡片包含以下结构：</p>
+<table>
+<thead>
+<tr>
+<th>区域</th>
+<th>元素</th>
+<th>描述</th>
+<th>新版本状态</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td rowspan="5"><strong>Header</strong></td>
+<td>Role Badge</td>
+<td>角色标签（User/Assistant/System），带颜色区分</td>
+<td><span class="status-partial">⚠️ 简化</span></td>
+</tr>
+<tr>
+<td>Host Name</td>
+<td>主机名标签，带图标 <code>&lt;i class="bi bi-pc-display-horizontal"&gt;</code></td>
+<td><span class="status-missing">❌ 缺失</span></td>
+</tr>
+<tr>
+<td>Message Source</td>
+<td>消息来源标签（openclaw/qwen/claude），带颜色样式</td>
+<td><span class="status-missing">❌ 缺失</span></td>
+</tr>
+<tr>
+<td>Sender Name</td>
+<td>发送者名称，带图标 <code>&lt;i class="bi bi-person-circle"&gt;</code></td>
+<td><span class="status-missing">❌ 缺失</span></td>
+</tr>
+<tr>
+<td>Tokens</td>
+<td>Token 数量显示，带图标 <code>&lt;i class="bi bi-token"&gt;</code></td>
+<td><span class="status-exists">✅ 存在</span></td>
+</tr>
+<tr>
+<td><strong>Content</strong></td>
+<td>Truncated Content</td>
+<td>截断的内容预览（200字符），支持 HTML 转义</td>
+<td><span class="status-exists">✅ 存在</span></td>
+</tr>
+<tr>
+<td><strong>Expanded</strong></td>
+<td>Full Content</td>
+<td>展开后的完整内容（JSON 格式化显示）</td>
+<td><span class="status-partial">⚠️ 简化</span></td>
+</tr>
+<tr>
+<td rowspan="2"><strong>Footer</strong></td>
+<td>Timestamp</td>
+<td>消息时间戳</td>
+<td><span class="status-exists">✅ 存在</span></td>
+</tr>
+<tr>
+<td>Model</td>
+<td>模型名称（如 claude-3-opus、qwen-max 等）</td>
+<td><span class="status-missing">❌ 缺失</span></td>
+</tr>
+</tbody>
+</table>
+
+<h4>2.4.2 Expand/Collapse 功能</h4>
+<table>
+<thead>
+<tr>
+<th>功能</th>
+<th>描述</th>
+<th>新版本状态</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>点击展开/折叠</strong></td>
+<td>点击消息卡片可展开显示完整内容，再次点击折叠</td>
+<td><span class="status-exists">✅ 存在</span></td>
+</tr>
+<tr>
+<td><strong>箭头图标动画</strong></td>
+<td>展开时箭头旋转 180 度，折叠时恢复</td>
+<td><span class="status-missing">❌ 缺失</span></td>
+</tr>
+<tr>
+<td><strong>JSON 格式化</strong></td>
+<td>展开时自动解析 JSON 并格式化显示（带缩进）</td>
+<td><span class="status-partial">⚠️ 简化</span></td>
+</tr>
+<tr>
+<td><strong>full_entry 支持</strong></td>
+<td>优先显示完整原始 JSON 条目（full_entry 字段）</td>
+<td><span class="status-missing">❌ 缺失</span></td>
+</tr>
+</tbody>
+</table>
+
+<h4>2.4.3 消息标签样式</h4>
+<table>
+<thead>
+<tr>
+<th>标签类型</th>
+<th>样式类</th>
+<th>颜色</th>
+<th>示例</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>User Badge</td>
+<td><code>.role-badge.user</code></td>
+<td>蓝色 (#0d6efd)</td>
+<td><span style="background:#0d6efd;color:white;padding:2px 8px;border-radius:4px;font-size:12px;">USER</span></td>
+</tr>
+<tr>
+<td>Assistant Badge</td>
+<td><code>.role-badge.assistant</code></td>
+<td>绿色 (#198754)</td>
+<td><span style="background:#198754;color:white;padding:2px 8px;border-radius:4px;font-size:12px;">ASSISTANT</span></td>
+</tr>
+<tr>
+<td>System Badge</td>
+<td><code>.role-badge.system</code></td>
+<td>灰色 (#6c757d)</td>
+<td><span style="background:#6c757d;color:white;padding:2px 8px;border-radius:4px;font-size:12px;">SYSTEM</span></td>
+</tr>
+<tr>
+<td>Slack Source</td>
+<td><code>.message-source.slack</code></td>
+<td>紫色 (#4A154B)</td>
+<td><span style="background:#4A154B;color:white;padding:2px 6px;border-radius:3px;font-size:10px;">SLACK</span></td>
+</tr>
+<tr>
+<td>Feishu Source</td>
+<td><code>.message-source.feishu</code></td>
+<td>青色 (#00D6B9)</td>
+<td><span style="background:#00D6B9;color:white;padding:2px 6px;border-radius:3px;font-size:10px;">FEISHU</span></td>
+</tr>
+<tr>
+<td>OpenClaw Source</td>
+<td><code>.message-source.openclaw</code></td>
+<td>蓝色 (#0d6efd)</td>
+<td><span style="background:#0d6efd;color:white;padding:2px 6px;border-radius:3px;font-size:10px;">OPENCLAW</span></td>
+</tr>
+<tr>
+<td>Qwen Source</td>
+<td><code>.message-source.qwen</code></td>
+<td>青色 (#0dcaf0)</td>
+<td><span style="background:#0dcaf0;color:#000;padding:2px 6px;border-radius:3px;font-size:10px;">QWEN</span></td>
+</tr>
+<tr>
+<td>Claude Source</td>
+<td><code>.message-source.claude</code></td>
+<td>粉色 (#d63384)</td>
+<td><span style="background:#d63384;color:white;padding:2px 6px;border-radius:3px;font-size:10px;">CLAUDE</span></td>
+</tr>
+</tbody>
+</table>
+
+<h4>2.4.4 消息卡片缺失项汇总</h4>
+<table>
+<thead>
+<tr>
+<th>缺失项</th>
+<th>描述</th>
+<th>优先级</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Host Name 标签</strong></td>
+<td>消息卡片头部显示主机名</td>
+<td><span class="priority-high">高</span></td>
+</tr>
+<tr>
+<td><strong>Message Source 标签</strong></td>
+<td>消息来源标签（openclaw/qwen/claude），带颜色样式</td>
+<td><span class="priority-high">高</span></td>
+</tr>
+<tr>
+<td><strong>Sender Name 标签</strong></td>
+<td>发送者名称显示</td>
+<td><span class="priority-high">高</span></td>
+</tr>
+<tr>
+<td><strong>Model 显示</strong></td>
+<td>消息卡片底部显示模型名称</td>
+<td><span class="priority-medium">中</span></td>
+</tr>
+<tr>
+<td><strong>箭头旋转动画</strong></td>
+<td>展开/折叠时的箭头旋转动画效果</td>
+<td><span class="priority-low">低</span></td>
+</tr>
+<tr>
+<td><strong>full_entry 支持</strong></td>
+<td>展开时显示完整原始 JSON 条目</td>
+<td><span class="priority-low">低</span></td>
+</tr>
+</tbody>
+</table>
+
+<hr />
+
+<h2 id="analysis">3. Analysis 页面</h2>
+
+<h3>3.1 元素对比表</h3>
+<table>
+<thead>
+<tr>
+<th>元素类型</th>
+<th>元素名称</th>
+<th>功能描述</th>
+<th>新版本状态</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>按钮组</td>
+<td>Quick Date Range</td>
+<td>快速日期范围选择（7天/30天/90天/全部）</td>
+<td><span class="status-missing">❌ 缺失</span></td>
+</tr>
+<tr>
+<td>日期选择器</td>
+<td>Date Range</td>
+<td>日期范围选择器（开始-结束）</td>
+<td><span class="status-exists">✅ 存在</span></td>
+</tr>
+<tr>
+<td>下拉列表</td>
+<td>Tool Filter</td>
+<td>工具筛选器</td>
+<td><span class="status-missing">❌ 缺失</span></td>
+</tr>
+<tr>
+<td>下拉列表</td>
+<td>Host Filter</td>
+<td>主机筛选器</td>
+<td><span class="status-missing">❌ 缺失</span></td>
+</tr>
+<tr>
+<td>按钮</td>
+<td>Refresh</td>
+<td>刷新按钮</td>
+<td><span class="status-exists">✅ 存在</span></td>
+</tr>
+<tr>
+<td>标签页</td>
+<td>Tabs</td>
+<td>Overview / Conversation History 标签页</td>
+<td><span class="status-exists">✅ 存在</span></td>
+</tr>
+<tr>
+<td>卡片组</td>
+<td>Key Metrics</td>
+<td>6个关键指标卡片</td>
+<td><span class="status-partial">⚠️ 部分缺失</span></td>
+</tr>
+<tr>
+<td>图表</td>
+<td>Usage Heatmap</td>
+<td>使用热力图（最近7天）</td>
+<td><span class="status-missing">❌ 缺失</span></td>
+</tr>
+<tr>
+<td>表格</td>
+<td>Peak Usage Periods</td>
+<td>峰值使用时段表格（可排序）</td>
+<td><span class="status-missing">❌ 缺失</span></td>
+</tr>
+<tr>
+<td>表格</td>
+<td>Top 10 Active Users</td>
+<td>活跃用户排名表格（可排序）</td>
+<td><span class="status-missing">❌ 缺失</span></td>
+</tr>
+<tr>
+<td>图表</td>
+<td>Tool Comparison</td>
+<td>工具对比图表</td>
+<td><span class="status-exists">✅ 存在</span></td>
+</tr>
+<tr>
+<td>卡片</td>
+<td>Agent Session Statistics</td>
+<td>会话统计卡片</td>
+<td><span class="status-partial">⚠️ 部分缺失</span></td>
+</tr>
+<tr>
+<td>图表</td>
+<td>User Segmentation</td>
+<td>用户分段图表</td>
+<td><span class="status-missing">❌ 缺失</span></td>
+</tr>
+<tr>
+<td>表格</td>
+<td>Anomaly Detection</td>
+<td>异常检测表格（可排序）</td>
+<td><span class="status-missing">❌ 缺失</span></td>
+</tr>
+<tr>
+<td>列表</td>
+<td>Recommendations</td>
+<td>推荐建议列表</td>
+<td><span class="status-missing">❌ 缺失</span></td>
+</tr>
+</tbody>
+</table>
+
+<h3>3.2 Key Metrics 对比</h3>
+<table>
+<thead>
+<tr>
+<th>指标</th>
+<th>旧版本</th>
+<th>新版本</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Total Tokens</td>
+<td>✅</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Total Requests</td>
+<td>✅</td>
+<td>❌</td>
+</tr>
+<tr>
+<td>Active Users</td>
+<td>✅</td>
+<td>❌</td>
+</tr>
+<tr>
+<td>Active Tools</td>
+<td>✅</td>
+<td>❌</td>
+</tr>
+<tr>
+<td>Anomalies</td>
+<td>✅</td>
+<td>❌</td>
+</tr>
+<tr>
+<td>Health Score</td>
+<td>✅</td>
+<td>❌</td>
+</tr>
+<tr>
+<td>Total Sessions</td>
+<td>❌</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Total Messages</td>
+<td>❌</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Avg Tokens/Session</td>
+<td>❌</td>
+<td>✅</td>
+</tr>
+</tbody>
+</table>
+
+<h3>3.3 缺失项详情</h3>
+<table>
+<thead>
+<tr>
+<th>缺失项</th>
+<th>描述</th>
+<th>优先级</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Quick Date Range 按钮组</strong></td>
+<td>快速日期范围选择（7天/30天/90天/全部）</td>
+<td><span class="priority-high">高</span></td>
+</tr>
+<tr>
+<td><strong>Tool Filter</strong></td>
+<td>工具筛选器</td>
+<td><span class="priority-high">高</span></td>
+</tr>
+<tr>
+<td><strong>Host Filter</strong></td>
+<td>主机筛选器</td>
+<td><span class="priority-high">高</span></td>
+</tr>
+<tr>
+<td><strong>Usage Heatmap</strong></td>
+<td>使用热力图</td>
+<td><span class="priority-high">高</span></td>
+</tr>
+<tr>
+<td><strong>Peak Usage Periods 表格</strong></td>
+<td>峰值使用时段表格</td>
+<td><span class="priority-high">高</span></td>
+</tr>
+<tr>
+<td><strong>Top 10 Active Users 表格</strong></td>
+<td>活跃用户排名表格</td>
+<td><span class="priority-high">高</span></td>
+</tr>
+<tr>
+<td><strong>Anomaly Detection 表格</strong></td>
+<td>异常检测表格</td>
+<td><span class="priority-medium">中</span></td>
+</tr>
+<tr>
+<td><strong>Recommendations 列表</strong></td>
+<td>推荐建议列表</td>
+<td><span class="priority-medium">中</span></td>
+</tr>
+<tr>
+<td><strong>User Segmentation 图表</strong></td>
+<td>用户分段图表</td>
+<td><span class="priority-medium">中</span></td>
+</tr>
+<tr>
+<td><strong>Key Metrics 补充</strong></td>
+<td>缺少 Active Users、Active Tools、Anomalies、Health Score 指标</td>
+<td><span class="priority-medium">中</span></td>
+</tr>
+<tr>
+<td><strong>Agent Session Statistics 补充</strong></td>
+<td>缺少 Conversations、Multi-turn Ratio 指标</td>
+<td><span class="priority-low">低</span></td>
+</tr>
+</tbody>
+</table>
+
+<h3>3.4 新版本改进项</h3>
+<ul>
+<li><strong>Group By 下拉列表</strong> - 新增按日/周/月分组功能</li>
+</ul>
+
+<hr />
+
+<h2 id="conversation">4. Conversation History 页面</h2>
+
+<h3>4.1 元素对比表</h3>
+<table>
+<thead>
+<tr>
+<th>元素类型</th>
+<th>元素名称</th>
+<th>功能描述</th>
+<th>新版本状态</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>下拉按钮</td>
+<td>Column Selector</td>
+<td>列选择器，可选择显示/隐藏表格列</td>
+<td><span class="status-missing">❌ 缺失</span></td>
+</tr>
+<tr>
+<td>按钮</td>
+<td>Fullscreen</td>
+<td>全屏按钮，可全屏显示表格</td>
+<td><span class="status-missing">❌ 缺失</span></td>
+</tr>
+<tr>
+<td>表格</td>
+<td>Tabulator Table</td>
+<td>高级表格（支持排序、筛选、分页）</td>
+<td><span class="status-partial">⚠️ 简化版</span></td>
+</tr>
+<tr>
+<td>按钮</td>
+<td>View Details</td>
+<td>查看详情按钮</td>
+<td><span class="status-exists">✅ 存在</span></td>
+</tr>
+<tr>
+<td>弹窗</td>
+<td>Conversation Detail Modal</td>
+<td>对话详情弹窗</td>
+<td><span class="status-exists">✅ 存在</span></td>
+</tr>
+</tbody>
+</table>
+
+<h3>4.2 筛选器对比</h3>
+<table>
+<thead>
+<tr>
+<th>筛选器</th>
+<th>旧版本</th>
+<th>新版本</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Date</td>
+<td>✅ 日期选择器</td>
+<td>✅ 日期选择器</td>
+</tr>
+<tr>
+<td>Tool</td>
+<td>✅ 下拉列表</td>
+<td>✅ 下拉列表</td>
+</tr>
+<tr>
+<td>Host</td>
+<td>✅ 下拉列表</td>
+<td>⚠️ 文本输入框</td>
+</tr>
+<tr>
+<td>Sender</td>
+<td>✅ 可搜索下拉列表</td>
+<td>⚠️ 文本输入框</td>
+</tr>
+<tr>
+<td>Reset</td>
+<td>✅ 按钮</td>
+<td>✅ 按钮</td>
+</tr>
+<tr>
+<td>Refresh</td>
+<td>✅ 按钮</td>
+<td>✅ 按钮</td>
+</tr>
+</tbody>
+</table>
+
+<h3>4.3 缺失项详情</h3>
+<table>
+<thead>
+<tr>
+<th>缺失项</th>
+<th>描述</th>
+<th>优先级</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Column Selector</strong></td>
+<td>列选择器，可选择显示/隐藏表格列</td>
+<td><span class="priority-medium">中</span></td>
+</tr>
+<tr>
+<td><strong>Fullscreen 按钮</strong></td>
+<td>全屏显示表格功能</td>
+<td><span class="priority-medium">中</span></td>
+</tr>
+<tr>
+<td><strong>高级表格功能</strong></td>
+<td>旧版本使用 Tabulator 表格，支持更丰富的功能（列排序、列筛选、列显示/隐藏等）</td>
+<td><span class="priority-medium">中</span></td>
+</tr>
+</tbody>
+</table>
+
+<hr />
+
+<h2 id="common">5. 通用功能对比</h2>
+
+<h3>5.1 侧边栏</h3>
+<table>
+<thead>
+<tr>
+<th>功能</th>
+<th>旧版本</th>
+<th>新版本</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>折叠/展开</td>
+<td>✅ 有折叠按钮</td>
+<td>⚠️ 需确认</td>
+</tr>
+<tr>
+<td>语言切换</td>
+<td>✅ English/中文</td>
+<td>✅ 存在</td>
+</tr>
+<tr>
+<td>版本显示</td>
+<td>✅ 显示版本号</td>
+<td>⚠️ 需确认</td>
+</tr>
+<tr>
+<td>Data Status Panel</td>
+<td>✅ 显示数据状态</td>
+<td><span class="status-missing">❌ 缺失</span></td>
+</tr>
+</tbody>
+</table>
+
+<h3>5.2 导航菜单</h3>
+<table>
+<thead>
+<tr>
+<th>菜单项</th>
+<th>旧版本</th>
+<th>新版本</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Dashboard</td>
+<td>✅</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Messages</td>
+<td>✅</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Analysis</td>
+<td>✅</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Management</td>
+<td>✅</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Workspace</td>
+<td>✅</td>
+<td>⚠️ 需确认</td>
+</tr>
+<tr>
+<td>Report</td>
+<td>✅</td>
+<td>⚠️ 需确认</td>
+</tr>
+<tr>
+<td>Logout</td>
+<td>✅</td>
+<td>✅</td>
+</tr>
+</tbody>
+</table>
+
+<hr />
+
+<h2 id="summary">6. 总结</h2>
+
+<h3>6.1 高优先级缺失项 <span class="priority-high">高</span></h3>
+<table>
+<thead>
+<tr>
+<th>页面</th>
+<th>缺失项</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td rowspan="8"><strong>Messages</strong></td>
+<td>Auto-refresh 开关</td>
+</tr>
+<tr>
+<td>Host Filter</td>
+</tr>
+<tr>
+<td>Sender Filter（可搜索下拉列表）</td>
+</tr>
+<tr>
+<td>Search Filter（消息内容搜索）</td>
+</tr>
+<tr>
+<td>Role Filter 改为勾选框组（支持多选）</td>
+</tr>
+<tr>
+<td>消息卡片 Host Name 标签</td>
+</tr>
+<tr>
+<td>消息卡片 Message Source 标签</td>
+</tr>
+<tr>
+<td>消息卡片 Sender Name 标签</td>
+</tr>
+<tr>
+<td rowspan="6"><strong>Analysis</strong></td>
+<td>Quick Date Range 按钮组</td>
+</tr>
+<tr>
+<td>Tool Filter 和 Host Filter</td>
+</tr>
+<tr>
+<td>Usage Heatmap 图表</td>
+</tr>
+<tr>
+<td>Peak Usage Periods 表格</td>
+</tr>
+<tr>
+<td>Top 10 Active Users 表格</td>
+</tr>
+<tr>
+<td>Anomaly Detection 表格</td>
+</tr>
+<tr>
+<td><strong>Conversation History</strong></td>
+<td>Column Selector（列选择器）</td>
+</tr>
+<tr>
+<td><strong>Dashboard</strong></td>
+<td>Auto-refresh 开关（UI 控件）</td>
+</tr>
+</tbody>
+</table>
+
+<h3>6.2 中优先级缺失项 <span class="priority-medium">中</span></h3>
+<table>
+<thead>
+<tr>
+<th>页面</th>
+<th>缺失项</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td rowspan="4"><strong>Analysis</strong></td>
+<td>Key Metrics 补充（Active Users、Active Tools、Anomalies、Health Score）</td>
+</tr>
+<tr>
+<td>User Segmentation 图表</td>
+</tr>
+<tr>
+<td>Agent Session Statistics 补充（Conversations、Multi-turn Ratio）</td>
+</tr>
+<tr>
+<td>Recommendations 列表</td>
+</tr>
+<tr>
+<td rowspan="2"><strong>Conversation History</strong></td>
+<td>Fullscreen 按钮</td>
+</tr>
+<tr>
+<td>高级表格功能（Tabulator）</td>
+</tr>
+<tr>
+<td><strong>Messages</strong></td>
+<td>消息卡片 Model 显示</td>
+</tr>
+<tr>
+<td><strong>侧边栏</strong></td>
+<td>Data Status Panel（数据状态面板）</td>
+</tr>
+</tbody>
+</table>
+
+<h3>6.3 低优先级缺失项 <span class="priority-low">低</span></h3>
+<table>
+<thead>
+<tr>
+<th>页面</th>
+<th>缺失项</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Dashboard</strong></td>
+<td>Tools Info 卡片补充更详细信息（days tracked、avg/day、requests、date range）</td>
+</tr>
+<tr>
+<td rowspan="2"><strong>Messages</strong></td>
+<td>消息卡片箭头旋转动画</td>
+</tr>
+<tr>
+<td>消息卡片 full_entry 支持（展开时显示完整原始 JSON）</td>
+</tr>
+<tr>
+<td><strong>侧边栏</strong></td>
+<td>版本显示</td>
+</tr>
+</tbody>
+</table>
+
+<hr />
+
+<h2 id="roadmap">7. 实施路线图</h2>
+
+<div class="phase-timeline">
+    <div class="phase-item">
+        <h4>第一阶段：核心功能补充 <span class="priority-high">高优先级</span></h4>
+        <ul>
+            <li>Messages 页面筛选器完善（Host、Sender、Search、Role 多选）</li>
+            <li>Messages 页面消息卡片标签完善（Host Name、Message Source、Sender Name）</li>
+            <li>Analysis 页面筛选器完善（Tool、Host、Quick Date Range）</li>
+            <li>Dashboard 页面 Auto-refresh 开关</li>
+            <li>Analysis 页面 Usage Heatmap</li>
+            <li>Analysis 页面 Peak Usage Periods 表格</li>
+            <li>Analysis 页面 Top 10 Active Users 表格</li>
+        </ul>
+    </div>
+
+    <div class="phase-item">
+        <h4>第二阶段：图表和表格补充 <span class="priority-medium">中优先级</span></h4>
+        <ul>
+            <li>Analysis 页面 Anomaly Detection 表格</li>
+            <li>Analysis 页面 Recommendations 列表</li>
+            <li>Analysis 页面 User Segmentation 图表</li>
+            <li>Conversation History 页面 Column Selector</li>
+            <li>Conversation History 页面 Fullscreen 按钮</li>
+            <li>Key Metrics 补充完整</li>
+            <li>Messages 页面消息卡片 Model 显示</li>
+        </ul>
+    </div>
+
+    <div class="phase-item">
+        <h4>第三阶段：高级功能补充 <span class="priority-low">低优先级</span></h4>
+        <ul>
+            <li>侧边栏 Data Status Panel</li>
+            <li>Tools Info 卡片详情补充</li>
+            <li>Messages 页面消息卡片箭头旋转动画</li>
+            <li>Messages 页面消息卡片 full_entry 支持</li>
+            <li>版本显示功能</li>
+            <li>高级表格功能（Tabulator 集成）</li>
+        </ul>
+    </div>
+</div>
+
+<hr />
+
+<div class="footer">
+    <p>文档生成时间：2026-03-22</p>
+    <p>旧版本访问地址：http://127.0.0.1:5002/</p>
+    <p>新版本前端路径：/Users/rhuang/workspace/open-ace/frontend/</p>
+</div>
+
+        </div>
+    </div>
+</body>
+</html>

@@ -4,7 +4,7 @@
 
 export { useAuth } from './useAuth';
 export { useTodayUsage, useSummary, useTrendData, useHosts, useDashboard } from './useDashboard';
-export { useMessages, useInfiniteMessages, useMessage, useMessageCount, useConversationHistory, useConversationTimeline } from './useMessages';
+export { useMessages, useInfiniteMessages, useMessage, useMessageCount, useConversationHistory, useConversationTimeline, useSenders } from './useMessages';
 export {
   useRenderPerformance,
   usePerformance,
@@ -35,8 +35,16 @@ export {
   useUserRanking,
   useConversationStats,
   useToolComparison,
+  useUserSegmentation,
   useRecommendations,
 } from './useAnalysis';
+export {
+  useSessions,
+  useSession,
+  useSessionStats,
+  useDeleteSession,
+  useCompleteSession,
+} from './useSessions';
 
 // Re-export store hooks
 export {

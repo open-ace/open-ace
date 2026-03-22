@@ -1,0 +1,463 @@
+/**
+ * Sessions Component - Agent sessions list with filters and details
+ */
+
+import React, { useState, useMemo } from 'react';
+import { cn } from '@/utils';
+import { useSessions, useSessionStats, useDeleteSession, useCompleteSession } from '@/hooks';
+import { useLanguage } from '@/store';
+import { t, type Language } from '@/i18n';
+import { Card, Button, Select, Loading, Error, EmptyState, Badge } from '@/components/common';
+import type { BadgeVariant } from '@/components/common';
+import { formatDateTime, formatTokens } from '@/utils';
+import type { AgentSession, SessionFilters } from '@/api/sessions';
+
+const ITEMS_PER_PAGE = 20;
+
+// Status badge colors
+const statusColors: Record<string, BadgeVariant> = {
+  active: 'success',
+  paused: 'warning',
+  completed: 'secondary',
+  archived: 'dark',
+  error: 'danger',
+};
+
+// Session type badge colors
+const typeColors: Record<string, BadgeVariant> = {
+  chat: 'primary',
+  task: 'info',
+  workflow: 'warning',
+  agent: 'success',
+};
+
+export const Sessions: React.FC = () => {
+  const language = useLanguage();
+  const [filters, setFilters] = useState<SessionFilters>({});
+  const [page, setPage] = useState(1);
+  const [selectedSession, setSelectedSession] = useState<AgentSession | null>(null);
+
+  // Queries
+  const { data, isLoading, isFetching, isError, error, refetch } = useSessions({
+    filters,
+    pageSize: ITEMS_PER_PAGE,
+    page,
+  });
+
+  const { data: statsData } = useSessionStats();
+
+  // Mutations
+  const deleteMutation = useDeleteSession();
+  const completeMutation = useCompleteSession();
+
+  const sessions = data?.data?.sessions ?? [];
+  const pagination = data?.data
+    ? {
+        page: data.data.page,
+        totalPages: data.data.total_pages,
+        total: data.data.total,
+      }
+    : null;
+
+  // Filter options
+  const toolOptions = useMemo(
+    () => [
+      { value: '', label: t('dashboardFilterAllTools', language) },
+      { value: 'openclaw', label: 'OpenClaw' },
+      { value: 'claude', label: 'Claude' },
+      { value: 'qwen', label: 'Qwen' },
+    ],
+    [language]
+  );
+
+  const statusOptions = useMemo(
+    () => [
+      { value: '', label: t('allStatus', language) || 'All Status' },
+      { value: 'active', label: t('statusActive', language) || 'Active' },
+      { value: 'paused', label: t('statusPaused', language) || 'Paused' },
+      { value: 'completed', label: t('statusCompleted', language) || 'Completed' },
+      { value: 'archived', label: t('statusArchived', language) || 'Archived' },
+      { value: 'error', label: t('statusError', language) || 'Error' },
+    ],
+    [language]
+  );
+
+  const typeOptions = useMemo(
+    () => [
+      { value: '', label: t('allTypes', language) || 'All Types' },
+      { value: 'chat', label: 'Chat' },
+      { value: 'task', label: 'Task' },
+      { value: 'workflow', label: 'Workflow' },
+      { value: 'agent', label: 'Agent' },
+    ],
+    [language]
+  );
+
+  // Handlers
+  const handleFilterChange = (key: keyof SessionFilters, value: string) => {
+    setFilters((prev) => ({ ...prev, [key]: value || undefined }));
+    setPage(1);
+  };
+
+  const handleReset = () => {
+    setFilters({});
+    setPage(1);
+  };
+
+  const handleDelete = async (sessionId: string) => {
+    if (window.confirm(t('confirmDeleteSession', language) || 'Are you sure you want to delete this session?')) {
+      await deleteMutation.mutateAsync(sessionId);
+      if (selectedSession?.session_id === sessionId) {
+        setSelectedSession(null);
+      }
+    }
+  };
+
+  const handleComplete = async (sessionId: string) => {
+    await completeMutation.mutateAsync(sessionId);
+  };
+
+  if (isError) {
+    return <Error message={error?.message || t('error', language)} onRetry={() => refetch()} />;
+  }
+
+  return (
+    <div className="sessions">
+      {/* Header */}
+      <div className="sessions-header d-flex justify-content-between align-items-center mb-4">
+        <h2>{t('sessions', language)}</h2>
+        <div className="d-flex gap-2 align-items-center">
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => refetch()}
+            loading={isFetching}
+            icon={isFetching ? undefined : <i className="bi bi-arrow-clockwise" />}
+          >
+            {t('refresh', language)}
+          </Button>
+        </div>
+      </div>
+
+      {/* Stats Cards */}
+      {statsData?.success && statsData.data && (
+        <div className="row mb-4">
+          <div className="col-md-3 col-sm-6 mb-2">
+            <Card className="text-center">
+              <div className="text-muted small">{t('totalSessions', language) || 'Total Sessions'}</div>
+              <div className="fs-3 fw-bold text-primary">{statsData.data.total_sessions}</div>
+            </Card>
+          </div>
+          <div className="col-md-3 col-sm-6 mb-2">
+            <Card className="text-center">
+              <div className="text-muted small">{t('activeSessions', language) || 'Active Sessions'}</div>
+              <div className="fs-3 fw-bold text-success">{statsData.data.active_sessions}</div>
+            </Card>
+          </div>
+          <div className="col-md-3 col-sm-6 mb-2">
+            <Card className="text-center">
+              <div className="text-muted small">{t('totalMessages', language)}</div>
+              <div className="fs-3 fw-bold text-info">{statsData.data.total_messages}</div>
+            </Card>
+          </div>
+          <div className="col-md-3 col-sm-6 mb-2">
+            <Card className="text-center">
+              <div className="text-muted small">{t('totalTokens', language)}</div>
+              <div className="fs-3 fw-bold text-warning">{formatTokens(statsData.data.total_tokens)}</div>
+            </Card>
+          </div>
+        </div>
+      )}
+
+      {/* Filters */}
+      <Card className="mb-3">
+        <div className="d-flex flex-wrap align-items-center gap-2">
+          {/* Tool Filter */}
+          <div className="d-flex align-items-center gap-1">
+            <small className="text-muted">{t('tableTool', language)}:</small>
+            <Select
+              options={toolOptions}
+              value={filters.tool_name || ''}
+              onChange={(value) => handleFilterChange('tool_name', value)}
+              size="sm"
+            />
+          </div>
+          {/* Status Filter */}
+          <div className="d-flex align-items-center gap-1">
+            <small className="text-muted">{t('status', language) || 'Status'}:</small>
+            <Select
+              options={statusOptions}
+              value={filters.status || ''}
+              onChange={(value) => handleFilterChange('status', value)}
+              size="sm"
+            />
+          </div>
+          {/* Type Filter */}
+          <div className="d-flex align-items-center gap-1">
+            <small className="text-muted">{t('type', language) || 'Type'}:</small>
+            <Select
+              options={typeOptions}
+              value={filters.session_type || ''}
+              onChange={(value) => handleFilterChange('session_type', value)}
+              size="sm"
+            />
+          </div>
+          {/* Search */}
+          <div className="d-flex align-items-center gap-1 ms-auto">
+            <div className="input-group input-group-sm" style={{ width: '200px' }}>
+              <span className="input-group-text">
+                <i className="bi bi-search" />
+              </span>
+              <input
+                type="text"
+                className="form-control"
+                placeholder={t('search', language)}
+                value={filters.search || ''}
+                onChange={(e) => handleFilterChange('search', e.target.value)}
+              />
+            </div>
+          </div>
+          {/* Reset Button */}
+          <Button variant="outline-secondary" size="sm" onClick={handleReset}>
+            <i className="bi bi-x-circle me-1" />
+            {t('reset', language)}
+          </Button>
+        </div>
+      </Card>
+
+      {/* Sessions List */}
+      {isLoading ? (
+        <Loading size="lg" text={t('loading', language)} />
+      ) : sessions.length === 0 ? (
+        <EmptyState
+          icon="bi-chat-dots"
+          title={t('noData', language)}
+          description={t('noAgentSessions', language) || 'No agent sessions found. Sessions are created when using AI tools in Workspace.'}
+        />
+      ) : (
+        <>
+          <div className="sessions-list">
+            {sessions.map((session) => (
+              <SessionCard
+                key={session.session_id}
+                session={session}
+                language={language}
+                isSelected={selectedSession?.session_id === session.session_id}
+                onSelect={() => setSelectedSession(selectedSession?.session_id === session.session_id ? null : session)}
+                onDelete={handleDelete}
+                onComplete={handleComplete}
+                isDeleting={deleteMutation.isPending}
+                isCompleting={completeMutation.isPending}
+              />
+            ))}
+          </div>
+
+          {/* Pagination */}
+          {pagination && pagination.totalPages > 1 && (
+            <div className="d-flex justify-content-center mt-4">
+              <nav>
+                <ul className="pagination">
+                  <li className={cn('page-item', page === 1 && 'disabled')}>
+                    <button
+                      className="page-link"
+                      onClick={() => setPage(page - 1)}
+                      disabled={page === 1}
+                    >
+                      {t('previous', language) || 'Previous'}
+                    </button>
+                  </li>
+                  {Array.from({ length: Math.min(5, pagination.totalPages) }, (_, i) => {
+                    const pageNum = i + 1;
+                    return (
+                      <li key={pageNum} className={cn('page-item', page === pageNum && 'active')}>
+                        <button className="page-link" onClick={() => setPage(pageNum)}>
+                          {pageNum}
+                        </button>
+                      </li>
+                    );
+                  })}
+                  <li className={cn('page-item', page === pagination.totalPages && 'disabled')}>
+                    <button
+                      className="page-link"
+                      onClick={() => setPage(page + 1)}
+                      disabled={page === pagination.totalPages}
+                    >
+                      {t('next', language) || 'Next'}
+                    </button>
+                  </li>
+                </ul>
+              </nav>
+            </div>
+          )}
+
+          {/* Total count */}
+          {pagination && (
+            <div className="text-center text-muted mt-2">
+              {t('total', language)}: {pagination.total.toLocaleString()} {t('sessions', language)}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+};
+
+/**
+ * Session Card Component
+ */
+interface SessionCardProps {
+  session: AgentSession;
+  language: Language;
+  isSelected: boolean;
+  onSelect: () => void;
+  onDelete: (sessionId: string) => void;
+  onComplete: (sessionId: string) => void;
+  isDeleting: boolean;
+  isCompleting: boolean;
+}
+
+const SessionCard: React.FC<SessionCardProps> = ({
+  session,
+  language,
+  isSelected,
+  onSelect,
+  onDelete,
+  onComplete,
+  isDeleting,
+  isCompleting,
+}) => {
+  const [expanded, setExpanded] = useState(false);
+
+  const handleToggle = () => {
+    setExpanded(!expanded);
+    onSelect();
+  };
+
+  return (
+    <div
+      className={cn(
+        'session-item card mb-2',
+        isSelected && 'border-primary'
+      )}
+    >
+      <div className="card-body" onClick={handleToggle} style={{ cursor: 'pointer' }}>
+        {/* Header Row */}
+        <div className="d-flex justify-content-between align-items-start">
+          <div className="flex-grow-1">
+            {/* Title and Badges */}
+            <div className="d-flex align-items-center gap-2 mb-2">
+              <h5 className="mb-0">
+                {session.title || session.session_id.substring(0, 8)}
+              </h5>
+              <Badge variant={statusColors[session.status] || 'secondary'}>
+                {session.status}
+              </Badge>
+              <Badge variant={typeColors[session.session_type] || 'secondary'}>
+                {session.session_type}
+              </Badge>
+            </div>
+
+            {/* Meta Info */}
+            <div className="d-flex flex-wrap gap-3 text-muted small">
+              <span>
+                <i className="bi bi-tools me-1" />
+                {session.tool_name}
+              </span>
+              <span>
+                <i className="bi bi-pc-display me-1" />
+                {session.host_name}
+              </span>
+              {session.model && (
+                <span>
+                  <i className="bi bi-cpu me-1" />
+                  {session.model}
+                </span>
+              )}
+              <span>
+                <i className="bi bi-chat-dots me-1" />
+                {session.message_count} {t('messages', language)}
+              </span>
+              <span>
+                <i className="bi bi-cpu me-1" />
+                {formatTokens(session.total_tokens)} {t('tokens', language)}
+              </span>
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="d-flex gap-1" onClick={(e) => e.stopPropagation()}>
+            {session.status === 'active' && (
+              <span title={t('complete', language) || 'Complete'}>
+                <Button
+                  variant="outline-success"
+                  size="sm"
+                  onClick={() => onComplete(session.session_id)}
+                  loading={isCompleting}
+                >
+                  <i className="bi bi-check-circle" />
+                </Button>
+              </span>
+            )}
+            <span title={t('delete', language)}>
+              <Button
+                variant="outline-danger"
+                size="sm"
+                onClick={() => onDelete(session.session_id)}
+                loading={isDeleting}
+              >
+                <i className="bi bi-trash" />
+              </Button>
+            </span>
+          </div>
+        </div>
+
+        {/* Timestamps */}
+        <div className="d-flex justify-content-between text-muted small mt-2">
+          <span>
+            <i className="bi bi-clock me-1" />
+            {t('created', language) || 'Created'}: {session.created_at ? formatDateTime(session.created_at) : '-'}
+          </span>
+          {session.completed_at && (
+            <span>
+              <i className="bi bi-check-circle me-1" />
+              {t('completed', language) || 'Completed'}: {formatDateTime(session.completed_at)}
+            </span>
+          )}
+        </div>
+
+        {/* Expanded Content - Messages */}
+        {expanded && session.messages && session.messages.length > 0 && (
+          <div className="mt-3 border-top pt-3">
+            <h6>{t('messages', language)}</h6>
+            <div className="messages-container" style={{ maxHeight: '400px', overflowY: 'auto' }}>
+              {session.messages.map((msg, idx) => (
+                <div
+                  key={msg.id || idx}
+                  className={cn(
+                    'p-2 mb-2 rounded',
+                    msg.role === 'user' ? 'bg-light' : 'bg-white border'
+                  )}
+                >
+                  <div className="d-flex justify-content-between align-items-center mb-1">
+                    <Badge
+                      variant={msg.role === 'user' ? 'primary' : msg.role === 'assistant' ? 'success' : 'secondary'}
+                    >
+                      {msg.role}
+                    </Badge>
+                    <small className="text-muted">
+                      {msg.timestamp ? formatDateTime(msg.timestamp) : ''}
+                      {msg.tokens_used > 0 && ` • ${formatTokens(msg.tokens_used)} tokens`}
+                    </small>
+                  </div>
+                  <div className="message-content" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    {msg.content.length > 500 ? `${msg.content.substring(0, 500)}...` : msg.content}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};

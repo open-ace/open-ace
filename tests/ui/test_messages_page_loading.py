@@ -8,8 +8,9 @@ This test verifies that:
 [Commented out] 3. Manual refresh button works correctly
 """
 
+import pytest
 import time
-from playwright.sync_api import sync_playwright, expect
+from playwright.async_api import async_playwright, expect
 
 # Test configuration
 BASE_URL = "http://localhost:5001"
@@ -18,141 +19,118 @@ PASSWORD = "admin123"
 TIMEOUT = 10000  # 10 seconds timeout
 
 
-def test_messages_page_loading(close_browser=True):
-    """Test that Messages page loads quickly without blocking.
-    
-    Args:
-        close_browser: If True, close browser after test. If False, return
-                       (browser, page) for reuse in subsequent tests.
-    
-    Returns:
-        If close_browser is False, returns (browser, page) tuple.
-    """
-    p = sync_playwright().start()
-    browser = p.chromium.launch(headless=False)
-    context = browser.new_context()
-    page = context.new_page()
+@pytest.mark.asyncio
+async def test_messages_page_loading():
+    """Test that Messages page loads quickly without blocking."""
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=False)
+        context = await browser.new_context()
+        page = await context.new_page()
 
-    # Set default timeout
-    page.set_default_timeout(TIMEOUT)
-
-    try:
-        print("=" * 60)
-        print("[UI] Testing: Messages page loading performance")
-        print("=" * 60)
-
-        # Step 1: Login
-        print("\n[Step 1] Logging in...")
-        page.goto(f"{BASE_URL}/login")
-        page.fill('input[name="username"]', USERNAME)
-        page.fill('input[name="password"]', PASSWORD)
-        page.click('button[type="submit"]')
-
-        # Wait for redirect to dashboard (with longer timeout)
-        page.wait_for_url(f"{BASE_URL}/", timeout=15000)
-        print("✓ Login successful")
-
-        # Step 2: Navigate to Messages page
-        print("\n[Step 2] Navigating to Messages page...")
-        start_time = time.time()
-        page.click('#nav-messages')
-
-        # Wait for messages container to be visible
-        page.wait_for_selector('#messages-container', state='visible', timeout=5000)
-
-        # Check if loading spinner appears and disappears quickly
-        loading_time = time.time() - start_time
-        print(f"✓ Messages page loaded in {loading_time:.2f} seconds")
-
-        # Step 3: Check if messages are displayed or "No messages found" is shown
-        print("\n[Step 3] Checking messages display...")
-
-        # Wait for either messages or "no messages" message
         try:
-            # Check for message items
-            messages = page.locator('.message-item')
-            no_messages = page.locator('text=No messages found')
+            print("=" * 60)
+            print("[UI] Testing: Messages page loading performance")
+            print("=" * 60)
 
-            # Wait a bit for content to load
+            # Step 1: Login
+            print("\n[Step 1] Logging in...")
+            await page.goto(f"{BASE_URL}/login")
+            await page.fill('#username', USERNAME)
+            await page.fill('#password', PASSWORD)
+            await page.click('button[type="submit"]')
+
+            # Wait for redirect to dashboard (with longer timeout)
+            await page.wait_for_url(f"{BASE_URL}/", timeout=15000)
+            print("✓ Login successful")
+
+            # Step 2: Navigate to Messages page
+            print("\n[Step 2] Navigating to Messages page...")
+            start_time = time.time()
+            # Wait for sidebar to be visible
+            await page.wait_for_selector('.sidebar', timeout=10000)
+            # Click on Messages nav item (using text content in span)
+            await page.click('.sidebar .nav-link:has-text("Messages")')
+
+            # Wait for messages container to be visible
+            await page.wait_for_selector('#messages-container', state='visible', timeout=5000)
+
+            # Check if loading spinner appears and disappears quickly
+            loading_time = time.time() - start_time
+            print(f"✓ Messages page loaded in {loading_time:.2f} seconds")
+
+            # Step 3: Check if messages are displayed or "No messages found" is shown
+            print("\n[Step 3] Checking messages display...")
+
+            # Wait for either messages or "no messages" message
+            try:
+                # Check for message items
+                messages = page.locator('.message-item')
+                no_messages = page.locator('text=No messages found')
+
+                # Wait a bit for content to load
+                time.sleep(2)
+
+                msg_count = await messages.count()
+                no_msg_count = await no_messages.count()
+
+                if msg_count > 0:
+                    print(f"✓ Found {msg_count} messages displayed")
+                elif no_msg_count > 0:
+                    print("✓ No messages found (expected for empty date)")
+                else:
+                    # Check if still loading
+                    spinner = page.locator('.spinner-border')
+                    spinner_count = await spinner.count()
+                    if spinner_count > 0:
+                        print("⚠ Page still loading after 2 seconds...")
+                        # Wait more time
+                        time.sleep(3)
+                        msg_count = await messages.count()
+                        if msg_count > 0:
+                            print(f"✓ Messages loaded after waiting: {msg_count} messages")
+                        else:
+                            print("✗ Messages still not loaded after 5 seconds")
+                    else:
+                        print("✓ Page loaded (no spinner visible)")
+            except Exception as e:
+                print(f"⚠ Error checking messages: {e}")
+
+            # Step 4: Test auto-refresh toggle (should not block)
+            print("\n[Step 4] Testing auto-refresh toggle...")
+            auto_refresh_checkbox = page.locator('#auto-refresh')
+
+            # Enable auto-refresh
+            await auto_refresh_checkbox.check()
+            print("✓ Auto-refresh enabled")
+
+            # Wait a moment to see if UI is blocked
             time.sleep(2)
 
-            if messages.count() > 0:
-                print(f"✓ Found {messages.count()} messages displayed")
-            elif no_messages.count() > 0:
-                print("✓ No messages found (expected for empty date)")
-            else:
-                # Check if still loading
-                spinner = page.locator('.spinner-border')
-                if spinner.count() > 0:
-                    print("⚠ Page still loading after 2 seconds...")
-                    # Wait more time
-                    time.sleep(3)
-                    if messages.count() > 0:
-                        print(f"✓ Messages loaded after waiting: {messages.count()} messages")
-                    else:
-                        print("✗ Messages still not loaded after 5 seconds")
-                else:
-                    print("✓ Page loaded (no spinner visible)")
+            # Check if page is still responsive
+            try:
+                # Try to interact with the page
+                await page.hover('#nav-dashboard')
+                print("✓ Page is responsive after enabling auto-refresh")
+            except Exception as e:
+                print(f"✗ Page became unresponsive: {e}")
+
+            # Disable auto-refresh
+            await auto_refresh_checkbox.uncheck()
+            print("✓ Auto-refresh disabled")
+
+            print("\n" + "=" * 60)
+            print("Test completed successfully!")
+            print("=" * 60)
+
         except Exception as e:
-            print(f"⚠ Error checking messages: {e}")
+            print(f"\n✗ Test failed: {e}")
+            await page.screenshot(path="screenshots/test_messages_loading_error.png")
+            print("Error screenshot saved to screenshots/test_messages_loading_error.png")
+            raise
 
-        # Step 4: Test auto-refresh toggle (should not block)
-        print("\n[Step 4] Testing auto-refresh toggle...")
-        auto_refresh_checkbox = page.locator('#auto-refresh')
-
-        # Enable auto-refresh
-        auto_refresh_checkbox.check()
-        print("✓ Auto-refresh enabled")
-
-        # Wait a moment to see if UI is blocked
-        time.sleep(2)
-
-        # Check if page is still responsive
-        try:
-            # Try to interact with the page
-            page.hover('#nav-dashboard')
-            print("✓ Page is responsive after enabling auto-refresh")
-        except Exception as e:
-            print(f"✗ Page became unresponsive: {e}")
-
-        # Disable auto-refresh
-        auto_refresh_checkbox.uncheck()
-        print("✓ Auto-refresh disabled")
-#
-#            # Step 5: Test manual refresh button
-#            print("\n[Step 5] Testing manual refresh button...")
-#            refresh_btn = page.locator('#messages-section button:has-text("Refresh")')
-#            refresh_btn.click()
-#            print("✓ Refresh button clicked")
-#
-#            # Wait for refresh to complete
-#            time.sleep(3)
-#            print("✓ Refresh completed")
-#
-#            # Take screenshot
-#            page.screenshot(path="screenshots/test_messages_loading.png")
-#            print("\n✓ Screenshot saved to screenshots/test_messages_loading.png")
-#
-        print("\n" + "=" * 60)
-        print("Test completed successfully!")
-        print("=" * 60)
-
-        # Return browser and page for reuse, or close them
-        if not close_browser:
-            return browser, page
-
-    except Exception as e:
-        print(f"\n✗ Test failed: {e}")
-        page.screenshot(path="screenshots/test_messages_loading_error.png")
-        print("Error screenshot saved to screenshots/test_messages_loading_error.png")
-        if close_browser:
-            browser.close()
-        raise
-
-    # Close browser if requested
-    if close_browser:
-        browser.close()
+        finally:
+            await browser.close()
 
 
 if __name__ == "__main__":
-    test_messages_page_loading()
+    pytest.main([__file__, "-v"])

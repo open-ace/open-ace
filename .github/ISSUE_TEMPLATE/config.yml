@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 Documentation
+    url: https://github.com/your-org/open-ace/tree/main/docs
+    about: Check the documentation for usage guides and API reference
+  - name: 💬 Discussions
+    url: https://github.com/your-org/open-ace/discussions
+    about: Ask questions and discuss with the community

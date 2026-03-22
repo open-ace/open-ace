@@ -6,6 +6,7 @@ This test verifies that:
 2. Both elements are visible in the sidebar footer
 """
 
+import pytest
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))

@@ -11,6 +11,7 @@ Usage:
     python3 tests/issues/94/test_ui_conversation_history.py
 """
 
+import pytest
 import sys
 import os
 import time

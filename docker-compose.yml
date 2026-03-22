@@ -1,0 +1,150 @@
+# Open ACE - AI Computing Explorer - Docker Compose Configuration
+# For production deployment with optional services
+
+version: '3.8'
+
+services:
+  # ===========================================================================
+  # Main Application
+  # ===========================================================================
+  open-ace-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    image: open-ace:latest
+    container_name: open-ace-web
+    restart: unless-stopped
+    ports:
+      - "${PORT:-5001}:5001"
+    environment:
+      - FLASK_ENV=production
+      - PYTHONUNBUFFERED=1
+      - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
+      - UPLOAD_AUTH_KEY=${UPLOAD_AUTH_KEY:-change-me-in-production}
+      # Database URL - set to use PostgreSQL
+      - DATABASE_URL=${DATABASE_URL:-}
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config:/app/config:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5001/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - open-ace-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ===========================================================================
+  # Optional: Nginx Reverse Proxy (for SSL termination)
+  # ===========================================================================
+  nginx:
+    image: nginx:alpine
+    container_name: open-ace-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - open-ace-web
+    networks:
+      - open-ace-network
+    profiles:
+      - production
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ===========================================================================
+  # Optional: Redis for caching (future use)
+  # ===========================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: open-ace-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    networks:
+      - open-ace-network
+    profiles:
+      - cache
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===========================================================================
+  # PostgreSQL for production database
+  # ===========================================================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: open-ace-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${DB_USER:-ace}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-ace-secret}
+      - POSTGRES_DB=${DB_NAME:-ace}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - open-ace-network
+    profiles:
+      - database
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-ace} -d ${DB_NAME:-ace}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "${DB_PORT:-5432}:5432"
+
+  # ===========================================================================
+  # Database Migration Service
+  # ===========================================================================
+  migrate:
+    image: open-ace:latest
+    container_name: open-ace-migrate
+    environment:
+      - DATABASE_URL=postgresql://${DB_USER:-ace}:${DB_PASSWORD:-ace-secret}@postgres:5432/${DB_NAME:-ace}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - open-ace-network
+    profiles:
+      - database
+    command: ["python", "-m", "alembic", "upgrade", "head"]
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  open-ace-network:
+    driver: bridge
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  redis-data:
+    driver: local
+  postgres-data:
+    driver: local

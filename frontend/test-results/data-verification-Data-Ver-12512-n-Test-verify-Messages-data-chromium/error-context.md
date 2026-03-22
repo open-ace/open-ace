@@ -1,0 +1,100 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - navigation [ref=e4]:
+    - generic [ref=e6]:
+      - generic [ref=e7]: 
+      - generic [ref=e8]: Open ACE
+    - list [ref=e9]:
+      - listitem [ref=e10]:
+        - button " Dashboard" [ref=e11] [cursor=pointer]:
+          - generic [ref=e12]: 
+          - generic [ref=e13]: Dashboard
+      - listitem [ref=e14]:
+        - button " Messages" [ref=e15] [cursor=pointer]:
+          - generic [ref=e16]: 
+          - generic [ref=e17]: Messages
+      - listitem [ref=e18]:
+        - button " Analysis" [ref=e19] [cursor=pointer]:
+          - generic [ref=e20]: 
+          - generic [ref=e21]: Analysis
+      - listitem [ref=e22]:
+        - button " Management" [ref=e23] [cursor=pointer]:
+          - generic [ref=e24]: 
+          - generic [ref=e25]: Management
+      - listitem [ref=e26]:
+        - button " Sessions" [ref=e27] [cursor=pointer]:
+          - generic [ref=e28]: 
+          - generic [ref=e29]: Sessions
+      - listitem [ref=e30]:
+        - button " Prompts" [ref=e31] [cursor=pointer]:
+          - generic [ref=e32]: 
+          - generic [ref=e33]: Prompts
+      - listitem [ref=e34]:
+        - button " Report" [ref=e35] [cursor=pointer]:
+          - generic [ref=e36]: 
+          - generic [ref=e37]: Report
+      - listitem [ref=e38]:
+        - button " Workspace" [ref=e39] [cursor=pointer]:
+          - generic [ref=e40]: 
+          - generic [ref=e41]: Workspace
+      - listitem [ref=e42]:
+        - button " Security" [ref=e43] [cursor=pointer]:
+          - generic [ref=e44]: 
+          - generic [ref=e45]: Security
+    - generic [ref=e47]:
+      - button "" [ref=e48] [cursor=pointer]:
+        - generic [ref=e49]: 
+      - generic [ref=e50]: v0.2.0
+  - generic [ref=e51]:
+    - banner [ref=e52]:
+      - generic [ref=e53]:
+        - button "Toggle sidebar" [ref=e54] [cursor=pointer]:
+          - generic [ref=e55]: 
+        - heading "Messages" [level=5] [ref=e56]
+      - generic [ref=e57]:
+        - button "" [ref=e59] [cursor=pointer]:
+          - generic [ref=e60]: 
+        - button "" [ref=e61] [cursor=pointer]:
+          - generic [ref=e62]: 
+        - generic [ref=e63]:
+          - button "" [ref=e64] [cursor=pointer]:
+            - generic [ref=e65]: 
+          - text: 
+    - main [ref=e66]:
+      - generic [ref=e67]:
+        - generic [ref=e68]:
+          - heading "Messages" [level=2] [ref=e69]
+          - button " Refresh" [ref=e70] [cursor=pointer]:
+            - generic [ref=e72]: 
+            - text: Refresh
+        - generic [ref=e74]:
+          - generic [ref=e75]:
+            - generic [ref=e76]:
+              - generic [ref=e77]: Tool
+              - combobox [ref=e78]:
+                - option "All Tools" [selected]
+                - option "OpenClaw"
+                - option "Claude"
+                - option "Qwen"
+            - generic [ref=e79]:
+              - generic [ref=e80]: Role
+              - combobox [ref=e81]:
+                - option "All Roles" [selected]
+                - option "User"
+                - option "Assistant"
+                - option "System"
+            - generic [ref=e82]:
+              - generic [ref=e83]: Start Date
+              - textbox [ref=e84]
+            - generic [ref=e85]:
+              - generic [ref=e86]: End Date
+              - textbox [ref=e87]
+          - button "Reset" [ref=e89] [cursor=pointer]
+        - generic [ref=e91]: "Total: 94,660 messages"
+        - generic [ref=e92]:
+          - generic [ref=e93]: 
+          - heading "No data available" [level=5] [ref=e94]
+          - paragraph [ref=e95]: No messages found with current filters
+```

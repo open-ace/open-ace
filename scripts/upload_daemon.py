@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """
+Open ACE - AI Computing Explorer - Upload Daemon
+
 Upload daemon - continuously fetches data and uploads to central server.
 Fetches data before each upload to ensure real-time synchronization.
 """

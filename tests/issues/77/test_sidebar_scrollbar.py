@@ -7,6 +7,7 @@ Issue: Sidebar menu shows scrollbar when content overflows.
 Fix: Add CSS to hide scrollbar while keeping scroll functionality.
 """
 
+import pytest
 import sys
 import os
 from datetime import datetime
@@ -15,7 +16,7 @@ from datetime import datetime
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 sys.path.insert(0, PROJECT_ROOT)
 
-from playwright.sync_api import sync_playwright, expect
+from playwright.async_api import async_playwright, expect
 
 # Configuration
 BASE_URL = "http://localhost:5001"
@@ -25,41 +26,42 @@ SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "issues", "77")
 HEADLESS = True
 
 
-def take_screenshot(page, name):
+async def take_screenshot(page, name):
     """Take a screenshot and return the path."""
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
     path = os.path.join(SCREENSHOT_DIR, name)
-    page.screenshot(path=path)
+    await page.screenshot(path=path)
     return path
 
 
-def test_sidebar_scrollbar():
+@pytest.mark.asyncio
+async def test_sidebar_scrollbar():
     """Test #77: Sidebar menu has no visible scrollbar."""
     print("\n" + "=" * 50)
     print("Test #77: Sidebar menu no scrollbar")
     print("=" * 50)
     
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=HEADLESS)
-        context = browser.new_context()
-        page = context.new_page()
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=HEADLESS)
+        context = await browser.new_context()
+        page = await context.new_page()
         
         try:
             # Login first
-            page.goto(f"{BASE_URL}/login")
-            page.wait_for_load_state("networkidle")
-            page.fill("#username", USERNAME)
-            page.fill("#password", PASSWORD)
-            page.click("#login-btn")
-            page.wait_for_url(f"{BASE_URL}/", timeout=10000)
-            page.wait_for_load_state("networkidle")
+            await page.goto(f"{BASE_URL}/login")
+            await page.wait_for_load_state("networkidle")
+            await page.fill("#username", USERNAME)
+            await page.fill("#password", PASSWORD)
+            await page.click("#login-btn")
+            await page.wait_for_url(f"{BASE_URL}/", timeout=10000)
+            await page.wait_for_load_state("networkidle")
             
             # Take screenshot of sidebar
-            screenshot_path = take_screenshot(page, "01_sidebar.png")
+            screenshot_path = await take_screenshot(page, "01_sidebar.png")
             print(f"  Screenshot: {screenshot_path}")
             
             # Check sidebar-nav has scrollbar-width: none
-            sidebar_nav = page.locator("#sidebar-nav")
+            sidebar_nav = await page.locator("#sidebar-nav")
             scrollbar_width = sidebar_nav.evaluate("el => window.getComputedStyle(el).scrollbarWidth")
             print(f"  ✓ Sidebar scrollbar-width: {scrollbar_width}")
             
@@ -69,10 +71,10 @@ def test_sidebar_scrollbar():
             
         except Exception as e:
             print(f"  ✗ Test #77 FAILED: {e}")
-            take_screenshot(page, "error_77.png")
+            await take_screenshot(page, "error_77.png")
             return False
         finally:
-            browser.close()
+            await browser.close()
 
 
 def main():

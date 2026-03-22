@@ -11,9 +11,10 @@ Usage:
     python3 tests/issues/42/test_page_size_loading.py
 """
 
+import pytest
 import time
 import os
-from playwright.sync_api import sync_playwright, expect
+from playwright.async_api import async_playwright, expect
 
 # Test configuration
 BASE_URL = "http://localhost:5001"
@@ -25,18 +26,19 @@ TIMEOUT = 10000  # 10 seconds timeout
 SCREENSHOT_DIR = "screenshots/issues/42"
 
 
-def test_page_size_loading():
+@pytest.mark.asyncio
+async def test_page_size_loading():
     """Test that Page Size change shows loading state instead of 'No sessions found'."""
     # Ensure screenshot directory exists
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
-    p = sync_playwright().start()
+    p = async_playwright().start()
     browser = p.chromium.launch(headless=False)
-    context = browser.new_context()
-    page = context.new_page()
+    context = await browser.new_context()
+    page = await context.new_page()
 
     # Set default timeout
-    page.set_default_timeout(TIMEOUT)
+    await page.set_default_timeout(TIMEOUT)
 
     test_passed = True
     error_messages = []
@@ -48,26 +50,26 @@ def test_page_size_loading():
 
         # Step 1: Login
         print("\n[Step 1] Logging in...")
-        page.goto(f"{BASE_URL}/login")
-        page.fill('input[name="username"]', USERNAME)
-        page.fill('input[name="password"]', PASSWORD)
-        page.click('button[type="submit"]')
+        await page.goto(f"{BASE_URL}/login")
+        await page.fill('input[name="username"]', USERNAME)
+        await page.fill('input[name="password"]', PASSWORD)
+        await page.click('button[type="submit"]')
 
         # Wait for redirect to dashboard
-        page.wait_for_url(f"{BASE_URL}/", timeout=15000)
+        await page.wait_for_url(f"{BASE_URL}/", timeout=15000)
         print("✓ Login successful")
 
         # Step 2: Navigate to Analysis page
         print("\n[Step 2] Navigating to Analysis page...")
 
         # Use JavaScript to switch section directly (more reliable)
-        page.evaluate("switchSection('analysis')")
+        await page.evaluate("switchSection('analysis')")
 
         # Wait for analysis section to be visible
         time.sleep(1)
 
         # Check if analysis section is visible
-        is_visible = page.evaluate("""
+        is_visible = await page.evaluate("""
             () => {
                 const section = document.getElementById('analysis-section');
                 return section && section.style.display !== 'none';
@@ -76,15 +78,15 @@ def test_page_size_loading():
 
         if not is_visible:
             print("  Warning: Analysis section not visible, trying again...")
-            page.evaluate("switchSection('analysis')")
+            await page.evaluate("switchSection('analysis')")
             time.sleep(1)
 
         print("✓ Analysis page loaded")
 
         # Step 3: Click Conversation History tab
         print("\n[Step 3] Clicking Conversation History tab...")
-        page.click('#conversation-history-tab')
-        page.wait_for_selector('#conversation-history-table', state='visible', timeout=5000)
+        await page.click('#conversation-history-tab')
+        await page.wait_for_selector('#conversation-history-table', state='visible', timeout=5000)
         print("✓ Conversation History tab loaded")
 
         # Step 4: Wait for initial data to load
@@ -93,12 +95,12 @@ def test_page_size_loading():
 
         # Take screenshot before Page Size change
         screenshot_path = f"{SCREENSHOT_DIR}/01_before_page_size_change.png"
-        page.screenshot(path=screenshot_path)
+        await page.screenshot(path=screenshot_path)
         print(f"✓ Screenshot saved: {screenshot_path}")
 
         # Step 5: Check if there's data in the table
         print("\n[Step 5] Checking table content...")
-        table_rows = page.locator('.tabulator-row')
+        table_rows = await page.locator('.tabulator-row')
         row_count = table_rows.count()
         print(f"  Found {row_count} rows in table")
 
@@ -106,7 +108,7 @@ def test_page_size_loading():
         print("\n[Step 6] Finding Page Size selector...")
 
         # Debug: print the HTML structure of the paginator
-        paginator_html = page.evaluate("""
+        paginator_html = await page.evaluate("""
             () => {
                 const paginator = document.querySelector('.tabulator-paginator');
                 return paginator ? paginator.outerHTML : 'Paginator not found';
@@ -115,21 +117,21 @@ def test_page_size_loading():
         print(f"  Paginator HTML: {paginator_html[:500]}...")
 
         # Try different selectors for Page Size
-        page_size_select = page.locator('.tabulator-paginator select')
+        page_size_select = await page.locator('.tabulator-paginator select')
 
         if page_size_select.count() == 0:
             # Try alternative selector
-            page_size_select = page.locator('.tabulator-footer select')
+            page_size_select = await page.locator('.tabulator-footer select')
 
         if page_size_select.count() == 0:
             # Try another alternative
-            page_size_select = page.locator('#conversation-history-table select')
+            page_size_select = await page.locator('#conversation-history-table select')
 
         if page_size_select.count() > 0:
             print("✓ Page Size selector found")
 
             # Debug: print the select element HTML
-            select_html = page.evaluate("""
+            select_html = await page.evaluate("""
                 () => {
                     const select = document.querySelector('.tabulator-page-size');
                     return select ? select.outerHTML : 'Select not found';
@@ -154,7 +156,7 @@ def test_page_size_loading():
             else:
                 print("  No options found in select element")
                 # Try to get options via JavaScript
-                options_js = page.evaluate("""
+                options_js = await page.evaluate("""
                     () => {
                         const select = document.querySelector('.tabulator-page-size');
                         if (select) {
@@ -174,7 +176,7 @@ def test_page_size_loading():
 
             # Take a quick screenshot right after clicking
             # We'll use JavaScript to monitor the placeholder content
-            page.evaluate("""
+            await page.evaluate("""
                 window.noSessionsFound = false;
                 window.loadingShown = false;
 
@@ -206,7 +208,7 @@ def test_page_size_loading():
             # Change page size using JavaScript (since select options may not be populated)
             # This simulates what happens when user changes page size
             print("  Triggering page size change via JavaScript...")
-            page.evaluate("""
+            await page.evaluate("""
                 () => {
                     // Get the Tabulator instance
                     const table = Tabulator.findTable('#conversation-history-table')[0];
@@ -222,11 +224,11 @@ def test_page_size_loading():
 
             # Take screenshot during loading
             screenshot_path = f"{SCREENSHOT_DIR}/02_during_page_size_change.png"
-            page.screenshot(path=screenshot_path)
+            await page.screenshot(path=screenshot_path)
             print(f"✓ Screenshot saved: {screenshot_path}")
 
             # Check what was shown during loading
-            result = page.evaluate("""
+            result = await page.evaluate("""
                 ({
                     noSessionsFound: window.noSessionsFound,
                     loadingShown: window.loadingShown
@@ -251,16 +253,16 @@ def test_page_size_loading():
 
             # Take screenshot after loading
             screenshot_path = f"{SCREENSHOT_DIR}/03_after_page_size_change.png"
-            page.screenshot(path=screenshot_path)
+            await page.screenshot(path=screenshot_path)
             print(f"✓ Screenshot saved: {screenshot_path}")
 
             # Step 8: Verify data loaded correctly
             print("\n[Step 8] Verifying data loaded correctly...")
-            new_row_count = page.locator('.tabulator-row').count()
+            new_row_count = await page.locator('.tabulator-row').count()
             print(f"  Found {new_row_count} rows after Page Size change")
 
             # Verify page size was actually changed using JavaScript
-            new_page_size = page.evaluate("""
+            new_page_size = await page.evaluate("""
                 () => {
                     const table = Tabulator.findTable('#conversation-history-table')[0];
                     return table ? table.getPageSize() : null;
@@ -278,13 +280,13 @@ def test_page_size_loading():
             print("\n[Step 9] Testing another Page Size change (to 100)...")
 
             # Reset the monitoring flags
-            page.evaluate("""
+            await page.evaluate("""
                 window.noSessionsFound = false;
                 window.loadingShown = false;
             """)
 
             # Change page size using JavaScript
-            page.evaluate("""
+            await page.evaluate("""
                 () => {
                     const table = Tabulator.findTable('#conversation-history-table')[0];
                     if (table) {
@@ -298,11 +300,11 @@ def test_page_size_loading():
 
             # Take screenshot
             screenshot_path = f"{SCREENSHOT_DIR}/04_page_size_100.png"
-            page.screenshot(path=screenshot_path)
+            await page.screenshot(path=screenshot_path)
             print(f"✓ Screenshot saved: {screenshot_path}")
 
             # Check what was shown during loading
-            result = page.evaluate("""
+            result = await page.evaluate("""
                 ({
                     noSessionsFound: window.noSessionsFound,
                     loadingShown: window.loadingShown
@@ -321,7 +323,7 @@ def test_page_size_loading():
 
             # Take final screenshot
             screenshot_path = f"{SCREENSHOT_DIR}/05_final_state.png"
-            page.screenshot(path=screenshot_path)
+            await page.screenshot(path=screenshot_path)
             print(f"✓ Screenshot saved: {screenshot_path}")
 
         else:
@@ -347,11 +349,11 @@ def test_page_size_loading():
         # Take error screenshot
         timestamp = time.strftime('%Y%m%d_%H%M%S')
         screenshot_path = f"{SCREENSHOT_DIR}/error_{timestamp}.png"
-        page.screenshot(path=screenshot_path)
+        await page.screenshot(path=screenshot_path)
         print(f"Error screenshot saved to {screenshot_path}")
 
     finally:
-        browser.close()
+        await browser.close()
 
     return test_passed, error_messages
 

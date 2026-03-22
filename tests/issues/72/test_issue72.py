@@ -12,9 +12,10 @@ Usage:
     python3 tests/issues/72/test_issue72.py
 """
 
+import pytest
 import time
 import os
-from playwright.sync_api import sync_playwright
+from playwright.async_api import async_playwright
 
 # Test configuration
 BASE_URL = "http://localhost:5001"
@@ -24,19 +25,20 @@ TIMEOUT = 30000  # 30 seconds timeout
 SCREENSHOT_DIR = "screenshots/issues/72"
 
 
-def test_fullscreen():
+@pytest.mark.asyncio
+async def test_fullscreen():
     """Test Conversation History fullscreen functionality."""
     
     # Create screenshot directory
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
     
-    p = sync_playwright().start()
+    p = async_playwright().start()
     browser = p.chromium.launch(headless=False)
-    context = browser.new_context()
-    page = context.new_page()
+    context = await browser.new_context()
+    page = await context.new_page()
     
     # Set default timeout
-    page.set_default_timeout(TIMEOUT)
+    await page.set_default_timeout(TIMEOUT)
     
     results = []
     
@@ -49,33 +51,33 @@ def test_fullscreen():
         print("\n[Step 1] Logging in...")
         context.clear_cookies()  # Clear any existing session
         
-        page.goto(f"{BASE_URL}/login")
-        page.wait_for_load_state('networkidle')
+        await page.goto(f"{BASE_URL}/login")
+        await page.wait_for_load_state('networkidle')
         
-        page.fill('input[name="username"]', USERNAME)
-        page.fill('input[name="password"]', PASSWORD)
-        page.click('button[type="submit"]')
+        await page.fill('input[name="username"]', USERNAME)
+        await page.fill('input[name="password"]', PASSWORD)
+        await page.click('button[type="submit"]')
         
         # Wait for navigation to complete
-        page.wait_for_url(f"{BASE_URL}/", timeout=15000)
+        await page.wait_for_url(f"{BASE_URL}/", timeout=15000)
         print("   ✓ Login successful")
         results.append(("Login", True, ""))
         
         # Step 2: Navigate to Analysis page
         print("\n[Step 2] Navigating to Analysis page...")
-        page.evaluate('switchSection("analysis")')
+        await page.evaluate('switchSection("analysis")')
         time.sleep(2)
         print("   ✓ Analysis page loaded")
         results.append(("Navigate to Analysis", True, ""))
         
         # Step 3: Click Conversation History tab
         print("\n[Step 3] Clicking Conversation History tab...")
-        page.evaluate('document.getElementById("conversation-history-tab").click()')
+        await page.evaluate('document.getElementById("conversation-history-tab").click()')
         time.sleep(3)
         
         # Wait for table to initialize
         for i in range(10):
-            table_exists = page.evaluate('typeof conversationHistoryTable !== "undefined"')
+            table_exists = await page.evaluate('typeof conversationHistoryTable !== "undefined"')
             if table_exists:
                 break
             time.sleep(1)
@@ -86,12 +88,12 @@ def test_fullscreen():
         # Take screenshot before fullscreen
         timestamp = time.strftime('%Y%m%d_%H%M%S')
         screenshot_before = f"{SCREENSHOT_DIR}/before_fullscreen_{timestamp}.png"
-        page.screenshot(path=screenshot_before)
+        await page.screenshot(path=screenshot_before)
         print(f"   ✓ Screenshot saved: {screenshot_before}")
         
         # Step 4: Check fullscreen button
         print("\n[Step 4] Checking fullscreen button...")
-        fullscreen_btn = page.locator('#conversationHistoryFullscreenBtn')
+        fullscreen_btn = await page.locator('#conversationHistoryFullscreenBtn')
         if fullscreen_btn.is_visible():
             print("   ✓ Fullscreen button is visible")
             results.append(("Fullscreen button visible", True, ""))
@@ -101,19 +103,19 @@ def test_fullscreen():
         
         # Step 5: Enter fullscreen mode
         print("\n[Step 5] Entering fullscreen mode...")
-        page.evaluate('toggleConversationHistoryFullscreen()')
+        await page.evaluate('toggleConversationHistoryFullscreen()')
         time.sleep(1)
         
         # Take screenshot in fullscreen mode
         screenshot_fullscreen = f"{SCREENSHOT_DIR}/fullscreen_mode_{timestamp}.png"
-        page.screenshot(path=screenshot_fullscreen)
+        await page.screenshot(path=screenshot_fullscreen)
         print(f"   ✓ Screenshot saved: {screenshot_fullscreen}")
         
         # Step 6: Verify fullscreen mode
         print("\n[Step 6] Verifying fullscreen mode...")
         
         # Check container styles
-        container = page.locator('#conversation-history-table-container')
+        container = await page.locator('#conversation-history-table-container')
         container_style = container.evaluate('el => el.style.cssText')
         
         # Check if container has fullscreen styles
@@ -125,8 +127,8 @@ def test_fullscreen():
             results.append(("Fullscreen styles applied", False, container_style[:100]))
         
         # Check table height
-        table_height = page.evaluate('document.querySelector("#conversation-history-table").offsetHeight')
-        viewport_height = page.evaluate('window.innerHeight')
+        table_height = await page.evaluate('document.querySelector("#conversation-history-table").offsetHeight')
+        viewport_height = await page.evaluate('window.innerHeight')
         
         print(f"   Table height: {table_height}px, Viewport height: {viewport_height}px")
         
@@ -140,7 +142,7 @@ def test_fullscreen():
             results.append(("Table fills fullscreen", False, f"Height: {table_height}px, expected >= {expected_min_height}px"))
         
         # Check for visible table rows
-        rows = page.locator('#conversation-history-table .tabulator-row')
+        rows = await page.locator('#conversation-history-table .tabulator-row')
         row_count = rows.count()
         
         print(f"   Table rows: {row_count}")
@@ -156,12 +158,12 @@ def test_fullscreen():
         print("\n[Step 7] Exiting fullscreen mode...")
         
         # Click the exit fullscreen button
-        page.evaluate('toggleConversationHistoryFullscreen()')
+        await page.evaluate('toggleConversationHistoryFullscreen()')
         time.sleep(1)
         
         # Take screenshot after exiting fullscreen
         screenshot_exit = f"{SCREENSHOT_DIR}/after_fullscreen_{timestamp}.png"
-        page.screenshot(path=screenshot_exit)
+        await page.screenshot(path=screenshot_exit)
         print(f"   ✓ Screenshot saved: {screenshot_exit}")
         
         # Verify container styles are reset
@@ -200,13 +202,13 @@ def test_fullscreen():
         # Take error screenshot
         timestamp = time.strftime('%Y%m%d_%H%M%S')
         screenshot_error = f"{SCREENSHOT_DIR}/error_{timestamp}.png"
-        page.screenshot(path=screenshot_error)
+        await page.screenshot(path=screenshot_error)
         print(f"Error screenshot saved: {screenshot_error}")
         
         return False
         
     finally:
-        browser.close()
+        await browser.close()
 
 
 if __name__ == "__main__":

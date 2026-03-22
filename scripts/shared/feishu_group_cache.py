@@ -8,9 +8,10 @@ Fetches group details from Feishu API when needed.
 
 import json
 import time
-import requests
-from typing import Optional, Dict
 from pathlib import Path
+from typing import Dict, Optional
+
+import requests
 
 # Cache file location
 CACHE_DIR = Path.home() / ".open-ace"
@@ -30,9 +31,9 @@ def load_cache() -> Dict:
         return {"groups": {}, "last_updated": 0}
 
     try:
-        with open(CACHE_FILE, 'r', encoding='utf-8') as f:
+        with open(CACHE_FILE, encoding='utf-8') as f:
             return json.load(f)
-    except (json.JSONDecodeError, IOError):
+    except (OSError, json.JSONDecodeError):
         return {"groups": {}, "last_updated": 0}
 
 

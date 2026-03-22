@@ -10,6 +10,7 @@ Test cases:
 4. Language switching should update all visible text
 """
 
+import pytest
 import sys
 import os
 from pathlib import Path

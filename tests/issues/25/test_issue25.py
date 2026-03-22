@@ -1,9 +1,11 @@
 """
 Test script for Issue 25: 测试全屏按钮和版本号
 """
+import pytest
 import asyncio
 from playwright.async_api import async_playwright
 
+@pytest.mark.asyncio
 async def test_issue25():
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=False)

@@ -11,13 +11,14 @@ Usage:
     python3 tests/issues/94/test_ui_conversation_history.py
 """
 
+import pytest
 import sys
 import os
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
-from playwright.sync_api import sync_playwright, expect
+from playwright.async_api import async_playwright, expect
 from datetime import datetime
 
 # Test configuration
@@ -32,59 +33,62 @@ SCREENSHOT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os
 os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
 
-def test_conversation_history_ui():
+@pytest.mark.asyncio
+async def test_conversation_history_ui():
     """Test Conversation History page UI for issue 94 concepts."""
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=HEADLESS)
-        context = browser.new_context(viewport=VIEWPORT_SIZE)
-        page = context.new_page()
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=HEADLESS)
+        context = await browser.new_context(viewport=VIEWPORT_SIZE)
+        page = await context.new_page()
 
         test_results = []
 
         try:
             # Step 1: Navigate to login page
             print("Step 1: Navigate to login page...")
-            page.goto(BASE_URL + 'login')
-            page.wait_for_load_state('networkidle')
+            await page.goto(BASE_URL + 'login')
+            await page.wait_for_load_state('networkidle')
             time.sleep(1)
 
             # Step 2: Login
             print("Step 2: Login...")
-            page.fill('#username', USERNAME)
-            page.fill('#password', PASSWORD)
-            page.click('#login-btn')
+            await page.fill('#username', USERNAME)
+            await page.fill('#password', PASSWORD)
+            await page.click('button[type="submit"]')
 
             # Wait for sidebar to appear
-            page.wait_for_selector('#sidebar', timeout=15000)
+            await page.wait_for_selector('#sidebar', timeout=15000)
             time.sleep(2)
 
-            expect(page.locator('#sidebar')).to_be_visible()
+            await expect(page.locator('#sidebar')).to_be_visible()
             test_results.append(("Login", "PASS", "Successfully logged in"))
 
             # Step 3: Navigate to Analysis page
             print("Step 3: Navigate to Analysis page...")
-            page.click('#nav-analysis')
-            page.wait_for_load_state('networkidle')
+            await page.click('#nav-analysis')
+            await page.wait_for_load_state('networkidle')
             time.sleep(2)
 
-            expect(page.locator('#analysis-section')).to_be_visible()
+            await expect(page.locator('#analysis-section')).to_be_visible()
             test_results.append(("Navigate to Analysis", "PASS", "Analysis section visible"))
 
             # Step 4: Click Conversation History tab
             print("Step 4: Click Conversation History tab...")
             conversation_history_tab = page.locator('#conversation-history-tab')
-            if conversation_history_tab.is_visible():
-                conversation_history_tab.click()
+            is_visible = await conversation_history_tab.is_visible()
+            if is_visible:
+                await conversation_history_tab.click()
                 time.sleep(3)
                 test_results.append(("Conversation History Tab", "PASS", "Tab clicked"))
             else:
                 # Try alternative selector
                 tabs = page.locator('.tab-button')
-                if tabs.count() > 0:
-                    for i in range(tabs.count()):
-                        tab_text = tabs.nth(i).text_content()
+                tab_count = await tabs.count()
+                if tab_count > 0:
+                    for i in range(tab_count):
+                        tab_text = await tabs.nth(i).text_content()
                         if 'Conversation' in tab_text or 'History' in tab_text:
-                            tabs.nth(i).click()
+                            await tabs.nth(i).click()
                             time.sleep(3)
                             test_results.append(("Conversation History Tab", "PASS", f"Tab '{tab_text}' clicked"))
                             break
@@ -95,18 +99,18 @@ def test_conversation_history_ui():
 
             # Take screenshot
             screenshot_path = os.path.join(SCREENSHOT_DIR, 'conversation_history.png')
-            page.screenshot(path=screenshot_path)
+            await page.screenshot(path=screenshot_path)
             print(f"Screenshot saved: {screenshot_path}")
 
             # Step 5: Check if conversation data table is visible
             print("Step 5: Check conversation data table...")
-            table_visible = page.is_visible('#conversation-history-table') or page.is_visible('.tabulator')
-            
+            table_visible = await page.is_visible('#conversation-history-table') or await page.is_visible('.tabulator')
+
             if table_visible:
                 test_results.append(("Conversation Table", "PASS", "Table is visible"))
-                
+
                 # Check for conversation_id column or data
-                page_content = page.content()
+                page_content = await page.content()
                 if 'conversation_id' in page_content.lower() or 'conversation' in page_content.lower():
                     test_results.append(("Conversation ID Display", "PASS", "Conversation ID found in page"))
                 else:
@@ -117,32 +121,34 @@ def test_conversation_history_ui():
             # Step 6: Test language switching
             print("Step 6: Test language switching...")
             lang_select = page.locator('#lang-select')
-            if lang_select.is_visible():
+            is_lang_visible = await lang_select.is_visible()
+            if is_lang_visible:
                 # Switch to Chinese
-                page.select_option('#lang-select', 'zh')
+                await page.select_option('#lang-select', 'zh')
                 time.sleep(1)
-                
+
                 # Take screenshot with Chinese
                 screenshot_zh = os.path.join(SCREENSHOT_DIR, 'conversation_history_zh.png')
-                page.screenshot(path=screenshot_zh)
+                await page.screenshot(path=screenshot_zh)
                 print(f"Screenshot saved: {screenshot_zh}")
-                
+
                 # Switch back to English
-                page.select_option('#lang-select', 'en')
+                await page.select_option('#lang-select', 'en')
                 time.sleep(1)
-                
+
                 test_results.append(("Language Switching", "PASS", "Language switch works"))
             else:
                 test_results.append(("Language Switching", "PASS", "No language selector (may be OK)"))
 
             # Step 7: Check for session-related UI elements
             print("Step 7: Check session-related UI elements...")
-            page_content = page.content().lower()
-            
-            has_session_info = any(keyword in page_content for keyword in [
+            page_content = await page.content()
+            page_content_lower = page_content.lower()
+
+            has_session_info = any(keyword in page_content_lower for keyword in [
                 'session', 'agent', 'tool', 'conversation'
             ])
-            
+
             if has_session_info:
                 test_results.append(("Session Info Display", "PASS", "Session-related info present"))
             else:
@@ -150,17 +156,17 @@ def test_conversation_history_ui():
 
             # Final screenshot
             screenshot_final = os.path.join(SCREENSHOT_DIR, 'conversation_history_final.png')
-            page.screenshot(path=screenshot_final)
+            await page.screenshot(path=screenshot_final)
             print(f"Screenshot saved: {screenshot_final}")
 
         except Exception as e:
             test_results.append(("Error", "FAIL", str(e)))
             error_screenshot = os.path.join(SCREENSHOT_DIR, 'error_screenshot.png')
-            page.screenshot(path=error_screenshot)
+            await page.screenshot(path=error_screenshot)
             print(f"Error screenshot saved: {error_screenshot}")
 
         finally:
-            browser.close()
+            await browser.close()
 
         # Print test report
         print("\n" + "=" * 60)
@@ -187,5 +193,5 @@ def test_conversation_history_ui():
 
 
 if __name__ == '__main__':
-    success = test_conversation_history_ui()
-    sys.exit(0 if success else 1)
+    success = pytest.main([__file__, "-v"])
+    sys.exit(0 if success == 0 else 1)
