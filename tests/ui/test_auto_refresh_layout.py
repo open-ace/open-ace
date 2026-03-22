@@ -68,7 +68,8 @@ def test_auto_refresh_layout():
 
             # Step 3: Navigate to Analysis Page
             print("\nStep 3: Navigate to Analysis Page...")
-            page.click('#nav-analysis')
+            # Click the Analysis nav button (contains icon bi-graph-up)
+            page.click('.nav-link:has(.bi-graph-up)')
             page.wait_for_load_state('networkidle')
             page.wait_for_timeout(2000)
             page.screenshot(path='screenshots/auto_refresh_test_02_analysis.png')
@@ -99,7 +100,8 @@ def test_auto_refresh_layout():
 
             # Step 5: Navigate to Messages Page
             print("\nStep 5: Navigate to Messages Page...")
-            page.click('#nav-messages')
+            # Click the Messages nav button (contains icon bi-chat-dots)
+            page.click('.nav-link:has(.bi-chat-dots)')
             page.wait_for_load_state('networkidle')
             page.wait_for_timeout(2000)
             page.screenshot(path='screenshots/auto_refresh_test_03_messages.png')
