@@ -23,8 +23,8 @@ export const Messages: React.FC = () => {
     endDate: getTodayDate(),
   }));
   const [page, setPage] = useState(1);
-  const [autoRefresh, setAutoRefresh] = useState<boolean>(false);
-  const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
+  const [autoRefresh, setAutoRefresh] = useState<boolean>(true);
+  const [selectedRoles, setSelectedRoles] = useState<string[]>(['user']);
 
   // Get hosts for filter
   const { data: hostsData } = useHosts();
