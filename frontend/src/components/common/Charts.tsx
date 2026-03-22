@@ -67,17 +67,17 @@ export const TOOL_COLORS: Record<string, { border: string; background: string; s
   openclaw: {
     border: 'rgba(255, 99, 132, 1)',
     background: 'rgba(255, 99, 132, 0.2)',
-    solid: 'rgba(255, 99, 132, 0.8)'
+    solid: 'rgba(255, 99, 132, 0.8)',
   },
   claude: {
     border: 'rgba(75, 192, 192, 1)',
     background: 'rgba(75, 192, 192, 0.2)',
-    solid: 'rgba(75, 192, 192, 0.8)'
+    solid: 'rgba(75, 192, 192, 0.8)',
   },
   qwen: {
     border: 'rgba(54, 162, 235, 1)',
     background: 'rgba(54, 162, 235, 0.2)',
-    solid: 'rgba(54, 162, 235, 0.8)'
+    solid: 'rgba(54, 162, 235, 0.8)',
   },
 };
 
@@ -95,8 +95,22 @@ export const getToolColor = (tool: string, index: number) => {
     'rgba(6, 182, 212, 0.8)',
   ];
   return {
-    border: [COLORS.primary, COLORS.success, COLORS.warning, COLORS.danger, COLORS.purple, COLORS.cyan][index % 6],
-    background: [COLORS.primaryLight, COLORS.successLight, COLORS.warningLight, COLORS.dangerLight, COLORS.purpleLight, COLORS.cyanLight][index % 6],
+    border: [
+      COLORS.primary,
+      COLORS.success,
+      COLORS.warning,
+      COLORS.danger,
+      COLORS.purple,
+      COLORS.cyan,
+    ][index % 6],
+    background: [
+      COLORS.primaryLight,
+      COLORS.successLight,
+      COLORS.warningLight,
+      COLORS.dangerLight,
+      COLORS.purpleLight,
+      COLORS.cyanLight,
+    ][index % 6],
     solid: solidColors[index % 6],
   };
 };
@@ -163,6 +177,9 @@ export const LineChart: React.FC<LineChartProps> = ({
     }
   };
 
+  // Check if we have only one data point
+  const hasSinglePoint = labels.length === 1;
+
   const chartData = {
     labels,
     datasets: datasets.map((dataset, index) => ({
@@ -173,6 +190,11 @@ export const LineChart: React.FC<LineChartProps> = ({
         dataset.backgroundColor || COLOR_ARRAY_LIGHT[index % COLOR_ARRAY_LIGHT.length],
       fill: dataset.fill ?? true,
       tension: dataset.tension ?? 0.4,
+      // For single point, use pointRadius to make it visible
+      pointRadius: hasSinglePoint ? 8 : dataset.pointRadius,
+      pointHoverRadius: hasSinglePoint ? 10 : dataset.pointHoverRadius,
+      // For single point, disable line display but show the point
+      showLine: !hasSinglePoint,
     })),
   };
 
@@ -211,15 +233,21 @@ export const LineChart: React.FC<LineChartProps> = ({
       y: {
         beginAtZero: true,
         max: yMax,
-        ticks: unit !== 'none' ? {
-          stepSize: 1,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          callback: (value: string | number) => `${value}${unit}`,
-        } : undefined,
-        title: unit !== 'none' ? {
-          display: true,
-          text: `Tokens (${unit})`,
-        } : undefined,
+        ticks:
+          unit !== 'none'
+            ? {
+                stepSize: 1,
+
+                callback: (value: string | number) => `${value}${unit}`,
+              }
+            : undefined,
+        title:
+          unit !== 'none'
+            ? {
+                display: true,
+                text: `Tokens (${unit})`,
+              }
+            : undefined,
       },
     },
   };
@@ -493,7 +521,7 @@ export const TokenTrendChart: React.FC<TokenTrendChartProps> = ({
         max: yMax,
         ticks: {
           stepSize: 1,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
           callback: (value: string | number) => `${value}M`,
         },
         title: {
