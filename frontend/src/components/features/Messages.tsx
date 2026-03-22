@@ -2,21 +2,37 @@
  * Messages Component - Messages list with filters
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { cn } from '@/utils';
-import { useMessages, useMessageCount } from '@/hooks';
+import { useMessages, useMessageCount, useHosts, useSenders } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
-import { Card, Button, Select, Loading, Error, EmptyState } from '@/components/common';
-import { formatDateTime, formatTokens } from '@/utils';
+import { Card, Button, Select, SearchableSelect, Loading, Error, EmptyState } from '@/components/common';
+import { formatDateTime, formatDate, formatTokens } from '@/utils';
 import type { Message, MessageFilters } from '@/types';
 
 const ITEMS_PER_PAGE = 20;
 
+// Get today's date in ISO format for default filter
+const getTodayDate = () => formatDate(new Date(), 'iso');
+
 export const Messages: React.FC = () => {
   const language = useLanguage();
-  const [filters, setFilters] = useState<MessageFilters>({});
+  const [filters, setFilters] = useState<MessageFilters>(() => ({
+    startDate: getTodayDate(),
+    endDate: getTodayDate(),
+  }));
   const [page, setPage] = useState(1);
+  const [autoRefresh, setAutoRefresh] = useState<boolean>(false);
+  const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
+
+  // Get hosts for filter
+  const { data: hostsData } = useHosts();
+  const hosts = hostsData || [];
+
+  // Get senders for filter
+  const { data: sendersData } = useSenders(filters.host);
+  const senders = sendersData || [];
 
   const { data, isLoading, isFetching, isError, error, refetch } = useMessages({
     filters,
@@ -29,6 +45,17 @@ export const Messages: React.FC = () => {
   const messages = data?.data ?? [];
   const pagination = data?.pagination;
 
+  // Auto-refresh effect
+  useEffect(() => {
+    if (autoRefresh) {
+      const interval = setInterval(() => {
+        refetch();
+      }, 30000); // 30 seconds
+      return () => clearInterval(interval);
+    }
+    return undefined;
+  }, [autoRefresh, refetch]);
+
   // Tool options
   const toolOptions = useMemo(
     () => [
@@ -40,24 +67,36 @@ export const Messages: React.FC = () => {
     [language]
   );
 
-  // Role options
-  const roleOptions = useMemo(
+  // Host options
+  const hostOptions = useMemo(
     () => [
-      { value: '', label: 'All Roles' },
-      { value: 'user', label: 'User' },
-      { value: 'assistant', label: 'Assistant' },
-      { value: 'system', label: 'System' },
+      { value: '', label: t('dashboardFilterAllHosts', language) },
+      ...hosts.map((host) => ({ value: host, label: host })),
     ],
-    []
+    [hosts, language]
   );
 
-  const handleFilterChange = (key: keyof MessageFilters, value: string) => {
-    setFilters((prev) => ({ ...prev, [key]: value || undefined }));
+  // Sender options
+  const senderOptions = useMemo(
+    () => [
+      { value: '', label: t('dashboardFilterAllSenders', language) || 'All Senders' },
+      ...senders.map((sender: string) => ({ value: sender, label: sender })),
+    ],
+    [senders, language]
+  );
+
+  // Handle role checkbox change
+  const handleRoleChange = (role: string, checked: boolean) => {
+    const newRoles = checked
+      ? [...selectedRoles, role]
+      : selectedRoles.filter((r) => r !== role);
+    setSelectedRoles(newRoles);
+    setFilters((prev) => ({ ...prev, role: newRoles.length > 0 ? newRoles : undefined }));
     setPage(1);
   };
 
-  const handleReset = () => {
-    setFilters({});
+  const handleFilterChange = (key: keyof MessageFilters, value: string) => {
+    setFilters((prev) => ({ ...prev, [key]: value || undefined }));
     setPage(1);
   };
 
@@ -70,66 +109,147 @@ export const Messages: React.FC = () => {
       {/* Header */}
       <div className="messages-header d-flex justify-content-between align-items-center mb-4">
         <h2>{t('messages', language)}</h2>
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={() => refetch()}
-          loading={isFetching}
-          icon={isFetching ? undefined : <i className="bi bi-arrow-clockwise" />}
-        >
-          {t('refresh', language)}
-        </Button>
+        <div className="d-flex gap-2 align-items-center">
+          {/* Auto-refresh toggle */}
+          <div className="form-check form-switch me-2">
+            <input
+              className="form-check-input"
+              type="checkbox"
+              id="messagesAutoRefreshSwitch"
+              checked={autoRefresh}
+              onChange={(e) => setAutoRefresh(e.target.checked)}
+            />
+            <label className="form-check-label" htmlFor="messagesAutoRefreshSwitch">
+              {t('autoRefresh', language)}
+            </label>
+          </div>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => refetch()}
+            loading={isFetching}
+            icon={isFetching ? undefined : <i className="bi bi-arrow-clockwise" />}
+          >
+            {t('refresh', language)}
+          </Button>
+        </div>
       </div>
 
-      {/* Filters */}
-      <Card className="mb-4">
-        <div className="row g-3">
-          <div className="col-md-3">
-            <label className="form-label">{t('tableTool', language)}</label>
-            <Select
-              options={toolOptions}
-              value={filters.tool || ''}
-              onChange={(value) => handleFilterChange('tool', value)}
-            />
-          </div>
-          <div className="col-md-3">
-            <label className="form-label">{t('tableRole', language)}</label>
-            <Select
-              options={roleOptions}
-              value={filters.role || ''}
-              onChange={(value) => handleFilterChange('role', value)}
-            />
-          </div>
-          <div className="col-md-3">
-            <label className="form-label">Start Date</label>
+      {/* Filters - Two row layout */}
+      <Card className="mb-3">
+        {/* Row 1: Date, Host, Tool, Sender, Search */}
+        <div className="d-flex flex-wrap align-items-center gap-3 mb-3">
+          {/* Date Filter */}
+          <div className="d-flex align-items-center gap-1">
+            <small className="text-muted">{t('date', language)}:</small>
             <input
               type="date"
-              className="form-control"
+              className="form-control form-control-sm"
+              style={{ width: '150px' }}
               value={filters.startDate || ''}
               onChange={(e) => handleFilterChange('startDate', e.target.value)}
             />
           </div>
-          <div className="col-md-3">
-            <label className="form-label">End Date</label>
+          {/* Host Filter */}
+          <div className="d-flex align-items-center gap-1">
+            <small className="text-muted">{t('tableHost', language)}:</small>
+            <Select
+              options={hostOptions}
+              value={filters.host || ''}
+              onChange={(value) => handleFilterChange('host', value)}
+              size="sm"
+              className="flex-grow-0"
+              style={{ width: '150px' } as React.CSSProperties}
+            />
+          </div>
+          {/* Tool Filter */}
+          <div className="d-flex align-items-center gap-1">
+            <small className="text-muted">{t('tableTool', language)}:</small>
+            <Select
+              options={toolOptions}
+              value={filters.tool || ''}
+              onChange={(value) => handleFilterChange('tool', value)}
+              size="sm"
+              className="flex-grow-0"
+              style={{ width: '150px' } as React.CSSProperties}
+            />
+          </div>
+          {/* Sender Filter */}
+          <div className="d-flex align-items-center gap-1">
+            <small className="text-muted">{t('tableSender', language)}:</small>
+            <SearchableSelect
+              options={senderOptions}
+              value={filters.sender || ''}
+              onChange={(value) => handleFilterChange('sender', value)}
+              placeholder={t('dashboardFilterAllSenders', language) || 'All Senders'}
+              searchPlaceholder={t('searchSender', language)}
+              size="sm"
+              className="flex-grow-0"
+              style={{ width: '150px' } as React.CSSProperties}
+            />
+          </div>
+          {/* Search Filter */}
+          <div className="d-flex align-items-center gap-1 ms-auto">
+            <small className="text-muted">{t('search', language)}:</small>
             <input
-              type="date"
-              className="form-control"
-              value={filters.endDate || ''}
-              onChange={(e) => handleFilterChange('endDate', e.target.value)}
+              type="text"
+              className="form-control form-control-sm"
+              placeholder={t('searchMessages', language) || 'Search messages...'}
+              style={{ width: '250px' }}
+              value={filters.search || ''}
+              onChange={(e) => handleFilterChange('search', e.target.value)}
             />
           </div>
         </div>
-        <div className="mt-3">
-          <Button variant="secondary" size="sm" onClick={handleReset}>
-            {t('reset', language)}
-          </Button>
+        {/* Row 2: Role */}
+        <div className="d-flex flex-wrap align-items-center gap-2">
+          {/* Role Filter */}
+          <div className="d-flex align-items-center gap-1">
+            <small className="text-muted">{t('role', language)}:</small>
+            <div className="form-check form-check-inline mb-0">
+              <input
+                className="form-check-input"
+                type="checkbox"
+                id="roleUser"
+                checked={selectedRoles.includes('user')}
+                onChange={(e) => handleRoleChange('user', e.target.checked)}
+              />
+              <label className="form-check-label" htmlFor="roleUser">
+                User
+              </label>
+            </div>
+            <div className="form-check form-check-inline mb-0">
+              <input
+                className="form-check-input"
+                type="checkbox"
+                id="roleAssistant"
+                checked={selectedRoles.includes('assistant')}
+                onChange={(e) => handleRoleChange('assistant', e.target.checked)}
+              />
+              <label className="form-check-label" htmlFor="roleAssistant">
+                Assistant
+              </label>
+            </div>
+            <div className="form-check form-check-inline mb-0">
+              <input
+                className="form-check-input"
+                type="checkbox"
+                id="roleSystem"
+                checked={selectedRoles.includes('system')}
+                onChange={(e) => handleRoleChange('system', e.target.checked)}
+              />
+              <label className="form-check-label" htmlFor="roleSystem">
+                System
+              </label>
+            </div>
+          </div>
         </div>
       </Card>
 
       {/* Stats */}
       {totalCount !== undefined && (
         <div className="mb-3">
-          <span className="text-muted">Total: {totalCount.toLocaleString()} messages</span>
+          <span className="text-muted">{t('total', language)}: {totalCount.toLocaleString()} {t('messages', language)}</span>
         </div>
       )}
 
@@ -195,6 +315,11 @@ export const Messages: React.FC = () => {
 
 /**
  * Message Card Component
+ * 
+ * Features:
+ * - Click entire card to expand/collapse
+ * - Smooth shadow transition on hover and expand
+ * - Chevron rotation animation
  */
 interface MessageCardProps {
   message: Message;
@@ -216,32 +341,113 @@ const MessageCard: React.FC<MessageCardProps> = ({ message, language }) => {
     system: 'bi-gear',
   };
 
+  // Toggle expand/collapse
+  const handleToggle = () => {
+    setExpanded(!expanded);
+  };
+
+  // Check if content can be expanded
+  const canExpand = message.content.length > 200 || message.full_entry;
+
   return (
-    <Card className={cn('mb-3', roleColors[message.role] || '')} variant="default">
-      <div className="d-flex justify-content-between align-items-start mb-2">
-        <div className="d-flex align-items-center">
-          <i className={cn('bi', roleIcons[message.role] || 'bi-chat', 'me-2')} />
-          <strong className="text-capitalize">{message.role}</strong>
-          {message.tool_name && (
-            <span className="badge bg-secondary ms-2">{message.tool_name}</span>
-          )}
+    <div
+      className={cn(
+        'message-item',
+        roleColors[message.role] || '',
+        expanded && 'expanded'
+      )}
+      onClick={handleToggle}
+      style={{ cursor: canExpand ? 'pointer' : 'default' }}
+    >
+      {/* Header with tags */}
+      <div className="message-header">
+        {/* Role Badge */}
+        <div className="message-role">
+          <span className={cn('role-badge', message.role)}>
+            <i className={cn('bi', roleIcons[message.role] || 'bi-chat', 'me-1')} />
+            {message.role.toUpperCase()}
+          </span>
         </div>
-        <small className="text-muted">{formatDateTime(message.timestamp)}</small>
+
+        {/* Content area */}
+        <div className="message-content">
+          {/* Meta info for user messages */}
+          {message.role === 'user' && (
+            <div className="message-meta">
+              {/* Host Name */}
+              {(message.host_name || message.host) && (
+                <span className="text-muted">
+                  <i className="bi bi-pc-display-horizontal me-1" />
+                  {message.host_name || message.host}
+                </span>
+              )}
+
+              {/* Message Source */}
+              {message.message_source && (
+                <span className={cn('message-source', message.message_source)}>
+                  {message.message_source.toUpperCase()}
+                </span>
+              )}
+
+              {/* Sender Name */}
+              {message.sender_name && (
+                <span className="text-primary fw-semibold">
+                  <i className="bi bi-person-circle me-1" />
+                  {message.sender_name}
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Truncated content */}
+          <div className="message-content-truncated">
+            {message.content.length > 200
+              ? `${message.content.substring(0, 200)}...`
+              : message.content}
+          </div>
+        </div>
+
+        {/* Tokens display */}
+        {message.tokens !== undefined && message.tokens > 0 && (
+          <div className="message-tokens">
+            <i className="bi bi-cpu me-1" />
+            {formatTokens(message.tokens)} {t('tokens', language)}
+          </div>
+        )}
+
+        {/* Expand/Collapse chevron */}
+        {canExpand && (
+          <div className="message-chevron">
+            <i
+              className={cn('bi bi-chevron-down', 'transition-transform', expanded && 'rotate-180')}
+            />
+          </div>
+        )}
       </div>
 
-      <div className={cn('message-content', !expanded && 'truncated')}>{message.content}</div>
-
-      {message.content.length > 200 && (
-        <button className="btn btn-link btn-sm p-0 mt-2" onClick={() => setExpanded(!expanded)}>
-          {expanded ? 'Show less' : 'Show more'}
-        </button>
+      {/* Expanded content */}
+      {canExpand && (
+        <div
+          className="message-content-expanded"
+          style={{ display: expanded ? 'block' : 'none' }}
+        >
+          <pre className="mb-0" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+            {expanded && message.full_entry
+              ? JSON.stringify(message.full_entry, null, 2)
+              : message.content}
+          </pre>
+        </div>
       )}
 
-      {message.tokens !== undefined && message.tokens > 0 && (
-        <small className="text-muted d-block mt-2">
-          {formatTokens(message.tokens)} {t('tokens', language)}
-        </small>
-      )}
-    </Card>
+      {/* Footer */}
+      <div className="message-footer">
+        <small>{formatDateTime(message.timestamp)}</small>
+        {message.model && (
+          <small className="text-muted">
+            Model: {message.model}
+          </small>
+        )}
+      </div>
+    </div>
   );
 };
