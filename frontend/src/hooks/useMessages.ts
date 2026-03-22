@@ -52,10 +52,11 @@ export function useMessage(id: string, enabled = true) {
   });
 }
 
-export function useMessageCount(filters: MessageFilters = {}) {
+export function useMessageCount(filters: MessageFilters = {}, enabled: boolean = true) {
   return useQuery<number>({
     queryKey: ['messages', 'count', filters],
     queryFn: () => messagesApi.getMessageCount(filters),
+    enabled,
     staleTime: 60 * 1000, // 1 minute
   });
 }

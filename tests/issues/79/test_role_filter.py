@@ -9,6 +9,7 @@ Test script for Issue #79: Messages页面role过滤不生效
 2. 检查 User 角色是否默认选中
 3. 验证 API 请求是否包含 role=user 参数
 4. 验证返回的消息是否都是 user 角色
+5. 取消所有角色选择，验证显示空状态提示
 """
 
 import asyncio
@@ -112,6 +113,23 @@ async def test_role_filter():
                 print(f"✓ All {min(len(messages), 10)} checked messages have ASSISTANT role")
             else:
                 print("  No messages found (may be expected if no assistant messages today)")
+
+            # Test: Uncheck all roles - should show empty state
+            print("\n[Step 7] Unchecking all roles...")
+            await assistant_checkbox.click()  # Uncheck Assistant
+
+            # Wait for empty state to appear
+            await asyncio.sleep(2)
+
+            # Check for empty state message (EmptyState component uses h5 for title)
+            print("\n[Step 8] Checking empty state when no role selected...")
+            empty_title = page.locator('.messages .text-center h5')
+            await empty_title.wait_for(timeout=5000)
+            title_text = await empty_title.text_content()
+            print(f"  Empty state title: {title_text}")
+            assert 'Select Role' in title_text or '选择角色' in title_text, \
+                f"Expected 'Select Role' empty state, got '{title_text}'"
+            print("✓ Empty state shown when no role selected")
 
             # Take screenshot
             screenshot_path = Path(__file__).parent.parent.parent / 'screenshots/issues/79'

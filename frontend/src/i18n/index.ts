@@ -38,6 +38,7 @@ const translations: Record<Language, Translations> = {
     endDate: 'End Date',
     date: 'Date',
     role: 'Role',
+    selectRole: 'Select Role',
     searchMessages: 'Search messages...',
 
     // Navigation
@@ -50,6 +51,14 @@ const translations: Record<Language, Translations> = {
     report: 'Report',
     workspace: 'Workspace',
     security: 'Security',
+
+    // Report
+    myUsageReport: 'My Usage Report',
+    user: 'User',
+    dateRange: 'Date Range',
+    dailyUsage: 'Daily Usage',
+    showingFirst: 'Showing first',
+    of: 'of',
 
     // Dashboard
     dashboardTitle: 'Dashboard',
@@ -197,7 +206,8 @@ const translations: Record<Language, Translations> = {
     anomalies: 'Anomalies',
     healthScore: 'Health Score',
     usageHeatmap: 'Usage Heatmap (24 Hours)',
-    usageHeatmapDescription: 'Shows token usage distribution by hour (0-23). Darker blue = higher usage. Hover over a cell to see exact token count.',
+    usageHeatmapDescription:
+      'Shows token usage distribution by hour (0-23). Darker blue = higher usage. Hover over a cell to see exact token count.',
     less: 'Less',
     more: 'More',
     peakUsagePeriods: 'Peak Usage Periods',
@@ -220,7 +230,8 @@ const translations: Record<Language, Translations> = {
     // Sessions
     activeSessions: 'Active Sessions',
     noSessionsFound: 'No sessions found with current filters',
-    noAgentSessions: 'No agent sessions found. Sessions are created when using AI tools in Workspace.',
+    noAgentSessions:
+      'No agent sessions found. Sessions are created when using AI tools in Workspace.',
     allStatus: 'All Status',
     allTypes: 'All Types',
     status: 'Status',
@@ -326,6 +337,7 @@ const translations: Record<Language, Translations> = {
     endDate: '结束日期',
     date: '日期',
     role: '角色',
+    selectRole: '选择角色',
     searchMessages: '搜索消息...',
 
     // Navigation
@@ -338,6 +350,14 @@ const translations: Record<Language, Translations> = {
     report: '报告',
     workspace: '工作区',
     security: '安全',
+
+    // Report
+    myUsageReport: '我的使用报告',
+    user: '用户',
+    dateRange: '日期范围',
+    dailyUsage: '每日使用量',
+    showingFirst: '显示前',
+    of: '共',
 
     // Dashboard
     dashboardTitle: '仪表盘',
@@ -480,7 +500,8 @@ const translations: Record<Language, Translations> = {
     anomalies: '异常',
     healthScore: '健康分数',
     usageHeatmap: '使用热力图（24小时）',
-    usageHeatmapDescription: '显示一天中各时段（0-23点）的 Token 使用分布。颜色越深表示使用量越高。鼠标悬停可查看具体数值。',
+    usageHeatmapDescription:
+      '显示一天中各时段（0-23点）的 Token 使用分布。颜色越深表示使用量越高。鼠标悬停可查看具体数值。',
     less: '少',
     more: '多',
     peakUsagePeriods: '峰值使用时段',
@@ -609,6 +630,7 @@ const translations: Record<Language, Translations> = {
     endDate: '終了日',
     date: '日付',
     role: '役割',
+    selectRole: '役割を選択',
     searchMessages: 'メッセージを検索...',
 
     // Navigation
@@ -621,6 +643,14 @@ const translations: Record<Language, Translations> = {
     report: 'レポート',
     workspace: 'ワークスペース',
     security: 'セキュリティ',
+
+    // Report
+    myUsageReport: 'マイ使用レポート',
+    user: 'ユーザー',
+    dateRange: '日付範囲',
+    dailyUsage: '毎日の使用量',
+    showingFirst: '最初の',
+    of: '/',
 
     // Dashboard
     dashboardTitle: 'ダッシュボード',
@@ -763,7 +793,8 @@ const translations: Record<Language, Translations> = {
     anomalies: '異常',
     healthScore: 'ヘルススコア',
     usageHeatmap: '使用ヒートマップ（24時間）',
-    usageHeatmapDescription: '時間帯別（0-23時）のトークン使用分布を表示。色が濃いほど使用量が多い。セルにホバーすると詳細が表示されます。',
+    usageHeatmapDescription:
+      '時間帯別（0-23時）のトークン使用分布を表示。色が濃いほど使用量が多い。セルにホバーすると詳細が表示されます。',
     less: '少',
     more: '多',
     peakUsagePeriods: 'ピーク使用期間',
@@ -786,7 +817,8 @@ const translations: Record<Language, Translations> = {
     // Sessions
     activeSessions: 'アクティブセッション',
     noSessionsFound: '条件に一致するセッションが見つかりません',
-    noAgentSessions: 'Agent セッションがありません。Workspace で AI ツールを使用するとセッションが作成されます。',
+    noAgentSessions:
+      'Agent セッションがありません。Workspace で AI ツールを使用するとセッションが作成されます。',
     allStatus: 'すべてのステータス',
     allTypes: 'すべてのタイプ',
     status: 'ステータス',
@@ -892,6 +924,7 @@ const translations: Record<Language, Translations> = {
     endDate: '종료 날짜',
     date: '날짜',
     role: '역할',
+    selectRole: '역할 선택',
     searchMessages: '메시지 검색...',
 
     // Navigation
@@ -904,6 +937,14 @@ const translations: Record<Language, Translations> = {
     report: '보고서',
     workspace: '워크스페이스',
     security: '보안',
+
+    // Report
+    myUsageReport: '내 사용 보고서',
+    user: '사용자',
+    dateRange: '날짜 범위',
+    dailyUsage: '일일 사용량',
+    showingFirst: '처음',
+    of: '/',
 
     // Dashboard
     dashboardTitle: '대시보드',
@@ -1025,7 +1066,8 @@ const translations: Record<Language, Translations> = {
     twoFactorHelp: '사용자에게 이중 인증 설정 요구',
     ipWhitelist: 'IP 화이트리스트',
     allowedIpAddresses: '허용된 IP 주소',
-    ipWhitelistHelp: '한 줄에 하나의 IP 주소 또는 CIDR 범위를 입력하세요. 비워두면 모든 IP를 허용합니다.',
+    ipWhitelistHelp:
+      '한 줄에 하나의 IP 주소 또는 CIDR 범위를 입력하세요. 비워두면 모든 IP를 허용합니다.',
 
     // Analysis
     overview: '개요',
@@ -1046,7 +1088,8 @@ const translations: Record<Language, Translations> = {
     anomalies: '이상',
     healthScore: '건강 점수',
     usageHeatmap: '사용 히트맵 (24시간)',
-    usageHeatmapDescription: '시간대별(0-23시) 토큰 사용 분포를 표시합니다. 색이 짙을수록 사용량이 많습니다. 셀에 마우스를 올리면 상세 정보가 표시됩니다.',
+    usageHeatmapDescription:
+      '시간대별(0-23시) 토큰 사용 분포를 표시합니다. 색이 짙을수록 사용량이 많습니다. 셀에 마우스를 올리면 상세 정보가 표시됩니다.',
     less: '적음',
     more: '많음',
     peakUsagePeriods: '피크 사용 기간',

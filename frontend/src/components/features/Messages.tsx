@@ -43,13 +43,17 @@ export const Messages: React.FC = () => {
   const { data: sendersData } = useSenders(filters.host);
   const senders = sendersData || [];
 
+  // Only fetch messages when at least one role is selected
+  const hasRoleFilter = selectedRoles.length > 0;
+
   const { data, isLoading, isFetching, isError, error, refetch } = useMessages({
     filters,
     pageSize: ITEMS_PER_PAGE,
     page,
+    enabled: hasRoleFilter,
   });
 
-  const { data: totalCount } = useMessageCount(filters);
+  const { data: totalCount } = useMessageCount(filters, hasRoleFilter);
 
   const messages = data?.data ?? [];
   const pagination = data?.pagination;
@@ -263,7 +267,13 @@ export const Messages: React.FC = () => {
       )}
 
       {/* Messages List */}
-      {isLoading ? (
+      {!hasRoleFilter ? (
+        <EmptyState
+          icon="bi-funnel"
+          title={t('selectRole', language) || 'Select Role'}
+          description="Please select at least one role to view messages"
+        />
+      ) : isLoading ? (
         <Loading size="lg" text={t('loading', language)} />
       ) : messages.length === 0 ? (
         <EmptyState
