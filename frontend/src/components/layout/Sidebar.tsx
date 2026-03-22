@@ -5,9 +5,7 @@
 import React from 'react';
 import { cn } from '@/utils';
 import { useSidebarCollapsed, useLanguage } from '@/store';
-import { useSummary } from '@/hooks';
 import { t } from '@/i18n';
-import { formatTokens } from '@/utils';
 
 interface NavItem {
   id: string;
@@ -36,9 +34,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeSection, onNavigate }) =
   const collapsed = useSidebarCollapsed();
   const language = useLanguage();
 
-  // Get summary data for status panel
-  const { data: summaryData } = useSummary();
-
   const handleNavClick = (id: string, href?: string) => {
     if (href) {
       window.location.href = href;
@@ -46,16 +41,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeSection, onNavigate }) =
       onNavigate(id);
     }
   };
-
-  // Calculate total tokens from summary
-  const totalTokens = summaryData
-    ? Object.values(summaryData).reduce((sum, stats) => sum + stats.total_tokens, 0)
-    : 0;
-
-  // Calculate total days tracked
-  const totalDays = summaryData
-    ? Math.max(...Object.values(summaryData).map((s) => s.days_count), 0)
-    : 0;
 
   return (
     <nav className={cn('sidebar bg-dark text-white', collapsed ? 'sidebar-collapsed' : '')}>
@@ -85,28 +70,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeSection, onNavigate }) =
           </li>
         ))}
       </ul>
-
-      {/* Data Status Panel */}
-      {!collapsed && (
-        <div className="sidebar-status-panel p-3 border-top border-secondary">
-          <h6 className="text-muted mb-2">
-            <i className="bi bi-database me-2" />
-            {t('dataStatus', language)}
-          </h6>
-          <div className="status-item d-flex justify-content-between mb-1">
-            <small className="text-muted">{t('totalTokens', language)}</small>
-            <small className="text-light">{formatTokens(totalTokens)}</small>
-          </div>
-          <div className="status-item d-flex justify-content-between mb-1">
-            <small className="text-muted">{t('daysTracked', language)}</small>
-            <small className="text-light">{totalDays} {t('days', language)}</small>
-          </div>
-          <div className="status-item d-flex justify-content-between">
-            <small className="text-muted">{t('lastUpdate', language)}</small>
-            <small className="text-light">{new Date().toLocaleTimeString()}</small>
-          </div>
-        </div>
-      )}
     </nav>
   );
 };
