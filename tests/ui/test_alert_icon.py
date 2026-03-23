@@ -114,19 +114,19 @@ async def test_alert_icon():
                     
                     print(f"  Found icons: {icon_classes}")
                     
-                    # Check for bi-envelope-unread icon
-                    envelope_unread_icons = page.locator('.bi-envelope-unread')
-                    envelope_unread_count = await envelope_unread_icons.count()
+                    # Check for bi-envelope-fill icon
+                    envelope_fill_icons = page.locator('.bi-envelope-fill')
+                    envelope_fill_count = await envelope_fill_icons.count()
                     
                     # Also check for any envelope icon
                     envelope_icons = page.locator('.bi-envelope')
                     envelope_count = await envelope_icons.count()
                     
-                    print(f"  bi-envelope-unread icons: {envelope_unread_count}")
+                    print(f"  bi-envelope-fill icons: {envelope_fill_count}")
                     print(f"  bi-envelope icons: {envelope_count}")
-                    
-                    if envelope_unread_count > 0:
-                        results.append(("Envelope Unread Icon", "Pass", f"Found {envelope_unread_count} bi-envelope-unread icons"))
+
+                    if envelope_fill_count > 0:
+                        results.append(("Envelope Fill Icon", "Pass", f"Found {envelope_fill_count} bi-envelope-fill icons"))
                     elif envelope_count > 0:
                         # Check if any envelope icon has the correct class
                         results.append(("Envelope Icon", "Pass", f"Found {envelope_count} bi-envelope icons (checking classes...)"))

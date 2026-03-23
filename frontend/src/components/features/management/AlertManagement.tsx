@@ -240,7 +240,7 @@ export const AlertManagement: React.FC = () => {
           <StatCard
             label={t('unreadCount', language)}
             value={unreadCount.toString()}
-            icon={<i className="bi bi-envelope-unread fs-4" />}
+            icon={<i className="bi bi-envelope-fill fs-4" />}
             variant="warning"
           />
         </div>
