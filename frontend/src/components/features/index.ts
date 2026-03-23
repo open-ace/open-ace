@@ -13,3 +13,7 @@ export { Report } from './Report';
 export { Workspace } from './Workspace';
 export { Sessions } from './Sessions';
 export { Prompts } from './Prompts';
+
+// Analysis sub-components
+export { TrendAnalysis } from './analysis/TrendAnalysis';
+export { AnomalyDetection } from './analysis/AnomalyDetection';

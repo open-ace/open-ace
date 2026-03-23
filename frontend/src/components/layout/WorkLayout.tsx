@@ -15,6 +15,7 @@ import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import { ModeSwitcher } from '@/components/common';
 import { Header } from './Header';
+import { SessionList, AssistPanel, StatusBar } from '@/components/work';
 
 interface NavItem {
   id: string;
@@ -98,21 +99,8 @@ export const WorkLayout: React.FC<WorkLayoutProps> = ({ children }) => {
             ))}
           </nav>
 
-          {/* Session List Content */}
-          {!leftPanelCollapsed && (
-            <div className="session-list-content">
-              <div className="session-list-header">
-                <span className="text-muted">{t('todayUsage', language)}</span>
-              </div>
-              {/* Session items will be rendered by child components */}
-              <div className="session-items">
-                <div className="session-item-placeholder">
-                  <i className="bi bi-chat-dots" />
-                  <span>{t('noSessionsFound', language)}</span>
-                </div>
-              </div>
-            </div>
-          )}
+          {/* Session List Component */}
+          <SessionList collapsed={leftPanelCollapsed} />
         </aside>
 
         {/* Main Content */}
@@ -133,43 +121,13 @@ export const WorkLayout: React.FC<WorkLayoutProps> = ({ children }) => {
             </button>
           </div>
 
-          {!rightPanelCollapsed && (
-            <div className="assist-panel-content">
-              <div className="assist-section">
-                <h6>{t('prompts', language)}</h6>
-                <div className="assist-items">
-                  <div className="assist-item-placeholder">
-                    <i className="bi bi-file-text" />
-                    <span>{t('noPromptsFound', language)}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
+          {/* Assist Panel Component */}
+          <AssistPanel collapsed={rightPanelCollapsed} />
         </aside>
       </div>
 
-      {/* Status Bar */}
-      <footer className="work-status-bar">
-        <div className="status-left">
-          <span className="status-item">
-            <i className="bi bi-cpu" />
-            <span>GPT-4</span>
-          </span>
-        </div>
-        <div className="status-center">
-          <span className="status-item">
-            <i className="bi bi-lightning" />
-            <span>Token: 0 / 10,000</span>
-          </span>
-        </div>
-        <div className="status-right">
-          <span className="status-item">
-            <i className="bi bi-clock" />
-            <span>0ms</span>
-          </span>
-        </div>
-      </footer>
+      {/* Status Bar Component */}
+      <StatusBar />
     </div>
   );
 };

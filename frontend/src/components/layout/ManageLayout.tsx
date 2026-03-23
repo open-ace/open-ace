@@ -44,7 +44,8 @@ const navSections: NavSection[] = [
     id: 'analysis',
     title: 'analysis',
     items: [
-      { id: 'trend', label: 'tokenTrend', icon: 'bi-graph-up', path: '/manage/analysis' },
+      { id: 'trend', label: 'tokenTrend', icon: 'bi-graph-up', path: '/manage/analysis/trend' },
+      { id: 'anomaly', label: 'anomalyDetection', icon: 'bi-exclamation-triangle', path: '/manage/analysis/anomaly' },
       { id: 'messages', label: 'messages', icon: 'bi-chat-dots', path: '/manage/messages' },
     ],
   },

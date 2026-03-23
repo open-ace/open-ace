@@ -22,6 +22,8 @@ import {
   Workspace,
   Sessions,
   Prompts,
+  TrendAnalysis,
+  AnomalyDetection,
 } from '@/components/features';
 import { SecuritySettings } from '@/components/features/management/SecuritySettings';
 import { LoadingOverlay } from '@/components/common';
@@ -147,7 +149,9 @@ const ManageRoutes: React.FC = () => {
     <ManageLayout>
       <Routes>
         <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/analysis" element={<Analysis />} />
+        <Route path="/analysis" element={<Navigate to="/manage/analysis/trend" replace />} />
+        <Route path="/analysis/trend" element={<TrendAnalysis />} />
+        <Route path="/analysis/anomaly" element={<AnomalyDetection />} />
         <Route path="/messages" element={<Messages />} />
         <Route path="/audit" element={<Management />} />
         <Route path="/quota" element={<Management />} />

@@ -525,3 +525,167 @@ class AnalysisService:
                 segments['low'] += 1
 
         return segments
+
+    def detect_anomalies(
+        self,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        host_name: Optional[str] = None,
+        anomaly_type: Optional[str] = None,
+        severity: Optional[str] = None
+    ) -> Dict:
+        """
+        Detect usage anomalies.
+
+        Anomaly types:
+        1. usage_spike: Daily usage exceeds 2 standard deviations above mean
+        2. usage_drop: Daily usage below 50% of average
+
+        Args:
+            start_date: Optional start date filter.
+            end_date: Optional end date filter.
+            host_name: Optional host name filter.
+            anomaly_type: Optional filter by anomaly type ('spike', 'drop').
+            severity: Optional filter by severity ('high', 'medium', 'low').
+
+        Returns:
+            Dict: Anomaly detection results with anomalies list.
+        """
+        if not start_date:
+            start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+        if not end_date:
+            end_date = datetime.now().strftime('%Y-%m-%d')
+
+        # Get daily token totals from messages
+        daily_data = self.message_repo.get_daily_token_totals(start_date, end_date, host_name)
+
+        if not daily_data or len(daily_data) < 3:
+            return {
+                'anomalies': [],
+                'summary': {
+                    'total': 0,
+                    'high': 0,
+                    'medium': 0,
+                    'low': 0
+                }
+            }
+
+        # Calculate statistics
+        tokens = [d.get('total_tokens', 0) for d in daily_data]
+        avg_tokens = sum(tokens) / len(tokens)
+
+        # Calculate standard deviation
+        if len(tokens) > 1:
+            variance = sum((t - avg_tokens) ** 2 for t in tokens) / len(tokens)
+            std_dev = variance ** 0.5
+        else:
+            std_dev = 0
+
+        anomalies = []
+
+        # Detect anomalies
+        for d in daily_data:
+            token = d.get('total_tokens', 0)
+            date = d.get('date')
+
+            if std_dev > 0:
+                deviation = (token - avg_tokens) / std_dev
+
+                # Usage spike: more than 2 standard deviations above mean
+                if deviation > 2:
+                    anomaly = {
+                        'date': date,
+                        'tokens': token,
+                        'expected': round(avg_tokens),
+                        'deviation': round(deviation, 2),
+                        'type': 'spike',
+                        'severity': 'high' if deviation > 3 else 'medium'
+                    }
+
+                    # Apply filters
+                    if anomaly_type and anomaly['type'] != anomaly_type:
+                        continue
+                    if severity and anomaly['severity'] != severity:
+                        continue
+
+                    anomalies.append(anomaly)
+
+                # Usage drop: below 50% of average
+                elif token < avg_tokens * 0.5 and avg_tokens > 0:
+                    anomaly = {
+                        'date': date,
+                        'tokens': token,
+                        'expected': round(avg_tokens),
+                        'deviation': round((avg_tokens - token) / avg_tokens * 100, 1),
+                        'type': 'drop',
+                        'severity': 'low'
+                    }
+
+                    # Apply filters
+                    if anomaly_type and anomaly['type'] != anomaly_type:
+                        continue
+                    if severity and anomaly['severity'] != severity:
+                        continue
+
+                    anomalies.append(anomaly)
+
+        # Sort by date descending
+        anomalies.sort(key=lambda x: x['date'], reverse=True)
+
+        # Calculate summary
+        summary = {
+            'total': len(anomalies),
+            'high': sum(1 for a in anomalies if a['severity'] == 'high'),
+            'medium': sum(1 for a in anomalies if a['severity'] == 'medium'),
+            'low': sum(1 for a in anomalies if a['severity'] == 'low')
+        }
+
+        return {
+            'anomalies': anomalies,
+            'summary': summary,
+            'statistics': {
+                'average': round(avg_tokens),
+                'std_deviation': round(std_dev),
+                'data_points': len(daily_data)
+            }
+        }
+
+    def get_anomaly_trend(
+        self,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        host_name: Optional[str] = None
+    ) -> Dict:
+        """
+        Get anomaly trend over time.
+
+        Returns:
+            Dict: Anomaly trend data grouped by date.
+        """
+        anomaly_data = self.detect_anomalies(start_date, end_date, host_name)
+        anomalies = anomaly_data.get('anomalies', [])
+
+        # Group anomalies by date
+        trend_by_date = {}
+        for anomaly in anomalies:
+            date = anomaly['date']
+            if date not in trend_by_date:
+                trend_by_date[date] = {
+                    'date': date,
+                    'count': 0,
+                    'spikes': 0,
+                    'drops': 0
+                }
+            trend_by_date[date]['count'] += 1
+            if anomaly['type'] == 'spike':
+                trend_by_date[date]['spikes'] += 1
+            else:
+                trend_by_date[date]['drops'] += 1
+
+        # Sort by date
+        trend = sorted(trend_by_date.values(), key=lambda x: x['date'])
+
+        return {
+            'trend': trend,
+            'total_anomalies': len(anomalies)
+        }

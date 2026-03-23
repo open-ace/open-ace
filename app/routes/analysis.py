@@ -141,9 +141,32 @@ def api_anomaly_detection():
     start_date = request.args.get('start')
     end_date = request.args.get('end')
     host = request.args.get('host')
+    anomaly_type = request.args.get('type')
+    severity = request.args.get('severity')
 
-    # Placeholder for anomaly detection
-    return jsonify({'anomalies': []})
+    result = analysis_service.detect_anomalies(
+        start_date=start_date,
+        end_date=end_date,
+        host_name=host,
+        anomaly_type=anomaly_type,
+        severity=severity
+    )
+    return jsonify(result)
+
+
+@analysis_bp.route('/analysis/anomaly-trend')
+def api_anomaly_trend():
+    """Get anomaly trend over time."""
+    start_date = request.args.get('start')
+    end_date = request.args.get('end')
+    host = request.args.get('host')
+
+    result = analysis_service.get_anomaly_trend(
+        start_date=start_date,
+        end_date=end_date,
+        host_name=host
+    )
+    return jsonify(result)
 
 
 @analysis_bp.route('/analysis/recommendations')

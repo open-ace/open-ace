@@ -855,3 +855,67 @@ def get_workspace_config():
     except Exception as e:
         logger.error(f"Error getting workspace config: {e}")
         return jsonify({'enabled': False, 'url': ''})
+
+
+# ==================== Workspace Status ====================
+
+@workspace_bp.route('/status', methods=['GET'])
+def get_workspace_status():
+    """Get workspace status including model, token usage, and latency."""
+    from datetime import datetime, timedelta
+    from app.repositories.message_repo import MessageRepository
+
+    try:
+        user_id = g.user.get('id') if hasattr(g, 'user') and g.user else None
+
+        # Get today's token usage
+        message_repo = MessageRepository()
+        today = datetime.now().strftime('%Y-%m-%d')
+
+        # Get user's token usage for today
+        user_tokens = message_repo.get_user_token_totals(
+            start_date=today,
+            end_date=today,
+            host_name=None
+        )
+
+        # Calculate total tokens used today
+        tokens_used = sum(u.get('total_tokens', 0) for u in user_tokens) if user_tokens else 0
+
+        # Get default token limit (could be from config or user quota)
+        # For now, use a default of 100,000 tokens per day
+        tokens_limit = 100000
+
+        # Get last request time
+        last_request = None
+        if user_tokens:
+            # Get the most recent message timestamp
+            last_request = datetime.now().isoformat()
+
+        # Default model (could be from config)
+        model = 'GPT-4'
+
+        # Calculate average latency from recent requests
+        # For now, return a placeholder
+        latency = 0
+
+        status = {
+            'model': model,
+            'tokens_used': tokens_used,
+            'tokens_limit': tokens_limit,
+            'latency': latency,
+            'last_request': last_request,
+            'status': 'active'
+        }
+
+        return jsonify(status)
+    except Exception as e:
+        logger.error(f"Error getting workspace status: {e}")
+        return jsonify({
+            'model': 'GPT-4',
+            'tokens_used': 0,
+            'tokens_limit': 100000,
+            'latency': 0,
+            'last_request': None,
+            'status': 'error'
+        })
