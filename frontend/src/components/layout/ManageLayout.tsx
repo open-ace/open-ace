@@ -2,21 +2,29 @@
  * ManageLayout Component - Sidebar navigation layout for Manage Mode
  *
  * Layout structure:
- * - Left: Navigation sidebar with grouped menu items
+ * - Left: Navigation sidebar with grouped menu items (collapsible groups)
  * - Right: Main content area
  *
  * Navigation groups:
  * - Overview: Dashboard
- * - Analysis: Trend, Anomaly
- * - Governance: Audit, Quota, Security
- * - Users: Management
+ * - Analysis: Trend, Anomaly, ROI, Conversation History, Messages
+ * - Governance: Audit Center, Quota & Alerts, Compliance, Security Center
+ * - Users: Management, Tenants
+ * - Settings: SSO
+ *
+ * Features:
+ * - Collapsible navigation groups
+ * - Active group auto-expands
+ * - Collapse state persisted to localStorage
+ * - Admin-only items are disabled for non-admin users
  */
 
-import React from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { cn } from '@/utils';
 import { useLanguage, useSidebarCollapsed } from '@/store';
 import { useAppStore } from '@/store';
+import { useAuth } from '@/hooks';
 import { t } from '@/i18n';
 import { ModeSwitcher } from '@/components/common';
 import { Header } from './Header';
@@ -26,6 +34,7 @@ interface NavItem {
   label: string;
   icon: string;
   path: string;
+  adminOnly?: boolean;
 }
 
 interface NavSection {
@@ -34,6 +43,8 @@ interface NavSection {
   items: NavItem[];
 }
 
+// Optimized navigation structure with merged pages
+// Items with adminOnly: true are only accessible by admin users
 const navSections: NavSection[] = [
   {
     id: 'overview',
@@ -46,6 +57,8 @@ const navSections: NavSection[] = [
     items: [
       { id: 'trend', label: 'tokenTrend', icon: 'bi-graph-up', path: '/manage/analysis/trend' },
       { id: 'anomaly', label: 'anomalyDetection', icon: 'bi-exclamation-triangle', path: '/manage/analysis/anomaly' },
+      { id: 'roi', label: 'roiAnalysis', icon: 'bi-currency-dollar', path: '/manage/analysis/roi' },
+      { id: 'conversation-history', label: 'conversationHistory', icon: 'bi-chat-history', path: '/manage/analysis/conversation-history' },
       { id: 'messages', label: 'messages', icon: 'bi-chat-dots', path: '/manage/messages' },
     ],
   },
@@ -53,17 +66,31 @@ const navSections: NavSection[] = [
     id: 'governance',
     title: 'governance',
     items: [
-      { id: 'audit', label: 'auditLog', icon: 'bi-journal-text', path: '/manage/audit' },
-      { id: 'quota', label: 'quotaManagement', icon: 'bi-sliders', path: '/manage/quota' },
-      { id: 'security', label: 'securitySettings', icon: 'bi-shield', path: '/manage/security' },
+      { id: 'audit', label: 'auditCenter', icon: 'bi-journal-text', path: '/manage/audit' },
+      { id: 'quota', label: 'quotaAndAlerts', icon: 'bi-sliders', path: '/manage/quota', adminOnly: true },
+      { id: 'compliance', label: 'complianceManagement', icon: 'bi-file-earmark-text', path: '/manage/compliance', adminOnly: true },
+      { id: 'security', label: 'securityCenter', icon: 'bi-shield', path: '/manage/security', adminOnly: true },
     ],
   },
   {
     id: 'users',
     title: 'user',
-    items: [{ id: 'users', label: 'userManagement', icon: 'bi-people', path: '/manage/users' }],
+    items: [
+      { id: 'users', label: 'userManagement', icon: 'bi-people', path: '/manage/users', adminOnly: true },
+      { id: 'tenants', label: 'tenantManagement', icon: 'bi-building', path: '/manage/tenants', adminOnly: true },
+    ],
+  },
+  {
+    id: 'settings',
+    title: 'settings',
+    items: [
+      { id: 'sso', label: 'ssoSettings', icon: 'bi-key', path: '/manage/settings/sso', adminOnly: true },
+    ],
   },
 ];
+
+// Local storage key for collapse state
+const COLLAPSE_STATE_KEY = 'manage-nav-collapse-state';
 
 interface ManageLayoutProps {
   children?: React.ReactNode;
@@ -74,21 +101,85 @@ export const ManageLayout: React.FC<ManageLayoutProps> = ({ children }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const collapsed = useSidebarCollapsed();
+  const { user } = useAuth();
 
-  // Get active nav item from path
-  const getActiveNavItem = () => {
+  // Initialize collapse state from localStorage
+  const getInitialCollapseState = useCallback(() => {
+    try {
+      const saved = localStorage.getItem(COLLAPSE_STATE_KEY);
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch (e) {
+      console.error('Failed to load nav collapse state:', e);
+    }
+    // Default: all collapsed
+    return {};
+  }, []);
+
+  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>(getInitialCollapseState);
+
+  // Get active nav item from path (use last segment for nested paths)
+  const getActiveNavItem = useCallback(() => {
     const path = location.pathname;
-    // Extract the last part of the path
     const parts = path.split('/').filter(Boolean);
     if (parts.length >= 2) {
-      return parts[1]; // e.g., 'dashboard', 'analysis', etc.
+      // For nested paths like /manage/analysis/trend, use the last segment
+      return parts[parts.length - 1];
     }
     return 'dashboard';
-  };
+  }, [location.pathname]);
 
   const activeNavItem = getActiveNavItem();
 
-  const handleNavClick = (item: NavItem) => {
+  // Find which section contains the active item
+  const getActiveSection = useCallback(() => {
+    for (const section of navSections) {
+      if (section.items.some(item => item.id === activeNavItem)) {
+        return section.id;
+      }
+    }
+    return 'overview';
+  }, [activeNavItem]);
+
+  const activeSection = getActiveSection();
+
+  // Auto-expand active section when it changes
+  useEffect(() => {
+    setCollapsedSections(prev => {
+      // If active section is collapsed, expand it
+      if (prev[activeSection] !== false) {
+        const newState = { ...prev, [activeSection]: false };
+        localStorage.setItem(COLLAPSE_STATE_KEY, JSON.stringify(newState));
+        return newState;
+      }
+      return prev;
+    });
+  }, [activeSection]);
+
+  // Toggle section collapse (accordion mode: only one section expanded at a time)
+  const toggleSection = (sectionId: string) => {
+    setCollapsedSections(prev => {
+      const isCurrentlyExpanded = prev[sectionId] === false;
+      if (isCurrentlyExpanded) {
+        // If currently expanded, collapse it
+        const newState = { ...prev, [sectionId]: true };
+        localStorage.setItem(COLLAPSE_STATE_KEY, JSON.stringify(newState));
+        return newState;
+      } else {
+        // If currently collapsed, expand it and collapse all others
+        const newState: Record<string, boolean> = {};
+        navSections.forEach(section => {
+          newState[section.id] = section.id !== sectionId;
+        });
+        localStorage.setItem(COLLAPSE_STATE_KEY, JSON.stringify(newState));
+        return newState;
+      }
+    });
+  };
+
+  const handleNavClick = (item: NavItem, disabled?: boolean) => {
+    if (disabled) return;
     navigate(item.path);
   };
 
@@ -103,7 +194,7 @@ export const ManageLayout: React.FC<ManageLayoutProps> = ({ children }) => {
         {/* Logo */}
         <div className="sidebar-header">
           <div className="logo">
-            <i className="bi bi-cpu fs-4" />
+            <img src="/static/icons/icon.svg" alt="Open ACE" style={{ width: '28px', height: '28px' }} />
             {!collapsed && <span className="logo-text">Open ACE</span>}
           </div>
         </div>
@@ -117,27 +208,49 @@ export const ManageLayout: React.FC<ManageLayoutProps> = ({ children }) => {
 
         {/* Navigation Sections */}
         <div className="sidebar-nav">
-          {navSections.map((section) => (
-            <div key={section.id} className="nav-section">
-              {!collapsed && (
-                <div className="nav-section-title">{t(section.title, language)}</div>
-              )}
-              <ul className="nav-section-items">
-                {section.items.map((item) => (
-                  <li key={item.id}>
-                    <button
-                      className={cn('nav-item', activeNavItem === item.id && 'active')}
-                      onClick={() => handleNavClick(item)}
-                      title={collapsed ? t(item.label, language) : undefined}
-                    >
-                      <i className={cn('bi', item.icon)} />
-                      {!collapsed && <span>{t(item.label, language)}</span>}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
+          {navSections.map((section) => {
+            const isCollapsed = collapsedSections[section.id] !== false;
+            const isActive = section.id === activeSection;
+
+            return (
+              <div key={section.id} className={cn('nav-section', isActive && 'active')}>
+                {/* Section Header - Clickable to toggle */}
+                {!collapsed && (
+                  <button
+                    className="nav-section-header"
+                    onClick={() => toggleSection(section.id)}
+                    aria-expanded={!isCollapsed}
+                  >
+                    <span className="nav-section-title">{t(section.title, language)}</span>
+                    <i className={cn('bi', 'bi-chevron-down', 'nav-section-chevron', isCollapsed && 'collapsed')} />
+                  </button>
+                )}
+                {/* Section Items */}
+                <ul className={cn('nav-section-items', isCollapsed && 'collapsed', collapsed && 'sidebar-collapsed')}>
+                  {section.items.map((item) => {
+                    const isDisabled = item.adminOnly && user?.role !== 'admin';
+                    return (
+                      <li key={item.id}>
+                        <button
+                          className={cn(
+                            'nav-item',
+                            activeNavItem === item.id && !isDisabled && 'active',
+                            isDisabled && 'disabled'
+                          )}
+                          onClick={() => handleNavClick(item, isDisabled)}
+                          disabled={isDisabled}
+                          title={collapsed ? t(item.label, language) : isDisabled ? t('adminOnly', language) : undefined}
+                        >
+                          <i className={cn('bi', item.icon)} />
+                          {!collapsed && <span>{t(item.label, language)}</span>}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            );
+          })}
         </div>
 
         {/* Collapse Toggle */}

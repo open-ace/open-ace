@@ -2287,6 +2287,17 @@ link[rel='dns-prefetch'] {
   color: white;
 }
 
+.manage-sidebar .nav-item.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.manage-sidebar .nav-item.disabled:hover {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.5);
+}
+
 .manage-sidebar.collapsed .nav-item {
   justify-content: center;
   padding: 10px;
