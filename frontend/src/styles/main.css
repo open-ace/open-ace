@@ -1311,6 +1311,7 @@ link[rel='dns-prefetch'] {
   color: var(--text-secondary);
   padding: var(--spacing-sm) var(--spacing-md);
   transition: all var(--transition-fast);
+  white-space: nowrap;
 }
 
 .nav-tabs .nav-link:hover {
@@ -1322,6 +1323,23 @@ link[rel='dns-prefetch'] {
   color: var(--color-primary);
   border-bottom-color: var(--color-primary);
   background: transparent;
+}
+
+/* Assist Panel Tabs - Equal width tabs for right panel */
+.assist-panel .nav-tabs {
+  display: flex;
+  gap: 0;
+}
+
+.assist-panel .nav-tabs .nav-link {
+  flex: 1;
+  text-align: center;
+  padding: var(--spacing-sm) var(--spacing-xs);
+}
+
+.assist-panel .nav-tabs .nav-item {
+  flex: 1;
+  text-align: center;
 }
 
 .tab-content {
@@ -1458,14 +1476,25 @@ link[rel='dns-prefetch'] {
   margin-left: -0.5rem;
 }
 
-/* Dropdown Styles */
-.dropdown-menu {
+/* Dropdown Styles - Override Bootstrap defaults */
+.dropdown-menu,
+.dropdown-menu.show {
+  --bs-dropdown-color: var(--text-primary);
+  --bs-dropdown-bg: var(--bg-primary);
+  --bs-dropdown-border-color: var(--border-color);
+  --bs-dropdown-link-color: var(--text-primary);
+  --bs-dropdown-link-hover-color: var(--text-primary);
+  --bs-dropdown-link-hover-bg: var(--bg-tertiary);
+  --bs-dropdown-link-active-color: var(--text-inverse);
+  --bs-dropdown-link-active-bg: var(--color-primary);
+  --bs-dropdown-link-disabled-color: var(--text-muted);
   background: var(--bg-primary) !important;
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius);
   box-shadow: var(--shadow-lg);
   padding: var(--spacing-xs) 0;
   min-width: 180px;
+  color: var(--text-primary) !important;
 }
 
 /* Override Bootstrap dropdown item styles */
