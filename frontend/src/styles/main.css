@@ -69,6 +69,17 @@
   --shadow-inner: inset 0 2px 4px 0 rgb(15 23 42 / 0.05);
   --shadow-glow: 0 0 20px rgb(14 165 233 / 0.3);
 
+  /* ===== Bootstrap Dropdown Overrides ===== */
+  --bs-dropdown-color: var(--text-primary);
+  --bs-dropdown-bg: var(--bg-primary);
+  --bs-dropdown-border-color: var(--border-color);
+  --bs-dropdown-link-color: var(--text-primary);
+  --bs-dropdown-link-hover-color: var(--text-primary);
+  --bs-dropdown-link-hover-bg: var(--bg-tertiary);
+  --bs-dropdown-link-active-color: var(--text-inverse);
+  --bs-dropdown-link-active-bg: var(--color-primary);
+  --bs-dropdown-link-disabled-color: var(--text-muted);
+
   /* ===== Spacing Scale ===== */
   --spacing-xs: 0.25rem;
   --spacing-sm: 0.5rem;
