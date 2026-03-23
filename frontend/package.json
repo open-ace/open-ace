@@ -33,17 +33,20 @@
     ]
   },
   "dependencies": {
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
     "@tanstack/react-query": "^5.62.0",
-    "zustand": "^5.0.2",
-    "react-router-dom": "^7.0.2",
+    "bootstrap": "^5.3.8",
+    "bootstrap-icons": "^1.13.1",
     "chart.js": "^4.4.7",
-    "react-chartjs-2": "^5.2.0",
     "clsx": "^2.1.1",
-    "date-fns": "^4.1.0"
+    "date-fns": "^4.1.0",
+    "react": "^18.3.1",
+    "react-chartjs-2": "^5.2.0",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^7.0.2",
+    "zustand": "^5.0.2"
   },
   "devDependencies": {
+    "@eslint/js": "^9.15.0",
     "@playwright/test": "^1.40.0",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.0.1",
@@ -57,14 +60,13 @@
     "eslint-plugin-prettier": "^5.2.1",
     "eslint-plugin-react": "^7.37.2",
     "eslint-plugin-react-hooks": "^5.0.0",
+    "globals": "^15.13.0",
     "husky": "^9.1.7",
     "jsdom": "^25.0.1",
     "lint-staged": "^15.2.10",
     "prettier": "^3.4.2",
     "typescript": "~5.7.2",
     "vite": "^6.0.3",
-    "vitest": "^2.1.8",
-    "globals": "^15.13.0",
-    "@eslint/js": "^9.15.0"
+    "vitest": "^2.1.8"
   }
 }
