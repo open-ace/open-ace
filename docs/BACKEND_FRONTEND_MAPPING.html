@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>后端功能模块与前端页面对应关系分析</title>
+    <style>
+        :root {
+            --primary-color: #667eea;
+            --secondary-color: #764ba2;
+            --bg-color: #f8f9fa;
+            --card-bg: #ffffff;
+            --text-color: #333;
+            --text-muted: #6c757d;
+            --border-color: #dee2e6;
+            --code-bg: #f4f4f4;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.8;
+            color: var(--text-color);
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: var(--card-bg);
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+
+        .header h1 {
+            margin: 0 0 10px 0;
+            font-size: 2em;
+            border: none;
+            padding: 0;
+        }
+
+        .header .meta {
+            font-size: 0.9em;
+            opacity: 0.9;
+            margin-top: 15px;
+        }
+
+        .header .meta p {
+            margin: 5px 0;
+        }
+
+        .content {
+            padding: 40px;
+        }
+
+        h1 {
+            color: var(--primary-color);
+            border-bottom: 3px solid var(--primary-color);
+            padding-bottom: 10px;
+            margin-top: 40px;
+            font-size: 1.8em;
+        }
+
+        h2 {
+            color: var(--secondary-color);
+            border-left: 4px solid var(--secondary-color);
+            padding-left: 15px;
+            margin-top: 35px;
+            font-size: 1.5em;
+        }
+
+        h3 {
+            color: var(--text-color);
+            margin-top: 25px;
+            font-size: 1.25em;
+        }
+
+        h4 {
+            color: var(--text-muted);
+            margin-top: 20px;
+            font-size: 1.1em;
+        }
+
+        p {
+            margin: 15px 0;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            font-size: 14px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        th {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            color: white;
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+        }
+
+        td {
+            padding: 12px 15px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        tr:nth-child(even) {
+            background-color: #f8f9fa;
+        }
+
+        tr:hover {
+            background-color: #e9ecef;
+        }
+
+        pre {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 20px 0;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        code {
+            background: var(--code-bg);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'SF Mono', Monaco, Consolas, 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+
+        pre code {
+            background: none;
+            padding: 0;
+            color: inherit;
+        }
+
+        blockquote {
+            border-left: 4px solid var(--primary-color);
+            margin: 20px 0;
+            padding: 15px 20px;
+            background: #f0f4ff;
+            border-radius: 0 8px 8px 0;
+            color: var(--text-muted);
+        }
+
+        hr {
+            border: none;
+            height: 2px;
+            background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));
+            margin: 40px 0;
+        }
+
+        ul, ol {
+            padding-left: 25px;
+            margin: 15px 0;
+        }
+
+        li {
+            margin: 8px 0;
+        }
+
+        strong {
+            color: var(--primary-color);
+        }
+
+        a {
+            color: var(--primary-color);
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        /* 状态徽章 */
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+            margin: 2px;
+        }
+
+        .badge-success { background-color: #d4edda; color: #155724; }
+        .badge-warning { background-color: #fff3cd; color: #856404; }
+        .badge-danger { background-color: #f8d7da; color: #721c24; }
+        .badge-info { background-color: #d1ecf1; color: #0c5460; }
+        .badge-new { background-color: #cce5ff; color: #004085; }
+        .badge-p1 { background-color: #f8d7da; color: #721c24; }
+        .badge-p2 { background-color: #fff3cd; color: #856404; }
+        .badge-p3 { background-color: #d1ecf1; color: #0c5460; }
+
+        /* 目录 */
+        .toc {
+            background: #f8f9fa;
+            padding: 20px 30px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+            border-left: 4px solid var(--primary-color);
+        }
+
+        .toc h2 {
+            margin-top: 0;
+            border: none;
+            padding: 0;
+            color: var(--primary-color);
+        }
+
+        .toc ol {
+            margin: 10px 0;
+        }
+
+        .toc li {
+            margin: 5px 0;
+        }
+
+        /* 页脚 */
+        .footer {
+            text-align: center;
+            padding: 20px;
+            color: var(--text-muted);
+            font-size: 14px;
+            border-top: 1px solid var(--border-color);
+            background: #f8f9fa;
+        }
+
+        /* 摘要卡片 */
+        .summary-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 12px;
+            padding: 25px;
+            margin: 20px 0;
+            text-align: center;
+        }
+
+        .summary-card h3 {
+            color: white;
+            margin-top: 0;
+        }
+
+        .summary-stats {
+            display: flex;
+            justify-content: space-around;
+            flex-wrap: wrap;
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .summary-stat {
+            text-align: center;
+        }
+
+        .summary-stat .number {
+            font-size: 2.5em;
+            font-weight: bold;
+        }
+
+        .summary-stat .label {
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+
+        /* 响应式 */
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+            .content {
+                padding: 20px;
+            }
+            .header {
+                padding: 20px;
+            }
+            table {
+                font-size: 12px;
+            }
+            th, td {
+                padding: 8px 10px;
+            }
+            .summary-stats {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>后端功能模块与前端页面对应关系分析</h1>
+            <div class="meta">
+                <p><strong>分析日期:</strong> 2026-03-23</p>
+                <p><strong>目的:</strong> 识别缺少前端页面的后端功能模块</p>
+            </div>
+        </div>
+        <div class="content">
+            <div class="summary-card">
+                <h3>缺失页面统计</h3>
+                <div class="summary-stats">
+                    <div class="summary-stat">
+                        <div class="number">6</div>
+                        <div class="label">缺失模块</div>
+                    </div>
+                    <div class="summary-stat">
+                        <div class="number">8</div>
+                        <div class="label">待实现页面</div>
+                    </div>
+                    <div class="summary-stat">
+                        <div class="number">34h</div>
+                        <div class="label">预计工时</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="toc">
+                <h2>目录</h2>
+                <ol>
+                    <li><a href="#一对应关系总览">对应关系总览</a></li>
+                    <li><a href="#二缺失模块详细分析">缺失模块详细分析</a></li>
+                    <li><a href="#三建议的导航结构调整">建议的导航结构调整</a></li>
+                    <li><a href="#四实施优先级">实施优先级</a></li>
+                    <li><a href="#五总结">总结</a></li>
+                </ol>
+            </div>
+
+            <hr>
+
+            <h1 id="一对应关系总览">一、对应关系总览</h1>
+
+            <h2 id="已有前端页面的后端模块">✅ 已有前端页面的后端模块</h2>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>后端模块</th>
+                        <th>路由文件</th>
+                        <th>前端组件</th>
+                        <th>状态</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>Usage</strong></td>
+                        <td><code>app/routes/usage.py</code></td>
+                        <td><code>Dashboard.tsx</code></td>
+                        <td><span class="badge badge-success">✅ 完整</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>Messages</strong></td>
+                        <td><code>app/routes/messages.py</code></td>
+                        <td><code>Messages.tsx</code></td>
+                        <td><span class="badge badge-success">✅ 完整</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>Analysis</strong></td>
+                        <td><code>app/routes/analysis.py</code></td>
+                        <td><code>TrendAnalysis.tsx</code>, <code>AnomalyDetection.tsx</code></td>
+                        <td><span class="badge badge-success">✅ 完整</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>Workspace</strong></td>
+                        <td><code>app/routes/workspace.py</code></td>
+                        <td><code>Workspace.tsx</code></td>
+                        <td><span class="badge badge-success">✅ 完整</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>Auth</strong></td>
+                        <td><code>app/routes/auth.py</code></td>
+                        <td><code>Login.tsx</code>, <code>LogoutSuccess.tsx</code></td>
+                        <td><span class="badge badge-success">✅ 完整</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>Admin</strong></td>
+                        <td><code>app/routes/admin.py</code></td>
+                        <td><code>UserManagement.tsx</code></td>
+                        <td><span class="badge badge-success">✅ 完整</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>Governance</strong></td>
+                        <td><code>app/routes/governance.py</code></td>
+                        <td><code>AuditLog.tsx</code>, <code>QuotaManagement.tsx</code>, <code>ContentFilter.tsx</code>, <code>SecuritySettings.tsx</code></td>
+                        <td><span class="badge badge-success">✅ 完整</span></td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h2 id="缺少前端页面的后端模块">❌ 缺少前端页面的后端模块</h2>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>后端模块</th>
+                        <th>路由文件</th>
+                        <th>功能描述</th>
+                        <th>优先级</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>Alerts</strong></td>
+                        <td><code>app/routes/alerts.py</code></td>
+                        <td>告警管理、通知偏好设置</td>
+                        <td><span class="badge badge-p1">P1</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>Compliance</strong></td>
+                        <td><code>app/routes/compliance.py</code></td>
+                        <td>合规报告、审计分析、数据保留</td>
+                        <td><span class="badge badge-p1">P1</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>ROI</strong></td>
+                        <td><code>app/routes/roi.py</code></td>
+                        <td>ROI 分析、成本优化建议</td>
+                        <td><span class="badge badge-p2">P2</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>Tenant</strong></td>
+                        <td><code>app/routes/tenant.py</code></td>
+                        <td>多租户管理</td>
+                        <td><span class="badge badge-p2">P2</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>SSO</strong></td>
+                        <td><code>app/routes/sso.py</code></td>
+                        <td>SSO 提供者管理</td>
+                        <td><span class="badge badge-p3">P3</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>Analytics</strong></td>
+                        <td><code>app/routes/analytics.py</code></td>
+                        <td>分析报告导出、预测、效率指标</td>
+                        <td><span class="badge badge-p2">P2</span></td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <hr>
+
+            <h1 id="二缺失模块详细分析">二、缺失模块详细分析</h1>
+
+            <h2 id="21-alerts-告警管理---p1">2.1 Alerts (告警管理) - P1</h2>
+
+            <p><strong>后端 API 端点</strong>:</p>
+
+            <table>
+                <thead>
+                    <tr><th>端点</th><th>方法</th><th>功能</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>/api/alerts</code></td><td>GET</td><td>获取告警列表</td></tr>
+                    <tr><td><code>/api/alerts/unread-count</code></td><td>GET</td><td>获取未读告警数</td></tr>
+                    <tr><td><code>/api/alerts/&lt;alert_id&gt;/read</code></td><td>POST</td><td>标记告警已读</td></tr>
+                    <tr><td><code>/api/alerts/read-all</code></td><td>POST</td><td>标记全部已读</td></tr>
+                    <tr><td><code>/api/alerts/&lt;alert_id&gt;</code></td><td>DELETE</td><td>删除告警</td></tr>
+                    <tr><td><code>/api/alerts/preferences</code></td><td>GET/PUT</td><td>获取/设置通知偏好</td></tr>
+                    <tr><td><code>/api/alerts/stream</code></td><td>GET</td><td>SSE 实时告警流</td></tr>
+                </tbody>
+            </table>
+
+            <p><strong>建议前端页面</strong>:</p>
+            <ul>
+                <li><strong>页面名称</strong>: AlertManagement (告警管理)</li>
+                <li><strong>路由</strong>: <code>/manage/alerts</code></li>
+                <li><strong>所属分组</strong>: 治理</li>
+            </ul>
+
+            <p><strong>页面元素</strong>:</p>
+            <table>
+                <thead>
+                    <tr><th>区域</th><th>元素</th><th>类型</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td><strong>统计卡片</strong></td><td>总告警数 / 未读告警 / 高危告警</td><td>StatCard</td></tr>
+                    <tr><td><strong>过滤器</strong></td><td>告警类型 / 严重程度 / 已读状态</td><td>Select</td></tr>
+                    <tr><td><strong>列表</strong></td><td>告警列表</td><td>Table</td></tr>
+                    <tr><td><strong>设置</strong></td><td>通知偏好（邮件/推送/Webhook）</td><td>Modal</td></tr>
+                </tbody>
+            </table>
+
+            <hr>
+
+            <h2 id="22-compliance-合规报告---p1">2.2 Compliance (合规报告) - P1</h2>
+
+            <p><strong>后端 API 端点</strong>:</p>
+
+            <table>
+                <thead>
+                    <tr><th>端点</th><th>方法</th><th>功能</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>/api/compliance/reports</code></td><td>GET/POST</td><td>报告类型列表 / 生成报告</td></tr>
+                    <tr><td><code>/api/compliance/reports/saved</code></td><td>GET</td><td>已保存报告</td></tr>
+                    <tr><td><code>/api/compliance/audit/patterns</code></td><td>GET</td><td>审计模式分析</td></tr>
+                    <tr><td><code>/api/compliance/audit/anomalies</code></td><td>GET</td><td>审计异常检测</td></tr>
+                    <tr><td><code>/api/compliance/audit/security-score</code></td><td>GET</td><td>安全评分</td></tr>
+                    <tr><td><code>/api/compliance/retention/rules</code></td><td>GET/PUT</td><td>数据保留规则</td></tr>
+                    <tr><td><code>/api/compliance/retention/cleanup</code></td><td>POST</td><td>执行数据清理</td></tr>
+                    <tr><td><code>/api/compliance/retention/storage</code></td><td>GET</td><td>存储估算</td></tr>
+                </tbody>
+            </table>
+
+            <p><strong>建议前端页面</strong>:</p>
+
+            <h4>2.2.1 合规报告页面</h4>
+            <ul>
+                <li><strong>路由</strong>: <code>/manage/compliance/reports</code></li>
+                <li><strong>功能</strong>: 报告类型选择、日期范围、生成/下载报告</li>
+            </ul>
+
+            <h4>2.2.2 数据保留页面</h4>
+            <ul>
+                <li><strong>路由</strong>: <code>/manage/compliance/retention</code></li>
+                <li><strong>功能</strong>: 保留规则管理、清理执行、存储估算</li>
+            </ul>
+
+            <h4>2.2.3 审计分析页面</h4>
+            <ul>
+                <li><strong>路由</strong>: <code>/manage/compliance/audit</code></li>
+                <li><strong>功能</strong>: 模式分析、异常检测、用户画像、安全评分</li>
+            </ul>
+
+            <hr>
+
+            <h2 id="23-roi-投资回报分析---p2">2.3 ROI (投资回报分析) - P2</h2>
+
+            <p><strong>后端 API 端点</strong>:</p>
+
+            <table>
+                <thead>
+                    <tr><th>端点</th><th>方法</th><th>功能</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>/api/roi</code></td><td>GET</td><td>获取 ROI 指标</td></tr>
+                    <tr><td><code>/api/roi/trend</code></td><td>GET</td><td>ROI 趋势</td></tr>
+                    <tr><td><code>/api/roi/by-tool</code></td><td>GET</td><td>按工具 ROI</td></tr>
+                    <tr><td><code>/api/roi/by-user</code></td><td>GET</td><td>按用户 ROI</td></tr>
+                    <tr><td><code>/api/roi/cost-breakdown</code></td><td>GET</td><td>成本分解</td></tr>
+                    <tr><td><code>/api/optimization/suggestions</code></td><td>GET</td><td>成本优化建议</td></tr>
+                    <tr><td><code>/api/optimization/efficiency</code></td><td>GET</td><td>效率报告</td></tr>
+                </tbody>
+            </table>
+
+            <p><strong>建议前端页面</strong>:</p>
+            <ul>
+                <li><strong>页面名称</strong>: ROIAnalysis (ROI 分析)</li>
+                <li><strong>路由</strong>: <code>/manage/analysis/roi</code></li>
+                <li><strong>所属分组</strong>: 分析</li>
+            </ul>
+
+            <p><strong>页面元素</strong>:</p>
+            <table>
+                <thead>
+                    <tr><th>区域</th><th>元素</th><th>类型</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td><strong>指标卡片</strong></td><td>总 ROI / 总成本 / 节省成本 / 效率提升</td><td>StatCard</td></tr>
+                    <tr><td><strong>图表</strong></td><td>ROI 趋势 / 成本分解 / 按工具对比</td><td>Charts</td></tr>
+                    <tr><td><strong>表格</strong></td><td>优化建议 / 用户 ROI 排名</td><td>Table</td></tr>
+                </tbody>
+            </table>
+
+            <hr>
+
+            <h2 id="24-tenant-多租户管理---p2">2.4 Tenant (多租户管理) - P2</h2>
+
+            <p><strong>后端 API 端点</strong>:</p>
+
+            <table>
+                <thead>
+                    <tr><th>端点</th><th>方法</th><th>功能</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>/api/tenants</code></td><td>GET/POST</td><td>租户列表 / 创建租户</td></tr>
+                    <tr><td><code>/api/tenants/&lt;id&gt;</code></td><td>GET/PUT/DELETE</td><td>租户 CRUD</td></tr>
+                    <tr><td><code>/api/tenants/&lt;id&gt;/quota</code></td><td>PUT</td><td>更新配额</td></tr>
+                    <tr><td><code>/api/tenants/&lt;id&gt;/suspend</code></td><td>POST</td><td>暂停租户</td></tr>
+                    <tr><td><code>/api/tenants/&lt;id&gt;/activate</code></td><td>POST</td><td>激活租户</td></tr>
+                    <tr><td><code>/api/tenants/&lt;id&gt;/usage</code></td><td>GET</td><td>使用历史</td></tr>
+                    <tr><td><code>/api/tenants/plans</code></td><td>GET</td><td>套餐配额</td></tr>
+                </tbody>
+            </table>
+
+            <p><strong>建议前端页面</strong>:</p>
+            <ul>
+                <li><strong>页面名称</strong>: TenantManagement (租户管理)</li>
+                <li><strong>路由</strong>: <code>/manage/tenants</code></li>
+                <li><strong>所属分组</strong>: 用户</li>
+            </ul>
+
+            <hr>
+
+            <h2 id="25-sso-单点登录管理---p3">2.5 SSO (单点登录管理) - P3</h2>
+
+            <p><strong>后端 API 端点</strong>:</p>
+
+            <table>
+                <thead>
+                    <tr><th>端点</th><th>方法</th><th>功能</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>/api/sso/providers</code></td><td>GET/POST</td><td>SSO 提供者列表 / 注册</td></tr>
+                    <tr><td><code>/api/sso/providers/&lt;name&gt;</code></td><td>DELETE</td><td>禁用提供者</td></tr>
+                    <tr><td><code>/api/sso/session</code></td><td>GET/DELETE</td><td>会话管理</td></tr>
+                    <tr><td><code>/api/sso/identities/&lt;user_id&gt;</code></td><td>GET</td><td>用户身份</td></tr>
+                </tbody>
+            </table>
+
+            <p><strong>建议前端页面</strong>:</p>
+            <ul>
+                <li><strong>页面名称</strong>: SSOSettings (SSO 设置)</li>
+                <li><strong>路由</strong>: <code>/manage/settings/sso</code></li>
+                <li><strong>所属分组</strong>: 设置</li>
+            </ul>
+
+            <hr>
+
+            <h2 id="26-analytics-分析报告---p2">2.6 Analytics (分析报告) - P2</h2>
+
+            <p><strong>建议</strong>: 整合到现有的 <code>TrendAnalysis</code> 页面中：</p>
+            <ul>
+                <li>添加"预测"Tab 显示使用预测</li>
+                <li>添加"效率分析"卡片</li>
+                <li>添加"导出"按钮支持 CSV 导出</li>
+            </ul>
+
+            <hr>
+
+            <h1 id="三建议的导航结构调整">三、建议的导航结构调整</h1>
+
+            <pre><code class="language-tsx">const navSections: NavSection[] = [
+  {
+    id: 'overview',
+    title: '概览',
+    items: [
+      { id: 'dashboard', label: '仪表盘', icon: 'bi-speedometer2', path: '/manage/dashboard' }
+    ],
+  },
+  {
+    id: 'analysis',
+    title: '分析',
+    items: [
+      { id: 'trend', label: '趋势分析', icon: 'bi-graph-up', path: '/manage/analysis/trend' },
+      { id: 'anomaly', label: '异常检测', icon: 'bi-exclamation-triangle', path: '/manage/analysis/anomaly' },
+      { id: 'roi', label: 'ROI 分析', icon: 'bi-currency-dollar', path: '/manage/analysis/roi' },  // 新增
+      { id: 'conversation-history', label: '会话历史', icon: 'bi-chat-history', path: '/manage/analysis/conversation-history' },
+      { id: 'messages', label: '消息查询', icon: 'bi-chat-dots', path: '/manage/messages' },
+    ],
+  },
+  {
+    id: 'governance',
+    title: '治理',
+    items: [
+      { id: 'audit', label: '审计日志', icon: 'bi-journal-text', path: '/manage/audit' },
+      { id: 'audit-analysis', label: '审计分析', icon: 'bi-search', path: '/manage/compliance/audit' },  // 新增
+      { id: 'quota', label: '配额管理', icon: 'bi-sliders', path: '/manage/quota' },
+      { id: 'alerts', label: '告警管理', icon: 'bi-bell', path: '/manage/alerts' },  // 新增
+      { id: 'content-filter', label: '内容过滤', icon: 'bi-shield-check', path: '/manage/governance/content-filter' },
+      { id: 'compliance', label: '合规报告', icon: 'bi-file-earmark-text', path: '/manage/compliance/reports' },  // 新增
+      { id: 'retention', label: '数据保留', icon: 'bi-database', path: '/manage/compliance/retention' },  // 新增
+      { id: 'security', label: '安全设置', icon: 'bi-shield', path: '/manage/security' },
+    ],
+  },
+  {
+    id: 'users',
+    title: '用户',
+    items: [
+      { id: 'users', label: '用户管理', icon: 'bi-people', path: '/manage/users' },
+      { id: 'tenants', label: '租户管理', icon: 'bi-building', path: '/manage/tenants' },  // 新增
+    ],
+  },
+  {
+    id: 'settings',
+    title: '设置',  // 新增分组
+    items: [
+      { id: 'sso', label: 'SSO 设置', icon: 'bi-key', path: '/manage/settings/sso' },
+    ],
+  },
+];</code></pre>
+
+            <hr>
+
+            <h1 id="四实施优先级">四、实施优先级</h1>
+
+            <h2 id="p1---高优先级">P1 - 高优先级（建议优先实现）</h2>
+
+            <table>
+                <thead>
+                    <tr><th>模块</th><th>页面</th><th>路由</th><th>工时估算</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Alerts</td><td>AlertManagement</td><td><code>/manage/alerts</code></td><td>4h</td></tr>
+                    <tr><td>Compliance</td><td>ComplianceReport</td><td><code>/manage/compliance/reports</code></td><td>4h</td></tr>
+                    <tr><td>Compliance</td><td>DataRetention</td><td><code>/manage/compliance/retention</code></td><td>4h</td></tr>
+                    <tr><td>Compliance</td><td>AuditAnalysis</td><td><code>/manage/compliance/audit</code></td><td>4h</td></tr>
+                </tbody>
+            </table>
+
+            <h2 id="p2---中优先级">P2 - 中优先级</h2>
+
+            <table>
+                <thead>
+                    <tr><th>模块</th><th>页面</th><th>路由</th><th>工时估算</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>ROI</td><td>ROIAnalysis</td><td><code>/manage/analysis/roi</code></td><td>6h</td></tr>
+                    <tr><td>Tenant</td><td>TenantManagement</td><td><code>/manage/tenants</code></td><td>6h</td></tr>
+                    <tr><td>Analytics</td><td>整合到 TrendAnalysis</td><td>-</td><td>2h</td></tr>
+                </tbody>
+            </table>
+
+            <h2 id="p3---低优先级">P3 - 低优先级</h2>
+
+            <table>
+                <thead>
+                    <tr><th>模块</th><th>页面</th><th>路由</th><th>工时估算</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>SSO</td><td>SSOSettings</td><td><code>/manage/settings/sso</code></td><td>4h</td></tr>
+                </tbody>
+            </table>
+
+            <hr>
+
+            <h1 id="五总结">五、总结</h1>
+
+            <h2 id="缺失页面统计">缺失页面统计</h2>
+
+            <table>
+                <thead>
+                    <tr><th>优先级</th><th>模块数</th><th>页面数</th><th>总工时</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td><span class="badge badge-p1">P1</span></td><td>2</td><td>4</td><td>16h</td></tr>
+                    <tr><td><span class="badge badge-p2">P2</span></td><td>3</td><td>3</td><td>14h</td></tr>
+                    <tr><td><span class="badge badge-p3">P3</span></td><td>1</td><td>1</td><td>4h</td></tr>
+                    <tr><td><strong>合计</strong></td><td><strong>6</strong></td><td><strong>8</strong></td><td><strong>34h</strong></td></tr>
+                </tbody>
+            </table>
+
+            <h2 id="建议实施顺序">建议实施顺序</h2>
+
+            <ol>
+                <li><strong>第一阶段 (P1)</strong>: Alerts + Compliance 模块（约 2 天）</li>
+                <li><strong>第二阶段 (P2)</strong>: ROI + Tenant 模块（约 2 天）</li>
+                <li><strong>第三阶段 (P3)</strong>: SSO 设置（约 0.5 天）</li>
+            </ol>
+
+        </div>
+        <div class="footer">
+            <p>文档维护: Open ACE 开发团队<br>最后更新: 2026-03-23</p>
+        </div>
+    </div>
+</body>
+</html>

@@ -2,14 +2,13 @@
  * Messages Component - Messages list with filters
  */
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { cn } from '@/utils';
 import { useMessages, useMessageCount, useHosts, useSenders } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
 import {
   Card,
-  Button,
   Select,
   SearchableSelect,
   Loading,
@@ -33,7 +32,6 @@ export const Messages: React.FC = () => {
     role: ['user'],
   }));
   const [page, setPage] = useState(1);
-  const [autoRefresh, setAutoRefresh] = useState<boolean>(true);
 
   // Get hosts for filter
   const { data: hostsData } = useHosts();
@@ -46,7 +44,7 @@ export const Messages: React.FC = () => {
   // Only fetch messages when at least one role is selected
   const hasRoleFilter = selectedRoles.length > 0;
 
-  const { data, isLoading, isFetching, isError, error, refetch } = useMessages({
+  const { data, isLoading, isError, error, refetch } = useMessages({
     filters,
     pageSize: ITEMS_PER_PAGE,
     page,
@@ -57,17 +55,6 @@ export const Messages: React.FC = () => {
 
   const messages = data?.data ?? [];
   const pagination = data?.pagination;
-
-  // Auto-refresh effect
-  useEffect(() => {
-    if (autoRefresh) {
-      const interval = setInterval(() => {
-        refetch();
-      }, 30000); // 30 seconds
-      return () => clearInterval(interval);
-    }
-    return undefined;
-  }, [autoRefresh, refetch]);
 
   // Tool options
   const toolOptions = useMemo(
@@ -120,30 +107,6 @@ export const Messages: React.FC = () => {
       {/* Header */}
       <div className="messages-header d-flex justify-content-between align-items-center mb-4">
         <h2>{t('messages', language)}</h2>
-        <div className="page-header-controls">
-          {/* Auto-refresh toggle */}
-          <div className="form-check form-switch">
-            <input
-              className="form-check-input"
-              type="checkbox"
-              id="messagesAutoRefreshSwitch"
-              checked={autoRefresh}
-              onChange={(e) => setAutoRefresh(e.target.checked)}
-            />
-            <label className="form-check-label" htmlFor="messagesAutoRefreshSwitch">
-              {t('autoRefresh', language)}
-            </label>
-          </div>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => refetch()}
-            loading={isFetching}
-            icon={isFetching ? undefined : <i className="bi bi-arrow-clockwise" />}
-          >
-            {t('refresh', language)}
-          </Button>
-        </div>
       </div>
 
       {/* Filters - Two row layout */}

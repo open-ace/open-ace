@@ -7,6 +7,8 @@ API routes for data fetching operations.
 
 import logging
 import os
+import subprocess
+import threading
 from datetime import datetime
 
 from flask import Blueprint, jsonify
@@ -20,6 +22,146 @@ fetch_bp = Blueprint('fetch', __name__)
 usage_service = UsageService()
 message_service = MessageService()
 logger = logging.getLogger(__name__)
+
+# Global state for fetch status
+_fetch_status = {
+    'is_running': False,
+    'last_run': None,
+    'last_result': None,
+    'error': None
+}
+_fetch_lock = threading.Lock()
+
+
+def run_fetch_scripts():
+    """Run data fetch scripts in background."""
+    global _fetch_status
+
+    with _fetch_lock:
+        if _fetch_status['is_running']:
+            return
+        _fetch_status['is_running'] = True
+        _fetch_status['error'] = None
+
+    try:
+        # Get project root directory
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+        results = {}
+
+        # Run fetch_qwen.py
+        qwen_script = os.path.join(project_root, 'scripts', 'fetch_qwen.py')
+        if os.path.exists(qwen_script):
+            try:
+                result = subprocess.run(
+                    ['python3', qwen_script, '--days', '1'],
+                    capture_output=True,
+                    text=True,
+                    timeout=300,  # 5 minutes timeout
+                    cwd=project_root
+                )
+                results['qwen'] = {
+                    'success': result.returncode == 0,
+                    'output': result.stdout[-1000:] if result.stdout else '',
+                    'error': result.stderr[-500:] if result.stderr else None
+                }
+            except subprocess.TimeoutExpired:
+                results['qwen'] = {'success': False, 'error': 'Timeout after 5 minutes'}
+            except Exception as e:
+                results['qwen'] = {'success': False, 'error': str(e)}
+
+        # Run fetch_claude.py if exists
+        claude_script = os.path.join(project_root, 'scripts', 'fetch_claude.py')
+        if os.path.exists(claude_script):
+            try:
+                result = subprocess.run(
+                    ['python3', claude_script, '--days', '1'],
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                    cwd=project_root
+                )
+                results['claude'] = {
+                    'success': result.returncode == 0,
+                    'output': result.stdout[-1000:] if result.stdout else '',
+                    'error': result.stderr[-500:] if result.stderr else None
+                }
+            except subprocess.TimeoutExpired:
+                results['claude'] = {'success': False, 'error': 'Timeout after 5 minutes'}
+            except Exception as e:
+                results['claude'] = {'success': False, 'error': str(e)}
+
+        # Run fetch_openclaw.py if exists
+        openclaw_script = os.path.join(project_root, 'scripts', 'fetch_openclaw.py')
+        if os.path.exists(openclaw_script):
+            try:
+                result = subprocess.run(
+                    ['python3', openclaw_script, '--days', '1', '--mode', 'messages'],
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                    cwd=project_root
+                )
+                results['openclaw'] = {
+                    'success': result.returncode == 0,
+                    'output': result.stdout[-1000:] if result.stdout else '',
+                    'error': result.stderr[-500:] if result.stderr else None
+                }
+            except subprocess.TimeoutExpired:
+                results['openclaw'] = {'success': False, 'error': 'Timeout after 5 minutes'}
+            except Exception as e:
+                results['openclaw'] = {'success': False, 'error': str(e)}
+
+        with _fetch_lock:
+            _fetch_status['last_run'] = datetime.now().isoformat()
+            _fetch_status['last_result'] = results
+            _fetch_status['is_running'] = False
+
+        logger.info(f"Data fetch completed: {results}")
+
+    except Exception as e:
+        logger.exception("Error running fetch scripts")
+        with _fetch_lock:
+            _fetch_status['error'] = str(e)
+            _fetch_status['is_running'] = False
+
+
+@fetch_bp.route('/fetch/data', methods=['POST'])
+def api_fetch_data():
+    """Trigger data collection from all sources."""
+    global _fetch_status
+
+    with _fetch_lock:
+        if _fetch_status['is_running']:
+            return jsonify({
+                'success': False,
+                'message': 'Data fetch is already running',
+                'status': _fetch_status
+            })
+
+    # Start fetch in background thread
+    thread = threading.Thread(target=run_fetch_scripts)
+    thread.daemon = True
+    thread.start()
+
+    return jsonify({
+        'success': True,
+        'message': 'Data fetch started in background',
+        'status': {
+            'is_running': True,
+            'last_run': _fetch_status['last_run']
+        }
+    })
+
+
+@fetch_bp.route('/fetch/status')
+def api_fetch_status():
+    """Get data fetch status."""
+    with _fetch_lock:
+        return jsonify({
+            'success': True,
+            'status': _fetch_status.copy()
+        })
 
 
 @fetch_bp.route('/fetch')

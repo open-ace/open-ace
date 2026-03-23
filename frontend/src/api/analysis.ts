@@ -44,7 +44,7 @@ export interface ConversationStats {
   total_conversations: number;
   avg_conversation_length: number;
   avg_tokens_per_conversation: number;
-  conversation_distribution: Array<{ length: number; count: number }>;
+  conversation_distribution?: Array<{ length: number; count: number }>;
 }
 
 export interface ToolComparison {
@@ -70,8 +70,35 @@ export interface UserSegmentation {
   dormant: number;   // No activity
 }
 
+// Batch response type
+export interface BatchAnalysisResponse {
+  key_metrics: KeyMetrics;
+  daily_hourly_usage: DailyHourlyUsage;
+  peak_usage: PeakUsage;
+  user_ranking: UserRanking;
+  conversation_stats: ConversationStats;
+  tool_comparison: ToolComparison;
+  user_segmentation: UserSegmentation;
+}
+
 // API
 export const analysisApi = {
+  /**
+   * Get all analysis data in a single request (optimized)
+   */
+  async getBatchAnalysis(
+    startDate?: string,
+    endDate?: string,
+    host?: string
+  ): Promise<BatchAnalysisResponse> {
+    const params: Record<string, string> = {};
+    if (startDate) params.start = startDate;
+    if (endDate) params.end = endDate;
+    if (host) params.host = host;
+
+    return apiClient.get<BatchAnalysisResponse>('/api/analysis/batch', params);
+  },
+
   async getKeyMetrics(startDate?: string, endDate?: string, host?: string): Promise<KeyMetrics> {
     const params: Record<string, string> = {};
     if (startDate) params.start = startDate;

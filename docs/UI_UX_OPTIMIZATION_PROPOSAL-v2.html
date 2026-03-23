@@ -1,0 +1,1643 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Open ACE 企业级AI工作平台 UI/UX 优化方案 v2</title>
+    <style>
+        :root {
+            --primary-color: #667eea;
+            --secondary-color: #764ba2;
+            --accent-color: #f093fb;
+            --bg-color: #f8f9fa;
+            --card-bg: #ffffff;
+            --text-color: #333;
+            --text-muted: #6c757d;
+            --border-color: #dee2e6;
+            --code-bg: #f4f4f4;
+            --success-color: #28a745;
+            --warning-color: #ffc107;
+            --danger-color: #dc3545;
+            --info-color: #17a2b8;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.8;
+            color: var(--text-color);
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: var(--card-bg);
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+
+        .header h1 {
+            margin: 0 0 10px 0;
+            font-size: 2.2em;
+            border: none;
+            padding: 0;
+        }
+
+        .header .meta {
+            font-size: 0.9em;
+            opacity: 0.9;
+            margin-top: 15px;
+        }
+
+        .header .meta p {
+            margin: 5px 0;
+        }
+
+        .content {
+            padding: 40px;
+        }
+
+        h1 {
+            color: var(--primary-color);
+            border-bottom: 3px solid var(--primary-color);
+            padding-bottom: 10px;
+            margin-top: 40px;
+            font-size: 1.8em;
+        }
+
+        h2 {
+            color: var(--secondary-color);
+            border-left: 4px solid var(--secondary-color);
+            padding-left: 15px;
+            margin-top: 35px;
+            font-size: 1.5em;
+        }
+
+        h3 {
+            color: var(--text-color);
+            margin-top: 25px;
+            font-size: 1.25em;
+        }
+
+        h4 {
+            color: var(--text-muted);
+            margin-top: 20px;
+            font-size: 1.1em;
+        }
+
+        p {
+            margin: 15px 0;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            font-size: 14px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        th {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            color: white;
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+        }
+
+        td {
+            padding: 12px 15px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        tr:nth-child(even) {
+            background-color: #f8f9fa;
+        }
+
+        tr:hover {
+            background-color: #e9ecef;
+        }
+
+        pre {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 20px 0;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        code {
+            background: var(--code-bg);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'SF Mono', Monaco, Consolas, 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+
+        pre code {
+            background: none;
+            padding: 0;
+            color: inherit;
+        }
+
+        /* 语法高亮 */
+        .keyword { color: #f92672; }
+        .string { color: #e6db74; }
+        .comment { color: #75715e; }
+        .function { color: #66d9ef; }
+        .number { color: #ae81ff; }
+        .operator { color: #f92672; }
+        .variable { color: #fd971f; }
+        .type { color: #a6e22e; }
+
+        blockquote {
+            border-left: 4px solid var(--primary-color);
+            margin: 20px 0;
+            padding: 15px 20px;
+            background: #f0f4ff;
+            border-radius: 0 8px 8px 0;
+            color: var(--text-muted);
+        }
+
+        hr {
+            border: none;
+            height: 2px;
+            background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));
+            margin: 40px 0;
+        }
+
+        ul, ol {
+            padding-left: 25px;
+            margin: 15px 0;
+        }
+
+        li {
+            margin: 8px 0;
+        }
+
+        strong {
+            color: var(--primary-color);
+        }
+
+        a {
+            color: var(--primary-color);
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        /* 状态徽章 */
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            margin: 2px;
+            white-space: nowrap;
+        }
+
+        .badge-success { 
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%); 
+            color: white; 
+        }
+        .badge-warning { 
+            background: linear-gradient(135deg, #ffc107 0%, #fd7e14 100%); 
+            color: #333; 
+        }
+        .badge-danger { 
+            background: linear-gradient(135deg, #dc3545 0%, #e83e8c 100%); 
+            color: white; 
+        }
+        .badge-info { 
+            background: linear-gradient(135deg, #17a2b8 0%, #6f42c1 100%); 
+            color: white; 
+        }
+        .badge-new { 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+            color: white; 
+        }
+        .badge-p1 { 
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%); 
+            color: white; 
+        }
+        .badge-p2 { 
+            background: linear-gradient(135deg, #ffc107 0%, #e0a800 100%); 
+            color: #333; 
+        }
+        .badge-p3 { 
+            background: linear-gradient(135deg, #17a2b8 0%, #117a8b 100%); 
+            color: white; 
+        }
+        .badge-implemented { 
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%); 
+            color: white; 
+        }
+        .badge-pending { 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+            color: white; 
+        }
+
+        /* 目录 */
+        .toc {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            padding: 25px 30px;
+            border-radius: 12px;
+            margin-bottom: 30px;
+            border-left: 4px solid var(--primary-color);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        }
+
+        .toc h2 {
+            margin-top: 0;
+            border: none;
+            padding: 0;
+            color: var(--primary-color);
+            font-size: 1.3em;
+        }
+
+        .toc ol {
+            margin: 10px 0;
+            column-count: 2;
+            column-gap: 40px;
+        }
+
+        .toc li {
+            margin: 8px 0;
+            break-inside: avoid;
+        }
+
+        .toc a {
+            color: var(--text-color);
+            font-weight: 500;
+        }
+
+        .toc a:hover {
+            color: var(--primary-color);
+        }
+
+        /* 页脚 */
+        .footer {
+            text-align: center;
+            padding: 20px;
+            color: var(--text-muted);
+            font-size: 14px;
+            border-top: 1px solid var(--border-color);
+            background: #f8f9fa;
+        }
+
+        /* 摘要卡片 */
+        .summary-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 12px;
+            padding: 25px;
+            margin: 20px 0;
+            text-align: center;
+        }
+
+        .summary-card h3 {
+            color: white;
+            margin-top: 0;
+        }
+
+        .summary-stats {
+            display: flex;
+            justify-content: space-around;
+            flex-wrap: wrap;
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .summary-stat {
+            text-align: center;
+        }
+
+        .summary-stat .number {
+            font-size: 2.5em;
+            font-weight: bold;
+        }
+
+        .summary-stat .label {
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+
+        /* 布局图 */
+        .layout-diagram {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+            border-radius: 8px;
+            font-family: 'SF Mono', Monaco, Consolas, 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.4;
+            overflow-x: auto;
+            margin: 20px 0;
+            white-space: pre;
+        }
+
+        /* 流程图 */
+        .flow-diagram {
+            background: #f8f9fa;
+            padding: 15px 20px;
+            border-radius: 8px;
+            font-family: 'SF Mono', Monaco, Consolas, 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            margin: 20px 0;
+            border: 1px solid var(--border-color);
+            white-space: pre;
+        }
+
+        /* 区块标题 */
+        .section-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .section-header .icon {
+            font-size: 1.5em;
+        }
+
+        /* 导航结构 */
+        .nav-structure {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+
+        /* 响应式 */
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+            .content {
+                padding: 20px;
+            }
+            .header {
+                padding: 20px;
+            }
+            table {
+                font-size: 12px;
+            }
+            th, td {
+                padding: 8px 10px;
+            }
+            .summary-stats {
+                flex-direction: column;
+            }
+            .toc ol {
+                column-count: 1;
+            }
+        }
+
+        /* 打印样式 */
+        @media print {
+            body {
+                background: white;
+                padding: 0;
+            }
+            .container {
+                box-shadow: none;
+            }
+            .header {
+                background: #333;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Open ACE 企业级AI工作平台 UI/UX 优化方案 v2</h1>
+            <div class="meta">
+                <p><strong>文档版本:</strong> 2.0</p>
+                <p><strong>创建日期:</strong> 2026-03-23</p>
+                <p><strong>目标:</strong> 打造"方便用、方便管"的企业级AI工作平台</p>
+                <p><strong>更新说明:</strong> 根据 6.2.1 工作模式布局和 6.2.2 管理模式布局，详细设计各页面功能、元素和布局</p>
+            </div>
+        </div>
+        <div class="content">
+            <div class="toc">
+                <h2>目录</h2>
+                <ol>
+                    <li><a href="#一方案概述">方案概述</a></li>
+                    <li><a href="#二工作模式页面设计">工作模式页面设计</a></li>
+                    <li><a href="#三管理模式页面设计">管理模式页面设计</a></li>
+                    <li><a href="#四实施计划">实施计划</a></li>
+                    <li><a href="#五附录">附录</a></li>
+                </ol>
+            </div>
+
+            <hr>
+
+            <h1 id="一方案概述">一、方案概述</h1>
+
+            <h2 id="11-设计理念">1.1 设计理念</h2>
+
+            <p><strong>核心理念</strong>: "用"与"管"分离，双入口设计</p>
+
+            <div class="flow-diagram">
+用户进入平台:
+├── 🚀 工作模式 (用)
+│   └── 专注AI对话和任务完成
+└── 📊 管理模式 (管)
+    └── 专注监控、分析、治理
+            </div>
+
+            <h2 id="12-现有代码分析">1.2 现有代码分析</h2>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>模块</th>
+                        <th>现有文件</th>
+                        <th>状态</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>前端布局</strong></td>
+                        <td><code>frontend/src/components/layout/WorkLayout.tsx</code></td>
+                        <td><span class="badge badge-implemented">✅ 已实现基础结构</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>前端布局</strong></td>
+                        <td><code>frontend/src/components/layout/ManageLayout.tsx</code></td>
+                        <td><span class="badge badge-implemented">✅ 已实现基础结构</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>前端页面</strong></td>
+                        <td><code>frontend/src/components/features/*.tsx</code></td>
+                        <td><span class="badge badge-implemented">✅ 已实现基础功能</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>后端路由</strong></td>
+                        <td><code>app/routes/*.py</code></td>
+                        <td><span class="badge badge-implemented">✅ 已实现 API</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>数据服务</strong></td>
+                        <td><code>app/services/*.py</code></td>
+                        <td><span class="badge badge-implemented">✅ 已实现业务逻辑</span></td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h2 id="13-需要完善的内容">1.3 需要完善的内容</h2>
+
+            <ol>
+                <li><strong>工作模式</strong>: 需要完善三栏布局的具体功能实现</li>
+                <li><strong>管理模式</strong>: 需要按照导航菜单设计各子页面</li>
+                <li><strong>页面细节</strong>: 需要详细设计每个页面的图表、元素、交互</li>
+            </ol>
+
+            <hr>
+
+            <h1 id="二工作模式页面设计">二、工作模式页面设计</h1>
+
+            <h2 id="21-工作模式布局结构">2.1 工作模式布局结构</h2>
+
+            <div class="layout-diagram">
+┌─────────────────────────────────────────────────────────────┐
+│  Header: Logo | 模式切换 | 搜索 | 通知 | 用户                │
+├───────────┬─────────────────────────────────┬───────────────┤
+│           │                                 │               │
+│  左侧面板  │         主内容区域               │   右侧面板    │
+│  (可折叠)  │                                 │   (可折叠)    │
+│           │                                 │               │
+│  ┌─────┐  │   ┌─────────────────────┐      │   ┌─────┐    │
+│  │导航 │  │   │                     │      │   │提示词│    │
+│  ├─────┤  │   │    AI 对话区域       │      │   ├─────┤    │
+│  │会话 │  │   │                     │      │   │工具  │    │
+│  │列表 │  │   └─────────────────────┘      │   ├─────┤    │
+│  └─────┘  │                                 │   │文档  │    │
+│           │                                 │   └─────┘    │
+├───────────┴─────────────────────────────────┴───────────────┤
+│  Status Bar: 模型 | Token用量 | 延迟                          │
+└─────────────────────────────────────────────────────────────┘
+            </div>
+
+            <h2 id="22-左侧面板设计">2.2 左侧面板设计</h2>
+
+            <h3 id="221-导航菜单">2.2.1 导航菜单</h3>
+
+            <p><strong>现有代码</strong>: <code>frontend/src/components/layout/WorkLayout.tsx</code></p>
+
+            <pre><code><span class="comment">// 现有导航项</span>
+<span class="keyword">const</span> workNavItems: NavItem[] = [
+  { <span class="variable">id</span>: <span class="string">'workspace'</span>, <span class="variable">label</span>: <span class="string">'workspace'</span>, <span class="variable">icon</span>: <span class="string">'bi-grid'</span>, <span class="variable">path</span>: <span class="string">'/work'</span> },
+  { <span class="variable">id</span>: <span class="string">'sessions'</span>, <span class="variable">label</span>: <span class="string">'sessions'</span>, <span class="variable">icon</span>: <span class="string">'bi-collection'</span>, <span class="variable">path</span>: <span class="string">'/work/sessions'</span> },
+  { <span class="variable">id</span>: <span class="string">'prompts'</span>, <span class="variable">label</span>: <span class="string">'prompts'</span>, <span class="variable">icon</span>: <span class="string">'bi-file-text'</span>, <span class="variable">path</span>: <span class="string">'/work/prompts'</span> },
+];</code></pre>
+
+            <p><strong>需要改动</strong>: 无，现有导航已满足需求</p>
+
+            <h3 id="222-会话列表">2.2.2 会话列表</h3>
+
+            <p><strong>功能描述</strong>:</p>
+            <ul>
+                <li>显示用户的 AI 会话历史</li>
+                <li>支持按日期分组（今日、昨日、本周、更早）</li>
+                <li>支持搜索和筛选</li>
+                <li>点击会话可在主区域打开对话</li>
+            </ul>
+
+            <p><strong>页面元素</strong>:</p>
+
+            <table>
+                <thead>
+                    <tr><th>元素</th><th>类型</th><th>说明</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>搜索框</td><td>Input</td><td>搜索会话标题</td></tr>
+                    <tr><td>日期分组</td><td>Group</td><td>今日/昨日/本周/更早</td></tr>
+                    <tr><td>会话卡片</td><td>Card</td><td>标题、工具图标、时间、消息数</td></tr>
+                    <tr><td>新建按钮</td><td>Button</td><td>创建新会话</td></tr>
+                </tbody>
+            </table>
+
+            <p><strong>数据来源</strong>:</p>
+            <ul>
+                <li>现有 API: <code>GET /api/sessions</code></li>
+                <li>现有服务: <code>app/services/message_service.py</code></li>
+            </ul>
+
+            <p><strong>需要改动</strong>:</p>
+            <ol>
+                <li>前端: 在 <code>WorkLayout.tsx</code> 中实现会话列表组件</li>
+                <li>后端: 无需改动，现有 API 已支持</li>
+            </ol>
+
+            <p><strong>代码位置</strong>:</p>
+            <ul>
+                <li>新增组件: <code>frontend/src/components/work/SessionList.tsx</code></li>
+                <li>修改文件: <code>frontend/src/components/layout/WorkLayout.tsx</code></li>
+            </ul>
+
+            <h2 id="23-主内容区域设计">2.3 主内容区域设计</h2>
+
+            <h3 id="231-workspace-页面">2.3.1 Workspace 页面（AI对话主界面）</h3>
+
+            <p><strong>现有代码</strong>: <code>frontend/src/components/features/Workspace.tsx</code></p>
+
+            <p><strong>功能描述</strong>:</p>
+            <ul>
+                <li>iframe 嵌入外部 AI 工具界面</li>
+                <li>支持配置的 AI 工具 URL</li>
+            </ul>
+
+            <p><strong>页面元素</strong>:</p>
+
+            <table>
+                <thead>
+                    <tr><th>元素</th><th>类型</th><th>说明</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>iframe</td><td>iframe</td><td>嵌入 AI 工具界面</td></tr>
+                    <tr><td>加载状态</td><td>Loading</td><td>加载中显示</td></tr>
+                    <tr><td>错误提示</td><td>Error</td><td>配置错误时显示</td></tr>
+                </tbody>
+            </table>
+
+            <p><strong>数据来源</strong>:</p>
+            <ul>
+                <li>现有 API: <code>GET /api/workspace/config</code></li>
+                <li>现有服务: <code>app/services/workspace_service.py</code></li>
+            </ul>
+
+            <p><strong>需要改动</strong>: 无，现有实现已满足需求</p>
+
+            <h3 id="232-sessions-页面">2.3.2 Sessions 页面（会话管理）</h3>
+
+            <p><strong>现有代码</strong>: <code>frontend/src/components/features/Sessions.tsx</code></p>
+
+            <p><strong>功能描述</strong>:</p>
+            <ul>
+                <li>显示所有 Agent 会话列表</li>
+                <li>支持按工具、状态、类型筛选</li>
+                <li>支持查看会话详情和消息</li>
+                <li>支持删除和完成会话</li>
+            </ul>
+
+            <p><strong>页面元素</strong>:</p>
+
+            <table>
+                <thead>
+                    <tr><th>元素</th><th>类型</th><th>说明</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>统计卡片</td><td>Card x4</td><td>总会话/活跃会话/消息/Token</td></tr>
+                    <tr><td>筛选器</td><td>Filter</td><td>工具/状态/类型/搜索</td></tr>
+                    <tr><td>会话卡片</td><td>Card</td><td>标题、状态、类型、工具、消息数、Token</td></tr>
+                    <tr><td>消息展开</td><td>Collapse</td><td>展开查看会话消息</td></tr>
+                    <tr><td>分页</td><td>Pagination</td><td>分页导航</td></tr>
+                </tbody>
+            </table>
+
+            <p><strong>数据来源</strong>:</p>
+            <ul>
+                <li>现有 API: <code>GET /api/sessions</code>, <code>GET /api/sessions/stats</code></li>
+                <li>现有服务: <code>app/services/message_service.py</code></li>
+            </ul>
+
+            <p><strong>需要改动</strong>: 无，现有实现已满足需求</p>
+
+            <h3 id="233-prompts-页面">2.3.3 Prompts 页面（提示词库）</h3>
+
+            <p><strong>现有代码</strong>: <code>frontend/src/components/features/Prompts.tsx</code></p>
+
+            <p><strong>功能描述</strong>:</p>
+            <ul>
+                <li>显示提示词模板列表</li>
+                <li>支持按分类筛选和搜索</li>
+                <li>支持创建、编辑、删除提示词</li>
+                <li>支持变量渲染和复制</li>
+            </ul>
+
+            <p><strong>页面元素</strong>:</p>
+
+            <table>
+                <thead>
+                    <tr><th>元素</th><th>类型</th><th>说明</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>筛选器</td><td>Filter</td><td>分类/搜索</td></tr>
+                    <tr><td>提示词卡片</td><td>Card x N</td><td>名称、分类、标签、描述、使用次数</td></tr>
+                    <tr><td>创建按钮</td><td>Button</td><td>打开创建模态框</td></tr>
+                    <tr><td>编辑模态框</td><td>Modal</td><td>名称、描述、分类、内容、标签、变量</td></tr>
+                    <tr><td>渲染模态框</td><td>Modal</td><td>变量输入、结果预览、复制</td></tr>
+                    <tr><td>分页</td><td>Pagination</td><td>分页导航</td></tr>
+                </tbody>
+            </table>
+
+            <p><strong>数据来源</strong>:</p>
+            <ul>
+                <li>现有 API: <code>GET /api/prompts</code>, <code>POST /api/prompts</code>, <code>PUT /api/prompts/:id</code>, <code>DELETE /api/prompts/:id</code></li>
+                <li>现有服务: <code>app/modules/prompts/</code></li>
+            </ul>
+
+            <p><strong>需要改动</strong>: 无，现有实现已满足需求</p>
+
+            <h2 id="24-右侧面板设计">2.4 右侧面板设计</h2>
+
+            <h3 id="241-辅助面板结构">2.4.1 辅助面板结构</h3>
+
+            <p><strong>功能描述</strong>:</p>
+            <ul>
+                <li>提供快捷访问提示词、工具、文档</li>
+                <li>支持折叠展开</li>
+            </ul>
+
+            <p><strong>页面元素</strong>:</p>
+
+            <table>
+                <thead>
+                    <tr><th>Tab</th><th>内容</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>提示词</td><td>快捷访问常用提示词，点击可复制</td></tr>
+                    <tr><td>工具</td><td>AI 工具快捷入口</td></tr>
+                    <tr><td>文档</td><td>帮助文档和指南</td></tr>
+                </tbody>
+            </table>
+
+            <p><strong>需要改动</strong>:</p>
+            <ol>
+                <li>前端: 在 <code>WorkLayout.tsx</code> 中实现辅助面板内容</li>
+                <li>后端: 无需改动</li>
+            </ol>
+
+            <p><strong>代码位置</strong>:</p>
+            <ul>
+                <li>新增组件: <code>frontend/src/components/work/AssistPanel.tsx</code></li>
+                <li>修改文件: <code>frontend/src/components/layout/WorkLayout.tsx</code></li>
+            </ul>
+
+            <h2 id="25-状态栏设计">2.5 状态栏设计</h2>
+
+            <p><strong>功能描述</strong>:</p>
+            <ul>
+                <li>显示当前模型信息</li>
+                <li>显示 Token 使用量</li>
+                <li>显示响应延迟</li>
+            </ul>
+
+            <p><strong>页面元素</strong>:</p>
+
+            <table>
+                <thead>
+                    <tr><th>元素</th><th>位置</th><th>说明</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>模型名称</td><td>左侧</td><td>当前使用的 AI 模型</td></tr>
+                    <tr><td>Token 用量</td><td>中间</td><td>已用/总量</td></tr>
+                    <tr><td>延迟</td><td>右侧</td><td>API 响应延迟</td></tr>
+                </tbody>
+            </table>
+
+            <p><strong>需要改动</strong>:</p>
+            <ol>
+                <li>前端: 实现状态栏组件</li>
+                <li>后端: 需要新增 API 获取实时状态</li>
+            </ol>
+
+            <p><strong>代码位置</strong>:</p>
+            <ul>
+                <li>新增组件: <code>frontend/src/components/work/StatusBar.tsx</code></li>
+                <li>新增 API: <code>GET /api/workspace/status</code></li>
+            </ul>
+
+            <hr>
+
+            <h1 id="三管理模式页面设计">三、管理模式页面设计</h1>
+
+            <h2 id="31-管理模式布局结构">3.1 管理模式布局结构</h2>
+
+            <div class="layout-diagram">
+┌─────────────────────────────────────────────────────────────┐
+│  Header: Logo | 模式切换 | 搜索 | 通知 | 用户                │
+├───────────┬─────────────────────────────────────────────────┤
+│           │                                                 │
+│  侧边导航  │              主内容区域                          │
+│  (可折叠)  │                                                 │
+│           │   ┌──────────┐ ┌──────────┐ ┌──────────┐       │
+│  概览     │   │ 卡片1    │ │ 卡片2    │ │ 卡片3    │       │
+│  └仪表盘  │   └──────────┘ └──────────┘ └──────────┘       │
+│  分析     │                                                 │
+│  └趋势    │   ┌──────────────────────────────────────┐     │
+│  └异常    │   │           图表区域                    │     │
+│  └会话历史 │   └──────────────────────────────────────┘     │
+│  └消息查询 │                                                 │
+│  治理     │   ┌─────────────────┐ ┌─────────────────┐      │
+│  └审计    │   │    表格/列表    │ │    详情面板     │      │
+│  └配额    │   └─────────────────┘ └─────────────────┘      │
+│  └内容过滤 │                                                 │
+│  └安全    │                                                 │
+│  用户     │                                                 │
+│  └管理    │                                                 │
+│           │                                                 │
+└───────────┴─────────────────────────────────────────────────┘
+            </div>
+
+            <h2 id="32-侧边导航设计">3.2 侧边导航设计</h2>
+
+            <p><strong>现有代码</strong>: <code>frontend/src/components/layout/ManageLayout.tsx</code></p>
+
+            <pre><code><span class="comment">// 现有导航结构</span>
+<span class="keyword">const</span> navSections: NavSection[] = [
+  {
+    <span class="variable">id</span>: <span class="string">'overview'</span>,
+    <span class="variable">title</span>: <span class="string">'overview'</span>,
+    <span class="variable">items</span>: [{ <span class="variable">id</span>: <span class="string">'dashboard'</span>, <span class="variable">label</span>: <span class="string">'dashboard'</span>, <span class="variable">icon</span>: <span class="string">'bi-speedometer2'</span>, <span class="variable">path</span>: <span class="string">'/manage/dashboard'</span> }],
+  },
+  <span class="comment">// ...</span>
+];</code></pre>
+
+            <p><strong>需要改动</strong>:</p>
+            <ol>
+                <li>添加"异常"菜单项到分析分组</li>
+                <li>调整路由映射</li>
+            </ol>
+
+            <p><strong>修改后导航结构</strong>:</p>
+
+            <pre><code><span class="keyword">const</span> navSections: NavSection[] = [
+  {
+    <span class="variable">id</span>: <span class="string">'overview'</span>,
+    <span class="variable">title</span>: <span class="string">'概览'</span>,
+    <span class="variable">items</span>: [
+      { <span class="variable">id</span>: <span class="string">'dashboard'</span>, <span class="variable">label</span>: <span class="string">'仪表盘'</span>, <span class="variable">icon</span>: <span class="string">'bi-speedometer2'</span>, <span class="variable">path</span>: <span class="string">'/manage/dashboard'</span> }
+    ],
+  },
+  {
+    <span class="variable">id</span>: <span class="string">'analysis'</span>,
+    <span class="variable">title</span>: <span class="string">'分析'</span>,
+    <span class="variable">items</span>: [
+      { <span class="variable">id</span>: <span class="string">'trend'</span>, <span class="variable">label</span>: <span class="string">'趋势分析'</span>, <span class="variable">icon</span>: <span class="string">'bi-graph-up'</span>, <span class="variable">path</span>: <span class="string">'/manage/analysis/trend'</span> },
+      { <span class="variable">id</span>: <span class="string">'anomaly'</span>, <span class="variable">label</span>: <span class="string">'异常检测'</span>, <span class="variable">icon</span>: <span class="string">'bi-exclamation-triangle'</span>, <span class="variable">path</span>: <span class="string">'/manage/analysis/anomaly'</span> },
+      { <span class="variable">id</span>: <span class="string">'roi'</span>, <span class="variable">label</span>: <span class="string">'ROI 分析'</span>, <span class="variable">icon</span>: <span class="string">'bi-currency-dollar'</span>, <span class="variable">path</span>: <span class="string">'/manage/analysis/roi'</span> },
+      { <span class="variable">id</span>: <span class="string">'conversation-history'</span>, <span class="variable">label</span>: <span class="string">'会话历史'</span>, <span class="variable">icon</span>: <span class="string">'bi-chat-history'</span>, <span class="variable">path</span>: <span class="string">'/manage/analysis/conversation-history'</span> },
+      { <span class="variable">id</span>: <span class="string">'messages'</span>, <span class="variable">label</span>: <span class="string">'消息查询'</span>, <span class="variable">icon</span>: <span class="string">'bi-chat-dots'</span>, <span class="variable">path</span>: <span class="string">'/manage/messages'</span> },
+    ],
+  },
+  {
+    <span class="variable">id</span>: <span class="string">'governance'</span>,
+    <span class="variable">title</span>: <span class="string">'治理'</span>,
+    <span class="variable">items</span>: [
+      { <span class="variable">id</span>: <span class="string">'audit'</span>, <span class="variable">label</span>: <span class="string">'审计日志'</span>, <span class="variable">icon</span>: <span class="string">'bi-journal-text'</span>, <span class="variable">path</span>: <span class="string">'/manage/audit'</span> },
+      { <span class="variable">id</span>: <span class="string">'audit-analysis'</span>, <span class="variable">label</span>: <span class="string">'审计分析'</span>, <span class="variable">icon</span>: <span class="string">'bi-search'</span>, <span class="variable">path</span>: <span class="string">'/manage/compliance/audit'</span> },
+      { <span class="variable">id</span>: <span class="string">'quota'</span>, <span class="variable">label</span>: <span class="string">'配额管理'</span>, <span class="variable">icon</span>: <span class="string">'bi-sliders'</span>, <span class="variable">path</span>: <span class="string">'/manage/quota'</span> },
+      { <span class="variable">id</span>: <span class="string">'alerts'</span>, <span class="variable">label</span>: <span class="string">'告警管理'</span>, <span class="variable">icon</span>: <span class="string">'bi-bell'</span>, <span class="variable">path</span>: <span class="string">'/manage/alerts'</span> },
+      { <span class="variable">id</span>: <span class="string">'content-filter'</span>, <span class="variable">label</span>: <span class="string">'内容过滤'</span>, <span class="variable">icon</span>: <span class="string">'bi-shield-check'</span>, <span class="variable">path</span>: <span class="string">'/manage/governance/content-filter'</span> },
+      { <span class="variable">id</span>: <span class="string">'compliance'</span>, <span class="variable">label</span>: <span class="string">'合规报告'</span>, <span class="variable">icon</span>: <span class="string">'bi-file-earmark-text'</span>, <span class="variable">path</span>: <span class="string">'/manage/compliance/reports'</span> },
+      { <span class="variable">id</span>: <span class="string">'retention'</span>, <span class="variable">label</span>: <span class="string">'数据保留'</span>, <span class="variable">icon</span>: <span class="string">'bi-database'</span>, <span class="variable">path</span>: <span class="string">'/manage/compliance/retention'</span> },
+      { <span class="variable">id</span>: <span class="string">'security'</span>, <span class="variable">label</span>: <span class="string">'安全设置'</span>, <span class="variable">icon</span>: <span class="string">'bi-shield'</span>, <span class="variable">path</span>: <span class="string">'/manage/security'</span> },
+    ],
+  },
+  {
+    <span class="variable">id</span>: <span class="string">'users'</span>,
+    <span class="variable">title</span>: <span class="string">'用户'</span>,
+    <span class="variable">items</span>: [
+      { <span class="variable">id</span>: <span class="string">'users'</span>, <span class="variable">label</span>: <span class="string">'用户管理'</span>, <span class="variable">icon</span>: <span class="string">'bi-people'</span>, <span class="variable">path</span>: <span class="string">'/manage/users'</span> },
+      { <span class="variable">id</span>: <span class="string">'tenants'</span>, <span class="variable">label</span>: <span class="string">'租户管理'</span>, <span class="variable">icon</span>: <span class="string">'bi-building'</span>, <span class="variable">path</span>: <span class="string">'/manage/tenants'</span> },
+    ],
+  },
+  {
+    <span class="variable">id</span>: <span class="string">'settings'</span>,
+    <span class="variable">title</span>: <span class="string">'设置'</span>,
+    <span class="variable">items</span>: [
+      { <span class="variable">id</span>: <span class="string">'sso'</span>, <span class="variable">label</span>: <span class="string">'SSO 设置'</span>, <span class="variable">icon</span>: <span class="string">'bi-key'</span>, <span class="variable">path</span>: <span class="string">'/manage/settings/sso'</span> },
+    ],
+  },
+];</code></pre>
+
+            <h2 id="33-概览分组页面设计">3.3 概览分组页面设计</h2>
+
+            <h3 id="331-仪表盘页面">3.3.1 仪表盘页面 (Dashboard)</h3>
+
+            <p><strong>路由</strong>: <code>/manage/dashboard</code><br>
+            <strong>现有代码</strong>: <code>frontend/src/components/features/Dashboard.tsx</code></p>
+
+            <p><strong>功能描述</strong>:</p>
+            <ul>
+                <li>显示系统整体使用概览</li>
+                <li>今日使用统计</li>
+                <li>累计统计</li>
+                <li>趋势图表</li>
+                <li>工具分布</li>
+            </ul>
+
+            <p><strong>页面元素</strong>:</p>
+
+            <table>
+                <thead>
+                    <tr><th>区域</th><th>元素</th><th>类型</th><th>数据来源</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td rowspan="4"><strong>过滤器</strong></td><td>主机选择</td><td>Select</td><td><code>GET /api/hosts</code></td></tr>
+                    <tr><td>工具选择</td><td>Select</td><td>固定选项</td></tr>
+                    <tr><td>自动刷新</td><td>Switch</td><td>-</td></tr>
+                    <tr><td>刷新按钮</td><td>Button</td><td>-</td></tr>
+                    <tr><td rowspan="3"><strong>今日使用</strong></td><td>OpenClaw 卡片</td><td>Card</td><td><code>GET /api/usage/today</code></td></tr>
+                    <tr><td>Claude 卡片</td><td>Card</td><td><code>GET /api/usage/today</code></td></tr>
+                    <tr><td>Qwen 卡片</td><td>Card</td><td><code>GET /api/usage/today</code></td></tr>
+                    <tr><td rowspan="3"><strong>总览</strong></td><td>OpenClaw 累计</td><td>Card</td><td><code>GET /api/summary</code></td></tr>
+                    <tr><td>Claude 累计</td><td>Card</td><td><code>GET /api/summary</code></td></tr>
+                    <tr><td>Qwen 累计</td><td>Card</td><td><code>GET /api/summary</code></td></tr>
+                    <tr><td rowspan="2"><strong>图表</strong></td><td>Token 趋势图</td><td>LineChart</td><td><code>GET /api/usage/trend</code></td></tr>
+                    <tr><td>Token 分布图</td><td>PieChart</td><td>计算得出</td></tr>
+                    <tr><td><strong>表格</strong></td><td>工具详情表</td><td>Table</td><td><code>GET /api/summary</code></td></tr>
+                </tbody>
+            </table>
+
+            <p><strong>数据来源</strong>:</p>
+            <ul>
+                <li>现有 API: <code>app/routes/usage.py</code></li>
+                <li>现有服务: <code>app/services/usage_service.py</code></li>
+            </ul>
+
+            <p><strong>需要改动</strong>: 无，现有实现已满足需求</p>
+
+            <h2 id="34-分析分组页面设计">3.4 分析分组页面设计</h2>
+
+            <h3 id="341-趋势分析页面">3.4.1 趋势分析页面 (Trend Analysis)</h3>
+
+            <p><strong>路由</strong>: <code>/manage/analysis/trend</code><br>
+            <strong>现有代码</strong>: <code>frontend/src/components/features/Analysis.tsx</code> (需拆分)<br>
+            <strong>状态</strong>: <span class="badge badge-implemented">✅ 已实现</span></p>
+
+            <p><strong>功能描述</strong>:</p>
+            <ul>
+                <li>显示 Token 使用趋势</li>
+                <li>支持按日期范围、工具、主机筛选</li>
+                <li>显示关键指标卡片</li>
+                <li>显示使用热力图</li>
+                <li>显示工具对比</li>
+                <li>显示峰值时段</li>
+                <li>显示活跃用户排名</li>
+            </ul>
+
+            <p><strong>页面元素</strong>:</p>
+
+            <table>
+                <thead>
+                    <tr><th>区域</th><th>元素</th><th>类型</th><th>数据来源</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td rowspan="5"><strong>过滤器</strong></td><td>快捷日期</td><td>ButtonGroup</td><td>7天/30天/90天/全部</td></tr>
+                    <tr><td>开始日期</td><td>DatePicker</td><td>-</td></tr>
+                    <tr><td>结束日期</td><td>DatePicker</td><td>-</td></tr>
+                    <tr><td>工具选择</td><td>Select</td><td>固定选项</td></tr>
+                    <tr><td>主机选择</td><td>Select</td><td><code>GET /api/hosts</code></td></tr>
+                    <tr><td rowspan="4"><strong>指标卡片</strong></td><td>总 Token</td><td>StatCard</td><td><code>GET /api/analysis/key-metrics</code></td></tr>
+                    <tr><td>总请求</td><td>StatCard</td><td><code>GET /api/analysis/key-metrics</code></td></tr>
+                    <tr><td>活跃用户</td><td>StatCard</td><td><code>GET /api/analysis/user-ranking</code></td></tr>
+                    <tr><td>活跃工具</td><td>StatCard</td><td><code>GET /api/analysis/tool-comparison</code></td></tr>
+                    <tr><td rowspan="3"><strong>图表</strong></td><td>使用热力图</td><td>Heatmap</td><td><code>GET /api/analysis/daily-hourly-usage</code></td></tr>
+                    <tr><td>Token 趋势</td><td>LineChart</td><td><code>GET /api/analysis/daily-hourly-usage</code></td></tr>
+                    <tr><td>工具对比</td><td>BarChart</td><td><code>GET /api/analysis/tool-comparison</code></td></tr>
+                    <tr><td rowspan="4"><strong>表格</strong></td><td>峰值时段</td><td>Table</td><td><code>GET /api/analysis/peak-usage</code></td></tr>
+                    <tr><td>活跃用户</td><td>Table</td><td><code>GET /api/analysis/user-ranking</code></td></tr>
+                    <tr><td>会话统计</td><td>Table</td><td><code>GET /api/analysis/conversation-stats</code></td></tr>
+                    <tr><td>用户分层</td><td>DoughnutChart</td><td><code>GET /api/analysis/user-segmentation</code></td></tr>
+                </tbody>
+            </table>
+
+            <h3 id="342-异常检测页面">3.4.2 异常检测页面 (Anomaly Detection)</h3>
+
+            <p><strong>路由</strong>: <code>/manage/analysis/anomaly</code><br>
+            <strong>现有代码</strong>: 无，需新建<br>
+            <strong>状态</strong>: <span class="badge badge-pending">🆕 待实现</span> <span class="badge badge-p1">P1</span></p>
+
+            <p><strong>功能描述</strong>:</p>
+            <ul>
+                <li>显示异常检测结果</li>
+                <li>支持按日期范围筛选</li>
+                <li>显示异常类型、严重程度</li>
+                <li>提供优化建议</li>
+            </ul>
+
+            <p><strong>页面元素</strong>:</p>
+
+            <table>
+                <thead>
+                    <tr><th>区域</th><th>元素</th><th>类型</th><th>数据来源</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td rowspan="3"><strong>过滤器</strong></td><td>日期范围</td><td>DatePicker</td><td>-</td></tr>
+                    <tr><td>异常类型</td><td>Select</td><td>用量异常/延迟异常/错误率异常</td></tr>
+                    <tr><td>严重程度</td><td>Select</td><td>高/中/低</td></tr>
+                    <tr><td rowspan="3"><strong>统计卡片</strong></td><td>异常总数</td><td>StatCard</td><td>计算得出</td></tr>
+                    <tr><td>高危异常</td><td>StatCard</td><td>计算得出</td></tr>
+                    <tr><td>已处理</td><td>StatCard</td><td>计算得出</td></tr>
+                    <tr><td rowspan="2"><strong>图表</strong></td><td>异常趋势</td><td>LineChart</td><td><code>GET /api/analysis/anomaly-detection</code></td></tr>
+                    <tr><td>异常分布</td><td>PieChart</td><td>按类型统计</td></tr>
+                    <tr><td rowspan="2"><strong>列表</strong></td><td>异常列表</td><td>Table</td><td><code>GET /api/analysis/anomaly-detection</code></td></tr>
+                    <tr><td>优化建议</td><td>List</td><td><code>GET /api/analysis/recommendations</code></td></tr>
+                </tbody>
+            </table>
+
+            <h3 id="343-会话历史页面">3.4.3 会话历史页面 (Conversation History)</h3>
+
+            <p><strong>路由</strong>: <code>/manage/analysis/conversation-history</code><br>
+            <strong>现有代码</strong>: <code>frontend/src/components/features/ConversationHistory.tsx</code><br>
+            <strong>状态</strong>: <span class="badge badge-implemented">✅ 已实现</span></p>
+
+            <p><strong>功能描述</strong>:</p>
+            <ul>
+                <li>显示会话历史表格</li>
+                <li>支持按日期、工具、主机、发送者筛选</li>
+                <li>支持列显示/隐藏、排序</li>
+                <li>支持全屏模式查看</li>
+                <li>点击会话可查看详情（时间线、延迟曲线）</li>
+            </ul>
+
+            <p><strong>页面元素</strong>:</p>
+
+            <table>
+                <thead>
+                    <tr><th>区域</th><th>元素</th><th>类型</th><th>数据来源</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td rowspan="5"><strong>过滤器</strong></td><td>日期选择</td><td>DatePicker</td><td>-</td></tr>
+                    <tr><td>工具选择</td><td>Select</td><td>OpenClaw/Claude/Qwen/全部</td></tr>
+                    <tr><td>主机选择</td><td>Select</td><td><code>GET /api/hosts</code></td></tr>
+                    <tr><td>发送者搜索</td><td>Input</td><td>-</td></tr>
+                    <tr><td>重置/刷新按钮</td><td>Button</td><td>-</td></tr>
+                    <tr><td rowspan="8"><strong>表格</strong></td><td>日期</td><td>Column</td><td>可排序</td></tr>
+                    <tr><td>工具</td><td>Column</td><td>Badge 显示</td></tr>
+                    <tr><td>主机</td><td>Column</td><td>-</td></tr>
+                    <tr><td>发送者</td><td>Column</td><td>-</td></tr>
+                    <tr><td>消息数</td><td>Column</td><td>数字显示</td></tr>
+                    <tr><td>Token 数</td><td>Column</td><td>格式化显示</td></tr>
+                    <tr><td>最后消息时间</td><td>Column</td><td>时间格式化</td></tr>
+                    <tr><td>操作</td><td>Column</td><td>查看详情按钮</td></tr>
+                    <tr><td rowspan="2"><strong>工具栏</strong></td><td>列选择器</td><td>Dropdown</td><td>显示/隐藏列</td></tr>
+                    <tr><td>全屏按钮</td><td>Button</td><td>切换全屏模式</td></tr>
+                    <tr><td rowspan="4"><strong>详情模态框</strong></td><td>时间线 Tab</td><td>Tab</td><td>显示会话消息时间线</td></tr>
+                    <tr><td>延迟曲线 Tab</td><td>Tab</td><td>显示响应延迟图表</td></tr>
+                    <tr><td>消息列表</td><td>List</td><td>角色/内容/时间/Token</td></tr>
+                    <tr><td>延迟图表</td><td>LineChart</td><td>消息延迟曲线</td></tr>
+                    <tr><td><strong>分页</strong></td><td>分页导航</td><td>Pagination</td><td>每页 20 条</td></tr>
+                </tbody>
+            </table>
+
+            <h3 id="344-消息查询页面">3.4.4 消息查询页面 (Messages)</h3>
+
+            <p><strong>路由</strong>: <code>/manage/messages</code><br>
+            <strong>现有代码</strong>: <code>frontend/src/components/features/Messages.tsx</code><br>
+            <strong>状态</strong>: <span class="badge badge-implemented">✅ 已实现</span></p>
+
+            <p><strong>功能描述</strong>:</p>
+            <ul>
+                <li>显示消息列表</li>
+                <li>支持多条件筛选</li>
+                <li>支持搜索消息内容</li>
+                <li>支持查看消息详情</li>
+            </ul>
+
+            <h3 id="345-roi-分析页面">3.4.5 ROI 分析页面 (ROI Analysis)</h3>
+
+            <p><strong>路由</strong>: <code>/manage/analysis/roi</code><br>
+            <strong>现有代码</strong>: 无，需新建<br>
+            <strong>状态</strong>: <span class="badge badge-pending">🆕 待实现</span> <span class="badge badge-p2">P2</span></p>
+
+            <p><strong>功能描述</strong>:</p>
+            <ul>
+                <li>显示 ROI（投资回报）指标</li>
+                <li>支持按日期范围、用户、工具筛选</li>
+                <li>显示成本分解和趋势</li>
+                <li>提供成本优化建议</li>
+                <li>显示效率分析报告</li>
+            </ul>
+
+            <p><strong>页面元素</strong>:</p>
+
+            <table>
+                <thead>
+                    <tr><th>区域</th><th>元素</th><th>类型</th><th>数据来源</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td rowspan="3"><strong>过滤器</strong></td><td>日期范围</td><td>DatePicker</td><td>-</td></tr>
+                    <tr><td>用户选择</td><td>Select</td><td>用户列表</td></tr>
+                    <tr><td>工具选择</td><td>Select</td><td>固定选项</td></tr>
+                    <tr><td rowspan="4"><strong>指标卡片</strong></td><td>总 ROI</td><td>StatCard</td><td><code>GET /api/roi</code></td></tr>
+                    <tr><td>总成本</td><td>StatCard</td><td><code>GET /api/roi/cost-breakdown</code></td></tr>
+                    <tr><td>节省成本</td><td>StatCard</td><td>计算得出</td></tr>
+                    <tr><td>效率提升</td><td>StatCard</td><td><code>GET /api/optimization/efficiency</code></td></tr>
+                    <tr><td rowspan="4"><strong>图表</strong></td><td>ROI 趋势</td><td>LineChart</td><td><code>GET /api/roi/trend</code></td></tr>
+                    <tr><td>成本分解</td><td>PieChart</td><td><code>GET /api/roi/cost-breakdown</code></td></tr>
+                    <tr><td>按工具对比</td><td>BarChart</td><td><code>GET /api/roi/by-tool</code></td></tr>
+                    <tr><td>每日成本</td><td>AreaChart</td><td><code>GET /api/roi/daily-costs</code></td></tr>
+                    <tr><td rowspan="2"><strong>表格</strong></td><td>优化建议</td><td>Table</td><td><code>GET /api/optimization/suggestions</code></td></tr>
+                    <tr><td>用户 ROI 排名</td><td>Table</td><td><code>GET /api/roi/by-user</code></td></tr>
+                </tbody>
+            </table>
+
+            <h2 id="35-治理分组页面设计">3.5 治理分组页面设计</h2>
+
+            <h3 id="351-审计日志页面">3.5.1 审计日志页面 (Audit Log)</h3>
+
+            <p><strong>路由</strong>: <code>/manage/audit</code><br>
+            <strong>现有代码</strong>: <code>frontend/src/components/features/management/AuditLog.tsx</code><br>
+            <strong>状态</strong>: <span class="badge badge-implemented">✅ 已实现</span></p>
+
+            <p><strong>功能描述</strong>:</p>
+            <ul>
+                <li>显示系统操作审计日志</li>
+                <li>支持按用户、操作类型、时间筛选</li>
+                <li>支持导出日志</li>
+            </ul>
+
+            <h3 id="352-配额管理页面">3.5.2 配额管理页面 (Quota Management)</h3>
+
+            <p><strong>路由</strong>: <code>/manage/quota</code><br>
+            <strong>现有代码</strong>: <code>frontend/src/components/features/management/QuotaManagement.tsx</code><br>
+            <strong>状态</strong>: <span class="badge badge-implemented">✅ 已实现</span></p>
+
+            <p><strong>功能描述</strong>:</p>
+            <ul>
+                <li>显示用户配额状态</li>
+                <li>支持设置用户配额</li>
+                <li>显示配额告警</li>
+            </ul>
+
+            <h3 id="353-内容过滤页面">3.5.3 内容过滤页面 (Content Filter)</h3>
+
+            <p><strong>路由</strong>: <code>/manage/governance/content-filter</code><br>
+            <strong>现有代码</strong>: <code>frontend/src/components/features/management/ContentFilter.tsx</code><br>
+            <strong>状态</strong>: <span class="badge badge-implemented">✅ 已实现</span></p>
+
+            <p><strong>功能描述</strong>:</p>
+            <ul>
+                <li>管理内容过滤规则</li>
+                <li>支持创建、编辑、删除规则</li>
+                <li>支持启用/禁用规则</li>
+                <li>规则类型：关键词、正则表达式、PII（个人身份信息）</li>
+                <li>严重程度：低、中、高</li>
+                <li>操作类型：警告、阻止、脱敏</li>
+            </ul>
+
+            <p><strong>规则类型说明</strong>:</p>
+
+            <table>
+                <thead>
+                    <tr><th>类型</th><th>说明</th><th>示例</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>keyword</td><td>关键词匹配</td><td>敏感词汇列表</td></tr>
+                    <tr><td>regex</td><td>正则表达式匹配</td><td>邮箱、手机号模式</td></tr>
+                    <tr><td>pii</td><td>个人身份信息检测</td><td>身份证、银行卡号</td></tr>
+                </tbody>
+            </table>
+
+            <p><strong>操作类型说明</strong>:</p>
+
+            <table>
+                <thead>
+                    <tr><th>操作</th><th>说明</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>warn</td><td>警告：记录日志但不阻止</td></tr>
+                    <tr><td>block</td><td>阻止：拒绝请求并返回错误</td></tr>
+                    <tr><td>redact</td><td>脱敏：替换敏感内容为占位符</td></tr>
+                </tbody>
+            </table>
+
+            <h3 id="354-安全设置页面">3.5.4 安全设置页面 (Security Settings)</h3>
+
+            <p><strong>路由</strong>: <code>/manage/security</code><br>
+            <strong>现有代码</strong>: <code>frontend/src/components/features/management/SecuritySettings.tsx</code><br>
+            <strong>状态</strong>: <span class="badge badge-implemented">✅ 已实现</span></p>
+
+            <p><strong>功能描述</strong>:</p>
+            <ul>
+                <li>配置系统安全设置</li>
+                <li>配置密码策略</li>
+                <li>配置登录安全策略</li>
+                <li>配置会话管理</li>
+            </ul>
+
+            <h3 id="355-告警管理页面">3.5.5 告警管理页面 (Alert Management)</h3>
+
+            <p><strong>路由</strong>: <code>/manage/alerts</code><br>
+            <strong>现有代码</strong>: 无，需新建<br>
+            <strong>状态</strong>: <span class="badge badge-pending">🆕 待实现</span> <span class="badge badge-p1">P1</span></p>
+
+            <p><strong>功能描述</strong>:</p>
+            <ul>
+                <li>显示系统告警列表</li>
+                <li>支持按类型、严重程度、已读状态筛选</li>
+                <li>支持标记已读/全部已读</li>
+                <li>支持删除告警</li>
+                <li>配置通知偏好（邮件、推送、Webhook）</li>
+                <li>支持 SSE 实时告警推送</li>
+            </ul>
+
+            <p><strong>页面元素</strong>:</p>
+
+            <table>
+                <thead>
+                    <tr><th>区域</th><th>元素</th><th>类型</th><th>数据来源</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td rowspan="3"><strong>统计卡片</strong></td><td>总告警数</td><td>StatCard</td><td>计算得出</td></tr>
+                    <tr><td>未读告警</td><td>StatCard</td><td><code>GET /api/alerts/unread-count</code></td></tr>
+                    <tr><td>高危告警</td><td>StatCard</td><td>计算得出</td></tr>
+                    <tr><td rowspan="3"><strong>过滤器</strong></td><td>告警类型</td><td>Select</td><td>quota/system/security</td></tr>
+                    <tr><td>严重程度</td><td>Select</td><td>info/warning/critical</td></tr>
+                    <tr><td>已读状态</td><td>Select</td><td>全部/已读/未读</td></tr>
+                    <tr><td rowspan="6"><strong>列表</strong></td><td>标题</td><td>Column</td><td>-</td></tr>
+                    <tr><td>消息</td><td>Column</td><td>内容预览</td></tr>
+                    <tr><td>类型</td><td>Column</td><td>Badge</td></tr>
+                    <tr><td>严重程度</td><td>Column</td><td>Badge (danger/warning/info)</td></tr>
+                    <tr><td>时间</td><td>Column</td><td>格式化显示</td></tr>
+                    <tr><td>操作</td><td>Column</td><td>标记已读/删除</td></tr>
+                    <tr><td rowspan="5"><strong>设置</strong></td><td>邮件通知</td><td>Switch</td><td>-</td></tr>
+                    <tr><td>推送通知</td><td>Switch</td><td>-</td></tr>
+                    <tr><td>Webhook URL</td><td>Input</td><td>-</td></tr>
+                    <tr><td>告警类型订阅</td><td>Checkbox</td><td>quota/system/security</td></tr>
+                    <tr><td>最低严重程度</td><td>Select</td><td>info/warning/critical</td></tr>
+                </tbody>
+            </table>
+
+            <h3 id="356-合规报告页面">3.5.6 合规报告页面 (Compliance Report)</h3>
+
+            <p><strong>路由</strong>: <code>/manage/compliance/reports</code><br>
+            <strong>现有代码</strong>: 无，需新建<br>
+            <strong>状态</strong>: <span class="badge badge-pending">🆕 待实现</span> <span class="badge badge-p1">P1</span></p>
+
+            <p><strong>功能描述</strong>:</p>
+            <ul>
+                <li>选择报告类型生成合规报告</li>
+                <li>支持日期范围选择</li>
+                <li>支持多种报告格式（JSON/CSV）</li>
+                <li>查看已保存报告列表</li>
+                <li>下载历史报告</li>
+            </ul>
+
+            <p><strong>报告类型说明</strong>:</p>
+
+            <table>
+                <thead>
+                    <tr><th>类型</th><th>说明</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Usage Summary</td><td>AI 使用摘要统计</td></tr>
+                    <tr><td>User Activity</td><td>用户活动和参与度指标</td></tr>
+                    <tr><td>Audit Trail</td><td>完整审计日志追踪</td></tr>
+                    <tr><td>Data Access</td><td>数据访问和导出日志</td></tr>
+                    <tr><td>Security Report</td><td>安全相关事件分析</td></tr>
+                    <tr><td>Quota Usage</td><td>配额使用和告警</td></tr>
+                    <tr><td>Comprehensive</td><td>包含所有章节的完整报告</td></tr>
+                </tbody>
+            </table>
+
+            <h3 id="357-数据保留页面">3.5.7 数据保留页面 (Data Retention)</h3>
+
+            <p><strong>路由</strong>: <code>/manage/compliance/retention</code><br>
+            <strong>现有代码</strong>: 无，需新建<br>
+            <strong>状态</strong>: <span class="badge badge-pending">🆕 待实现</span> <span class="badge badge-p1">P1</span></p>
+
+            <p><strong>功能描述</strong>:</p>
+            <ul>
+                <li>查看和设置数据保留规则</li>
+                <li>执行数据清理（支持预览模式）</li>
+                <li>查看清理历史</li>
+                <li>存储使用估算</li>
+                <li>合规状态检查</li>
+            </ul>
+
+            <p><strong>数据类型保留规则</strong>:</p>
+
+            <table>
+                <thead>
+                    <tr><th>数据类型</th><th>默认保留天数</th><th>说明</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>messages</td><td>90</td><td>消息记录</td></tr>
+                    <tr><td>sessions</td><td>180</td><td>会话记录</td></tr>
+                    <tr><td>audit_logs</td><td>365</td><td>审计日志</td></tr>
+                    <tr><td>usage_stats</td><td>365</td><td>使用统计</td></tr>
+                    <tr><td>alerts</td><td>30</td><td>告警记录</td></tr>
+                </tbody>
+            </table>
+
+            <h3 id="358-审计分析页面">3.5.8 审计分析页面 (Audit Analysis)</h3>
+
+            <p><strong>路由</strong>: <code>/manage/compliance/audit</code><br>
+            <strong>现有代码</strong>: 无，需新建<br>
+            <strong>状态</strong>: <span class="badge badge-pending">🆕 待实现</span> <span class="badge badge-p1">P1</span></p>
+
+            <p><strong>功能描述</strong>:</p>
+            <ul>
+                <li>审计模式分析</li>
+                <li>异常行为检测</li>
+                <li>用户行为画像</li>
+                <li>安全评分展示</li>
+            </ul>
+
+            <h2 id="36-用户分组页面设计">3.6 用户分组页面设计</h2>
+
+            <h3 id="361-用户管理页面">3.6.1 用户管理页面 (User Management)</h3>
+
+            <p><strong>路由</strong>: <code>/manage/users</code><br>
+            <strong>现有代码</strong>: <code>frontend/src/components/features/management/UserManagement.tsx</code><br>
+            <strong>状态</strong>: <span class="badge badge-implemented">✅ 已实现</span></p>
+
+            <p><strong>功能描述</strong>:</p>
+            <ul>
+                <li>显示用户列表</li>
+                <li>支持创建、编辑、删除用户</li>
+                <li>支持重置密码</li>
+                <li>支持角色分配</li>
+            </ul>
+
+            <h3 id="362-租户管理页面">3.6.2 租户管理页面 (Tenant Management)</h3>
+
+            <p><strong>路由</strong>: <code>/manage/tenants</code><br>
+            <strong>现有代码</strong>: 无，需新建<br>
+            <strong>状态</strong>: <span class="badge badge-pending">🆕 待实现</span> <span class="badge badge-p2">P2</span></p>
+
+            <p><strong>功能描述</strong>:</p>
+            <ul>
+                <li>显示租户列表</li>
+                <li>支持创建、编辑、删除租户</li>
+                <li>配额管理</li>
+                <li>暂停/激活租户</li>
+                <li>查看使用统计</li>
+            </ul>
+
+            <p><strong>套餐类型说明</strong>:</p>
+
+            <table>
+                <thead>
+                    <tr><th>套餐</th><th>月 Token 配额</th><th>月请求配额</th><th>说明</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Standard</td><td>100,000</td><td>10,000</td><td>标准版</td></tr>
+                    <tr><td>Premium</td><td>500,000</td><td>50,000</td><td>高级版</td></tr>
+                    <tr><td>Enterprise</td><td>Unlimited</td><td>Unlimited</td><td>企业版</td></tr>
+                </tbody>
+            </table>
+
+            <h2 id="37-设置分组页面设计">3.7 设置分组页面设计</h2>
+
+            <h3 id="371-sso-设置页面">3.7.1 SSO 设置页面 (SSO Settings)</h3>
+
+            <p><strong>路由</strong>: <code>/manage/settings/sso</code><br>
+            <strong>现有代码</strong>: 无，需新建<br>
+            <strong>状态</strong>: <span class="badge badge-pending">🆕 待实现</span> <span class="badge badge-p3">P3</span></p>
+
+            <p><strong>功能描述</strong>:</p>
+            <ul>
+                <li>管理 SSO 提供者</li>
+                <li>注册新的 SSO 提供者</li>
+                <li>配置 OAuth2/OIDC 参数</li>
+                <li>启用/禁用提供者</li>
+                <li>查看用户绑定身份</li>
+            </ul>
+
+            <p><strong>预定义 SSO 提供者</strong>:</p>
+
+            <table>
+                <thead>
+                    <tr><th>提供者</th><th>类型</th><th>说明</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Google</td><td>OAuth2</td><td>Google 账号登录</td></tr>
+                    <tr><td>Microsoft</td><td>OAuth2</td><td>Microsoft 账号登录</td></tr>
+                    <tr><td>GitHub</td><td>OAuth2</td><td>GitHub 账号登录</td></tr>
+                    <tr><td>Okta</td><td>OIDC</td><td>Okta 企业身份</td></tr>
+                    <tr><td>Custom</td><td>OAuth2/OIDC</td><td>自定义提供者</td></tr>
+                </tbody>
+            </table>
+
+            <hr>
+
+            <h1 id="四实施计划">四、实施计划</h1>
+
+            <h2 id="41-任务清单">4.1 任务清单</h2>
+
+            <table>
+                <thead>
+                    <tr><th>优先级</th><th>任务</th><th>类型</th><th>文件</th><th>预计工时</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td><span class="badge badge-p1">P0</span></td><td>添加所有新页面菜单项</td><td>前端</td><td><code>ManageLayout.tsx</code></td><td>1h</td></tr>
+                    <tr><td><span class="badge badge-p1">P0</span></td><td>更新路由配置</td><td>前端</td><td><code>App.tsx</code></td><td>1h</td></tr>
+                    <tr><td><span class="badge badge-p1">P1</span></td><td>实现异常检测页面</td><td>前端</td><td><code>AnomalyDetection.tsx</code> (新建)</td><td>4h</td></tr>
+                    <tr><td><span class="badge badge-p1">P1</span></td><td>实现异常检测逻辑</td><td>后端</td><td><code>analysis_service.py</code></td><td>4h</td></tr>
+                    <tr><td><span class="badge badge-p1">P1</span></td><td>拆分会话历史为独立页面</td><td>前端</td><td><code>ConversationHistory.tsx</code></td><td>2h</td></tr>
+                    <tr><td><span class="badge badge-p1">P1</span></td><td>拆分内容过滤为独立页面</td><td>前端</td><td><code>ContentFilter.tsx</code></td><td>2h</td></tr>
+                    <tr><td><span class="badge badge-p1">P1</span></td><td>实现告警管理页面</td><td>前端</td><td><code>AlertManagement.tsx</code> (新建)</td><td>4h</td></tr>
+                    <tr><td><span class="badge badge-p1">P1</span></td><td>实现合规报告页面</td><td>前端</td><td><code>ComplianceReport.tsx</code> (新建)</td><td>4h</td></tr>
+                    <tr><td><span class="badge badge-p1">P1</span></td><td>实现数据保留页面</td><td>前端</td><td><code>DataRetention.tsx</code> (新建)</td><td>4h</td></tr>
+                    <tr><td><span class="badge badge-p1">P1</span></td><td>实现审计分析页面</td><td>前端</td><td><code>AuditAnalysis.tsx</code> (新建)</td><td>4h</td></tr>
+                    <tr><td><span class="badge badge-p2">P2</span></td><td>实现 ROI 分析页面</td><td>前端</td><td><code>ROIAnalysis.tsx</code> (新建)</td><td>6h</td></tr>
+                    <tr><td><span class="badge badge-p2">P2</span></td><td>实现租户管理页面</td><td>前端</td><td><code>TenantManagement.tsx</code> (新建)</td><td>6h</td></tr>
+                    <tr><td><span class="badge badge-p2">P2</span></td><td>实现会话列表组件</td><td>前端</td><td><code>SessionList.tsx</code> (新建)</td><td>4h</td></tr>
+                    <tr><td><span class="badge badge-p2">P2</span></td><td>实现辅助面板组件</td><td>前端</td><td><code>AssistPanel.tsx</code> (新建)</td><td>4h</td></tr>
+                    <tr><td><span class="badge badge-p2">P2</span></td><td>实现状态栏组件</td><td>前端</td><td><code>StatusBar.tsx</code> (新建)</td><td>2h</td></tr>
+                    <tr><td><span class="badge badge-p2">P2</span></td><td>新增状态 API</td><td>后端</td><td><code>workspace.py</code></td><td>2h</td></tr>
+                    <tr><td><span class="badge badge-p3">P3</span></td><td>拆分趋势分析页面</td><td>前端</td><td><code>TrendAnalysis.tsx</code> (新建)</td><td>4h</td></tr>
+                    <tr><td><span class="badge badge-p3">P3</span></td><td>实现 SSO 设置页面</td><td>前端</td><td><code>SSOSettings.tsx</code> (新建)</td><td>4h</td></tr>
+                </tbody>
+            </table>
+
+            <h2 id="42-实施步骤">4.2 实施步骤</h2>
+
+            <h3 id="第一阶段导航完善-1天">第一阶段：导航完善 (1天)</h3>
+
+            <ol>
+                <li>修改 <code>ManageLayout.tsx</code>，添加所有新页面菜单项</li>
+                <li>更新 <code>App.tsx</code> 路由配置</li>
+                <li>测试导航跳转</li>
+            </ol>
+
+            <h3 id="第二阶段页面拆分-2天">第二阶段：页面拆分 (2天)</h3>
+
+            <ol>
+                <li>从 <code>Analysis.tsx</code> 拆分会话历史为独立页面</li>
+                <li>从 <code>Management.tsx</code> 拆分内容过滤为独立页面</li>
+                <li>更新相关路由和导航</li>
+                <li>测试页面功能</li>
+            </ol>
+
+            <h3 id="第三阶段p1-新页面实现-3天">第三阶段：P1 新页面实现 (3天)</h3>
+
+            <ol>
+                <li>实现告警管理页面</li>
+                <li>实现合规报告页面</li>
+                <li>实现数据保留页面</li>
+                <li>实现审计分析页面</li>
+                <li>实现异常检测页面和后端逻辑</li>
+                <li>集成测试</li>
+            </ol>
+
+            <h3 id="第四阶段p2-功能实现-3天">第四阶段：P2 功能实现 (3天)</h3>
+
+            <ol>
+                <li>实现 ROI 分析页面</li>
+                <li>实现租户管理页面</li>
+                <li>实现会话列表组件</li>
+                <li>实现辅助面板组件</li>
+                <li>实现状态栏组件</li>
+                <li>后端新增状态 API</li>
+            </ol>
+
+            <h3 id="第五阶段p3-功能完善-2天">第五阶段：P3 功能完善 (2天)</h3>
+
+            <ol>
+                <li>拆分趋势分析页面</li>
+                <li>实现 SSO 设置页面</li>
+                <li>优化页面布局</li>
+                <li>整体测试</li>
+            </ol>
+
+            <h2 id="43-风险评估">4.3 风险评估</h2>
+
+            <table>
+                <thead>
+                    <tr><th>风险</th><th>影响</th><th>缓解措施</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>异常检测算法不准确</td><td>误报/漏报</td><td>设置可调阈值，支持人工确认</td></tr>
+                    <tr><td>会话列表性能问题</td><td>加载慢</td><td>分页加载，虚拟滚动</td></tr>
+                    <tr><td>状态栏实时性</td><td>数据延迟</td><td>WebSocket 推送</td></tr>
+                    <tr><td>告警通知延迟</td><td>响应不及时</td><td>SSE 实时推送，多渠道通知</td></tr>
+                    <tr><td>数据清理误删</td><td>数据丢失</td><td>预览模式，备份机制</td></tr>
+                    <tr><td>SSO 配置错误</td><td>登录失败</td><td>配置验证，回滚机制</td></tr>
+                </tbody>
+            </table>
+
+            <hr>
+
+            <h1 id="五附录">五、附录</h1>
+
+            <h2 id="51-api-端点清单">5.1 API 端点清单</h2>
+
+            <table>
+                <thead>
+                    <tr><th>模块</th><th>端点</th><th>方法</th><th>说明</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td rowspan="4"><strong>Usage</strong></td><td><code>/api/summary</code></td><td>GET</td><td>获取使用摘要</td></tr>
+                    <tr><td><code>/api/usage/today</code></td><td>GET</td><td>获取今日使用</td></tr>
+                    <tr><td><code>/api/usage/trend</code></td><td>GET</td><td>获取趋势数据</td></tr>
+                    <tr><td><code>/api/hosts</code></td><td>GET</td><td>获取主机列表</td></tr>
+                    <tr><td rowspan="7"><strong>Analysis</strong></td><td><code>/api/analysis/key-metrics</code></td><td>GET</td><td>获取关键指标</td></tr>
+                    <tr><td><code>/api/analysis/daily-hourly-usage</code></td><td>GET</td><td>获取每日/每小时使用</td></tr>
+                    <tr><td><code>/api/analysis/peak-usage</code></td><td>GET</td><td>获取峰值使用</td></tr>
+                    <tr><td><code>/api/analysis/user-ranking</code></td><td>GET</td><td>获取用户排名</td></tr>
+                    <tr><td><code>/api/analysis/tool-comparison</code></td><td>GET</td><td>获取工具对比</td></tr>
+                    <tr><td><code>/api/analysis/anomaly-detection</code></td><td>GET</td><td>获取异常检测</td></tr>
+                    <tr><td><code>/api/analysis/recommendations</code></td><td>GET</td><td>获取优化建议</td></tr>
+                    <tr><td rowspan="7"><strong>ROI</strong></td><td><code>/api/roi</code></td><td>GET</td><td>获取 ROI 指标</td></tr>
+                    <tr><td><code>/api/roi/trend</code></td><td>GET</td><td>ROI 趋势</td></tr>
+                    <tr><td><code>/api/roi/by-tool</code></td><td>GET</td><td>按工具 ROI</td></tr>
+                    <tr><td><code>/api/roi/by-user</code></td><td>GET</td><td>按用户 ROI</td></tr>
+                    <tr><td><code>/api/roi/cost-breakdown</code></td><td>GET</td><td>成本分解</td></tr>
+                    <tr><td><code>/api/optimization/suggestions</code></td><td>GET</td><td>成本优化建议</td></tr>
+                    <tr><td><code>/api/optimization/efficiency</code></td><td>GET</td><td>效率报告</td></tr>
+                    <tr><td rowspan="2"><strong>Conversation</strong></td><td><code>/api/conversation-history</code></td><td>GET</td><td>获取会话历史列表</td></tr>
+                    <tr><td><code>/api/conversation-timeline/:sessionId</code></td><td>GET</td><td>获取会话时间线</td></tr>
+                    <tr><td rowspan="3"><strong>Messages</strong></td><td><code>/api/messages</code></td><td>GET</td><td>获取消息列表</td></tr>
+                    <tr><td><code>/api/messages/count</code></td><td>GET</td><td>获取消息数量</td></tr>
+                    <tr><td><code>/api/senders</code></td><td>GET</td><td>获取发送者列表</td></tr>
+                    <tr><td rowspan="7"><strong>Alerts</strong></td><td><code>/api/alerts</code></td><td>GET</td><td>获取告警列表</td></tr>
+                    <tr><td><code>/api/alerts/unread-count</code></td><td>GET</td><td>获取未读告警数</td></tr>
+                    <tr><td><code>/api/alerts/:id/read</code></td><td>POST</td><td>标记告警已读</td></tr>
+                    <tr><td><code>/api/alerts/read-all</code></td><td>POST</td><td>标记全部已读</td></tr>
+                    <tr><td><code>/api/alerts/:id</code></td><td>DELETE</td><td>删除告警</td></tr>
+                    <tr><td><code>/api/alerts/preferences</code></td><td>GET/PUT</td><td>通知偏好</td></tr>
+                    <tr><td><code>/api/alerts/stream</code></td><td>GET</td><td>SSE 实时告警流</td></tr>
+                    <tr><td rowspan="11"><strong>Compliance</strong></td><td><code>/api/compliance/reports</code></td><td>GET/POST</td><td>报告类型/生成报告</td></tr>
+                    <tr><td><code>/api/compliance/reports/saved</code></td><td>GET</td><td>已保存报告</td></tr>
+                    <tr><td><code>/api/compliance/reports/:id</code></td><td>GET</td><td>报告详情</td></tr>
+                    <tr><td><code>/api/compliance/audit/patterns</code></td><td>GET</td><td>审计模式分析</td></tr>
+                    <tr><td><code>/api/compliance/audit/anomalies</code></td><td>GET</td><td>审计异常检测</td></tr>
+                    <tr><td><code>/api/compliance/audit/user/:id/profile</code></td><td>GET</td><td>用户行为画像</td></tr>
+                    <tr><td><code>/api/compliance/audit/security-score</code></td><td>GET</td><td>安全评分</td></tr>
+                    <tr><td><code>/api/compliance/retention/rules</code></td><td>GET/PUT</td><td>数据保留规则</td></tr>
+                    <tr><td><code>/api/compliance/retention/cleanup</code></td><td>POST</td><td>执行数据清理</td></tr>
+                    <tr><td><code>/api/compliance/retention/history</code></td><td>GET</td><td>清理历史</td></tr>
+                    <tr><td><code>/api/compliance/retention/storage</code></td><td>GET</td><td>存储估算</td></tr>
+                    <tr><td rowspan="5"><strong>Governance</strong></td><td><code>/api/audit/logs</code></td><td>GET</td><td>获取审计日志</td></tr>
+                    <tr><td><code>/api/quota/status/all</code></td><td>GET</td><td>获取所有用户配额</td></tr>
+                    <tr><td><code>/api/quota/alerts</code></td><td>GET</td><td>获取配额告警</td></tr>
+                    <tr><td><code>/api/filter-rules</code></td><td>GET/POST</td><td>过滤规则列表/创建</td></tr>
+                    <tr><td><code>/api/filter-rules/:id</code></td><td>PUT/DELETE</td><td>更新/删除过滤规则</td></tr>
+                    <tr><td rowspan="7"><strong>Tenant</strong></td><td><code>/api/tenants</code></td><td>GET/POST</td><td>租户列表/创建</td></tr>
+                    <tr><td><code>/api/tenants/:id</code></td><td>GET/PUT/DELETE</td><td>租户 CRUD</td></tr>
+                    <tr><td><code>/api/tenants/:id/quota</code></td><td>PUT</td><td>更新配额</td></tr>
+                    <tr><td><code>/api/tenants/:id/suspend</code></td><td>POST</td><td>暂停租户</td></tr>
+                    <tr><td><code>/api/tenants/:id/activate</code></td><td>POST</td><td>激活租户</td></tr>
+                    <tr><td><code>/api/tenants/:id/usage</code></td><td>GET</td><td>使用历史</td></tr>
+                    <tr><td><code>/api/tenants/plans</code></td><td>GET</td><td>套餐配额</td></tr>
+                    <tr><td rowspan="4"><strong>SSO</strong></td><td><code>/api/sso/providers</code></td><td>GET/POST</td><td>SSO 提供者列表/注册</td></tr>
+                    <tr><td><code>/api/sso/providers/:name</code></td><td>DELETE</td><td>禁用提供者</td></tr>
+                    <tr><td><code>/api/sso/session</code></td><td>GET/DELETE</td><td>会话管理</td></tr>
+                    <tr><td><code>/api/sso/identities/:user_id</code></td><td>GET</td><td>用户身份</td></tr>
+                    <tr><td rowspan="3"><strong>Admin</strong></td><td><code>/api/admin/users</code></td><td>GET/POST</td><td>用户管理</td></tr>
+                    <tr><td><code>/api/admin/users/:id</code></td><td>PUT/DELETE</td><td>用户操作</td></tr>
+                    <tr><td><code>/api/admin/users/:id/password</code></td><td>PUT</td><td>重置密码</td></tr>
+                    <tr><td rowspan="2"><strong>Workspace</strong></td><td><code>/api/workspace/config</code></td><td>GET</td><td>获取工作区配置</td></tr>
+                    <tr><td><code>/api/workspace/status</code></td><td>GET</td><td>获取工作区状态 (新增)</td></tr>
+                </tbody>
+            </table>
+
+            <h2 id="52-组件清单">5.2 组件清单</h2>
+
+            <table>
+                <thead>
+                    <tr><th>组件</th><th>路径</th><th>状态</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>WorkLayout</td><td><code>components/layout/WorkLayout.tsx</code></td><td><span class="badge badge-implemented">✅ 已实现</span></td></tr>
+                    <tr><td>ManageLayout</td><td><code>components/layout/ManageLayout.tsx</code></td><td><span class="badge badge-implemented">✅ 已实现</span></td></tr>
+                    <tr><td>Dashboard</td><td><code>components/features/Dashboard.tsx</code></td><td><span class="badge badge-implemented">✅ 已实现</span></td></tr>
+                    <tr><td>Analysis</td><td><code>components/features/Analysis.tsx</code></td><td><span class="badge badge-implemented">✅ 已实现</span></td></tr>
+                    <tr><td>ConversationHistory</td><td><code>components/features/ConversationHistory.tsx</code></td><td><span class="badge badge-implemented">✅ 已实现</span></td></tr>
+                    <tr><td>Messages</td><td><code>components/features/Messages.tsx</code></td><td><span class="badge badge-implemented">✅ 已实现</span></td></tr>
+                    <tr><td>Sessions</td><td><code>components/features/Sessions.tsx</code></td><td><span class="badge badge-implemented">✅ 已实现</span></td></tr>
+                    <tr><td>Prompts</td><td><code>components/features/Prompts.tsx</code></td><td><span class="badge badge-implemented">✅ 已实现</span></td></tr>
+                    <tr><td>Workspace</td><td><code>components/features/Workspace.tsx</code></td><td><span class="badge badge-implemented">✅ 已实现</span></td></tr>
+                    <tr><td>UserManagement</td><td><code>components/features/management/UserManagement.tsx</code></td><td><span class="badge badge-implemented">✅ 已实现</span></td></tr>
+                    <tr><td>QuotaManagement</td><td><code>components/features/management/QuotaManagement.tsx</code></td><td><span class="badge badge-implemented">✅ 已实现</span></td></tr>
+                    <tr><td>AuditLog</td><td><code>components/features/management/AuditLog.tsx</code></td><td><span class="badge badge-implemented">✅ 已实现</span></td></tr>
+                    <tr><td>ContentFilter</td><td><code>components/features/management/ContentFilter.tsx</code></td><td><span class="badge badge-implemented">✅ 已实现</span></td></tr>
+                    <tr><td>SecuritySettings</td><td><code>components/features/management/SecuritySettings.tsx</code></td><td><span class="badge badge-implemented">✅ 已实现</span></td></tr>
+                    <tr><td>AlertManagement</td><td><code>components/features/management/AlertManagement.tsx</code></td><td><span class="badge badge-pending">🆕 待实现</span></td></tr>
+                    <tr><td>TenantManagement</td><td><code>components/features/management/TenantManagement.tsx</code></td><td><span class="badge badge-pending">🆕 待实现</span></td></tr>
+                    <tr><td>TrendAnalysis</td><td><code>components/features/analysis/TrendAnalysis.tsx</code></td><td><span class="badge badge-pending">🆕 待实现</span></td></tr>
+                    <tr><td>AnomalyDetection</td><td><code>components/features/analysis/AnomalyDetection.tsx</code></td><td><span class="badge badge-pending">🆕 待实现</span></td></tr>
+                    <tr><td>ROIAnalysis</td><td><code>components/features/analysis/ROIAnalysis.tsx</code></td><td><span class="badge badge-pending">🆕 待实现</span></td></tr>
+                    <tr><td>ComplianceReport</td><td><code>components/features/compliance/ComplianceReport.tsx</code></td><td><span class="badge badge-pending">🆕 待实现</span></td></tr>
+                    <tr><td>DataRetention</td><td><code>components/features/compliance/DataRetention.tsx</code></td><td><span class="badge badge-pending">🆕 待实现</span></td></tr>
+                    <tr><td>AuditAnalysis</td><td><code>components/features/compliance/AuditAnalysis.tsx</code></td><td><span class="badge badge-pending">🆕 待实现</span></td></tr>
+                    <tr><td>SSOSettings</td><td><code>components/features/settings/SSOSettings.tsx</code></td><td><span class="badge badge-pending">🆕 待实现</span></td></tr>
+                    <tr><td>SessionList</td><td><code>components/work/SessionList.tsx</code></td><td><span class="badge badge-pending">🆕 待实现</span></td></tr>
+                    <tr><td>AssistPanel</td><td><code>components/work/AssistPanel.tsx</code></td><td><span class="badge badge-pending">🆕 待实现</span></td></tr>
+                    <tr><td>StatusBar</td><td><code>components/work/StatusBar.tsx</code></td><td><span class="badge badge-pending">🆕 待实现</span></td></tr>
+                </tbody>
+            </table>
+
+            <h2 id="53-路由配置">5.3 路由配置</h2>
+
+            <pre><code><span class="comment">// App.tsx 路由配置</span>
+
+<span class="comment">// 工作模式路由</span>
+<span class="keyword">const</span> WorkRoutes = [
+  { <span class="variable">path</span>: <span class="string">'/work'</span>, <span class="variable">element</span>: &lt;Workspace /&gt; },
+  { <span class="variable">path</span>: <span class="string">'/work/sessions'</span>, <span class="variable">element</span>: &lt;Sessions /&gt; },
+  { <span class="variable">path</span>: <span class="string">'/work/prompts'</span>, <span class="variable">element</span>: &lt;Prompts /&gt; },
+];
+
+<span class="comment">// 管理模式路由</span>
+<span class="keyword">const</span> ManageRoutes = [
+  <span class="comment">// 概览</span>
+  { <span class="variable">path</span>: <span class="string">'/manage/dashboard'</span>, <span class="variable">element</span>: &lt;Dashboard /&gt; },
+
+  <span class="comment">// 分析</span>
+  { <span class="variable">path</span>: <span class="string">'/manage/analysis/trend'</span>, <span class="variable">element</span>: &lt;TrendAnalysis /&gt; },
+  { <span class="variable">path</span>: <span class="string">'/manage/analysis/anomaly'</span>, <span class="variable">element</span>: &lt;AnomalyDetection /&gt; },
+  { <span class="variable">path</span>: <span class="string">'/manage/analysis/roi'</span>, <span class="variable">element</span>: &lt;ROIAnalysis /&gt; },
+  { <span class="variable">path</span>: <span class="string">'/manage/analysis/conversation-history'</span>, <span class="variable">element</span>: &lt;ConversationHistory /&gt; },
+  { <span class="variable">path</span>: <span class="string">'/manage/messages'</span>, <span class="variable">element</span>: &lt;Messages /&gt; },
+
+  <span class="comment">// 治理</span>
+  { <span class="variable">path</span>: <span class="string">'/manage/audit'</span>, <span class="variable">element</span>: &lt;AuditLog /&gt; },
+  { <span class="variable">path</span>: <span class="string">'/manage/compliance/audit'</span>, <span class="variable">element</span>: &lt;AuditAnalysis /&gt; },
+  { <span class="variable">path</span>: <span class="string">'/manage/quota'</span>, <span class="variable">element</span>: &lt;QuotaManagement /&gt; },
+  { <span class="variable">path</span>: <span class="string">'/manage/alerts'</span>, <span class="variable">element</span>: &lt;AlertManagement /&gt; },
+  { <span class="variable">path</span>: <span class="string">'/manage/governance/content-filter'</span>, <span class="variable">element</span>: &lt;ContentFilter /&gt; },
+  { <span class="variable">path</span>: <span class="string">'/manage/compliance/reports'</span>, <span class="variable">element</span>: &lt;ComplianceReport /&gt; },
+  { <span class="variable">path</span>: <span class="string">'/manage/compliance/retention'</span>, <span class="variable">element</span>: &lt;DataRetention /&gt; },
+  { <span class="variable">path</span>: <span class="string">'/manage/security'</span>, <span class="variable">element</span>: &lt;SecuritySettings /&gt; },
+
+  <span class="comment">// 用户</span>
+  { <span class="variable">path</span>: <span class="string">'/manage/users'</span>, <span class="variable">element</span>: &lt;UserManagement /&gt; },
+  { <span class="variable">path</span>: <span class="string">'/manage/tenants'</span>, <span class="variable">element</span>: &lt;TenantManagement /&gt; },
+
+  <span class="comment">// 设置</span>
+  { <span class="variable">path</span>: <span class="string">'/manage/settings/sso'</span>, <span class="variable">element</span>: &lt;SSOSettings /&gt; },
+];</code></pre>
+
+        </div>
+        <div class="footer">
+            <p>文档维护: Open ACE 开发团队</p>
+            <p>最后更新: 2026-03-23</p>
+        </div>
+    </div>
+</body>
+</html>

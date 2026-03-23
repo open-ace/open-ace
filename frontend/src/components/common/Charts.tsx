@@ -285,6 +285,8 @@ interface BarChartProps {
   horizontal?: boolean;
   stacked?: boolean;
   className?: string;
+  /** Format large numbers (e.g., 'M' for millions) */
+  unit?: 'none' | 'K' | 'M' | 'B';
 }
 
 export const BarChart: React.FC<BarChartProps> = ({
@@ -296,17 +298,38 @@ export const BarChart: React.FC<BarChartProps> = ({
   horizontal = false,
   stacked = false,
   className,
+  unit = 'none',
 }) => {
+  // Helper function to format values based on unit
+  const formatValue = (value: number): number => {
+    switch (unit) {
+      case 'K':
+        return value / 1_000;
+      case 'M':
+        return value / 1_000_000;
+      case 'B':
+        return value / 1_000_000_000;
+      default:
+        return value;
+    }
+  };
+
   const chartData = {
     labels,
     datasets: datasets.map((dataset, index) => ({
       ...dataset,
+      data: dataset.data.map(formatValue),
       backgroundColor:
         dataset.backgroundColor || COLOR_ARRAY_LIGHT[index % COLOR_ARRAY_LIGHT.length],
       borderColor: dataset.borderColor || COLOR_ARRAY[index % COLOR_ARRAY.length],
       borderWidth: dataset.borderWidth ?? 1,
     })),
   };
+
+  // Calculate max value for y-axis
+  const allValues = datasets.flatMap((d) => d.data.map(formatValue));
+  const maxValue = Math.max(...allValues, 1);
+  const yMax = unit !== 'none' ? Math.ceil(maxValue * 1.1) : undefined;
 
   const options = {
     ...defaultOptions,
@@ -321,6 +344,19 @@ export const BarChart: React.FC<BarChartProps> = ({
         display: !!title,
         text: title,
       },
+      tooltip: {
+        callbacks: {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          label: (context: any) => {
+            const label = context.dataset?.label || '';
+            const value = context.parsed?.y;
+            if (unit !== 'none') {
+              return `${label}: ${value?.toFixed(2) || 0}${unit}`;
+            }
+            return `${label}: ${value?.toLocaleString() || 0}`;
+          },
+        },
+      },
     },
     scales: {
       x: {
@@ -329,6 +365,21 @@ export const BarChart: React.FC<BarChartProps> = ({
       y: {
         stacked,
         beginAtZero: true,
+        max: yMax,
+        ticks:
+          unit !== 'none'
+            ? {
+                stepSize: 1,
+                callback: (value: string | number) => `${value}${unit}`,
+              }
+            : undefined,
+        title:
+          unit !== 'none'
+            ? {
+                display: true,
+                text: `Tokens (${unit})`,
+              }
+            : undefined,
       },
     },
   };

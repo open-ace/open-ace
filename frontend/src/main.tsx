@@ -9,6 +9,11 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { App } from './App';
 
+// Import Bootstrap and Bootstrap Icons locally (no external CDN)
+import 'bootstrap/dist/css/bootstrap.min.css';
+import 'bootstrap-icons/font/bootstrap-icons.css';
+import 'bootstrap/dist/js/bootstrap.bundle.min.js';
+
 // Mount the React application
 const rootElement = document.getElementById('root');
 

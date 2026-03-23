@@ -77,7 +77,7 @@ export function useConversationHistory(options: UseConversationHistoryOptions = 
   return useQuery({
     queryKey: ['conversation-history', page, { date, tool, host, sender, pageSize }],
     queryFn: () => messagesApi.getConversationHistory({ date, tool, host, sender }, page, pageSize),
-    staleTime: 30 * 1000,
+    staleTime: 60 * 1000, // 1 minute cache
   });
 }
 
@@ -86,7 +86,7 @@ export function useConversationTimeline(sessionId: string, enabled = true) {
     queryKey: ['conversation-timeline', sessionId],
     queryFn: () => messagesApi.getConversationTimeline(sessionId),
     enabled: enabled && !!sessionId,
-    staleTime: 60 * 1000,
+    staleTime: 5 * 60 * 1000, // 5 minutes cache for conversation details
   });
 }
 

@@ -9,7 +9,6 @@ import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
 import {
   Card,
-  Button,
   Select,
   Loading,
   Error,
@@ -43,15 +42,12 @@ export const Dashboard: React.FC = () => {
   const language = useLanguage();
   const [selectedHost, setSelectedHost] = useState<string>('');
   const [selectedTool, setSelectedTool] = useState<string>('');
-  const [autoRefresh, setAutoRefresh] = useState<boolean>(true);
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
-  const { todayData, summaryData, hosts, isLoading, isFetching, isError, error, refetch } = useDashboard({
+  const { todayData, summaryData, hosts, isLoading, isError, error, refetch } = useDashboard({
     tool: selectedTool || undefined,
     host: selectedHost || undefined,
-    autoRefresh,
-    refreshInterval: 60000,
   });
 
   // Get date range for trend data (last 30 days)
@@ -122,30 +118,8 @@ export const Dashboard: React.FC = () => {
       <div className="dashboard-header d-flex justify-content-between align-items-center mb-4">
         <h2>{t('dashboardTitle', language)}</h2>
         <div className="page-header-controls">
-          <Select options={hostOptions} value={selectedHost} onChange={setSelectedHost} size="sm" />
-          <Select options={toolOptions} value={selectedTool} onChange={setSelectedTool} size="sm" />
-          {/* Auto-refresh toggle */}
-          <div className="form-check form-switch">
-            <input
-              className="form-check-input"
-              type="checkbox"
-              id="autoRefreshSwitch"
-              checked={autoRefresh}
-              onChange={(e) => setAutoRefresh(e.target.checked)}
-            />
-            <label className="form-check-label" htmlFor="autoRefreshSwitch">
-              {t('autoRefresh', language)}
-            </label>
-          </div>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => refetch()}
-            loading={isFetching}
-            icon={isFetching ? undefined : <i className="bi bi-arrow-clockwise" />}
-          >
-            {t('refresh', language)}
-          </Button>
+          <Select options={hostOptions} value={selectedHost} onChange={setSelectedHost} size="sm" className="select-narrow" />
+          <Select options={toolOptions} value={selectedTool} onChange={setSelectedTool} size="sm" className="select-narrow" />
         </div>
       </div>
 

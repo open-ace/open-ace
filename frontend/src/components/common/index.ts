@@ -26,6 +26,9 @@ export { Avatar, AvatarGroup } from './Avatar';
 export { Dropdown, SplitButton } from './Dropdown';
 export { Divider } from './Divider';
 
+// Mode Switcher - Dual-track system
+export { ModeSwitcher } from './ModeSwitcher';
+
 // Chart components
 export {
   LineChart,

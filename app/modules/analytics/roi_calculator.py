@@ -207,7 +207,7 @@ class ROICalculator:
 
         # Get model breakdown for cost calculation
         model_query = '''
-            SELECT tool_name, model,
+            SELECT tool_name, models_used as model,
                    SUM(input_tokens) as input_tokens,
                    SUM(output_tokens) as output_tokens
             FROM daily_usage
@@ -223,7 +223,7 @@ class ROICalculator:
             model_query += ' AND tool_name = ?'
             model_params.append(tool_name)
 
-        model_query += ' GROUP BY tool_name, model'
+        model_query += ' GROUP BY tool_name, models_used'
 
         model_rows = self.db.fetch_all(model_query, model_params)
 
@@ -294,6 +294,9 @@ class ROICalculator:
         """
         Get ROI trend over months.
 
+        Optimized: Uses a single query with monthly grouping instead of
+        multiple queries per month.
+
         Args:
             months: Number of months to analyze.
             user_id: Optional user ID filter.
@@ -301,21 +304,138 @@ class ROICalculator:
         Returns:
             List of ROIMetrics.
         """
-        trends = []
         today = datetime.utcnow()
+        start_date = (today - timedelta(days=months * 30)).strftime('%Y-%m-%d')
 
-        for i in range(months):
-            end_date = today - timedelta(days=i*30)
-            start_date = end_date - timedelta(days=30)
+        # Check database type for SQL syntax
+        from app.repositories.database import is_postgresql
+        if is_postgresql():
+            # PostgreSQL uses to_char, need to cast date column
+            month_expr = "to_char(date::date, 'YYYY-MM')"
+        else:
+            # SQLite uses strftime
+            month_expr = "strftime('%Y-%m', date)"
 
-            roi = self.calculate_roi(
-                start_date.strftime('%Y-%m-%d'),
-                end_date.strftime('%Y-%m-%d'),
-                user_id
-            )
-            trends.append(roi)
+        # Single query to get monthly aggregated data
+        query = f'''
+            SELECT
+                {month_expr} as month,
+                COUNT(*) as request_count,
+                SUM(input_tokens) as total_input_tokens,
+                SUM(output_tokens) as total_output_tokens
+            FROM daily_usage
+            WHERE date >= %s
+        '''
+        params = [start_date]
 
-        return list(reversed(trends))
+        if user_id:
+            query += ' AND user_id = %s'
+            params.append(user_id)
+
+        query += f' GROUP BY {month_expr} ORDER BY month'
+
+        rows = self.db.fetch_all(query, params)
+
+        # Get model breakdown for cost calculation (single query)
+        model_query = f'''
+            SELECT
+                {month_expr} as month,
+                tool_name, models_used as model,
+                SUM(input_tokens) as input_tokens,
+                SUM(output_tokens) as output_tokens
+            FROM daily_usage
+            WHERE date >= %s
+        '''
+        model_params = [start_date]
+
+        if user_id:
+            model_query += ' AND user_id = %s'
+            model_params.append(user_id)
+
+        model_query += f' GROUP BY {month_expr}, tool_name, models_used'
+
+        model_rows = self.db.fetch_all(model_query, model_params)
+
+        # Group model data by month
+        model_data_by_month: Dict[str, List[Dict]] = {}
+        for row in model_rows:
+            month = row.get('month')
+            if month:
+                if month not in model_data_by_month:
+                    model_data_by_month[month] = []
+                model_data_by_month[month].append(row)
+
+        trends = []
+        for row in rows:
+            month = row.get('month')
+            if not month or len(month) < 7:
+                continue  # Skip invalid month data
+
+            requests = row.get('request_count') or 0
+            input_tokens = row.get('total_input_tokens') or 0
+            output_tokens = row.get('total_output_tokens') or 0
+            tokens = input_tokens + output_tokens
+
+            # Calculate costs for this month
+            total_cost = 0.0
+            total_input_cost = 0.0
+            total_output_cost = 0.0
+
+            for model_row in model_data_by_month.get(month, []):
+                model = model_row.get('model') or 'default'
+                m_input_tokens = model_row.get('input_tokens') or 0
+                m_output_tokens = model_row.get('output_tokens') or 0
+
+                input_cost, output_cost, cost = self.calculate_cost(
+                    m_input_tokens, m_output_tokens, model
+                )
+                total_input_cost += input_cost
+                total_output_cost += output_cost
+                total_cost += cost
+
+            # Calculate savings
+            estimated_hours_saved = requests * self.AVG_TIME_SAVED_PER_REQUEST / 60
+            estimated_savings = estimated_hours_saved * self.HOURLY_LABOR_COST
+
+            # Calculate ROI
+            if total_cost > 0:
+                roi_percentage = ((estimated_savings - total_cost) / total_cost) * 100
+            else:
+                roi_percentage = 0.0
+
+            # Create period string (first day of month to last day)
+            period_start = f"{month}-01"
+            # Calculate last day of month
+            try:
+                year, mon = int(month[:4]), int(month[5:7])
+                if mon == 12:
+                    next_month = datetime(year + 1, 1, 1)
+                else:
+                    next_month = datetime(year, mon + 1, 1)
+                period_end = (next_month - timedelta(days=1)).strftime('%Y-%m-%d')
+            except (ValueError, IndexError):
+                period_end = period_start
+
+            trends.append(ROIMetrics(
+                period=f"{period_start} to {period_end}",
+                start_date=period_start,
+                end_date=period_end,
+                total_cost=total_cost,
+                tokens_used=tokens,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                input_cost=total_input_cost,
+                output_cost=total_output_cost,
+                requests_made=requests,
+                estimated_hours_saved=estimated_hours_saved,
+                estimated_savings=estimated_savings,
+                productivity_gain=(self.PRODUCTIVITY_MULTIPLIER - 1) * 100,
+                roi_percentage=roi_percentage,
+                cost_per_request=total_cost / requests if requests > 0 else 0,
+                cost_per_token=total_cost / tokens if tokens > 0 else 0,
+            ))
+
+        return trends
 
     def get_roi_by_tool(
         self,
@@ -393,7 +513,7 @@ class ROICalculator:
             List of CostBreakdown objects.
         """
         query = '''
-            SELECT tool_name, model,
+            SELECT tool_name, models_used as model,
                    COUNT(*) as requests,
                    SUM(input_tokens) as input_tokens,
                    SUM(output_tokens) as output_tokens
@@ -406,7 +526,7 @@ class ROICalculator:
             query += ' AND user_id = ?'
             params.append(user_id)
 
-        query += ' GROUP BY tool_name, model ORDER BY input_tokens + output_tokens DESC'
+        query += ' GROUP BY tool_name, models_used ORDER BY SUM(input_tokens + output_tokens) DESC'
 
         rows = self.db.fetch_all(query, params)
 

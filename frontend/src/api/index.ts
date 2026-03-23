@@ -72,3 +72,56 @@ export type {
   RenderPromptResponse,
   CategoryInfo,
 } from './prompts';
+export { alertsApi } from './alerts';
+export type {
+  Alert,
+  AlertListResponse,
+  NotificationPreferences,
+} from './alerts';
+export { complianceApi } from './compliance';
+export type {
+  ReportType,
+  ComplianceReport,
+  SavedReport,
+  AuditPattern,
+  AuditAnomaly,
+  UserProfile,
+  SecurityScore,
+  RetentionRule,
+  RetentionHistory,
+  StorageEstimate,
+} from './compliance';
+export { roiApi } from './roi';
+export type {
+  ROIMetrics,
+  ROITrend,
+  ROIBreakdown,
+  CostBreakdown,
+  DailyCost,
+  OptimizationSuggestion,
+  EfficiencyReport,
+} from './roi';
+export { tenantApi } from './tenant';
+export type {
+  Tenant,
+  TenantQuota,
+  CreateTenantRequest,
+  UpdateTenantRequest,
+  UpdateTenantQuotaRequest,
+  TenantUsage,
+  TenantStats,
+  PlanQuota,
+} from './tenant';
+export { ssoApi } from './sso';
+export type {
+  SSOProvider,
+  PredefinedProvider,
+  RegisterProviderRequest,
+  SSOIdentity,
+  SSOSession,
+} from './sso';
+export { fetchApi } from './fetch';
+export type {
+  FetchStatus,
+  FetchResponse,
+} from './fetch';

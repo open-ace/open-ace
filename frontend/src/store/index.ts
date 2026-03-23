@@ -4,7 +4,7 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { User, Theme, Language } from '@/types';
+import type { User, Theme, Language, AppMode } from '@/types';
 
 interface AppState {
   // Auth state
@@ -16,6 +16,7 @@ interface AppState {
   theme: Theme;
   language: Language;
   sidebarCollapsed: boolean;
+  appMode: AppMode;
 
   // Actions
   setUser: (user: User | null) => void;
@@ -25,6 +26,7 @@ interface AppState {
   setLanguage: (language: Language) => void;
   toggleSidebar: () => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
+  setAppMode: (mode: AppMode) => void;
   logout: () => void;
 }
 
@@ -38,6 +40,7 @@ export const useAppStore = create<AppState>()(
       theme: 'light',
       language: 'en',
       sidebarCollapsed: false,
+      appMode: 'work',
 
       // Actions
       setUser: (user) => set({ user }),
@@ -52,6 +55,7 @@ export const useAppStore = create<AppState>()(
       setLanguage: (language) => set({ language }),
       toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
       setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
+      setAppMode: (appMode) => set({ appMode }),
       logout: () =>
         set({
           user: null,
@@ -65,6 +69,7 @@ export const useAppStore = create<AppState>()(
         theme: state.theme,
         language: state.language,
         sidebarCollapsed: state.sidebarCollapsed,
+        appMode: state.appMode,
       }),
     }
   )
@@ -77,3 +82,4 @@ export const useAuthLoading = () => useAppStore((state) => state.authLoading);
 export const useTheme = () => useAppStore((state) => state.theme);
 export const useLanguage = () => useAppStore((state) => state.language);
 export const useSidebarCollapsed = () => useAppStore((state) => state.sidebarCollapsed);
+export const useAppMode = () => useAppStore((state) => state.appMode);
