@@ -9,7 +9,11 @@ import { useAppStore } from '@/store';
 import { t } from '@/i18n';
 import { Button } from '@/components/common';
 
-export const Header: React.FC = () => {
+interface HeaderProps {
+  compact?: boolean;
+}
+
+export const Header: React.FC<HeaderProps> = ({ compact = false }) => {
   const { user, isAuthenticated, logout } = useAuth();
   const theme = useTheme();
   const language = useLanguage();
@@ -24,7 +28,7 @@ export const Header: React.FC = () => {
   };
 
   return (
-    <header className="header bg-white border-bottom px-3 py-2 d-flex align-items-center justify-content-between">
+    <header className={cn('header', compact && 'header-compact')}>
       {/* Left side - empty for now, can be used for breadcrumbs or other content */}
       <div className="d-flex align-items-center" />
 

@@ -54,4 +54,5 @@ export {
   useTheme,
   useLanguage,
   useSidebarCollapsed,
+  useAppMode,
 } from '@/store';

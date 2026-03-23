@@ -52,6 +52,12 @@ const translations: Record<Language, Translations> = {
     workspace: 'Workspace',
     security: 'Security',
 
+    // Mode - Dual-track system
+    workMode: 'Work',
+    manageMode: 'Manage',
+    governance: 'Governance',
+    tools: 'Tools',
+
     // Report
     myUsageReport: 'My Usage Report',
     user: 'User',
@@ -351,6 +357,12 @@ const translations: Record<Language, Translations> = {
     workspace: '工作区',
     security: '安全',
 
+    // Mode - Dual-track system
+    workMode: '工作',
+    manageMode: '管理',
+    governance: '治理',
+    tools: '工具',
+
     // Report
     myUsageReport: '我的使用报告',
     user: '用户',
@@ -643,6 +655,12 @@ const translations: Record<Language, Translations> = {
     report: 'レポート',
     workspace: 'ワークスペース',
     security: 'セキュリティ',
+
+    // Mode - Dual-track system
+    workMode: 'ワーク',
+    manageMode: '管理',
+    governance: 'ガバナンス',
+    tools: 'ツール',
 
     // Report
     myUsageReport: 'マイ使用レポート',
@@ -937,6 +955,12 @@ const translations: Record<Language, Translations> = {
     report: '보고서',
     workspace: '워크스페이스',
     security: '보안',
+
+    // Mode - Dual-track system
+    workMode: '워크',
+    manageMode: '관리',
+    governance: '거버넌스',
+    tools: '도구',
 
     // Report
     myUsageReport: '내 사용 보고서',

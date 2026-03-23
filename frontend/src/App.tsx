@@ -1,11 +1,16 @@
 /**
  * App Component - Main application component with routing
+ *
+ * Dual-track routing system:
+ * - /work/* - Work mode (WorkLayout with three-column layout)
+ * - /manage/* - Manage mode (ManageLayout with sidebar navigation)
+ * - /login, /logout - Public routes
  */
 
 import React, { useEffect } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { Layout } from '@/components/layout';
+import { Layout, WorkLayout, ManageLayout } from '@/components/layout';
 import {
   Dashboard,
   Messages,
@@ -52,8 +57,8 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
   return <>{children}</>;
 };
 
-// Main App Content (requires auth)
-const AppContent: React.FC = () => {
+// Legacy App Content (for backward compatibility with old routes)
+const LegacyAppContent: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const language = useAppStore((state) => state.language);
@@ -119,6 +124,78 @@ const AppContent: React.FC = () => {
     >
       {renderSection()}
     </Layout>
+  );
+};
+
+// Work Mode Routes
+const WorkRoutes: React.FC = () => {
+  return (
+    <WorkLayout>
+      <Routes>
+        <Route path="/" element={<Workspace />} />
+        <Route path="/sessions" element={<Sessions />} />
+        <Route path="/prompts" element={<Prompts />} />
+        <Route path="*" element={<Navigate to="/work" replace />} />
+      </Routes>
+    </WorkLayout>
+  );
+};
+
+// Manage Mode Routes
+const ManageRoutes: React.FC = () => {
+  return (
+    <ManageLayout>
+      <Routes>
+        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/analysis" element={<Analysis />} />
+        <Route path="/messages" element={<Messages />} />
+        <Route path="/audit" element={<Management />} />
+        <Route path="/quota" element={<Management />} />
+        <Route path="/security" element={<SecuritySettings />} />
+        <Route path="/users" element={<Management />} />
+        <Route path="*" element={<Navigate to="/manage/dashboard" replace />} />
+      </Routes>
+    </ManageLayout>
+  );
+};
+
+// Main App Content (requires auth)
+const AppContent: React.FC = () => {
+  // Sync app mode with URL on mount
+  useEffect(() => {
+    const path = window.location.pathname;
+    if (path.startsWith('/work')) {
+      useAppStore.getState().setAppMode('work');
+    } else if (path.startsWith('/manage')) {
+      useAppStore.getState().setAppMode('manage');
+    }
+  }, []);
+
+  return (
+    <Routes>
+      {/* Work Mode Routes */}
+      <Route path="/work/*" element={<WorkRoutes />} />
+
+      {/* Manage Mode Routes */}
+      <Route path="/manage/*" element={<ManageRoutes />} />
+
+      {/* Legacy Routes - redirect to appropriate mode */}
+      <Route path="/dashboard" element={<Navigate to="/manage/dashboard" replace />} />
+      <Route path="/messages" element={<Navigate to="/manage/messages" replace />} />
+      <Route path="/analysis" element={<Navigate to="/manage/analysis" replace />} />
+      <Route path="/management" element={<Navigate to="/manage/users" replace />} />
+      <Route path="/security" element={<Navigate to="/manage/security" replace />} />
+      <Route path="/workspace" element={<Navigate to="/work" replace />} />
+      <Route path="/sessions" element={<Navigate to="/work/sessions" replace />} />
+      <Route path="/prompts" element={<Navigate to="/work/prompts" replace />} />
+
+      {/* Report - Keep as standalone for now */}
+      <Route path="/report" element={<LegacyAppContent />} />
+
+      {/* Default redirect */}
+      <Route path="/" element={<Navigate to="/work" replace />} />
+      <Route path="*" element={<Navigate to="/work" replace />} />
+    </Routes>
   );
 };
 

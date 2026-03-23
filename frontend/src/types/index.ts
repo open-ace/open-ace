@@ -200,6 +200,9 @@ export type Theme = 'light' | 'dark';
 // Language types
 export type Language = 'en' | 'zh' | 'ja' | 'ko';
 
+// App Mode types - Dual-track system
+export type AppMode = 'work' | 'manage';
+
 // App state types
 export interface AppState {
   user: User | null;
