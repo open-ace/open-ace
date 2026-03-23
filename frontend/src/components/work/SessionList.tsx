@@ -107,7 +107,29 @@ export const SessionList: React.FC<SessionListProps> = ({
   };
 
   if (collapsed) {
-    return null;
+    // Show collapsed view with icon
+    return (
+      <div className="session-list-collapsed">
+        <button
+          className="session-list-collapsed-btn"
+          onClick={handleNewSession}
+          title={t('newSession', language)}
+        >
+          <i className="bi bi-plus-lg" />
+        </button>
+        <div className="session-list-collapsed-divider" />
+        {sessions.slice(0, 5).map((session: AgentSession) => (
+          <button
+            key={session.session_id}
+            className="session-list-collapsed-item"
+            onClick={() => handleSessionClick(session.session_id)}
+            title={session.title || `Session ${session.session_id.slice(0, 8)}`}
+          >
+            <i className="bi bi-chat-dots" />
+          </button>
+        ))}
+      </div>
+    );
   }
 
   return (

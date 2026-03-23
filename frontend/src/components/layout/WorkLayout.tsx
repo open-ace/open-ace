@@ -62,7 +62,7 @@ export const WorkLayout: React.FC<WorkLayoutProps> = ({ children }) => {
       <header className="work-header">
         <div className="header-left">
           <div className="logo">
-            <i className="bi bi-cpu fs-4" />
+            <img src="/static/icons/icon.svg" alt="Open ACE" style={{ width: '28px', height: '28px' }} />
             <span className="logo-text">Open ACE</span>
           </div>
           <ModeSwitcher className="header-mode-switcher" />

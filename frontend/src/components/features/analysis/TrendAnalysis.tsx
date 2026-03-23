@@ -9,42 +9,61 @@
  * - Peak usage periods
  * - Active users ranking
  * - User segmentation
+ *
+ * Performance optimizations:
+ * - Uses batch API to fetch all data in a single request
+ * - Skeleton loading for better perceived performance
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { cn } from '@/utils';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
 import {
   Card,
   StatCard,
-  Button,
   Select,
-  Loading,
   Error,
   EmptyState,
   BarChart,
   PieChart,
   LineChart,
   DoughnutChart,
+  Skeleton,
 } from '@/components/common';
 import { formatTokens } from '@/utils';
 import {
-  useKeyMetrics,
-  useDailyHourlyUsage,
-  useToolComparison,
-  usePeakUsage,
-  useUserRanking,
-  useConversationStats,
+  useBatchAnalysis,
   useHosts,
-  useUserSegmentation,
 } from '@/hooks';
+
+// Skeleton components
+const MetricsSkeleton: React.FC = () => (
+  <div className="row g-3 mb-4">
+    {[1, 2, 3, 4].map((i) => (
+      <div key={i} className="col-md-3">
+        <div className="card">
+          <div className="card-body">
+            <Skeleton height={16} width="60%" className="mb-2" />
+            <Skeleton height={32} width="80%" className="mb-1" />
+            <Skeleton height={12} width="40%" />
+          </div>
+        </div>
+      </div>
+    ))}
+  </div>
+);
+
+const ChartSkeleton: React.FC<{ height?: number }> = ({ height = 300 }) => (
+  <div style={{ height }}>
+    <Skeleton variant="rectangular" height={height} className="w-100" />
+  </div>
+);
 
 export const TrendAnalysis: React.FC = () => {
   const language = useLanguage();
   const [selectedTool, setSelectedTool] = useState<string>('');
   const [selectedHost, setSelectedHost] = useState<string>('');
-  const [autoRefresh, setAutoRefresh] = useState<boolean>(false);
 
   // Get hosts for filter
   const { data: hostsData } = useHosts();
@@ -83,38 +102,29 @@ export const TrendAnalysis: React.FC = () => {
   const [startDate, setStartDate] = useState(dateRange.start);
   const [endDate, setEndDate] = useState(dateRange.end);
 
+  // Track if this is the initial load
+  const isInitialLoad = useRef(true);
+
   // Update date range when quick range changes
-  React.useEffect(() => {
+  useEffect(() => {
     setStartDate(dateRange.start);
     setEndDate(dateRange.end);
   }, [dateRange]);
 
-  // Fetch data
+  // Fetch all data in a single batch request
   const {
-    data: keyMetrics,
-    isLoading: metricsLoading,
-    isFetching: metricsFetching,
-    isError: metricsError,
-    error: metricsErrorMsg,
-    refetch: refetchMetrics,
-  } = useKeyMetrics(startDate, endDate, selectedHost || undefined);
-  const { data: dailyHourly, isLoading: dailyLoading } = useDailyHourlyUsage(startDate, endDate, selectedHost || undefined);
-  const { data: toolComparison, isLoading: toolsLoading } = useToolComparison(startDate, endDate, selectedHost || undefined);
-  const { data: peakUsage } = usePeakUsage(startDate, endDate, selectedHost || undefined);
-  const { data: userRanking } = useUserRanking(startDate, endDate, selectedHost || undefined, 10);
-  const { data: conversationStats } = useConversationStats(startDate, endDate, selectedHost || undefined);
-  const { data: userSegmentation } = useUserSegmentation(startDate, endDate, selectedHost || undefined);
+    data: batchData,
+    isLoading,
+    isError,
+    error,
+  } = useBatchAnalysis(startDate, endDate, selectedHost || undefined);
 
-  // Auto-refresh effect
-  React.useEffect(() => {
-    if (autoRefresh) {
-      const interval = setInterval(() => {
-        refetchMetrics();
-      }, 60000);
-      return () => clearInterval(interval);
+  // Mark initial load complete
+  useEffect(() => {
+    if (!isLoading && batchData) {
+      isInitialLoad.current = false;
     }
-    return undefined;
-  }, [autoRefresh, refetchMetrics]);
+  }, [isLoading, batchData]);
 
   // Tool options
   const toolOptions = useMemo(
@@ -136,7 +146,14 @@ export const TrendAnalysis: React.FC = () => {
     [hosts, language]
   );
 
-  const isLoading = metricsLoading || dailyLoading || toolsLoading;
+  // Extract data from batch response
+  const keyMetrics = batchData?.key_metrics;
+  const dailyHourly = batchData?.daily_hourly_usage;
+  const peakUsage = batchData?.peak_usage;
+  const userRanking = batchData?.user_ranking;
+  const conversationStats = batchData?.conversation_stats;
+  const toolComparison = batchData?.tool_comparison;
+  const userSegmentation = batchData?.user_segmentation;
 
   // Prepare chart data
   const dailyTrend = dailyHourly?.daily || [];
@@ -147,34 +164,60 @@ export const TrendAnalysis: React.FC = () => {
   const activeUsers = userRanking?.users?.length || 0;
   const healthScore = calculateHealthScore(keyMetrics, conversationStats);
 
+  // Show skeleton on initial load
+  if (isLoading && isInitialLoad.current) {
+    return (
+      <div className="trend-analysis">
+        <div className="page-header d-flex justify-content-between align-items-center mb-4">
+          <Skeleton height={32} width={200} />
+          <Skeleton height={32} width={100} />
+        </div>
+
+        <Card className="mb-4">
+          <div className="row g-3">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="col-md-3">
+                <Skeleton height={38} />
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        <MetricsSkeleton />
+
+        <div className="row mb-4">
+          <div className="col-12">
+            <Card title={t('usageHeatmap', language)}>
+              <ChartSkeleton height={100} />
+            </Card>
+          </div>
+        </div>
+
+        <div className="row mb-4">
+          <div className="col-md-8">
+            <Card title={t('tokenTrend', language)}>
+              <ChartSkeleton height={300} />
+            </Card>
+          </div>
+          <div className="col-md-4">
+            <Card title={t('topTools', language)}>
+              <ChartSkeleton height={300} />
+            </Card>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (isError) {
+    return <Error message={error?.message || t('error', language)} />;
+  }
+
   return (
     <div className="trend-analysis">
       {/* Header */}
       <div className="page-header d-flex justify-content-between align-items-center mb-4">
         <h2>{t('tokenTrend', language)}</h2>
-        <div className="page-header-controls">
-          <div className="form-check form-switch">
-            <input
-              className="form-check-input"
-              type="checkbox"
-              id="trendAutoRefreshSwitch"
-              checked={autoRefresh}
-              onChange={(e) => setAutoRefresh(e.target.checked)}
-            />
-            <label className="form-check-label" htmlFor="trendAutoRefreshSwitch">
-              {t('autoRefresh', language)}
-            </label>
-          </div>
-          <Button
-            variant="primary"
-            size="sm"
-            icon={metricsFetching ? undefined : <i className="bi bi-arrow-clockwise" />}
-            onClick={() => refetchMetrics()}
-            loading={metricsFetching}
-          >
-            {t('refresh', language)}
-          </Button>
-        </div>
       </div>
 
       {/* Filters */}
@@ -260,274 +303,248 @@ export const TrendAnalysis: React.FC = () => {
         </div>
       </Card>
 
-      {isLoading ? (
-        <Loading size="lg" text={t('loading', language)} />
-      ) : metricsError ? (
-        <Error
-          message={metricsErrorMsg?.message || t('error', language)}
-          onRetry={() => refetchMetrics()}
-        />
-      ) : (
-        <>
-          {/* Key Metrics - 4 cards */}
-          <div className="row g-3 mb-4">
-            <div className="col-md-3">
-              <StatCard
-                label={t('totalTokens', language)}
-                value={formatTokens(keyMetrics?.total_tokens || 0)}
-                icon={<i className="bi bi-cpu fs-4" />}
-                variant="primary"
+      {/* Key Metrics - 4 cards */}
+      <div className="row g-3 mb-4">
+        <div className="col-md-3">
+          <StatCard
+            label={t('totalTokens', language)}
+            value={formatTokens(keyMetrics?.total_tokens || 0)}
+            icon={<i className="bi bi-cpu fs-4" />}
+            variant="primary"
+          />
+        </div>
+        <div className="col-md-3">
+          <StatCard
+            label={t('totalRequests', language)}
+            value={(keyMetrics?.total_messages || 0).toLocaleString()}
+            icon={<i className="bi bi-chat-dots fs-4" />}
+            variant="success"
+          />
+        </div>
+        <div className="col-md-3">
+          <StatCard
+            label={t('activeUsers', language)}
+            value={activeUsers.toString()}
+            icon={<i className="bi bi-people fs-4" />}
+            variant="info"
+          />
+        </div>
+        <div className="col-md-3">
+          <StatCard
+            label={t('healthScore', language)}
+            value={`${healthScore}%`}
+            icon={<i className="bi bi-heart-pulse fs-4" />}
+            variant={healthScore >= 80 ? 'success' : healthScore >= 60 ? 'warning' : 'danger'}
+          />
+        </div>
+      </div>
+
+      {/* Usage Heatmap */}
+      <div className="row mb-4">
+        <div className="col-12">
+          <Card title={t('usageHeatmap', language)}>
+            {hourlyData.length > 0 ? (
+              <UsageHeatmap hourlyData={hourlyData} language={language} />
+            ) : (
+              <EmptyState icon="bi-calendar3" title={t('noData', language)} />
+            )}
+          </Card>
+        </div>
+      </div>
+
+      {/* Token Trend Chart */}
+      <div className="row mb-4">
+        <div className="col-12">
+          <Card title={t('tokenTrend', language)}>
+            {dailyTrend.length > 0 ? (
+              <LineChart
+                labels={dailyTrend.map((d) => d.date)}
+                datasets={[
+                  {
+                    label: t('tokens', language),
+                    data: dailyTrend.map((d) => d.tokens),
+                  },
+                ]}
+                height={300}
+                unit="M"
               />
-            </div>
-            <div className="col-md-3">
-              <StatCard
-                label={t('totalRequests', language)}
-                value={(keyMetrics?.total_messages || 0).toLocaleString()}
-                icon={<i className="bi bi-chat-dots fs-4" />}
-                variant="success"
-              />
-            </div>
-            <div className="col-md-3">
-              <StatCard
-                label={t('activeUsers', language)}
-                value={activeUsers.toString()}
-                icon={<i className="bi bi-people fs-4" />}
-                variant="info"
-              />
-            </div>
-            <div className="col-md-3">
-              <StatCard
-                label={t('healthScore', language)}
-                value={`${healthScore}%`}
-                icon={<i className="bi bi-heart-pulse fs-4" />}
-                variant={healthScore >= 80 ? 'success' : healthScore >= 60 ? 'warning' : 'danger'}
-              />
-            </div>
-          </div>
+            ) : (
+              <EmptyState icon="bi-graph-up" title={t('noData', language)} />
+            )}
+          </Card>
+        </div>
+      </div>
 
-          {/* Usage Heatmap */}
-          <div className="row mb-4">
-            <div className="col-12">
-              <Card title={t('usageHeatmap', language)}>
-                {hourlyData.length > 0 ? (
-                  <UsageHeatmap hourlyData={hourlyData} language={language} />
-                ) : (
-                  <EmptyState icon="bi-calendar3" title={t('noData', language)} />
-                )}
-              </Card>
-            </div>
-          </div>
-
-          {/* Charts Row */}
-          <div className="row mb-4">
-            <div className="col-md-8">
-              <Card title={t('tokenTrend', language)}>
-                {dailyTrend.length > 0 ? (
-                  <LineChart
-                    labels={dailyTrend.map((d) => d.date)}
-                    datasets={[
-                      {
-                        label: t('tokens', language),
-                        data: dailyTrend.map((d) => d.tokens),
-                      },
-                    ]}
-                    height={300}
-                    unit="M"
-                  />
-                ) : (
-                  <EmptyState icon="bi-graph-up" title={t('noData', language)} />
-                )}
-              </Card>
-            </div>
-            <div className="col-md-4">
-              <Card title={t('topTools', language)}>
-                {tools.length > 0 ? (
-                  <BarChart
-                    labels={tools.map((t) => t.tool_name)}
-                    datasets={[
-                      {
-                        label: t('usage', language),
-                        data: tools.map((t) => t.total_tokens),
-                      },
-                    ]}
-                    height={300}
-                    horizontal
-                    showLegend={false}
-                  />
-                ) : (
-                  <EmptyState icon="bi-bar-chart" title={t('noData', language)} />
-                )}
-              </Card>
-            </div>
-          </div>
-
-          {/* Tables Row */}
-          <div className="row mb-4">
-            {/* Peak Usage Periods */}
-            <div className="col-md-6">
-              <Card title={t('peakUsagePeriods', language)}>
-                {peakUsage?.peak_days && peakUsage.peak_days.length > 0 ? (
-                  <div className="table-responsive">
-                    <table className="table table-sm table-hover">
-                      <thead>
-                        <tr>
-                          <th>{t('tableDate', language)}</th>
-                          <th>{t('tableTokens', language)}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {peakUsage.peak_days.slice(0, 5).map((day, index) => (
-                          <tr key={index}>
-                            <td>{day.date}</td>
-                            <td>{formatTokens(day.tokens)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <EmptyState icon="bi-graph-up-arrow" title={t('noData', language)} />
-                )}
-              </Card>
-            </div>
-
-            {/* Top 10 Active Users */}
-            <div className="col-md-6">
-              <Card title={t('topActiveUsers', language)}>
-                {userRanking?.users && userRanking.users.length > 0 ? (
-                  <div className="table-responsive">
-                    <table className="table table-sm table-hover">
-                      <thead>
-                        <tr>
-                          <th>#</th>
-                          <th>{t('tableUser', language)}</th>
-                          <th>{t('tableMessages', language)}</th>
-                          <th>{t('tableTokens', language)}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {userRanking.users.slice(0, 10).map((user, index) => (
-                          <tr key={user.user_id || index}>
-                            <td>{index + 1}</td>
-                            <td>{user.username || `User ${user.user_id}`}</td>
-                            <td>{user.requests.toLocaleString()}</td>
-                            <td>{formatTokens(user.tokens)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <EmptyState icon="bi-people" title={t('noData', language)} />
-                )}
-              </Card>
-            </div>
-          </div>
-
-          {/* Detailed Stats */}
-          <div className="row mb-4">
-            <div className="col-md-6">
-              <Card title={t('sessionStatistics', language)}>
-                <table className="table table-sm">
+      {/* Tables Row */}
+      <div className="row mb-4">
+        {/* Peak Usage Periods */}
+        <div className="col-md-6">
+          <Card title={t('peakUsagePeriods', language)}>
+            {peakUsage?.peak_days && peakUsage.peak_days.length > 0 ? (
+              <div style={{ minHeight: 380 }}>
+                <table className="table table-sm table-hover" style={{ tableLayout: 'fixed', width: '100%' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ width: '10%' }}>#</th>
+                      <th style={{ width: '45%' }}>{t('tableDate', language)}</th>
+                      <th style={{ width: '45%' }} className="text-end">{t('tableTokens', language)}</th>
+                    </tr>
+                  </thead>
                   <tbody>
-                    <tr>
-                      <td>{t('avgMessagesPerSession', language)}</td>
-                      <td className="text-end">
-                        {keyMetrics?.avg_messages_per_session?.toFixed(1) || '0'}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td>{t('avgTokensPerSession', language)}</td>
-                      <td className="text-end">
-                        {formatTokens(keyMetrics?.avg_tokens_per_session || 0)}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td>{t('totalSessions', language)}</td>
-                      <td className="text-end">
-                        {keyMetrics?.total_sessions?.toLocaleString() || '0'}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td>{t('totalConversations', language)}</td>
-                      <td className="text-end">
-                        {conversationStats?.total_conversations?.toLocaleString() || '0'}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td>{t('multiTurnRatio', language)}</td>
-                      <td className="text-end">
-                        {conversationStats?.avg_conversation_length?.toFixed(1) || '0'}
-                      </td>
-                    </tr>
+                    {peakUsage.peak_days.slice(0, 10).map((day, index) => (
+                      <tr key={index}>
+                        <td>{index + 1}</td>
+                        <td>{day.date}</td>
+                        <td className="text-end">{formatTokens(day.tokens)}</td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
-              </Card>
-            </div>
-            <div className="col-md-6">
-              <Card title={t('userSegmentation', language)}>
-                {userSegmentation && (userSegmentation.high + userSegmentation.medium + userSegmentation.low + userSegmentation.dormant) > 0 ? (
-                  <DoughnutChart
-                    labels={['High (>10K)', 'Medium (1K-10K)', 'Low (<1K)', 'Dormant']}
-                    data={[
-                      userSegmentation.high || 0,
-                      userSegmentation.medium || 0,
-                      userSegmentation.low || 0,
-                      userSegmentation.dormant || 0,
-                    ]}
-                    backgroundColor={[
-                      'rgba(255, 99, 132, 0.8)',
-                      'rgba(255, 206, 86, 0.8)',
-                      'rgba(75, 192, 192, 0.8)',
-                      'rgba(201, 203, 207, 0.8)',
-                    ]}
-                    height={200}
-                  />
-                ) : (
-                  <EmptyState icon="bi-people" title={t('noData', language)} />
-                )}
-              </Card>
-            </div>
-          </div>
+              </div>
+            ) : (
+              <EmptyState icon="bi-graph-up-arrow" title={t('noData', language)} />
+            )}
+          </Card>
+        </div>
 
-          {/* Tool Comparison Chart */}
-          <div className="row mb-4">
-            <div className="col-md-6">
-              <Card title={t('toolComparison', language)}>
-                {tools.length > 0 ? (
-                  <BarChart
-                    labels={tools.map((tool) => tool.tool_name.toUpperCase())}
-                    datasets={[
-                      {
-                        label: t('tableTokens', language),
-                        data: tools.map((tool) => tool.total_tokens),
-                        backgroundColor: 'rgba(54, 162, 235, 0.6)',
-                      },
-                    ]}
-                    height={250}
-                    showLegend={false}
-                  />
-                ) : (
-                  <EmptyState icon="bi-bar-chart" title={t('noData', language)} />
-                )}
-              </Card>
+        {/* Top 10 Active Users */}
+        <div className="col-md-6">
+          <Card title={t('topActiveUsers', language)}>
+            {userRanking?.users && userRanking.users.length > 0 ? (
+              <div style={{ minHeight: 380 }}>
+                <table className="table table-sm table-hover" style={{ tableLayout: 'fixed', width: '100%' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ width: '10%' }}>#</th>
+                      <th style={{ width: '40%' }}>{t('tableUser', language)}</th>
+                      <th style={{ width: '25%' }} className="text-end">{t('tableMessages', language)}</th>
+                      <th style={{ width: '25%' }} className="text-end">{t('tableTokens', language)}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {userRanking.users.slice(0, 10).map((user, index) => (
+                      <tr key={user.user_id || index}>
+                        <td>{index + 1}</td>
+                        <td className="text-truncate">{user.username || `User ${user.user_id}`}</td>
+                        <td className="text-end">{user.requests.toLocaleString()}</td>
+                        <td className="text-end">{formatTokens(user.tokens)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <EmptyState icon="bi-people" title={t('noData', language)} />
+            )}
+          </Card>
+        </div>
+      </div>
+
+      {/* Detailed Stats */}
+      <div className="row mb-4">
+        <div className="col-md-6">
+          <Card title={t('sessionStatistics', language)}>
+            <div style={{ height: 200 }}>
+              <table className="table table-sm">
+                <tbody>
+                  <tr>
+                    <td>{t('avgMessagesPerSession', language)}</td>
+                    <td className="text-end">
+                      {Math.round(keyMetrics?.avg_messages_per_session || 0)}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>{t('avgTokensPerSession', language)}</td>
+                    <td className="text-end">
+                      {formatTokens(keyMetrics?.avg_tokens_per_session || 0)}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>{t('totalSessions', language)}</td>
+                    <td className="text-end">
+                      {keyMetrics?.total_sessions?.toLocaleString() || '0'}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>{t('totalConversations', language)}</td>
+                    <td className="text-end">
+                      {conversationStats?.total_conversations?.toLocaleString() || '0'}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>{t('multiTurnRatio', language)}</td>
+                    <td className="text-end">
+                      {conversationStats?.avg_conversation_length?.toFixed(1) || '0'}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
-            <div className="col-md-6">
-              <Card title={t('tokenDistribution', language)}>
-                {keyMetrics?.top_tools && keyMetrics.top_tools.length > 0 ? (
-                  <PieChart
-                    labels={keyMetrics.top_tools.map((tool) => tool.tool)}
-                    data={keyMetrics.top_tools.map((tool) => tool.count)}
-                    height={250}
-                  />
-                ) : (
-                  <EmptyState icon="bi-pie-chart" title={t('noData', language)} />
-                )}
-              </Card>
-            </div>
-          </div>
-        </>
-      )}
+          </Card>
+        </div>
+        <div className="col-md-6">
+          <Card title={t('userSegmentation', language)}>
+            {userSegmentation && (userSegmentation.high + userSegmentation.medium + userSegmentation.low + userSegmentation.dormant) > 0 ? (
+              <DoughnutChart
+                labels={['High (>10K)', 'Medium (1K-10K)', 'Low (<1K)', 'Dormant']}
+                data={[
+                  userSegmentation.high || 0,
+                  userSegmentation.medium || 0,
+                  userSegmentation.low || 0,
+                  userSegmentation.dormant || 0,
+                ]}
+                backgroundColor={[
+                  'rgba(255, 99, 132, 0.8)',
+                  'rgba(255, 206, 86, 0.8)',
+                  'rgba(75, 192, 192, 0.8)',
+                  'rgba(201, 203, 207, 0.8)',
+                ]}
+                height={200}
+              />
+            ) : (
+              <EmptyState icon="bi-people" title={t('noData', language)} />
+            )}
+          </Card>
+        </div>
+      </div>
+
+      {/* Tool Comparison Chart */}
+      <div className="row mb-4">
+        <div className="col-md-6">
+          <Card title={t('toolComparison', language)}>
+            {tools.length > 0 ? (
+              <BarChart
+                labels={tools.map((tool) => tool.tool_name.toUpperCase())}
+                datasets={[
+                  {
+                    label: t('tableTokens', language),
+                    data: tools.map((tool) => tool.total_tokens),
+                    backgroundColor: 'rgba(54, 162, 235, 0.6)',
+                  },
+                ]}
+                height={250}
+                showLegend={false}
+                unit="M"
+              />
+            ) : (
+              <EmptyState icon="bi-bar-chart" title={t('noData', language)} />
+            )}
+          </Card>
+        </div>
+        <div className="col-md-6">
+          <Card title={t('tokenDistribution', language)}>
+            {keyMetrics?.top_tools && keyMetrics.top_tools.length > 0 ? (
+              <PieChart
+                labels={keyMetrics.top_tools.map((tool) => tool.tool.toUpperCase())}
+                data={keyMetrics.top_tools.map((tool) => tool.count)}
+                height={250}
+              />
+            ) : (
+              <EmptyState icon="bi-pie-chart" title={t('noData', language)} />
+            )}
+          </Card>
+        </div>
+      </div>
     </div>
   );
 };

@@ -14,7 +14,7 @@ import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import { promptsApi } from '@/api';
 import type { PromptTemplate } from '@/api';
-import { Loading, EmptyState, SimpleTabs } from '@/components/common';
+import { Loading, EmptyState, SimpleTabs, useToast } from '@/components/common';
 
 interface AssistPanelProps {
   collapsed?: boolean;
@@ -23,6 +23,7 @@ interface AssistPanelProps {
 export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) => {
   const language = useLanguage();
   const navigate = useNavigate();
+  const toast = useToast();
   const [activeTab, setActiveTab] = useState('prompts');
   const [prompts, setPrompts] = useState<PromptTemplate[]>([]);
   const [promptsLoading, setPromptsLoading] = useState(true);
@@ -59,6 +60,11 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
 
   const handleToolClick = (url: string) => {
     navigate(url);
+  };
+
+  const handleDocClick = (_docId: string, docTitle: string) => {
+    // Show toast notification (help pages coming soon)
+    toast.info(docTitle, t('comingSoon', language) || 'Coming soon...');
   };
 
   const handleCopyPrompt = async (content: string) => {
@@ -141,7 +147,10 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
       <ul className="assist-items list-unstyled">
         {helpDocs.map((doc) => (
           <li key={doc.id}>
-            <button className="assist-item assist-item-clickable">
+            <button
+              className="assist-item assist-item-clickable"
+              onClick={() => handleDocClick(doc.id, doc.title)}
+            >
               <i className={cn('bi', doc.icon, 'me-2')} />
               <span>{doc.title}</span>
             </button>
@@ -176,6 +185,7 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
   return (
     <div className="assist-panel">
       <SimpleTabs tabs={tabs} defaultTab={activeTab} onTabChange={setActiveTab} />
+      <toast.ToastContainer />
     </div>
   );
 };

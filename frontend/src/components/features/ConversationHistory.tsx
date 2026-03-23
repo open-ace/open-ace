@@ -1,8 +1,12 @@
 /**
  * ConversationHistory Component - Conversation history table with filters
+ *
+ * Performance optimizations:
+ * - Skeleton loading for better perceived performance
+ * - React Query caching with staleTime
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { cn } from '@/utils';
 import { useConversationHistory, useConversationTimeline, useHosts } from '@/hooks';
 import { useLanguage } from '@/store';
@@ -17,6 +21,7 @@ import {
   Modal,
   Dropdown,
   LineChart,
+  Skeleton,
 } from '@/components/common';
 import { formatDateTime, formatTokens } from '@/utils';
 import type { ConversationHistory as ConversationHistoryType } from '@/api';
@@ -42,6 +47,30 @@ const defaultColumns: ColumnDef[] = [
   { key: 'actions', label: 'actions', visible: true, sortable: false },
 ];
 
+// Skeleton components
+const TableSkeleton: React.FC<{ rows?: number }> = ({ rows = 10 }) => (
+  <div className="table-responsive">
+    <table className="table table-hover">
+      <thead>
+        <tr>
+          {['Date', 'Tool', 'Host', 'Sender', 'Messages', 'Tokens', 'Last Message', 'Actions'].map((header) => (
+            <th key={header}><Skeleton height={16} width="80%" /></th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {Array.from({ length: rows }).map((_, i) => (
+          <tr key={i}>
+            {Array.from({ length: 8 }).map((_, j) => (
+              <td key={j}><Skeleton height={14} width={j === 7 ? 40 : '90%'} /></td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+);
+
 export const ConversationHistory: React.FC = () => {
   const language = useLanguage();
   const [filters, setFilters] = useState<{
@@ -57,6 +86,9 @@ export const ConversationHistory: React.FC = () => {
   const [sortColumn, setSortColumn] = useState<string>('');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
+  // Track if this is the initial load
+  const isInitialLoad = useRef(true);
+
   // Get hosts for filter
   const { data: hostsData } = useHosts();
   const hosts = hostsData || [];
@@ -68,6 +100,13 @@ export const ConversationHistory: React.FC = () => {
   });
 
   const conversations = data?.data ?? [];
+
+  // Mark initial load complete
+  useEffect(() => {
+    if (!isLoading && data) {
+      isInitialLoad.current = false;
+    }
+  }, [isLoading, data]);
 
   // Tool options
   const toolOptions = useMemo(
@@ -220,11 +259,15 @@ export const ConversationHistory: React.FC = () => {
       </Card>
 
       {/* Table */}
-      {isLoading ? (
+      {isLoading && isInitialLoad.current ? (
+        <Card>
+          <TableSkeleton rows={ITEMS_PER_PAGE} />
+        </Card>
+      ) : isLoading ? (
         <Loading size="lg" text={t('loading', language)} />
       ) : sortedConversations.length === 0 ? (
         <EmptyState
-          icon="bi-chat-history"
+          icon="bi-chat-square-text"
           title={t('noData', language)}
           description="No conversation history found"
         />
@@ -405,32 +448,187 @@ interface ConversationDetailModalProps {
   onClose: () => void;
 }
 
+// Message item component with expand/collapse functionality
+interface MessageItemProps {
+  msg: {
+    id: number;
+    role: string;
+    content: string;
+    timestamp: string;
+    tokens_used: number;
+    input_tokens: number;
+    output_tokens: number;
+    model?: string;
+    sender_name?: string;
+  };
+  language: Language;
+}
+
+const MessageItem: React.FC<MessageItemProps> = ({ msg, language }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const MAX_CONTENT_LENGTH = 500;
+
+  const shouldTruncate = msg.content && msg.content.length > MAX_CONTENT_LENGTH;
+  const displayContent = shouldTruncate && !isExpanded
+    ? msg.content.substring(0, MAX_CONTENT_LENGTH) + '...'
+    : msg.content;
+
+  const getRoleIcon = (role: string) => {
+    switch (role) {
+      case 'user':
+        return 'bi-person-fill';
+      case 'assistant':
+        return 'bi-robot';
+      case 'system':
+        return 'bi-gear-fill';
+      case 'toolResult':
+        return 'bi-wrench';
+      default:
+        return 'bi-chat-dots';
+    }
+  };
+
+  const getRoleBadgeClass = (role: string) => {
+    switch (role) {
+      case 'user':
+        return 'bg-primary';
+      case 'assistant':
+        return 'bg-success';
+      case 'system':
+        return 'bg-secondary';
+      case 'toolResult':
+        return 'bg-info';
+      default:
+        return 'bg-secondary';
+    }
+  };
+
+  return (
+    <div
+      className={cn(
+        'message-item mb-3 p-3 rounded',
+        msg.role === 'user' ? 'bg-light' : 'bg-white border'
+      )}
+    >
+      {/* Header: Role, Sender, Model, Time */}
+      <div className="d-flex justify-content-between align-items-start mb-2">
+        <div className="d-flex align-items-center flex-wrap gap-2">
+          <i className={cn('bi', getRoleIcon(msg.role))} />
+          <span className={cn('badge', getRoleBadgeClass(msg.role))}>
+            {msg.role}
+          </span>
+          {msg.sender_name && (
+            <span className="text-muted small">
+              <i className="bi bi-person me-1" />
+              {msg.sender_name}
+            </span>
+          )}
+          {msg.model && (
+            <span className="badge bg-dark">
+              <i className="bi bi-cpu me-1" />
+              {msg.model}
+            </span>
+          )}
+        </div>
+        <small className="text-muted">
+          <i className="bi bi-clock me-1" />
+          {formatDateTime(msg.timestamp)}
+        </small>
+      </div>
+
+      {/* Content */}
+      <div className="message-content">
+        <pre
+          className="mb-0"
+          style={{
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            fontSize: '0.875rem',
+            maxHeight: isExpanded ? 'none' : '300px',
+            overflow: isExpanded ? 'visible' : 'auto'
+          }}
+        >
+          {displayContent}
+        </pre>
+      </div>
+
+      {/* Expand/Collapse Button */}
+      {shouldTruncate && (
+        <Button
+          variant="link"
+          size="sm"
+          className="p-0 mt-2"
+          onClick={() => setIsExpanded(!isExpanded)}
+        >
+          <i className={cn('bi me-1', isExpanded ? 'bi-chevron-up' : 'bi-chevron-down')} />
+          {isExpanded ? t('collapse', language) : t('expand', language)}
+        </Button>
+      )}
+
+      {/* Token Info */}
+      {(msg.tokens_used > 0 || msg.input_tokens > 0 || msg.output_tokens > 0) && (
+        <div className="d-flex gap-3 mt-2 flex-wrap">
+          {msg.tokens_used > 0 && (
+            <small className="text-muted">
+              <i className="bi bi-coin me-1" />
+              {t('tokens', language)}: {formatTokens(msg.tokens_used)}
+            </small>
+          )}
+          {msg.input_tokens > 0 && (
+            <small className="text-muted">
+              <i className="bi bi-box-arrow-in-right me-1" />
+              {t('inputTokens', language)}: {formatTokens(msg.input_tokens)}
+            </small>
+          )}
+          {msg.output_tokens > 0 && (
+            <small className="text-muted">
+              <i className="bi bi-box-arrow-right me-1" />
+              {t('outputTokens', language)}: {formatTokens(msg.output_tokens)}
+            </small>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
   sessionId,
   language,
   onClose,
 }) => {
   const [activeTab, setActiveTab] = useState<'timeline' | 'latency'>('timeline');
+  const [roleFilter, setRoleFilter] = useState<string>('all');
   const { data: messages, isLoading, isError } = useConversationTimeline(sessionId);
+
+  // Filter messages by role
+  const filteredMessages = useMemo(() => {
+    if (!messages) return [];
+    if (roleFilter === 'all') return messages;
+    return messages.filter(msg => msg.role === roleFilter);
+  }, [messages, roleFilter]);
 
   // Calculate latency data from messages
   const latencyData = useMemo(() => {
     if (!messages || messages.length < 2) return [];
 
-    const latencies: Array<{ index: number; role: string; latency: number }> = [];
+    const latencies: Array<{ index: number; role: string; latency: number; timestamp: string }> = [];
     let lastUserTime: Date | null = null;
+    let lastUserIndex = 0;
 
     messages.forEach((msg, index) => {
       const msgTime = new Date(msg.timestamp);
       if (msg.role === 'user') {
         lastUserTime = msgTime;
-      } else if (msg.role === 'assistant' && lastUserTime) {
+        lastUserIndex = index;
+      } else if ((msg.role === 'assistant' || msg.role === 'toolResult') && lastUserTime) {
         const latency = (msgTime.getTime() - lastUserTime.getTime()) / 1000; // seconds
         if (latency > 0) {
           latencies.push({
-            index: index + 1,
+            index: lastUserIndex + 1,
             role: msg.role,
             latency: Math.round(latency * 100) / 100,
+            timestamp: msg.timestamp,
           });
         }
         lastUserTime = null;
@@ -440,12 +638,71 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
     return latencies;
   }, [messages]);
 
+  // Calculate latency statistics
+  const latencyStats = useMemo(() => {
+    if (latencyData.length === 0) return null;
+
+    const latencies = latencyData.map(d => d.latency);
+    const avg = latencies.reduce((a, b) => a + b, 0) / latencies.length;
+    const max = Math.max(...latencies);
+    const min = Math.min(...latencies);
+    const sorted = [...latencies].sort((a, b) => a - b);
+    const median = sorted.length % 2 === 0
+      ? (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2
+      : sorted[Math.floor(sorted.length / 2)];
+
+    return {
+      avg: Math.round(avg * 100) / 100,
+      max: Math.round(max * 100) / 100,
+      min: Math.round(min * 100) / 100,
+      median: Math.round(median * 100) / 100,
+      count: latencies.length,
+    };
+  }, [latencyData]);
+
+  // Calculate message statistics
+  const messageStats = useMemo(() => {
+    if (!messages) return null;
+
+    const stats = {
+      total: messages.length,
+      user: 0,
+      assistant: 0,
+      system: 0,
+      toolResult: 0,
+      totalTokens: 0,
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+    };
+
+    messages.forEach(msg => {
+      if (msg.role === 'user') stats.user++;
+      else if (msg.role === 'assistant') stats.assistant++;
+      else if (msg.role === 'system') stats.system++;
+      else if (msg.role === 'toolResult') stats.toolResult++;
+      stats.totalTokens += msg.tokens_used || 0;
+      stats.totalInputTokens += msg.input_tokens || 0;
+      stats.totalOutputTokens += msg.output_tokens || 0;
+    });
+
+    return stats;
+  }, [messages]);
+
+  // Role filter options
+  const roleFilterOptions = [
+    { value: 'all', label: t('all', language) },
+    { value: 'user', label: 'User' },
+    { value: 'assistant', label: 'Assistant' },
+    { value: 'system', label: 'System' },
+    { value: 'toolResult', label: 'Tool Result' },
+  ];
+
   return (
     <Modal
       isOpen={true}
       onClose={onClose}
       title={t('conversationDetails', language)}
-      size="lg"
+      size="xl"
       footer={
         <Button variant="secondary" onClick={onClose}>
           {t('close', language)}
@@ -458,6 +715,50 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
         <Error message={t('error', language)} />
       ) : messages && messages.length > 0 ? (
         <>
+          {/* Message Statistics */}
+          {messageStats && (
+            <div className="row mb-3 g-2">
+              <div className="col-auto">
+                <span className="badge bg-secondary me-1">
+                  <i className="bi bi-chat-dots me-1" />
+                  {messageStats.total} {t('messages', language)}
+                </span>
+              </div>
+              {messageStats.user > 0 && (
+                <div className="col-auto">
+                  <span className="badge bg-primary me-1">
+                    <i className="bi bi-person me-1" />
+                    User: {messageStats.user}
+                  </span>
+                </div>
+              )}
+              {messageStats.assistant > 0 && (
+                <div className="col-auto">
+                  <span className="badge bg-success me-1">
+                    <i className="bi bi-robot me-1" />
+                    Assistant: {messageStats.assistant}
+                  </span>
+                </div>
+              )}
+              {messageStats.toolResult > 0 && (
+                <div className="col-auto">
+                  <span className="badge bg-info me-1">
+                    <i className="bi bi-wrench me-1" />
+                    Tool: {messageStats.toolResult}
+                  </span>
+                </div>
+              )}
+              {messageStats.totalTokens > 0 && (
+                <div className="col-auto">
+                  <span className="badge bg-dark me-1">
+                    <i className="bi bi-coin me-1" />
+                    {formatTokens(messageStats.totalTokens)} {t('tokens', language)}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Tab Navigation */}
           <ul className="nav nav-tabs mb-3">
             <li className="nav-item">
@@ -467,6 +768,9 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
               >
                 <i className="bi bi-chat-text me-1" />
                 {t('timeline', language)}
+                {filteredMessages.length > 0 && (
+                  <span className="badge bg-secondary ms-1">{filteredMessages.length}</span>
+                )}
               </button>
             </li>
             <li className="nav-item">
@@ -476,63 +780,148 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
               >
                 <i className="bi bi-graph-up me-1" />
                 {t('latencyCurve', language)}
+                {latencyData.length > 0 && (
+                  <span className="badge bg-secondary ms-1">{latencyData.length}</span>
+                )}
               </button>
             </li>
           </ul>
 
           {/* Tab Content */}
           {activeTab === 'timeline' ? (
-            <div className="conversation-messages" style={{ maxHeight: '400px', overflowY: 'auto' }}>
-              {messages.map((msg, index) => (
-                <div
-                  key={msg.id || index}
-                  className={cn(
-                    'message-item mb-3 p-3 rounded',
-                    msg.role === 'user' ? 'bg-light' : 'bg-white border'
-                  )}
-                >
-                  <div className="d-flex justify-content-between align-items-start mb-2">
-                    <div className="d-flex align-items-center">
-                      <i
-                        className={cn(
-                          'bi me-2',
-                          msg.role === 'user' ? 'bi-person' : 'bi-robot'
-                        )}
-                      />
-                      <strong className="text-capitalize">{msg.role}</strong>
-                    </div>
-                    <small className="text-muted">{formatDateTime(msg.timestamp)}</small>
+            <>
+              {/* Role Filter */}
+              <div className="mb-3">
+                <div className="d-flex align-items-center gap-2">
+                  <span className="text-muted small">{t('filterByRole', language)}:</span>
+                  <div className="btn-group btn-group-sm">
+                    {roleFilterOptions.map(opt => (
+                      <button
+                        key={opt.value}
+                        className={cn('btn', roleFilter === opt.value ? 'btn-primary' : 'btn-outline-secondary')}
+                        onClick={() => setRoleFilter(opt.value)}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
                   </div>
-                  <div className="message-content">
-                    <pre className="mb-0" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                      {msg.content}
-                    </pre>
-                  </div>
-                  {msg.tokens_used > 0 && (
-                    <small className="text-muted d-block mt-2">
-                      {formatTokens(msg.tokens_used)} {t('tokens', language)}
-                    </small>
-                  )}
                 </div>
-              ))}
-            </div>
+              </div>
+
+              {/* Message List */}
+              <div className="conversation-messages" style={{ maxHeight: '500px', overflowY: 'auto' }}>
+                {filteredMessages.length > 0 ? (
+                  filteredMessages.map((msg, index) => (
+                    <MessageItem
+                      key={msg.id || index}
+                      msg={msg}
+                      language={language}
+                    />
+                  ))
+                ) : (
+                  <EmptyState icon="bi-chat-dots" title={t('noMessages', language)} />
+                )}
+              </div>
+            </>
           ) : (
             <div className="latency-chart">
               {latencyData.length > 0 ? (
-                <LineChart
-                  labels={latencyData.map((d) => `#${d.index}`)}
-                  datasets={[
-                    {
-                      label: t('latency', language) + ' (s)',
-                      data: latencyData.map((d) => d.latency),
-                      borderColor: 'rgba(75, 192, 192, 1)',
-                      backgroundColor: 'rgba(75, 192, 192, 0.2)',
-                    },
-                  ]}
-                  height={300}
-                />
+                <>
+                  {/* Latency Statistics */}
+                  {latencyStats && (
+                    <div className="row mb-3 g-2">
+                      <div className="col-md-3">
+                        <div className="card bg-light">
+                          <div className="card-body py-2 px-3">
+                            <small className="text-muted d-block">{t('averageLatency', language)}</small>
+                            <strong className="text-primary">{latencyStats.avg}s</strong>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="col-md-3">
+                        <div className="card bg-light">
+                          <div className="card-body py-2 px-3">
+                            <small className="text-muted d-block">{t('medianLatency', language)}</small>
+                            <strong className="text-info">{latencyStats.median}s</strong>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="col-md-3">
+                        <div className="card bg-light">
+                          <div className="card-body py-2 px-3">
+                            <small className="text-muted d-block">{t('minLatency', language)}</small>
+                            <strong className="text-success">{latencyStats.min}s</strong>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="col-md-3">
+                        <div className="card bg-light">
+                          <div className="card-body py-2 px-3">
+                            <small className="text-muted d-block">{t('maxLatency', language)}</small>
+                            <strong className="text-danger">{latencyStats.max}s</strong>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Latency Chart */}
+                  <LineChart
+                    labels={latencyData.map((d) => `#${d.index}`)}
+                    datasets={[
+                      {
+                        label: t('latency', language) + ' (s)',
+                        data: latencyData.map((d) => d.latency),
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                        fill: true,
+                        tension: 0.3,
+                      },
+                    ]}
+                    height={300}
+                  />
+
+                  {/* Latency Table */}
+                  <div className="mt-3">
+                    <h6 className="text-muted mb-2">{t('latencyDetails', language)}</h6>
+                    <div className="table-responsive" style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                      <table className="table table-sm table-hover">
+                        <thead>
+                          <tr>
+                            <th>#</th>
+                            <th>{t('messageIndex', language)}</th>
+                            <th>{t('latency', language)} (s)</th>
+                            <th>{t('timestamp', language)}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {latencyData.map((d, i) => (
+                            <tr key={i}>
+                              <td>{i + 1}</td>
+                              <td>#{d.index}</td>
+                              <td>
+                                <span className={cn(
+                                  'badge',
+                                  d.latency > 10 ? 'bg-danger' :
+                                  d.latency > 5 ? 'bg-warning' : 'bg-success'
+                                )}>
+                                  {d.latency}s
+                                </span>
+                              </td>
+                              <td><small>{formatDateTime(d.timestamp)}</small></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </>
               ) : (
-                <EmptyState icon="bi-graph-up" title={t('noLatencyData', language)} />
+                <EmptyState
+                  icon="bi-graph-up"
+                  title={t('noLatencyData', language)}
+                  description={t('noLatencyDataDesc', language)}
+                />
               )}
             </div>
           )}

@@ -162,48 +162,59 @@ class CostOptimizer:
         return suggestions
 
     def _get_usage_data(self, start_date: str, end_date: str) -> Dict[str, Any]:
-        """Get comprehensive usage data."""
-        # Overall statistics
-        overall = self.db.fetch_one('''
-            SELECT
-                COUNT(*) as total_requests,
-                SUM(input_tokens) as total_input_tokens,
-                SUM(output_tokens) as total_output_tokens
+        """Get comprehensive usage data.
+
+        Optimized: Uses a single query to fetch all data, then aggregates in Python.
+        This reduces database round trips from 4 to 1.
+        """
+        # Single query to get all raw data
+        all_data = self.db.fetch_all('''
+            SELECT tool_name, models_used as model, date,
+                   input_tokens, output_tokens
             FROM daily_usage
             WHERE date >= ? AND date <= ?
         ''', (start_date, end_date))
 
-        # By model
-        by_model = self.db.fetch_all('''
-            SELECT tool_name, model,
-                   COUNT(*) as requests,
-                   SUM(input_tokens) as input_tokens,
-                   SUM(output_tokens) as output_tokens,
-                   AVG(input_tokens + output_tokens) as avg_tokens_per_request
-            FROM daily_usage
-            WHERE date >= ? AND date <= ?
-            GROUP BY tool_name, model
-        ''', (start_date, end_date))
+        # Aggregate in Python
+        total_requests = len(all_data)
+        total_input_tokens = sum(r.get('input_tokens') or 0 for r in all_data)
+        total_output_tokens = sum(r.get('output_tokens') or 0 for r in all_data)
 
-        # By user
-        by_user = self.db.fetch_all('''
-            SELECT user_id,
-                   COUNT(*) as requests,
-                   SUM(input_tokens + output_tokens) as total_tokens
-            FROM daily_usage
-            WHERE date >= ? AND date <= ? AND user_id IS NOT NULL
-            GROUP BY user_id
-        ''', (start_date, end_date))
+        overall = {
+            'total_requests': total_requests,
+            'total_input_tokens': total_input_tokens,
+            'total_output_tokens': total_output_tokens,
+        }
 
-        # By hour
-        by_hour = self.db.fetch_all('''
-            SELECT strftime('%H', timestamp) as hour,
-                   COUNT(*) as requests
-            FROM daily_usage
-            WHERE date >= ? AND date <= ?
-            GROUP BY hour
-            ORDER BY requests DESC
-        ''', (start_date, end_date))
+        # By model aggregation
+        model_stats: Dict[tuple, Dict] = {}
+        for row in all_data:
+            key = (row.get('tool_name'), row.get('model'))
+            if key not in model_stats:
+                model_stats[key] = {
+                    'tool_name': row.get('tool_name'),
+                    'model': row.get('model'),
+                    'requests': 0,
+                    'input_tokens': 0,
+                    'output_tokens': 0,
+                }
+            model_stats[key]['requests'] += 1
+            model_stats[key]['input_tokens'] += row.get('input_tokens') or 0
+            model_stats[key]['output_tokens'] += row.get('output_tokens') or 0
+
+        # Calculate avg_tokens_per_request and convert to list
+        by_model = []
+        for stats in model_stats.values():
+            stats['avg_tokens_per_request'] = (
+                (stats['input_tokens'] + stats['output_tokens']) / stats['requests']
+                if stats['requests'] > 0 else 0
+            )
+            by_model.append(stats)
+
+        # Note: user_id and timestamp columns don't exist in daily_usage table
+        # So by_user and by_hour will be empty lists
+        by_user = []
+        by_hour = []
 
         return {
             'overall': overall,

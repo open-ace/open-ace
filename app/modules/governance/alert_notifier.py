@@ -21,7 +21,7 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Set, Union
 
-from app.repositories.database import DB_PATH, is_postgresql, get_database_url
+from app.repositories.database import DB_PATH, is_postgresql, get_database_url, adapt_sql
 
 logger = logging.getLogger(__name__)
 
@@ -299,12 +299,12 @@ class AlertNotifier:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        cursor.execute('''
+        cursor.execute(adapt_sql('''
             INSERT INTO alerts
             (alert_id, alert_type, severity, title, message, user_id, username,
              tool_name, metadata, created_at, read, action_url, action_text)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
+        '''), (
             alert.alert_id,
             alert.alert_type,
             alert.severity,
@@ -410,12 +410,12 @@ class AlertNotifier:
 
         where_clause = ' AND '.join(conditions) if conditions else '1=1'
 
-        cursor.execute(f'''
+        cursor.execute(adapt_sql(f'''
             SELECT * FROM alerts
             WHERE {where_clause}
             ORDER BY created_at DESC
             LIMIT ? OFFSET ?
-        ''', params + [limit, offset])
+        '''), params + [limit, offset])
 
         rows = cursor.fetchall()
         conn.close()
@@ -437,7 +437,7 @@ class AlertNotifier:
 
         if user_id is not None:
             cursor.execute(
-                'SELECT COUNT(*) as count FROM alerts WHERE user_id = ? AND read = 0',
+                adapt_sql('SELECT COUNT(*) as count FROM alerts WHERE user_id = ? AND read = 0'),
                 (user_id,)
             )
         else:
@@ -462,7 +462,7 @@ class AlertNotifier:
         cursor = conn.cursor()
 
         cursor.execute(
-            'UPDATE alerts SET read = 1 WHERE alert_id = ?',
+            adapt_sql('UPDATE alerts SET read = 1 WHERE alert_id = ?'),
             (alert_id,)
         )
 
@@ -487,7 +487,7 @@ class AlertNotifier:
 
         if user_id is not None:
             cursor.execute(
-                'UPDATE alerts SET read = 1 WHERE user_id = ? AND read = 0',
+                adapt_sql('UPDATE alerts SET read = 1 WHERE user_id = ? AND read = 0'),
                 (user_id,)
             )
         else:
@@ -512,7 +512,7 @@ class AlertNotifier:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        cursor.execute('DELETE FROM alerts WHERE alert_id = ?', (alert_id,))
+        cursor.execute(adapt_sql('DELETE FROM alerts WHERE alert_id = ?'), (alert_id,))
         success = cursor.rowcount > 0
         conn.commit()
         conn.close()
@@ -533,7 +533,7 @@ class AlertNotifier:
         cursor = conn.cursor()
 
         cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
-        cursor.execute('DELETE FROM alerts WHERE created_at < ? AND read = 1', (cutoff,))
+        cursor.execute(adapt_sql('DELETE FROM alerts WHERE created_at < ? AND read = 1'), (cutoff,))
 
         count = cursor.rowcount
         conn.commit()
@@ -556,7 +556,7 @@ class AlertNotifier:
         cursor = conn.cursor()
 
         cursor.execute(
-            'SELECT * FROM notification_preferences WHERE user_id = ?',
+            adapt_sql('SELECT * FROM notification_preferences WHERE user_id = ?'),
             (user_id,)
         )
         row = cursor.fetchone()
@@ -588,18 +588,38 @@ class AlertNotifier:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        cursor.execute('''
-            INSERT OR REPLACE INTO notification_preferences
-            (user_id, email_enabled, push_enabled, webhook_url, alert_types, min_severity)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (
-            preferences.user_id,
-            1 if preferences.email_enabled else 0,
-            1 if preferences.push_enabled else 0,
-            preferences.webhook_url,
-            json.dumps(preferences.alert_types),
-            preferences.min_severity,
-        ))
+        if is_postgresql():
+            cursor.execute('''
+                INSERT INTO notification_preferences
+                (user_id, email_enabled, push_enabled, webhook_url, alert_types, min_severity)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    email_enabled = EXCLUDED.email_enabled,
+                    push_enabled = EXCLUDED.push_enabled,
+                    webhook_url = EXCLUDED.webhook_url,
+                    alert_types = EXCLUDED.alert_types,
+                    min_severity = EXCLUDED.min_severity
+            ''', (
+                preferences.user_id,
+                preferences.email_enabled,
+                preferences.push_enabled,
+                preferences.webhook_url,
+                json.dumps(preferences.alert_types),
+                preferences.min_severity,
+            ))
+        else:
+            cursor.execute('''
+                INSERT OR REPLACE INTO notification_preferences
+                (user_id, email_enabled, push_enabled, webhook_url, alert_types, min_severity)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (
+                preferences.user_id,
+                1 if preferences.email_enabled else 0,
+                1 if preferences.push_enabled else 0,
+                preferences.webhook_url,
+                json.dumps(preferences.alert_types),
+                preferences.min_severity,
+            ))
 
         conn.commit()
         conn.close()

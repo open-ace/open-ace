@@ -188,29 +188,27 @@ export const Prompts: React.FC = () => {
 
       {/* Filters */}
       <Card className="mb-3">
-        <div className="d-flex flex-wrap align-items-center gap-2">
-          {/* Category Filter */}
-          <div className="d-flex align-items-center gap-1">
-            <small className="text-muted">{t('category', language) || 'Category'}:</small>
-            <Select
-              options={categoryOptions}
-              value={filters.category || ''}
-              onChange={(value) => handleFilterChange('category', value)}
-              size="sm"
-            />
-          </div>
+        <div className="d-flex flex-nowrap align-items-center gap-2">
           {/* Search */}
-          <div className="d-flex align-items-center gap-1 flex-grow-1" style={{ maxWidth: '300px' }}>
-            <TextInput
-              type="text"
-              placeholder={t('searchPrompts', language) || 'Search prompts...'}
-              value={filters.search || ''}
-              onChange={handleSearch}
-            />
-          </div>
+          <input
+            type="text"
+            className="form-control"
+            style={{ maxWidth: '300px', height: '31px' }}
+            placeholder={t('searchPrompts', language) || 'Search prompts...'}
+            value={filters.search || ''}
+            onChange={(e) => handleSearch(e.target.value)}
+          />
+          {/* Category Filter */}
+          <Select
+            options={categoryOptions}
+            value={filters.category || ''}
+            onChange={(value) => handleFilterChange('category', value)}
+            size="sm"
+            style={{ width: 'auto', minWidth: '120px' }}
+          />
           {/* Reset Button */}
-          <Button variant="outline-secondary" size="sm" onClick={handleReset} className="ms-auto">
-            <i className="bi bi-x-circle me-1" />
+          <Button variant="outline-primary" size="sm" onClick={handleReset} className="text-nowrap">
+            <i className="bi bi-arrow-counterclockwise me-1" />
             {t('reset', language)}
           </Button>
         </div>

@@ -58,7 +58,7 @@ const navSections: NavSection[] = [
       { id: 'trend', label: 'tokenTrend', icon: 'bi-graph-up', path: '/manage/analysis/trend' },
       { id: 'anomaly', label: 'anomalyDetection', icon: 'bi-exclamation-triangle', path: '/manage/analysis/anomaly' },
       { id: 'roi', label: 'roiAnalysis', icon: 'bi-currency-dollar', path: '/manage/analysis/roi' },
-      { id: 'conversation-history', label: 'conversationHistory', icon: 'bi-chat-history', path: '/manage/analysis/conversation-history' },
+      { id: 'conversation-history', label: 'conversationHistory', icon: 'bi-chat-square-text', path: '/manage/analysis/conversation-history' },
       { id: 'messages', label: 'messages', icon: 'bi-chat-dots', path: '/manage/messages' },
     ],
   },

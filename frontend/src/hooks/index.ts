@@ -29,6 +29,7 @@ export {
 } from './useAdmin';
 export { useMyUsage } from './useReport';
 export {
+  useBatchAnalysis,
   useKeyMetrics,
   useDailyHourlyUsage,
   usePeakUsage,
@@ -45,6 +46,7 @@ export {
   useDeleteSession,
   useCompleteSession,
 } from './useSessions';
+export { useGlobalFetch } from './useFetch';
 
 // Re-export store hooks
 export {

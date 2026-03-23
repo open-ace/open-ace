@@ -13,6 +13,26 @@ analysis_bp = Blueprint('analysis', __name__)
 analysis_service = AnalysisService()
 
 
+@analysis_bp.route('/analysis/batch')
+def api_batch_analysis():
+    """Get all analysis data in a single request for better performance.
+
+    This endpoint combines multiple analysis queries into a single request,
+    reducing network overhead and allowing for shared data fetching.
+    """
+    start_date = request.args.get('start')
+    end_date = request.args.get('end')
+    host = request.args.get('host')
+
+    # Get all data in one call
+    result = analysis_service.get_batch_analysis(
+        start_date=start_date,
+        end_date=end_date,
+        host_name=host
+    )
+    return jsonify(result)
+
+
 @analysis_bp.route('/analysis/key-metrics')
 def api_key_metrics():
     """Get key metrics for the dashboard."""

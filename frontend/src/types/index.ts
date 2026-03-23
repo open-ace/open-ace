@@ -218,6 +218,7 @@ export interface AppState {
 export interface BaseComponentProps {
   className?: string;
   id?: string;
+  style?: React.CSSProperties;
   'data-testid'?: string;
 }
 

@@ -16,7 +16,6 @@ import { t } from '@/i18n';
 import {
   Card,
   StatCard,
-  Button,
   Select,
   Loading,
   Error,
@@ -51,7 +50,6 @@ export const AnomalyDetection: React.FC = () => {
   const [selectedHost, setSelectedHost] = useState<string>('');
   const [anomalyTypeFilter, setAnomalyTypeFilter] = useState<string>('');
   const [severityFilter, setSeverityFilter] = useState<string>('');
-  const [autoRefresh, setAutoRefresh] = useState<boolean>(false);
 
   // Get hosts for filter
   const { data: hostsData } = useHosts();
@@ -100,23 +98,10 @@ export const AnomalyDetection: React.FC = () => {
   const {
     data: dailyHourly,
     isLoading: dailyLoading,
-    isFetching: dailyFetching,
     isError: dailyError,
     error: dailyErrorMsg,
-    refetch: refetchDaily,
   } = useDailyHourlyUsage(startDate, endDate, selectedHost || undefined);
   const { data: recommendations } = useRecommendations(selectedHost || undefined);
-
-  // Auto-refresh effect
-  React.useEffect(() => {
-    if (autoRefresh) {
-      const interval = setInterval(() => {
-        refetchDaily();
-      }, 60000);
-      return () => clearInterval(interval);
-    }
-    return undefined;
-  }, [autoRefresh, refetchDaily]);
 
   // Host options
   const hostOptions = useMemo(
@@ -181,29 +166,6 @@ export const AnomalyDetection: React.FC = () => {
       {/* Header */}
       <div className="page-header d-flex justify-content-between align-items-center mb-4">
         <h2>{t('anomalyDetection', language)}</h2>
-        <div className="page-header-controls">
-          <div className="form-check form-switch">
-            <input
-              className="form-check-input"
-              type="checkbox"
-              id="anomalyAutoRefreshSwitch"
-              checked={autoRefresh}
-              onChange={(e) => setAutoRefresh(e.target.checked)}
-            />
-            <label className="form-check-label" htmlFor="anomalyAutoRefreshSwitch">
-              {t('autoRefresh', language)}
-            </label>
-          </div>
-          <Button
-            variant="primary"
-            size="sm"
-            icon={dailyFetching ? undefined : <i className="bi bi-arrow-clockwise" />}
-            onClick={() => refetchDaily()}
-            loading={dailyFetching}
-          >
-            {t('refresh', language)}
-          </Button>
-        </div>
       </div>
 
       {/* Filters */}
@@ -303,7 +265,6 @@ export const AnomalyDetection: React.FC = () => {
       ) : dailyError ? (
         <Error
           message={dailyErrorMsg?.message || t('error', language)}
-          onRetry={() => refetchDaily()}
         />
       ) : (
         <>
@@ -385,28 +346,28 @@ export const AnomalyDetection: React.FC = () => {
           <div className="row mb-4">
             {/* Anomaly List */}
             <div className="col-md-6">
-              <Card title={t('anomalyList', language)}>
+              <Card title={t('anomalyList', language)} style={{ height: '100%' }}>
                 {filteredAnomalies.length > 0 ? (
-                  <div className="table-responsive" style={{ maxHeight: '400px', overflowY: 'auto' }}>
-                    <table className="table table-sm table-hover">
+                  <div style={{ maxHeight: '400px', overflowY: 'auto', overflowX: 'hidden' }}>
+                    <table className="table table-sm table-hover mb-0" style={{ tableLayout: 'fixed', width: '100%' }}>
                       <thead>
                         <tr>
-                          <th>{t('tableDate', language)}</th>
-                          <th>{t('type', language)}</th>
-                          <th>{t('tableTokens', language)}</th>
-                          <th>{t('severity', language)}</th>
+                          <th style={{ width: '35%' }}>{t('tableDate', language)}</th>
+                          <th style={{ width: '25%' }}>{t('type', language)}</th>
+                          <th style={{ width: '20%' }}>{t('tableTokens', language)}</th>
+                          <th style={{ width: '20%' }}>{t('severity', language)}</th>
                         </tr>
                       </thead>
                       <tbody>
                         {filteredAnomalies.map((anomaly, index) => (
                           <tr key={index}>
-                            <td>{anomaly.date}</td>
+                            <td style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{anomaly.date}</td>
                             <td>
                               <span className={cn('badge', anomaly.type === 'spike' ? 'bg-danger' : 'bg-info')}>
                                 {anomaly.type === 'spike' ? t('usageSpike', language) : t('usageDrop', language)}
                               </span>
                             </td>
-                            <td>{formatTokens(anomaly.tokens)}</td>
+                            <td style={{ whiteSpace: 'nowrap' }}>{formatTokens(anomaly.tokens)}</td>
                             <td>
                               <span
                                 className={cn(
@@ -434,7 +395,7 @@ export const AnomalyDetection: React.FC = () => {
 
             {/* Recommendations */}
             <div className="col-md-6">
-              <Card title={t('recommendations', language)}>
+              <Card title={t('recommendations', language)} style={{ height: '100%' }}>
                 {recommendations && recommendations.length > 0 ? (
                   <ul className="list-group list-group-flush" style={{ maxHeight: '400px', overflowY: 'auto' }}>
                     {recommendations.map((rec, index) => (

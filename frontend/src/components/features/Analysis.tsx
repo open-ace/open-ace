@@ -9,7 +9,6 @@ import { t, type Language } from '@/i18n';
 import {
   Card,
   StatCard,
-  Button,
   Select,
   Loading,
   Error,
@@ -39,7 +38,6 @@ export const Analysis: React.FC = () => {
   const [groupBy, setGroupBy] = useState<'day' | 'week' | 'month'>('day');
   const [selectedTool, setSelectedTool] = useState<string>('');
   const [selectedHost, setSelectedHost] = useState<string>('');
-  const [autoRefresh, setAutoRefresh] = useState<boolean>(false);
 
   // Get hosts for filter
   const { data: hostsData } = useHosts();
@@ -88,10 +86,8 @@ export const Analysis: React.FC = () => {
   const {
     data: keyMetrics,
     isLoading: metricsLoading,
-    isFetching: metricsFetching,
     isError: metricsError,
     error: metricsErrorMsg,
-    refetch: refetchMetrics,
   } = useKeyMetrics(startDate, endDate, selectedHost || undefined);
   const { data: dailyHourly, isLoading: dailyLoading } = useDailyHourlyUsage(startDate, endDate, selectedHost || undefined);
   const { data: toolComparison, isLoading: toolsLoading } = useToolComparison(startDate, endDate, selectedHost || undefined);
@@ -100,17 +96,6 @@ export const Analysis: React.FC = () => {
   const { data: conversationStats } = useConversationStats(startDate, endDate, selectedHost || undefined);
   const { data: recommendations } = useRecommendations(selectedHost || undefined);
   const { data: userSegmentation } = useUserSegmentation(startDate, endDate, selectedHost || undefined);
-
-  // Auto-refresh effect
-  React.useEffect(() => {
-    if (autoRefresh) {
-      const interval = setInterval(() => {
-        refetchMetrics();
-      }, 60000); // 60 seconds
-      return () => clearInterval(interval);
-    }
-    return undefined;
-  }, [autoRefresh, refetchMetrics]);
 
   // Group by options
   const groupByOptions = useMemo(
@@ -246,7 +231,6 @@ export const Analysis: React.FC = () => {
       ) : metricsError ? (
         <Error
           message={metricsErrorMsg?.message || t('error', language)}
-          onRetry={() => refetchMetrics()}
         />
       ) : (
         <>
@@ -581,7 +565,7 @@ export const Analysis: React.FC = () => {
     {
       id: 'conversation-history',
       label: t('conversationHistory', language),
-      icon: <i className="bi bi-chat-history" />,
+      icon: <i className="bi bi-chat-square-text" />,
       content: <ConversationHistory />,
     },
   ];
@@ -598,28 +582,6 @@ export const Analysis: React.FC = () => {
             onChange={(value) => setGroupBy(value as 'day' | 'week' | 'month')}
             size="sm"
           />
-          {/* Auto-refresh toggle */}
-          <div className="form-check form-switch">
-            <input
-              className="form-check-input"
-              type="checkbox"
-              id="analysisAutoRefreshSwitch"
-              checked={autoRefresh}
-              onChange={(e) => setAutoRefresh(e.target.checked)}
-            />
-            <label className="form-check-label" htmlFor="analysisAutoRefreshSwitch">
-              {t('autoRefresh', language)}
-            </label>
-          </div>
-          <Button
-            variant="primary"
-            size="sm"
-            icon={metricsFetching ? undefined : <i className="bi bi-arrow-clockwise" />}
-            onClick={() => refetchMetrics()}
-            loading={metricsFetching}
-          >
-            {t('refresh', language)}
-          </Button>
         </div>
       </div>
 

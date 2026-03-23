@@ -17,7 +17,6 @@ import {
   Analysis,
   Login,
   LogoutSuccess,
-  Management,
   Report,
   Workspace,
   Sessions,
@@ -29,6 +28,7 @@ import {
   SSOSettings,
   ConversationHistory,
 } from '@/components/features';
+import { UserManagement } from '@/components/features/management/UserManagement';
 import { AuditCenter } from '@/components/features/management/AuditCenter';
 import { QuotaAlerts } from '@/components/features/management/QuotaAlerts';
 import { ComplianceMgmt } from '@/components/features/management/ComplianceMgmt';
@@ -107,7 +107,7 @@ const LegacyAppContent: React.FC = () => {
       case 'analysis':
         return <Analysis />;
       case 'management':
-        return <Management />;
+        return <UserManagement />;
       case 'report':
         return <Report />;
       case 'workspace':
@@ -173,7 +173,7 @@ const ManageRoutes: React.FC = () => {
         <Route path="/security" element={<SecurityCenter />} />
 
         {/* Users */}
-        <Route path="/users" element={<Management />} />
+        <Route path="/users" element={<UserManagement />} />
         <Route path="/tenants" element={<TenantManagement />} />
 
         {/* Settings */}
