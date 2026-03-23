@@ -1301,6 +1301,7 @@ link[rel='dns-prefetch'] {
 /* Tabs Styles */
 .nav-tabs {
   border-bottom: 2px solid var(--border-color);
+  flex-wrap: nowrap;
 }
 
 .nav-tabs .nav-link {
@@ -1467,7 +1468,8 @@ link[rel='dns-prefetch'] {
   min-width: 180px;
 }
 
-.dropdown-item {
+/* Override Bootstrap dropdown item styles */
+.dropdown-menu .dropdown-item {
   padding: var(--spacing-sm) var(--spacing-md);
   color: var(--text-primary) !important;
   transition: background-color var(--transition-fast);
@@ -1478,28 +1480,37 @@ link[rel='dns-prefetch'] {
   cursor: pointer;
 }
 
-.dropdown-item:hover {
+.dropdown-menu .dropdown-item:hover {
   background: var(--bg-tertiary) !important;
   color: var(--text-primary) !important;
 }
 
-.dropdown-item.active {
+.dropdown-menu .dropdown-item.active {
   background: var(--color-primary) !important;
   color: var(--text-inverse) !important;
 }
 
-.dropdown-item.active:hover {
+.dropdown-menu .dropdown-item.active:hover {
   background: var(--color-primary-hover) !important;
   color: var(--text-inverse) !important;
 }
 
-.dropdown-item.disabled {
+.dropdown-menu .dropdown-item.disabled {
   color: var(--text-muted) !important;
   pointer-events: none;
 }
 
-.dropdown-item.text-danger:hover {
+.dropdown-menu .dropdown-item.text-danger:hover {
   background: rgba(239, 68, 68, 0.1) !important;
+}
+
+/* Fix for header dropdown button color */
+.header .dropdown-toggle {
+  color: var(--text-primary) !important;
+}
+
+.header .dropdown-toggle::after {
+  color: var(--text-primary) !important;
 }
 
 /* Input Styles */
@@ -2056,11 +2067,11 @@ link[rel='dns-prefetch'] {
 }
 
 .manage-sidebar {
-  width: 250px;
-  min-width: 60px;
+  width: 220px;
+  min-width: 56px;
   display: flex;
   flex-direction: column;
-  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
   color: white;
   transition: width var(--transition-normal);
   position: fixed;
@@ -2068,15 +2079,16 @@ link[rel='dns-prefetch'] {
   left: 0;
   height: 100vh;
   z-index: var(--z-fixed);
+  box-shadow: 2px 0 16px rgba(0, 0, 0, 0.2);
 }
 
 .manage-sidebar.collapsed {
-  width: 60px;
+  width: 56px;
 }
 
 .manage-sidebar .sidebar-header {
-  padding: var(--spacing-md);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .manage-sidebar .logo {
@@ -2099,6 +2111,25 @@ link[rel='dns-prefetch'] {
   padding: var(--spacing-sm) var(--spacing-md);
 }
 
+/* ModeSwitcher dark theme for sidebar */
+.manage-sidebar .sidebar-mode-switcher .mode-switcher {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.manage-sidebar .sidebar-mode-switcher .mode-btn {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.manage-sidebar .sidebar-mode-switcher .mode-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: white;
+}
+
+.manage-sidebar .sidebar-mode-switcher .mode-btn.active {
+  background: var(--color-primary);
+  color: white;
+}
+
 .manage-sidebar.collapsed .sidebar-mode-switcher {
   display: none;
 }
@@ -2107,11 +2138,11 @@ link[rel='dns-prefetch'] {
 .manage-sidebar .sidebar-nav {
   flex: 1;
   overflow-y: auto;
-  padding: var(--spacing-sm);
+  padding: var(--spacing-xs);
 }
 
 .manage-sidebar .nav-section {
-  margin-bottom: var(--spacing-md);
+  margin-bottom: var(--spacing-sm);
 }
 
 /* Collapsible section header */
@@ -2120,8 +2151,8 @@ link[rel='dns-prefetch'] {
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  padding: var(--spacing-sm) var(--spacing-sm);
-  margin-bottom: var(--spacing-xs);
+  padding: 6px 10px;
+  margin-bottom: 2px;
   border: none;
   background: transparent;
   cursor: pointer;
@@ -2131,19 +2162,19 @@ link[rel='dns-prefetch'] {
 }
 
 .manage-sidebar .nav-section-header:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .manage-sidebar .nav-section-title {
-  font-size: var(--font-size-sm);
+  font-size: 0.8125rem;
   font-weight: var(--font-weight-semibold);
-  color: rgba(255, 255, 255, 0.6);
-  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.55);
+  letter-spacing: 0.01em;
 }
 
 .manage-sidebar .nav-section-chevron {
-  font-size: 0.7rem;
-  color: rgba(255, 255, 255, 0.5);
+  font-size: 0.65rem;
+  color: rgba(255, 255, 255, 0.4);
   transition: transform 250ms cubic-bezier(0.4, 0, 0.2, 1);
   transform: rotate(0deg);
 }
@@ -2158,8 +2189,20 @@ link[rel='dns-prefetch'] {
   transform: rotate(-90deg);
 }
 
-.manage-sidebar .nav-section.active .nav-section-title {
-  color: rgba(255, 255, 255, 0.9);
+/* Active section indicator - subtle highlight instead of color change */
+.manage-sidebar .nav-section.active {
+  position: relative;
+}
+
+.manage-sidebar .nav-section.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--color-primary);
+  border-radius: 1px;
 }
 
 .manage-sidebar.collapsed .nav-section-title {
@@ -2168,7 +2211,7 @@ link[rel='dns-prefetch'] {
 
 .manage-sidebar .nav-section-items {
   list-style: none;
-  padding: 0;
+  padding: 0 4px;
   margin: 0;
   /* Smooth expand/collapse animation */
   max-height: 400px;
@@ -2183,11 +2226,6 @@ link[rel='dns-prefetch'] {
   opacity: 0;
 }
 
-/* Inner wrapper for smooth grid animation */
-.manage-sidebar .nav-section-items > li:first-child > .nav-item {
-  margin-top: var(--spacing-xs);
-}
-
 .manage-sidebar .nav-section-items.sidebar-collapsed {
   max-height: 400px;
   opacity: 1;
@@ -2196,12 +2234,12 @@ link[rel='dns-prefetch'] {
 .manage-sidebar .nav-item {
   display: flex;
   align-items: center;
-  gap: var(--spacing-sm);
+  gap: 8px;
   width: 100%;
-  padding: var(--spacing-sm) var(--spacing-md);
+  padding: 8px 10px;
   border: none;
   background: transparent;
-  border-radius: var(--border-radius);
+  border-radius: var(--border-radius-sm);
   cursor: pointer;
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
@@ -2222,7 +2260,7 @@ link[rel='dns-prefetch'] {
 
 .manage-sidebar.collapsed .nav-item {
   justify-content: center;
-  padding: var(--spacing-sm);
+  padding: 10px;
 }
 
 .manage-sidebar.collapsed .nav-item span {
@@ -2260,12 +2298,12 @@ link[rel='dns-prefetch'] {
   flex: 1;
   display: flex;
   flex-direction: column;
-  margin-left: 250px;
+  margin-left: 220px;
   transition: margin-left var(--transition-normal);
 }
 
 .manage-layout.sidebar-collapsed .manage-main {
-  margin-left: 60px;
+  margin-left: 56px;
 }
 
 .manage-content {
