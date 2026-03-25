@@ -48,11 +48,23 @@ class UserRepository:
             Optional[int]: User ID if successful, None otherwise.
         """
         try:
-            cursor = self.db.execute('''
-                INSERT INTO users (username, email, password_hash, role, is_active, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (username, email, password_hash, role, is_active, datetime.utcnow()))
-            return cursor.lastrowid
+            # Convert boolean to integer for PostgreSQL compatibility
+            is_active_int = 1 if is_active else 0
+
+            # Use RETURNING for PostgreSQL, or lastrowid for SQLite
+            if self.db.is_postgresql:
+                result = self.db.fetch_one('''
+                    INSERT INTO users (username, email, password_hash, role, is_active, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    RETURNING id
+                ''', (username, email, password_hash, role, is_active_int, datetime.utcnow()))
+                return result['id'] if result else None
+            else:
+                cursor = self.db.execute('''
+                    INSERT INTO users (username, email, password_hash, role, is_active, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (username, email, password_hash, role, is_active_int, datetime.utcnow()))
+                return cursor.lastrowid
         except Exception as e:
             logger.error(f"Error creating user: {e}")
             return None
@@ -164,7 +176,8 @@ class UserRepository:
 
         if is_active is not None:
             updates.append('is_active = ?')
-            params.append(is_active)
+            # Convert boolean to integer for PostgreSQL compatibility
+            params.append(1 if is_active else 0)
 
         if linux_account is not None:
             updates.append('linux_account = ?')

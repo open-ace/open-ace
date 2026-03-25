@@ -28,6 +28,7 @@ export const UserManagement: React.FC = () => {
 
   const [showModal, setShowModal] = useState(false);
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
   const [formData, setFormData] = useState<CreateUserRequest & { confirm_password?: string }>({
     username: '',
     email: '',
@@ -45,6 +46,7 @@ export const UserManagement: React.FC = () => {
 
   const handleOpenCreate = () => {
     setEditingUser(null);
+    setFormError(null);
     setFormData({
       username: '',
       email: '',
@@ -58,6 +60,7 @@ export const UserManagement: React.FC = () => {
 
   const handleOpenEdit = (user: AdminUser) => {
     setEditingUser(user);
+    setFormError(null);
     setFormData({
       username: user.username,
       email: user.email,
@@ -72,6 +75,7 @@ export const UserManagement: React.FC = () => {
   const handleCloseModal = () => {
     setShowModal(false);
     setEditingUser(null);
+    setFormError(null);
     setFormData({
       username: '',
       email: '',
@@ -83,6 +87,36 @@ export const UserManagement: React.FC = () => {
   };
 
   const handleSubmit = async () => {
+    setFormError(null);
+
+    // Client-side validation
+    if (!formData.username || formData.username.trim() === '') {
+      setFormError(t('usernameRequired', language) || 'Username is required');
+      return;
+    }
+
+    if (!formData.email || formData.email.trim() === '') {
+      setFormError(t('emailRequired', language) || 'Email is required');
+      return;
+    }
+
+    if (!editingUser) {
+      // Password required for new users
+      if (!formData.password || formData.password.trim() === '') {
+        setFormError(t('passwordRequired', language) || 'Password is required');
+        return;
+      }
+      if (formData.password.length < 8) {
+        setFormError(t('passwordTooShort', language) || 'Password must be at least 8 characters');
+        return;
+      }
+    }
+
+    if (formData.password && formData.password !== formData.confirm_password) {
+      setFormError(t('passwordMismatch', language) || 'Passwords do not match');
+      return;
+    }
+
     try {
       if (editingUser) {
         // Update existing user
@@ -96,10 +130,6 @@ export const UserManagement: React.FC = () => {
 
         // Update password if provided
         if (formData.password && formData.password.trim() !== '') {
-          if (formData.password !== formData.confirm_password) {
-            alert(t('passwordMismatch', language) || 'Passwords do not match');
-            return;
-          }
           await updateUserPassword.mutateAsync({
             userId: editingUser.id,
             password: formData.password,
@@ -107,15 +137,14 @@ export const UserManagement: React.FC = () => {
         }
       } else {
         // Create new user
-        if (formData.password !== formData.confirm_password) {
-          alert(t('passwordMismatch', language) || 'Passwords do not match');
-          return;
-        }
         await createUser.mutateAsync(formData);
       }
       handleCloseModal();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to save user:', err);
+      // Display error message to user
+      const errorMessage = err?.message || err?.error || t('failedToSaveUser', language) || 'Failed to save user';
+      setFormError(errorMessage);
     }
   };
 
@@ -240,6 +269,14 @@ export const UserManagement: React.FC = () => {
           </>
         }
       >
+        {/* Error Message */}
+        {formError && (
+          <div className="alert alert-danger mb-3" role="alert">
+            <i className="bi bi-exclamation-triangle-fill me-2" />
+            {formError}
+          </div>
+        )}
+
         <div className="row g-3">
           <div className="col-md-6">
             <label className="form-label">{t('tableUsername', language)}</label>
