@@ -269,15 +269,21 @@ export const UserManagement: React.FC = () => {
           </>
         }
       >
-        {/* Error Message */}
-        {formError && (
-          <div className="alert alert-danger mb-3" role="alert">
-            <i className="bi bi-exclamation-triangle-fill me-2" />
-            {formError}
-          </div>
-        )}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleSubmit();
+          }}
+        >
+          {/* Error Message */}
+          {formError && (
+            <div className="alert alert-danger mb-3" role="alert">
+              <i className="bi bi-exclamation-triangle-fill me-2" />
+              {formError}
+            </div>
+          )}
 
-        <div className="row g-3">
+          <div className="row g-3">
           <div className="col-md-6">
             <label className="form-label">{t('tableUsername', language)}</label>
             <TextInput
@@ -362,6 +368,7 @@ export const UserManagement: React.FC = () => {
             </>
           )}
         </div>
+        </form>
       </Modal>
     </div>
   );
