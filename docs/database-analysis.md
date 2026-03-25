@@ -1388,7 +1388,7 @@ class Database:
 ```python
 #!/usr/bin/env python3
 """
-scripts/migrate_to_postgres.py
+scripts/utils/migrate_to_postgres.py
 
 从 SQLite 迁移数据到 PostgreSQL
 """
@@ -1586,7 +1586,7 @@ export DATABASE_URL="postgresql://openace:password@localhost:5432/openace"
 alembic upgrade head
 
 # 5. 迁移数据
-python scripts/migrate_to_postgres.py
+python scripts/utils/migrate_to_postgres.py
 
 # 6. 验证
 python -m pytest tests/

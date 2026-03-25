@@ -204,18 +204,24 @@ async def test_login():
 
 ## Database Migrations
 
-Migration scripts are in `scripts/migrations/`:
+Database schema migrations use Alembic. See `migrations/` directory for migration files.
 
 ```bash
-# Run migration
-python3 scripts/migrations/migrate_concepts.py
+# Run migrations
+alembic upgrade head
+
+# Create a new migration
+alembic revision --autogenerate -m "description"
 ```
 
-### Creating a Migration
+### Data Migration
 
-1. Create a new file in `scripts/migrations/`
-2. Name it descriptively: `migrate_xxx.py`
-3. Include rollback logic if possible
+For data migration scripts (e.g., SQLite to PostgreSQL), see `scripts/utils/`:
+
+```bash
+# Migrate from SQLite to PostgreSQL
+python3 scripts/utils/migrate_to_postgres.py
+```
 
 ## Adding a New Data Source
 

@@ -6,7 +6,7 @@ This script migrates data from SQLite to PostgreSQL.
 
 Usage:
     export DATABASE_URL="postgresql://user:password@localhost:5432/ace"
-    python scripts/migrate_to_postgres.py
+    python scripts/utils/migrate_to_postgres.py
 
 Prerequisites:
     1. PostgreSQL database created
@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional
 
 # Add project root to path
 script_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(script_dir)
+project_root = os.path.dirname(os.path.dirname(script_dir))
 sys.path.insert(0, project_root)
 
 logging.basicConfig(

@@ -277,12 +277,19 @@ def start_service(dev_mode: bool = False):
 
     os.chdir(work_dir)
 
+    # Set environment variables
+    env = os.environ.copy()
+    if dev_mode:
+        env['FLASK_DEBUG'] = 'true'
+        print("Debug mode: ON")
+
     with open(log_file, 'a') as log:
         subprocess.Popen(
             [sys.executable, str(work_dir / "web.py")],
             stdout=log,
             stderr=log,
-            cwd=work_dir
+            cwd=work_dir,
+            env=env
         )
 
     import time

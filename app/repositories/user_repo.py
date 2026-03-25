@@ -57,7 +57,7 @@ class UserRepository:
                     INSERT INTO users (username, email, password_hash, role, is_active, created_at)
                     VALUES (?, ?, ?, ?, ?, ?)
                     RETURNING id
-                ''', (username, email, password_hash, role, is_active_int, datetime.utcnow()))
+                ''', (username, email, password_hash, role, is_active_int, datetime.utcnow()), commit=True)
                 return result['id'] if result else None
             else:
                 cursor = self.db.execute('''

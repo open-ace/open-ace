@@ -669,11 +669,55 @@ def save_message(
         if model is None and existing['model']:
             model = existing['model']
 
-    _execute(cursor, '''
-        INSERT OR REPLACE INTO daily_messages
-        (date, tool_name, host_name, message_id, parent_id, role, content, full_entry, tokens_used, input_tokens, output_tokens, model, timestamp, sender_id, sender_name, message_source, feishu_conversation_id, group_subject, is_group_chat, agent_session_id, conversation_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (date, tool_name, host_name, message_id, parent_id, role, content, full_entry, tokens_used, input_tokens, output_tokens, model, timestamp, sender_id, sender_name, message_source, feishu_conversation_id, group_subject, is_group_chat, agent_session_id, conversation_id))
+    if is_postgresql():
+        _execute(cursor, '''
+            INSERT INTO daily_messages
+            (date, tool_name, host_name, message_id, parent_id, role, content, full_entry, tokens_used, input_tokens, output_tokens, model, timestamp, sender_id, sender_name, message_source, feishu_conversation_id, group_subject, is_group_chat, agent_session_id, conversation_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (date, tool_name, host_name, message_id) DO UPDATE SET
+                parent_id = EXCLUDED.parent_id,
+                role = EXCLUDED.role,
+                content = EXCLUDED.content,
+                full_entry = EXCLUDED.full_entry,
+                tokens_used = EXCLUDED.tokens_used,
+                input_tokens = EXCLUDED.input_tokens,
+                output_tokens = EXCLUDED.output_tokens,
+                model = EXCLUDED.model,
+                timestamp = EXCLUDED.timestamp,
+                sender_id = EXCLUDED.sender_id,
+                sender_name = EXCLUDED.sender_name,
+                message_source = EXCLUDED.message_source,
+                feishu_conversation_id = EXCLUDED.feishu_conversation_id,
+                group_subject = EXCLUDED.group_subject,
+                is_group_chat = EXCLUDED.is_group_chat,
+                agent_session_id = EXCLUDED.agent_session_id,
+                conversation_id = EXCLUDED.conversation_id
+        ''', (date, tool_name, host_name, message_id, parent_id, role, content, full_entry, tokens_used, input_tokens, output_tokens, model, timestamp, sender_id, sender_name, message_source, feishu_conversation_id, group_subject, is_group_chat, agent_session_id, conversation_id))
+    else:
+        # Use INSERT ... ON CONFLICT to preserve created_at on updates
+        _execute(cursor, '''
+            INSERT INTO daily_messages
+            (date, tool_name, host_name, message_id, parent_id, role, content, full_entry, tokens_used, input_tokens, output_tokens, model, timestamp, sender_id, sender_name, message_source, feishu_conversation_id, group_subject, is_group_chat, agent_session_id, conversation_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(date, tool_name, host_name, message_id) DO UPDATE SET
+                parent_id = excluded.parent_id,
+                role = excluded.role,
+                content = excluded.content,
+                full_entry = excluded.full_entry,
+                tokens_used = excluded.tokens_used,
+                input_tokens = excluded.input_tokens,
+                output_tokens = excluded.output_tokens,
+                model = excluded.model,
+                timestamp = excluded.timestamp,
+                sender_id = excluded.sender_id,
+                sender_name = excluded.sender_name,
+                message_source = excluded.message_source,
+                feishu_conversation_id = excluded.feishu_conversation_id,
+                group_subject = excluded.group_subject,
+                is_group_chat = excluded.is_group_chat,
+                agent_session_id = excluded.agent_session_id,
+                conversation_id = excluded.conversation_id
+        ''', (date, tool_name, host_name, message_id, parent_id, role, content, full_entry, tokens_used, input_tokens, output_tokens, model, timestamp, sender_id, sender_name, message_source, feishu_conversation_id, group_subject, is_group_chat, agent_session_id, conversation_id))
 
     conn.commit()
     conn.close()
@@ -829,10 +873,29 @@ def save_messages_batch(messages: List[Dict], batch_size: int = 1000) -> int:
                         msg.get('is_group_chat'), msg.get('agent_session_id'), msg.get('conversation_id')
                     ))
                 else:
+                    # Use INSERT ... ON CONFLICT to preserve created_at on updates
                     _execute(cursor, '''
-                        INSERT OR REPLACE INTO daily_messages
+                        INSERT INTO daily_messages
                         (date, tool_name, host_name, message_id, parent_id, role, content, full_entry, tokens_used, input_tokens, output_tokens, model, timestamp, sender_id, sender_name, message_source, feishu_conversation_id, group_subject, is_group_chat, agent_session_id, conversation_id)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(date, tool_name, host_name, message_id) DO UPDATE SET
+                            parent_id = excluded.parent_id,
+                            role = excluded.role,
+                            content = excluded.content,
+                            full_entry = excluded.full_entry,
+                            tokens_used = excluded.tokens_used,
+                            input_tokens = excluded.input_tokens,
+                            output_tokens = excluded.output_tokens,
+                            model = excluded.model,
+                            timestamp = excluded.timestamp,
+                            sender_id = excluded.sender_id,
+                            sender_name = excluded.sender_name,
+                            message_source = excluded.message_source,
+                            feishu_conversation_id = excluded.feishu_conversation_id,
+                            group_subject = excluded.group_subject,
+                            is_group_chat = excluded.is_group_chat,
+                            agent_session_id = excluded.agent_session_id,
+                            conversation_id = excluded.conversation_id
                     ''', (
                         date, tool_name, host_name, message_id, msg.get('parent_id'),
                         msg.get('role'), msg.get('content'), msg.get('full_entry'),

@@ -1,0 +1,16 @@
+[Unit]
+Description=Fetch and upload data to Open ACE central server
+After=network.target
+
+[Service]
+Type=simple
+User=open-ace
+WorkingDirectory=/home/open-ace/upload-to-central
+Environment=DATABASE_URL=sqlite:////home/open-ace/upload-to-central/ace.db
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /home/open-ace/upload-to-central/upload_to_server.py --daemon --interval 300
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

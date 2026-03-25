@@ -224,13 +224,14 @@ class Database:
             conn.commit()
             return cursor
 
-    def fetch_one(self, query: str, params: tuple = ()) -> Optional[Dict[str, Any]]:
+    def fetch_one(self, query: str, params: tuple = (), commit: bool = False) -> Optional[Dict[str, Any]]:
         """
         Execute a query and return a single row.
 
         Args:
             query: SQL query string.
             params: Query parameters.
+            commit: Whether to commit the transaction (needed for INSERT/UPDATE/DELETE with RETURNING).
 
         Returns:
             Optional[dict]: Single row as dictionary or None.
@@ -244,6 +245,10 @@ class Database:
                 cursor = conn.cursor()
             cursor.execute(adapt_sql(query), params)
             row = cursor.fetchone()
+
+            # Commit if requested (needed for INSERT/UPDATE/DELETE with RETURNING)
+            if commit:
+                conn.commit()
 
             if row is None:
                 return None

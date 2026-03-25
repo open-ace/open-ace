@@ -1,14 +1,14 @@
 #!/bin/bash
 #
-# Open ACE - AI Computing Explorer - Release Script
+# Open ACE - AI Computing Explorer - Package Script
 #
-# This script creates a release package with version and date in the filename.
+# This script creates a package with version and date in the filename.
 #
 # Usage:
-#   ./release.sh                    # Use version from VERSION file
-#   ./release.sh --version 1.2.0    # Specify version
-#   ./release.sh --force-download   # Force re-download dependencies
-#   ./release.sh --help             # Show help
+#   ./package.sh                    # Use version from VERSION file
+#   ./package.sh --version 1.2.0    # Specify version
+#   ./package.sh --force-download   # Force re-download dependencies
+#   ./package.sh --help             # Show help
 #
 
 set -e
@@ -60,7 +60,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --help|-h)
-            echo "Open ACE - Release Script"
+            echo "Open ACE - Package Script"
             echo ""
             echo "Usage: $0 [OPTIONS]"
             echo ""
@@ -86,7 +86,7 @@ PACKAGE_NAME="open-ace-${VERSION}"
 ARCHIVE_NAME="${PACKAGE_NAME}.tar.gz"
 
 echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}  Open ACE - Release Builder${NC}"
+echo -e "${GREEN}  Open ACE - Package Builder${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 echo "Version: $VERSION"
@@ -104,13 +104,14 @@ INCLUDE_ITEMS=(
     "requirements.txt"
     "VERSION"
     "install.conf.sample"
+    "alembic.ini"
     "config"
     "contrib"
     "cron"
     "scripts"
     "static"
-    "templates"
-    "web"
+    "app"
+    "migrations"
 )
 
 # Documentation files (optional)
@@ -126,11 +127,8 @@ SCRIPT_EXCLUDES=(
     "*.pyc"
     "*.pyo"
     ".DS_Store"
-    "release.sh"
+    "package.sh"
     "manage.py"
-    "clean_message_content.py"
-    "migrate_messages.py"
-    "restore_queued_messages.py"
 )
 
 # Files to exclude from static directory
@@ -139,7 +137,7 @@ STATIC_EXCLUDES=(
     "*.log"
 )
 
-echo -e "${YELLOW}Creating release package...${NC}"
+echo -e "${YELLOW}Creating package...${NC}"
 
 # Create temporary directory
 TEMP_DIR=$(mktemp -d)
@@ -224,7 +222,7 @@ if [ "$SKIP_DOWNLOAD" = false ] && [ -f "$PROJECT_DIR/requirements.txt" ]; then
     echo "  ✓ Downloaded $pkg_count packages to vendor/ (multi-platform)"
     
     # Cache the vendor directory for future use
-    echo -e "${YELLOW}Caching vendor directory for future releases...${NC}"
+    echo -e "${YELLOW}Caching vendor directory for future packages...${NC}"
     mkdir -p "$CACHED_VENDOR_DIR"
     cp -r "$VENDOR_DIR"/* "$CACHED_VENDOR_DIR/"
     
@@ -311,7 +309,7 @@ CHECKSUM=$(shasum -a 256 "$DIST_DIR/$ARCHIVE_NAME" | cut -d' ' -f1)
 
 echo ""
 echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}  Release Package Created Successfully!${NC}"
+echo -e "${GREEN}  Package Created Successfully!${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 echo "Package: $DIST_DIR/$ARCHIVE_NAME"

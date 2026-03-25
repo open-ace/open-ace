@@ -2,15 +2,40 @@
 # Multi-stage Docker build for production deployment
 
 # =============================================================================
-# Build Stage
+# Frontend Build Stage
 # =============================================================================
-FROM python:3.11-slim as builder
+# Use BUILDPLATFORM to run frontend build on host architecture (for esbuild compatibility)
+FROM --platform=$BUILDPLATFORM node:20-alpine AS frontend-builder
+
+WORKDIR /app
+
+# Copy frontend package files
+COPY frontend/package*.json ./frontend/
+
+# Install all dependencies (including devDependencies for build tools)
+WORKDIR /app/frontend
+RUN npm ci --ignore-scripts
+
+# Copy frontend source
+COPY frontend/ ./
+
+# Create static/js/dist directory for build output
+RUN mkdir -p /app/static/js/dist
+
+# Build frontend (outputs to ../static/js/dist relative to frontend/)
+RUN npm run build
+
+# =============================================================================
+# Python Build Stage
+# =============================================================================
+FROM python:3.11-slim AS builder
 
 WORKDIR /app
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
+    libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy dependency files
@@ -25,16 +50,24 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # =============================================================================
 # Production Stage
 # =============================================================================
-FROM python:3.11-slim as production
+FROM python:3.11-slim AS production
 
 # Labels for container metadata
 LABEL maintainer="Open ACE Team"
-LABEL description="AI Computing Explorer - AI Token Usage Tracker & Analyzer"
+LABEL description="AI Computing Explorer"
 LABEL version="1.0.0"
 
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
 # Create non-root user for security
-RUN groupadd -r openace && \
-    useradd -r -g openace -d /app -s /sbin/nologin -c "Open ACE user" openace
+RUN groupadd -r open-ace && \
+    useradd -r -g open-ace -d /home/open-ace -s /sbin/nologin -c "Open ACE user" open-ace && \
+    mkdir -p /home/open-ace && \
+    chown -R open-ace:open-ace /home/open-ace
 
 WORKDIR /app
 
@@ -43,14 +76,17 @@ COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 # Copy application code
-COPY --chown=openace:openace . .
+COPY --chown=open-ace:open-ace . .
 
-# Create necessary directories
-RUN mkdir -p logs data && \
-    chown -R openace:openace logs data
+# Copy frontend build output from frontend-builder
+COPY --from=frontend-builder --chown=open-ace:open-ace /app/static/js/dist ./static/js/dist
+
+# Copy and set up entrypoint script
+COPY --chown=open-ace:open-ace docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Switch to non-root user
-USER openace
+USER open-ace
 
 # Environment variables
 ENV PYTHONUNBUFFERED=1 \
@@ -66,12 +102,12 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5001/health')" || exit 1
 
 # Run the application
-CMD ["python", "web.py"]
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
 # =============================================================================
 # Development Stage (optional)
 # =============================================================================
-FROM production as development
+FROM production AS development
 
 USER root
 
@@ -79,12 +115,13 @@ USER root
 RUN pip install --no-cache-dir \
     pytest \
     pytest-cov \
+    pytest-asyncio \
     black \
     isort \
     ruff \
     mypy
 
-USER openace
+USER open-ace
 
 # Development environment
 ENV FLASK_ENV=development \
@@ -92,3 +129,32 @@ ENV FLASK_ENV=development \
 
 # Run with auto-reload
 CMD ["python", "-c", "from web import app; app.run(host='0.0.0.0', port=5001, debug=True)"]
+
+# =============================================================================
+# Migration Stage (for running database migrations)
+# =============================================================================
+FROM production AS migration
+
+USER root
+
+# Create migration entrypoint script
+RUN echo '#!/bin/bash\n\
+set -e\n\
+\n\
+# Wait for database to be ready\n\
+if [ -n "$DATABASE_URL" ]; then\n\
+    echo "Waiting for database..."\n\
+    sleep 5\n\
+    \n\
+    # Run migrations\n\
+    echo "Running database migrations..."\n\
+    alembic upgrade head\n\
+    echo "Migrations completed successfully"\n\
+fi\n\
+\n\
+# Start the application\n\
+exec python web.py' > /entrypoint.sh && chmod +x /entrypoint.sh
+
+USER open-ace
+
+ENTRYPOINT ["/entrypoint.sh"]

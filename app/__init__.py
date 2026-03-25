@@ -60,6 +60,9 @@ def create_app(config=None):
             'version': get_git_commit()
         })
 
+    # Start background services
+    start_background_services()
+
     logger.info("Open ACE application initialized")
     return app
 
@@ -122,3 +125,13 @@ def register_blueprints(app):
     app.register_blueprint(pages_bp)
 
     logger.info("All blueprints registered")
+
+
+def start_background_services():
+    """Start background services like data fetch scheduler."""
+    try:
+        from app.services.data_fetch_scheduler import init_scheduler
+        init_scheduler()
+        logger.info("Background services started")
+    except Exception as e:
+        logger.warning(f"Failed to start background services: {e}")
