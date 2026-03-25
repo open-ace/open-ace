@@ -415,7 +415,7 @@ pre code {
 
 /* Secondary Button */
 .btn-secondary {
-  background-color: #e9ecef;
+  background-color: #f1f3f5;
   color: var(--text-primary) !important;
   border-color: var(--border-color);
   box-shadow: var(--shadow-sm);
@@ -423,7 +423,7 @@ pre code {
 
 .btn-secondary:hover:not(:disabled),
 .btn-secondary:focus:not(:disabled) {
-  background-color: #dee2e6;
+  background-color: #e9ecef;
   color: var(--text-primary) !important;
   border-color: var(--border-color-dark);
   box-shadow: var(--shadow-md);
