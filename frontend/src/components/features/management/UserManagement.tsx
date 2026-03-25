@@ -275,6 +275,9 @@ export const UserManagement: React.FC = () => {
             handleSubmit();
           }}
         >
+          {/* Hidden submit button to enable Enter key submission */}
+          <button type="submit" style={{ display: 'none' }} />
+
           {/* Error Message */}
           {formError && (
             <div className="alert alert-danger mb-3" role="alert">
