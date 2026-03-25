@@ -413,8 +413,14 @@ pre code {
   transform: translateY(-1px);
 }
 
-/* Secondary Button */
+/* Secondary Button - Override Bootstrap */
 .btn-secondary {
+  --bs-btn-bg: #f1f3f5;
+  --bs-btn-hover-bg: #e9ecef;
+  --bs-btn-color: var(--text-primary);
+  --bs-btn-hover-color: var(--text-primary);
+  --bs-btn-border-color: var(--border-color);
+  --bs-btn-hover-border-color: var(--border-color-dark);
   background-color: #f1f3f5;
   color: var(--text-primary) !important;
   border-color: var(--border-color);
