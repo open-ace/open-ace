@@ -2024,6 +2024,28 @@ link[rel='dns-prefetch'] {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
+  padding: var(--spacing-xs) 0;
+}
+
+/* Session Group Styles - Optimized spacing */
+.session-group {
+  margin-bottom: var(--spacing-md);
+}
+
+.session-group-title {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--letter-spacing-wide);
+}
+
+.session-group-items {
+  padding: 0;
+  margin: 0;
+}
+
+.session-group-items li {
+  list-style: none;
 }
 
 /* Session List Collapsed State */
@@ -2116,11 +2138,10 @@ link[rel='dns-prefetch'] {
   opacity: 0.5;
 }
 
-/* Session Item Styles */
+/* Session Item Styles - Optimized for better space usage */
 .session-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--spacing-sm);
   border: none;
   background: transparent;
@@ -2131,10 +2152,12 @@ link[rel='dns-prefetch'] {
   color: var(--text-primary);
   font-size: var(--font-size-xs);
   text-align: left;
+  width: 100%;
+  padding: var(--spacing-sm) var(--spacing-md);
 }
 
 .session-item:hover {
-  background: var(--bg-hover, #f5f5f5);
+  background: var(--bg-tertiary);
 }
 
 .session-item.selected {
@@ -2145,30 +2168,42 @@ link[rel='dns-prefetch'] {
 .session-item .session-title {
   flex: 1;
   min-width: 0;
-  font-size: 0.75rem;
+  font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
   color: var(--text-primary);
   text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .session-item .session-time {
-  width: 60px;
-  text-align: center;
   white-space: nowrap;
-  font-size: 0.7rem;
+  font-size: var(--font-size-xs);
   text-decoration: none;
+  color: var(--text-muted);
+  padding: 0 var(--spacing-sm);
+  border-right: 1px solid var(--border-color);
+  margin-right: var(--spacing-sm);
 }
 
 .session-item .session-messages {
-  width: 50px;
-  text-align: center;
-  font-size: 0.7rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  font-size: var(--font-size-xs);
   text-decoration: none;
+  gap: 4px;
+  min-width: 45px;
+  padding-left: var(--spacing-sm);
 }
 
 .session-item .session-messages i {
-  font-size: 0.7rem;
-  margin-right: 2px;
+  font-size: var(--font-size-xs);
+  display: inline-block;
+  width: 16px;
+  text-align: center;
+  flex-shrink: 0;
 }
 
 /* Session Detail Modal */
@@ -2199,6 +2234,26 @@ link[rel='dns-prefetch'] {
 .work-main .sessions {
   padding: var(--spacing-md);
   overflow-y: auto;
+}
+
+/* Sessions page specific styles */
+.work-main .sessions .sessions-list {
+  max-width: 100%;
+  margin: 0;
+  width: 100%;
+}
+
+.work-main .sessions .session-item.card {
+  padding: var(--spacing-sm) var(--spacing-md);
+  margin-bottom: var(--spacing-sm);
+}
+
+.work-main .sessions .session-item .card-body {
+  padding: var(--spacing-sm) 0;
+}
+
+.work-main .sessions .session-item .card-body .flex-grow-1 {
+  max-width: 100%;
 }
 
 /* Work Right Panel - Assist Panel */
