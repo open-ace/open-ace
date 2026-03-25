@@ -37,7 +37,6 @@ import { LoadingOverlay } from '@/components/common';
 import { useAuth, useTheme } from '@/hooks';
 import { useAppStore } from '@/store';
 import { t } from '@/i18n';
-import '@/styles/main.css';
 
 // Create Query Client
 const queryClient = new QueryClient({

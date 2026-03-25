@@ -14,6 +14,9 @@ import 'bootstrap/dist/css/bootstrap.min.css';
 import 'bootstrap-icons/font/bootstrap-icons.css';
 import 'bootstrap/dist/js/bootstrap.bundle.min.js';
 
+// Import custom styles AFTER Bootstrap to override defaults
+import '@/styles/main.css';
+
 // Mount the React application
 const rootElement = document.getElementById('root');
 
