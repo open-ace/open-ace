@@ -423,6 +423,7 @@ pre code {
 
 .btn-secondary:hover:not(:disabled) {
   background-color: var(--bg-secondary);
+  color: var(--text-primary);
   border-color: var(--border-color-dark);
   box-shadow: var(--shadow-md);
   transform: translateY(-1px);
