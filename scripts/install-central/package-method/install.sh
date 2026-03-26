@@ -701,16 +701,16 @@ do_fresh_install() {
 
     # Create default admin user
     print_info "Creating default admin user..."
-    if [ -f "$target_path/scripts/init_auth_db.py" ]; then
+    if [ -f "$target_path/scripts/init_db.py" ]; then
         cd "$target_path"
-        if python3 scripts/init_auth_db.py; then
+        if python3 scripts/init_db.py; then
             print_success "Default admin user created"
         else
-            print_warning "Failed to create default admin user. You may need to run scripts/init_auth_db.py manually."
+            print_warning "Failed to create default admin user. You may need to run scripts/init_db.py manually."
         fi
         cd - > /dev/null
     else
-        print_warning "init_auth_db.py not found, skipping default user creation"
+        print_warning "init_db.py not found, skipping default user creation"
     fi
 
     print_success "Fresh installation completed"
@@ -806,16 +806,16 @@ do_upgrade() {
 
     # Create default admin user (if not exists)
     print_info "Ensuring default admin user exists..."
-    if [ -f "$target_path/scripts/init_auth_db.py" ]; then
+    if [ -f "$target_path/scripts/init_db.py" ]; then
         cd "$target_path"
-        if python3 scripts/init_auth_db.py; then
+        if python3 scripts/init_db.py; then
             print_success "Default admin user ready"
         else
-            print_warning "Failed to create default admin user. You may need to run scripts/init_auth_db.py manually."
+            print_warning "Failed to create default admin user. You may need to run scripts/init_db.py manually."
         fi
         cd - > /dev/null
     else
-        print_warning "init_auth_db.py not found, skipping default user creation"
+        print_warning "init_db.py not found, skipping default user creation"
     fi
 
     print_success "Upgrade completed"
@@ -885,14 +885,14 @@ do_fresh_install_remote() {
     print_info "Creating default admin user on remote..."
     ssh "$remote" "
         cd '$target_path'
-        if [ -f 'scripts/init_auth_db.py' ]; then
-            if python3 scripts/init_auth_db.py; then
+        if [ -f 'scripts/init_db.py' ]; then
+            if python3 scripts/init_db.py; then
                 echo 'Default admin user created successfully'
             else
-                echo 'Warning: Failed to create default admin user. You may need to run scripts/init_auth_db.py manually.'
+                echo 'Warning: Failed to create default admin user. You may need to run scripts/init_db.py manually.'
             fi
         else
-            echo 'Warning: init_auth_db.py not found, skipping default user creation'
+            echo 'Warning: init_db.py not found, skipping default user creation'
         fi
     "
 
@@ -967,14 +967,14 @@ do_upgrade_remote() {
     print_info "Ensuring default admin user exists on remote..."
     ssh "$remote" "
         cd '$target_path'
-        if [ -f 'scripts/init_auth_db.py' ]; then
-            if python3 scripts/init_auth_db.py; then
+        if [ -f 'scripts/init_db.py' ]; then
+            if python3 scripts/init_db.py; then
                 echo 'Default admin user ready'
             else
-                echo 'Warning: Failed to create default admin user. You may need to run scripts/init_auth_db.py manually.'
+                echo 'Warning: Failed to create default admin user. You may need to run scripts/init_db.py manually.'
             fi
         else
-            echo 'Warning: init_auth_db.py not found, skipping default user creation'
+            echo 'Warning: init_db.py not found, skipping default user creation'
         fi
     "
 

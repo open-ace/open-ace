@@ -67,12 +67,19 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
     toast.info(docTitle, t('comingSoon', language) || 'Coming soon...');
   };
 
-  const handleCopyPrompt = async (content: string) => {
+  const handleCopyPrompt = async (content: string, promptName: string) => {
     try {
       await navigator.clipboard.writeText(content);
+      toast.success(t('copied', language) || 'Copied!', promptName);
     } catch (err) {
       console.error('Failed to copy:', err);
+      toast.error(t('copyFailed', language) || 'Copy failed', promptName);
     }
+  };
+
+  const handlePromptClick = (promptId: number) => {
+    // Navigate to prompts page with the prompt selected
+    navigate(`/work/prompts?highlight=${promptId}`);
   };
 
   if (collapsed) {
@@ -88,12 +95,19 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
         <ul className="assist-items list-unstyled">
           {prompts.slice(0, 5).map((prompt) => (
             <li key={prompt.id}>
-              <div className="assist-item">
+              <div
+                className="assist-item assist-item-clickable"
+                onClick={() => handlePromptClick(prompt.id)}
+                title={t('clickToView', language) || 'Click to view details'}
+              >
                 <div className="assist-item-header">
                   <span className="assist-item-title">{prompt.name}</span>
                   <button
                     className="btn btn-sm btn-link p-0"
-                    onClick={() => handleCopyPrompt(prompt.content)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleCopyPrompt(prompt.content, prompt.name);
+                    }}
                     title={t('copy', language)}
                   >
                     <i className="bi bi-clipboard" />

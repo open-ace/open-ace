@@ -27,6 +27,7 @@ export interface MessagesResponse {
 
 // Conversation history types
 export interface ConversationHistory {
+  conversation_id: string;
   session_id: string;
   tool_name: string;
   host_name: string;

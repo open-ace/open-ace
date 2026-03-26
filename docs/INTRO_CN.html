@@ -1,0 +1,1056 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Open ACE - Enterprise AI Work Platform - 中文版</title>
+    <style>
+        :root {
+            --primary-color: #667eea;
+            --secondary-color: #764ba2;
+            --bg-color: #f8f9fa;
+            --card-bg: #ffffff;
+            --text-color: #333;
+            --text-muted: #6c757d;
+            --border-color: #dee2e6;
+            --code-bg: #f4f4f4;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.8;
+            color: var(--text-color);
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: var(--card-bg);
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 2.5em;
+        }
+
+        .header p {
+            margin: 10px 0 0;
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .content {
+            padding: 40px;
+        }
+
+        h1, h2, h3, h4, h5, h6 {
+            color: var(--text-color);
+            margin-top: 35px;
+            margin-bottom: 20px;
+            font-weight: 600;
+        }
+
+        h1 {
+            color: var(--primary-color);
+            border-bottom: 3px solid var(--primary-color);
+            padding-bottom: 10px;
+        }
+
+        h2 {
+            color: var(--secondary-color);
+            border-left: 4px solid var(--secondary-color);
+            padding-left: 15px;
+        }
+
+        h3 {
+            color: var(--text-color);
+            border-left: 3px solid var(--primary-color);
+            padding-left: 12px;
+        }
+
+        h4 {
+            color: var(--text-color);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            font-size: 14px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        th {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            color: white;
+            padding: 12px 15px;
+            text-align: left;
+            font-weight: 600;
+        }
+
+        td {
+            padding: 10px 15px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        tr {
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        tr:nth-child(even) {
+            background-color: #f8f9fa;
+        }
+
+        tr:hover {
+            background-color: #e9ecef;
+        }
+
+        pre {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 20px 0;
+        }
+
+        code {
+            background: var(--code-bg);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'SF Mono', Monaco, Consolas, monospace;
+            font-size: 0.9em;
+        }
+
+        pre code {
+            background: none;
+            padding: 0;
+            color: inherit;
+        }
+
+        blockquote {
+            border-left: 4px solid var(--primary-color);
+            margin: 20px 0;
+            padding: 15px 20px;
+            background: #f0f4ff;
+            border-radius: 0 8px 8px 0;
+            color: #495057;
+        }
+
+        blockquote p {
+            margin: 0;
+        }
+
+        hr {
+            border: none;
+            height: 2px;
+            background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));
+            margin: 40px 0;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .badge-success { background-color: #d4edda; color: #155724; }
+        .badge-warning { background-color: #fff3cd; color: #856404; }
+        .badge-danger { background-color: #f8d7da; color: #721c24; }
+        .badge-info { background-color: #d1ecf1; color: #0c5460; }
+        .badge-new { background-color: #cce5ff; color: #004085; }
+
+        .layout-diagram {
+            background: #f8f9fa;
+            border: 2px solid var(--border-color);
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            font-family: 'SF Mono', Monaco, Consolas, monospace;
+            font-size: 12px;
+            white-space: pre;
+            overflow-x: auto;
+        }
+
+        .toc {
+            background: #f8f9fa;
+            padding: 20px 30px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+        }
+
+        .toc ul {
+            list-style: none;
+            padding-left: 0;
+        }
+
+        .toc li {
+            margin-bottom: 5px;
+        }
+
+        .toc a {
+            color: var(--primary-color);
+            text-decoration: none;
+        }
+
+        .toc a:hover {
+            text-decoration: underline;
+        }
+
+        .footer {
+            text-align: center;
+            padding: 20px;
+            color: var(--text-muted);
+            font-size: 14px;
+            border-top: 1px solid var(--border-color);
+            background: #f8f9fa;
+        }
+
+        .footer p {
+            margin: 5px 0;
+        }
+
+        /* 响应式 */
+        @media (max-width: 768px) {
+            .header {
+                padding: 20px;
+            }
+            
+            .header h1 {
+                font-size: 1.8em;
+            }
+            
+            .content {
+                padding: 20px;
+            }
+            
+            h1 {
+                font-size: 1.8em;
+            }
+            
+            h2 {
+                font-size: 1.5em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Open ACE - Enterprise AI Work Platform</h1>
+            <p>企业级 AI 工作平台 - 中文版</p>
+        </div>
+        <div class="content">
+<h1 id="open-ace-ai">Open ACE - 企业级 AI 工作平台</h1>
+<blockquote>
+<p><strong>ACE</strong> = <strong>AI Computing Explorer</strong>（AI 计算探索器）</p>
+</blockquote>
+<p>本文档提供了 Open ACE 的定位、核心功能和快速入门的简要概述。</p>
+<hr />
+<h2 id="_1">项目定位</h2>
+<p>Open ACE 是一个<strong>企业级 AI 工作平台</strong>，旨在帮助组织高效地使用AI和追踪、分析、管理和治理 AI 工具使用情况。它是一个全面的平台，连接了技术 AI 使用数据与业务决策之间的重要桥梁。</p>
+<h3 id="_2">核心价值主张</h3>
+<p>Open ACE 围绕两大核心维度构建：</p>
+<table>
+<thead>
+<tr>
+<th>维度</th>
+<th>目标</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>"用" (Workspace)</strong></td>
+<td>方便用</td>
+<td>让用户在 Workspace 上方便地与 AI 对话、完成各类任务</td>
+</tr>
+<tr>
+<td><strong>"管" (Management)</strong></td>
+<td>方便管</td>
+<td>监视、分析、持续优化 AI 使用，保障安全可控</td>
+</tr>
+</tbody>
+</table>
+<h3 id="_2">目标用户</h3>
+<table>
+<thead>
+<tr>
+<th>用户类型</th>
+<th>主要需求</th>
+<th>平台功能</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td colspan="3" style="background: #f0f4ff; font-style: italic; color: #495057;">
+    <strong>Work 模式 (<code>/work/*</code>)</strong>：面向所有用户的交互式 AI 工作界面，提供对话、任务执行、工具调用等核心功能
+</td>
+</tr>
+<tr>
+<td><strong>个人开发者</strong></td>
+<td>追踪个人使用情况、了解成本</td>
+<td>工作模式仪表板、会话管理、提示库</td>
+</tr>
+<tr>
+<td><strong>团队负责人</strong></td>
+<td>监控团队使用情况、优化成本</td>
+<td>分析、ROI 分析、配额管理</td>
+</tr>
+<tr>
+<td><strong>IT 管理员</strong></td>
+<td>用户管理、安全、合规</td>
+<td>用户/租户管理、SSO、审计日志、合规控制</td>
+</tr>
+<tr>
+<td><strong>高管层</strong></td>
+<td>成本监督、ROI 衡量、战略决策</td>
+<td>使用分析、趋势分析、ROI 报告</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="_3">核心能力</h2>
+<h3 id="1-token">1. 多工具 Token 追踪</h3>
+<p>支持主要 AI 工具的自动日志解析：</p>
+<table>
+<thead>
+<tr>
+<th>工具</th>
+<th>收集数据</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Claude</strong></td>
+<td>Token 使用量、请求次数、模型、输入/输出明细</td>
+</tr>
+<tr>
+<td><strong>Qwen</strong></td>
+<td>Token 使用量、请求次数、缓存使用量、模型</td>
+</tr>
+<tr>
+<td><strong>OpenClaw</strong></td>
+<td>Agent 会话数据、工具调用、对话历史</td>
+</tr>
+</tbody>
+</table>
+<p><strong>主要功能：</strong>
+- 通过定时脚本自动收集数据
+- 按工具、主机、用户进行细分
+- 输入/输出 Token 追踪以优化成本
+- 请求计数用于 API 配额管理</p>
+<h3 id="2">2. 双模式界面</h3>
+<p>Open ACE 根据用户角色提供两个不同的界面：</p>
+<h4 id="work-">工作模式 (<code>/work/*</code>) - 适用于所有用户</h4>
+<ul>
+<li><strong>工作空间</strong>：交互式 AI 工具界面</li>
+<li><strong>会话</strong>：查看和管理对话历史</li>
+<li><strong>提示</strong>：保存、组织和重用提示模板</li>
+<li><strong>仪表板</strong>：个人使用情况概览</li>
+</ul>
+<h4 id="manage-">管理模式 (<code>/manage/*</code>) - 适用于管理员</h4>
+<ul>
+<li><strong>仪表板</strong>：团队/组织范围的统计数据</li>
+<li><strong>分析</strong>：趋势分析、异常检测、ROI 计算</li>
+<li><strong>消息</strong>：高级过滤和搜索</li>
+<li><strong>用户管理</strong>：创建、编辑、删除用户</li>
+<li><strong>租户管理</strong>：多租户组织结构</li>
+<li><strong>审计中心</strong>：全面的审计日志和分析</li>
+<li><strong>安全中心</strong>：内容过滤、访问控制</li>
+<li><strong>合规性</strong>：数据保留、报告</li>
+</ul>
+<h3 id="3">3. 高级分析</h3>
+<h4 id="_4">使用分析</h4>
+<ul>
+<li>每日/每周/每月使用趋势</li>
+<li>显示使用模式的热力图</li>
+<li>工具对比图表</li>
+<li>模型使用细分</li>
+</ul>
+<h4 id="_5">异常检测</h4>
+<ul>
+<li>识别异常使用模式</li>
+<li>监控请求失败率</li>
+<li>非工作时间活动警报</li>
+<li>自动异常报告</li>
+</ul>
+<h4 id="roi">ROI 分析</h4>
+<ul>
+<li>每次对话的成本</li>
+<li>Token 效率指标</li>
+<li>工具 ROI 计算</li>
+<li>预算与实际支出对比</li>
+</ul>
+<h3 id="4">4. 企业治理</h3>
+<h4 id="_6">配额管理</h4>
+<ul>
+<li>每用户每日/每月 Token 配额</li>
+<li>每日/每月请求配额</li>
+<li>警报阈值（80% 警告，95% 严重）</li>
+<li>实时配额状态监控</li>
+</ul>
+<h4 id="_7">用户与租户管理</h4>
+<ul>
+<li>基于角色的访问控制（管理员、经理、用户）</li>
+<li>多租户组织支持</li>
+<li>团队协作功能</li>
+<li>权限精细化</li>
+</ul>
+<h4 id="_8">安全与合规</h4>
+<ul>
+<li>SSO/SAML 集成（OIDC、OAuth2）</li>
+<li>全面的审计日志</li>
+<li>内容过滤</li>
+<li>数据保留策略</li>
+<li>符合 GDPR 的数据导出</li>
+</ul>
+<h3 id="5">5. 工作空间与工具集成</h3>
+<h4 id="_9">统一工具连接器</h4>
+<ul>
+<li><strong>工具健康监控</strong>：所有 AI 工具的实时状态</li>
+<li><strong>工具注册</strong>：动态工具发现和注册</li>
+<li><strong>功能检测</strong>：自动检测工具功能（流式传输、视觉、工具）</li>
+<li><strong>模型映射</strong>：每个工具支持多个模型</li>
+</ul>
+<h4 id="_10">状态同步</h4>
+<ul>
+<li><strong>会话持久化</strong>：保存并恢复对话</li>
+<li><strong>状态恢复</strong>：重新连接时自动恢复会话状态</li>
+<li><strong>跨设备同步</strong>：在不同设备上继续工作</li>
+<li><strong>标签管理</strong>：在工作空间内管理多个对话标签</li>
+</ul>
+<h4 id="_11">工作空间配置</h4>
+<p>工作空间可以配置为连接到各种 AI 工具服务：</p>
+<pre><code class="language-json">{
+  &quot;workspace&quot;: {
+    &quot;enabled&quot;: true,
+    &quot;url&quot;: &quot;http://localhost:3000&quot;,
+    &quot;tool_urls&quot;: {
+      &quot;openclaw&quot;: &quot;http://localhost:3001&quot;,
+      &quot;claude&quot;: &quot;http://localhost:3002&quot;,
+      &quot;qwen&quot;: &quot;http://localhost:3003&quot;
+    }
+  }
+}
+</code></pre>
+<h4 id="_12">提示库</h4>
+<ul>
+<li><strong>模板分类</strong>：通用、编码、写作、分析、翻译、摘要</li>
+<li><strong>变量支持</strong>：模板变量用于动态内容</li>
+<li><strong>标签系统</strong>：使用自定义标签组织提示</li>
+<li><strong>使用追踪</strong>：查看最常用的提示</li>
+<li><strong>公开/私有共享</strong>：在团队内共享或保持私有</li>
+<li><strong>精选提示</strong>：突出显示推荐的模板</li>
+</ul>
+<h4 id="_13">协作功能</h4>
+<ul>
+<li><strong>会话共享</strong>：与团队成员共享对话</li>
+<li><strong>提示库</strong>：集中式提示存储库</li>
+<li><strong>团队工作空间</strong>：共享工作环境</li>
+<li><strong>协作注释</strong>：为对话添加注释</li>
+</ul>
+<hr />
+<h2 id="_14">架构概述</h2>
+<pre><code>┌─────────────────────────────────────────────────────────────┐
+│                      数据收集层                              │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
+│  │ fetch_claude│  │ fetch_qwen  │  │fetch_openclaw│         │
+│  │   (日志)    │  │   (日志)    │  │   (日志)    │         │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘         │
+│         │                │                │                 │
+│         └────────────────┼────────────────┘                 │
+│                          ▼                                  │
+│                  ┌─────────────────┐                        │
+│                  │   数据库        │                        │
+│                  │ (SQLite/PostgreSQL)                     │
+│                  └─────────────────┘                        │
+└─────────────────────────────────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    应用层                                    │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
+│  │   路由       │  │  服务       │  │  模块       │         │
+│  │  (API)      │  │ (业务逻辑)  │  │ (核心)      │         │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘         │
+│         │                │                │                 │
+│         └────────────────┼────────────────┘                 │
+│                          ▼                                  │
+│                  ┌─────────────────┐                        │
+│                  │   Flask 应用   │                        │
+│                  └─────────────────┘                        │
+└─────────────────────────────────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      表现层                                  │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
+│  │   Web UI    │  │    CLI      │  │   API       │         │
+│  │ (React)     │  │  (Python)   │  │ (REST)      │         │
+│  └─────────────┘  └─────────────┘  └─────────────┘         │
+└─────────────────────────────────────────────────────────────┘
+</code></pre>
+<h3 id="_15">技术栈</h3>
+<table>
+<thead>
+<tr>
+<th>层级</th>
+<th>技术</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>后端</strong></td>
+<td>Python 3.9+, Flask</td>
+</tr>
+<tr>
+<td><strong>前端</strong></td>
+<td>React 18, TypeScript, Bootstrap 5, Chart.js</td>
+</tr>
+<tr>
+<td><strong>数据库</strong></td>
+<td>SQLite (开发), PostgreSQL (生产)</td>
+</tr>
+<tr>
+<td><strong>构建</strong></td>
+<td>Vite, TypeScript</td>
+</tr>
+<tr>
+<td><strong>测试</strong></td>
+<td>pytest, Playwright, Vitest</td>
+</tr>
+<tr>
+<td><strong>认证</strong></td>
+<td>基于会话, OIDC, OAuth2</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="_16">快速入门</h2>
+<h3 id="_17">安装</h3>
+<pre><code class="language-bash"># 克隆仓库
+git clone https://github.com/your-org/open-ace.git
+cd open-ace
+
+# 安装 Python 依赖
+pip install -r requirements.txt
+
+# 初始化配置
+python3 cli.py config init
+</code></pre>
+<h3 id="_18">配置</h3>
+<p>编辑 <code>~/.open-ace/config.json</code>：</p>
+<pre><code class="language-json">{
+  &quot;host_name&quot;: &quot;my-server&quot;,
+  &quot;tools&quot;: {
+    &quot;claude&quot;: { &quot;enabled&quot;: true, &quot;log_path&quot;: &quot;~/.claude/projects&quot; },
+    &quot;qwen&quot;: { &quot;enabled&quot;: true, &quot;log_path&quot;: &quot;~/.qwen/projects&quot; },
+    &quot;openclaw&quot;: { &quot;enabled&quot;: true, &quot;log_path&quot;: &quot;~/.openclaw/agents&quot; }
+  },
+  &quot;email&quot;: {
+    &quot;smtp_host&quot;: &quot;smtp.example.com&quot;,
+    &quot;smtp_port&quot;: 587,
+    &quot;sender&quot;: &quot;noreply@example.com&quot;
+  }
+}
+</code></pre>
+<h3 id="_19">启动服务器</h3>
+<pre><code class="language-bash"># 启动 Web 服务器
+python3 web.py
+
+# 访问 http://localhost:5001
+# 默认登录：admin / admin123
+</code></pre>
+<h3 id="_20">收集数据</h3>
+<pre><code class="language-bash"># 从所有工具收集
+python3 scripts/fetch_claude.py
+python3 scripts/fetch_qwen.py
+python3 scripts/fetch_openclaw.py
+
+# 或设置 cron 进行自动收集
+crontab -e
+# 添加：30 0 * * * cd /path/to/open-ace &amp;&amp; python3 scripts/fetch_*.py
+</code></pre>
+<hr />
+<h2 id="cli">CLI 命令</h2>
+<pre><code class="language-bash"># 查看使用统计
+python3 cli.py today        # 今天的使用情况
+python3 cli.py today --tool qwen   # 特定工具今天的使用情况
+python3 cli.py today --host myserver  # 特定主机的使用情况
+
+python3 cli.py top          # 最近 7 天的使用情况
+python3 cli.py top --days 14  # 最近 14 天
+python3 cli.py summary      # 总结
+
+# 生成报告
+python3 cli.py report       # 生成邮件报告
+python3 cli.py report --email user@example.com  # 发送到特定地址
+</code></pre>
+<hr />
+<h2 id="api">API 端点</h2>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>端点</th>
+<th>描述</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET</td>
+<td><code>/api/summary</code></td>
+<td>使用情况摘要</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/today</code></td>
+<td>今天的使用情况</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/messages</code></td>
+<td>带过滤的消息</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/analysis/trend</code></td>
+<td>使用趋势</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/analysis/anomaly</code></td>
+<td>异常检测</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/analysis/roi</code></td>
+<td>ROI 分析</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/users</code></td>
+<td>用户列表 (管理员)</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/users</code></td>
+<td>创建用户 (管理员)</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/tenants</code></td>
+<td>租户列表 (管理员)</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/sessions</code></td>
+<td>会话列表</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/prompts</code></td>
+<td>提示库</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="_21">部署选项</h2>
+<h3 id="_22">单机（个人/小型团队）</h3>
+<pre><code class="language-bash"># 所有组件在同一台机器上
+python3 web.py          # Web 服务器
+python3 cli.py config init  # 配置
+crontab -e              # 定时数据收集
+</code></pre>
+<h3 id="docker">Docker（生产环境）</h3>
+<pre><code class="language-bash"># 使用 Docker Compose 部署
+docker compose up -d
+
+# 管理服务
+docker compose ps
+docker compose logs -f
+docker compose restart
+</code></pre>
+<h3 id="_23">中心服务器 + 远程收集器（企业）</h3>
+<pre><code>┌───────────────────────┐       ┌───────────────────────┐
+│   中心服务器           │       │    远程机器           │
+│  ┌─────────────────┐  │       │  ┌─────────────────┐  │
+│  │   web.py        │  │       │  │ fetch_openclaw  │  │
+│  │   (仪表板)      │  │       │  │                 │  │
+│  └────────┬────────┘  │       │  └────────┬────────┘  │
+│           │           │       │           │           │
+│           ▼           │       │           ▼           │
+│  ┌─────────────────┐  │       │  ┌─────────────────┐  │
+│  │   PostgreSQL    │◄─┼───────┼──│   SQLite        │  │
+│  │   (中心)        │  │上传   │  │   (远程)        │  │
+│  └─────────────────┘  │       │  └─────────────────┘  │
+└───────────────────────┘       └───────────────────────┘
+</code></pre>
+<hr />
+<h2 id="_24">核心概念</h2>
+<table>
+<thead>
+<tr>
+<th>概念</th>
+<th>描述</th>
+<th>示例</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>请求 (Request)</strong></td>
+<td>对 LLM 的单次 API 调用</td>
+<td>用户消息 → 1 个请求</td>
+</tr>
+<tr>
+<td><strong>消息 (Message)</strong></td>
+<td>按角色划分的单条消息</td>
+<td>user, assistant, toolResult</td>
+</tr>
+<tr>
+<td><strong>对话 (Conversation)</strong></td>
+<td>一轮对话</td>
+<td>用户发送 → AI 回复</td>
+</tr>
+<tr>
+<td><strong>会话 (Session)</strong></td>
+<td>工具级别的会话</td>
+<td>qwen 代码进程生命周期</td>
+</tr>
+</tbody>
+</table>
+<p><strong>关系</strong>：会话 → 对话 → 请求 + 消息</p>
+<hr />
+<h2 id="_25">快速参考</h2>
+<h3 id="_26">默认登录凭据</h3>
+<pre><code>用户名: admin
+密码: admin123
+</code></pre>
+<p><strong>重要</strong>：首次登录后立即更改！</p>
+<h3 id="_27">默认端口</h3>
+<table>
+<thead>
+<tr>
+<th>服务</th>
+<th>端口</th>
+<th>URL</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Web 服务器</td>
+<td>5001</td>
+<td>http://localhost:5001</td>
+</tr>
+<tr>
+<td>工作空间（如启用）</td>
+<td>3000</td>
+<td>http://localhost:3000</td>
+</tr>
+</tbody>
+</table>
+<h3 id="_28">配置位置</h3>
+<ul>
+<li><strong>配置文件</strong>: <code>~/.open-ace/config.json</code></li>
+<li><strong>数据库</strong>: <code>~/.open-ace/usage.db</code> (SQLite) 或 PostgreSQL</li>
+<li><strong>日志</strong>: <code>~/logs/open-ace/</code></li>
+</ul>
+<hr />
+<h2 id="_29">数据流</h2>
+<pre><code>┌─────────────────────────────────────────────────────────────┐
+│                    用户操作                                  │
+│  • 向 AI 工具发送消息                                        │
+│  • 使用提示模板                                              │
+│  • 共享会话                                                  │
+│  • 查询使用数据                                              │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  AI 工具日志                                 │
+│  • Claude: ~/.claude/projects/*.json                        │
+│  • Qwen: ~/.qwen/projects/*.json                            │
+│  • OpenClaw: ~/.openclaw/agents/*.json                      │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│              数据收集（定时）                                │
+│  • fetch_claude.py                                          │
+│  • fetch_qwen.py                                            │
+│  • fetch_openclaw.py                                        │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  数据库层                                    │
+│  • daily_usage: 聚合的 Token 统计                           │
+│  • daily_messages: 单条消息记录                             │
+│  • sessions: 对话会话                                       │
+│  • prompts: 提示模板                                        │
+│  • users: 用户账户和配额                                    │
+│  • audit_logs: 系统活动日志                                 │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  应用层                                      │
+│  • API 路由: REST 端点                                       │
+│  • 服务: 业务逻辑                                            │
+│  • 模块: 核心功能                                            │
+│  • 仓库: 数据访问                                            │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  表现层                                      │
+│  • Web UI: React 仪表板                                      │
+│  • CLI: 命令行查询                                           │
+│  • 邮件: 自动报告                                            │
+└─────────────────────────────────────────────────────────────┘
+</code></pre>
+<hr />
+<h2 id="_30">数据库模式</h2>
+<h3 id="_31">核心表</h3>
+<table>
+<thead>
+<tr>
+<th>表名</th>
+<th>用途</th>
+<th>关键字段</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>daily_usage</code></td>
+<td>Token 使用统计</td>
+<td>date, tool_name, host_name, tokens_used, input_tokens, output_tokens</td>
+</tr>
+<tr>
+<td><code>daily_messages</code></td>
+<td>单条消息</td>
+<td>message_id, role, content, tokens_used, sender_id, conversation_id</td>
+</tr>
+<tr>
+<td><code>sessions</code></td>
+<td>对话会话</td>
+<td>session_id, session_type, status, created_at, tool_name</td>
+</tr>
+<tr>
+<td><code>prompts</code></td>
+<td>提示模板</td>
+<td>name, category, content, variables, is_public, use_count</td>
+</tr>
+<tr>
+<td><code>users</code></td>
+<td>用户账户</td>
+<td>username, email, role, is_active, daily_token_quota</td>
+</tr>
+<tr>
+<td><code>audit_logs</code></td>
+<td>系统活动</td>
+<td>action, user_id, timestamp, details</td>
+</tr>
+<tr>
+<td><code>quotas</code></td>
+<td>配额追踪</td>
+<td>user_id, period, tokens_used, requests_made, quota_limit</td>
+</tr>
+<tr>
+<td><code>teams</code></td>
+<td>团队协作</td>
+<td>team_id, name, owner_id, members</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="_32">功能状态</h2>
+<h3 id="_33">✅ 已实现</h3>
+<ul>
+<li>多工具 Token 追踪（Claude、Qwen、OpenClaw）</li>
+<li>带有交互式可视化的 Web 仪表板</li>
+<li>用于快速查询的 CLI 工具</li>
+<li>邮件报告生成</li>
+<li>用户认证和基于角色的访问控制</li>
+<li>配额管理和警报</li>
+<li>SSO/SAML 集成（OIDC、OAuth2）</li>
+<li>审计日志和合规功能</li>
+<li>租户管理</li>
+<li>提示库和会话管理</li>
+<li>分析和 ROI 分析</li>
+<li>异常检测</li>
+<li>多语言支持（英语、中文）</li>
+</ul>
+<h3 id="_34">🔄 进行中</h3>
+<ul>
+<li>高级协作功能</li>
+<li>实时通知</li>
+<li>移动端响应式改进</li>
+</ul>
+<h3 id="_35">📋 计划中</h3>
+<ul>
+<li>Kubernetes 部署</li>
+<li>高级工作流自动化</li>
+<li>自定义报告构建器</li>
+<li>AI 驱动的成本优化建议</li>
+</ul>
+<hr />
+<h2 id="_36">文档</h2>
+<table>
+<thead>
+<tr>
+<th>文档</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>INTRO.md</td>
+<td><strong>本文档</strong> - 快速概览和入门</td>
+</tr>
+<tr>
+<td>ARCHITECTURE.md</td>
+<td>系统架构和数据模型</td>
+</tr>
+<tr>
+<td>CONCEPTS.md</td>
+<td>核心概念和术语</td>
+</tr>
+<tr>
+<td>DEPLOYMENT.md</td>
+<td>部署指南（本地、Docker、企业）</td>
+</tr>
+<tr>
+<td>DEVELOPMENT.md</td>
+<td>开发设置和贡献指南</td>
+</tr>
+<tr>
+<td>FEISHU_CONFIG.md</td>
+<td>飞书集成配置</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="_37">总结</h2>
+<p>Open ACE 是一个全面的企业 AI 工作平台，提供：</p>
+<div class="layout-diagram" style="background: #e7f3ff; border-color: var(--primary-color);">
+    <strong>💡 核心理念：</strong><br>
+    • <strong>"用" (Work 模式)</strong> - 交互式 AI 工作界面，方便用户与 AI 对话和完成任务<br>
+    • <strong>"管" (Manage 模式)</strong> - 管理中心，监视、分析、优化 AI 使用，保障安全可控
+</div>
+<table>
+<thead>
+<tr>
+<th>类别</th>
+<th>功能</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>追踪</strong></td>
+<td>多工具 Token 使用、请求计数、输入/输出细分</td>
+</tr>
+<tr>
+<td><strong>分析</strong></td>
+<td>趋势、异常、ROI、热力图、对比</td>
+</tr>
+<tr>
+<td><strong>管理</strong></td>
+<td>用户、租户、配额、角色、权限</td>
+</tr>
+<tr>
+<td><strong>治理</strong></td>
+<td>审计日志、安全、合规、保留</td>
+</tr>
+<tr>
+<td><strong>协作</strong></td>
+<td>会话共享、提示库、团队工作空间</td>
+</tr>
+<tr>
+<td><strong>集成</strong></td>
+<td>SSO/SAML、工具连接器、状态同步</td>
+</tr>
+</tbody>
+</table>
+<p><strong>个人开发者</strong>：追踪个人使用情况和优化成本
+<strong>团队</strong>：监控使用情况、共享提示、协作会话
+<strong>企业</strong>：完整的治理、安全、合规和多租户支持</p>
+<hr />
+<h2 id="_38">获取帮助</h2>
+<ol>
+<li><strong>文档</strong>：查看 docs 目录获取详细指南</li>
+<li><strong>问题</strong>：在 GitHub 上报告 bug 或请求功能</li>
+<li><strong>贡献</strong>：参见 CONTRIBUTING.md 了解开发指南</li>
+<li><strong>许可证</strong>：Apache 2.0 - 可免费用于商业用途</li>
+</ol>
+<hr />
+<h2 id="open-ace">为什么选择 Open ACE？</h2>
+<table>
+<thead>
+<tr>
+<th>功能</th>
+<th>Open ACE</th>
+<th>自定义解决方案</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>设置时间</strong></td>
+<td>15 分钟</td>
+<td>2-4 周</td>
+</tr>
+<tr>
+<td><strong>多工具</strong></td>
+<td>内置</td>
+<td>自定义编码</td>
+</tr>
+<tr>
+<td><strong>分析</strong></td>
+<td>开箱即用</td>
+<td>从头开始</td>
+</tr>
+<tr>
+<td><strong>治理</strong></td>
+<td>企业就绪</td>
+<td>构建复杂</td>
+</tr>
+<tr>
+<td><strong>维护</strong></td>
+<td>活跃社区</td>
+<td>需要完整团队</td>
+</tr>
+<tr>
+<td><strong>成本</strong></td>
+<td>免费 (Apache 2.0)</td>
+<td>高总拥有成本</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<p><strong>准备开始？</strong> → 部署指南</p>
+        </div>
+        <div class="footer">
+            <p>文档维护: Open ACE 团队<br>最后更新: 2026年3月26日</p>
+        </div>
+    </div>
+</body>
+</html>

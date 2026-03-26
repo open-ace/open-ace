@@ -20,6 +20,16 @@ from app.repositories.database import DB_PATH, is_postgresql, get_database_url
 
 logger = logging.getLogger(__name__)
 
+# Parameter placeholder for SQL queries
+def _param() -> str:
+    """Get the correct parameter placeholder for the current database."""
+    return '?' if not is_postgresql() else '%s'
+
+def _params(count: int) -> str:
+    """Get comma-separated placeholders for multiple parameters."""
+    p = _param()
+    return ', '.join([p] * count)
+
 
 class SessionStatus(Enum):
     """Session status enumeration."""
@@ -201,7 +211,6 @@ class SessionManager:
                 from psycopg2.extras import RealDictCursor
                 url = get_database_url()
                 conn = psycopg2.connect(url)
-                conn.cursor_factory = RealDictCursor
                 return conn
             except ImportError:
                 raise ImportError(
@@ -342,11 +351,11 @@ class SessionManager:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        cursor.execute('''
+        cursor.execute(f'''
             INSERT INTO agent_sessions
             (session_id, session_type, title, tool_name, host_name, user_id, status,
              context, settings, model, expires_at, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES ({_params(13)})
         ''', (
             session.session_id,
             session.session_type,
@@ -384,7 +393,7 @@ class SessionManager:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        cursor.execute('SELECT * FROM agent_sessions WHERE session_id = ?', (session_id,))
+        cursor.execute(f'SELECT * FROM agent_sessions WHERE session_id = {_param()}', (session_id,))
         row = cursor.fetchone()
 
         if not row:
@@ -394,9 +403,9 @@ class SessionManager:
         session = self._row_to_session(row)
 
         if include_messages:
-            cursor.execute('''
+            cursor.execute(f'''
                 SELECT * FROM session_messages
-                WHERE session_id = ?
+                WHERE session_id = {_param()}
                 ORDER BY timestamp ASC
             ''', (session_id,))
             message_rows = cursor.fetchall()
@@ -424,12 +433,12 @@ class SessionManager:
         now = datetime.utcnow()
         session.updated_at = now
 
-        cursor.execute('''
+        cursor.execute(f'''
             UPDATE agent_sessions
-            SET title = ?, status = ?, context = ?, settings = ?,
-                total_tokens = ?, total_input_tokens = ?, total_output_tokens = ?,
-                message_count = ?, model = ?, tags = ?, updated_at = ?, completed_at = ?
-            WHERE session_id = ?
+            SET title = {_param()}, status = {_param()}, context = {_param()}, settings = {_param()},
+                total_tokens = {_param()}, total_input_tokens = {_param()}, total_output_tokens = {_param()},
+                message_count = {_param()}, model = {_param()}, tags = {_param()}, updated_at = {_param()}, completed_at = {_param()}
+            WHERE session_id = {_param()}
         ''', (
             session.title,
             session.status,
@@ -480,10 +489,10 @@ class SessionManager:
 
         now = datetime.utcnow().isoformat()
 
-        cursor.execute('''
+        cursor.execute(f'''
             INSERT INTO session_messages
             (session_id, role, content, tokens_used, model, timestamp, metadata)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES ({_params(7)})
         ''', (
             session_id,
             role,
@@ -497,12 +506,12 @@ class SessionManager:
         message_id = cursor.lastrowid
 
         # Update session stats
-        cursor.execute('''
+        cursor.execute(f'''
             UPDATE agent_sessions
             SET message_count = message_count + 1,
-                total_tokens = total_tokens + ?,
-                updated_at = ?
-            WHERE session_id = ?
+                total_tokens = total_tokens + {_param()},
+                updated_at = {_param()}
+            WHERE session_id = {_param()}
         ''', (tokens_used, now, session_id))
 
         conn.commit()
@@ -531,17 +540,17 @@ class SessionManager:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        query = 'SELECT * FROM session_messages WHERE session_id = ?'
+        query = f'SELECT * FROM session_messages WHERE session_id = {_param()}'
         params = [session_id]
 
         if before_id:
-            query += ' AND id < ?'
+            query += f' AND id < {_param()}'
             params.append(before_id)
 
         query += ' ORDER BY timestamp ASC'
 
         if limit:
-            query += ' LIMIT ?'
+            query += f' LIMIT {_param()}'
             params.append(limit)
 
         cursor.execute(query, params)
@@ -565,10 +574,10 @@ class SessionManager:
 
         now = datetime.utcnow().isoformat()
 
-        cursor.execute('''
+        cursor.execute(f'''
             UPDATE agent_sessions
-            SET status = ?, completed_at = ?, updated_at = ?
-            WHERE session_id = ?
+            SET status = {_param()}, completed_at = {_param()}, updated_at = {_param()}
+            WHERE session_id = {_param()}
         ''', (SessionStatus.COMPLETED.value, now, now, session_id))
 
         success = cursor.rowcount > 0
@@ -594,10 +603,10 @@ class SessionManager:
 
         now = datetime.utcnow().isoformat()
 
-        cursor.execute('''
+        cursor.execute(f'''
             UPDATE agent_sessions
-            SET status = ?, updated_at = ?
-            WHERE session_id = ?
+            SET status = {_param()}, updated_at = {_param()}
+            WHERE session_id = {_param()}
         ''', (SessionStatus.ARCHIVED.value, now, session_id))
 
         success = cursor.rowcount > 0
@@ -622,10 +631,10 @@ class SessionManager:
         cursor = conn.cursor()
 
         # Delete messages first
-        cursor.execute('DELETE FROM session_messages WHERE session_id = ?', (session_id,))
+        cursor.execute(f'DELETE FROM session_messages WHERE session_id = {_param()}', (session_id,))
 
         # Delete session
-        cursor.execute('DELETE FROM agent_sessions WHERE session_id = ?', (session_id,))
+        cursor.execute(f'DELETE FROM agent_sessions WHERE session_id = {_param()}', (session_id,))
 
         success = cursor.rowcount > 0
         conn.commit()
@@ -667,23 +676,23 @@ class SessionManager:
         params = []
 
         if user_id is not None:
-            conditions.append('user_id = ?')
+            conditions.append(f'user_id = {_param()}')
             params.append(user_id)
 
         if tool_name:
-            conditions.append('tool_name = ?')
+            conditions.append(f'tool_name = {_param()}')
             params.append(tool_name)
 
         if status:
-            conditions.append('status = ?')
+            conditions.append(f'status = {_param()}')
             params.append(status)
 
         if session_type:
-            conditions.append('session_type = ?')
+            conditions.append(f'session_type = {_param()}')
             params.append(session_type)
 
         if search:
-            conditions.append('title LIKE ?')
+            conditions.append(f'title LIKE {_param()}')
             params.append(f'%{search}%')
 
         where_clause = ' AND '.join(conditions) if conditions else '1=1'
@@ -695,13 +704,12 @@ class SessionManager:
 
         # Get paginated results
         offset = (page - 1) * limit
-        from app.repositories.database import adapt_sql
-        cursor.execute(adapt_sql(f'''
+        cursor.execute(f'''
             SELECT * FROM agent_sessions
             WHERE {where_clause}
             ORDER BY updated_at DESC
-            LIMIT ? OFFSET ?
-        '''), params + [limit, offset])
+            LIMIT {_param()} OFFSET {_param()}
+        ''', params + [limit, offset])
 
         rows = cursor.fetchall()
         conn.close()
@@ -730,15 +738,15 @@ class SessionManager:
         cursor = conn.cursor()
 
         if user_id:
-            cursor.execute('''
+            cursor.execute(f'''
                 SELECT * FROM agent_sessions
-                WHERE user_id = ? AND status = ?
+                WHERE user_id = {_param()} AND status = {_param()}
                 ORDER BY updated_at DESC
             ''', (user_id, SessionStatus.ACTIVE.value))
         else:
-            cursor.execute('''
+            cursor.execute(f'''
                 SELECT * FROM agent_sessions
-                WHERE status = ?
+                WHERE status = {_param()}
                 ORDER BY updated_at DESC
             ''', (SessionStatus.ACTIVE.value,))
 
@@ -793,18 +801,18 @@ class SessionManager:
         cutoff = datetime.utcnow() - timedelta(days=days_old)
 
         # Get expired session IDs
-        cursor.execute('''
+        cursor.execute(f'''
             SELECT session_id FROM agent_sessions
-            WHERE (expires_at < ? OR updated_at < ?)
-            AND status != ?
+            WHERE (expires_at < {_param()} OR updated_at < {_param()})
+            AND status != {_param()}
         ''', (cutoff.isoformat(), cutoff.isoformat(), SessionStatus.ARCHIVED.value))
 
         session_ids = [row['session_id'] for row in cursor.fetchall()]
 
         # Delete messages and sessions
         for session_id in session_ids:
-            cursor.execute('DELETE FROM session_messages WHERE session_id = ?', (session_id,))
-            cursor.execute('DELETE FROM agent_sessions WHERE session_id = ?', (session_id,))
+            cursor.execute(f'DELETE FROM session_messages WHERE session_id = {_param()}', (session_id,))
+            cursor.execute(f'DELETE FROM agent_sessions WHERE session_id = {_param()}', (session_id,))
 
         conn.commit()
         conn.close()
@@ -828,7 +836,7 @@ class SessionManager:
         cursor = conn.cursor()
 
         if user_id:
-            cursor.execute('''
+            cursor.execute(f'''
                 SELECT
                     COUNT(*) as total_sessions,
                     SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active_sessions,
@@ -836,7 +844,7 @@ class SessionManager:
                     SUM(total_tokens) as total_tokens,
                     SUM(message_count) as total_messages
                 FROM agent_sessions
-                WHERE user_id = ?
+                WHERE user_id = {_param()}
             ''', (user_id,))
         else:
             cursor.execute('''
@@ -860,40 +868,52 @@ class SessionManager:
             'total_messages': row['total_messages'] or 0,
         }
 
-    def _row_to_session(self, row: sqlite3.Row) -> AgentSession:
+    def _row_to_session(self, row: Union[sqlite3.Row, Dict]) -> AgentSession:
         """Convert a database row to AgentSession."""
+        # Handle both sqlite3.Row and dict (PostgreSQL)
+        def get_value(key: str):
+            if isinstance(row, dict):
+                return row.get(key)
+            return row[key]
+
         return AgentSession(
-            id=row['id'],
-            session_id=row['session_id'],
-            session_type=row['session_type'] or SessionType.CHAT.value,
-            title=row['title'] or '',
-            tool_name=row['tool_name'],
-            host_name=row['host_name'] or 'localhost',
-            user_id=row['user_id'],
-            status=row['status'] or SessionStatus.ACTIVE.value,
-            context=json.loads(row['context']) if row['context'] else {},
-            settings=json.loads(row['settings']) if row['settings'] else {},
-            total_tokens=row['total_tokens'] or 0,
-            total_input_tokens=row['total_input_tokens'] or 0,
-            total_output_tokens=row['total_output_tokens'] or 0,
-            message_count=row['message_count'] or 0,
-            model=row['model'],
-            tags=json.loads(row['tags']) if row['tags'] else [],
-            created_at=datetime.fromisoformat(row['created_at']) if row['created_at'] else None,
-            updated_at=datetime.fromisoformat(row['updated_at']) if row['updated_at'] else None,
-            completed_at=datetime.fromisoformat(row['completed_at']) if row['completed_at'] else None,
-            expires_at=datetime.fromisoformat(row['expires_at']) if row['expires_at'] else None,
+            id=get_value('id'),
+            session_id=get_value('session_id'),
+            session_type=get_value('session_type') or SessionType.CHAT.value,
+            title=get_value('title') or '',
+            tool_name=get_value('tool_name'),
+            host_name=get_value('host_name') or 'localhost',
+            user_id=get_value('user_id'),
+            status=get_value('status') or SessionStatus.ACTIVE.value,
+            context=json.loads(get_value('context')) if get_value('context') else {},
+            settings=json.loads(get_value('settings')) if get_value('settings') else {},
+            total_tokens=get_value('total_tokens') or 0,
+            total_input_tokens=get_value('total_input_tokens') or 0,
+            total_output_tokens=get_value('total_output_tokens') or 0,
+            message_count=get_value('message_count') or 0,
+            model=get_value('model'),
+            tags=json.loads(get_value('tags')) if get_value('tags') else [],
+            created_at=datetime.fromisoformat(get_value('created_at')) if get_value('created_at') else None,
+            updated_at=datetime.fromisoformat(get_value('updated_at')) if get_value('updated_at') else None,
+            completed_at=datetime.fromisoformat(get_value('completed_at')) if get_value('completed_at') else None,
+            expires_at=datetime.fromisoformat(get_value('expires_at')) if get_value('expires_at') else None,
         )
 
-    def _row_to_message(self, row: sqlite3.Row) -> SessionMessage:
+    def _row_to_message(self, row: Union[sqlite3.Row, Dict]) -> SessionMessage:
         """Convert a database row to SessionMessage."""
+        # Handle both sqlite3.Row and dict (PostgreSQL)
+        def get_value(key: str):
+            if isinstance(row, dict):
+                return row.get(key)
+            return row[key]
+
         return SessionMessage(
-            id=row['id'],
-            session_id=row['session_id'],
-            role=row['role'],
-            content=row['content'] or '',
-            tokens_used=row['tokens_used'] or 0,
-            model=row['model'],
-            timestamp=datetime.fromisoformat(row['timestamp']) if row['timestamp'] else None,
-            metadata=json.loads(row['metadata']) if row['metadata'] else {},
+            id=get_value('id'),
+            session_id=get_value('session_id'),
+            role=get_value('role'),
+            content=get_value('content') or '',
+            tokens_used=get_value('tokens_used') or 0,
+            model=get_value('model'),
+            timestamp=datetime.fromisoformat(get_value('timestamp')) if get_value('timestamp') else None,
+            metadata=json.loads(get_value('metadata')) if get_value('metadata') else {},
         )

@@ -238,10 +238,12 @@ class MessageService:
         feishu_conversation_id: Optional[str] = None,
         group_subject: Optional[str] = None,
         is_group_chat: Optional[int] = None,
+        agent_session_id: Optional[str] = None,
+        conversation_id: Optional[str] = None,
     ) -> bool:
         """
         Save a message.
-        
+
         Returns:
             bool: True if successful.
         """
@@ -264,5 +266,7 @@ class MessageService:
             message_source=message_source,
             feishu_conversation_id=feishu_conversation_id,
             group_subject=group_subject,
-            is_group_chat=is_group_chat
+            is_group_chat=is_group_chat,
+            agent_session_id=agent_session_id,
+            conversation_id=conversation_id
         )

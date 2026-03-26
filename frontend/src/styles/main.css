@@ -304,7 +304,7 @@ pre code {
   margin-bottom: var(--spacing-md);
   transition: all var(--transition-normal);
   position: relative;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .card:hover {
@@ -413,16 +413,24 @@ pre code {
   transform: translateY(-1px);
 }
 
-/* Secondary Button */
+/* Secondary Button - Override Bootstrap */
 .btn-secondary {
-  background-color: var(--bg-tertiary);
-  color: var(--text-primary);
+  --bs-btn-bg: #f1f3f5;
+  --bs-btn-hover-bg: #e9ecef;
+  --bs-btn-color: var(--text-primary);
+  --bs-btn-hover-color: var(--text-primary);
+  --bs-btn-border-color: var(--border-color);
+  --bs-btn-hover-border-color: var(--border-color-dark);
+  background-color: #f1f3f5;
+  color: var(--text-primary) !important;
   border-color: var(--border-color);
   box-shadow: var(--shadow-sm);
 }
 
-.btn-secondary:hover:not(:disabled) {
-  background-color: var(--bg-secondary);
+.btn-secondary:hover:not(:disabled),
+.btn-secondary:focus:not(:disabled) {
+  background-color: #e9ecef;
+  color: var(--text-primary) !important;
   border-color: var(--border-color-dark);
   box-shadow: var(--shadow-md);
   transform: translateY(-1px);
@@ -1380,10 +1388,32 @@ link[rel='dns-prefetch'] {
   background: transparent;
 }
 
+/* Assist Panel - Right panel container */
+.assist-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+
+.assist-panel .tabs-container {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+
+.assist-panel .tab-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--spacing-sm);
+}
+
 /* Assist Panel Tabs - Equal width tabs for right panel */
 .assist-panel .nav-tabs {
   display: flex;
   gap: 0;
+  flex-shrink: 0;
 }
 
 .assist-panel .nav-tabs .nav-link {
@@ -1981,6 +2011,43 @@ link[rel='dns-prefetch'] {
   padding: var(--spacing-sm);
 }
 
+/* Session List - Main container */
+.session-list {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: var(--spacing-sm);
+}
+
+.session-list .session-groups {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--spacing-xs) 0;
+}
+
+/* Session Group Styles - Optimized spacing */
+.session-group {
+  margin-bottom: var(--spacing-md);
+}
+
+.session-group-title {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--letter-spacing-wide);
+}
+
+.session-group-items {
+  padding: 0;
+  margin: 0;
+}
+
+.session-group-items li {
+  list-style: none;
+}
+
 /* Session List Collapsed State */
 .session-list-collapsed {
   display: flex;
@@ -2071,6 +2138,88 @@ link[rel='dns-prefetch'] {
   opacity: 0.5;
 }
 
+/* Session Item Styles - Optimized for better space usage */
+.session-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  border: none;
+  background: transparent;
+  border-radius: var(--border-radius);
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+  text-decoration: none;
+  color: var(--text-primary);
+  font-size: var(--font-size-xs);
+  text-align: left;
+  width: 100%;
+  padding: var(--spacing-sm) var(--spacing-md);
+}
+
+.session-item:hover {
+  background: var(--bg-tertiary);
+}
+
+.session-item.selected {
+  background: var(--color-primary-light);
+  border: 1px solid var(--color-primary);
+}
+
+.session-item .session-title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-item .session-time {
+  white-space: nowrap;
+  font-size: var(--font-size-xs);
+  text-decoration: none;
+  color: var(--text-muted);
+  padding: 0 var(--spacing-sm);
+  border-right: 1px solid var(--border-color);
+  margin-right: var(--spacing-sm);
+}
+
+.session-item .session-messages {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  font-size: var(--font-size-xs);
+  text-decoration: none;
+  gap: 4px;
+  min-width: 45px;
+  padding-left: var(--spacing-sm);
+}
+
+.session-item .session-messages i {
+  font-size: var(--font-size-xs);
+  display: inline-block;
+  width: 16px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+/* Session Detail Modal */
+.session-detail-content .session-meta {
+  background: var(--bg-tertiary);
+}
+
+.session-detail-content .message-item {
+  border-radius: var(--border-radius);
+}
+
+.session-detail-content .message-content {
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+}
+
 /* Work Main Content */
 .work-main {
   flex: 1;
@@ -2085,6 +2234,26 @@ link[rel='dns-prefetch'] {
 .work-main .sessions {
   padding: var(--spacing-md);
   overflow-y: auto;
+}
+
+/* Sessions page specific styles */
+.work-main .sessions .sessions-list {
+  max-width: 100%;
+  margin: 0;
+  width: 100%;
+}
+
+.work-main .sessions .session-item.card {
+  padding: var(--spacing-sm) var(--spacing-md);
+  margin-bottom: var(--spacing-sm);
+}
+
+.work-main .sessions .session-item .card-body {
+  padding: var(--spacing-sm) 0;
+}
+
+.work-main .sessions .session-item .card-body .flex-grow-1 {
+  max-width: 100%;
 }
 
 /* Work Right Panel - Assist Panel */
@@ -2126,6 +2295,18 @@ link[rel='dns-prefetch'] {
   flex: 1;
   overflow-y: auto;
   padding: var(--spacing-sm);
+}
+
+/* Assist Prompts - Prompts tab content */
+.assist-prompts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.assist-prompts .btn-link {
+  align-self: flex-start;
+  cursor: pointer;
 }
 
 .assist-section {

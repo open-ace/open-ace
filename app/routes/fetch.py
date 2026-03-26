@@ -157,11 +157,19 @@ def api_fetch_data():
 @fetch_bp.route('/fetch/status')
 def api_fetch_status():
     """Get data fetch status."""
+    from app.services.data_fetch_scheduler import scheduler
+
     with _fetch_lock:
-        return jsonify({
-            'success': True,
-            'status': _fetch_status.copy()
-        })
+        fetch_status = _fetch_status.copy()
+
+    # Add scheduler status
+    scheduler_status = scheduler.get_status()
+
+    return jsonify({
+        'success': True,
+        'status': fetch_status,
+        'scheduler': scheduler_status
+    })
 
 
 @fetch_bp.route('/fetch')

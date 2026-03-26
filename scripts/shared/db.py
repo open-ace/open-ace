@@ -42,6 +42,53 @@ def is_postgresql() -> bool:
     return _get_db_url().startswith('postgresql')
 
 
+def _placeholder() -> str:
+    """Get the appropriate placeholder for the current database."""
+    return '%s' if is_postgresql() else '?'
+
+
+def sanitize_utf8(text: Optional[str]) -> Optional[str]:
+    """
+    Sanitize text to remove invalid UTF-8 surrogate characters.
+
+    Some messages may contain invalid UTF-8 surrogate pairs (e.g., \udcdd)
+    which cannot be encoded to UTF-8. This function removes them.
+
+    Args:
+        text: Input text that may contain invalid characters
+
+    Returns:
+        Sanitized text with invalid characters removed, or None if input is None
+    """
+    if text is None:
+        return None
+    try:
+        # Try to encode to UTF-8 - if it works, the text is valid
+        text.encode('utf-8')
+        return text
+    except UnicodeEncodeError:
+        # Remove invalid surrogate characters by encoding with surrogatepass
+        # and then decoding with replace errors
+        return text.encode('utf-8', errors='surrogatepass').decode('utf-8', errors='replace')
+
+
+def _convert_sql(sql: str) -> str:
+    """Convert SQL placeholders from ? to %s for PostgreSQL."""
+    if is_postgresql():
+        return sql.replace('?', '%s')
+    return sql
+
+
+def _execute(cursor, sql: str, params: tuple = ()) -> None:
+    """Execute SQL with automatic placeholder conversion for PostgreSQL."""
+    cursor.execute(_convert_sql(sql), params)
+
+
+def _executemany(cursor, sql: str, params_list: list) -> None:
+    """Execute many SQL statements with automatic placeholder conversion for PostgreSQL."""
+    cursor.executemany(_convert_sql(sql), params_list)
+
+
 def ensure_db_dir() -> None:
     """Ensure the database directory exists (for SQLite)."""
     os.makedirs(DB_DIR, exist_ok=True)
@@ -85,13 +132,13 @@ def _get_id_type() -> str:
 def _table_exists(cursor, table_name: str) -> bool:
     """Check if a table exists."""
     if is_postgresql():
-        cursor.execute(
+        _execute(cursor, 
             "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = %s)",
             (table_name,)
         )
         return cursor.fetchone()[0]
     else:
-        cursor.execute(
+        _execute(cursor, 
             "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
             (table_name,)
         )
@@ -101,7 +148,7 @@ def _table_exists(cursor, table_name: str) -> bool:
 def _column_exists(cursor, table_name: str, column_name: str) -> bool:
     """Check if a column exists in a table."""
     if is_postgresql():
-        cursor.execute(
+        _execute(cursor, 
             "SELECT EXISTS (SELECT FROM information_schema.columns WHERE table_name = %s AND column_name = %s)",
             (table_name, column_name)
         )
@@ -111,7 +158,7 @@ def _column_exists(cursor, table_name: str, column_name: str) -> bool:
             return result['exists']
         return result[0]
     else:
-        cursor.execute(f"PRAGMA table_info({table_name})")
+        _execute(cursor, f"PRAGMA table_info({table_name})")
         columns = [col[1] for col in cursor.fetchall()]
         return column_name in columns
 
@@ -127,7 +174,7 @@ def init_database() -> None:
     id_type = _get_id_type()
 
     # Create daily_usage table
-    cursor.execute(f'''
+    _execute(cursor, f'''
         CREATE TABLE IF NOT EXISTS daily_usage (
             id {id_type},
             date TEXT NOT NULL,
@@ -145,7 +192,7 @@ def init_database() -> None:
     ''')
 
     # Create daily_messages table first (before checking for full_entry)
-    cursor.execute(f'''
+    _execute(cursor, f'''
         CREATE TABLE IF NOT EXISTS daily_messages (
             id {id_type},
             date TEXT NOT NULL,
@@ -172,78 +219,78 @@ def init_database() -> None:
     # Check if host_name column exists in daily_usage, add it if not (for old databases)
     if not _column_exists(cursor, 'daily_usage', 'host_name'):
         print("Adding host_name column to existing daily_usage table...")
-        cursor.execute("ALTER TABLE daily_usage ADD COLUMN host_name TEXT DEFAULT 'localhost'")
+        _execute(cursor, "ALTER TABLE daily_usage ADD COLUMN host_name TEXT DEFAULT 'localhost'")
         # Update existing records with 'localhost'
-        cursor.execute("UPDATE daily_usage SET host_name = 'localhost' WHERE host_name IS NULL")
+        _execute(cursor, "UPDATE daily_usage SET host_name = 'localhost' WHERE host_name IS NULL")
         conn.commit()
 
     # Check if host_name column exists in daily_messages, add it if not (for old databases)
     if not _column_exists(cursor, 'daily_messages', 'host_name'):
         print("Adding host_name column to existing daily_messages table...")
-        cursor.execute("ALTER TABLE daily_messages ADD COLUMN host_name TEXT DEFAULT 'localhost'")
+        _execute(cursor, "ALTER TABLE daily_messages ADD COLUMN host_name TEXT DEFAULT 'localhost'")
         # Update existing records with 'localhost'
-        cursor.execute("UPDATE daily_messages SET host_name = 'localhost' WHERE host_name IS NULL")
+        _execute(cursor, "UPDATE daily_messages SET host_name = 'localhost' WHERE host_name IS NULL")
         conn.commit()
 
     # Check if request_count column exists, add it if not (for old databases)
     if not _column_exists(cursor, 'daily_usage', 'request_count'):
         print("Adding request_count column to existing database...")
-        cursor.execute("ALTER TABLE daily_usage ADD COLUMN request_count INTEGER DEFAULT 0")
+        _execute(cursor, "ALTER TABLE daily_usage ADD COLUMN request_count INTEGER DEFAULT 0")
         conn.commit()
 
     # Check if full_entry column exists in daily_messages, add it if not (for old databases)
     if not _column_exists(cursor, 'daily_messages', 'full_entry'):
         print("Adding full_entry column to existing database...")
-        cursor.execute("ALTER TABLE daily_messages ADD COLUMN full_entry TEXT")
+        _execute(cursor, "ALTER TABLE daily_messages ADD COLUMN full_entry TEXT")
         conn.commit()
 
     # Check if sender_id column exists in daily_messages, add it if not (for old databases)
     if not _column_exists(cursor, 'daily_messages', 'sender_id'):
         print("Adding sender_id column to existing daily_messages table...")
-        cursor.execute("ALTER TABLE daily_messages ADD COLUMN sender_id TEXT")
+        _execute(cursor, "ALTER TABLE daily_messages ADD COLUMN sender_id TEXT")
         conn.commit()
 
     # Check if sender_name column exists in daily_messages, add it if not (for old databases)
     if not _column_exists(cursor, 'daily_messages', 'sender_name'):
         print("Adding sender_name column to existing daily_messages table...")
-        cursor.execute("ALTER TABLE daily_messages ADD COLUMN sender_name TEXT")
+        _execute(cursor, "ALTER TABLE daily_messages ADD COLUMN sender_name TEXT")
         conn.commit()
 
     # Check if message_source column exists in daily_messages, add it if not (for old databases)
     if not _column_exists(cursor, 'daily_messages', 'message_source'):
         print("Adding message_source column to existing daily_messages table...")
-        cursor.execute("ALTER TABLE daily_messages ADD COLUMN message_source TEXT")
+        _execute(cursor, "ALTER TABLE daily_messages ADD COLUMN message_source TEXT")
         conn.commit()
 
     # Check if feishu_conversation_id column exists in daily_messages, add it if not (for old databases)
     # conversation_label was renamed to feishu_conversation_id (Issue #94)
     if not _column_exists(cursor, 'daily_messages', 'feishu_conversation_id'):
         print("Adding feishu_conversation_id column to existing daily_messages table...")
-        cursor.execute("ALTER TABLE daily_messages ADD COLUMN feishu_conversation_id TEXT")
+        _execute(cursor, "ALTER TABLE daily_messages ADD COLUMN feishu_conversation_id TEXT")
         conn.commit()
 
     # Check if group_subject column exists in daily_messages, add it if not (for old databases)
     if not _column_exists(cursor, 'daily_messages', 'group_subject'):
         print("Adding group_subject column to existing daily_messages table...")
-        cursor.execute("ALTER TABLE daily_messages ADD COLUMN group_subject TEXT")
+        _execute(cursor, "ALTER TABLE daily_messages ADD COLUMN group_subject TEXT")
         conn.commit()
 
     # Check if is_group_chat column exists in daily_messages, add it if not (for old databases)
     if not _column_exists(cursor, 'daily_messages', 'is_group_chat'):
         print("Adding is_group_chat column to existing daily_messages table...")
-        cursor.execute("ALTER TABLE daily_messages ADD COLUMN is_group_chat INTEGER")
+        _execute(cursor, "ALTER TABLE daily_messages ADD COLUMN is_group_chat INTEGER")
         conn.commit()
 
     # Check if agent_session_id column exists in daily_messages, add it if not (for old databases)
     if not _column_exists(cursor, 'daily_messages', 'agent_session_id'):
         print("Adding agent_session_id column to existing daily_messages table...")
-        cursor.execute("ALTER TABLE daily_messages ADD COLUMN agent_session_id TEXT")
+        _execute(cursor, "ALTER TABLE daily_messages ADD COLUMN agent_session_id TEXT")
         conn.commit()
 
     # Check if conversation_id column exists in daily_messages, add it if not (for old databases)
     if not _column_exists(cursor, 'daily_messages', 'conversation_id'):
         print("Adding conversation_id column to existing daily_messages table...")
-        cursor.execute("ALTER TABLE daily_messages ADD COLUMN conversation_id TEXT")
+        _execute(cursor, "ALTER TABLE daily_messages ADD COLUMN conversation_id TEXT")
         conn.commit()
 
     conn.commit()
@@ -270,7 +317,7 @@ def init_database() -> None:
 
     for index_name, table_name, columns in indexes_to_create:
         try:
-            cursor.execute(f'CREATE INDEX IF NOT EXISTS {index_name} ON {table_name} ({columns})')
+            _execute(cursor, f'CREATE INDEX IF NOT EXISTS {index_name} ON {table_name} ({columns})')
             print(f"Index created: {index_name} on {table_name}({columns})")
         except Exception as e:
             print(f"Warning: Could not create index {index_name}: {e}")
@@ -305,7 +352,7 @@ def save_usage(
     models_json = json.dumps(models_used) if models_used else None
 
     if is_postgresql():
-        cursor.execute('''
+        _execute(cursor, '''
             INSERT INTO daily_usage
             (date, tool_name, host_name, tokens_used, input_tokens, output_tokens, cache_tokens, request_count, models_used)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -318,7 +365,7 @@ def save_usage(
                 models_used = EXCLUDED.models_used
         ''', (date, tool_name, host_name, tokens_used, input_tokens, output_tokens, cache_tokens, request_count, models_json))
     else:
-        cursor.execute('''
+        _execute(cursor, '''
             INSERT OR REPLACE INTO daily_usage
             (date, tool_name, host_name, tokens_used, input_tokens, output_tokens, cache_tokens, request_count, models_used)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -345,7 +392,7 @@ def get_usage_by_date(date: str, tool_name: Optional[str] = None, host_name: Opt
         conditions.append('host_name = ?')
         params.append(host_name)
 
-    cursor.execute(f'''
+    _execute(cursor, f'''
         SELECT * FROM daily_usage
         WHERE {' AND '.join(conditions)}
         ORDER BY date DESC
@@ -392,7 +439,7 @@ def get_usage_by_tool(
         conditions.append('host_name = ?')
         params.append(host_name)
 
-    cursor.execute(f'''
+    _execute(cursor, f'''
         SELECT * FROM daily_usage
         WHERE {' AND '.join(conditions)}
         ORDER BY date DESC
@@ -419,7 +466,7 @@ def get_all_tools() -> List[str]:
     conn = get_connection()
     cursor = conn.cursor()
 
-    cursor.execute('''
+    _execute(cursor, '''
         SELECT DISTINCT tool_name FROM daily_usage
         ORDER BY tool_name
     ''')
@@ -441,7 +488,7 @@ def get_all_hosts(active_only: bool = True) -> List[str]:
 
     if active_only:
         # Query hosts from both daily_usage and daily_messages tables
-        cursor.execute('''
+        _execute(cursor, '''
             SELECT DISTINCT host_name FROM daily_usage
             WHERE date >= date('now', '-7 days')
               AND host_name != 'localhost'
@@ -452,7 +499,7 @@ def get_all_hosts(active_only: bool = True) -> List[str]:
             ORDER BY host_name
         ''')
     else:
-        cursor.execute('''
+        _execute(cursor, '''
             SELECT DISTINCT host_name FROM daily_usage
             WHERE host_name != 'localhost' OR host_name IS NULL
             UNION
@@ -473,7 +520,7 @@ def get_summary_by_tool(host_name: Optional[str] = None) -> Dict[str, Dict]:
     cursor = conn.cursor()
 
     if host_name:
-        cursor.execute('''
+        _execute(cursor, '''
             SELECT
                 tool_name,
                 COUNT(*) as days_count,
@@ -489,7 +536,7 @@ def get_summary_by_tool(host_name: Optional[str] = None) -> Dict[str, Dict]:
             ORDER BY total_tokens DESC
         ''', (host_name,))
     else:
-        cursor.execute('''
+        _execute(cursor, '''
             SELECT
                 tool_name,
                 COUNT(*) as days_count,
@@ -543,7 +590,7 @@ def get_daily_range(
         conditions.append('host_name = ?')
         params.append(host_name)
 
-    cursor.execute(f'''
+    _execute(cursor, f'''
         SELECT * FROM daily_usage
         WHERE {' AND '.join(conditions)}
         ORDER BY date DESC
@@ -622,7 +669,7 @@ def save_message(
     cursor = conn.cursor()
 
     # Check if message already exists
-    cursor.execute('''
+    _execute(cursor, '''
         SELECT tokens_used, input_tokens, output_tokens, sender_id, sender_name, model
         FROM daily_messages
         WHERE date = ? AND tool_name = ? AND message_id = ? AND host_name = ?
@@ -647,7 +694,7 @@ def save_message(
         if model is None and existing['model']:
             model = existing['model']
 
-    cursor.execute('''
+    _execute(cursor, '''
         INSERT OR REPLACE INTO daily_messages
         (date, tool_name, host_name, message_id, parent_id, role, content, full_entry, tokens_used, input_tokens, output_tokens, model, timestamp, sender_id, sender_name, message_source, feishu_conversation_id, group_subject, is_group_chat, agent_session_id, conversation_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -711,13 +758,13 @@ def save_messages_batch(messages: List[Dict], batch_size: int = 1000) -> int:
         existing_map = {}
         for date, tool_name, host_name in keys:
             if is_postgresql():
-                cursor.execute('''
+                _execute(cursor, '''
                     SELECT message_id, tokens_used, input_tokens, output_tokens, sender_id, sender_name, model
                     FROM daily_messages
                     WHERE date = %s AND tool_name = %s AND host_name = %s
                 ''', (date, tool_name, host_name))
             else:
-                cursor.execute('''
+                _execute(cursor, '''
                     SELECT message_id, tokens_used, input_tokens, output_tokens, sender_id, sender_name, model
                     FROM daily_messages
                     WHERE date = ? AND tool_name = ? AND host_name = ?
@@ -776,7 +823,7 @@ def save_messages_batch(messages: List[Dict], batch_size: int = 1000) -> int:
                         model = existing['model']
 
                 if is_postgresql():
-                    cursor.execute('''
+                    _execute(cursor, '''
                         INSERT INTO daily_messages
                         (date, tool_name, host_name, message_id, parent_id, role, content, full_entry, tokens_used, input_tokens, output_tokens, model, timestamp, sender_id, sender_name, message_source, feishu_conversation_id, group_subject, is_group_chat, agent_session_id, conversation_id)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -800,20 +847,20 @@ def save_messages_batch(messages: List[Dict], batch_size: int = 1000) -> int:
                             conversation_id = EXCLUDED.conversation_id
                     ''', (
                         date, tool_name, host_name, message_id, msg.get('parent_id'),
-                        msg.get('role'), msg.get('content'), msg.get('full_entry'),
+                        msg.get('role'), sanitize_utf8(msg.get('content')), sanitize_utf8(msg.get('full_entry')),
                         tokens_used, input_tokens, output_tokens, model, msg.get('timestamp'),
                         sender_id, sender_name, msg.get('message_source'),
                         msg.get('feishu_conversation_id'), msg.get('group_subject'),
                         msg.get('is_group_chat'), msg.get('agent_session_id'), msg.get('conversation_id')
                     ))
                 else:
-                    cursor.execute('''
+                    _execute(cursor, '''
                         INSERT OR REPLACE INTO daily_messages
                         (date, tool_name, host_name, message_id, parent_id, role, content, full_entry, tokens_used, input_tokens, output_tokens, model, timestamp, sender_id, sender_name, message_source, feishu_conversation_id, group_subject, is_group_chat, agent_session_id, conversation_id)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         date, tool_name, host_name, message_id, msg.get('parent_id'),
-                        msg.get('role'), msg.get('content'), msg.get('full_entry'),
+                        msg.get('role'), sanitize_utf8(msg.get('content')), sanitize_utf8(msg.get('full_entry')),
                         tokens_used, input_tokens, output_tokens, model, msg.get('timestamp'),
                         sender_id, sender_name, msg.get('message_source'),
                         msg.get('feishu_conversation_id'), msg.get('group_subject'),
@@ -889,7 +936,7 @@ def get_messages_by_date(
 
     # Get total count
     where_clause = ' AND '.join(conditions)
-    cursor.execute(f'''
+    _execute(cursor, f'''
         SELECT COUNT(*) as count FROM daily_messages
         WHERE {where_clause}
     ''', params)
@@ -899,7 +946,7 @@ def get_messages_by_date(
 
     # Get paginated messages
     offset = (page - 1) * limit
-    cursor.execute(f'''
+    _execute(cursor, f'''
         SELECT * FROM daily_messages
         WHERE {where_clause}
         ORDER BY timestamp DESC
@@ -937,7 +984,7 @@ def get_hosts_by_tool(tool_name: str) -> List[str]:
     conn = get_connection()
     cursor = conn.cursor()
 
-    cursor.execute('''
+    _execute(cursor, '''
         SELECT DISTINCT host_name FROM daily_usage
         WHERE tool_name = ?
         ORDER BY host_name
@@ -976,7 +1023,7 @@ def get_unique_senders(date: str, tool_name: Optional[str] = None, host_name: Op
 
     # Get unique sender_name values, falling back to sender_id if sender_name is null
     # Include records where either sender_name or sender_id is not null
-    cursor.execute(f'''
+    _execute(cursor, f'''
         SELECT DISTINCT
             CASE
                 WHEN sender_name IS NOT NULL AND sender_name != '' THEN sender_name
@@ -1048,7 +1095,7 @@ def init_auth_database() -> None:
     id_type = _get_id_type()
 
     # Create users table
-    cursor.execute(f'''
+    _execute(cursor, f'''
         CREATE TABLE IF NOT EXISTS users (
             id {id_type},
             username TEXT NOT NULL UNIQUE,
@@ -1066,7 +1113,7 @@ def init_auth_database() -> None:
     ''')
 
     # Create web_user_auth_sessions table
-    cursor.execute(f'''
+    _execute(cursor, f'''
         CREATE TABLE IF NOT EXISTS web_user_auth_sessions (
             id {id_type},
             user_id INTEGER NOT NULL,
@@ -1078,7 +1125,7 @@ def init_auth_database() -> None:
     ''')
 
     # Create sessions table for user authentication
-    cursor.execute(f'''
+    _execute(cursor, f'''
         CREATE TABLE IF NOT EXISTS sessions (
             id {id_type},
             user_id INTEGER NOT NULL,
@@ -1090,7 +1137,7 @@ def init_auth_database() -> None:
     ''')
 
     # Create quota_usage table
-    cursor.execute(f'''
+    _execute(cursor, f'''
         CREATE TABLE IF NOT EXISTS quota_usage (
             id {id_type},
             user_id INTEGER NOT NULL,
@@ -1108,7 +1155,7 @@ def init_auth_database() -> None:
     # Add linux_account column if not exists (migration for existing databases)
     if not _column_exists(cursor, 'users', 'linux_account'):
         print("Adding linux_account column to users table...")
-        cursor.execute("ALTER TABLE users ADD COLUMN linux_account TEXT")
+        _execute(cursor, "ALTER TABLE users ADD COLUMN linux_account TEXT")
         conn.commit()
 
     conn.close()
@@ -1123,7 +1170,7 @@ def create_user(username: str, password_hash: str, email: str = None,
     cursor = conn.cursor()
 
     try:
-        cursor.execute('''
+        _execute(cursor, '''
             INSERT INTO users (username, password_hash, email, role, daily_token_quota, daily_request_quota)
             VALUES (?, ?, ?, ?, ?, ?)
         ''', (username, password_hash, email, role, daily_token_quota, daily_request_quota))
@@ -1144,7 +1191,7 @@ def create_user_with_is_active(username: str, password_hash: str, email: str = N
     cursor = conn.cursor()
 
     try:
-        cursor.execute('''
+        _execute(cursor, '''
             INSERT INTO users (username, password_hash, email, role, daily_token_quota, daily_request_quota, is_active, linux_account)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ''', (username, password_hash, email, role, daily_token_quota, daily_request_quota, is_active, linux_account))
@@ -1161,7 +1208,7 @@ def get_user_by_username(username: str) -> Optional[Dict]:
     conn = get_connection()
     cursor = conn.cursor()
 
-    cursor.execute('SELECT * FROM users WHERE username = ?', (username,))
+    _execute(cursor, 'SELECT * FROM users WHERE username = ?', (username,))
     row = cursor.fetchone()
     conn.close()
 
@@ -1175,7 +1222,7 @@ def get_user_by_id(user_id: int) -> Optional[Dict]:
     conn = get_connection()
     cursor = conn.cursor()
 
-    cursor.execute('SELECT * FROM users WHERE id = ?', (user_id,))
+    _execute(cursor, 'SELECT * FROM users WHERE id = ?', (user_id,))
     row = cursor.fetchone()
     conn.close()
 
@@ -1207,7 +1254,7 @@ def get_all_users() -> List[Dict]:
     conn = get_connection()
     cursor = conn.cursor()
 
-    cursor.execute('''
+    _execute(cursor, '''
         SELECT id, username, email, role, daily_token_quota, daily_request_quota,
                is_active, created_at
         FROM users
@@ -1225,14 +1272,14 @@ def get_global_quota_summary(start_date: str, end_date: str) -> Dict:
     cursor = conn.cursor()
 
     # Get total quota allocated to all users
-    cursor.execute('''
+    _execute(cursor, '''
         SELECT COALESCE(SUM(daily_token_quota), 0) as total_quota
         FROM users
     ''')
     total_quota = cursor.fetchone()[0] or 0
 
     # Get total usage within date range
-    cursor.execute('''
+    _execute(cursor, '''
         SELECT COALESCE(SUM(tokens_used), 0) as total_used
         FROM quota_usage
         WHERE date >= ? AND date <= ?
@@ -1253,7 +1300,7 @@ def get_user_quota_breakdown(start_date: str, end_date: str) -> List[Dict]:
     conn = get_connection()
     cursor = conn.cursor()
 
-    cursor.execute('''
+    _execute(cursor, '''
         SELECT
             u.id as user_id,
             u.username,
@@ -1301,7 +1348,7 @@ def create_session(user_id: int, session_token: str, expires_at: datetime) -> bo
     cursor = conn.cursor()
 
     try:
-        cursor.execute('''
+        _execute(cursor, '''
             INSERT INTO web_user_auth_sessions (user_id, session_token, expires_at)
             VALUES (?, ?, ?)
         ''', (user_id, session_token, expires_at))
@@ -1319,7 +1366,7 @@ def get_session_by_token(session_token: str) -> Optional[Dict]:
     cursor = conn.cursor()
 
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    cursor.execute('''
+    _execute(cursor, '''
         SELECT s.*, u.* FROM web_user_auth_sessions s
         JOIN users u ON s.user_id = u.id
         WHERE s.session_token = ? AND s.expires_at > ?
@@ -1338,7 +1385,7 @@ def delete_session(session_token: str) -> bool:
     conn = get_connection()
     cursor = conn.cursor()
 
-    cursor.execute('DELETE FROM web_user_auth_sessions WHERE session_token = ?', (session_token,))
+    _execute(cursor, 'DELETE FROM web_user_auth_sessions WHERE session_token = ?', (session_token,))
     conn.commit()
     conn.close()
     return True
@@ -1349,7 +1396,7 @@ def get_all_users() -> List[Dict]:
     conn = get_connection()
     cursor = conn.cursor()
 
-    cursor.execute('SELECT * FROM users ORDER BY created_at DESC')
+    _execute(cursor, 'SELECT * FROM users ORDER BY created_at DESC')
     rows = cursor.fetchall()
     conn.close()
 
@@ -1374,7 +1421,7 @@ def update_user(user_id: int, **kwargs) -> bool:
 
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute(f'''
+    _execute(cursor, f'''
         UPDATE users SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP WHERE id = ?
     ''', params)
     conn.commit()
@@ -1387,7 +1434,7 @@ def update_user_password(user_id: int, password_hash: str) -> bool:
     conn = get_connection()
     cursor = conn.cursor()
 
-    cursor.execute('''
+    _execute(cursor, '''
         UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
     ''', (password_hash, user_id))
     conn.commit()
@@ -1400,7 +1447,7 @@ def delete_user(user_id: int) -> bool:
     conn = get_connection()
     cursor = conn.cursor()
 
-    cursor.execute('DELETE FROM users WHERE id = ?', (user_id,))
+    _execute(cursor, 'DELETE FROM users WHERE id = ?', (user_id,))
     conn.commit()
     conn.close()
     return True
@@ -1412,7 +1459,7 @@ def save_quota_usage(user_id: int, date: str, tool_name: str = None,
     conn = get_connection()
     cursor = conn.cursor()
 
-    cursor.execute('''
+    _execute(cursor, '''
         INSERT INTO quota_usage (user_id, date, tool_name, tokens_used, requests_used)
         VALUES (?, ?, ?, ?, ?)
     ''', (user_id, date, tool_name, tokens_used, requests_used))
@@ -1458,7 +1505,7 @@ def aggregate_quota_usage_from_messages(start_date: str = None, end_date: str = 
     date_clause = " AND ".join(date_conditions) if date_conditions else "1=1"
 
     # Step 1: Get all user messages with their sender info
-    cursor.execute(f'''
+    _execute(cursor, f'''
         SELECT
             date,
             tool_name,
@@ -1482,7 +1529,7 @@ def aggregate_quota_usage_from_messages(start_date: str = None, end_date: str = 
         }
 
     # Step 2: Get all assistant messages and their tokens
-    cursor.execute(f'''
+    _execute(cursor, f'''
         SELECT
             date,
             tool_name,
@@ -1512,7 +1559,7 @@ def aggregate_quota_usage_from_messages(start_date: str = None, end_date: str = 
         }
 
     # Step 2.5: Get all messages (including toolResult) for parent_id chain lookup
-    cursor.execute(f'''
+    _execute(cursor, f'''
         SELECT message_id, parent_id
         FROM daily_messages
         WHERE {date_clause}
@@ -1579,18 +1626,18 @@ def aggregate_quota_usage_from_messages(start_date: str = None, end_date: str = 
             usage_data[key]['tokens'] += assistant['tokens_used']
 
     # Step 5: Get all users for matching
-    cursor.execute("SELECT id, username FROM users")
+    _execute(cursor, "SELECT id, username FROM users")
     users = {row['username']: row['id'] for row in cursor.fetchall()}
 
     # Step 6: Clear existing quota_usage data for the date range
     if start_date and end_date:
-        cursor.execute("DELETE FROM quota_usage WHERE date >= ? AND date <= ?", (start_date, end_date))
+        _execute(cursor, "DELETE FROM quota_usage WHERE date >= ? AND date <= ?", (start_date, end_date))
     elif start_date:
-        cursor.execute("DELETE FROM quota_usage WHERE date >= ?", (start_date,))
+        _execute(cursor, "DELETE FROM quota_usage WHERE date >= ?", (start_date,))
     elif end_date:
-        cursor.execute("DELETE FROM quota_usage WHERE date <= ?", (end_date,))
+        _execute(cursor, "DELETE FROM quota_usage WHERE date <= ?", (end_date,))
     else:
-        cursor.execute("DELETE FROM quota_usage")
+        _execute(cursor, "DELETE FROM quota_usage")
 
     # Step 7: Insert aggregated data into quota_usage
     records_created = 0
@@ -1599,7 +1646,7 @@ def aggregate_quota_usage_from_messages(start_date: str = None, end_date: str = 
         user_id = users.get(sender)
 
         if user_id:
-            cursor.execute('''
+            _execute(cursor, '''
                 INSERT INTO quota_usage (user_id, date, tool_name, tokens_used, requests_used)
                 VALUES (?, ?, ?, ?, ?)
             ''', (user_id, date, tool_name, data['tokens'], data['requests']))
@@ -1616,7 +1663,7 @@ def get_quota_usage(user_id: int, start_date: str, end_date: str) -> List[Dict]:
     conn = get_connection()
     cursor = conn.cursor()
 
-    cursor.execute('''
+    _execute(cursor, '''
         SELECT * FROM quota_usage
         WHERE user_id = ? AND date >= ? AND date <= ?
         ORDER BY date DESC
@@ -1633,7 +1680,7 @@ def get_total_quota_usage(user_id: int, start_date: str, end_date: str) -> Dict:
     conn = get_connection()
     cursor = conn.cursor()
 
-    cursor.execute('''
+    _execute(cursor, '''
         SELECT
             COALESCE(SUM(tokens_used), 0) as total_tokens,
             COALESCE(SUM(requests_used), 0) as total_requests
@@ -1655,7 +1702,7 @@ def get_quota_usage_by_tool(user_id: int, start_date: str, end_date: str) -> Lis
     conn = get_connection()
     cursor = conn.cursor()
 
-    cursor.execute('''
+    _execute(cursor, '''
         SELECT
             tool_name,
             SUM(tokens_used) as total_tokens,
@@ -1683,7 +1730,7 @@ def get_quota_usage_by_day(user_id: int, start_date: str, end_date: str) -> List
     cursor = conn.cursor()
 
     # First, get the earliest date with usage for this user
-    cursor.execute('''
+    _execute(cursor, '''
         SELECT MIN(date) as first_date
         FROM quota_usage
         WHERE user_id = ? AND tokens_used > 0
@@ -1698,7 +1745,7 @@ def get_quota_usage_by_day(user_id: int, start_date: str, end_date: str) -> List
         return []
 
     # Get daily usage data
-    cursor.execute('''
+    _execute(cursor, '''
         SELECT
             date,
             SUM(tokens_used) as total_tokens,
@@ -1771,7 +1818,7 @@ def get_hourly_usage_from_messages(start_date: str, end_date: str,
 
     # Extract hour from timestamp and calculate day of week
     # SQLite doesn't have native day of week, use strftime('%w')
-    cursor.execute(f'''
+    _execute(cursor, f'''
         SELECT
             CAST(strftime('%H', timestamp) AS INTEGER) as hour,
             CAST(strftime('%w', date) AS INTEGER) as day_of_week,
@@ -1855,7 +1902,7 @@ def get_daily_hourly_usage(start_date: str, end_date: str,
     where_clause = ' AND '.join(conditions)
 
     # Extract hour from timestamp and keep date
-    cursor.execute(f'''
+    _execute(cursor, f'''
         SELECT
             date,
             CAST(strftime('%H', timestamp) AS INTEGER) as hour,
@@ -1941,7 +1988,7 @@ def get_user_activity_ranking(start_date: str, end_date: str,
 
     where_clause = ' AND '.join(conditions)
 
-    cursor.execute(f'''
+    _execute(cursor, f'''
         SELECT
             COALESCE(sender_name, sender_id) as sender_name,
             MAX(sender_id) as sender_id,
@@ -2002,7 +2049,7 @@ def get_conversation_statistics(start_date: str, end_date: str,
     where_clause = ' AND '.join(conditions)
 
     # Get total messages and messages with parent_id (replies)
-    cursor.execute(f'''
+    _execute(cursor, f'''
         SELECT
             COUNT(*) as total_messages,
             SUM(CASE WHEN parent_id IS NOT NULL THEN 1 ELSE 0 END) as reply_messages,
@@ -2014,7 +2061,7 @@ def get_conversation_statistics(start_date: str, end_date: str,
     row = cursor.fetchone()
 
     # Calculate conversation length distribution
-    cursor.execute(f'''
+    _execute(cursor, f'''
         SELECT
             COUNT(*) as conversation_count,
             AVG(conv_length) as avg_length,
@@ -2031,7 +2078,7 @@ def get_conversation_statistics(start_date: str, end_date: str,
     conv_row = cursor.fetchone()
 
     # Get message counts by role
-    cursor.execute(f'''
+    _execute(cursor, f'''
         SELECT
             role,
             COUNT(*) as count
@@ -2099,7 +2146,7 @@ def get_peak_usage_periods(start_date: str, end_date: str,
 
     where_clause = ' AND '.join(conditions)
 
-    cursor.execute(f'''
+    _execute(cursor, f'''
         SELECT
             date,
             CAST(strftime('%H', timestamp) AS INTEGER) as hour,
@@ -2175,7 +2222,7 @@ def get_user_segmentation(start_date: str,
 
     where_clause = ' AND '.join(conditions)
 
-    cursor.execute(f'''
+    _execute(cursor, f'''
         SELECT
             COALESCE(sender_name, sender_id) as sender,
             SUM(tokens_used) as tokens_used
@@ -2207,7 +2254,7 @@ def get_user_segmentation(start_date: str,
     period_days = (end_date_obj - start_date_obj).days + 1
     thirty_days_ago = (end_date_obj - timedelta(days=30)).strftime('%Y-%m-%d')
 
-    cursor.execute('''
+    _execute(cursor, '''
         SELECT COUNT(DISTINCT COALESCE(sender_name, sender_id)) as dormant_count
         FROM daily_messages
         WHERE date >= ? AND date < ? AND (sender_id IS NOT NULL OR sender_name IS NOT NULL)
@@ -2252,7 +2299,7 @@ def get_tool_comparison_metrics(start_date: str, end_date: str,
     where_clause = ' AND '.join(conditions)
 
     # Get usage metrics from daily_usage
-    cursor.execute(f'''
+    _execute(cursor, f'''
         SELECT 
             tool_name,
             SUM(tokens_used) as total_tokens,
@@ -2270,7 +2317,7 @@ def get_tool_comparison_metrics(start_date: str, end_date: str,
     usage_rows = cursor.fetchall()
 
     # Get message metrics from daily_messages
-    cursor.execute(f'''
+    _execute(cursor, f'''
         SELECT 
             tool_name,
             COUNT(*) as total_messages,
@@ -2331,7 +2378,7 @@ def detect_usage_anomalies(start_date: str, end_date: str,
     where_clause = ' AND '.join(conditions)
 
     # Get daily usage statistics
-    cursor.execute(f'''
+    _execute(cursor, f'''
         SELECT 
             date,
             tool_name,
@@ -2434,7 +2481,7 @@ def get_key_metrics(start_date: str,
     usage_where = ' AND '.join(usage_conditions)
 
     # Get usage metrics for the date range
-    cursor.execute(f'''
+    _execute(cursor, f'''
         SELECT
             SUM(tokens_used) as total_tokens,
             SUM(request_count) as total_requests,
@@ -2447,7 +2494,7 @@ def get_key_metrics(start_date: str,
     usage_row = cursor.fetchone()
 
     # Get message metrics for the date range
-    cursor.execute(f'''
+    _execute(cursor, f'''
         SELECT
             COUNT(*) as total_messages,
             COUNT(DISTINCT COALESCE(sender_name, sender_id)) as active_users
@@ -2477,7 +2524,7 @@ def get_key_metrics(start_date: str,
         prev_conditions.append('host_name = ?')
         prev_params.append(host_name)
 
-    cursor.execute(f'''
+    _execute(cursor, f'''
         SELECT SUM(tokens_used) as prev_tokens
         FROM daily_usage
         WHERE {' AND '.join(prev_conditions)}
@@ -2515,7 +2562,7 @@ def get_data_status_by_host(host_name: str) -> Dict:
     cursor = conn.cursor()
 
     # Get last update time from daily_usage
-    cursor.execute('''
+    _execute(cursor, '''
         SELECT MAX(created_at) as last_updated
         FROM daily_usage
         WHERE host_name = ?
@@ -2524,7 +2571,7 @@ def get_data_status_by_host(host_name: str) -> Dict:
     last_updated_usage = usage_row['last_updated'] if usage_row else None
 
     # Get last update time from daily_messages
-    cursor.execute('''
+    _execute(cursor, '''
         SELECT MAX(created_at) as last_updated
         FROM daily_messages
         WHERE host_name = ?
@@ -2539,14 +2586,14 @@ def get_data_status_by_host(host_name: str) -> Dict:
             last_updated = last_updated_messages
 
     # Get record counts
-    cursor.execute('''
+    _execute(cursor, '''
         SELECT COUNT(*) as count
         FROM daily_usage
         WHERE host_name = ?
     ''', [host_name])
     usage_count = cursor.fetchone()['count'] or 0
 
-    cursor.execute('''
+    _execute(cursor, '''
         SELECT COUNT(*) as count
         FROM daily_messages
         WHERE host_name = ?
@@ -2554,14 +2601,14 @@ def get_data_status_by_host(host_name: str) -> Dict:
     message_count = cursor.fetchone()['count'] or 0
 
     # Get date range
-    cursor.execute('''
+    _execute(cursor, '''
         SELECT MIN(date) as min_date, MAX(date) as max_date
         FROM daily_usage
         WHERE host_name = ?
     ''', [host_name])
     date_row = cursor.fetchone()
 
-    cursor.execute('''
+    _execute(cursor, '''
         SELECT MIN(date) as min_date, MAX(date) as max_date
         FROM daily_messages
         WHERE host_name = ?
@@ -2598,7 +2645,7 @@ def get_all_hosts_with_status() -> List[Dict]:
     cursor = conn.cursor()
 
     # Get all unique host names from both tables
-    cursor.execute('''
+    _execute(cursor, '''
         SELECT DISTINCT host_name FROM daily_usage
         UNION
         SELECT DISTINCT host_name FROM daily_messages
@@ -2609,7 +2656,7 @@ def get_all_hosts_with_status() -> List[Dict]:
 
     for host_name in hosts:
         # Get last update time from daily_usage
-        cursor.execute('''
+        _execute(cursor, '''
             SELECT MAX(created_at) as last_updated
             FROM daily_usage
             WHERE host_name = ?
@@ -2618,7 +2665,7 @@ def get_all_hosts_with_status() -> List[Dict]:
         last_updated_usage = usage_row['last_updated'] if usage_row else None
 
         # Get last update time from daily_messages
-        cursor.execute('''
+        _execute(cursor, '''
             SELECT MAX(created_at) as last_updated
             FROM daily_messages
             WHERE host_name = ?
@@ -2633,14 +2680,14 @@ def get_all_hosts_with_status() -> List[Dict]:
                 last_updated = last_updated_messages
 
         # Get record counts
-        cursor.execute('''
+        _execute(cursor, '''
             SELECT COUNT(*) as count
             FROM daily_usage
             WHERE host_name = ?
         ''', [host_name])
         usage_count = cursor.fetchone()['count'] or 0
 
-        cursor.execute('''
+        _execute(cursor, '''
             SELECT COUNT(*) as count
             FROM daily_messages
             WHERE host_name = ?
@@ -2715,7 +2762,7 @@ def get_conversation_history(
 
     # First, get all messages ordered by timestamp to identify sessions
     # We use agent_session_id as primary session identifier, fallback to sender+date grouping
-    cursor.execute(f'''
+    _execute(cursor, f'''
         SELECT
             id,
             date,
@@ -3010,7 +3057,7 @@ def get_conversation_timeline(session_id: str) -> Dict:
     cursor = conn.cursor()
 
     # Try to find messages by agent_session_id first
-    cursor.execute('''
+    _execute(cursor, '''
         SELECT
             timestamp,
             role,
@@ -3029,7 +3076,7 @@ def get_conversation_timeline(session_id: str) -> Dict:
 
     # If no results, try conversation_id
     if not rows:
-        cursor.execute('''
+        _execute(cursor, '''
             SELECT
                 timestamp,
                 role,
@@ -3055,7 +3102,7 @@ def get_conversation_timeline(session_id: str) -> Dict:
 
             # Handle 'Unknown' sender (sender_name and sender_id are both NULL)
             if sender == 'Unknown':
-                cursor.execute('''
+                _execute(cursor, '''
                     SELECT
                         timestamp,
                         role,
@@ -3071,7 +3118,7 @@ def get_conversation_timeline(session_id: str) -> Dict:
                     ORDER BY timestamp ASC
                 ''', [date, tool])
             else:
-                cursor.execute('''
+                _execute(cursor, '''
                     SELECT
                         timestamp,
                         role,
@@ -3237,7 +3284,7 @@ def get_conversation_details(session_id: str) -> Dict:
     rows = []
 
     # Try to find messages by agent_session_id first
-    cursor.execute('''
+    _execute(cursor, '''
         SELECT
             message_id,
             parent_id,
@@ -3259,7 +3306,7 @@ def get_conversation_details(session_id: str) -> Dict:
 
     # If no results, try conversation_id
     if not rows:
-        cursor.execute('''
+        _execute(cursor, '''
             SELECT
                 message_id,
                 parent_id,
@@ -3289,7 +3336,7 @@ def get_conversation_details(session_id: str) -> Dict:
 
             # Handle 'Unknown' sender (sender_name and sender_id are both NULL)
             if sender == 'Unknown':
-                cursor.execute('''
+                _execute(cursor, '''
                     SELECT
                         message_id,
                         parent_id,
@@ -3309,7 +3356,7 @@ def get_conversation_details(session_id: str) -> Dict:
                     ORDER BY timestamp ASC
                 ''', [date, tool])
             else:
-                cursor.execute('''
+                _execute(cursor, '''
                     SELECT
                         message_id,
                         parent_id,

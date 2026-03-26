@@ -52,9 +52,14 @@ if __name__ == '__main__':
     print(f"Config: ~/.open-ace/config.json")
     print("-" * 50)
 
+    # Check if running in production mode
+    debug_mode = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
+    if debug_mode:
+        print("WARNING: Running in DEBUG mode - not recommended for production!")
+    
     app.run(
         host=WEB_HOST,
         port=WEB_PORT,
-        debug=True,
+        debug=debug_mode,
         threaded=True
     )

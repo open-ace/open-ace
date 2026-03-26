@@ -15,7 +15,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
-from app.repositories.database import DB_PATH, is_postgresql, get_database_url
+from app.repositories.database import DB_PATH, is_postgresql, get_database_url, adapt_sql
 
 logger = logging.getLogger(__name__)
 
@@ -201,28 +201,56 @@ class PromptLibrary:
         cursor = conn.cursor()
 
         now = datetime.utcnow().isoformat()
-        cursor.execute('''
-            INSERT INTO prompt_templates
-            (name, description, category, content, variables, tags, author_id,
-             author_name, is_public, is_featured, use_count, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            template.name,
-            template.description,
-            template.category,
-            template.content,
-            json.dumps(template.variables),
-            json.dumps(template.tags),
-            template.author_id,
-            template.author_name,
-            1 if template.is_public else 0,
-            1 if template.is_featured else 0,
-            template.use_count,
-            now,
-            now
-        ))
-
-        template_id = cursor.lastrowid
+        
+        if is_postgresql():
+            # PostgreSQL: use RETURNING clause
+            cursor.execute('''
+                INSERT INTO prompt_templates
+                (name, description, category, content, variables, tags, author_id,
+                 author_name, is_public, is_featured, use_count, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+            ''', (
+                template.name,
+                template.description,
+                template.category,
+                template.content,
+                json.dumps(template.variables),
+                json.dumps(template.tags),
+                template.author_id,
+                template.author_name,
+                1 if template.is_public else 0,
+                1 if template.is_featured else 0,
+                template.use_count,
+                now,
+                now
+            ))
+            row = cursor.fetchone()
+            template_id = row['id'] if row else None
+        else:
+            # SQLite: use lastrowid
+            cursor.execute('''
+                INSERT INTO prompt_templates
+                (name, description, category, content, variables, tags, author_id,
+                 author_name, is_public, is_featured, use_count, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                template.name,
+                template.description,
+                template.category,
+                template.content,
+                json.dumps(template.variables),
+                json.dumps(template.tags),
+                template.author_id,
+                template.author_name,
+                1 if template.is_public else 0,
+                1 if template.is_featured else 0,
+                template.use_count,
+                now,
+                now
+            ))
+            template_id = cursor.lastrowid
+        
         conn.commit()
         conn.close()
 
@@ -242,7 +270,7 @@ class PromptLibrary:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        cursor.execute('SELECT * FROM prompt_templates WHERE id = ?', (template_id,))
+        cursor.execute(adapt_sql('SELECT * FROM prompt_templates WHERE id = ?'), (template_id,))
         row = cursor.fetchone()
         conn.close()
 
@@ -267,13 +295,13 @@ class PromptLibrary:
         cursor = conn.cursor()
 
         now = datetime.utcnow().isoformat()
-        cursor.execute('''
+        cursor.execute(adapt_sql('''
             UPDATE prompt_templates
             SET name = ?, description = ?, category = ?, content = ?,
                 variables = ?, tags = ?, is_public = ?, is_featured = ?,
                 updated_at = ?
             WHERE id = ?
-        ''', (
+        '''), (
             template.name,
             template.description,
             template.category,
@@ -309,10 +337,10 @@ class PromptLibrary:
         cursor = conn.cursor()
 
         if user_id is not None:
-            cursor.execute('DELETE FROM prompt_templates WHERE id = ? AND author_id = ?',
+            cursor.execute(adapt_sql('DELETE FROM prompt_templates WHERE id = ? AND author_id = ?'),
                           (template_id, user_id))
         else:
-            cursor.execute('DELETE FROM prompt_templates WHERE id = ?', (template_id,))
+            cursor.execute(adapt_sql('DELETE FROM prompt_templates WHERE id = ?'), (template_id,))
 
         success = cursor.rowcount > 0
         conn.commit()
@@ -379,13 +407,12 @@ class PromptLibrary:
         where_clause = ' AND '.join(conditions) if conditions else '1=1'
 
         # Get total count
-        cursor.execute(f'SELECT COUNT(*) as count FROM prompt_templates WHERE {where_clause}', params)
+        cursor.execute(adapt_sql(f'SELECT COUNT(*) as count FROM prompt_templates WHERE {where_clause}'), params)
         total = cursor.fetchone()['count']
         total_pages = (total + limit - 1) // limit if total > 0 else 1
 
         # Get paginated results
         offset = (page - 1) * limit
-        from app.repositories.database import adapt_sql
         cursor.execute(adapt_sql(f'''
             SELECT * FROM prompt_templates
             WHERE {where_clause}
@@ -419,11 +446,11 @@ class PromptLibrary:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        cursor.execute('''
+        cursor.execute(adapt_sql('''
             UPDATE prompt_templates
             SET use_count = use_count + 1
             WHERE id = ?
-        ''', (template_id,))
+        '''), (template_id,))
 
         success = cursor.rowcount > 0
         conn.commit()
@@ -444,12 +471,12 @@ class PromptLibrary:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        cursor.execute('''
+        cursor.execute(adapt_sql('''
             SELECT * FROM prompt_templates
             WHERE is_featured = 1 AND is_public = 1
             ORDER BY use_count DESC
             LIMIT ?
-        ''', (limit,))
+        '''), (limit,))
 
         rows = cursor.fetchall()
         conn.close()
@@ -516,6 +543,30 @@ class PromptLibrary:
 
     def _row_to_template(self, row: sqlite3.Row) -> PromptTemplate:
         """Convert a database row to PromptTemplate."""
+        # Handle datetime fields - PostgreSQL returns datetime objects, SQLite returns strings
+        created_at_val = row['created_at']
+        updated_at_val = row['updated_at']
+        
+        if created_at_val:
+            if isinstance(created_at_val, datetime):
+                created_at = created_at_val
+            elif isinstance(created_at_val, str):
+                created_at = datetime.fromisoformat(created_at_val)
+            else:
+                created_at = None
+        else:
+            created_at = None
+            
+        if updated_at_val:
+            if isinstance(updated_at_val, datetime):
+                updated_at = updated_at_val
+            elif isinstance(updated_at_val, str):
+                updated_at = datetime.fromisoformat(updated_at_val)
+            else:
+                updated_at = None
+        else:
+            updated_at = None
+        
         return PromptTemplate(
             id=row['id'],
             name=row['name'],
@@ -529,8 +580,8 @@ class PromptLibrary:
             is_public=bool(row['is_public']),
             is_featured=bool(row['is_featured']),
             use_count=row['use_count'] or 0,
-            created_at=datetime.fromisoformat(row['created_at']) if row['created_at'] else None,
-            updated_at=datetime.fromisoformat(row['updated_at']) if row['updated_at'] else None,
+            created_at=created_at,
+            updated_at=updated_at,
         )
 
     def seed_default_templates(self) -> None:
@@ -602,7 +653,7 @@ class PromptLibrary:
             # Check if template already exists
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute('SELECT id FROM prompt_templates WHERE name = ?', (template.name,))
+            cursor.execute(adapt_sql('SELECT id FROM prompt_templates WHERE name = ?'), (template.name,))
             exists = cursor.fetchone()
             conn.close()
 

@@ -2,15 +2,16 @@
  * Sessions Component - Agent sessions list with filters and details
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { cn } from '@/utils';
-import { useSessions, useSessionStats, useDeleteSession, useCompleteSession } from '@/hooks';
+import { useSessions, useSessionStats, useDeleteSession, useCompleteSession, useSession } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
-import { Card, Button, Select, Loading, Error, EmptyState, Badge } from '@/components/common';
+import { Card, Button, Select, Loading, Error, EmptyState, Badge, Modal } from '@/components/common';
 import type { BadgeVariant } from '@/components/common';
 import { formatDateTime, formatTokens } from '@/utils';
-import type { AgentSession, SessionFilters } from '@/api/sessions';
+import type { AgentSession, SessionFilters, SessionMessage } from '@/api/sessions';
 
 const ITEMS_PER_PAGE = 20;
 
@@ -33,9 +34,11 @@ const typeColors: Record<string, BadgeVariant> = {
 
 export const Sessions: React.FC = () => {
   const language = useLanguage();
+  const [searchParams] = useSearchParams();
   const [filters, setFilters] = useState<SessionFilters>({});
   const [page, setPage] = useState(1);
-  const [selectedSession, setSelectedSession] = useState<AgentSession | null>(null);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [showDetailModal, setShowDetailModal] = useState(false);
 
   // Queries
   const { data, isLoading, isFetching, isError, error, refetch } = useSessions({
@@ -46,11 +49,30 @@ export const Sessions: React.FC = () => {
 
   const { data: statsData } = useSessionStats();
 
+  // Fetch selected session details with messages
+  const { data: sessionDetail, isLoading: isLoadingDetail } = useSession(
+    selectedSessionId || '',
+    true,
+    !!selectedSessionId
+  );
+
   // Mutations
   const deleteMutation = useDeleteSession();
   const completeMutation = useCompleteSession();
 
   const sessions = data?.data?.sessions ?? [];
+
+  // Auto-select session from URL parameter
+  useEffect(() => {
+    const sessionId = searchParams.get('id');
+    if (sessionId && sessions.length > 0) {
+      const session = sessions.find((s: AgentSession) => s.session_id === sessionId);
+      if (session && selectedSessionId !== sessionId) {
+        setSelectedSessionId(sessionId);
+        setShowDetailModal(true);
+      }
+    }
+  }, [searchParams, sessions, selectedSessionId]);
   const pagination = data?.data
     ? {
         page: data.data.page,
@@ -107,14 +129,25 @@ export const Sessions: React.FC = () => {
   const handleDelete = async (sessionId: string) => {
     if (window.confirm(t('confirmDeleteSession', language) || 'Are you sure you want to delete this session?')) {
       await deleteMutation.mutateAsync(sessionId);
-      if (selectedSession?.session_id === sessionId) {
-        setSelectedSession(null);
+      if (selectedSessionId === sessionId) {
+        setSelectedSessionId(null);
+        setShowDetailModal(false);
       }
     }
   };
 
   const handleComplete = async (sessionId: string) => {
     await completeMutation.mutateAsync(sessionId);
+  };
+
+  const handleSessionClick = (sessionId: string) => {
+    setSelectedSessionId(sessionId);
+    setShowDetailModal(true);
+  };
+
+  const handleCloseModal = () => {
+    setShowDetailModal(false);
+    setSelectedSessionId(null);
   };
 
   if (isError) {
@@ -203,7 +236,7 @@ export const Sessions: React.FC = () => {
             />
           </div>
           {/* Search */}
-          <div className="d-flex align-items-center gap-1 ms-auto">
+          <div className="d-flex align-items-center gap-1 ms-auto" style={{ minWidth: '250px' }}>
             <div className="input-group input-group-sm" style={{ width: '200px' }}>
               <span className="input-group-text">
                 <i className="bi bi-search" />
@@ -242,8 +275,8 @@ export const Sessions: React.FC = () => {
                 key={session.session_id}
                 session={session}
                 language={language}
-                isSelected={selectedSession?.session_id === session.session_id}
-                onSelect={() => setSelectedSession(selectedSession?.session_id === session.session_id ? null : session)}
+                isSelected={selectedSessionId === session.session_id}
+                onClick={() => handleSessionClick(session.session_id)}
                 onDelete={handleDelete}
                 onComplete={handleComplete}
                 isDeleting={deleteMutation.isPending}
@@ -298,6 +331,22 @@ export const Sessions: React.FC = () => {
           )}
         </>
       )}
+
+      {/* Session Detail Modal */}
+      <Modal
+        isOpen={showDetailModal}
+        onClose={handleCloseModal}
+        title={sessionDetail?.data?.title || t('sessionDetails', language) || 'Session Details'}
+        size="lg"
+      >
+        {isLoadingDetail ? (
+          <Loading size="sm" text={t('loading', language)} />
+        ) : sessionDetail?.data ? (
+          <SessionDetailContent session={sessionDetail.data} language={language} />
+        ) : (
+          <div className="text-muted">{t('noData', language)}</div>
+        )}
+      </Modal>
     </div>
   );
 };
@@ -309,7 +358,7 @@ interface SessionCardProps {
   session: AgentSession;
   language: Language;
   isSelected: boolean;
-  onSelect: () => void;
+  onClick: () => void;
   onDelete: (sessionId: string) => void;
   onComplete: (sessionId: string) => void;
   isDeleting: boolean;
@@ -320,33 +369,28 @@ const SessionCard: React.FC<SessionCardProps> = ({
   session,
   language,
   isSelected,
-  onSelect,
+  onClick,
   onDelete,
   onComplete,
   isDeleting,
   isCompleting,
 }) => {
-  const [expanded, setExpanded] = useState(false);
-
-  const handleToggle = () => {
-    setExpanded(!expanded);
-    onSelect();
-  };
-
   return (
     <div
       className={cn(
         'session-item card mb-2',
         isSelected && 'border-primary'
       )}
+      onClick={onClick}
+      style={{ cursor: 'pointer' }}
     >
-      <div className="card-body" onClick={handleToggle} style={{ cursor: 'pointer' }}>
-        {/* Header Row */}
+      <div className="card-body py-4 px-4">
+        {/* Header Row - Spacious Layout */}
         <div className="d-flex justify-content-between align-items-start">
           <div className="flex-grow-1">
             {/* Title and Badges */}
-            <div className="d-flex align-items-center gap-2 mb-2">
-              <h5 className="mb-0">
+            <div className="d-flex align-items-center gap-3 mb-3">
+              <h5 className="mb-0" style={{ fontSize: '1.1rem', fontWeight: 600 }}>
                 {session.title || session.session_id.substring(0, 8)}
               </h5>
               <Badge variant={statusColors[session.status] || 'secondary'}>
@@ -357,35 +401,35 @@ const SessionCard: React.FC<SessionCardProps> = ({
               </Badge>
             </div>
 
-            {/* Meta Info */}
-            <div className="d-flex flex-wrap gap-3 text-muted small">
+            {/* Meta Info - Two rows for better spacing */}
+            <div className="d-flex flex-wrap gap-4 text-muted" style={{ fontSize: '0.875rem' }}>
               <span>
-                <i className="bi bi-tools me-1" />
+                <i className="bi bi-tools me-2" />
                 {session.tool_name}
               </span>
               <span>
-                <i className="bi bi-pc-display me-1" />
+                <i className="bi bi-pc-display me-2" />
                 {session.host_name}
               </span>
               {session.model && (
                 <span>
-                  <i className="bi bi-cpu me-1" />
+                  <i className="bi bi-cpu me-2" />
                   {session.model}
                 </span>
               )}
               <span>
-                <i className="bi bi-chat-dots me-1" />
+                <i className="bi bi-chat-dots me-2" />
                 {session.message_count} {t('messages', language)}
               </span>
               <span>
-                <i className="bi bi-cpu me-1" />
+                <i className="bi bi-cpu me-2" />
                 {formatTokens(session.total_tokens)} {t('tokens', language)}
               </span>
             </div>
           </div>
 
           {/* Actions */}
-          <div className="d-flex gap-1" onClick={(e) => e.stopPropagation()}>
+          <div className="d-flex flex-column gap-2 ms-4" onClick={(e) => e.stopPropagation()}>
             {session.status === 'active' && (
               <span title={t('complete', language) || 'Complete'}>
                 <Button
@@ -411,50 +455,96 @@ const SessionCard: React.FC<SessionCardProps> = ({
           </div>
         </div>
 
-        {/* Timestamps */}
-        <div className="d-flex justify-content-between text-muted small mt-2">
+        {/* Timestamps - Two separate lines */}
+        <div className="d-flex flex-column gap-2 text-muted mt-4" style={{ fontSize: '0.8rem' }}>
           <span>
-            <i className="bi bi-clock me-1" />
+            <i className="bi bi-clock me-2" />
             {t('created', language) || 'Created'}: {session.created_at ? formatDateTime(session.created_at) : '-'}
           </span>
           {session.completed_at && (
             <span>
-              <i className="bi bi-check-circle me-1" />
+              <i className="bi bi-check-circle me-2" />
               {t('completed', language) || 'Completed'}: {formatDateTime(session.completed_at)}
             </span>
           )}
         </div>
+      </div>
+    </div>
+  );
+};
 
-        {/* Expanded Content - Messages */}
-        {expanded && session.messages && session.messages.length > 0 && (
-          <div className="mt-3 border-top pt-3">
-            <h6>{t('messages', language)}</h6>
-            <div className="messages-container" style={{ maxHeight: '400px', overflowY: 'auto' }}>
-              {session.messages.map((msg, idx) => (
-                <div
-                  key={msg.id || idx}
-                  className={cn(
-                    'p-2 mb-2 rounded',
-                    msg.role === 'user' ? 'bg-light' : 'bg-white border'
-                  )}
-                >
-                  <div className="d-flex justify-content-between align-items-center mb-1">
-                    <Badge
-                      variant={msg.role === 'user' ? 'primary' : msg.role === 'assistant' ? 'success' : 'secondary'}
-                    >
-                      {msg.role}
-                    </Badge>
-                    <small className="text-muted">
-                      {msg.timestamp ? formatDateTime(msg.timestamp) : ''}
-                      {msg.tokens_used > 0 && ` • ${formatTokens(msg.tokens_used)} tokens`}
-                    </small>
-                  </div>
-                  <div className="message-content" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                    {msg.content.length > 500 ? `${msg.content.substring(0, 500)}...` : msg.content}
-                  </div>
-                </div>
-              ))}
+/**
+ * Session Detail Content Component (for Modal)
+ */
+interface SessionDetailContentProps {
+  session: AgentSession;
+  language: Language;
+}
+
+const SessionDetailContent: React.FC<SessionDetailContentProps> = ({
+  session,
+  language,
+}) => {
+  return (
+    <div className="session-detail-content">
+      {/* Session Meta Info */}
+      <div className="session-meta mb-3 p-3 bg-light rounded">
+        <div className="row g-3">
+          <div className="col-md-6">
+            <small className="text-muted d-block">{t('tableTool', language)}</small>
+            <span>{session.tool_name}</span>
+          </div>
+          <div className="col-md-6">
+            <small className="text-muted d-block">{t('status', language) || 'Status'}</small>
+            <Badge variant={session.status === 'active' ? 'success' : session.status === 'completed' ? 'secondary' : 'warning'}>
+              {session.status}
+            </Badge>
+          </div>
+          <div className="col-md-6">
+            <small className="text-muted d-block">{t('totalMessages', language)}</small>
+            <span>{session.message_count}</span>
+          </div>
+          <div className="col-md-6">
+            <small className="text-muted d-block">{t('totalTokens', language)}</small>
+            <span>{formatTokens(session.total_tokens)}</span>
+          </div>
+          <div className="col-md-6">
+            <small className="text-muted d-block">{t('created', language) || 'Created'}</small>
+            <span>{session.created_at ? formatDateTime(session.created_at) : '-'}</span>
+          </div>
+          <div className="col-md-6">
+            <small className="text-muted d-block">{t('model', language) || 'Model'}</small>
+            <span>{session.model || '-'}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Messages */}
+      <h6 className="mb-2">{t('messages', language)}</h6>
+      <div className="messages-container" style={{ maxHeight: '400px', overflowY: 'auto' }}>
+        {session.messages && session.messages.length > 0 ? (
+          session.messages.map((msg: SessionMessage, idx: number) => (
+            <div
+              key={msg.id || idx}
+              className={`message-item p-2 mb-2 rounded ${msg.role === 'user' ? 'bg-light' : 'bg-white border'}`}
+            >
+              <div className="d-flex justify-content-between align-items-center mb-1">
+                <Badge variant={msg.role === 'user' ? 'primary' : msg.role === 'assistant' ? 'success' : 'secondary'}>
+                  {msg.role}
+                </Badge>
+                <small className="text-muted">
+                  {msg.timestamp ? formatDateTime(msg.timestamp) : ''}
+                  {msg.tokens_used > 0 && ` • ${formatTokens(msg.tokens_used)} tokens`}
+                </small>
+              </div>
+              <div className="message-content" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                {msg.content}
+              </div>
             </div>
+          ))
+        ) : (
+          <div className="text-muted text-center py-3">
+            {t('noMessages', language) || 'No messages in this session'}
           </div>
         )}
       </div>

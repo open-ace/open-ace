@@ -119,7 +119,7 @@ class UsageRepository:
             params.append(host_name)
 
         query = f'''
-            SELECT * FROM daily_usage
+            SELECT * FROM daily_messages
             WHERE {' AND '.join(conditions)}
             ORDER BY date DESC
         '''
@@ -168,7 +168,7 @@ class UsageRepository:
             params.append(host_name)
 
         query = f'''
-            SELECT * FROM daily_usage
+            SELECT * FROM daily_messages
             WHERE {' AND '.join(conditions)}
             ORDER BY date DESC
         '''
@@ -214,7 +214,7 @@ class UsageRepository:
             params.append(host_name)
 
         query = f'''
-            SELECT * FROM daily_usage
+            SELECT * FROM daily_messages
             WHERE {' AND '.join(conditions)}
             ORDER BY date DESC
         '''
@@ -259,7 +259,7 @@ class UsageRepository:
                 SUM(output_tokens) as total_output_tokens,
                 MIN(date) as first_date,
                 MAX(date) as last_date
-            FROM daily_usage
+            FROM daily_messages
             {where_clause}
             GROUP BY tool_name
             ORDER BY total_tokens DESC
@@ -291,7 +291,7 @@ class UsageRepository:
         """
         query = '''
             SELECT DISTINCT tool_name 
-            FROM daily_usage 
+            FROM daily_messages 
             ORDER BY tool_name
         '''
 
@@ -307,7 +307,7 @@ class UsageRepository:
         """
         query = '''
             SELECT DISTINCT host_name 
-            FROM daily_usage 
+            FROM daily_messages 
             ORDER BY host_name
         '''
 
@@ -345,7 +345,7 @@ class UsageRepository:
                 SUM(input_tokens) as input_tokens,
                 SUM(output_tokens) as output_tokens,
                 SUM(request_count) as requests
-            FROM daily_usage
+            FROM daily_messages
             WHERE {' AND '.join(conditions)}
             GROUP BY date
             ORDER BY date ASC
@@ -395,7 +395,7 @@ class UsageRepository:
                 date,
                 tool_name,
                 SUM(tokens_used) as tokens
-            FROM daily_usage
+            FROM daily_messages
             WHERE {' AND '.join(conditions)}
             GROUP BY date, tool_name
             ORDER BY date ASC, tool_name ASC

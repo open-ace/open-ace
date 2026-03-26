@@ -46,10 +46,12 @@ class MessageRepository:
         feishu_conversation_id: Optional[str] = None,
         group_subject: Optional[str] = None,
         is_group_chat: Optional[int] = None,
+        agent_session_id: Optional[str] = None,
+        conversation_id: Optional[str] = None,
     ) -> bool:
         """
         Save a message to the database.
-        
+
         Args:
             date: Date string (YYYY-MM-DD).
             tool_name: Name of the tool.
@@ -70,7 +72,9 @@ class MessageRepository:
             feishu_conversation_id: Feishu conversation ID.
             group_subject: Group subject.
             is_group_chat: Is group chat flag.
-            
+            agent_session_id: Agent session ID (tool process session).
+            conversation_id: Conversation ID (one round of conversation).
+
         Returns:
             bool: True if successful.
         """
@@ -81,8 +85,9 @@ class MessageRepository:
                 (date, tool_name, host_name, message_id, parent_id, role, content,
                  full_entry, tokens_used, input_tokens, output_tokens, model,
                  timestamp, sender_id, sender_name, message_source,
-                 feishu_conversation_id, group_subject, is_group_chat)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 feishu_conversation_id, group_subject, is_group_chat,
+                 agent_session_id, conversation_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (date, tool_name, host_name, message_id) DO UPDATE SET
                     parent_id = EXCLUDED.parent_id,
                     role = EXCLUDED.role,
@@ -98,23 +103,28 @@ class MessageRepository:
                     message_source = EXCLUDED.message_source,
                     feishu_conversation_id = EXCLUDED.feishu_conversation_id,
                     group_subject = EXCLUDED.group_subject,
-                    is_group_chat = EXCLUDED.is_group_chat
+                    is_group_chat = EXCLUDED.is_group_chat,
+                    agent_session_id = EXCLUDED.agent_session_id,
+                    conversation_id = EXCLUDED.conversation_id
             ''', (date, tool_name, host_name, message_id, parent_id, role, content,
                   full_entry, tokens_used, input_tokens, output_tokens, model,
                   timestamp, sender_id, sender_name, message_source,
-                  feishu_conversation_id, group_subject, is_group_chat))
+                  feishu_conversation_id, group_subject, is_group_chat,
+                  agent_session_id, conversation_id))
         else:
             self.db.execute('''
                 INSERT OR REPLACE INTO daily_messages
                 (date, tool_name, host_name, message_id, parent_id, role, content,
                  full_entry, tokens_used, input_tokens, output_tokens, model,
                  timestamp, sender_id, sender_name, message_source,
-                 feishu_conversation_id, group_subject, is_group_chat)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 feishu_conversation_id, group_subject, is_group_chat,
+                 agent_session_id, conversation_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (date, tool_name, host_name, message_id, parent_id, role, content,
                   full_entry, tokens_used, input_tokens, output_tokens, model,
                   timestamp, sender_id, sender_name, message_source,
-                  feishu_conversation_id, group_subject, is_group_chat))
+                  feishu_conversation_id, group_subject, is_group_chat,
+                  agent_session_id, conversation_id))
 
         logger.debug(f"Saved message: {date} - {tool_name} - {message_id}")
         return True
@@ -296,17 +306,18 @@ class MessageRepository:
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
         # Add condition to filter out records without any session ID
-        session_filter = "COALESCE(feishu_conversation_id, agent_session_id, conversation_id) IS NOT NULL"
+        id_filter = "COALESCE(conversation_id, feishu_conversation_id, agent_session_id) IS NOT NULL"
         if where_clause:
-            where_clause = f"{where_clause} AND {session_filter}"
+            where_clause = f"{where_clause} AND {id_filter}"
         else:
-            where_clause = f"WHERE {session_filter}"
+            where_clause = f"WHERE {id_filter}"
 
         # Use COALESCE to get the first available session ID
         # Priority: feishu_conversation_id > agent_session_id > conversation_id
         query = f'''
             SELECT 
-                COALESCE(feishu_conversation_id, agent_session_id, conversation_id) as session_id,
+                COALESCE(conversation_id, feishu_conversation_id, agent_session_id) as conversation_id,
+                agent_session_id as session_id,
                 tool_name,
                 host_name,
                 sender_name,
@@ -320,7 +331,7 @@ class MessageRepository:
                 MAX(timestamp) as last_message_time
             FROM daily_messages
             {where_clause}
-            GROUP BY COALESCE(feishu_conversation_id, agent_session_id, conversation_id), tool_name, host_name, sender_name
+            GROUP BY COALESCE(conversation_id, feishu_conversation_id, agent_session_id), agent_session_id, tool_name, host_name, sender_name
             ORDER BY last_message_time DESC
             LIMIT ? OFFSET ?
         '''
@@ -341,7 +352,7 @@ class MessageRepository:
         # Use COALESCE to match session_id from multiple possible fields
         query = '''
             SELECT * FROM daily_messages
-            WHERE COALESCE(feishu_conversation_id, agent_session_id, conversation_id) = ?
+            WHERE COALESCE(conversation_id, feishu_conversation_id, agent_session_id) = ?
             ORDER BY timestamp ASC
         '''
 
@@ -360,7 +371,8 @@ class MessageRepository:
         # Use COALESCE to match session_id from multiple possible fields
         query = '''
             SELECT 
-                COALESCE(feishu_conversation_id, agent_session_id, conversation_id) as session_id,
+                COALESCE(conversation_id, feishu_conversation_id, agent_session_id) as conversation_id,
+                agent_session_id as session_id,
                 tool_name,
                 host_name,
                 sender_name,
@@ -373,7 +385,7 @@ class MessageRepository:
                 MIN(timestamp) as first_message_time,
                 MAX(timestamp) as last_message_time
             FROM daily_messages
-            WHERE COALESCE(feishu_conversation_id, agent_session_id, conversation_id) = ?
+            WHERE COALESCE(conversation_id, feishu_conversation_id, agent_session_id) = ?
             GROUP BY COALESCE(feishu_conversation_id, agent_session_id, conversation_id)
         '''
 
@@ -406,7 +418,18 @@ class MessageRepository:
         '''
 
         rows = self.db.fetch_all(query, tuple(params))
-        return [row['sender_name'] for row in rows if row['sender_name']]
+
+        # Filter out abnormal sender names:
+        # Feishu user IDs (e.g., "ou_3e479c7f81f8674741d778e8f838f8ed")
+        def is_valid_sender(name: str) -> bool:
+            if not name:
+                return False
+            # Filter out Feishu user IDs (starts with "ou_" followed by hex characters)
+            if name.startswith('ou_') and len(name) > 10:
+                return False
+            return True
+
+        return [row['sender_name'] for row in rows if is_valid_sender(row['sender_name'])]
 
     def count_messages(
         self,

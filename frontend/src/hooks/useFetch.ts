@@ -18,7 +18,7 @@ export function useGlobalFetch() {
   });
   const [autoRefresh, setAutoRefresh] = useState(false);
 
-  // Fetch data from all sources
+  // Fetch data from all sources (triggers backend data collection)
   const fetchData = useCallback(async () => {
     try {
       const response = await fetchApi.fetchData();
@@ -44,17 +44,14 @@ export function useGlobalFetch() {
     }
   }, []);
 
-  // Refresh all data (fetch + invalidate queries)
+  // Refresh all data (only invalidate queries, don't trigger backend fetch)
+  // This is fast because it only refreshes the frontend cache
   const refreshAll = useCallback(async () => {
-    const response = await fetchData();
-    if (response?.success) {
-      // Invalidate all queries to refetch data
-      await queryClient.invalidateQueries();
-    }
-    return response;
-  }, [fetchData, queryClient]);
+    // Invalidate all queries to refetch data from database
+    await queryClient.invalidateQueries();
+  }, [queryClient]);
 
-  // Auto-refresh effect
+  // Auto-refresh effect (only refreshes cache, doesn't trigger backend fetch)
   useEffect(() => {
     if (autoRefresh) {
       const interval = setInterval(() => {

@@ -328,11 +328,11 @@ export const ConversationHistory: React.FC = () => {
               <tbody>
                 {sortedConversations.map((conv) => (
                   <ConversationRow
-                    key={conv.session_id}
+                    key={conv.conversation_id}
                     conversation={conv}
                     columns={columns}
                     language={language}
-                    onViewDetails={() => setSelectedSession(conv.session_id)}
+                    onViewDetails={() => setSelectedSession(conv.conversation_id)}
                   />
                 ))}
               </tbody>
