@@ -38,9 +38,5 @@
   "feishu": {
     "app_id": "<FEISHU_APP_ID>",
     "app_secret": "<FEISHU_APP_SECRET>"
-  },
-  "remote": {
-    "enabled": false,
-    "hosts": []
   }
 }

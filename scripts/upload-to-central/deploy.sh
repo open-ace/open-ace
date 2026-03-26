@@ -357,7 +357,7 @@ def upload_incremental(server_url, auth_key, hostname, last_sync_time=None):
     messages = []
     for row in rows:
         m = dict(zip(columns, row))
-        messages.append({k: m.get(k) for k in ['date','tool_name','message_id','parent_id','role','content','tokens_used','input_tokens','output_tokens','model','timestamp','sender_id','sender_name','message_source','feishu_conversation_id','group_subject','is_group_chat']})
+        messages.append({k: m.get(k) for k in ['date','tool_name','message_id','parent_id','role','content','tokens_used','input_tokens','output_tokens','model','timestamp','sender_id','sender_name','message_source','feishu_conversation_id','group_subject','is_group_chat','agent_session_id','conversation_id']})
     try:
         r = requests.post(f"{server_url.rstrip('/')}/api/upload/batch", json={'host_name': hostname, 'usage': [], 'messages': messages}, headers={'X-Auth-Key': auth_key}, timeout=60)
         r.raise_for_status()

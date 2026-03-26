@@ -21,7 +21,7 @@ NC='\033[0m'
 # Default values
 IMAGE_NAME="open-ace:latest"
 IMAGE_FILE="open-ace-images.tar.gz"
-LOCAL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+LOCAL_DIR="$(cd "$(dirname "$0")/../../.." && pwd)"
 DEFAULT_REMOTE="open-ace@192.168.31.159"
 DEFAULT_DEPLOY_DIR="/home/open-ace/open-ace"
 
@@ -52,10 +52,10 @@ echo -e "${BLUE}Remote Host:${NC} $REMOTE_HOST"
 echo -e "${BLUE}Deploy Dir:${NC} $DEPLOY_DIR"
 echo ""
 
-# Step 1: Build Docker image locally
+# Step 1: Build Docker image locally (for linux/amd64 target platform)
 echo -e "${YELLOW}[Step 1/5] Building Docker image locally...${NC}"
 cd "$LOCAL_DIR"
-docker build -t "$IMAGE_NAME" .
+docker build --platform linux/amd64 -t "$IMAGE_NAME" .
 echo -e "${GREEN}✓ Docker image built: $IMAGE_NAME${NC}"
 echo ""
 

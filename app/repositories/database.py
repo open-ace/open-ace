@@ -17,8 +17,24 @@ logger = logging.getLogger(__name__)
 # Database configuration
 CONFIG_DIR = os.path.expanduser("~/.open-ace")
 DEFAULT_SQLITE_PATH = os.path.join(CONFIG_DIR, "ace.db")
-# Legacy alias for backwards compatibility
-DB_PATH = DEFAULT_SQLITE_PATH
+
+
+def _get_db_path() -> str:
+    """Get database path from config."""
+    from scripts.shared.config import get_database_url
+    url = get_database_url()
+    if url and url.startswith('postgresql'):
+        # For PostgreSQL, we still need a path for SessionManager's SQLite compatibility
+        # But the actual connection will use PostgreSQL
+        return DEFAULT_SQLITE_PATH
+    # For SQLite, extract path from URL
+    if url and url.startswith('sqlite'):
+        return url.replace('sqlite:///', '')
+    return DEFAULT_SQLITE_PATH
+
+
+# Legacy alias - now dynamic
+DB_PATH = _get_db_path()
 
 
 def get_database_url() -> str:

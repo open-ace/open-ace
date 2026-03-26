@@ -304,7 +304,7 @@ pre code {
   margin-bottom: var(--spacing-md);
   transition: all var(--transition-normal);
   position: relative;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .card:hover {

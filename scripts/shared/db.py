@@ -47,6 +47,31 @@ def _placeholder() -> str:
     return '%s' if is_postgresql() else '?'
 
 
+def sanitize_utf8(text: Optional[str]) -> Optional[str]:
+    """
+    Sanitize text to remove invalid UTF-8 surrogate characters.
+
+    Some messages may contain invalid UTF-8 surrogate pairs (e.g., \udcdd)
+    which cannot be encoded to UTF-8. This function removes them.
+
+    Args:
+        text: Input text that may contain invalid characters
+
+    Returns:
+        Sanitized text with invalid characters removed, or None if input is None
+    """
+    if text is None:
+        return None
+    try:
+        # Try to encode to UTF-8 - if it works, the text is valid
+        text.encode('utf-8')
+        return text
+    except UnicodeEncodeError:
+        # Remove invalid surrogate characters by encoding with surrogatepass
+        # and then decoding with replace errors
+        return text.encode('utf-8', errors='surrogatepass').decode('utf-8', errors='replace')
+
+
 def _convert_sql(sql: str) -> str:
     """Convert SQL placeholders from ? to %s for PostgreSQL."""
     if is_postgresql():
@@ -822,7 +847,7 @@ def save_messages_batch(messages: List[Dict], batch_size: int = 1000) -> int:
                             conversation_id = EXCLUDED.conversation_id
                     ''', (
                         date, tool_name, host_name, message_id, msg.get('parent_id'),
-                        msg.get('role'), msg.get('content'), msg.get('full_entry'),
+                        msg.get('role'), sanitize_utf8(msg.get('content')), sanitize_utf8(msg.get('full_entry')),
                         tokens_used, input_tokens, output_tokens, model, msg.get('timestamp'),
                         sender_id, sender_name, msg.get('message_source'),
                         msg.get('feishu_conversation_id'), msg.get('group_subject'),
@@ -835,7 +860,7 @@ def save_messages_batch(messages: List[Dict], batch_size: int = 1000) -> int:
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         date, tool_name, host_name, message_id, msg.get('parent_id'),
-                        msg.get('role'), msg.get('content'), msg.get('full_entry'),
+                        msg.get('role'), sanitize_utf8(msg.get('content')), sanitize_utf8(msg.get('full_entry')),
                         tokens_used, input_tokens, output_tokens, model, msg.get('timestamp'),
                         sender_id, sender_name, msg.get('message_source'),
                         msg.get('feishu_conversation_id'), msg.get('group_subject'),

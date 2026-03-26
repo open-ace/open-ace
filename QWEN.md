@@ -2,6 +2,7 @@
 - 测试脚本组织规则：在 tests/issues/{issue_number}/ 目录下创建测试脚本。例如 issue 36 的测试脚本放在 tests/issues/36/ 目录下。
 - 截图组织规则：在 screenshots/issues/{issue_number}/ 目录下存放 issue 相关截图。例如 issue 36 的截图放在 screenshots/issues/36/ 目录下。通用截图保留在 screenshots/ 根目录。
 - **多 issue 规则**：每个 issue 必须单独创建目录，禁止使用范围命名（如 73-78）。例如 issue 73、74、75 应分别创建 tests/issues/73/、tests/issues/74/、tests/issues/75/ 目录。
+- 修复前端代码后必须执行：1) cd frontend && npm run build 构建前端 2) 重启后端服务 3) 然后才能告诉用户修复完成。前端使用 Vite 构建，输出到 ../static/js/dist/ 目录。
 
 ## 修复完成后的验证流程（必须执行）
 

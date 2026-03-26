@@ -86,6 +86,7 @@ python3 scripts/fetch_openclaw.py
 
 | 文档 | 说明 |
 |------|------|
+| [产品介绍](docs/INTRO.md) | **快速了解项目定位和功能** |
 | [架构说明](docs/ARCHITECTURE.md) | 系统架构和核心概念 |
 | [部署指南](docs/DEPLOYMENT.md) | 本地和远程部署 |
 | [飞书配置](docs/FEISHU_CONFIG.md) | 飞书集成配置 |

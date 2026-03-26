@@ -19,10 +19,32 @@ from app.modules.workspace.prompt_library import PromptCategory, PromptLibrary, 
 from app.modules.workspace.session_manager import SessionManager, SessionType
 from app.modules.workspace.state_sync import get_state_sync_manager
 from app.modules.workspace.tool_connector import get_tool_connector
+from app.services.auth_service import AuthService
 
 logger = logging.getLogger(__name__)
 
 workspace_bp = Blueprint('workspace', __name__)
+auth_service = AuthService()
+
+
+@workspace_bp.before_request
+def load_user():
+    """Load the current user from session token before each request."""
+    token = request.cookies.get('session_token') or request.headers.get('Authorization', '').replace('Bearer ', '')
+    
+    if token:
+        session = auth_service.get_session(token)
+        if session:
+            g.user = {
+                'id': session.get('user_id'),
+                'username': session.get('username'),
+                'email': session.get('email'),
+                'role': session.get('role')
+            }
+        else:
+            g.user = None
+    else:
+        g.user = None
 
 
 # ==================== Prompt Templates ====================
@@ -241,36 +263,107 @@ def get_featured_prompts():
 
 @workspace_bp.route('/sessions', methods=['GET'])
 def list_sessions():
-    """List agent sessions."""
-    try:
-        manager = SessionManager()
+    """List agent sessions from daily_messages table.
 
-        user_id = g.user.get('id') if hasattr(g, 'user') and g.user else None
+    Sessions are grouped by agent_session_id (tool process session).
+    """
+    try:
+        from app.repositories.database import Database, is_postgresql
+
+        db = Database()
+
         tool_name = request.args.get('tool_name')
-        status = request.args.get('status')
-        session_type = request.args.get('session_type')
+        host_name = request.args.get('host_name')
         search = request.args.get('search')
         page = int(request.args.get('page', 1))
         limit = int(request.args.get('limit', 20))
 
-        result = manager.list_sessions(
-            user_id=user_id,
-            tool_name=tool_name,
-            status=status,
-            session_type=session_type,
-            search=search,
-            page=page,
-            limit=limit
-        )
+        conditions = ["agent_session_id IS NOT NULL"]
+        params = []
+
+        if tool_name:
+            conditions.append('tool_name = ?')
+            params.append(tool_name)
+
+        if host_name:
+            conditions.append('host_name = ?')
+            params.append(host_name)
+
+        if search:
+            conditions.append('(sender_name LIKE ? OR agent_session_id LIKE ?)')
+            params.extend([f'%{search}%', f'%{search}%'])
+
+        where_clause = ' AND '.join(conditions)
+
+        # Get total count
+        count_query = f'''
+            SELECT COUNT(DISTINCT agent_session_id) as count
+            FROM daily_messages
+            WHERE {where_clause}
+        '''
+        result = db.fetch_one(count_query, tuple(params))
+        total = result['count'] if result else 0
+        total_pages = (total + limit - 1) // limit if total > 0 else 1
+
+        # Get paginated sessions
+        offset = (page - 1) * limit
+        sessions_query = f'''
+            SELECT
+                agent_session_id as session_id,
+                tool_name,
+                host_name,
+                sender_name,
+                MAX(sender_id) as sender_id,
+                MAX(date) as date,
+                COUNT(*) as message_count,
+                SUM(tokens_used) as total_tokens,
+                SUM(input_tokens) as total_input_tokens,
+                SUM(output_tokens) as total_output_tokens,
+                MIN(timestamp) as created_at,
+                MAX(timestamp) as updated_at
+            FROM daily_messages
+            WHERE {where_clause}
+            GROUP BY agent_session_id, tool_name, host_name, sender_name
+            ORDER BY updated_at DESC
+            LIMIT ? OFFSET ?
+        '''
+        sessions = db.fetch_all(sessions_query, tuple(params + [limit, offset]))
+
+        # Format sessions for response
+        formatted_sessions = []
+        for s in sessions:
+            formatted_sessions.append({
+                'id': None,
+                'session_id': s['session_id'],
+                'session_type': 'chat',
+                'title': f"{s['tool_name']} - {s['session_id'][:8]}",
+                'tool_name': s['tool_name'],
+                'host_name': s['host_name'],
+                'user_id': None,
+                'status': 'completed',
+                'context': {},
+                'settings': {},
+                'total_tokens': s['total_tokens'] or 0,
+                'total_input_tokens': s['total_input_tokens'] or 0,
+                'total_output_tokens': s['total_output_tokens'] or 0,
+                'message_count': s['message_count'] or 0,
+                'model': None,
+                'tags': [],
+                'created_at': s['created_at'],
+                'updated_at': s['updated_at'],
+                'completed_at': s['updated_at'],
+                'expires_at': None,
+                'messages': []
+            })
 
         return jsonify({
             'success': True,
             'data': {
-                'sessions': [s.to_dict() for s in result['sessions']],
-                'total': result['total'],
-                'page': result['page'],
-                'limit': result['limit'],
-                'total_pages': result['total_pages']
+                'sessions': formatted_sessions,
+                'total': total,
+                'page': page,
+                'limit': limit,
+                'total_pages': total_pages
             }
         })
     except Exception as e:
@@ -320,15 +413,115 @@ def get_session(session_id):
     try:
         include_messages = request.args.get('include_messages', 'false').lower() == 'true'
 
+        # First try to get from SessionManager (agent_sessions table)
         manager = SessionManager()
         session = manager.get_session(session_id, include_messages=include_messages)
 
-        if not session:
+        if session:
+            return jsonify({
+                'success': True,
+                'data': session.to_dict()
+            })
+
+        # If not found in agent_sessions, try to get from daily_messages
+        from scripts.shared.db import get_connection, _execute, _placeholder
+
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        # Get session info from daily_messages
+        p = _placeholder()
+        session_query = f'''
+            SELECT
+                agent_session_id as session_id,
+                tool_name,
+                host_name,
+                sender_name,
+                MAX(sender_id) as sender_id,
+                MAX(date) as date,
+                COUNT(*) as message_count,
+                SUM(tokens_used) as total_tokens,
+                SUM(input_tokens) as total_input_tokens,
+                SUM(output_tokens) as total_output_tokens,
+                MIN(timestamp) as created_at,
+                MAX(timestamp) as updated_at
+            FROM daily_messages
+            WHERE agent_session_id = {p}
+            GROUP BY agent_session_id, tool_name, host_name, sender_name
+        '''
+        _execute(cursor, session_query, [session_id])
+        session_data = cursor.fetchone()
+
+        if not session_data:
+            conn.close()
             return jsonify({'success': False, 'error': 'Session not found'}), 404
+
+        # Convert to dict if needed
+        if not isinstance(session_data, dict):
+            session_data = dict(session_data)
+
+        # Get messages if requested
+        messages = []
+        if include_messages:
+            messages_query = f'''
+                SELECT
+                    id,
+                    agent_session_id as session_id,
+                    role,
+                    content,
+                    tokens_used,
+                    model,
+                    timestamp
+                FROM daily_messages
+                WHERE agent_session_id = {p}
+                ORDER BY timestamp ASC
+            '''
+            _execute(cursor, messages_query, [session_id])
+            messages_data = cursor.fetchall()
+            messages = [
+                {
+                    'id': m['id'] if isinstance(m, dict) else m[0],
+                    'session_id': m['session_id'] if isinstance(m, dict) else m[1],
+                    'role': m['role'] if isinstance(m, dict) else m[2],
+                    'content': m['content'] or '' if isinstance(m, dict) else (m[3] or ''),
+                    'tokens_used': m['tokens_used'] or 0 if isinstance(m, dict) else (m[4] or 0),
+                    'model': m['model'] if isinstance(m, dict) else m[5],
+                    'timestamp': m['timestamp'] if isinstance(m, dict) else m[6],
+                    'metadata': {}
+                }
+                for m in messages_data
+            ]
+
+        conn.close()
+
+        # Format session for response
+        formatted_session = {
+            'id': None,
+            'session_id': session_data['session_id'],
+            'session_type': 'chat',
+            'title': f"{session_data['tool_name']} - {session_data['session_id'][:8]}",
+            'tool_name': session_data['tool_name'],
+            'host_name': session_data['host_name'],
+            'user_id': None,
+            'status': 'completed',
+            'context': {},
+            'settings': {},
+            'total_tokens': session_data['total_tokens'] or 0,
+            'total_input_tokens': session_data['total_input_tokens'] or 0,
+            'total_output_tokens': session_data['total_output_tokens'] or 0,
+            'message_count': session_data['message_count'] or 0,
+            'model': None,
+            'tags': [],
+            'created_at': session_data['created_at'],
+            'updated_at': session_data['updated_at'],
+            'completed_at': session_data['updated_at'],
+            'expires_at': None,
+            'messages': messages
+        }
 
         return jsonify({
             'success': True,
-            'data': session.to_dict()
+            'data': formatted_session
         })
     except Exception as e:
         logger.error(f"Error getting session: {e}")

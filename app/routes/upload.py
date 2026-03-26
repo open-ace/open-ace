@@ -102,7 +102,9 @@ def api_upload_messages():
                 message_source=msg.get('message_source'),
                 feishu_conversation_id=msg.get('feishu_conversation_id'),
                 group_subject=msg.get('group_subject'),
-                is_group_chat=msg.get('is_group_chat')
+                is_group_chat=msg.get('is_group_chat'),
+                agent_session_id=msg.get('agent_session_id'),
+                conversation_id=msg.get('conversation_id')
             )
 
             if success:
@@ -171,7 +173,9 @@ def api_upload_batch():
                 message_source=m.get('message_source'),
                 feishu_conversation_id=m.get('feishu_conversation_id'),
                 group_subject=m.get('group_subject'),
-                is_group_chat=m.get('is_group_chat')
+                is_group_chat=m.get('is_group_chat'),
+                agent_session_id=m.get('agent_session_id'),
+                conversation_id=m.get('conversation_id')
             )
             if success:
                 results['messages']['saved'] += 1

@@ -86,11 +86,12 @@ def get_default_sender_name(tool: str = "openclaw") -> str:
 
 
 def parse_timestamp(ts_str: str) -> str:
-    """Extract date from ISO timestamp."""
+    """Extract date from ISO timestamp, converting UTC to local time."""
     if not ts_str:
         return "unknown"
     try:
         if ts_str.endswith("Z"):
+            # UTC time - convert to local time (assuming UTC+8 for China)
             if "." in ts_str:
                 base, rest = ts_str.rsplit(".", 1)
                 ms = rest.rstrip("Z")
@@ -98,9 +99,13 @@ def parse_timestamp(ts_str: str) -> str:
                 dt = datetime.strptime(f"{base}.{ms}Z", "%Y-%m-%dT%H:%M:%S.%fZ")
             else:
                 dt = datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%SZ")
+            # Convert UTC to local time (UTC+8 for China)
+            from datetime import timedelta
+            local_dt = dt + timedelta(hours=8)
+            return local_dt.strftime("%Y-%m-%d")
         else:
             dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-        return dt.strftime("%Y-%m-%d")
+            return dt.strftime("%Y-%m-%d")
     except Exception:
         return "unknown"
 
@@ -810,8 +815,13 @@ def extract_user_message_metadata(text: str) -> Optional[dict]:
     }
 
 
-def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> tuple:
+def process_jsonl_file(filepath: Path, hostname: str = 'localhost', tool_name: str = "openclaw") -> tuple:
     """Process a single JSONL file and return daily token aggregates and messages.
+
+    Args:
+        filepath: Path to the JSONL file
+        hostname: Host name
+        tool_name: Tool name (default: openclaw)
 
     Returns:
         tuple: (daily_stats dict, messages list)
@@ -828,7 +838,12 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> tuple:
 
     # Extract agent_session_id from file path
     # Format: ~/.openclaw/agents/main/sessions/{uuid}.jsonl
-    agent_session_id = get_agent_session_id_from_path(str(filepath), tool_name="openclaw")
+    agent_session_id = get_agent_session_id_from_path(str(filepath), tool_name=tool_name)
+
+    # Track conversation_id: each user message starts a new conversation
+    # conversation_id is generated when we see a user message
+    current_conversation_id = None
+    conversation_counter = 0
 
     # First pass: collect user message senders for assistant message attribution
     # Map: message_id -> (sender_id, sender_name)
@@ -913,6 +928,11 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> tuple:
                             if role == "user" and (sender_id or sender_name):
                                 user_senders[message_id] = (sender_id, sender_name)
 
+                            # Generate conversation_id: each user message starts a new conversation
+                            if role == "user":
+                                conversation_counter += 1
+                                current_conversation_id = f"conv_{agent_session_id}_{conversation_counter}"
+
                             # Get token counts
                             input_tokens = tokens.get("input_tokens", 0)
                             output_tokens = tokens.get("output_tokens", 0)
@@ -976,7 +996,7 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> tuple:
                             # Collect message for batch insert
                             messages.append({
                                 "date": date_key,
-                                "tool_name": "openclaw",
+                                "tool_name": tool_name,
                                 "host_name": hostname,
                                 "message_id": message_id,
                                 "parent_id": parent_id,
@@ -994,7 +1014,8 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> tuple:
                                 "feishu_conversation_id": conversation_label,
                                 "group_subject": group_subject,
                                 "is_group_chat": is_group_chat,
-                                "agent_session_id": agent_session_id
+                                "agent_session_id": agent_session_id,
+                                "conversation_id": current_conversation_id
                             })
 
                 elif entry_type == "custom":
@@ -1057,7 +1078,8 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> tuple:
                                 "feishu_conversation_id": None,
                                 "group_subject": None,
                                 "is_group_chat": None,
-                                "agent_session_id": agent_session_id
+                                "agent_session_id": agent_session_id,
+                                "conversation_id": current_conversation_id
                             })
                             # Store error sender for future messages (assistant can inherit from error)
                             if sender_id or sender_name:
@@ -1094,7 +1116,7 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> tuple:
     return dict(daily), messages
 
 
-def fetch_and_save_messages(days: int = 7, sessions_dir: Optional[Path] = None, hostname: Optional[str] = None) -> bool:
+def fetch_and_save_messages(days: int = 7, sessions_dir: Optional[Path] = None, hostname: Optional[str] = None, tool_name: str = "openclaw") -> bool:
     """
     Fetch OpenClaw messages and save to database.
 
@@ -1102,6 +1124,7 @@ def fetch_and_save_messages(days: int = 7, sessions_dir: Optional[Path] = None, 
         days: Number of days to look back
         sessions_dir: Optional specific sessions directory
         hostname: Optional host name to identify this machine
+        tool_name: Tool name (default: openclaw)
 
     Returns:
         True if successful, False otherwise
@@ -1160,7 +1183,7 @@ def fetch_and_save_messages(days: int = 7, sessions_dir: Optional[Path] = None, 
     all_messages = []
 
     for f in sorted(jsonl_files, key=lambda x: x.name):
-        daily, messages = process_jsonl_file(f, hostname)
+        daily, messages = process_jsonl_file(f, hostname, tool_name)
         for date, stats in daily.items():
             for key in ["input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "request_count"]:
                 aggregated[date][key] += stats[key]
@@ -1218,6 +1241,7 @@ def main():
     parser.add_argument('--token', default=None, help='OpenClaw token (reads from config.json if not provided)')
     parser.add_argument('--hostname', default=None, help='Host name to identify this machine')
     parser.add_argument('--sessions-dir', help='Specific sessions directory')
+    parser.add_argument('--tool', default='openclaw', help='Tool name (default: openclaw, can be qclaw, stepclaw, etc.)')
     parser.add_argument('--mode', choices=['usage', 'messages', 'both'], default='both',
                         help='Mode: usage (WebSocket API only), messages (session logs only), both (default)')
     args = parser.parse_args()
@@ -1246,7 +1270,8 @@ def main():
         messages_success = fetch_and_save_messages(
             days=args.days,
             sessions_dir=Path(args.sessions_dir) if args.sessions_dir else None,
-            hostname=args.hostname
+            hostname=args.hostname,
+            tool_name=args.tool
         )
         success = success and messages_success
 

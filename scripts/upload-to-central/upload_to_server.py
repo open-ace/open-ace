@@ -98,9 +98,12 @@ def fetch_qwen(hostname: str, days: int) -> bool:
 
     projects_dir = None
     for d in possible_dirs:
-        if d.exists():
-            projects_dir = d
-            break
+        try:
+            if d.exists():
+                projects_dir = d
+                break
+        except PermissionError:
+            continue
 
     if not projects_dir:
         return False
@@ -116,7 +119,7 @@ def fetch_qwen(hostname: str, days: int) -> bool:
         capture_output=True,
         text=True
     )
-    
+
     return result.returncode == 0
 
 
@@ -130,9 +133,12 @@ def fetch_claude(hostname: str, days: int) -> bool:
 
     projects_dir = None
     for d in possible_dirs:
-        if d.exists():
-            projects_dir = d
-            break
+        try:
+            if d.exists():
+                projects_dir = d
+                break
+        except PermissionError:
+            continue
 
     if not projects_dir:
         return False
@@ -250,6 +256,7 @@ def upload_incremental(server_url: str, auth_key: str, hostname: str,
         messages.append({
             'date': message.get('date'),
             'tool_name': message.get('tool_name'),
+            'host_name': message.get('host_name', hostname),
             'message_id': message.get('message_id'),
             'parent_id': message.get('parent_id'),
             'role': message.get('role'),
@@ -264,7 +271,10 @@ def upload_incremental(server_url: str, auth_key: str, hostname: str,
             'message_source': message.get('message_source'),
             'feishu_conversation_id': message.get('feishu_conversation_id'),
             'group_subject': message.get('group_subject'),
-            'is_group_chat': message.get('is_group_chat')
+            'is_group_chat': message.get('is_group_chat'),
+            'agent_session_id': message.get('agent_session_id'),
+            'conversation_id': message.get('conversation_id'),
+            'host_name': message.get('host_name')
         })
     
     conn.close()

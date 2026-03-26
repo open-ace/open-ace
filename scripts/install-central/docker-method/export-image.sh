@@ -199,7 +199,7 @@ if [ "$BUILD_IMAGE" = true ]; then
 
     # Find project root (where Dockerfile is)
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+    PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
     if [ ! -f "$PROJECT_ROOT/Dockerfile" ]; then
         print_error "找不到 Dockerfile: $PROJECT_ROOT/Dockerfile"

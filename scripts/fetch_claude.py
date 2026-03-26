@@ -190,6 +190,51 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> tuple:
     })
     messages = []
 
+    # First pass: build message tree for conversation_id tracking
+    # Key: message uuid, Value: (entry, parent_uuid)
+    message_tree = {}
+    root_messages = {}  # uuid -> entry for messages with no parent (conversation starters)
+
+    with open(filepath, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+                if not isinstance(entry, dict):
+                    continue
+
+                uuid = entry.get("uuid")
+                parent_uuid = entry.get("parentUuid")
+                entry_type = entry.get("type")
+
+                if uuid:
+                    message_tree[uuid] = (entry, parent_uuid)
+                    # Root message: user message with no parent = new conversation
+                    if entry_type == "user" and parent_uuid is None:
+                        root_messages[uuid] = entry
+            except (json.JSONDecodeError, KeyError, TypeError):
+                continue
+
+    # Build conversation_id mapping: each root message defines a conversation
+    # All descendants of a root message belong to the same conversation
+    def find_root(uuid: str) -> Optional[str]:
+        """Find the root message uuid for a given message uuid (iterative to avoid recursion limit)."""
+        visited = set()
+        current_uuid = uuid
+        while current_uuid and current_uuid in message_tree:
+            if current_uuid in visited:
+                # Cycle detected, return None
+                return None
+            visited.add(current_uuid)
+            entry, parent_uuid = message_tree[current_uuid]
+            if parent_uuid is None:
+                return current_uuid
+            current_uuid = parent_uuid
+        return None
+
+    # Second pass: process messages with conversation_id
     with open(filepath, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -251,6 +296,15 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> tuple:
                             elif 'project' in entry:
                                 agent_session_id = get_agent_session_id_from_path(entry['project'])
 
+                            # Determine conversation_id: find root message of this conversation
+                            uuid = entry.get("uuid")
+                            conversation_id = None
+                            if uuid:
+                                root_uuid = find_root(uuid)
+                                if root_uuid:
+                                    # Use root message uuid as conversation_id
+                                    conversation_id = f"conv_{root_uuid}"
+
                             # Collect message for batch insert
                             messages.append({
                                 "date": date_key,
@@ -268,7 +322,8 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> tuple:
                                 "timestamp": ts,
                                 "sender_id": "claude_user",
                                 "sender_name": get_default_sender_name("claude"),
-                                "agent_session_id": agent_session_id
+                                "agent_session_id": agent_session_id,
+                                "conversation_id": conversation_id
                             })
 
                 if sum([

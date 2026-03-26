@@ -118,8 +118,8 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
       {/* Dropdown Menu */}
       {isOpen && (
         <div
-          className="position-absolute top-100 start-0 w-100 mt-1 bg-white border rounded shadow-sm z-3"
-          style={{ maxHeight: '300px', overflow: 'hidden' }}
+          className="position-absolute top-100 start-0 mt-1 bg-white border rounded shadow-sm"
+          style={{ minWidth: '100%', maxHeight: '300px', overflow: 'hidden', zIndex: 1050 }}
           role="listbox"
         >
           {/* Search Input */}
@@ -147,11 +147,12 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
                   key={option.value}
                   type="button"
                   className={cn(
-                    'w-100 text-start px-3 py-2 border-0 bg-transparent',
-                    'hover:bg-light cursor-pointer',
+                    'text-start px-3 py-2 border-0 bg-transparent',
+                    'hover:bg-light cursor-pointer text-nowrap',
                     option.value === value && 'bg-primary bg-opacity-10',
                     option.disabled && 'text-muted'
                   )}
+                  style={{ minWidth: '100%' }}
                   onClick={() => !option.disabled && handleSelect(option.value)}
                   disabled={option.disabled}
                   role="option"
