@@ -386,7 +386,7 @@ class MessageRepository:
                 MAX(timestamp) as last_message_time
             FROM daily_messages
             WHERE COALESCE(conversation_id, feishu_conversation_id, agent_session_id) = ?
-            GROUP BY COALESCE(feishu_conversation_id, agent_session_id, conversation_id)
+            GROUP BY COALESCE(conversation_id, feishu_conversation_id, agent_session_id)
         '''
 
         return self.db.fetch_one(query, (session_id,))
