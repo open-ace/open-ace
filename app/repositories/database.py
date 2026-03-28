@@ -18,6 +18,32 @@ logger = logging.getLogger(__name__)
 CONFIG_DIR = os.path.expanduser("~/.open-ace")
 DEFAULT_SQLITE_PATH = os.path.join(CONFIG_DIR, "ace.db")
 
+
+class PgConnectionWrapper:
+    """Wrapper for psycopg2 connection to allow custom attributes."""
+
+    def __init__(self, conn, cursor_factory=None, from_pool=False):
+        self._conn = conn
+        self._cursor_factory = cursor_factory
+        self._from_pool = from_pool
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+    def cursor(self, cursor_factory=None):
+        if cursor_factory is None and self._cursor_factory is not None:
+            cursor_factory = self._cursor_factory
+        return self._conn.cursor(cursor_factory=cursor_factory)
+
+    def close(self):
+        if self._from_pool and _pg_pool is not None:
+            try:
+                _pg_pool.putconn(self._conn)
+            except Exception:
+                self._conn.close()
+        else:
+            self._conn.close()
+
 # Connection pool configuration
 POOL_MIN_CONN = 1
 POOL_MAX_CONN = 10
@@ -155,14 +181,10 @@ def get_postgresql_connection() -> Any:
             except Exception as e:
                 logger.warning(f"Failed to create connection pool: {e}, falling back to direct connection")
                 conn = psycopg2.connect(url)
-                conn._cursor_factory = RealDictCursor
-                return conn
-        
+                return PgConnectionWrapper(conn, cursor_factory=RealDictCursor, from_pool=False)
         # Get connection from pool
         conn = _pg_pool.getconn()
-        conn._cursor_factory = RealDictCursor
-        conn._from_pool = True  # Mark as from pool
-        return conn
+        return PgConnectionWrapper(conn, cursor_factory=RealDictCursor, from_pool=True)
         
     except ImportError:
         raise ImportError(
@@ -179,7 +201,13 @@ def release_postgresql_connection(conn: Any) -> None:
         conn: Connection to release.
     """
     global _pg_pool
-    
+
+    # Handle PgConnectionWrapper
+    if isinstance(conn, PgConnectionWrapper):
+        conn.close()
+        return
+
+    # Handle raw connection (legacy)
     if _pg_pool is not None and hasattr(conn, '_from_pool') and conn._from_pool:
         try:
             _pg_pool.putconn(conn)
