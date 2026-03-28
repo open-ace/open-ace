@@ -7,6 +7,8 @@ API routes for data upload operations.
 
 import json
 import logging
+import os
+from functools import wraps
 
 from flask import Blueprint, jsonify, request
 
@@ -18,8 +20,31 @@ usage_service = UsageService()
 message_service = MessageService()
 logger = logging.getLogger(__name__)
 
+# Upload authentication key for API access
+UPLOAD_AUTH_KEY = os.environ.get('UPLOAD_AUTH_KEY')
+
+
+def require_upload_auth(f):
+    """Decorator to require upload authentication."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        # Check for UPLOAD_AUTH_KEY in environment
+        if not UPLOAD_AUTH_KEY:
+            logger.error("UPLOAD_AUTH_KEY not configured - upload endpoints disabled")
+            return jsonify({'error': 'Upload service not configured'}), 503
+
+        # Check Authorization header
+        auth_header = request.headers.get('X-Upload-Auth')
+        if not auth_header or auth_header != UPLOAD_AUTH_KEY:
+            logger.warning("Unauthorized upload attempt")
+            return jsonify({'error': 'Unauthorized'}), 401
+
+        return f(*args, **kwargs)
+    return decorated
+
 
 @upload_bp.route('/upload/usage', methods=['POST'])
+@require_upload_auth
 def api_upload_usage():
     """Upload usage data."""
     data = request.get_json() or {}
@@ -59,6 +84,7 @@ def api_upload_usage():
 
 
 @upload_bp.route('/upload/messages', methods=['POST'])
+@require_upload_auth
 def api_upload_messages():
     """Upload message data."""
     data = request.get_json() or {}
@@ -121,6 +147,7 @@ def api_upload_messages():
 
 
 @upload_bp.route('/upload/batch', methods=['POST'])
+@require_upload_auth
 def api_upload_batch():
     """Upload batch data (usage and messages)."""
     data = request.get_json() or {}

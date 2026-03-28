@@ -22,10 +22,10 @@ logger = logging.getLogger(__name__)
 def create_app(config=None):
     """
     Flask application factory.
-    
+
     Args:
         config: Optional configuration dictionary or object.
-    
+
     Returns:
         Flask application instance.
     """
@@ -35,7 +35,16 @@ def create_app(config=None):
 
     # Load configuration
     app.config['TEMPLATES_AUTO_RELOAD'] = True
-    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
+
+    # SECRET_KEY configuration with security checks
+    secret_key = os.environ.get('SECRET_KEY')
+    if not secret_key:
+        flask_env = os.environ.get('FLASK_ENV', 'development')
+        if flask_env == 'production':
+            raise RuntimeError("SECRET_KEY environment variable must be set in production!")
+        secret_key = 'dev-secret-key'
+        logger.warning("Using development SECRET_KEY - DO NOT use in production!")
+    app.config['SECRET_KEY'] = secret_key
 
     if config:
         if isinstance(config, dict):

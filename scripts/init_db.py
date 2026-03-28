@@ -8,7 +8,8 @@ and creates a default admin user.
 
 import os
 import sys
-import hashlib
+
+import bcrypt
 
 # Add scripts directory to path for standalone script execution
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -21,8 +22,8 @@ from shared import db
 def create_default_admin(username: str = 'admin', password: str = 'admin123',
                          email: str = 'admin@localhost') -> bool:
     """Create a default admin user."""
-    # Hash password using SHA256 (for production, use bcrypt)
-    password_hash = hashlib.sha256(password.encode()).hexdigest()
+    # Hash password using bcrypt
+    password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
 
     # Check if admin already exists
     existing = db.get_user_by_username(username)

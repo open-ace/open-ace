@@ -5,7 +5,7 @@ Open ACE - Auth Routes
 API routes for authentication operations.
 """
 
-import hashlib
+import bcrypt
 
 from flask import Blueprint, jsonify, make_response, request
 
@@ -18,13 +18,16 @@ user_repo = UserRepository()
 
 
 def verify_password(password: str, password_hash: str) -> bool:
-    """Verify password against hash."""
-    return hashlib.sha256(password.encode()).hexdigest() == password_hash
+    """Verify password against bcrypt hash."""
+    try:
+        return bcrypt.checkpw(password.encode(), password_hash.encode())
+    except Exception:
+        return False
 
 
 def hash_password(password: str) -> str:
-    """Hash a password."""
-    return hashlib.sha256(password.encode()).hexdigest()
+    """Hash a password using bcrypt."""
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
 
 
 @auth_bp.route('/auth/login', methods=['POST'])
