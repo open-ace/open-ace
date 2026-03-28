@@ -5,9 +5,12 @@ Open ACE - Message Models
 Data models for message tracking.
 """
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -64,26 +67,43 @@ class Message:
     @classmethod
     def from_dict(cls, data: dict) -> 'Message':
         """Create from dictionary."""
+        # Extract values once to avoid repeated get() calls
+        ts_value = data.get('timestamp')
+        gc_value = data.get('is_group_chat')
+        created_at_value = data.get('created_at')
+
         # Handle timestamp conversion from string to datetime
         timestamp = None
-        if data.get('timestamp'):
-            ts_value = data.get('timestamp')
+        if ts_value:
             if isinstance(ts_value, str):
                 try:
                     timestamp = datetime.fromisoformat(ts_value.replace('Z', '+00:00'))
-                except (ValueError, TypeError):
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Failed to parse timestamp '{ts_value}': {e}")
                     timestamp = None
             elif isinstance(ts_value, datetime):
                 timestamp = ts_value
 
-        # Handle is_group_chat conversion
+        # Handle is_group_chat conversion (bool, int, or string)
         is_group_chat = None
-        if data.get('is_group_chat') is not None:
-            gc_value = data.get('is_group_chat')
+        if gc_value is not None:
             if isinstance(gc_value, bool):
                 is_group_chat = gc_value
             elif isinstance(gc_value, int):
                 is_group_chat = gc_value == 1
+            elif isinstance(gc_value, str):
+                is_group_chat = gc_value.lower() in ('true', '1', 'yes')
+
+        # Handle created_at conversion
+        created_at = None
+        if created_at_value:
+            if isinstance(created_at_value, str):
+                try:
+                    created_at = datetime.fromisoformat(created_at_value.replace('Z', '+00:00'))
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Failed to parse created_at '{created_at_value}': {e}")
+            elif isinstance(created_at_value, datetime):
+                created_at = created_at_value
 
         return cls(
             id=data.get('id'),
@@ -106,7 +126,7 @@ class Message:
             feishu_conversation_id=data.get('feishu_conversation_id'),
             group_subject=data.get('group_subject'),
             is_group_chat=is_group_chat,
-            created_at=datetime.fromisoformat(data['created_at']) if data.get('created_at') else None,
+            created_at=created_at,
         )
 
 

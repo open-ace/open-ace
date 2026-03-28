@@ -14,7 +14,7 @@ This migration adds CHECK constraints to ensure data integrity:
 - daily_usage.tokens_used: must be >= 0
 
 """
-from typing import Sequence, Union
+from typing import Union
 
 from alembic import op
 import sqlalchemy as sa
@@ -22,14 +22,71 @@ import sqlalchemy as sa
 # revision identifiers, used by Alembic.
 revision: str = '013_add_check_constraints'
 down_revision: Union[str, None] = '012_fix_data_types'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+branch_labels: Union[str, None] = None
+depends_on: Union[str, None] = None
 
 
 def upgrade() -> None:
     """Upgrade database schema."""
     conn = op.get_bind()
     is_postgresql = conn.dialect.name == 'postgresql'
+
+    # ============================================
+    # Validate and clean existing data before adding constraints
+    # ============================================
+    # Clean invalid role values in users
+    op.execute("""
+        UPDATE users SET role = 'user'
+        WHERE role IS NOT NULL AND role NOT IN ('admin', 'manager', 'user')
+    """)
+
+    # Clean invalid status values in tenants
+    op.execute("""
+        UPDATE tenants SET status = 'active'
+        WHERE status IS NOT NULL AND status NOT IN ('active', 'suspended', 'trial', 'inactive')
+    """)
+
+    # Clean invalid plan values in tenants
+    op.execute("""
+        UPDATE tenants SET plan = 'standard'
+        WHERE plan IS NOT NULL AND plan NOT IN ('free', 'standard', 'premium', 'enterprise')
+    """)
+
+    # Clean negative token values in quota_usage
+    op.execute("""
+        UPDATE quota_usage SET tokens_used = 0 WHERE tokens_used < 0
+    """)
+    op.execute("""
+        UPDATE quota_usage SET requests_used = 0 WHERE requests_used < 0
+    """)
+
+    # Clean negative token values in daily_messages
+    op.execute("""
+        UPDATE daily_messages SET tokens_used = 0 WHERE tokens_used < 0
+    """)
+    op.execute("""
+        UPDATE daily_messages SET input_tokens = 0 WHERE input_tokens < 0
+    """)
+    op.execute("""
+        UPDATE daily_messages SET output_tokens = 0 WHERE output_tokens < 0
+    """)
+
+    # Clean negative token values in daily_usage
+    op.execute("""
+        UPDATE daily_usage SET tokens_used = 0 WHERE tokens_used < 0
+    """)
+    op.execute("""
+        UPDATE daily_usage SET input_tokens = 0 WHERE input_tokens < 0
+    """)
+    op.execute("""
+        UPDATE daily_usage SET output_tokens = 0 WHERE output_tokens < 0
+    """)
+    op.execute("""
+        UPDATE daily_usage SET cache_tokens = 0 WHERE cache_tokens < 0
+    """)
+    op.execute("""
+        UPDATE daily_usage SET request_count = 0 WHERE request_count < 0
+    """)
 
     # ============================================
     # users table constraints
@@ -184,9 +241,51 @@ def upgrade() -> None:
         """)
     else:
         # SQLite: recreate table with CHECK constraints
-        # This is complex due to many indexes, so we'll skip for SQLite
-        # The application-level validation will handle this
-        pass
+        # Note: This is complex due to many columns, but we need to add constraints
+        op.execute("""
+            CREATE TABLE daily_messages_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                tool_name TEXT NOT NULL,
+                host_name TEXT DEFAULT 'localhost',
+                message_id TEXT NOT NULL,
+                parent_id TEXT,
+                role TEXT NOT NULL,
+                content TEXT,
+                full_entry TEXT,
+                tokens_used INTEGER DEFAULT 0 CHECK (tokens_used >= 0),
+                input_tokens INTEGER DEFAULT 0 CHECK (input_tokens >= 0),
+                output_tokens INTEGER DEFAULT 0 CHECK (output_tokens >= 0),
+                model TEXT,
+                timestamp TEXT,
+                sender_id TEXT,
+                sender_name TEXT,
+                message_source TEXT,
+                feishu_conversation_id TEXT,
+                group_subject TEXT,
+                is_group_chat INTEGER,
+                conversation_id TEXT,
+                agent_session_id TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                CHECK (tokens_used >= 0),
+                CHECK (input_tokens >= 0),
+                CHECK (output_tokens >= 0)
+            )
+        """)
+        op.execute("""
+            INSERT INTO daily_messages_new
+            SELECT id, date, tool_name, host_name, message_id, parent_id, role, content, full_entry,
+                   tokens_used, input_tokens, output_tokens, model, timestamp, sender_id, sender_name,
+                   message_source, feishu_conversation_id, group_subject, is_group_chat,
+                   conversation_id, agent_session_id, created_at
+            FROM daily_messages
+        """)
+        # Recreate essential indexes
+        op.execute("CREATE INDEX idx_messages_date_tool_host ON daily_messages_new(date, tool_name, host_name)")
+        op.execute("CREATE INDEX idx_messages_sender_id ON daily_messages_new(sender_id)")
+        op.execute("CREATE INDEX idx_messages_date_role_timestamp ON daily_messages_new(date, role, timestamp)")
+        op.drop_table('daily_messages')
+        op.rename_table('daily_messages_new', 'daily_messages')
 
     # ============================================
     # daily_usage table constraints
@@ -218,8 +317,33 @@ def upgrade() -> None:
             CHECK (request_count >= 0)
         """)
     else:
-        # SQLite: skip for simplicity
-        pass
+        # SQLite: recreate table with CHECK constraints
+        op.execute("""
+            CREATE TABLE daily_usage_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                tool_name TEXT NOT NULL,
+                host_name TEXT DEFAULT 'localhost',
+                tokens_used INTEGER DEFAULT 0 CHECK (tokens_used >= 0),
+                input_tokens INTEGER DEFAULT 0 CHECK (input_tokens >= 0),
+                output_tokens INTEGER DEFAULT 0 CHECK (output_tokens >= 0),
+                cache_tokens INTEGER DEFAULT 0 CHECK (cache_tokens >= 0),
+                request_count INTEGER DEFAULT 0 CHECK (request_count >= 0),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(date, tool_name, host_name)
+            )
+        """)
+        op.execute("""
+            INSERT INTO daily_usage_new
+            SELECT id, date, tool_name, host_name, tokens_used, input_tokens, output_tokens,
+                   cache_tokens, request_count, created_at
+            FROM daily_usage
+        """)
+        # Recreate essential indexes
+        op.execute("CREATE INDEX idx_daily_usage_date ON daily_usage_new(date)")
+        op.execute("CREATE INDEX idx_daily_usage_tool ON daily_usage_new(tool_name)")
+        op.drop_table('daily_usage')
+        op.rename_table('daily_usage_new', 'daily_usage')
 
 
 def downgrade() -> None:
@@ -249,7 +373,7 @@ def downgrade() -> None:
     else:
         # SQLite: recreate tables without CHECK constraints
         # This is complex, so we'll provide simplified version
-        # Recreate users without CHECK
+        # Recreate users without CHECK (but keep foreign key)
         op.execute("""
             CREATE TABLE users_old (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -264,7 +388,7 @@ def downgrade() -> None:
                 monthly_token_quota INTEGER,
                 daily_request_quota INTEGER,
                 monthly_request_quota INTEGER,
-                tenant_id INTEGER
+                tenant_id INTEGER REFERENCES tenants(id) ON DELETE SET NULL
             )
         """)
         op.execute("""
@@ -314,11 +438,11 @@ def downgrade() -> None:
         op.drop_table('tenants')
         op.rename_table('tenants_old', 'tenants')
 
-        # Recreate quota_usage without CHECK
+        # Recreate quota_usage without CHECK (but keep foreign key)
         op.execute("""
             CREATE TABLE quota_usage_old (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 date TEXT NOT NULL,
                 period TEXT DEFAULT 'daily',
                 tokens_used INTEGER DEFAULT 0,

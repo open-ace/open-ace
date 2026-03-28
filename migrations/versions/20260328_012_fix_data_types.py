@@ -23,7 +23,7 @@ Tables affected:
 - tenant_settings: all boolean fields
 
 """
-from typing import Sequence, Union
+from typing import Union
 
 from alembic import op
 import sqlalchemy as sa
@@ -31,8 +31,8 @@ import sqlalchemy as sa
 # revision identifiers, used by Alembic.
 revision: str = '012_fix_data_types'
 down_revision: Union[str, None] = '011_add_tenant_id_to_users'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+branch_labels: Union[str, None] = None
+depends_on: Union[str, None] = None
 
 
 def upgrade() -> None:

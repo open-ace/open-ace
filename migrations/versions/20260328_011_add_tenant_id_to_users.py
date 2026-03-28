@@ -10,7 +10,7 @@ This migration adds tenant_id column to users table for multi-tenant support:
 - Sets default tenant for existing users (if tenants exist)
 
 """
-from typing import Sequence, Union
+from typing import Union
 
 from alembic import op
 import sqlalchemy as sa
@@ -18,8 +18,8 @@ import sqlalchemy as sa
 # revision identifiers, used by Alembic.
 revision: str = '011_add_tenant_id_to_users'
 down_revision: Union[str, None] = '010_fix_is_group_chat_type'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+branch_labels: Union[str, None] = None
+depends_on: Union[str, None] = None
 
 
 def upgrade() -> None:
@@ -50,10 +50,14 @@ def upgrade() -> None:
     # which is already set in database.py
 
     # Set default tenant for existing users if tenants exist
+    # Use parameterized query to avoid SQL injection
     result = conn.execute(sa.text("SELECT id FROM tenants LIMIT 1"))
     first_tenant = result.fetchone()
     if first_tenant:
-        op.execute(f"UPDATE users SET tenant_id = {first_tenant[0]} WHERE tenant_id IS NULL")
+        op.execute(
+            sa.text("UPDATE users SET tenant_id = :tenant_id WHERE tenant_id IS NULL"),
+            {'tenant_id': first_tenant[0]}
+        )
 
 
 def downgrade() -> None:
