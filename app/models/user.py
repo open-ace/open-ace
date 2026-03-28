@@ -38,6 +38,9 @@ class User:
     last_login: Optional[datetime] = None
     permissions: List[Permission] = field(default_factory=list)
 
+    # Multi-tenant support
+    tenant_id: Optional[int] = None
+
     # Quota fields
     daily_token_quota: Optional[int] = None
     monthly_token_quota: Optional[int] = None
@@ -54,6 +57,7 @@ class User:
             'is_active': self.is_active,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'last_login': self.last_login.isoformat() if self.last_login else None,
+            'tenant_id': self.tenant_id,
             'daily_token_quota': self.daily_token_quota,
             'monthly_token_quota': self.monthly_token_quota,
             'daily_request_quota': self.daily_request_quota,
@@ -72,6 +76,7 @@ class User:
             is_active=data.get('is_active', True),
             created_at=datetime.fromisoformat(data['created_at']) if data.get('created_at') else None,
             last_login=datetime.fromisoformat(data['last_login']) if data.get('last_login') else None,
+            tenant_id=data.get('tenant_id'),
             daily_token_quota=data.get('daily_token_quota'),
             monthly_token_quota=data.get('monthly_token_quota'),
             daily_request_quota=data.get('daily_request_quota'),

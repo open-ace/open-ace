@@ -25,13 +25,13 @@ class Message:
     input_tokens: int = 0
     output_tokens: int = 0
     model: Optional[str] = None
-    timestamp: Optional[str] = None
+    timestamp: Optional[datetime] = None
     sender_id: Optional[str] = None
     sender_name: Optional[str] = None
     message_source: Optional[str] = None
     feishu_conversation_id: Optional[str] = None
     group_subject: Optional[str] = None
-    is_group_chat: Optional[int] = None
+    is_group_chat: Optional[bool] = None
     id: Optional[int] = None
     created_at: Optional[datetime] = None
 
@@ -51,7 +51,7 @@ class Message:
             'input_tokens': self.input_tokens,
             'output_tokens': self.output_tokens,
             'model': self.model,
-            'timestamp': self.timestamp,
+            'timestamp': self.timestamp.isoformat() if self.timestamp else None,
             'sender_id': self.sender_id,
             'sender_name': self.sender_name,
             'message_source': self.message_source,
@@ -64,6 +64,27 @@ class Message:
     @classmethod
     def from_dict(cls, data: dict) -> 'Message':
         """Create from dictionary."""
+        # Handle timestamp conversion from string to datetime
+        timestamp = None
+        if data.get('timestamp'):
+            ts_value = data.get('timestamp')
+            if isinstance(ts_value, str):
+                try:
+                    timestamp = datetime.fromisoformat(ts_value.replace('Z', '+00:00'))
+                except (ValueError, TypeError):
+                    timestamp = None
+            elif isinstance(ts_value, datetime):
+                timestamp = ts_value
+
+        # Handle is_group_chat conversion
+        is_group_chat = None
+        if data.get('is_group_chat') is not None:
+            gc_value = data.get('is_group_chat')
+            if isinstance(gc_value, bool):
+                is_group_chat = gc_value
+            elif isinstance(gc_value, int):
+                is_group_chat = gc_value == 1
+
         return cls(
             id=data.get('id'),
             date=data.get('date'),
@@ -78,13 +99,13 @@ class Message:
             input_tokens=data.get('input_tokens', 0),
             output_tokens=data.get('output_tokens', 0),
             model=data.get('model'),
-            timestamp=data.get('timestamp'),
+            timestamp=timestamp,
             sender_id=data.get('sender_id'),
             sender_name=data.get('sender_name'),
             message_source=data.get('message_source'),
             feishu_conversation_id=data.get('feishu_conversation_id'),
             group_subject=data.get('group_subject'),
-            is_group_chat=data.get('is_group_chat'),
+            is_group_chat=is_group_chat,
             created_at=datetime.fromisoformat(data['created_at']) if data.get('created_at') else None,
         )
 
