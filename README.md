@@ -44,7 +44,7 @@
 </p>
 
 **核心能力：**
-- 🤖 **多 AI 工具集成** — 支持 Claude、Qwen、ChatGPT 等主流 AI，一个平台全搞定
+- 🤖 **多 AI 工具集成** — 支持 Claude Code、Qwen Code、OpenClaw 等主流 AI，一个平台全搞定
 - 💬 **智能对话管理** — 历史记录、会话恢复、上下文记忆，对话不中断
 - 📝 **提示词库** — 团队共享优质提示词，最佳实践一键复用
 - 🔍 **快速检索** — 跨会话搜索历史对话，知识沉淀不丢失
@@ -87,20 +87,20 @@
 
 ```bash
 # 克隆项目
-git clone https://github.com/rhuang-zz/open-ace.git
+git clone https://github.com/open-ace/open-ace.git
 cd open-ace
 
 # 一键启动
 docker-compose up -d
 
-# 访问 http://localhost:5001
+# 访问 http://localhost:5000
 ```
 
 ### 方式二：源码安装
 
 ```bash
 # 1. 克隆项目
-git clone https://github.com/rhuang-zz/open-ace.git
+git clone https://github.com/open-ace/open-ace.git
 cd open-ace
 
 # 2. 安装后端依赖
@@ -115,7 +115,7 @@ python3 cli.py config init
 # 5. 启动服务
 python3 web.py
 
-# 访问 http://localhost:5001
+# 访问 http://localhost:5000
 ```
 
 ### 默认账号
@@ -236,8 +236,8 @@ open-ace/
 
 我们欢迎所有形式的贡献！
 
-- 🐛 发现 Bug？[提交 Issue](https://github.com/rhuang-zz/open-ace/issues)
-- 💡 有想法？[参与讨论](https://github.com/rhuang-zz/open-ace/discussions)
+- 🐛 发现 Bug？[提交 Issue](https://github.com/open-ace/open-ace/issues)
+- 💡 有想法？[参与讨论](https://github.com/open-ace/open-ace/discussions)
 - 🔧 想贡献代码？阅读 [贡献指南](CONTRIBUTING.md)
 
 ---
@@ -277,7 +277,7 @@ open-ace/
 </p>
 
 **Key Capabilities:**
-- 🤖 **Multi-AI Integration** — Support for Claude, Qwen, ChatGPT and more — all in one platform
+- 🤖 **Multi-AI Integration** — Support for Claude Code, Qwen Code, OpenClaw and more — all in one platform
 - 💬 **Smart Conversation Management** — History, session recovery, context memory — never lose a conversation
 - 📝 **Prompt Library** — Share best practices across your team with reusable prompts
 - 🔍 **Quick Search** — Search across all conversations, knowledge preserved
@@ -320,20 +320,20 @@ open-ace/
 
 ```bash
 # Clone the project
-git clone https://github.com/rhuang-zz/open-ace.git
+git clone https://github.com/open-ace/open-ace.git
 cd open-ace
 
 # Start with one command
 docker-compose up -d
 
-# Visit http://localhost:5001
+# Visit http://localhost:5000
 ```
 
 ### Option 2: From Source
 
 ```bash
 # 1. Clone the project
-git clone https://github.com/rhuang-zz/open-ace.git
+git clone https://github.com/open-ace/open-ace.git
 cd open-ace
 
 # 2. Install backend dependencies
@@ -348,7 +348,7 @@ python3 cli.py config init
 # 5. Start the server
 python3 web.py
 
-# Visit http://localhost:5001
+# Visit http://localhost:5000
 ```
 
 ### Default Credentials
@@ -469,8 +469,8 @@ open-ace/
 
 We welcome all forms of contribution!
 
-- 🐛 Found a bug? [Submit an Issue](https://github.com/rhuang-zz/open-ace/issues)
-- 💡 Have an idea? [Join the discussion](https://github.com/rhuang-zz/open-ace/discussions)
+- 🐛 Found a bug? [Submit an Issue](https://github.com/open-ace/open-ace/issues)
+- 💡 Have an idea? [Join the discussion](https://github.com/open-ace/open-ace/discussions)
 - 🔧 Want to contribute code? Read the [Contributing Guide](CONTRIBUTING.md)
 
 ---
