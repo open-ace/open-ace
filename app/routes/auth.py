@@ -130,3 +130,35 @@ def api_current_user():
         return jsonify({'user': profile})
 
     return jsonify({'error': 'User not found'}), 404
+
+
+@auth_bp.route('/auth/change-password', methods=['POST'])
+def api_change_password():
+    """Change password endpoint."""
+    token = request.cookies.get('session_token') or request.headers.get('Authorization', '').replace('Bearer ', '')
+
+    is_auth, session_or_error = auth_service.require_auth(token)
+    if not is_auth:
+        return jsonify(session_or_error), 401
+
+    data = request.get_json() or {}
+    current_password = data.get('current_password')
+    new_password = data.get('new_password')
+
+    if not current_password or not new_password:
+        return jsonify({'error': 'Current password and new password required'}), 400
+
+    user_id = session_or_error.get('user_id')
+
+    success, error = auth_service.change_password(
+        user_id,
+        current_password,
+        new_password,
+        verify_password,
+        hash_password
+    )
+
+    if success:
+        return jsonify({'success': True, 'message': 'Password changed successfully'})
+
+    return jsonify({'error': error}), 400

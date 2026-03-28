@@ -76,11 +76,15 @@ class AuthService:
 
         logger.info(f"User logged in: {username}")
 
+        # Check if user must change password
+        must_change_password = user.get('must_change_password', 0) == 1
+
         return {
             'id': user['id'],
             'username': user['username'],
             'email': user.get('email'),
-            'role': user['role']
+            'role': user['role'],
+            'must_change_password': must_change_password
         }, token
 
     def logout(self, token: str) -> bool:
@@ -94,6 +98,51 @@ class AuthService:
             bool: True if successful.
         """
         return self.user_repo.delete_session(token)
+
+    def change_password(
+        self,
+        user_id: int,
+        current_password: str,
+        new_password: str,
+        password_verify_func,
+        password_hash_func
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        Change user password.
+
+        Args:
+            user_id: User ID.
+            current_password: Current password for verification.
+            new_password: New password to set.
+            password_verify_func: Function to verify password hash.
+            password_hash_func: Function to hash new password.
+
+        Returns:
+            Tuple[bool, Optional[str]]: (Success, Error message or None).
+        """
+        # Get user
+        user = self.user_repo.get_user_by_id(user_id)
+        if not user:
+            return False, "User not found"
+
+        # Verify current password
+        if not password_verify_func(current_password, user.get('password_hash', '')):
+            return False, "Current password is incorrect"
+
+        # Validate new password
+        if len(new_password) < 8:
+            return False, "New password must be at least 8 characters"
+
+        if new_password == current_password:
+            return False, "New password must be different from current password"
+
+        # Hash and update password
+        new_password_hash = password_hash_func(new_password)
+        if not self.user_repo.update_password(user_id, new_password_hash):
+            return False, "Failed to update password"
+
+        logger.info(f"Password changed for user ID: {user_id}")
+        return True, None
 
     def get_session(self, token: str) -> Optional[Dict]:
         """

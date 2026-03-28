@@ -207,13 +207,34 @@ class UserRepository:
         Returns:
             bool: True if successful.
         """
-        query = 'UPDATE users SET password_hash = ? WHERE id = ?'
+        query = 'UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?'
 
         try:
             cursor = self.db.execute(query, (password_hash, user_id))
             return cursor.rowcount > 0
         except Exception as e:
             logger.error(f"Error updating password: {e}")
+            return False
+
+    def set_must_change_password(self, user_id: int, must_change: bool) -> bool:
+        """
+        Set must_change_password flag for a user.
+
+        Args:
+            user_id: User ID.
+            must_change: Whether user must change password.
+
+        Returns:
+            bool: True if successful.
+        """
+        query = 'UPDATE users SET must_change_password = ? WHERE id = ?'
+        must_change_int = 1 if must_change else 0
+
+        try:
+            cursor = self.db.execute(query, (must_change_int, user_id))
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error setting must_change_password: {e}")
             return False
 
     def update_last_login(self, user_id: int) -> bool:

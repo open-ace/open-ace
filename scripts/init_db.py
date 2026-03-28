@@ -21,7 +21,7 @@ from shared import db
 
 def create_default_admin(username: str = 'admin', password: str = 'admin123',
                          email: str = 'admin@localhost') -> bool:
-    """Create a default admin user."""
+    """Create a default admin user with forced password change on first login."""
     # Hash password using bcrypt
     password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
 
@@ -31,21 +31,23 @@ def create_default_admin(username: str = 'admin', password: str = 'admin123',
         print(f"Admin user '{username}' already exists")
         return True
 
-    # Create admin user
-    result = db.create_user(
+    # Create admin user with must_change_password = 1 (force password change on first login)
+    result = db.create_user_with_is_active(
         username=username,
         password_hash=password_hash,
         email=email,
         role='admin',
         daily_token_quota=10000000,  # 10M tokens
-        daily_request_quota=10000
+        daily_request_quota=10000,
+        is_active=1,
+        must_change_password=1  # Force password change on first login
     )
 
     if result:
         print(f"Created default admin user: {username}")
         print(f"Email: {email}")
         print(f"Password: {password}")
-        print("\nWARNING: Please change the default password immediately!")
+        print("\nIMPORTANT: You MUST change the password on first login!")
         return True
     else:
         print(f"Failed to create admin user '{username}'")
