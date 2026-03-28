@@ -45,6 +45,7 @@ class UsageService:
         entries = self.usage_repo.get_usage_by_date(today, tool_name, host_name)
 
         # Merge entries by tool_name (combine all hosts)
+        # Use sets for O(1) lookup instead of O(n) list lookup
         merged = {}
         for entry in entries:
             tool = entry.get('tool_name', 'unknown')
@@ -57,8 +58,8 @@ class UsageService:
                     'output_tokens': 0,
                     'cache_tokens': 0,
                     'request_count': 0,
-                    'models_used': [],
-                    'hosts': []
+                    'models_used_set': set(),  # Use set for O(1) lookup
+                    'hosts_set': set()  # Use set for O(1) lookup
                 }
 
             merged[tool]['tokens_used'] += entry.get('tokens_used', 0)
@@ -68,20 +69,28 @@ class UsageService:
             merged[tool]['request_count'] += entry.get('request_count', 0)
 
             if entry.get('models_used'):
-                for m in entry.get('models_used', []):
-                    if m not in merged[tool]['models_used']:
-                        merged[tool]['models_used'].append(m)
+                merged[tool]['models_used_set'].update(entry.get('models_used', []))
 
             host = entry.get('host_name', 'unknown')
-            if host not in merged[tool]['hosts']:
-                merged[tool]['hosts'].append(host)
+            merged[tool]['hosts_set'].add(host)
 
         # Convert to list and clean up
         result = []
         for tool, data in merged.items():
-            if not data['models_used']:
-                data['models_used'] = None
-            result.append(data)
+            # Convert sets to lists for output
+            models_used = list(data['models_used_set']) if data['models_used_set'] else None
+            hosts = list(data['hosts_set'])
+            result.append({
+                'date': data['date'],
+                'tool_name': data['tool_name'],
+                'tokens_used': data['tokens_used'],
+                'input_tokens': data['input_tokens'],
+                'output_tokens': data['output_tokens'],
+                'cache_tokens': data['cache_tokens'],
+                'request_count': data['request_count'],
+                'models_used': models_used,
+                'hosts': hosts
+            })
 
         return result
 

@@ -520,6 +520,76 @@ class SessionManager:
         logger.debug(f"Added message to session {session_id}: role={role}")
         return message_id
 
+    def add_messages_batch(
+        self,
+        session_id: str,
+        messages: List[Dict[str, Any]]
+    ) -> List[int]:
+        """
+        Add multiple messages to a session in a single transaction.
+
+        Args:
+            session_id: Session ID.
+            messages: List of message dicts with keys: role, content, tokens_used, model, metadata.
+
+        Returns:
+            List[int]: List of message IDs.
+        """
+        if not messages:
+            return []
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        now = datetime.utcnow().isoformat()
+        message_ids = []
+        total_tokens = 0
+
+        try:
+            # Insert all messages in a single transaction
+            for msg in messages:
+                role = msg.get('role', 'user')
+                content = msg.get('content', '')
+                tokens_used = msg.get('tokens_used', 0)
+                model = msg.get('model')
+                metadata = msg.get('metadata')
+
+                cursor.execute(f'''
+                    INSERT INTO session_messages
+                    (session_id, role, content, tokens_used, model, timestamp, metadata)
+                    VALUES ({_params(7)})
+                ''', (
+                    session_id,
+                    role,
+                    content,
+                    tokens_used,
+                    model,
+                    now,
+                    json.dumps(metadata) if metadata else None
+                ))
+
+                message_ids.append(cursor.lastrowid)
+                total_tokens += tokens_used
+
+            # Update session stats in one query
+            cursor.execute(f'''
+                UPDATE agent_sessions
+                SET message_count = message_count + {_param()},
+                    total_tokens = total_tokens + {_param()},
+                    updated_at = {_param()}
+                WHERE session_id = {_param()}
+            ''', (len(messages), total_tokens, now, session_id))
+
+            conn.commit()
+            logger.debug(f"Added {len(messages)} messages to session {session_id} in batch")
+            return message_ids
+
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Failed to add messages batch: {e}")
+            raise
+        finally:
+            conn.close()
+
     def get_messages(
         self,
         session_id: str,

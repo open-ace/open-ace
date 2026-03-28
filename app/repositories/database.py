@@ -3,7 +3,7 @@
 Open ACE - Database Connection
 
 Provides database connection management for the Open ACE application.
-Supports both SQLite (default) and PostgreSQL databases.
+Supports both SQLite (default) and PostgreSQL databases with connection pooling.
 """
 
 import logging
@@ -17,6 +17,13 @@ logger = logging.getLogger(__name__)
 # Database configuration
 CONFIG_DIR = os.path.expanduser("~/.open-ace")
 DEFAULT_SQLITE_PATH = os.path.join(CONFIG_DIR, "ace.db")
+
+# Connection pool configuration
+POOL_MIN_CONN = 1
+POOL_MAX_CONN = 10
+
+# Global connection pool for PostgreSQL
+_pg_pool: Optional[Any] = None
 
 
 def _get_db_path() -> str:
@@ -122,25 +129,71 @@ def get_sqlite_connection() -> sqlite3.Connection:
 
 def get_postgresql_connection() -> Any:
     """
-    Get a PostgreSQL database connection.
+    Get a PostgreSQL database connection from the pool.
 
     Returns:
         psycopg2.connection: PostgreSQL connection.
     """
+    global _pg_pool
+    
     try:
         import psycopg2
         from psycopg2.extras import RealDictCursor
-
+        from psycopg2 import pool
+        
         url = get_database_url()
-        conn = psycopg2.connect(url)
-        # Store cursor factory for later use
+        
+        # Initialize pool if not exists
+        if _pg_pool is None:
+            try:
+                _pg_pool = pool.ThreadedConnectionPool(
+                    POOL_MIN_CONN,
+                    POOL_MAX_CONN,
+                    url
+                )
+                logger.info(f"PostgreSQL connection pool initialized (min={POOL_MIN_CONN}, max={POOL_MAX_CONN})")
+            except Exception as e:
+                logger.warning(f"Failed to create connection pool: {e}, falling back to direct connection")
+                conn = psycopg2.connect(url)
+                conn._cursor_factory = RealDictCursor
+                return conn
+        
+        # Get connection from pool
+        conn = _pg_pool.getconn()
         conn._cursor_factory = RealDictCursor
+        conn._from_pool = True  # Mark as from pool
         return conn
+        
     except ImportError:
         raise ImportError(
             "psycopg2 is required for PostgreSQL. "
             "Install it with: pip install psycopg2-binary"
         )
+
+
+def release_postgresql_connection(conn: Any) -> None:
+    """
+    Release a PostgreSQL connection back to the pool.
+
+    Args:
+        conn: Connection to release.
+    """
+    global _pg_pool
+    
+    if _pg_pool is not None and hasattr(conn, '_from_pool') and conn._from_pool:
+        try:
+            _pg_pool.putconn(conn)
+        except Exception as e:
+            logger.warning(f"Failed to return connection to pool: {e}")
+            try:
+                conn.close()
+            except Exception:
+                pass
+    else:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 @contextmanager
@@ -158,7 +211,10 @@ def get_db_connection():
     try:
         yield conn
     finally:
-        conn.close()
+        if is_postgresql():
+            release_postgresql_connection(conn)
+        else:
+            conn.close()
 
 
 class Database:
@@ -201,18 +257,8 @@ class Database:
         return conn
 
     def _get_postgresql_connection(self) -> Any:
-        """Get PostgreSQL connection."""
-        try:
-            import psycopg2
-            from psycopg2.extras import RealDictCursor
-
-            conn = psycopg2.connect(self.db_url)
-            return conn
-        except ImportError:
-            raise ImportError(
-                "psycopg2 is required for PostgreSQL. "
-                "Install it with: pip install psycopg2-binary"
-            )
+        """Get PostgreSQL connection from pool."""
+        return get_postgresql_connection()
 
     @contextmanager
     def connection(self):
@@ -221,7 +267,10 @@ class Database:
         try:
             yield conn
         finally:
-            conn.close()
+            if self._is_postgresql:
+                release_postgresql_connection(conn)
+            else:
+                conn.close()
 
     def execute(self, query: str, params: tuple = ()) -> Any:
         """

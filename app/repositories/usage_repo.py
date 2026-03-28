@@ -8,11 +8,32 @@ Repository for usage data access operations.
 import json
 import logging
 from datetime import datetime, timedelta
+from functools import lru_cache
 from typing import Dict, List, Optional
 
 from app.repositories.database import Database
 
 logger = logging.getLogger(__name__)
+
+
+# Cache for JSON parsing to avoid repeated parsing of same strings
+@lru_cache(maxsize=256)
+def _parse_json_cached(json_str: Optional[str]) -> Optional[List[str]]:
+    """
+    Parse JSON string with caching for performance.
+    
+    Args:
+        json_str: JSON string to parse.
+        
+    Returns:
+        Parsed list or None.
+    """
+    if json_str is None:
+        return None
+    try:
+        return json.loads(json_str)
+    except (json.JSONDecodeError, TypeError):
+        return None
 
 
 class UsageRepository:
@@ -21,7 +42,7 @@ class UsageRepository:
     def __init__(self, db: Optional[Database] = None):
         """
         Initialize repository.
-        
+
         Args:
             db: Optional Database instance for dependency injection.
         """
@@ -129,7 +150,7 @@ class UsageRepository:
         results = []
         for row in rows:
             if row.get('models_used'):
-                row['models_used'] = json.loads(row['models_used'])
+                row['models_used'] = _parse_json_cached(row['models_used'])
             if 'request_count' not in row:
                 row['request_count'] = 0
             results.append(row)
@@ -178,7 +199,7 @@ class UsageRepository:
         results = []
         for row in rows:
             if row.get('models_used'):
-                row['models_used'] = json.loads(row['models_used'])
+                row['models_used'] = _parse_json_cached(row['models_used'])
             results.append(row)
 
         return results
@@ -224,7 +245,7 @@ class UsageRepository:
         results = []
         for row in rows:
             if row.get('models_used'):
-                row['models_used'] = json.loads(row['models_used'])
+                row['models_used'] = _parse_json_cached(row['models_used'])
             results.append(row)
 
         return results

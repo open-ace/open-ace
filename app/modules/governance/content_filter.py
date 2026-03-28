@@ -60,6 +60,18 @@ class FilterResult:
         }
 
 
+# Predefined redaction templates for performance
+REDACTION_TEMPLATES = {
+    'pii_email': lambda m: f"{m.group().split('@')[0][0]}***@{m.group().split('@')[1]}" if '@' in m.group() else '*' * len(m.group()),
+    'pii_phone_us': lambda m: m.group()[:3] + '-***-****',
+    'pii_phone_intl': lambda m: m.group()[:3] + '-***-****',
+    'pii_ssn': lambda m: '***-**-****',
+    'pii_credit_card': lambda m: '****-****-****-****',
+    'pii_credit_card_amex': lambda m: '****-****-****-****',
+    'default': lambda m: '*' * len(m.group()),
+}
+
+
 class ContentFilter:
     """
     Content security filter for enterprise compliance.
@@ -254,25 +266,9 @@ class ContentFilter:
         pattern: re.Pattern,
         pattern_name: str
     ) -> str:
-        """Redact matched patterns in content."""
-        def redact_func(match):
-            matched = match.group()
-            if pattern_name in ['pii_email']:
-                # Keep first char and domain
-                parts = matched.split('@')
-                if len(parts) == 2:
-                    return f"{parts[0][0]}***@{parts[1]}"
-            elif pattern_name in ['pii_phone_us', 'pii_phone_intl']:
-                # Keep area code
-                return matched[:3] + '-***-****'
-            elif pattern_name in ['pii_ssn']:
-                return '***-**-****'
-            elif pattern_name in ['pii_credit_card', 'pii_credit_card_amex']:
-                return '****-****-****-****'
-            else:
-                # Generic redaction
-                return '*' * len(matched)
-
+        """Redact matched patterns in content using predefined templates."""
+        # Use predefined template for better performance
+        redact_func = REDACTION_TEMPLATES.get(pattern_name, REDACTION_TEMPLATES['default'])
         return pattern.sub(redact_func, content)
 
     def _generate_suggestion(self, matched_rules: List[Dict]) -> str:

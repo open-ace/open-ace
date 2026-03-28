@@ -477,16 +477,93 @@ class QuotaManager:
             return False
 
     def get_all_quota_statuses(self) -> List[QuotaStatus]:
-        """Get quota status for all users."""
+        """Get quota status for all users with optimized batch queries."""
         users = self.user_repo.get_all_users(include_inactive=False)
+        
+        if not users:
+            return []
+        
+        # Get all user IDs
+        user_ids = [u.get('id') for u in users if u.get('id')]
+        
+        # Batch query: get usage for all users in one query
+        start_date, end_date = self._get_period_dates('daily')
+        usage_rows = self.db.fetch_all('''
+            SELECT user_id, SUM(tokens_used) as tokens, SUM(requests_used) as requests
+            FROM quota_usage
+            WHERE user_id IN ({}) AND date >= ? AND date <= ?
+            GROUP BY user_id
+        '''.format(','.join(['?'] * len(user_ids))), tuple(user_ids) + (start_date, end_date))
+        
+        # Build usage lookup
+        usage_lookup = {row['user_id']: {'tokens': row['tokens'], 'requests': row['requests']} for row in usage_rows}
+        
+        # Batch query: get recent alerts for all users
+        alert_rows = self.db.fetch_all('''
+            SELECT * FROM quota_alerts
+            WHERE user_id IN ({})
+            ORDER BY created_at DESC
+        '''.format(','.join(['?'] * len(user_ids))), tuple(user_ids))
+        
+        # Build alerts lookup by user_id
+        alerts_lookup = {}
+        for row in alert_rows:
+            user_id = row.get('user_id')
+            if user_id not in alerts_lookup:
+                alerts_lookup[user_id] = []
+            if len(alerts_lookup[user_id]) < 5:  # Limit to 5 alerts per user
+                alerts_lookup[user_id].append(QuotaAlert(
+                    id=row.get('id'),
+                    user_id=row.get('user_id', 0),
+                    alert_type=row.get('alert_type', 'warning'),
+                    quota_type=row.get('quota_type', 'tokens'),
+                    period=row.get('period', 'daily'),
+                    threshold=row.get('threshold', 0),
+                    current_usage=row.get('current_usage', 0),
+                    quota_limit=row.get('quota_limit', 0),
+                    percentage=row.get('percentage', 0),
+                    message=row.get('message', ''),
+                    created_at=datetime.fromisoformat(row['created_at']) if row.get('created_at') else None,
+                    acknowledged=bool(row.get('acknowledged', 0)),
+                    acknowledged_at=datetime.fromisoformat(row['acknowledged_at']) if row.get('acknowledged_at') else None,
+                    acknowledged_by=row.get('acknowledged_by'),
+                ))
+        
+        # Build statuses from batch data
         statuses = []
-
         for user in users:
             user_id = user.get('id')
-            if user_id:
-                status = self.get_user_quota_status(user_id)
-                statuses.append(status)
-
+            if not user_id:
+                continue
+            
+            username = user.get('username', '')
+            token_limit = user.get('daily_token_quota') or 1000000
+            request_limit = user.get('daily_request_quota') or 1000
+            
+            usage = usage_lookup.get(user_id, {'tokens': 0, 'requests': 0})
+            tokens_used = usage.get('tokens', 0)
+            requests_used = usage.get('requests', 0)
+            
+            token_pct = (tokens_used / token_limit * 100) if token_limit > 0 else 0
+            request_pct = (requests_used / request_limit * 100) if request_limit > 0 else 0
+            
+            alerts = alerts_lookup.get(user_id, [])
+            
+            statuses.append(QuotaStatus(
+                user_id=user_id,
+                username=username,
+                period='daily',
+                token_limit=token_limit,
+                tokens_used=tokens_used,
+                token_percentage=round(token_pct, 2),
+                request_limit=request_limit,
+                requests_used=requests_used,
+                request_percentage=round(request_pct, 2),
+                is_over_token_quota=tokens_used > token_limit,
+                is_over_request_quota=requests_used > request_limit,
+                alerts=alerts,
+            ))
+        
         return statuses
 
     def get_all_alerts(

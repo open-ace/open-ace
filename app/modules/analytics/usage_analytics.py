@@ -220,7 +220,7 @@ class UsageAnalytics:
         return self.db.fetch_all(query, (start_date, end_date))
 
     def _calculate_summary(self, usage_data: List[Dict]) -> Dict[str, Any]:
-        """Calculate summary statistics from usage data."""
+        """Calculate summary statistics from usage data in a single pass."""
         if not usage_data:
             return {
                 'total_tokens': 0,
@@ -235,19 +235,29 @@ class UsageAnalytics:
                 'peak_tokens': 0,
             }
 
-        # Aggregate totals
-        total_tokens = sum(d.get('tokens', 0) for d in usage_data)
-        total_input = sum(d.get('input_tokens', 0) for d in usage_data)
-        total_output = sum(d.get('output_tokens', 0) for d in usage_data)
-        total_requests = sum(d.get('requests', 0) for d in usage_data)
-
-        # Unique tools and hosts
-        tools = set(d.get('tool_name') for d in usage_data if d.get('tool_name'))
-        hosts = set(d.get('host_name') for d in usage_data if d.get('host_name'))
-
-        # Daily aggregation
+        # Single pass calculation for all totals
+        total_tokens = 0
+        total_input = 0
+        total_output = 0
+        total_requests = 0
+        tools = set()
+        hosts = set()
         daily_totals: Dict[str, int] = {}
+
         for d in usage_data:
+            # Accumulate totals
+            total_tokens += d.get('tokens', 0)
+            total_input += d.get('input_tokens', 0)
+            total_output += d.get('output_tokens', 0)
+            total_requests += d.get('requests', 0)
+            
+            # Collect unique tools and hosts
+            if d.get('tool_name'):
+                tools.add(d['tool_name'])
+            if d.get('host_name'):
+                hosts.add(d['host_name'])
+            
+            # Aggregate by date
             date = d.get('date')
             if date:
                 daily_totals[date] = daily_totals.get(date, 0) + d.get('tokens', 0)

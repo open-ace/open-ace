@@ -11,6 +11,8 @@ from typing import Dict, List, Optional
 
 from app.repositories.message_repo import MessageRepository
 from app.repositories.usage_repo import UsageRepository
+from app.utils.cache import cached
+from app.utils.helpers import get_today, get_days_ago
 
 logger = logging.getLogger(__name__)
 
@@ -54,9 +56,9 @@ class AnalysisService:
             Dict: Combined analysis data.
         """
         if not start_date:
-            start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+            start_date = get_days_ago(30)
         if not end_date:
-            end_date = datetime.now().strftime('%Y-%m-%d')
+            end_date = get_today()
 
         # Fetch all required data ONCE
         usage_data = self.usage_repo.get_daily_range(start_date, end_date, host_name=host_name)
@@ -251,6 +253,7 @@ class AnalysisService:
             'user_segmentation': user_segmentation
         }
 
+    @cached(ttl=60, key_prefix='analysis', skip_args=[0])
     def get_key_metrics(
         self,
         start_date: Optional[str] = None,
@@ -269,9 +272,9 @@ class AnalysisService:
             Dict: Key metrics data.
         """
         if not start_date:
-            start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+            start_date = get_days_ago(30)
         if not end_date:
-            end_date = datetime.now().strftime('%Y-%m-%d')
+            end_date = get_today()
 
         usage_data = self.usage_repo.get_daily_range(start_date, end_date, host_name=host_name)
 
@@ -388,6 +391,7 @@ class AnalysisService:
         # For now, return placeholder
         return []
 
+    @cached(ttl=60, key_prefix='analysis', skip_args=[0])
     def get_daily_hourly_usage(
         self,
         start_date: Optional[str] = None,
@@ -452,6 +456,7 @@ class AnalysisService:
             'hourly': hourly_result
         }
 
+    @cached(ttl=60, key_prefix='analysis', skip_args=[0])
     def get_peak_usage(
         self,
         start_date: Optional[str] = None,
@@ -465,9 +470,9 @@ class AnalysisService:
             Dict: Peak usage information with peak_days array.
         """
         if not start_date:
-            start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+            start_date = get_days_ago(30)
         if not end_date:
-            end_date = datetime.now().strftime('%Y-%m-%d')
+            end_date = get_today()
 
         # Get daily token totals from messages (has real token data)
         daily_data = self.message_repo.get_daily_token_totals(start_date, end_date, host_name)
@@ -511,6 +516,7 @@ class AnalysisService:
             'average_daily': sum(daily_totals.values()) / len(daily_totals) if daily_totals else 0
         }
 
+    @cached(ttl=60, key_prefix='analysis', skip_args=[0])
     def get_user_ranking(
         self,
         start_date: Optional[str] = None,
@@ -525,9 +531,9 @@ class AnalysisService:
             Dict: User rankings with users array.
         """
         if not start_date:
-            start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+            start_date = get_days_ago(30)
         if not end_date:
-            end_date = datetime.now().strftime('%Y-%m-%d')
+            end_date = get_today()
 
         # Get user token usage from messages
         user_tokens = self.message_repo.get_user_token_totals(
@@ -555,6 +561,7 @@ class AnalysisService:
 
         return {'users': users}
 
+    @cached(ttl=60, key_prefix='analysis', skip_args=[0])
     def get_conversation_stats(
         self,
         start_date: Optional[str] = None,
@@ -590,6 +597,7 @@ class AnalysisService:
             'average_tokens_per_conversation': total_tokens / total_conversations if total_conversations > 0 else 0
         }
 
+    @cached(ttl=60, key_prefix='analysis', skip_args=[0])
     def get_tool_comparison(
         self,
         start_date: Optional[str] = None,
@@ -603,9 +611,9 @@ class AnalysisService:
             Dict: Tool comparison data with tools array.
         """
         if not start_date:
-            start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+            start_date = get_days_ago(30)
         if not end_date:
-            end_date = datetime.now().strftime('%Y-%m-%d')
+            end_date = get_today()
 
         # Get tool stats from messages (has real token data)
         tool_stats = self.message_repo.get_tool_token_totals(
@@ -714,9 +722,9 @@ class AnalysisService:
             Dict: User segmentation data.
         """
         if not start_date:
-            start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+            start_date = get_days_ago(30)
         if not end_date:
-            end_date = datetime.now().strftime('%Y-%m-%d')
+            end_date = get_today()
 
         # Get user token usage from messages
         user_tokens = self.message_repo.get_user_token_totals(
@@ -770,9 +778,9 @@ class AnalysisService:
             Dict: Anomaly detection results with anomalies list.
         """
         if not start_date:
-            start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+            start_date = get_days_ago(30)
         if not end_date:
-            end_date = datetime.now().strftime('%Y-%m-%d')
+            end_date = get_today()
 
         # Get daily token totals from messages
         daily_data = self.message_repo.get_daily_token_totals(start_date, end_date, host_name)
