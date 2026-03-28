@@ -73,7 +73,7 @@
 | 特性 | 说明 |
 |------|------|
 | 🔒 **安全可控** | 私有化部署，数据不出域，满足企业安全合规要求 |
-| 🌐 **多工具支持** | Claude、Qwen、ChatGPT、OpenClaw... 一个平台管理所有 AI |
+| 🌐 **多工具支持** | Claude Code、Qwen Code、OpenClaw... 一个平台管理所有 AI |
 | 📊 **数据驱动** | 用量分析、成本优化、效率提升，用数据说话 |
 | 🔌 **易于集成** | 支持 SSO 单点登录、飞书/钉钉集成，无缝融入现有体系 |
 | 🐳 **一键部署** | Docker/K8s 支持，10 分钟完成私有化部署 |
@@ -306,7 +306,7 @@ open-ace/
 | Feature | Description |
 |---------|-------------|
 | 🔒 **Secure & Controllable** | Self-hosted deployment, data stays on-premise, meets enterprise compliance |
-| 🌐 **Multi-tool Support** | Claude, Qwen, ChatGPT, OpenClaw... manage all AI in one platform |
+| 🌐 **Multi-tool Support** | Claude Code, Qwen Code, OpenClaw... manage all AI in one platform |
 | 📊 **Data-Driven** | Usage analytics, cost optimization, efficiency gains — let data speak |
 | 🔌 **Easy Integration** | SSO support, Feishu/DingTalk integration, seamless with existing systems |
 | 🐳 **One-Click Deploy** | Docker/K8s support, deploy in 10 minutes |

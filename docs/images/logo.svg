@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
   <defs>
     <linearGradient id="login-icon-grad" x1="0" x2="1" y1="0" y2="1">
-      <stop offset="0" stopColor="#667eea" />
-      <stop offset="1" stopColor="#764ba2" />
+      <stop offset="0" stop-color="#667eea" />
+      <stop offset="1" stop-color="#764ba2" />
     </linearGradient>
   </defs>
   <rect width="100" height="100" rx="20" fill="url(#login-icon-grad)" />
