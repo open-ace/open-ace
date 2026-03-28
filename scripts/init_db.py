@@ -31,7 +31,7 @@ def create_default_admin(username: str = 'admin', password: str = 'admin123',
         print(f"Admin user '{username}' already exists")
         return True
 
-    # Create admin user with must_change_password = 1 (force password change on first login)
+    # Create admin user with must_change_password = True (force password change on first login)
     result = db.create_user_with_is_active(
         username=username,
         password_hash=password_hash,
@@ -40,7 +40,7 @@ def create_default_admin(username: str = 'admin', password: str = 'admin123',
         daily_token_quota=10000000,  # 10M tokens
         daily_request_quota=10000,
         is_active=1,
-        must_change_password=1  # Force password change on first login
+        must_change_password=True  # Force password change on first login
     )
 
     if result:

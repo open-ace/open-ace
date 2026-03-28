@@ -77,7 +77,7 @@ class AuthService:
         logger.info(f"User logged in: {username}")
 
         # Check if user must change password
-        must_change_password = user.get('must_change_password', 0) == 1
+        must_change_password = bool(user.get('must_change_password'))
 
         return {
             'id': user['id'],

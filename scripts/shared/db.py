@@ -1161,7 +1161,7 @@ def init_auth_database() -> None:
     # Add must_change_password column if not exists (migration for existing databases)
     if not _column_exists(cursor, 'users', 'must_change_password'):
         print("Adding must_change_password column to users table...")
-        _execute(cursor, "ALTER TABLE users ADD COLUMN must_change_password INTEGER DEFAULT 0")
+        _execute(cursor, "ALTER TABLE users ADD COLUMN must_change_password BOOLEAN DEFAULT 0")
         conn.commit()
 
     conn.close()
@@ -1191,16 +1191,19 @@ def create_user(username: str, password_hash: str, email: str = None,
 def create_user_with_is_active(username: str, password_hash: str, email: str = None,
                                role: str = 'user', daily_token_quota: int = 1000000,
                                daily_request_quota: int = 1000, is_active: int = 1,
-                               linux_account: str = None, must_change_password: int = 0) -> bool:
-    """Create a new user with is_active flag."""
+                               linux_account: str = None, must_change_password: bool = False) -> bool:
+    """Create a new user with is_active and must_change_password flags."""
     conn = get_connection()
     cursor = conn.cursor()
+
+    # Convert boolean to integer for SQLite compatibility
+    must_change_int = 1 if must_change_password else 0
 
     try:
         _execute(cursor, '''
             INSERT INTO users (username, password_hash, email, role, daily_token_quota, daily_request_quota, is_active, linux_account, must_change_password)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (username, password_hash, email, role, daily_token_quota, daily_request_quota, is_active, linux_account, must_change_password))
+        ''', (username, password_hash, email, role, daily_token_quota, daily_request_quota, is_active, linux_account, must_change_int))
         conn.commit()
         return True
     except sqlite3.IntegrityError:
