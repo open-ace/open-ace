@@ -11,8 +11,11 @@ import json
 import logging
 import secrets
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
+
+import jwt
+import requests
 
 from app.modules.sso.oauth2 import OAuth2Provider
 from app.modules.sso.provider import (
@@ -132,52 +135,174 @@ class OIDCProvider(OAuth2Provider):
 
         return user
 
+    def _get_jwks(self) -> Dict[str, Any]:
+        """
+        Fetch JWKS (JSON Web Key Set) from the provider's well-known endpoint.
+
+        Uses caching to avoid repeated requests.
+
+        Returns:
+            Dict[str, Any]: JWKS data containing keys.
+
+        Raises:
+            ValueError: If JWKS cannot be fetched or issuer URL is not configured.
+        """
+        if not self.config.issuer_url:
+            raise ValueError("Issuer URL is required for JWKS verification")
+
+        # Check cache (cache for 1 hour)
+        cache_ttl = timedelta(hours=1)
+        if (self._jwks_cache is not None and
+            self._jwks_cache_time is not None and
+            datetime.utcnow() - self._jwks_cache_time < cache_ttl):
+            return self._jwks_cache
+
+        # Fetch JWKS from well-known endpoint
+        jwks_url = f"{self.config.issuer_url.rstrip('/')}/.well-known/jwks.json"
+
+        try:
+            response = requests.get(jwks_url, timeout=10)
+            response.raise_for_status()
+            jwks = response.json()
+
+            # Cache the result
+            self._jwks_cache = jwks
+            self._jwks_cache_time = datetime.utcnow()
+
+            logger.debug(f"Successfully fetched JWKS from {jwks_url}")
+            return jwks
+
+        except requests.RequestException as e:
+            logger.error(f"Failed to fetch JWKS from {jwks_url}: {e}")
+            raise ValueError(f"Failed to fetch JWKS: {e}")
+
+    def _get_signing_key(self, kid: str) -> Optional[str]:
+        """
+        Get the signing key for a given key ID.
+
+        Args:
+            kid: Key ID from the JWT header.
+
+        Returns:
+            Optional[str]: The public key in PEM format, or None if not found.
+        """
+        try:
+            jwks = self._get_jwks()
+
+            for key in jwks.get('keys', []):
+                if key.get('kid') == kid:
+                    # Convert JWK to PEM format
+                    return self._jwk_to_pem(key)
+
+            logger.warning(f"No matching key found for kid: {kid}")
+            return None
+
+        except Exception as e:
+            logger.error(f"Error getting signing key: {e}")
+            return None
+
+    def _jwk_to_pem(self, jwk: Dict[str, Any]) -> str:
+        """
+        Convert a JWK (JSON Web Key) to PEM format.
+
+        Args:
+            jwk: JWK data containing modulus and exponent (for RSA keys).
+
+        Returns:
+            str: Public key in PEM format.
+        """
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from cryptography.hazmat.backends import default_backend
+
+        # Extract RSA components
+        n = int.from_bytes(
+            base64.urlsafe_b64decode(jwk['n'] + '=='),
+            byteorder='big'
+        )
+        e = int.from_bytes(
+            base64.urlsafe_b64decode(jwk['e'] + '=='),
+            byteorder='big'
+        )
+
+        # Construct RSA public key
+        public_key = rsa.RSAPublicNumbers(e, n).public_key(default_backend())
+
+        # Serialize to PEM format
+        pem = public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+
+        return pem.decode('utf-8')
+
     def _verify_id_token(self, id_token: str) -> Optional[Dict[str, Any]]:
         """
-        Verify and decode the ID token.
+        Verify and decode the ID token with proper signature verification.
+
+        This method validates:
+        - JWT signature using JWKS
+        - Token expiration
+        - Issuer
+        - Audience
 
         Args:
             id_token: JWT ID token.
 
         Returns:
-            Optional[Dict]: Decoded claims or None.
+            Optional[Dict]: Decoded claims or None if verification fails.
         """
         try:
-            # Split token
-            parts = id_token.split('.')
-            if len(parts) != 3:
-                raise ValueError("Invalid JWT format")
+            # First, decode the header to get the key ID (kid)
+            unverified_header = jwt.get_unverified_header(id_token)
+            kid = unverified_header.get('kid')
 
-            # Decode header and payload (without verification for now)
-            # In production, you should verify the signature using JWKS
-            header = json.loads(base64.urlsafe_b64decode(parts[0] + '=='))
-            payload = json.loads(base64.urlsafe_b64decode(parts[1] + '=='))
+            if not kid:
+                raise ValueError("No 'kid' in JWT header")
 
-            # Basic validation
-            now = datetime.utcnow().timestamp()
+            # Get the signing key
+            signing_key = self._get_signing_key(kid)
+            if not signing_key:
+                raise ValueError(f"Could not find signing key for kid: {kid}")
 
-            # Check expiration
-            if payload.get('exp', 0) < now:
-                raise ValueError("ID token expired")
+            # Verify and decode the token
+            payload = jwt.decode(
+                id_token,
+                key=signing_key,
+                algorithms=['RS256'],
+                audience=self.config.client_id,
+                issuer=self.config.issuer_url,
+                options={
+                    'verify_signature': True,
+                    'verify_exp': True,
+                    'verify_aud': True,
+                    'verify_iss': True,
+                }
+            )
 
-            # Check issuer
-            if self.config.issuer_url and payload.get('iss') != self.config.issuer_url:
-                # Some providers have dynamic issuers
-                logger.warning(f"Issuer mismatch: {payload.get('iss')} != {self.config.issuer_url}")
-
-            # Check audience
-            aud = payload.get('aud', '')
-            if isinstance(aud, list):
-                if self.config.client_id not in aud:
-                    raise ValueError("Invalid audience")
-            else:
-                if aud != self.config.client_id:
-                    raise ValueError("Invalid audience")
-
+            logger.debug(f"Successfully verified ID token for sub: {payload.get('sub')}")
             return payload
 
+        except jwt.ExpiredSignatureError:
+            logger.error("ID token has expired")
+            return None
+        except jwt.InvalidAudienceError:
+            logger.error(f"Invalid audience in ID token, expected: {self.config.client_id}")
+            return None
+        except jwt.InvalidIssuerError:
+            logger.error(f"Invalid issuer in ID token, expected: {self.config.issuer_url}")
+            return None
+        except jwt.InvalidSignatureError:
+            logger.error("Invalid ID token signature")
+            return None
+        except jwt.DecodeError as e:
+            logger.error(f"Failed to decode ID token: {e}")
+            return None
+        except ValueError as e:
+            logger.error(f"ID token verification error: {e}")
+            return None
         except Exception as e:
-            logger.error(f"ID token verification failed: {e}")
+            logger.error(f"Unexpected error during ID token verification: {e}")
             return None
 
     def _parse_user_info(self, data: Dict[str, Any]) -> SSOUser:
