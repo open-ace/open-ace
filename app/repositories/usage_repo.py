@@ -251,10 +251,10 @@ class UsageRepository:
         query = f'''
             SELECT
                 tool_name,
-                COUNT(*) as days_count,
+                COUNT(DISTINCT date) as days_count,
                 SUM(tokens_used) as total_tokens,
                 AVG(tokens_used) as avg_tokens,
-                SUM(request_count) as total_requests,
+                COUNT(*) as total_requests,
                 SUM(input_tokens) as total_input_tokens,
                 SUM(output_tokens) as total_output_tokens,
                 MIN(date) as first_date,
@@ -344,7 +344,7 @@ class UsageRepository:
                 SUM(tokens_used) as tokens,
                 SUM(input_tokens) as input_tokens,
                 SUM(output_tokens) as output_tokens,
-                SUM(request_count) as requests
+                COUNT(*) as requests
             FROM daily_messages
             WHERE {' AND '.join(conditions)}
             GROUP BY date
