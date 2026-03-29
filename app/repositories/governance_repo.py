@@ -100,23 +100,47 @@ class GovernanceRepository:
             Optional[int]: Rule ID if successful.
         """
         try:
-            cursor = self.db.execute(
-                """
-                INSERT INTO content_filter_rules
-                (pattern, type, severity, action, is_enabled, description, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-                (
-                    pattern,
-                    rule_type,
-                    severity,
-                    action,
-                    1 if is_enabled else 0,
-                    description,
-                    datetime.utcnow().isoformat(),
-                ),
-            )
-            return cursor.lastrowid
+            from app.repositories.database import is_postgresql
+
+            # Use RETURNING for PostgreSQL
+            if is_postgresql():
+                result = self.db.fetch_one(
+                    """
+                    INSERT INTO content_filter_rules
+                    (pattern, type, severity, action, is_enabled, description, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                """,
+                    (
+                        pattern,
+                        rule_type,
+                        severity,
+                        action,
+                        is_enabled,
+                        description,
+                        datetime.utcnow().isoformat(),
+                    ),
+                    commit=True,
+                )
+                return result["id"] if result else None
+            else:
+                cursor = self.db.execute(
+                    """
+                    INSERT INTO content_filter_rules
+                    (pattern, type, severity, action, is_enabled, description, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                    (
+                        pattern,
+                        rule_type,
+                        severity,
+                        action,
+                        1 if is_enabled else 0,
+                        description,
+                        datetime.utcnow().isoformat(),
+                    ),
+                )
+                return cursor.lastrowid
         except Exception as e:
             logger.error(f"Error creating filter rule: {e}")
             return None

@@ -40,36 +40,60 @@ class TenantRepository:
             Optional[int]: Tenant ID if successful, None otherwise.
         """
         try:
-            from app.repositories.database import adapt_sql
+            from app.repositories.database import adapt_sql, is_postgresql
 
             with self.db.connection() as conn:
                 cursor = conn.cursor()
 
-                # Insert tenant
-                cursor.execute(
-                    adapt_sql(
+                # Insert tenant - use RETURNING for PostgreSQL
+                if is_postgresql():
+                    cursor.execute(
                         """
-                    INSERT INTO tenants
-                    (name, slug, status, plan, contact_email, contact_phone,
-                     contact_name, quota, settings, trial_ends_at, subscription_ends_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """
-                    ),
-                    (
-                        tenant.name,
-                        tenant.slug,
-                        tenant.status,
-                        tenant.plan,
-                        tenant.contact_email,
-                        tenant.contact_phone,
-                        tenant.contact_name,
-                        json.dumps(tenant.quota.to_dict()),
-                        json.dumps(tenant.settings.to_dict()),
-                        tenant.trial_ends_at,
-                        tenant.subscription_ends_at,
-                    ),
-                )
-                tenant_id = cursor.lastrowid
+                        INSERT INTO tenants
+                        (name, slug, status, plan, contact_email, contact_phone,
+                         contact_name, quota, settings, trial_ends_at, subscription_ends_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        RETURNING id
+                    """,
+                        (
+                            tenant.name,
+                            tenant.slug,
+                            tenant.status,
+                            tenant.plan,
+                            tenant.contact_email,
+                            tenant.contact_phone,
+                            tenant.contact_name,
+                            json.dumps(tenant.quota.to_dict()),
+                            json.dumps(tenant.settings.to_dict()),
+                            tenant.trial_ends_at,
+                            tenant.subscription_ends_at,
+                        ),
+                    )
+                    result = cursor.fetchone()
+                    tenant_id = result[0] if result else None
+                else:
+                    cursor.execute(
+                        """
+                        INSERT INTO tenants
+                        (name, slug, status, plan, contact_email, contact_phone,
+                         contact_name, quota, settings, trial_ends_at, subscription_ends_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                        (
+                            tenant.name,
+                            tenant.slug,
+                            tenant.status,
+                            tenant.plan,
+                            tenant.contact_email,
+                            tenant.contact_phone,
+                            tenant.contact_name,
+                            json.dumps(tenant.quota.to_dict()),
+                            json.dumps(tenant.settings.to_dict()),
+                            tenant.trial_ends_at,
+                            tenant.subscription_ends_at,
+                        ),
+                    )
+                    tenant_id = cursor.lastrowid
 
                 # Insert tenant_quotas
                 quota_dict = tenant.quota.to_dict()
