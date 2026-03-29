@@ -21,6 +21,12 @@ export type { BadgeVariant } from './Badge';
 export { Tabs, TabList, Tab, TabPanels, TabPanel, SimpleTabs } from './Tabs';
 export { Progress, CircularProgress, StepsProgress } from './Progress';
 export { SkeletonText, SkeletonTable, SkeletonList } from './Skeleton';
+export {
+  DashboardSkeleton,
+  PageSkeleton,
+  ManagePageSkeleton,
+  WorkPageSkeleton,
+} from './DashboardSkeleton';
 export { TextInput, Textarea, Checkbox, RadioGroup, Switch } from './Input';
 export { Avatar, AvatarGroup } from './Avatar';
 export { Dropdown, SplitButton } from './Dropdown';

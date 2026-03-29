@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
+import { vitePluginPreload } from './vite-plugin-preload';
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -10,8 +11,15 @@ export default defineConfig({
   // 公共基础路径 - 匹配输出目录
   base: '/static/js/dist/',
 
-  // React 插件
-  plugins: [react()],
+  // React 插件 + Preload 插件
+  plugins: [
+    react(),
+    vitePluginPreload({
+      fonts: true,
+      criticalJs: ['react-vendor', 'router', 'query', 'zustand'],
+      css: true,
+    }),
+  ],
 
   // 路径别名
   resolve: {

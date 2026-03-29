@@ -17,7 +17,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Layout, WorkLayout, ManageLayout } from '@/components/layout';
 import { Login } from '@/components/features/Login';
 import { LogoutSuccess } from '@/components/features/LogoutSuccess';
-import { LoadingOverlay, Loading } from '@/components/common';
+import { LoadingOverlay, PageSkeleton } from '@/components/common';
 import { useAuth, useTheme } from '@/hooks';
 import { useAppStore } from '@/store';
 import { t } from '@/i18n';
@@ -43,10 +43,9 @@ const SecurityCenter = lazy(() => import('@/components/features/management/Secur
 const TenantManagement = lazy(() => import('@/components/features/management/TenantManagement').then(m => ({ default: m.TenantManagement })));
 const SSOSettings = lazy(() => import('@/components/features/settings/SSOSettings').then(m => ({ default: m.SSOSettings })));
 
-// Page loading fallback
+// Page loading fallback with skeleton
 const PageLoader: React.FC = () => {
-  const language = useAppStore((state) => state.language);
-  return <Loading size="lg" text={t('loading', language)} />;
+  return <PageSkeleton />;
 };
 
 // Create Query Client

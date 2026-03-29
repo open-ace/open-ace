@@ -10,11 +10,11 @@ import { t, type Language } from '@/i18n';
 import {
   Card,
   Select,
-  Loading,
   Error,
   EmptyState,
   TokenTrendChart,
   TokenDistributionChart,
+  DashboardSkeleton,
 } from '@/components/common';
 import { formatTokens, formatDate } from '@/utils';
 import type { ToolUsage, ToolSummary } from '@/types';
@@ -115,7 +115,7 @@ export const Dashboard: React.FC = () => {
   );
 
   if (isLoading) {
-    return <Loading size="lg" text={t('loading', language)} />;
+    return <DashboardSkeleton />;
   }
 
   if (isError) {
