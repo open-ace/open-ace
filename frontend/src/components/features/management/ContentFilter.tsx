@@ -79,7 +79,7 @@ export const ContentFilter: React.FC = () => {
       type: rule.type,
       severity: rule.severity,
       action: rule.action,
-      description: rule.description || '',
+      description: rule.description ?? '',
       is_enabled: rule.is_enabled,
     });
     setShowModal(true);
@@ -298,7 +298,7 @@ export const ContentFilter: React.FC = () => {
           <div className="col-12">
             <label className="form-label">{t('description', language)}</label>
             <TextInput
-              value={formData.description || ''}
+              value={formData.description ?? ''}
               onChange={(value: string) => setFormData({ ...formData, description: value })}
               placeholder={t('enterDescription', language)}
             />

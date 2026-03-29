@@ -164,7 +164,11 @@ export const Header: React.FC<HeaderProps> = ({ compact = false }) => {
             >
               {status.is_running ? (
                 <>
-                  <span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true" />
+                  <span
+                    className="spinner-border spinner-border-sm me-1"
+                    role="status"
+                    aria-hidden="true"
+                  />
                   {t('refreshing', language) || 'Refreshing...'}
                 </>
               ) : (

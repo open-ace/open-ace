@@ -124,7 +124,7 @@ export const Login: React.FC = () => {
         setError(getTranslation('invalidCredentials', language));
       }
     } catch (err: any) {
-      setError(err.message || getTranslation('errorOccurred', language));
+      setError(err.message ?? getTranslation('errorOccurred', language));
     } finally {
       setLoading(false);
     }

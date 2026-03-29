@@ -169,7 +169,7 @@ export const Checkbox: React.FC<CheckboxProps> = ({
         onChange={(e) => onChange?.(e.target.checked)}
         disabled={disabled}
         ref={(el) => {
-          if (el) el.indeterminate = indeterminate || false;
+          if (el) el.indeterminate = indeterminate ?? false;
         }}
       />
       <label className="form-check-label">{label}</label>

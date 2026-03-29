@@ -73,7 +73,8 @@ export const TenantManagement: React.FC = () => {
       });
       setTenants(result.tenants);
     } catch (err) {
-      const errorMessage = err instanceof Error ? (err as Error).message : 'Failed to fetch tenants';
+      const errorMessage =
+        err instanceof Error ? (err as Error).message : 'Failed to fetch tenants';
       setError(errorMessage);
     } finally {
       setIsLoading(false);
@@ -112,8 +113,8 @@ export const TenantManagement: React.FC = () => {
       name: tenant.name,
       slug: tenant.slug,
       plan: tenant.plan,
-      contact_email: tenant.contact_email || '',
-      contact_name: tenant.contact_name || '',
+      contact_email: tenant.contact_email ?? '',
+      contact_name: tenant.contact_name ?? '',
     });
     setShowModal(true);
   };
@@ -121,8 +122,8 @@ export const TenantManagement: React.FC = () => {
   const handleOpenQuota = (tenant: Tenant) => {
     setEditingTenant(tenant);
     setQuotaData({
-      monthly_tokens: tenant.quota?.monthly_tokens || 100000,
-      monthly_requests: tenant.quota?.monthly_requests || 10000,
+      monthly_tokens: tenant.quota?.monthly_tokens ?? 100000,
+      monthly_requests: tenant.quota?.monthly_requests ?? 10000,
     });
     setShowQuotaModal(true);
   };
@@ -335,9 +336,11 @@ export const TenantManagement: React.FC = () => {
                                 'progress-bar',
                                 (tenant.quota.used_tokens / tenant.quota.monthly_tokens) * 100 >= 90
                                   ? 'bg-danger'
-                                  : (tenant.quota.used_tokens / tenant.quota.monthly_tokens) * 100 >= 70
-                                  ? 'bg-warning'
-                                  : 'bg-success'
+                                  : (tenant.quota.used_tokens / tenant.quota.monthly_tokens) *
+                                        100 >=
+                                      70
+                                    ? 'bg-warning'
+                                    : 'bg-success'
                               )}
                               style={{
                                 width: `${Math.min(100, (tenant.quota.used_tokens / tenant.quota.monthly_tokens) * 100)}%`,
@@ -345,7 +348,8 @@ export const TenantManagement: React.FC = () => {
                             />
                           </div>
                           <small className="text-muted">
-                            {tenant.quota.used_tokens.toLocaleString()} / {tenant.quota.monthly_tokens.toLocaleString()}
+                            {tenant.quota.used_tokens.toLocaleString()} /{' '}
+                            {tenant.quota.monthly_tokens.toLocaleString()}
                           </small>
                         </div>
                       ) : (
@@ -434,7 +438,7 @@ export const TenantManagement: React.FC = () => {
           <div className="col-md-6">
             <label className="form-label">{t('slug', language)}</label>
             <TextInput
-              value={formData.slug || ''}
+              value={formData.slug ?? ''}
               onChange={(value: string) => setFormData({ ...formData, slug: value })}
               placeholder={t('enterSlug', language)}
             />
@@ -447,7 +451,7 @@ export const TenantManagement: React.FC = () => {
                 { value: 'premium', label: 'Premium' },
                 { value: 'enterprise', label: 'Enterprise' },
               ]}
-              value={formData.plan || 'standard'}
+              value={formData.plan ?? 'standard'}
               onChange={(value) =>
                 setFormData({ ...formData, plan: value as 'standard' | 'premium' | 'enterprise' })
               }
@@ -456,7 +460,7 @@ export const TenantManagement: React.FC = () => {
           <div className="col-md-6">
             <label className="form-label">{t('contactEmail', language)}</label>
             <TextInput
-              value={formData.contact_email || ''}
+              value={formData.contact_email ?? ''}
               onChange={(value: string) => setFormData({ ...formData, contact_email: value })}
               placeholder={t('enterEmail', language)}
             />
@@ -464,7 +468,7 @@ export const TenantManagement: React.FC = () => {
           <div className="col-md-6">
             <label className="form-label">{t('contactName', language)}</label>
             <TextInput
-              value={formData.contact_name || ''}
+              value={formData.contact_name ?? ''}
               onChange={(value: string) => setFormData({ ...formData, contact_name: value })}
               placeholder={t('enterContactName', language)}
             />

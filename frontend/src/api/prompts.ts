@@ -88,14 +88,14 @@ export const promptsApi = {
     if (filters?.category) params.append('category', filters.category);
     if (filters?.search) params.append('search', filters.search);
     if (filters?.tags?.length) {
-      filters.tags.forEach(tag => params.append('tags', tag));
+      filters.tags.forEach((tag) => params.append('tags', tag));
     }
     if (filters?.page) params.append('page', filters.page.toString());
     if (filters?.limit) params.append('limit', filters.limit.toString());
 
     const queryString = params.toString();
     const url = queryString ? `/api/workspace/prompts?${queryString}` : '/api/workspace/prompts';
-    
+
     const response = await apiClient.get<{ success: boolean; data: PromptListResponse }>(url);
     return response.data;
   },
@@ -104,7 +104,9 @@ export const promptsApi = {
    * Get a single prompt template
    */
   async get(id: number): Promise<PromptTemplate> {
-    const response = await apiClient.get<{ success: boolean; data: PromptTemplate }>(`/api/workspace/prompts/${id}`);
+    const response = await apiClient.get<{ success: boolean; data: PromptTemplate }>(
+      `/api/workspace/prompts/${id}`
+    );
     return response.data;
   },
 

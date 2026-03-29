@@ -24,16 +24,41 @@ interface SessionListProps {
 }
 
 interface GroupedSessions {
-  today: Array<{ id: string; title: string; tool: string; time: string; tokens: number; messages: number }>;
-  yesterday: Array<{ id: string; title: string; tool: string; time: string; tokens: number; messages: number }>;
-  thisWeek: Array<{ id: string; title: string; tool: string; time: string; tokens: number; messages: number }>;
-  earlier: Array<{ id: string; title: string; tool: string; time: string; tokens: number; messages: number }>;
+  today: Array<{
+    id: string;
+    title: string;
+    tool: string;
+    time: string;
+    tokens: number;
+    messages: number;
+  }>;
+  yesterday: Array<{
+    id: string;
+    title: string;
+    tool: string;
+    time: string;
+    tokens: number;
+    messages: number;
+  }>;
+  thisWeek: Array<{
+    id: string;
+    title: string;
+    tool: string;
+    time: string;
+    tokens: number;
+    messages: number;
+  }>;
+  earlier: Array<{
+    id: string;
+    title: string;
+    tool: string;
+    time: string;
+    tokens: number;
+    messages: number;
+  }>;
 }
 
-export const SessionList: React.FC<SessionListProps> = ({
-  collapsed = false,
-  onSelectSession,
-}) => {
+export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onSelectSession }) => {
   const language = useLanguage();
   const navigate = useNavigate();
   const location = useLocation();
@@ -44,27 +69,32 @@ export const SessionList: React.FC<SessionListProps> = ({
   const selectedRef = useRef<HTMLButtonElement>(null);
 
   // Fetch sessions
-  const { data: sessionsData, isLoading, error } = useSessions({
+  const {
+    data: sessionsData,
+    isLoading,
+    error,
+  } = useSessions({
     page: 1,
     pageSize: 50,
   });
 
   // Fetch selected session details with messages
   const { data: sessionDetail, isLoading: isLoadingDetail } = useSession(
-    selectedSessionId || '',
+    selectedSessionId ?? '',
     true,
     !!selectedSessionId
   );
 
-  const sessions = sessionsData?.data?.sessions || [];
+  const sessions = sessionsData?.data?.sessions ?? [];
 
   // Filter sessions by search query
   const filteredSessions = useMemo(() => {
     if (!searchQuery.trim()) return sessions;
     const query = searchQuery.toLowerCase();
-    return sessions.filter((s: { title?: string; tool_name?: string }) =>
-      (s.title || '').toLowerCase().includes(query) ||
-      (s.tool_name || '').toLowerCase().includes(query)
+    return sessions.filter(
+      (s: { title?: string; tool_name?: string }) =>
+        (s.title ?? '').toLowerCase().includes(query) ||
+        (s.tool_name ?? '').toLowerCase().includes(query)
     );
   }, [sessions, searchQuery]);
 
@@ -83,14 +113,14 @@ export const SessionList: React.FC<SessionListProps> = ({
     };
 
     filteredSessions.forEach((session: AgentSession) => {
-      const sessionDate = new Date(session.updated_at || session.created_at || now);
+      const sessionDate = new Date(session.updated_at ?? session.created_at ?? now);
       const sessionItem = {
         id: session.session_id,
-        title: session.title || `Session ${session.session_id.slice(0, 8)}`,
-        tool: session.tool_name || 'unknown',
-        time: formatRelativeTime(session.updated_at || session.created_at || ''),
-        tokens: session.total_tokens || 0,
-        messages: session.message_count || 0,
+        title: session.title ?? `Session ${session.session_id.slice(0, 8)}`,
+        tool: session.tool_name ?? 'unknown',
+        time: formatRelativeTime(session.updated_at ?? session.created_at ?? ''),
+        tokens: session.total_tokens ?? 0,
+        messages: session.message_count ?? 0,
       };
 
       if (sessionDate >= today) {
@@ -157,7 +187,7 @@ export const SessionList: React.FC<SessionListProps> = ({
             key={session.session_id}
             className="session-list-collapsed-item"
             onClick={() => handleSessionClick(session.session_id)}
-            title={session.title || `Session ${session.session_id.slice(0, 8)}`}
+            title={session.title ?? `Session ${session.session_id.slice(0, 8)}`}
           >
             <i className="bi bi-chat-dots" />
           </button>
@@ -185,10 +215,7 @@ export const SessionList: React.FC<SessionListProps> = ({
       </div>
 
       {/* New Session Button */}
-      <button
-        className="btn btn-primary btn-sm w-100 mb-3"
-        onClick={handleNewSession}
-      >
+      <button className="btn btn-primary btn-sm w-100 mb-3" onClick={handleNewSession}>
         <i className="bi bi-plus-lg me-1" />
         {t('newSession', language)}
       </button>
@@ -254,7 +281,7 @@ export const SessionList: React.FC<SessionListProps> = ({
       <Modal
         isOpen={showDetailModal}
         onClose={handleCloseModal}
-        title={sessionDetail?.data?.title || t('sessionDetails', language) || 'Session Details'}
+        title={sessionDetail?.data?.title ?? t('sessionDetails', language) ?? 'Session Details'}
         size="lg"
       >
         {isLoadingDetail ? (
@@ -303,11 +330,9 @@ const SessionGroup: React.FC<SessionGroupProps> = ({
               onClick={() => onSessionClick(session.id)}
             >
               <span className="session-title text-truncate">
-                {session.title.split(' - ')[1] || session.title}
+                {session.title.split(' - ')[1] ?? session.title}
               </span>
-              <span className="session-time text-muted">
-                {session.time}
-              </span>
+              <span className="session-time text-muted">{session.time}</span>
               <span className="session-messages text-muted">
                 <i className="bi bi-chat-dots" />
                 <span className="ms-1">{session.messages}</span>
@@ -328,10 +353,7 @@ interface SessionDetailContentProps {
   language: Language;
 }
 
-const SessionDetailContent: React.FC<SessionDetailContentProps> = ({
-  session,
-  language,
-}) => {
+const SessionDetailContent: React.FC<SessionDetailContentProps> = ({ session, language }) => {
   return (
     <div className="session-detail-content">
       {/* Session Meta Info */}
@@ -342,8 +364,16 @@ const SessionDetailContent: React.FC<SessionDetailContentProps> = ({
             <span>{session.tool_name}</span>
           </div>
           <div className="col-md-6">
-            <small className="text-muted d-block">{t('status', language) || 'Status'}</small>
-            <Badge variant={session.status === 'active' ? 'success' : session.status === 'completed' ? 'secondary' : 'warning'}>
+            <small className="text-muted d-block">{t('status', language) ?? 'Status'}</small>
+            <Badge
+              variant={
+                session.status === 'active'
+                  ? 'success'
+                  : session.status === 'completed'
+                    ? 'secondary'
+                    : 'warning'
+              }
+            >
               {session.status}
             </Badge>
           </div>
@@ -356,12 +386,12 @@ const SessionDetailContent: React.FC<SessionDetailContentProps> = ({
             <span>{formatTokens(session.total_tokens)}</span>
           </div>
           <div className="col-md-6">
-            <small className="text-muted d-block">{t('created', language) || 'Created'}</small>
+            <small className="text-muted d-block">{t('created', language) ?? 'Created'}</small>
             <span>{session.created_at ? formatDateTime(session.created_at) : '-'}</span>
           </div>
           <div className="col-md-6">
-            <small className="text-muted d-block">{t('model', language) || 'Model'}</small>
-            <span>{session.model || '-'}</span>
+            <small className="text-muted d-block">{t('model', language) ?? 'Model'}</small>
+            <span>{session.model ?? '-'}</span>
           </div>
         </div>
       </div>
@@ -372,11 +402,19 @@ const SessionDetailContent: React.FC<SessionDetailContentProps> = ({
         {session.messages && session.messages.length > 0 ? (
           session.messages.map((msg: SessionMessage, idx: number) => (
             <div
-              key={msg.id || idx}
+              key={msg.id ?? idx}
               className={`message-item p-2 mb-2 rounded ${msg.role === 'user' ? 'bg-light' : 'bg-white border'}`}
             >
               <div className="d-flex justify-content-between align-items-center mb-1">
-                <Badge variant={msg.role === 'user' ? 'primary' : msg.role === 'assistant' ? 'success' : 'secondary'}>
+                <Badge
+                  variant={
+                    msg.role === 'user'
+                      ? 'primary'
+                      : msg.role === 'assistant'
+                        ? 'success'
+                        : 'secondary'
+                  }
+                >
                   {msg.role}
                 </Badge>
                 <small className="text-muted">
@@ -384,14 +422,17 @@ const SessionDetailContent: React.FC<SessionDetailContentProps> = ({
                   {msg.tokens_used > 0 && ` • ${formatTokens(msg.tokens_used)} tokens`}
                 </small>
               </div>
-              <div className="message-content" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              <div
+                className="message-content"
+                style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
+              >
                 {msg.content}
               </div>
             </div>
           ))
         ) : (
           <div className="text-muted text-center py-3">
-            {t('noMessages', language) || 'No messages in this session'}
+            {t('noMessages', language) ?? 'No messages in this session'}
           </div>
         )}
       </div>

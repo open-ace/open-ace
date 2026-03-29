@@ -60,8 +60,8 @@ export const Progress: React.FC<ProgressProps> = ({
         aria-valuemin={0}
         aria-valuemax={max}
       >
-        {(label || showValue) && (
-          <span className="progress-label">{label || `${Math.round(percentage)}%`}</span>
+        {(label ?? showValue) && (
+          <span className="progress-label">{label ?? `${Math.round(percentage)}%`}</span>
         )}
       </div>
     </div>

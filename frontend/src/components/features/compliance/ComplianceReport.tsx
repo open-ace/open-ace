@@ -12,15 +12,7 @@ import React, { useState, useEffect } from 'react';
 import { cn } from '@/utils';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
-import {
-  Card,
-  Button,
-  Select,
-  Loading,
-  Error,
-  EmptyState,
-  Badge,
-} from '@/components/common';
+import { Card, Button, Select, Loading, Error, EmptyState, Badge } from '@/components/common';
 import { complianceApi, type ReportType, type SavedReport } from '@/api';
 import { formatDateTime } from '@/utils';
 

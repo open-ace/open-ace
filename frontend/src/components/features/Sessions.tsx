@@ -5,10 +5,25 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { cn } from '@/utils';
-import { useSessions, useSessionStats, useDeleteSession, useCompleteSession, useSession } from '@/hooks';
+import {
+  useSessions,
+  useSessionStats,
+  useDeleteSession,
+  useCompleteSession,
+  useSession,
+} from '@/hooks';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
-import { Card, Button, Select, Loading, Error, EmptyState, Badge, Modal } from '@/components/common';
+import {
+  Card,
+  Button,
+  Select,
+  Loading,
+  Error,
+  EmptyState,
+  Badge,
+  Modal,
+} from '@/components/common';
 import type { BadgeVariant } from '@/components/common';
 import { formatDateTime, formatTokens } from '@/utils';
 import type { AgentSession, SessionFilters, SessionMessage } from '@/api/sessions';
@@ -51,7 +66,7 @@ export const Sessions: React.FC = () => {
 
   // Fetch selected session details with messages
   const { data: sessionDetail, isLoading: isLoadingDetail } = useSession(
-    selectedSessionId || '',
+    selectedSessionId ?? '',
     true,
     !!selectedSessionId
   );
@@ -94,19 +109,19 @@ export const Sessions: React.FC = () => {
 
   const statusOptions = useMemo(
     () => [
-      { value: '', label: t('allStatus', language) || 'All Status' },
-      { value: 'active', label: t('statusActive', language) || 'Active' },
-      { value: 'paused', label: t('statusPaused', language) || 'Paused' },
-      { value: 'completed', label: t('statusCompleted', language) || 'Completed' },
-      { value: 'archived', label: t('statusArchived', language) || 'Archived' },
-      { value: 'error', label: t('statusError', language) || 'Error' },
+      { value: '', label: t('allStatus', language) ?? 'All Status' },
+      { value: 'active', label: t('statusActive', language) ?? 'Active' },
+      { value: 'paused', label: t('statusPaused', language) ?? 'Paused' },
+      { value: 'completed', label: t('statusCompleted', language) ?? 'Completed' },
+      { value: 'archived', label: t('statusArchived', language) ?? 'Archived' },
+      { value: 'error', label: t('statusError', language) ?? 'Error' },
     ],
     [language]
   );
 
   const typeOptions = useMemo(
     () => [
-      { value: '', label: t('allTypes', language) || 'All Types' },
+      { value: '', label: t('allTypes', language) ?? 'All Types' },
       { value: 'chat', label: 'Chat' },
       { value: 'task', label: 'Task' },
       { value: 'workflow', label: 'Workflow' },
@@ -127,7 +142,11 @@ export const Sessions: React.FC = () => {
   };
 
   const handleDelete = async (sessionId: string) => {
-    if (window.confirm(t('confirmDeleteSession', language) || 'Are you sure you want to delete this session?')) {
+    if (
+      window.confirm(
+        t('confirmDeleteSession', language) ?? 'Are you sure you want to delete this session?'
+      )
+    ) {
       await deleteMutation.mutateAsync(sessionId);
       if (selectedSessionId === sessionId) {
         setSelectedSessionId(null);
@@ -151,7 +170,7 @@ export const Sessions: React.FC = () => {
   };
 
   if (isError) {
-    return <Error message={error?.message || t('error', language)} onRetry={() => refetch()} />;
+    return <Error message={error?.message ?? t('error', language)} onRetry={() => refetch()} />;
   }
 
   return (
@@ -177,13 +196,17 @@ export const Sessions: React.FC = () => {
         <div className="row mb-4">
           <div className="col-md-3 col-sm-6 mb-2">
             <Card className="text-center">
-              <div className="text-muted small">{t('totalSessions', language) || 'Total Sessions'}</div>
+              <div className="text-muted small">
+                {t('totalSessions', language) ?? 'Total Sessions'}
+              </div>
               <div className="fs-3 fw-bold text-primary">{statsData.data.total_sessions}</div>
             </Card>
           </div>
           <div className="col-md-3 col-sm-6 mb-2">
             <Card className="text-center">
-              <div className="text-muted small">{t('activeSessions', language) || 'Active Sessions'}</div>
+              <div className="text-muted small">
+                {t('activeSessions', language) ?? 'Active Sessions'}
+              </div>
               <div className="fs-3 fw-bold text-success">{statsData.data.active_sessions}</div>
             </Card>
           </div>
@@ -196,7 +219,9 @@ export const Sessions: React.FC = () => {
           <div className="col-md-3 col-sm-6 mb-2">
             <Card className="text-center">
               <div className="text-muted small">{t('totalTokens', language)}</div>
-              <div className="fs-3 fw-bold text-warning">{formatTokens(statsData.data.total_tokens)}</div>
+              <div className="fs-3 fw-bold text-warning">
+                {formatTokens(statsData.data.total_tokens)}
+              </div>
             </Card>
           </div>
         </div>
@@ -210,27 +235,27 @@ export const Sessions: React.FC = () => {
             <small className="text-muted">{t('tableTool', language)}:</small>
             <Select
               options={toolOptions}
-              value={filters.tool_name || ''}
+              value={filters.tool_name ?? ''}
               onChange={(value) => handleFilterChange('tool_name', value)}
               size="sm"
             />
           </div>
           {/* Status Filter */}
           <div className="d-flex align-items-center gap-1">
-            <small className="text-muted">{t('status', language) || 'Status'}:</small>
+            <small className="text-muted">{t('status', language) ?? 'Status'}:</small>
             <Select
               options={statusOptions}
-              value={filters.status || ''}
+              value={filters.status ?? ''}
               onChange={(value) => handleFilterChange('status', value)}
               size="sm"
             />
           </div>
           {/* Type Filter */}
           <div className="d-flex align-items-center gap-1">
-            <small className="text-muted">{t('type', language) || 'Type'}:</small>
+            <small className="text-muted">{t('type', language) ?? 'Type'}:</small>
             <Select
               options={typeOptions}
-              value={filters.session_type || ''}
+              value={filters.session_type ?? ''}
               onChange={(value) => handleFilterChange('session_type', value)}
               size="sm"
             />
@@ -245,7 +270,7 @@ export const Sessions: React.FC = () => {
                 type="text"
                 className="form-control"
                 placeholder={t('search', language)}
-                value={filters.search || ''}
+                value={filters.search ?? ''}
                 onChange={(e) => handleFilterChange('search', e.target.value)}
               />
             </div>
@@ -265,7 +290,10 @@ export const Sessions: React.FC = () => {
         <EmptyState
           icon="bi-chat-dots"
           title={t('noData', language)}
-          description={t('noAgentSessions', language) || 'No agent sessions found. Sessions are created when using AI tools in Workspace.'}
+          description={
+            t('noAgentSessions', language) ??
+            'No agent sessions found. Sessions are created when using AI tools in Workspace.'
+          }
         />
       ) : (
         <>
@@ -296,7 +324,7 @@ export const Sessions: React.FC = () => {
                       onClick={() => setPage(page - 1)}
                       disabled={page === 1}
                     >
-                      {t('previous', language) || 'Previous'}
+                      {t('previous', language) ?? 'Previous'}
                     </button>
                   </li>
                   {Array.from({ length: Math.min(5, pagination.totalPages) }, (_, i) => {
@@ -315,7 +343,7 @@ export const Sessions: React.FC = () => {
                       onClick={() => setPage(page + 1)}
                       disabled={page === pagination.totalPages}
                     >
-                      {t('next', language) || 'Next'}
+                      {t('next', language) ?? 'Next'}
                     </button>
                   </li>
                 </ul>
@@ -336,7 +364,7 @@ export const Sessions: React.FC = () => {
       <Modal
         isOpen={showDetailModal}
         onClose={handleCloseModal}
-        title={sessionDetail?.data?.title || t('sessionDetails', language) || 'Session Details'}
+        title={sessionDetail?.data?.title ?? t('sessionDetails', language) ?? 'Session Details'}
         size="lg"
       >
         {isLoadingDetail ? (
@@ -377,10 +405,7 @@ const SessionCard: React.FC<SessionCardProps> = ({
 }) => {
   return (
     <div
-      className={cn(
-        'session-item card mb-2',
-        isSelected && 'border-primary'
-      )}
+      className={cn('session-item card mb-2', isSelected && 'border-primary')}
       onClick={onClick}
       style={{ cursor: 'pointer' }}
     >
@@ -391,12 +416,10 @@ const SessionCard: React.FC<SessionCardProps> = ({
             {/* Title and Badges */}
             <div className="d-flex align-items-center gap-3 mb-3">
               <h5 className="mb-0" style={{ fontSize: '1.1rem', fontWeight: 600 }}>
-                {session.title || session.session_id.substring(0, 8)}
+                {session.title ?? session.session_id.substring(0, 8)}
               </h5>
-              <Badge variant={statusColors[session.status] || 'secondary'}>
-                {session.status}
-              </Badge>
-              <Badge variant={typeColors[session.session_type] || 'secondary'}>
+              <Badge variant={statusColors[session.status] ?? 'secondary'}>{session.status}</Badge>
+              <Badge variant={typeColors[session.session_type] ?? 'secondary'}>
                 {session.session_type}
               </Badge>
             </div>
@@ -431,7 +454,7 @@ const SessionCard: React.FC<SessionCardProps> = ({
           {/* Actions */}
           <div className="d-flex flex-column gap-2 ms-4" onClick={(e) => e.stopPropagation()}>
             {session.status === 'active' && (
-              <span title={t('complete', language) || 'Complete'}>
+              <span title={t('complete', language) ?? 'Complete'}>
                 <Button
                   variant="outline-success"
                   size="sm"
@@ -459,12 +482,13 @@ const SessionCard: React.FC<SessionCardProps> = ({
         <div className="d-flex flex-column gap-2 text-muted mt-4" style={{ fontSize: '0.8rem' }}>
           <span>
             <i className="bi bi-clock me-2" />
-            {t('created', language) || 'Created'}: {session.created_at ? formatDateTime(session.created_at) : '-'}
+            {t('created', language) ?? 'Created'}:{' '}
+            {session.created_at ? formatDateTime(session.created_at) : '-'}
           </span>
           {session.completed_at && (
             <span>
               <i className="bi bi-check-circle me-2" />
-              {t('completed', language) || 'Completed'}: {formatDateTime(session.completed_at)}
+              {t('completed', language) ?? 'Completed'}: {formatDateTime(session.completed_at)}
             </span>
           )}
         </div>
@@ -481,10 +505,7 @@ interface SessionDetailContentProps {
   language: Language;
 }
 
-const SessionDetailContent: React.FC<SessionDetailContentProps> = ({
-  session,
-  language,
-}) => {
+const SessionDetailContent: React.FC<SessionDetailContentProps> = ({ session, language }) => {
   return (
     <div className="session-detail-content">
       {/* Session Meta Info */}
@@ -495,8 +516,16 @@ const SessionDetailContent: React.FC<SessionDetailContentProps> = ({
             <span>{session.tool_name}</span>
           </div>
           <div className="col-md-6">
-            <small className="text-muted d-block">{t('status', language) || 'Status'}</small>
-            <Badge variant={session.status === 'active' ? 'success' : session.status === 'completed' ? 'secondary' : 'warning'}>
+            <small className="text-muted d-block">{t('status', language) ?? 'Status'}</small>
+            <Badge
+              variant={
+                session.status === 'active'
+                  ? 'success'
+                  : session.status === 'completed'
+                    ? 'secondary'
+                    : 'warning'
+              }
+            >
               {session.status}
             </Badge>
           </div>
@@ -509,12 +538,12 @@ const SessionDetailContent: React.FC<SessionDetailContentProps> = ({
             <span>{formatTokens(session.total_tokens)}</span>
           </div>
           <div className="col-md-6">
-            <small className="text-muted d-block">{t('created', language) || 'Created'}</small>
+            <small className="text-muted d-block">{t('created', language) ?? 'Created'}</small>
             <span>{session.created_at ? formatDateTime(session.created_at) : '-'}</span>
           </div>
           <div className="col-md-6">
-            <small className="text-muted d-block">{t('model', language) || 'Model'}</small>
-            <span>{session.model || '-'}</span>
+            <small className="text-muted d-block">{t('model', language) ?? 'Model'}</small>
+            <span>{session.model ?? '-'}</span>
           </div>
         </div>
       </div>
@@ -525,11 +554,19 @@ const SessionDetailContent: React.FC<SessionDetailContentProps> = ({
         {session.messages && session.messages.length > 0 ? (
           session.messages.map((msg: SessionMessage, idx: number) => (
             <div
-              key={msg.id || idx}
+              key={msg.id ?? idx}
               className={`message-item p-2 mb-2 rounded ${msg.role === 'user' ? 'bg-light' : 'bg-white border'}`}
             >
               <div className="d-flex justify-content-between align-items-center mb-1">
-                <Badge variant={msg.role === 'user' ? 'primary' : msg.role === 'assistant' ? 'success' : 'secondary'}>
+                <Badge
+                  variant={
+                    msg.role === 'user'
+                      ? 'primary'
+                      : msg.role === 'assistant'
+                        ? 'success'
+                        : 'secondary'
+                  }
+                >
                   {msg.role}
                 </Badge>
                 <small className="text-muted">
@@ -537,7 +574,10 @@ const SessionDetailContent: React.FC<SessionDetailContentProps> = ({
                   {msg.tokens_used > 0 && ` • ${formatTokens(msg.tokens_used)} tokens`}
                 </small>
               </div>
-              <div className="message-content" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              <div
+                className="message-content"
+                style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
+              >
                 {msg.content}
               </div>
             </div>

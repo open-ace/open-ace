@@ -72,8 +72,8 @@ export const AuditLog: React.FC = () => {
     return <Error message={error?.message || t('error', language)} onRetry={() => refetch()} />;
   }
 
-  const logs = data?.logs || [];
-  const total = data?.total || 0;
+  const logs = data?.logs ?? [];
+  const total = data?.total ?? 0;
   const totalPages = Math.ceil(total / ITEMS_PER_PAGE);
 
   return (
@@ -94,7 +94,7 @@ export const AuditLog: React.FC = () => {
             <label className="form-label">{t('tableAction', language)}</label>
             <Select
               options={actionOptions}
-              value={filters.action || ''}
+              value={filters.action ?? ''}
               onChange={(value) => handleFilterChange('action', value)}
             />
           </div>
@@ -102,7 +102,7 @@ export const AuditLog: React.FC = () => {
             <label className="form-label">{t('resourceType', language)}</label>
             <Select
               options={resourceTypeOptions}
-              value={filters.resource_type || ''}
+              value={filters.resource_type ?? ''}
               onChange={(value) => handleFilterChange('resource_type', value)}
             />
           </div>
@@ -111,7 +111,7 @@ export const AuditLog: React.FC = () => {
             <input
               type="date"
               className="form-control"
-              value={filters.start_date || ''}
+              value={filters.start_date ?? ''}
               onChange={(e) => handleFilterChange('start_date', e.target.value)}
             />
           </div>
@@ -120,7 +120,7 @@ export const AuditLog: React.FC = () => {
             <input
               type="date"
               className="form-control"
-              value={filters.end_date || ''}
+              value={filters.end_date ?? ''}
               onChange={(e) => handleFilterChange('end_date', e.target.value)}
             />
           </div>
@@ -167,22 +167,22 @@ export const AuditLog: React.FC = () => {
                     <td>
                       <small>{formatDateTime(log.timestamp)}</small>
                     </td>
-                    <td>{log.username || `User ${log.user_id}`}</td>
+                    <td>{log.username ?? `User ${log.user_id}`}</td>
                     <td>
-                      <Badge variant={ACTION_COLORS[log.action] || 'secondary'}>{log.action}</Badge>
+                      <Badge variant={ACTION_COLORS[log.action] ?? 'secondary'}>{log.action}</Badge>
                     </td>
                     <td>{log.resource_type}</td>
                     <td>
                       <code>{log.resource_id}</code>
                     </td>
                     <td>
-                      <small className="text-muted">{log.ip_address || '-'}</small>
+                      <small className="text-muted">{log.ip_address ?? '-'}</small>
                     </td>
                     <td>
                       {log.details && Object.keys(log.details).length > 0 && (
                         <button
                           className="btn btn-link btn-sm p-0"
-                          onClick={() => alert(JSON.stringify(log.details, null, 2))}
+                          onClick={() => window.alert(JSON.stringify(log.details, null, 2))}
                         >
                           <i className="bi bi-eye" />
                         </button>

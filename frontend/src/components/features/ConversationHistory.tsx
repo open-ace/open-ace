@@ -53,16 +53,22 @@ const TableSkeleton: React.FC<{ rows?: number }> = ({ rows = 10 }) => (
     <table className="table table-hover">
       <thead>
         <tr>
-          {['Date', 'Tool', 'Host', 'Sender', 'Messages', 'Tokens', 'Last Message', 'Actions'].map((header) => (
-            <th key={header}><Skeleton height={16} width="80%" /></th>
-          ))}
+          {['Date', 'Tool', 'Host', 'Sender', 'Messages', 'Tokens', 'Last Message', 'Actions'].map(
+            (header) => (
+              <th key={header}>
+                <Skeleton height={16} width="80%" />
+              </th>
+            )
+          )}
         </tr>
       </thead>
       <tbody>
         {Array.from({ length: rows }).map((_, i) => (
           <tr key={i}>
             {Array.from({ length: 8 }).map((_, j) => (
-              <td key={j}><Skeleton height={14} width={j === 7 ? 40 : '90%'} /></td>
+              <td key={j}>
+                <Skeleton height={14} width={j === 7 ? 40 : '90%'} />
+              </td>
             ))}
           </tr>
         ))}
@@ -91,7 +97,7 @@ export const ConversationHistory: React.FC = () => {
 
   // Get hosts for filter
   const { data: hostsData } = useHosts();
-  const hosts = hostsData || [];
+  const hosts = hostsData ?? [];
 
   const { data, isLoading, isFetching, isError, error, refetch } = useConversationHistory({
     ...filters,
@@ -198,7 +204,7 @@ export const ConversationHistory: React.FC = () => {
     }));
 
   if (isError) {
-    return <Error message={error?.message || t('error', language)} onRetry={() => refetch()} />;
+    return <Error message={error?.message ?? t('error', language)} onRetry={() => refetch()} />;
   }
 
   const tableContent = (
@@ -211,7 +217,7 @@ export const ConversationHistory: React.FC = () => {
             <input
               type="date"
               className="form-control"
-              value={filters.date || ''}
+              value={filters.date ?? ''}
               onChange={(e) => handleFilterChange('date', e.target.value)}
             />
           </div>
@@ -219,7 +225,7 @@ export const ConversationHistory: React.FC = () => {
             <label className="form-label">{t('tableTool', language)}</label>
             <Select
               options={toolOptions}
-              value={filters.tool || ''}
+              value={filters.tool ?? ''}
               onChange={(value) => handleFilterChange('tool', value)}
             />
           </div>
@@ -227,7 +233,7 @@ export const ConversationHistory: React.FC = () => {
             <label className="form-label">{t('tableHost', language)}</label>
             <Select
               options={hostOptions}
-              value={filters.host || ''}
+              value={filters.host ?? ''}
               onChange={(value) => handleFilterChange('host', value)}
             />
           </div>
@@ -237,7 +243,7 @@ export const ConversationHistory: React.FC = () => {
               type="text"
               className="form-control"
               placeholder={t('searchSender', language)}
-              value={filters.sender || ''}
+              value={filters.sender ?? ''}
               onChange={(e) => handleFilterChange('sender', e.target.value)}
             />
           </div>
@@ -346,7 +352,10 @@ export const ConversationHistory: React.FC = () => {
   // Fullscreen mode
   if (isFullscreen) {
     return (
-      <div className="conversation-history-fullscreen position-fixed top-0 start-0 w-100 h-100 bg-white p-4 overflow-auto" style={{ zIndex: 1050 }}>
+      <div
+        className="conversation-history-fullscreen position-fixed top-0 start-0 w-100 h-100 bg-white p-4 overflow-auto"
+        style={{ zIndex: 1050 }}
+      >
         <div className="d-flex justify-content-between align-items-center mb-3">
           <h4>{t('conversationHistory', language)}</h4>
           <Button variant="outline-secondary" size="sm" onClick={() => setIsFullscreen(false)}>
@@ -406,18 +415,16 @@ const ConversationRow: React.FC<ConversationRowProps> = ({
       case 'tool_name':
         return <span className="badge bg-secondary">{conversation.tool_name}</span>;
       case 'host_name':
-        return conversation.host_name || '-';
+        return conversation.host_name ?? '-';
       case 'sender_name':
-        return conversation.sender_name || '-';
+        return conversation.sender_name ?? '-';
       case 'message_count':
         return <span className="text-end d-block">{conversation.message_count}</span>;
       case 'total_tokens':
         return <span className="text-end d-block">{formatTokens(conversation.total_tokens)}</span>;
       case 'last_message_time':
         return (
-          <small className="text-muted">
-            {formatDateTime(conversation.last_message_time)}
-          </small>
+          <small className="text-muted">{formatDateTime(conversation.last_message_time)}</small>
         );
       case 'actions':
         return (
@@ -469,9 +476,10 @@ const MessageItem: React.FC<MessageItemProps> = ({ msg, language }) => {
   const MAX_CONTENT_LENGTH = 500;
 
   const shouldTruncate = msg.content && msg.content.length > MAX_CONTENT_LENGTH;
-  const displayContent = shouldTruncate && !isExpanded
-    ? msg.content.substring(0, MAX_CONTENT_LENGTH) + '...'
-    : msg.content;
+  const displayContent =
+    shouldTruncate && !isExpanded
+      ? msg.content.substring(0, MAX_CONTENT_LENGTH) + '...'
+      : msg.content;
 
   const getRoleIcon = (role: string) => {
     switch (role) {
@@ -514,9 +522,7 @@ const MessageItem: React.FC<MessageItemProps> = ({ msg, language }) => {
       <div className="d-flex justify-content-between align-items-start mb-2">
         <div className="d-flex align-items-center flex-wrap gap-2">
           <i className={cn('bi', getRoleIcon(msg.role))} />
-          <span className={cn('badge', getRoleBadgeClass(msg.role))}>
-            {msg.role}
-          </span>
+          <span className={cn('badge', getRoleBadgeClass(msg.role))}>{msg.role}</span>
           {msg.sender_name && (
             <span className="text-muted small">
               <i className="bi bi-person me-1" />
@@ -545,7 +551,7 @@ const MessageItem: React.FC<MessageItemProps> = ({ msg, language }) => {
             wordBreak: 'break-word',
             fontSize: '0.875rem',
             maxHeight: isExpanded ? 'none' : '300px',
-            overflow: isExpanded ? 'visible' : 'auto'
+            overflow: isExpanded ? 'visible' : 'auto',
           }}
         >
           {displayContent}
@@ -605,14 +611,15 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
   const filteredMessages = useMemo(() => {
     if (!messages) return [];
     if (roleFilter === 'all') return messages;
-    return messages.filter(msg => msg.role === roleFilter);
+    return messages.filter((msg) => msg.role === roleFilter);
   }, [messages, roleFilter]);
 
   // Calculate latency data from messages
   const latencyData = useMemo(() => {
     if (!messages || messages.length < 2) return [];
 
-    const latencies: Array<{ index: number; role: string; latency: number; timestamp: string }> = [];
+    const latencies: Array<{ index: number; role: string; latency: number; timestamp: string }> =
+      [];
     let lastUserTime: Date | null = null;
     let lastUserIndex = 0;
 
@@ -642,14 +649,15 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
   const latencyStats = useMemo(() => {
     if (latencyData.length === 0) return null;
 
-    const latencies = latencyData.map(d => d.latency);
+    const latencies = latencyData.map((d) => d.latency);
     const avg = latencies.reduce((a, b) => a + b, 0) / latencies.length;
     const max = Math.max(...latencies);
     const min = Math.min(...latencies);
     const sorted = [...latencies].sort((a, b) => a - b);
-    const median = sorted.length % 2 === 0
-      ? (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2
-      : sorted[Math.floor(sorted.length / 2)];
+    const median =
+      sorted.length % 2 === 0
+        ? (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2
+        : sorted[Math.floor(sorted.length / 2)];
 
     return {
       avg: Math.round(avg * 100) / 100,
@@ -675,14 +683,14 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
       totalOutputTokens: 0,
     };
 
-    messages.forEach(msg => {
+    messages.forEach((msg) => {
       if (msg.role === 'user') stats.user++;
       else if (msg.role === 'assistant') stats.assistant++;
       else if (msg.role === 'system') stats.system++;
       else if (msg.role === 'toolResult') stats.toolResult++;
-      stats.totalTokens += msg.tokens_used || 0;
-      stats.totalInputTokens += msg.input_tokens || 0;
-      stats.totalOutputTokens += msg.output_tokens || 0;
+      stats.totalTokens += msg.tokens_used ?? 0;
+      stats.totalInputTokens += msg.input_tokens ?? 0;
+      stats.totalOutputTokens += msg.output_tokens ?? 0;
     });
 
     return stats;
@@ -795,10 +803,13 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
                 <div className="d-flex align-items-center gap-2">
                   <span className="text-muted small">{t('filterByRole', language)}:</span>
                   <div className="btn-group btn-group-sm">
-                    {roleFilterOptions.map(opt => (
+                    {roleFilterOptions.map((opt) => (
                       <button
                         key={opt.value}
-                        className={cn('btn', roleFilter === opt.value ? 'btn-primary' : 'btn-outline-secondary')}
+                        className={cn(
+                          'btn',
+                          roleFilter === opt.value ? 'btn-primary' : 'btn-outline-secondary'
+                        )}
                         onClick={() => setRoleFilter(opt.value)}
                       >
                         {opt.label}
@@ -809,14 +820,13 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
               </div>
 
               {/* Message List */}
-              <div className="conversation-messages" style={{ maxHeight: '500px', overflowY: 'auto' }}>
+              <div
+                className="conversation-messages"
+                style={{ maxHeight: '500px', overflowY: 'auto' }}
+              >
                 {filteredMessages.length > 0 ? (
                   filteredMessages.map((msg, index) => (
-                    <MessageItem
-                      key={msg.id || index}
-                      msg={msg}
-                      language={language}
-                    />
+                    <MessageItem key={msg.id ?? index} msg={msg} language={language} />
                   ))
                 ) : (
                   <EmptyState icon="bi-chat-dots" title={t('noMessages', language)} />
@@ -833,7 +843,9 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
                       <div className="col-md-3">
                         <div className="card bg-light">
                           <div className="card-body py-2 px-3">
-                            <small className="text-muted d-block">{t('averageLatency', language)}</small>
+                            <small className="text-muted d-block">
+                              {t('averageLatency', language)}
+                            </small>
                             <strong className="text-primary">{latencyStats.avg}s</strong>
                           </div>
                         </div>
@@ -841,7 +853,9 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
                       <div className="col-md-3">
                         <div className="card bg-light">
                           <div className="card-body py-2 px-3">
-                            <small className="text-muted d-block">{t('medianLatency', language)}</small>
+                            <small className="text-muted d-block">
+                              {t('medianLatency', language)}
+                            </small>
                             <strong className="text-info">{latencyStats.median}s</strong>
                           </div>
                         </div>
@@ -849,7 +863,9 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
                       <div className="col-md-3">
                         <div className="card bg-light">
                           <div className="card-body py-2 px-3">
-                            <small className="text-muted d-block">{t('minLatency', language)}</small>
+                            <small className="text-muted d-block">
+                              {t('minLatency', language)}
+                            </small>
                             <strong className="text-success">{latencyStats.min}s</strong>
                           </div>
                         </div>
@@ -857,7 +873,9 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
                       <div className="col-md-3">
                         <div className="card bg-light">
                           <div className="card-body py-2 px-3">
-                            <small className="text-muted d-block">{t('maxLatency', language)}</small>
+                            <small className="text-muted d-block">
+                              {t('maxLatency', language)}
+                            </small>
                             <strong className="text-danger">{latencyStats.max}s</strong>
                           </div>
                         </div>
@@ -884,7 +902,10 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
                   {/* Latency Table */}
                   <div className="mt-3">
                     <h6 className="text-muted mb-2">{t('latencyDetails', language)}</h6>
-                    <div className="table-responsive" style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                    <div
+                      className="table-responsive"
+                      style={{ maxHeight: '200px', overflowY: 'auto' }}
+                    >
                       <table className="table table-sm table-hover">
                         <thead>
                           <tr>
@@ -900,15 +921,22 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
                               <td>{i + 1}</td>
                               <td>#{d.index}</td>
                               <td>
-                                <span className={cn(
-                                  'badge',
-                                  d.latency > 10 ? 'bg-danger' :
-                                  d.latency > 5 ? 'bg-warning' : 'bg-success'
-                                )}>
+                                <span
+                                  className={cn(
+                                    'badge',
+                                    d.latency > 10
+                                      ? 'bg-danger'
+                                      : d.latency > 5
+                                        ? 'bg-warning'
+                                        : 'bg-success'
+                                  )}
+                                >
                                   {d.latency}s
                                 </span>
                               </td>
-                              <td><small>{formatDateTime(d.timestamp)}</small></td>
+                              <td>
+                                <small>{formatDateTime(d.timestamp)}</small>
+                              </td>
                             </tr>
                           ))}
                         </tbody>

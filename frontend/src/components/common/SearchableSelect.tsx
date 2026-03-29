@@ -46,11 +46,11 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
 
   // Find selected option label
   const selectedOption = options.find((opt) => opt.value === value);
-  const selectedLabel = selectedOption?.label || placeholder;
+  const selectedLabel = selectedOption?.label ?? placeholder;
 
   // Filter options based on search
   const filteredOptions = options.filter((opt) =>
-    (opt.label || '').toLowerCase().includes(search.toLowerCase())
+    (opt.label ?? '').toLowerCase().includes(search.toLowerCase())
   );
 
   // Handle click outside to close dropdown
@@ -109,9 +109,7 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
         aria-expanded={isOpen}
         aria-haspopup="listbox"
       >
-        <span className={cn(!selectedOption && 'text-muted')}>
-          {selectedLabel}
-        </span>
+        <span className={cn(!selectedOption && 'text-muted')}>{selectedLabel}</span>
         <i className={cn('bi', isOpen ? 'bi-chevron-up' : 'bi-chevron-down')} />
       </button>
 
@@ -138,9 +136,7 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
           {/* Options List */}
           <div className="overflow-auto" style={{ maxHeight: '250px' }}>
             {filteredOptions.length === 0 ? (
-              <div className="p-2 text-muted text-center small">
-                No options found
-              </div>
+              <div className="p-2 text-muted text-center small">No options found</div>
             ) : (
               filteredOptions.map((option) => (
                 <button

@@ -62,7 +62,11 @@ export const WorkLayout: React.FC<WorkLayoutProps> = ({ children }) => {
       <header className="work-header">
         <div className="header-left">
           <div className="logo">
-            <img src="/static/icons/icon.svg" alt="Open ACE" style={{ width: '28px', height: '28px' }} />
+            <img
+              src="/static/icons/icon.svg"
+              alt="Open ACE"
+              style={{ width: '28px', height: '28px' }}
+            />
             <span className="logo-text">Open ACE</span>
           </div>
           <ModeSwitcher className="header-mode-switcher" />
@@ -80,7 +84,9 @@ export const WorkLayout: React.FC<WorkLayoutProps> = ({ children }) => {
               onClick={() => setLeftPanelCollapsed(!leftPanelCollapsed)}
               title={leftPanelCollapsed ? t('showMore', language) : t('showLess', language)}
             >
-              <i className={cn('bi', leftPanelCollapsed ? 'bi-chevron-right' : 'bi-chevron-left')} />
+              <i
+                className={cn('bi', leftPanelCollapsed ? 'bi-chevron-right' : 'bi-chevron-left')}
+              />
             </button>
           </div>
 
@@ -104,9 +110,7 @@ export const WorkLayout: React.FC<WorkLayoutProps> = ({ children }) => {
         </aside>
 
         {/* Main Content */}
-        <main className="work-main">
-          {children || <Outlet />}
-        </main>
+        <main className="work-main">{children ?? <Outlet />}</main>
 
         {/* Right Panel - Assist Panel */}
         <aside className={cn('work-right-panel', rightPanelCollapsed && 'collapsed')}>
@@ -117,7 +121,9 @@ export const WorkLayout: React.FC<WorkLayoutProps> = ({ children }) => {
               onClick={() => setRightPanelCollapsed(!rightPanelCollapsed)}
               title={rightPanelCollapsed ? t('showMore', language) : t('showLess', language)}
             >
-              <i className={cn('bi', rightPanelCollapsed ? 'bi-chevron-left' : 'bi-chevron-right')} />
+              <i
+                className={cn('bi', rightPanelCollapsed ? 'bi-chevron-left' : 'bi-chevron-right')}
+              />
             </button>
           </div>
 

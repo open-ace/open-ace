@@ -94,23 +94,26 @@ export const Workspace: React.FC = () => {
   }, [config, language]);
 
   // Close a tab
-  const closeTab = useCallback((tabId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const closeTab = useCallback(
+    (tabId: string, e: React.MouseEvent) => {
+      e.stopPropagation();
 
-    setTabs((prev) => {
-      const newTabs = prev.filter((tab) => tab.id !== tabId);
+      setTabs((prev) => {
+        const newTabs = prev.filter((tab) => tab.id !== tabId);
 
-      // If closing the active tab, switch to another tab
-      if (activeTabId === tabId && newTabs.length > 0) {
-        // Find the previous tab or the first one
-        const closedIndex = prev.findIndex((tab) => tab.id === tabId);
-        const newActiveIndex = Math.min(closedIndex, newTabs.length - 1);
-        setActiveTabId(newTabs[newActiveIndex].id);
-      }
+        // If closing the active tab, switch to another tab
+        if (activeTabId === tabId && newTabs.length > 0) {
+          // Find the previous tab or the first one
+          const closedIndex = prev.findIndex((tab) => tab.id === tabId);
+          const newActiveIndex = Math.min(closedIndex, newTabs.length - 1);
+          setActiveTabId(newTabs[newActiveIndex].id);
+        }
 
-      return newTabs;
-    });
-  }, [activeTabId]);
+        return newTabs;
+      });
+    },
+    [activeTabId]
+  );
 
   // Switch to a tab
   const switchTab = useCallback((tabId: string) => {
@@ -141,7 +144,10 @@ export const Workspace: React.FC = () => {
     <div className="workspace h-100 d-flex flex-column">
       {/* Tab Bar */}
       {tabs.length > 0 && (
-        <div className="workspace-tabs d-flex align-items-center border-bottom bg-light" style={{ minHeight: '40px' }}>
+        <div
+          className="workspace-tabs d-flex align-items-center border-bottom bg-light"
+          style={{ minHeight: '40px' }}
+        >
           {/* Tabs */}
           <div className="d-flex flex-grow-1" style={{ overflowX: 'auto', overflowY: 'hidden' }}>
             {tabs.map((tab) => (
@@ -161,9 +167,7 @@ export const Workspace: React.FC = () => {
                 }}
               >
                 <i className="bi bi-chat-dots me-2 text-muted" />
-                <span className="text-truncate flex-grow-1 small">
-                  {tab.title}
-                </span>
+                <span className="text-truncate flex-grow-1 small">{tab.title}</span>
                 {tabs.length > 1 && (
                   <button
                     className="btn btn-sm btn-link p-0 ms-2 text-muted"

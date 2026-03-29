@@ -49,16 +49,28 @@ const navSections: NavSection[] = [
   {
     id: 'overview',
     title: 'overview',
-    items: [{ id: 'dashboard', label: 'dashboard', icon: 'bi-speedometer2', path: '/manage/dashboard' }],
+    items: [
+      { id: 'dashboard', label: 'dashboard', icon: 'bi-speedometer2', path: '/manage/dashboard' },
+    ],
   },
   {
     id: 'analysis',
     title: 'analysis',
     items: [
       { id: 'trend', label: 'tokenTrend', icon: 'bi-graph-up', path: '/manage/analysis/trend' },
-      { id: 'anomaly', label: 'anomalyDetection', icon: 'bi-exclamation-triangle', path: '/manage/analysis/anomaly' },
+      {
+        id: 'anomaly',
+        label: 'anomalyDetection',
+        icon: 'bi-exclamation-triangle',
+        path: '/manage/analysis/anomaly',
+      },
       { id: 'roi', label: 'roiAnalysis', icon: 'bi-currency-dollar', path: '/manage/analysis/roi' },
-      { id: 'conversation-history', label: 'conversationHistory', icon: 'bi-chat-square-text', path: '/manage/analysis/conversation-history' },
+      {
+        id: 'conversation-history',
+        label: 'conversationHistory',
+        icon: 'bi-chat-square-text',
+        path: '/manage/analysis/conversation-history',
+      },
       { id: 'messages', label: 'messages', icon: 'bi-chat-dots', path: '/manage/messages' },
     ],
   },
@@ -67,24 +79,60 @@ const navSections: NavSection[] = [
     title: 'governance',
     items: [
       { id: 'audit', label: 'auditCenter', icon: 'bi-journal-text', path: '/manage/audit' },
-      { id: 'quota', label: 'quotaAndAlerts', icon: 'bi-sliders', path: '/manage/quota', adminOnly: true },
-      { id: 'compliance', label: 'complianceManagement', icon: 'bi-file-earmark-text', path: '/manage/compliance', adminOnly: true },
-      { id: 'security', label: 'securityCenter', icon: 'bi-shield', path: '/manage/security', adminOnly: true },
+      {
+        id: 'quota',
+        label: 'quotaAndAlerts',
+        icon: 'bi-sliders',
+        path: '/manage/quota',
+        adminOnly: true,
+      },
+      {
+        id: 'compliance',
+        label: 'complianceManagement',
+        icon: 'bi-file-earmark-text',
+        path: '/manage/compliance',
+        adminOnly: true,
+      },
+      {
+        id: 'security',
+        label: 'securityCenter',
+        icon: 'bi-shield',
+        path: '/manage/security',
+        adminOnly: true,
+      },
     ],
   },
   {
     id: 'users',
     title: 'user',
     items: [
-      { id: 'users', label: 'userManagement', icon: 'bi-people', path: '/manage/users', adminOnly: true },
-      { id: 'tenants', label: 'tenantManagement', icon: 'bi-building', path: '/manage/tenants', adminOnly: true },
+      {
+        id: 'users',
+        label: 'userManagement',
+        icon: 'bi-people',
+        path: '/manage/users',
+        adminOnly: true,
+      },
+      {
+        id: 'tenants',
+        label: 'tenantManagement',
+        icon: 'bi-building',
+        path: '/manage/tenants',
+        adminOnly: true,
+      },
     ],
   },
   {
     id: 'settings',
     title: 'settings',
     items: [
-      { id: 'sso', label: 'ssoSettings', icon: 'bi-key', path: '/manage/settings/sso', adminOnly: true },
+      {
+        id: 'sso',
+        label: 'ssoSettings',
+        icon: 'bi-key',
+        path: '/manage/settings/sso',
+        adminOnly: true,
+      },
     ],
   },
 ];
@@ -117,7 +165,8 @@ export const ManageLayout: React.FC<ManageLayoutProps> = ({ children }) => {
     return {};
   }, []);
 
-  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>(getInitialCollapseState);
+  const [collapsedSections, setCollapsedSections] =
+    useState<Record<string, boolean>>(getInitialCollapseState);
 
   // Get active nav item from path (use last segment for nested paths)
   const getActiveNavItem = useCallback(() => {
@@ -135,7 +184,7 @@ export const ManageLayout: React.FC<ManageLayoutProps> = ({ children }) => {
   // Find which section contains the active item
   const getActiveSection = useCallback(() => {
     for (const section of navSections) {
-      if (section.items.some(item => item.id === activeNavItem)) {
+      if (section.items.some((item) => item.id === activeNavItem)) {
         return section.id;
       }
     }
@@ -146,7 +195,7 @@ export const ManageLayout: React.FC<ManageLayoutProps> = ({ children }) => {
 
   // Auto-expand active section when it changes
   useEffect(() => {
-    setCollapsedSections(prev => {
+    setCollapsedSections((prev) => {
       // If active section is collapsed, expand it
       if (prev[activeSection] !== false) {
         const newState = { ...prev, [activeSection]: false };
@@ -159,7 +208,7 @@ export const ManageLayout: React.FC<ManageLayoutProps> = ({ children }) => {
 
   // Toggle section collapse (accordion mode: only one section expanded at a time)
   const toggleSection = (sectionId: string) => {
-    setCollapsedSections(prev => {
+    setCollapsedSections((prev) => {
       const isCurrentlyExpanded = prev[sectionId] === false;
       if (isCurrentlyExpanded) {
         // If currently expanded, collapse it
@@ -169,7 +218,7 @@ export const ManageLayout: React.FC<ManageLayoutProps> = ({ children }) => {
       } else {
         // If currently collapsed, expand it and collapse all others
         const newState: Record<string, boolean> = {};
-        navSections.forEach(section => {
+        navSections.forEach((section) => {
           newState[section.id] = section.id !== sectionId;
         });
         localStorage.setItem(COLLAPSE_STATE_KEY, JSON.stringify(newState));
@@ -194,7 +243,11 @@ export const ManageLayout: React.FC<ManageLayoutProps> = ({ children }) => {
         {/* Logo */}
         <div className="sidebar-header">
           <div className="logo">
-            <img src="/static/icons/icon.svg" alt="Open ACE" style={{ width: '28px', height: '28px' }} />
+            <img
+              src="/static/icons/icon.svg"
+              alt="Open ACE"
+              style={{ width: '28px', height: '28px' }}
+            />
             {!collapsed && <span className="logo-text">Open ACE</span>}
           </div>
         </div>
@@ -222,11 +275,24 @@ export const ManageLayout: React.FC<ManageLayoutProps> = ({ children }) => {
                     aria-expanded={!isCollapsed}
                   >
                     <span className="nav-section-title">{t(section.title, language)}</span>
-                    <i className={cn('bi', 'bi-chevron-down', 'nav-section-chevron', isCollapsed && 'collapsed')} />
+                    <i
+                      className={cn(
+                        'bi',
+                        'bi-chevron-down',
+                        'nav-section-chevron',
+                        isCollapsed && 'collapsed'
+                      )}
+                    />
                   </button>
                 )}
                 {/* Section Items */}
-                <ul className={cn('nav-section-items', isCollapsed && 'collapsed', collapsed && 'sidebar-collapsed')}>
+                <ul
+                  className={cn(
+                    'nav-section-items',
+                    isCollapsed && 'collapsed',
+                    collapsed && 'sidebar-collapsed'
+                  )}
+                >
                   {section.items.map((item) => {
                     const isDisabled = item.adminOnly && user?.role !== 'admin';
                     return (
@@ -239,7 +305,13 @@ export const ManageLayout: React.FC<ManageLayoutProps> = ({ children }) => {
                           )}
                           onClick={() => handleNavClick(item, isDisabled)}
                           disabled={isDisabled}
-                          title={collapsed ? t(item.label, language) : isDisabled ? t('adminOnly', language) : undefined}
+                          title={
+                            collapsed
+                              ? t(item.label, language)
+                              : isDisabled
+                                ? t('adminOnly', language)
+                                : undefined
+                          }
                         >
                           <i className={cn('bi', item.icon)} />
                           {!collapsed && <span>{t(item.label, language)}</span>}
@@ -266,9 +338,7 @@ export const ManageLayout: React.FC<ManageLayoutProps> = ({ children }) => {
       {/* Main Content */}
       <div className="manage-main">
         <Header />
-        <main className="manage-content">
-          {children || <Outlet />}
-        </main>
+        <main className="manage-content">{children ?? <Outlet />}</main>
       </div>
     </div>
   );

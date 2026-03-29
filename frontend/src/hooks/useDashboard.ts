@@ -87,7 +87,7 @@ export function useDashboard(options: UseDashboardOptions = {}) {
       isLoading: results[0].isLoading || results[1].isLoading,
       isFetching: results[0].isFetching || results[1].isFetching,
       isError: results[0].isError || results[1].isError,
-      error: results[0].error || results[1].error,
+      error: results[0].error ?? results[1].error,
       refetch: async () => {
         await Promise.all([results[0].refetch(), results[1].refetch()]);
       },

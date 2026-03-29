@@ -122,7 +122,7 @@ export const QuotaManagement: React.FC = () => {
                     <div className="d-flex justify-content-between mb-1">
                       <small>{t('dailyTokenQuota', language)}</small>
                       <small>
-                        {formatTokens(user.tokens_used_today || 0)} /{' '}
+                        {formatTokens(user.tokens_used_today ?? 0)} /{' '}
                         {user.daily_token_quota ? formatTokens(user.daily_token_quota) : '∞'}
                       </small>
                     </div>
@@ -138,7 +138,7 @@ export const QuotaManagement: React.FC = () => {
                     <div className="d-flex justify-content-between mb-1">
                       <small>{t('monthlyTokenQuota', language)}</small>
                       <small>
-                        {formatTokens(user.tokens_used_month || 0)} /{' '}
+                        {formatTokens(user.tokens_used_month ?? 0)} /{' '}
                         {user.monthly_token_quota ? formatTokens(user.monthly_token_quota) : '∞'}
                       </small>
                     </div>
@@ -153,11 +153,11 @@ export const QuotaManagement: React.FC = () => {
                   <div className="d-flex gap-3 text-muted small">
                     <span>
                       <i className="bi bi-arrow-repeat me-1" />
-                      {t('dailyRequests', language)}: {user.requests_today || 0}
+                      {t('dailyRequests', language)}: {user.requests_today ?? 0}
                     </span>
                     <span>
                       <i className="bi bi-calendar me-1" />
-                      {t('monthlyRequests', language)}: {user.requests_month || 0}
+                      {t('monthlyRequests', language)}: {user.requests_month ?? 0}
                     </span>
                   </div>
                 </Card>
@@ -195,7 +195,7 @@ export const QuotaManagement: React.FC = () => {
               <label className="form-label">{t('dailyTokenQuota', language)}</label>
               <TextInput
                 type="number"
-                value={formData.daily_token_quota?.toString() || ''}
+                value={formData.daily_token_quota?.toString() ?? ''}
                 onChange={(value: string) =>
                   setFormData({
                     ...formData,
@@ -209,7 +209,7 @@ export const QuotaManagement: React.FC = () => {
               <label className="form-label">{t('monthlyTokenQuota', language)}</label>
               <TextInput
                 type="number"
-                value={formData.monthly_token_quota?.toString() || ''}
+                value={formData.monthly_token_quota?.toString() ?? ''}
                 onChange={(value: string) =>
                   setFormData({
                     ...formData,
@@ -223,7 +223,7 @@ export const QuotaManagement: React.FC = () => {
               <label className="form-label">{t('dailyRequestQuota', language)}</label>
               <TextInput
                 type="number"
-                value={formData.daily_request_quota?.toString() || ''}
+                value={formData.daily_request_quota?.toString() ?? ''}
                 onChange={(value: string) =>
                   setFormData({
                     ...formData,
@@ -237,7 +237,7 @@ export const QuotaManagement: React.FC = () => {
               <label className="form-label">{t('monthlyRequestQuota', language)}</label>
               <TextInput
                 type="number"
-                value={formData.monthly_request_quota?.toString() || ''}
+                value={formData.monthly_request_quota?.toString() ?? ''}
                 onChange={(value: string) =>
                   setFormData({
                     ...formData,

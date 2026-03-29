@@ -3,7 +3,13 @@
  */
 
 import React, { useState } from 'react';
-import { useUsers, useCreateUser, useUpdateUser, useDeleteUser, useUpdateUserPassword } from '@/hooks';
+import {
+  useUsers,
+  useCreateUser,
+  useUpdateUser,
+  useDeleteUser,
+  useUpdateUserPassword,
+} from '@/hooks';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import {
@@ -67,7 +73,7 @@ export const UserManagement: React.FC = () => {
       password: '',
       confirm_password: '',
       role: user.role,
-      linux_account: user.linux_account || '',
+      linux_account: user.linux_account ?? '',
     });
     setShowModal(true);
   };
@@ -91,29 +97,29 @@ export const UserManagement: React.FC = () => {
 
     // Client-side validation
     if (!formData.username || formData.username.trim() === '') {
-      setFormError(t('usernameRequired', language) || 'Username is required');
+      setFormError(t('usernameRequired', language) ?? 'Username is required');
       return;
     }
 
     if (!formData.email || formData.email.trim() === '') {
-      setFormError(t('emailRequired', language) || 'Email is required');
+      setFormError(t('emailRequired', language) ?? 'Email is required');
       return;
     }
 
     if (!editingUser) {
       // Password required for new users
       if (!formData.password || formData.password.trim() === '') {
-        setFormError(t('passwordRequired', language) || 'Password is required');
+        setFormError(t('passwordRequired', language) ?? 'Password is required');
         return;
       }
       if (formData.password.length < 8) {
-        setFormError(t('passwordTooShort', language) || 'Password must be at least 8 characters');
+        setFormError(t('passwordTooShort', language) ?? 'Password must be at least 8 characters');
         return;
       }
     }
 
     if (formData.password && formData.password !== formData.confirm_password) {
-      setFormError(t('passwordMismatch', language) || 'Passwords do not match');
+      setFormError(t('passwordMismatch', language) ?? 'Passwords do not match');
       return;
     }
 
@@ -143,7 +149,8 @@ export const UserManagement: React.FC = () => {
     } catch (err: any) {
       console.error('Failed to save user:', err);
       // Display error message to user
-      const errorMessage = err?.message || err?.error || t('failedToSaveUser', language) || 'Failed to save user';
+      const errorMessage =
+        err?.message ?? err?.error ?? t('failedToSaveUser', language) ?? 'Failed to save user';
       setFormError(errorMessage);
     }
   };
@@ -212,7 +219,7 @@ export const UserManagement: React.FC = () => {
                     <strong>{user.username}</strong>
                   </td>
                   <td>{user.email}</td>
-                  <td>{user.linux_account || '-'}</td>
+                  <td>{user.linux_account ?? '-'}</td>
                   <td>
                     <Badge variant={getRoleBadgeVariant(user.role)}>{user.role}</Badge>
                   </td>
@@ -287,90 +294,94 @@ export const UserManagement: React.FC = () => {
           )}
 
           <div className="row g-3">
-          <div className="col-md-6">
-            <label className="form-label">{t('tableUsername', language)}</label>
-            <TextInput
-              value={formData.username}
-              onChange={(value: string) => setFormData({ ...formData, username: value })}
-              placeholder={t('enterUsername', language)}
-            />
+            <div className="col-md-6">
+              <label className="form-label">{t('tableUsername', language)}</label>
+              <TextInput
+                value={formData.username}
+                onChange={(value: string) => setFormData({ ...formData, username: value })}
+                placeholder={t('enterUsername', language)}
+              />
+            </div>
+            <div className="col-md-6">
+              <label className="form-label">{t('tableEmail', language)}</label>
+              <TextInput
+                type="email"
+                value={formData.email}
+                onChange={(value: string) => setFormData({ ...formData, email: value })}
+                placeholder={t('enterEmail', language)}
+              />
+            </div>
+            <div className="col-md-6">
+              <label className="form-label">{t('linuxAccount', language)}</label>
+              <TextInput
+                value={formData.linux_account ?? ''}
+                onChange={(value: string) => setFormData({ ...formData, linux_account: value })}
+                placeholder={t('enterLinuxAccount', language)}
+              />
+            </div>
+            <div className="col-md-6">
+              <label className="form-label">{t('tableRole', language)}</label>
+              <Select
+                options={roleOptions}
+                value={formData.role}
+                onChange={(value) =>
+                  setFormData({ ...formData, role: value as CreateUserRequest['role'] })
+                }
+              />
+            </div>
+            {!editingUser && (
+              <>
+                <div className="col-md-6">
+                  <label className="form-label">{t('password', language)}</label>
+                  <TextInput
+                    type="password"
+                    value={formData.password}
+                    onChange={(value: string) => setFormData({ ...formData, password: value })}
+                    placeholder={t('enterPassword', language)}
+                  />
+                </div>
+                <div className="col-md-6">
+                  <label className="form-label">{t('confirmPassword', language)}</label>
+                  <TextInput
+                    type="password"
+                    value={formData.confirm_password ?? ''}
+                    onChange={(value: string) =>
+                      setFormData({ ...formData, confirm_password: value })
+                    }
+                    placeholder={t('confirmPassword', language)}
+                  />
+                </div>
+              </>
+            )}
+            {editingUser && (
+              <>
+                <div className="col-12">
+                  <hr className="my-2" />
+                  <small className="text-muted d-block mb-2">{t('passwordHint', language)}</small>
+                </div>
+                <div className="col-md-6">
+                  <label className="form-label">{t('newPassword', language)}</label>
+                  <TextInput
+                    type="password"
+                    value={formData.password}
+                    onChange={(value: string) => setFormData({ ...formData, password: value })}
+                    placeholder={t('enterPassword', language)}
+                  />
+                </div>
+                <div className="col-md-6">
+                  <label className="form-label">{t('confirmPassword', language)}</label>
+                  <TextInput
+                    type="password"
+                    value={formData.confirm_password ?? ''}
+                    onChange={(value: string) =>
+                      setFormData({ ...formData, confirm_password: value })
+                    }
+                    placeholder={t('confirmPassword', language)}
+                  />
+                </div>
+              </>
+            )}
           </div>
-          <div className="col-md-6">
-            <label className="form-label">{t('tableEmail', language)}</label>
-            <TextInput
-              type="email"
-              value={formData.email}
-              onChange={(value: string) => setFormData({ ...formData, email: value })}
-              placeholder={t('enterEmail', language)}
-            />
-          </div>
-          <div className="col-md-6">
-            <label className="form-label">{t('linuxAccount', language)}</label>
-            <TextInput
-              value={formData.linux_account || ''}
-              onChange={(value: string) => setFormData({ ...formData, linux_account: value })}
-              placeholder={t('enterLinuxAccount', language)}
-            />
-          </div>
-          <div className="col-md-6">
-            <label className="form-label">{t('tableRole', language)}</label>
-            <Select
-              options={roleOptions}
-              value={formData.role}
-              onChange={(value) =>
-                setFormData({ ...formData, role: value as CreateUserRequest['role'] })
-              }
-            />
-          </div>
-          {!editingUser && (
-            <>
-              <div className="col-md-6">
-                <label className="form-label">{t('password', language)}</label>
-                <TextInput
-                  type="password"
-                  value={formData.password}
-                  onChange={(value: string) => setFormData({ ...formData, password: value })}
-                  placeholder={t('enterPassword', language)}
-                />
-              </div>
-              <div className="col-md-6">
-                <label className="form-label">{t('confirmPassword', language)}</label>
-                <TextInput
-                  type="password"
-                  value={formData.confirm_password || ''}
-                  onChange={(value: string) => setFormData({ ...formData, confirm_password: value })}
-                  placeholder={t('confirmPassword', language)}
-                />
-              </div>
-            </>
-          )}
-          {editingUser && (
-            <>
-              <div className="col-12">
-                <hr className="my-2" />
-                <small className="text-muted d-block mb-2">{t('passwordHint', language)}</small>
-              </div>
-              <div className="col-md-6">
-                <label className="form-label">{t('newPassword', language)}</label>
-                <TextInput
-                  type="password"
-                  value={formData.password}
-                  onChange={(value: string) => setFormData({ ...formData, password: value })}
-                  placeholder={t('enterPassword', language)}
-                />
-              </div>
-              <div className="col-md-6">
-                <label className="form-label">{t('confirmPassword', language)}</label>
-                <TextInput
-                  type="password"
-                  value={formData.confirm_password || ''}
-                  onChange={(value: string) => setFormData({ ...formData, confirm_password: value })}
-                  placeholder={t('confirmPassword', language)}
-                />
-              </div>
-            </>
-          )}
-        </div>
         </form>
       </Modal>
     </div>

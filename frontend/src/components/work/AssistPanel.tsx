@@ -113,23 +113,15 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
                     <i className="bi bi-clipboard" />
                   </button>
                 </div>
-                {prompt.category && (
-                  <span className="badge bg-secondary">{prompt.category}</span>
-                )}
+                {prompt.category && <span className="badge bg-secondary">{prompt.category}</span>}
               </div>
             </li>
           ))}
         </ul>
       ) : (
-        <EmptyState
-          icon="bi-file-text"
-          title={t('noPromptsFound', language)}
-        />
+        <EmptyState icon="bi-file-text" title={t('noPromptsFound', language)} />
       )}
-      <button
-        className="btn btn-link btn-sm mt-2"
-        onClick={() => navigate('/work/prompts')}
-      >
+      <button className="btn btn-link btn-sm mt-2" onClick={() => navigate('/work/prompts')}>
         <i className="bi bi-arrow-right me-1" />
         {t('viewAll', language)}
       </button>

@@ -35,7 +35,13 @@ const TOOL_COLORS: Record<string, { border: string; background: string; card: st
 };
 
 // Sort configuration type
-type SortKey = 'total_tokens' | 'total_requests' | 'avg_tokens' | 'total_input_tokens' | 'total_output_tokens' | 'days_count';
+type SortKey =
+  | 'total_tokens'
+  | 'total_requests'
+  | 'avg_tokens'
+  | 'total_input_tokens'
+  | 'total_output_tokens'
+  | 'days_count';
 type SortDirection = 'asc' | 'desc';
 
 export const Dashboard: React.FC = () => {
@@ -79,8 +85,8 @@ export const Dashboard: React.FC = () => {
     if (!sortKey) return summaryData;
     const entries = Object.entries(summaryData);
     entries.sort(([, a], [, b]) => {
-      const aVal = a[sortKey] || 0;
-      const bVal = b[sortKey] || 0;
+      const aVal = a[sortKey] ?? 0;
+      const bVal = b[sortKey] ?? 0;
       return sortDirection === 'asc' ? aVal - bVal : bVal - aVal;
     });
     return Object.fromEntries(entries);
@@ -111,7 +117,7 @@ export const Dashboard: React.FC = () => {
   }
 
   if (isError) {
-    return <Error message={error?.message || t('error', language)} onRetry={() => refetch()} />;
+    return <Error message={error?.message ?? t('error', language)} onRetry={() => refetch()} />;
   }
 
   return (
@@ -120,8 +126,20 @@ export const Dashboard: React.FC = () => {
       <div className="dashboard-header d-flex justify-content-between align-items-center mb-4">
         <h2>{t('dashboardTitle', language)}</h2>
         <div className="page-header-controls">
-          <Select options={hostOptions} value={selectedHost} onChange={setSelectedHost} size="sm" className="select-narrow" />
-          <Select options={toolOptions} value={selectedTool} onChange={setSelectedTool} size="sm" className="select-narrow" />
+          <Select
+            options={hostOptions}
+            value={selectedHost}
+            onChange={setSelectedHost}
+            size="sm"
+            className="select-narrow"
+          />
+          <Select
+            options={toolOptions}
+            value={selectedTool}
+            onChange={setSelectedTool}
+            size="sm"
+            className="select-narrow"
+          />
         </div>
       </div>
 
@@ -172,14 +190,17 @@ export const Dashboard: React.FC = () => {
               {trendQuery.data && trendQuery.data.length > 0 ? (
                 <TokenDistributionChart
                   data={Object.values(
-                    trendQuery.data.reduce((acc, item) => {
-                      const tool = item.tool;
-                      if (!acc[tool]) {
-                        acc[tool] = { tool, tokens: 0 };
-                      }
-                      acc[tool].tokens += item.tokens;
-                      return acc;
-                    }, {} as Record<string, { tool: string; tokens: number }>)
+                    trendQuery.data.reduce(
+                      (acc, item) => {
+                        const tool = item.tool;
+                        if (!acc[tool]) {
+                          acc[tool] = { tool, tokens: 0 };
+                        }
+                        acc[tool].tokens += item.tokens;
+                        return acc;
+                      },
+                      {} as Record<string, { tool: string; tokens: number }>
+                    )
                   ).sort((a, b) => b.tokens - a.tokens)}
                   height={300}
                 />
@@ -209,7 +230,9 @@ export const Dashboard: React.FC = () => {
                     >
                       {t('tableTokens', language)}
                       {sortKey === 'total_tokens' && (
-                        <i className={`bi bi-caret-${sortDirection === 'asc' ? 'up' : 'down'}-fill ms-1`} />
+                        <i
+                          className={`bi bi-caret-${sortDirection === 'asc' ? 'up' : 'down'}-fill ms-1`}
+                        />
                       )}
                     </th>
                     <th
@@ -219,7 +242,9 @@ export const Dashboard: React.FC = () => {
                     >
                       {t('tableRequests', language)}
                       {sortKey === 'total_requests' && (
-                        <i className={`bi bi-caret-${sortDirection === 'asc' ? 'up' : 'down'}-fill ms-1`} />
+                        <i
+                          className={`bi bi-caret-${sortDirection === 'asc' ? 'up' : 'down'}-fill ms-1`}
+                        />
                       )}
                     </th>
                     <th
@@ -229,7 +254,9 @@ export const Dashboard: React.FC = () => {
                     >
                       {t('tableAverage', language)}
                       {sortKey === 'avg_tokens' && (
-                        <i className={`bi bi-caret-${sortDirection === 'asc' ? 'up' : 'down'}-fill ms-1`} />
+                        <i
+                          className={`bi bi-caret-${sortDirection === 'asc' ? 'up' : 'down'}-fill ms-1`}
+                        />
                       )}
                     </th>
                     <th
@@ -239,7 +266,9 @@ export const Dashboard: React.FC = () => {
                     >
                       {t('tableInput', language)}
                       {sortKey === 'total_input_tokens' && (
-                        <i className={`bi bi-caret-${sortDirection === 'asc' ? 'up' : 'down'}-fill ms-1`} />
+                        <i
+                          className={`bi bi-caret-${sortDirection === 'asc' ? 'up' : 'down'}-fill ms-1`}
+                        />
                       )}
                     </th>
                     <th
@@ -249,7 +278,9 @@ export const Dashboard: React.FC = () => {
                     >
                       {t('tableOutput', language)}
                       {sortKey === 'total_output_tokens' && (
-                        <i className={`bi bi-caret-${sortDirection === 'asc' ? 'up' : 'down'}-fill ms-1`} />
+                        <i
+                          className={`bi bi-caret-${sortDirection === 'asc' ? 'up' : 'down'}-fill ms-1`}
+                        />
                       )}
                     </th>
                     <th
@@ -259,7 +290,9 @@ export const Dashboard: React.FC = () => {
                     >
                       {t('days_tracked', language)}
                       {sortKey === 'days_count' && (
-                        <i className={`bi bi-caret-${sortDirection === 'asc' ? 'up' : 'down'}-fill ms-1`} />
+                        <i
+                          className={`bi bi-caret-${sortDirection === 'asc' ? 'up' : 'down'}-fill ms-1`}
+                        />
                       )}
                     </th>
                     <th>{t('date_range', language)}</th>
@@ -274,10 +307,10 @@ export const Dashboard: React.FC = () => {
                         </span>
                       </td>
                       <td className="text-end">{formatTokens(stats.total_tokens)}</td>
-                      <td className="text-end">{stats.total_requests || '-'}</td>
+                      <td className="text-end">{stats.total_requests ?? '-'}</td>
                       <td className="text-end">{(stats.avg_tokens / 1000000).toFixed(2)} M/day</td>
-                      <td className="text-end">{formatTokens(stats.total_input_tokens || 0)}</td>
-                      <td className="text-end">{formatTokens(stats.total_output_tokens || 0)}</td>
+                      <td className="text-end">{formatTokens(stats.total_input_tokens ?? 0)}</td>
+                      <td className="text-end">{formatTokens(stats.total_output_tokens ?? 0)}</td>
                       <td className="text-end">{stats.days_count}</td>
                       <td>
                         <small className="text-muted">

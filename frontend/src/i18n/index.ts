@@ -212,7 +212,8 @@ const translations: Record<Language, Translations> = {
     latencyCurve: 'Latency Curve',
     latency: 'Latency',
     noLatencyData: 'No latency data available',
-    noLatencyDataDesc: 'Latency data is calculated from user-assistant message pairs. No valid pairs found.',
+    noLatencyDataDesc:
+      'Latency data is calculated from user-assistant message pairs. No valid pairs found.',
     averageLatency: 'Average Latency',
     medianLatency: 'Median Latency',
     minLatency: 'Min Latency',
@@ -423,7 +424,8 @@ const translations: Record<Language, Translations> = {
     recordsDeleted: 'Records Deleted',
     editRetentionRule: 'Edit Retention Rule',
     cleanupPreview: 'Cleanup Preview',
-    cleanupPreviewDescription: 'This preview shows what data will be affected by the cleanup operation.',
+    cleanupPreviewDescription:
+      'This preview shows what data will be affected by the cleanup operation.',
     executeCleanup: 'Execute Cleanup',
     confirmCleanup: 'Are you sure you want to execute the cleanup? This action cannot be undone.',
     storageEstimates: 'Storage Estimates',
@@ -1213,7 +1215,8 @@ const translations: Record<Language, Translations> = {
     latencyCurve: 'レイテンシ曲線',
     latency: 'レイテンシ',
     noLatencyData: 'レイテンシデータがありません',
-    noLatencyDataDesc: 'レイテンシデータはユーザー-アシスタントメッセージペアから計算されます。有効なペアが見つかりません。',
+    noLatencyDataDesc:
+      'レイテンシデータはユーザー-アシスタントメッセージペアから計算されます。有効なペアが見つかりません。',
     averageLatency: '平均レイテンシ',
     medianLatency: '中央値レイテンシ',
     minLatency: '最小レイテンシ',
@@ -1565,7 +1568,8 @@ const translations: Record<Language, Translations> = {
     latencyCurve: '지연 곡선',
     latency: '지연',
     noLatencyData: '지연 데이터 없음',
-    noLatencyDataDesc: '지연 데이터는 사용자-어시스턴트 메시지 쌍에서 계산됩니다. 유효한 쌍을 찾을 수 없습니다.',
+    noLatencyDataDesc:
+      '지연 데이터는 사용자-어시스턴트 메시지 쌍에서 계산됩니다. 유효한 쌍을 찾을 수 없습니다.',
     averageLatency: '평균 지연',
     medianLatency: '중앙값 지연',
     minLatency: '최소 지연',
@@ -1728,9 +1732,9 @@ export function getLanguage(): Language {
 }
 
 export function t(key: string, language?: Language): string {
-  const lang = language || currentLanguage;
-  const langTranslations = translations[lang] || translations.en;
-  return langTranslations[key] || key;
+  const lang = language ?? currentLanguage;
+  const langTranslations = translations[lang] ?? translations.en;
+  return langTranslations[key] ?? key;
 }
 
 export function initLanguage(): void {

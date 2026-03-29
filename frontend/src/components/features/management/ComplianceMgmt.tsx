@@ -199,7 +199,7 @@ export const ComplianceMgmt: React.FC = () => {
     const rule = rules[dataType];
     setEditingRule(dataType);
     setEditDays(rule?.retention_days || 90);
-    setEditAction(rule?.action || 'delete');
+    setEditAction(rule?.action ?? 'delete');
     setShowEditModal(true);
   };
 
@@ -394,7 +394,8 @@ export const ComplianceMgmt: React.FC = () => {
 
     const totalRecords = storage.reduce((sum, s) => sum + s.record_count, 0);
     const totalSize = storage.reduce((sum, s) => sum + s.estimated_size_mb, 0);
-    const complianceScore = (complianceStatus as { compliance_score?: number }).compliance_score || 100;
+    const complianceScore =
+      (complianceStatus as { compliance_score?: number }).compliance_score ?? 100;
 
     return (
       <>
@@ -405,7 +406,9 @@ export const ComplianceMgmt: React.FC = () => {
               label={t('complianceScore', language)}
               value={`${complianceScore}%`}
               icon={<i className="bi bi-shield-check fs-4" />}
-              variant={complianceScore >= 80 ? 'success' : complianceScore >= 60 ? 'warning' : 'danger'}
+              variant={
+                complianceScore >= 80 ? 'success' : complianceScore >= 60 ? 'warning' : 'danger'
+              }
             />
           </div>
           <div className="col-md-3">
@@ -456,7 +459,9 @@ export const ComplianceMgmt: React.FC = () => {
                       </td>
                       <td>
                         {rule ? (
-                          <span>{rule.retention_days} {t('days', language)}</span>
+                          <span>
+                            {rule.retention_days} {t('days', language)}
+                          </span>
                         ) : (
                           <span className="text-muted">{t('notSet', language)}</span>
                         )}
@@ -471,7 +476,11 @@ export const ComplianceMgmt: React.FC = () => {
                         )}
                       </td>
                       <td>
-                        <Button variant="outline-primary" size="sm" onClick={() => handleOpenEdit(dt.value)}>
+                        <Button
+                          variant="outline-primary"
+                          size="sm"
+                          onClick={() => handleOpenEdit(dt.value)}
+                        >
                           <i className="bi bi-pencil" />
                         </Button>
                       </td>
@@ -604,9 +613,7 @@ export const ComplianceMgmt: React.FC = () => {
           {previewResult && (
             <div>
               <p className="text-muted mb-3">{t('cleanupPreviewDescription', language)}</p>
-              <pre className="bg-light p-3 rounded">
-                {JSON.stringify(previewResult, null, 2)}
-              </pre>
+              <pre className="bg-light p-3 rounded">{JSON.stringify(previewResult, null, 2)}</pre>
             </div>
           )}
         </Modal>
@@ -621,7 +628,12 @@ export const ComplianceMgmt: React.FC = () => {
         <h5>{t('complianceManagement', language)}</h5>
         {activeTab === 'retention' && (
           <div className="d-flex gap-2">
-            <Button variant="outline-secondary" size="sm" onClick={handlePreview} loading={isRunning}>
+            <Button
+              variant="outline-secondary"
+              size="sm"
+              onClick={handlePreview}
+              loading={isRunning}
+            >
               <i className="bi bi-eye me-1" />
               {t('preview', language)}
             </Button>
@@ -671,5 +683,5 @@ function getReportIcon(type: string): string {
     quota_usage: 'bi-sliders',
     comprehensive: 'bi-file-earmark-text',
   };
-  return icons[type] || 'bi-file-text';
+  return icons[type] ?? 'bi-file-text';
 }

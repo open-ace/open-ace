@@ -85,8 +85,8 @@ export const DataRetention: React.FC = () => {
   const handleOpenEdit = (dataType: string) => {
     const rule = rules[dataType];
     setEditingRule(dataType);
-    setEditDays(rule?.retention_days || 90);
-    setEditAction(rule?.action || 'delete');
+    setEditDays(rule?.retention_days ?? 90);
+    setEditAction(rule?.action ?? 'delete');
     setShowEditModal(true);
   };
 
@@ -146,7 +146,8 @@ export const DataRetention: React.FC = () => {
   // Calculate stats
   const totalRecords = storage.reduce((sum, s) => sum + s.record_count, 0);
   const totalSize = storage.reduce((sum, s) => sum + s.estimated_size_mb, 0);
-  const complianceScore = (complianceStatus as { compliance_score?: number }).compliance_score || 100;
+  const complianceScore =
+    (complianceStatus as { compliance_score?: number }).compliance_score ?? 100;
 
   return (
     <div className="data-retention">
@@ -172,7 +173,9 @@ export const DataRetention: React.FC = () => {
             label={t('complianceScore', language)}
             value={`${complianceScore}%`}
             icon={<i className="bi bi-shield-check fs-4" />}
-            variant={complianceScore >= 80 ? 'success' : complianceScore >= 60 ? 'warning' : 'danger'}
+            variant={
+              complianceScore >= 80 ? 'success' : complianceScore >= 60 ? 'warning' : 'danger'
+            }
           />
         </div>
         <div className="col-md-3">
@@ -223,7 +226,9 @@ export const DataRetention: React.FC = () => {
                     </td>
                     <td>
                       {rule ? (
-                        <span>{rule.retention_days} {t('days', language)}</span>
+                        <span>
+                          {rule.retention_days} {t('days', language)}
+                        </span>
                       ) : (
                         <span className="text-muted">{t('notSet', language)}</span>
                       )}
@@ -238,7 +243,11 @@ export const DataRetention: React.FC = () => {
                       )}
                     </td>
                     <td>
-                      <Button variant="outline-primary" size="sm" onClick={() => handleOpenEdit(dt.value)}>
+                      <Button
+                        variant="outline-primary"
+                        size="sm"
+                        onClick={() => handleOpenEdit(dt.value)}
+                      >
                         <i className="bi bi-pencil" />
                       </Button>
                     </td>
@@ -371,9 +380,7 @@ export const DataRetention: React.FC = () => {
         {previewResult && (
           <div>
             <p className="text-muted mb-3">{t('cleanupPreviewDescription', language)}</p>
-            <pre className="bg-light p-3 rounded">
-              {JSON.stringify(previewResult, null, 2)}
-            </pre>
+            <pre className="bg-light p-3 rounded">{JSON.stringify(previewResult, null, 2)}</pre>
           </div>
         )}
       </Modal>

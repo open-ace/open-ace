@@ -26,7 +26,7 @@ export const Loading: React.FC<LoadingProps> = ({
       className={cn('d-flex align-items-center justify-content-center', className)}
     >
       <div className={cn('spinner-border', sizeClasses[size])} role="status">
-        <span className="visually-hidden">{text || 'Loading...'}</span>
+        <span className="visually-hidden">{text ?? 'Loading...'}</span>
       </div>
       {text && <span className="ms-2">{text}</span>}
     </div>

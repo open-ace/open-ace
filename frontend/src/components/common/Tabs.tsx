@@ -35,7 +35,7 @@ export const Tabs: React.FC<TabsProps> = ({
   children,
   className,
 }) => {
-  const [internalActiveTab, setInternalActiveTab] = useState(defaultTab || '');
+  const [internalActiveTab, setInternalActiveTab] = useState(defaultTab ?? '');
 
   const activeTab = controlledActiveTab ?? internalActiveTab;
   const setActiveTab = (id: string) => {
@@ -160,7 +160,7 @@ export const SimpleTabs: React.FC<SimpleTabsProps> = ({
   className,
 }) => {
   return (
-    <Tabs defaultTab={defaultTab || tabs[0]?.id} activeTab={activeTab} onTabChange={onTabChange}>
+    <Tabs defaultTab={defaultTab ?? tabs[0]?.id} activeTab={activeTab} onTabChange={onTabChange}>
       <TabList className={cn('mb-3', className)}>
         {tabs.map((tab) => (
           <Tab key={tab.id} id={tab.id} icon={tab.icon}>

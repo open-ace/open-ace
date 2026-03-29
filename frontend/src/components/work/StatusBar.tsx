@@ -43,10 +43,10 @@ export const StatusBar: React.FC<StatusBarProps> = ({
     // If props are provided, use them
     if (propModel || propTokensUsed !== undefined) {
       setStatus({
-        model: propModel || 'GPT-4',
-        tokens_used: propTokensUsed || 0,
-        tokens_limit: propTokensLimit || 10000,
-        latency: propLatency || 0,
+        model: propModel ?? 'GPT-4',
+        tokens_used: propTokensUsed ?? 0,
+        tokens_limit: propTokensLimit ?? 10000,
+        latency: propLatency ?? 0,
         last_request: null,
       });
       return;
@@ -106,7 +106,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
       <div className="status-left">
         <span className="status-item" title={t('currentModel', language)}>
           <i className="bi bi-cpu" />
-          <span className="status-model">{status?.model || 'GPT-4'}</span>
+          <span className="status-model">{status?.model ?? 'GPT-4'}</span>
         </span>
       </div>
 
@@ -114,7 +114,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
         <span className="status-item status-token-usage" title={t('tokenUsage', language)}>
           <i className="bi bi-lightning" />
           <span className="status-tokens">
-            {formatTokens(status?.tokens_used || 0)} / {formatTokens(status?.tokens_limit || 10000)}
+            {formatTokens(status?.tokens_used ?? 0)} / {formatTokens(status?.tokens_limit ?? 10000)}
           </span>
           <div className="status-progress">
             <div
@@ -128,9 +128,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
       <div className="status-right">
         <span className="status-item" title={t('responseLatency', language)}>
           <i className="bi bi-clock" />
-          <span className="status-latency">
-            {formatLatency(status?.latency || 0)}
-          </span>
+          <span className="status-latency">{formatLatency(status?.latency ?? 0)}</span>
         </span>
         {loading && (
           <span className="status-loading">

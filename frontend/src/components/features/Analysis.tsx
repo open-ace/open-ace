@@ -41,7 +41,7 @@ export const Analysis: React.FC = () => {
 
   // Get hosts for filter
   const { data: hostsData } = useHosts();
-  const hosts = hostsData || [];
+  const hosts = hostsData ?? [];
 
   // Quick date range options
   const [quickRange, setQuickRange] = useState<'7' | '30' | '90' | 'all'>('30');
@@ -89,13 +89,29 @@ export const Analysis: React.FC = () => {
     isError: metricsError,
     error: metricsErrorMsg,
   } = useKeyMetrics(startDate, endDate, selectedHost || undefined);
-  const { data: dailyHourly, isLoading: dailyLoading } = useDailyHourlyUsage(startDate, endDate, selectedHost || undefined);
-  const { data: toolComparison, isLoading: toolsLoading } = useToolComparison(startDate, endDate, selectedHost || undefined);
+  const { data: dailyHourly, isLoading: dailyLoading } = useDailyHourlyUsage(
+    startDate,
+    endDate,
+    selectedHost || undefined
+  );
+  const { data: toolComparison, isLoading: toolsLoading } = useToolComparison(
+    startDate,
+    endDate,
+    selectedHost || undefined
+  );
   const { data: peakUsage } = usePeakUsage(startDate, endDate, selectedHost || undefined);
   const { data: userRanking } = useUserRanking(startDate, endDate, selectedHost || undefined, 10);
-  const { data: conversationStats } = useConversationStats(startDate, endDate, selectedHost || undefined);
+  const { data: conversationStats } = useConversationStats(
+    startDate,
+    endDate,
+    selectedHost || undefined
+  );
   const { data: recommendations } = useRecommendations(selectedHost || undefined);
-  const { data: userSegmentation } = useUserSegmentation(startDate, endDate, selectedHost || undefined);
+  const { data: userSegmentation } = useUserSegmentation(
+    startDate,
+    endDate,
+    selectedHost || undefined
+  );
 
   // Group by options
   const groupByOptions = useMemo(
@@ -130,12 +146,12 @@ export const Analysis: React.FC = () => {
   const isLoading = metricsLoading || dailyLoading || toolsLoading;
 
   // Prepare chart data
-  const dailyTrend = dailyHourly?.daily || [];
-  const hourlyData = dailyHourly?.hourly || [];
-  const tools = toolComparison?.tools || [];
+  const dailyTrend = dailyHourly?.daily ?? [];
+  const hourlyData = dailyHourly?.hourly ?? [];
+  const tools = toolComparison?.tools ?? [];
 
   // Calculate additional metrics
-  const activeUsers = userRanking?.users?.length || 0;
+  const activeUsers = userRanking?.users?.length ?? 0;
   const activeTools = tools.length;
   const healthScore = calculateHealthScore(keyMetrics, conversationStats);
   const anomalyCount = detectAnomalies(dailyTrend).length;
@@ -208,20 +224,12 @@ export const Analysis: React.FC = () => {
           {/* Tool Filter */}
           <div className="col-md-3">
             <label className="form-label">{t('tableTool', language)}</label>
-            <Select
-              options={toolOptions}
-              value={selectedTool}
-              onChange={setSelectedTool}
-            />
+            <Select options={toolOptions} value={selectedTool} onChange={setSelectedTool} />
           </div>
           {/* Host Filter */}
           <div className="col-md-3">
             <label className="form-label">{t('tableHost', language)}</label>
-            <Select
-              options={hostOptions}
-              value={selectedHost}
-              onChange={setSelectedHost}
-            />
+            <Select options={hostOptions} value={selectedHost} onChange={setSelectedHost} />
           </div>
         </div>
       </Card>
@@ -229,9 +237,7 @@ export const Analysis: React.FC = () => {
       {isLoading ? (
         <Loading size="lg" text={t('loading', language)} />
       ) : metricsError ? (
-        <Error
-          message={metricsErrorMsg?.message || t('error', language)}
-        />
+        <Error message={metricsErrorMsg?.message ?? t('error', language)} />
       ) : (
         <>
           {/* Key Metrics - 6 cards */}
@@ -239,7 +245,7 @@ export const Analysis: React.FC = () => {
             <div className="col-md-2">
               <StatCard
                 label={t('totalTokens', language)}
-                value={formatTokens(keyMetrics?.total_tokens || 0)}
+                value={formatTokens(keyMetrics?.total_tokens ?? 0)}
                 icon={<i className="bi bi-cpu fs-4" />}
                 variant="primary"
               />
@@ -247,7 +253,7 @@ export const Analysis: React.FC = () => {
             <div className="col-md-2">
               <StatCard
                 label={t('totalRequests', language)}
-                value={(keyMetrics?.total_messages || 0).toLocaleString()}
+                value={(keyMetrics?.total_messages ?? 0).toLocaleString()}
                 icon={<i className="bi bi-chat-dots fs-4" />}
                 variant="success"
               />
@@ -388,9 +394,9 @@ export const Analysis: React.FC = () => {
                       </thead>
                       <tbody>
                         {userRanking.users.slice(0, 10).map((user, index) => (
-                          <tr key={user.user_id || index}>
+                          <tr key={user.user_id ?? index}>
                             <td>{index + 1}</td>
-                            <td>{user.username || `User ${user.user_id}`}</td>
+                            <td>{user.username ?? `User ${user.user_id}`}</td>
                             <td>{user.requests.toLocaleString()}</td>
                             <td>{formatTokens(user.tokens)}</td>
                           </tr>
@@ -456,31 +462,31 @@ export const Analysis: React.FC = () => {
                     <tr>
                       <td>{t('avgMessagesPerSession', language)}</td>
                       <td className="text-end">
-                        {keyMetrics?.avg_messages_per_session?.toFixed(1) || '0'}
+                        {keyMetrics?.avg_messages_per_session?.toFixed(1) ?? '0'}
                       </td>
                     </tr>
                     <tr>
                       <td>{t('avgTokensPerSession', language)}</td>
                       <td className="text-end">
-                        {formatTokens(keyMetrics?.avg_tokens_per_session || 0)}
+                        {formatTokens(keyMetrics?.avg_tokens_per_session ?? 0)}
                       </td>
                     </tr>
                     <tr>
                       <td>{t('totalSessions', language)}</td>
                       <td className="text-end">
-                        {keyMetrics?.total_sessions?.toLocaleString() || '0'}
+                        {keyMetrics?.total_sessions?.toLocaleString() ?? '0'}
                       </td>
                     </tr>
                     <tr>
                       <td>{t('totalConversations', language)}</td>
                       <td className="text-end">
-                        {conversationStats?.total_conversations?.toLocaleString() || '0'}
+                        {conversationStats?.total_conversations?.toLocaleString() ?? '0'}
                       </td>
                     </tr>
                     <tr>
                       <td>{t('multiTurnRatio', language)}</td>
                       <td className="text-end">
-                        {conversationStats?.avg_conversation_length?.toFixed(1) || '0'}
+                        {conversationStats?.avg_conversation_length?.toFixed(1) ?? '0'}
                       </td>
                     </tr>
                   </tbody>
@@ -489,14 +495,19 @@ export const Analysis: React.FC = () => {
             </div>
             <div className="col-md-6">
               <Card title={t('userSegmentation', language)}>
-                {userSegmentation && (userSegmentation.high + userSegmentation.medium + userSegmentation.low + userSegmentation.dormant) > 0 ? (
+                {userSegmentation &&
+                userSegmentation.high +
+                  userSegmentation.medium +
+                  userSegmentation.low +
+                  userSegmentation.dormant >
+                  0 ? (
                   <DoughnutChart
                     labels={['High (>10K)', 'Medium (1K-10K)', 'Low (<1K)', 'Dormant']}
                     data={[
-                      userSegmentation.high || 0,
-                      userSegmentation.medium || 0,
-                      userSegmentation.low || 0,
-                      userSegmentation.dormant || 0,
+                      userSegmentation.high ?? 0,
+                      userSegmentation.medium ?? 0,
+                      userSegmentation.low ?? 0,
+                      userSegmentation.dormant ?? 0,
                     ]}
                     backgroundColor={[
                       'rgba(255, 99, 132, 0.8)',
@@ -605,9 +616,7 @@ const UsageHeatmap: React.FC<UsageHeatmapProps> = ({ hourlyData, language }) => 
   return (
     <div className="usage-heatmap">
       <div className="mb-3">
-        <small className="text-muted">
-          {t('usageHeatmapDescription', language)}
-        </small>
+        <small className="text-muted">{t('usageHeatmapDescription', language)}</small>
       </div>
       <div className="d-flex flex-wrap gap-1">
         {Array.from({ length: 24 }, (_, hour) => {
@@ -629,7 +638,7 @@ const UsageHeatmap: React.FC<UsageHeatmapProps> = ({ hourlyData, language }) => 
                 fontSize: '10px',
                 color: intensity > 50 ? 'white' : 'black',
               }}
-              title={`${hour}:00 - ${data?.tokens || 0} tokens`}
+              title={`${hour}:00 - ${data?.tokens ?? 0} tokens`}
             >
               {hour}
             </div>
@@ -643,10 +652,38 @@ const UsageHeatmap: React.FC<UsageHeatmapProps> = ({ hourlyData, language }) => 
       </div>
       <div className="mt-2 d-flex align-items-center justify-content-end gap-2">
         <small className="text-muted">{t('less', language)}</small>
-        <div style={{ width: '20px', height: '12px', backgroundColor: 'rgba(13, 110, 253, 0.1)', borderRadius: '2px' }} />
-        <div style={{ width: '20px', height: '12px', backgroundColor: 'rgba(13, 110, 253, 0.3)', borderRadius: '2px' }} />
-        <div style={{ width: '20px', height: '12px', backgroundColor: 'rgba(13, 110, 253, 0.6)', borderRadius: '2px' }} />
-        <div style={{ width: '20px', height: '12px', backgroundColor: 'rgba(13, 110, 253, 1)', borderRadius: '2px' }} />
+        <div
+          style={{
+            width: '20px',
+            height: '12px',
+            backgroundColor: 'rgba(13, 110, 253, 0.1)',
+            borderRadius: '2px',
+          }}
+        />
+        <div
+          style={{
+            width: '20px',
+            height: '12px',
+            backgroundColor: 'rgba(13, 110, 253, 0.3)',
+            borderRadius: '2px',
+          }}
+        />
+        <div
+          style={{
+            width: '20px',
+            height: '12px',
+            backgroundColor: 'rgba(13, 110, 253, 0.6)',
+            borderRadius: '2px',
+          }}
+        />
+        <div
+          style={{
+            width: '20px',
+            height: '12px',
+            backgroundColor: 'rgba(13, 110, 253, 1)',
+            borderRadius: '2px',
+          }}
+        />
         <small className="text-muted">{t('more', language)}</small>
       </div>
     </div>
@@ -692,8 +729,11 @@ const AnomalyTable: React.FC<AnomalyTableProps> = ({ anomalies, language }) => {
                 <span
                   className={cn(
                     'badge',
-                    anomaly.severity === 'high' ? 'bg-danger' :
-                    anomaly.severity === 'medium' ? 'bg-warning' : 'bg-info'
+                    anomaly.severity === 'high'
+                      ? 'bg-danger'
+                      : anomaly.severity === 'medium'
+                        ? 'bg-warning'
+                        : 'bg-info'
                   )}
                 >
                   {anomaly.severity}
@@ -765,7 +805,7 @@ function getRecommendationIcon(type: string): string {
     security: 'bi-shield-check',
     usage: 'bi-graph-up',
   };
-  return icons[type] || 'bi-lightbulb';
+  return icons[type] ?? 'bi-lightbulb';
 }
 
 function getImpactBadge(impact: string | undefined): string {
@@ -775,5 +815,5 @@ function getImpactBadge(impact: string | undefined): string {
     medium: 'bg-warning',
     low: 'bg-info',
   };
-  return badges[impact.toLowerCase()] || 'bg-secondary';
+  return badges[impact.toLowerCase()] ?? 'bg-secondary';
 }

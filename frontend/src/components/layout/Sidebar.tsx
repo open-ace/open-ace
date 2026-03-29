@@ -58,7 +58,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeSection, onNavigate }) =
       {/* Logo */}
       <div className="sidebar-header p-3 border-bottom border-secondary">
         <div className="d-flex align-items-center">
-          <img src="/static/icons/icon.svg" alt="Open ACE" style={{ width: '28px', height: '28px' }} className="me-2" />
+          <img
+            src="/static/icons/icon.svg"
+            alt="Open ACE"
+            style={{ width: '28px', height: '28px' }}
+            className="me-2"
+          />
           {!collapsed && <span className="fs-5 fw-bold">Open ACE</span>}
         </div>
       </div>
@@ -77,7 +82,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeSection, onNavigate }) =
                 )}
                 onClick={() => handleNavClick(item.id, item.href, isDisabled)}
                 disabled={isDisabled}
-                title={collapsed ? t(item.label, language) : isDisabled ? t('adminOnly', language) : undefined}
+                title={
+                  collapsed
+                    ? t(item.label, language)
+                    : isDisabled
+                      ? t('adminOnly', language)
+                      : undefined
+                }
               >
                 <i className={cn('bi', item.icon, 'me-2')} />
                 {!collapsed && <span>{t(item.label, language)}</span>}

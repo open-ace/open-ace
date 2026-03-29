@@ -29,7 +29,7 @@ export const Select: React.FC<SelectProps> = ({
       id={id}
       data-testid={testId}
       className={cn('form-select', sizeClasses[size], className)}
-      value={value || ''}
+      value={value ?? ''}
       onChange={(e) => onChange(e.target.value)}
       disabled={disabled}
       style={style}
@@ -54,6 +54,6 @@ export const Select: React.FC<SelectProps> = ({
 export function createOptions(values: string[], labels?: Record<string, string>): SelectOption[] {
   return values.map((value) => ({
     value,
-    label: labels?.[value] || value,
+    label: labels?.[value] ?? value,
   }));
 }

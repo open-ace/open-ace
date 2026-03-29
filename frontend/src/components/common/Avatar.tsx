@@ -62,7 +62,7 @@ export const Avatar: React.FC<AvatarProps> = ({
       {src ? (
         <img
           src={src}
-          alt={alt || name || 'Avatar'}
+          alt={alt ?? name ?? 'Avatar'}
           className={cn('w-100 h-100', shape === 'circle' && 'rounded-circle')}
           style={{ objectFit: 'cover' }}
         />

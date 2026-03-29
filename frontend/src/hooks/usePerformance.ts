@@ -23,10 +23,10 @@ export function useRenderPerformance(componentName: string, enabled = true) {
   useEffect(() => {
     if (!enabled) return;
 
-    renderStart.current = performance.now();
+    renderStart.current = window.performance.now();
 
     return () => {
-      const duration = performance.now() - renderStart.current;
+      const duration = window.performance.now() - renderStart.current;
       trackRender(componentName, duration);
     };
   });

@@ -64,10 +64,10 @@ export interface Recommendation {
 }
 
 export interface UserSegmentation {
-  high: number;      // >10K tokens
-  medium: number;    // 1K-10K tokens
-  low: number;       // <1K tokens
-  dormant: number;   // No activity
+  high: number; // >10K tokens
+  medium: number; // 1K-10K tokens
+  low: number; // <1K tokens
+  dormant: number; // No activity
 }
 
 // Batch response type
@@ -114,10 +114,7 @@ export const analysisApi = {
     if (tool) params.tool = tool;
     if (host) params.host = host;
 
-    const response = await apiClient.get<HourlyUsage[]>(
-      '/api/analysis/hourly-usage',
-      params
-    );
+    const response = await apiClient.get<HourlyUsage[]>('/api/analysis/hourly-usage', params);
     return response || [];
   },
 

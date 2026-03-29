@@ -32,10 +32,7 @@ import {
   Skeleton,
 } from '@/components/common';
 import { formatTokens } from '@/utils';
-import {
-  useBatchAnalysis,
-  useHosts,
-} from '@/hooks';
+import { useBatchAnalysis, useHosts } from '@/hooks';
 
 // Skeleton components
 const MetricsSkeleton: React.FC = () => (
@@ -67,7 +64,7 @@ export const TrendAnalysis: React.FC = () => {
 
   // Get hosts for filter
   const { data: hostsData } = useHosts();
-  const hosts = hostsData || [];
+  const hosts = hostsData ?? [];
 
   // Quick date range options
   const [quickRange, setQuickRange] = useState<'7' | '30' | '90' | 'all'>('30');
@@ -156,12 +153,12 @@ export const TrendAnalysis: React.FC = () => {
   const userSegmentation = batchData?.user_segmentation;
 
   // Prepare chart data
-  const dailyTrend = dailyHourly?.daily || [];
-  const hourlyData = dailyHourly?.hourly || [];
-  const tools = toolComparison?.tools || [];
+  const dailyTrend = dailyHourly?.daily ?? [];
+  const hourlyData = dailyHourly?.hourly ?? [];
+  const tools = toolComparison?.tools ?? [];
 
   // Calculate additional metrics
-  const activeUsers = userRanking?.users?.length || 0;
+  const activeUsers = userRanking?.users?.length ?? 0;
   const healthScore = calculateHealthScore(keyMetrics, conversationStats);
 
   // Show skeleton on initial load
@@ -285,20 +282,12 @@ export const TrendAnalysis: React.FC = () => {
           {/* Tool Filter */}
           <div className="col-md-3">
             <label className="form-label">{t('tableTool', language)}</label>
-            <Select
-              options={toolOptions}
-              value={selectedTool}
-              onChange={setSelectedTool}
-            />
+            <Select options={toolOptions} value={selectedTool} onChange={setSelectedTool} />
           </div>
           {/* Host Filter */}
           <div className="col-md-3">
             <label className="form-label">{t('tableHost', language)}</label>
-            <Select
-              options={hostOptions}
-              value={selectedHost}
-              onChange={setSelectedHost}
-            />
+            <Select options={hostOptions} value={selectedHost} onChange={setSelectedHost} />
           </div>
         </div>
       </Card>
@@ -308,7 +297,7 @@ export const TrendAnalysis: React.FC = () => {
         <div className="col-md-3">
           <StatCard
             label={t('totalTokens', language)}
-            value={formatTokens(keyMetrics?.total_tokens || 0)}
+            value={formatTokens(keyMetrics?.total_tokens ?? 0)}
             icon={<i className="bi bi-cpu fs-4" />}
             variant="primary"
           />
@@ -316,7 +305,7 @@ export const TrendAnalysis: React.FC = () => {
         <div className="col-md-3">
           <StatCard
             label={t('totalRequests', language)}
-            value={(keyMetrics?.total_messages || 0).toLocaleString()}
+            value={(keyMetrics?.total_messages ?? 0).toLocaleString()}
             icon={<i className="bi bi-chat-dots fs-4" />}
             variant="success"
           />
@@ -382,12 +371,17 @@ export const TrendAnalysis: React.FC = () => {
           <Card title={t('peakUsagePeriods', language)}>
             {peakUsage?.peak_days && peakUsage.peak_days.length > 0 ? (
               <div style={{ minHeight: 380 }}>
-                <table className="table table-sm table-hover" style={{ tableLayout: 'fixed', width: '100%' }}>
+                <table
+                  className="table table-sm table-hover"
+                  style={{ tableLayout: 'fixed', width: '100%' }}
+                >
                   <thead>
                     <tr>
                       <th style={{ width: '10%' }}>#</th>
                       <th style={{ width: '45%' }}>{t('tableDate', language)}</th>
-                      <th style={{ width: '45%' }} className="text-end">{t('tableTokens', language)}</th>
+                      <th style={{ width: '45%' }} className="text-end">
+                        {t('tableTokens', language)}
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -412,13 +406,20 @@ export const TrendAnalysis: React.FC = () => {
           <Card title={t('topActiveUsers', language)}>
             {userRanking?.users && userRanking.users.length > 0 ? (
               <div style={{ minHeight: 380 }}>
-                <table className="table table-sm table-hover" style={{ tableLayout: 'fixed', width: '100%' }}>
+                <table
+                  className="table table-sm table-hover"
+                  style={{ tableLayout: 'fixed', width: '100%' }}
+                >
                   <thead>
                     <tr>
                       <th style={{ width: '10%' }}>#</th>
                       <th style={{ width: '40%' }}>{t('tableUser', language)}</th>
-                      <th style={{ width: '25%' }} className="text-end">{t('tableMessages', language)}</th>
-                      <th style={{ width: '25%' }} className="text-end">{t('tableTokens', language)}</th>
+                      <th style={{ width: '25%' }} className="text-end">
+                        {t('tableMessages', language)}
+                      </th>
+                      <th style={{ width: '25%' }} className="text-end">
+                        {t('tableTokens', language)}
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -450,31 +451,31 @@ export const TrendAnalysis: React.FC = () => {
                   <tr>
                     <td>{t('avgMessagesPerSession', language)}</td>
                     <td className="text-end">
-                      {Math.round(keyMetrics?.avg_messages_per_session || 0)}
+                      {Math.round(keyMetrics?.avg_messages_per_session ?? 0)}
                     </td>
                   </tr>
                   <tr>
                     <td>{t('avgTokensPerSession', language)}</td>
                     <td className="text-end">
-                      {formatTokens(keyMetrics?.avg_tokens_per_session || 0)}
+                      {formatTokens(keyMetrics?.avg_tokens_per_session ?? 0)}
                     </td>
                   </tr>
                   <tr>
                     <td>{t('totalSessions', language)}</td>
                     <td className="text-end">
-                      {keyMetrics?.total_sessions?.toLocaleString() || '0'}
+                      {keyMetrics?.total_sessions?.toLocaleString() ?? '0'}
                     </td>
                   </tr>
                   <tr>
                     <td>{t('totalConversations', language)}</td>
                     <td className="text-end">
-                      {conversationStats?.total_conversations?.toLocaleString() || '0'}
+                      {conversationStats?.total_conversations?.toLocaleString() ?? '0'}
                     </td>
                   </tr>
                   <tr>
                     <td>{t('multiTurnRatio', language)}</td>
                     <td className="text-end">
-                      {conversationStats?.avg_conversation_length?.toFixed(1) || '0'}
+                      {conversationStats?.avg_conversation_length?.toFixed(1) ?? '0'}
                     </td>
                   </tr>
                 </tbody>
@@ -484,7 +485,12 @@ export const TrendAnalysis: React.FC = () => {
         </div>
         <div className="col-md-6">
           <Card title={t('userSegmentation', language)}>
-            {userSegmentation && (userSegmentation.high + userSegmentation.medium + userSegmentation.low + userSegmentation.dormant) > 0 ? (
+            {userSegmentation &&
+            userSegmentation.high +
+              userSegmentation.medium +
+              userSegmentation.low +
+              userSegmentation.dormant >
+              0 ? (
               <DoughnutChart
                 labels={['High (>10K)', 'Medium (1K-10K)', 'Low (<1K)', 'Dormant']}
                 data={[
@@ -564,9 +570,7 @@ const UsageHeatmap = React.memo<UsageHeatmapProps>(({ hourlyData, language }) =>
   return (
     <div className="usage-heatmap">
       <div className="mb-3">
-        <small className="text-muted">
-          {t('usageHeatmapDescription', language)}
-        </small>
+        <small className="text-muted">{t('usageHeatmapDescription', language)}</small>
       </div>
       <div className="d-flex flex-wrap gap-1">
         {Array.from({ length: 24 }, (_, hour) => {
@@ -588,7 +592,7 @@ const UsageHeatmap = React.memo<UsageHeatmapProps>(({ hourlyData, language }) =>
                 fontSize: '10px',
                 color: intensity > 50 ? 'white' : 'black',
               }}
-              title={`${hour}:00 - ${data?.tokens || 0} tokens`}
+              title={`${hour}:00 - ${data?.tokens ?? 0} tokens`}
             >
               {hour}
             </div>
@@ -602,10 +606,38 @@ const UsageHeatmap = React.memo<UsageHeatmapProps>(({ hourlyData, language }) =>
       </div>
       <div className="mt-2 d-flex align-items-center justify-content-end gap-2">
         <small className="text-muted">{t('less', language)}</small>
-        <div style={{ width: '20px', height: '12px', backgroundColor: 'rgba(13, 110, 253, 0.1)', borderRadius: '2px' }} />
-        <div style={{ width: '20px', height: '12px', backgroundColor: 'rgba(13, 110, 253, 0.3)', borderRadius: '2px' }} />
-        <div style={{ width: '20px', height: '12px', backgroundColor: 'rgba(13, 110, 253, 0.6)', borderRadius: '2px' }} />
-        <div style={{ width: '20px', height: '12px', backgroundColor: 'rgba(13, 110, 253, 1)', borderRadius: '2px' }} />
+        <div
+          style={{
+            width: '20px',
+            height: '12px',
+            backgroundColor: 'rgba(13, 110, 253, 0.1)',
+            borderRadius: '2px',
+          }}
+        />
+        <div
+          style={{
+            width: '20px',
+            height: '12px',
+            backgroundColor: 'rgba(13, 110, 253, 0.3)',
+            borderRadius: '2px',
+          }}
+        />
+        <div
+          style={{
+            width: '20px',
+            height: '12px',
+            backgroundColor: 'rgba(13, 110, 253, 0.6)',
+            borderRadius: '2px',
+          }}
+        />
+        <div
+          style={{
+            width: '20px',
+            height: '12px',
+            backgroundColor: 'rgba(13, 110, 253, 1)',
+            borderRadius: '2px',
+          }}
+        />
         <small className="text-muted">{t('more', language)}</small>
       </div>
     </div>

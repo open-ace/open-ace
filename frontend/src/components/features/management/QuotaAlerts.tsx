@@ -56,7 +56,14 @@ export const QuotaAlerts: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('quota');
 
   // --- Quota State ---
-  const { data: quotaData, isLoading: quotaLoading, isFetching, isError, error, refetch } = useQuotaUsage();
+  const {
+    data: quotaData,
+    isLoading: quotaLoading,
+    isFetching,
+    isError,
+    error,
+    refetch,
+  } = useQuotaUsage();
   const updateQuota = useUpdateQuota();
 
   const [showQuotaModal, setShowQuotaModal] = useState(false);
@@ -181,9 +188,7 @@ export const QuotaAlerts: React.FC = () => {
   const handleMarkAsRead = async (alertId: string) => {
     try {
       await alertsApi.markAsRead(alertId);
-      setAlerts((prev) =>
-        prev.map((a) => (a.id === alertId ? { ...a, is_read: true } : a))
-      );
+      setAlerts((prev) => prev.map((a) => (a.id === alertId ? { ...a, is_read: true } : a)));
       setUnreadCount((prev) => Math.max(0, prev - 1));
     } catch (err) {
       console.error('Failed to mark alert as read:', err);
@@ -289,7 +294,7 @@ export const QuotaAlerts: React.FC = () => {
                       <div className="d-flex justify-content-between mb-1">
                         <small>{t('dailyTokenQuota', language)}</small>
                         <small>
-                          {formatTokens(user.tokens_used_today || 0)} /{' '}
+                          {formatTokens(user.tokens_used_today ?? 0)} /{' '}
                           {user.daily_token_quota ? formatTokens(user.daily_token_quota) : '∞'}
                         </small>
                       </div>
@@ -305,7 +310,7 @@ export const QuotaAlerts: React.FC = () => {
                       <div className="d-flex justify-content-between mb-1">
                         <small>{t('monthlyTokenQuota', language)}</small>
                         <small>
-                          {formatTokens(user.tokens_used_month || 0)} /{' '}
+                          {formatTokens(user.tokens_used_month ?? 0)} /{' '}
                           {user.monthly_token_quota ? formatTokens(user.monthly_token_quota) : '∞'}
                         </small>
                       </div>
@@ -320,11 +325,11 @@ export const QuotaAlerts: React.FC = () => {
                     <div className="d-flex gap-3 text-muted small">
                       <span>
                         <i className="bi bi-arrow-repeat me-1" />
-                        {t('dailyRequests', language)}: {user.requests_today || 0}
+                        {t('dailyRequests', language)}: {user.requests_today ?? 0}
                       </span>
                       <span>
                         <i className="bi bi-calendar me-1" />
-                        {t('monthlyRequests', language)}: {user.requests_month || 0}
+                        {t('monthlyRequests', language)}: {user.requests_month ?? 0}
                       </span>
                     </div>
                   </Card>
@@ -362,7 +367,7 @@ export const QuotaAlerts: React.FC = () => {
                 <label className="form-label">{t('dailyTokenQuota', language)}</label>
                 <TextInput
                   type="number"
-                  value={formData.daily_token_quota?.toString() || ''}
+                  value={formData.daily_token_quota?.toString() ?? ''}
                   onChange={(value: string) =>
                     setFormData({
                       ...formData,
@@ -376,7 +381,7 @@ export const QuotaAlerts: React.FC = () => {
                 <label className="form-label">{t('monthlyTokenQuota', language)}</label>
                 <TextInput
                   type="number"
-                  value={formData.monthly_token_quota?.toString() || ''}
+                  value={formData.monthly_token_quota?.toString() ?? ''}
                   onChange={(value: string) =>
                     setFormData({
                       ...formData,
@@ -390,7 +395,7 @@ export const QuotaAlerts: React.FC = () => {
                 <label className="form-label">{t('dailyRequestQuota', language)}</label>
                 <TextInput
                   type="number"
-                  value={formData.daily_request_quota?.toString() || ''}
+                  value={formData.daily_request_quota?.toString() ?? ''}
                   onChange={(value: string) =>
                     setFormData({
                       ...formData,
@@ -404,7 +409,7 @@ export const QuotaAlerts: React.FC = () => {
                 <label className="form-label">{t('monthlyRequestQuota', language)}</label>
                 <TextInput
                   type="number"
-                  value={formData.monthly_request_quota?.toString() || ''}
+                  value={formData.monthly_request_quota?.toString() ?? ''}
                   onChange={(value: string) =>
                     setFormData({
                       ...formData,
@@ -478,7 +483,11 @@ export const QuotaAlerts: React.FC = () => {
             </div>
             <div className="col-md-3">
               <label className="form-label">{t('severity', language)}</label>
-              <Select options={SEVERITY_OPTIONS} value={severityFilter} onChange={setSeverityFilter} />
+              <Select
+                options={SEVERITY_OPTIONS}
+                value={severityFilter}
+                onChange={setSeverityFilter}
+              />
             </div>
             <div className="col-md-3">
               <label className="form-label">{t('readStatus', language)}</label>
@@ -522,7 +531,10 @@ export const QuotaAlerts: React.FC = () => {
                         )}
                       </td>
                       <td>
-                        <span className="text-truncate d-inline-block" style={{ maxWidth: '300px' }}>
+                        <span
+                          className="text-truncate d-inline-block"
+                          style={{ maxWidth: '300px' }}
+                        >
                           {alert.message}
                         </span>
                       </td>
@@ -618,10 +630,8 @@ export const QuotaAlerts: React.FC = () => {
               <input
                 type="url"
                 className="form-control"
-                value={preferences.webhook_url || ''}
-                onChange={(e) =>
-                  setPreferences({ ...preferences, webhook_url: e.target.value })
-                }
+                value={preferences.webhook_url ?? ''}
+                onChange={(e) => setPreferences({ ...preferences, webhook_url: e.target.value })}
                 placeholder="https://example.com/webhook"
               />
             </div>

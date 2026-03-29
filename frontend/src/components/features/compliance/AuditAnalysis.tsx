@@ -165,8 +165,8 @@ export const AuditAnalysis: React.FC = () => {
                   securityScore.overall_score >= 80
                     ? 'text-success'
                     : securityScore.overall_score >= 60
-                    ? 'text-warning'
-                    : 'text-danger'
+                      ? 'text-warning'
+                      : 'text-danger'
                 )}
               >
                 <div
@@ -177,8 +177,8 @@ export const AuditAnalysis: React.FC = () => {
                       securityScore.overall_score >= 80
                         ? '#198754'
                         : securityScore.overall_score >= 60
-                        ? '#ffc107'
-                        : '#dc3545',
+                          ? '#ffc107'
+                          : '#dc3545',
                   }}
                 >
                   {securityScore.overall_score}
@@ -197,8 +197,8 @@ export const AuditAnalysis: React.FC = () => {
                         data.status === 'good'
                           ? 'text-success'
                           : data.status === 'warning'
-                          ? 'text-warning'
-                          : 'text-danger'
+                            ? 'text-warning'
+                            : 'text-danger'
                       )}
                     >
                       {(data as { score: number }).score}%
@@ -211,8 +211,8 @@ export const AuditAnalysis: React.FC = () => {
                         data.status === 'good'
                           ? 'bg-success'
                           : data.status === 'warning'
-                          ? 'bg-warning'
-                          : 'bg-danger'
+                            ? 'bg-warning'
+                            : 'bg-danger'
                       )}
                       style={{ width: `${(data as { score: number }).score}%` }}
                     />
@@ -351,7 +351,7 @@ export const AuditAnalysis: React.FC = () => {
               type="number"
               className="form-control"
               placeholder={t('enterUserId', language)}
-              value={selectedUserId || ''}
+              value={selectedUserId ?? ''}
               onChange={(e) => setSelectedUserId(parseInt(e.target.value) || null)}
             />
           </div>
@@ -362,7 +362,7 @@ export const AuditAnalysis: React.FC = () => {
             <div className="row">
               <div className="col-md-6">
                 <h6>{t('activeHours', language)}</h6>
-                {Object.keys(userProfile.active_hours || {}).length > 0 ? (
+                {Object.keys(userProfile.active_hours ?? {}).length > 0 ? (
                   <BarChart
                     labels={Object.keys(userProfile.active_hours)}
                     datasets={[
@@ -394,10 +394,7 @@ export const AuditAnalysis: React.FC = () => {
             </div>
           </div>
         ) : (
-          <EmptyState
-            icon="bi-person"
-            title={t('selectUserToViewProfile', language)}
-          />
+          <EmptyState icon="bi-person" title={t('selectUserToViewProfile', language)} />
         )}
       </Card>
     </div>

@@ -99,7 +99,10 @@ export const sessionsApi = {
   /**
    * Get a single session by ID
    */
-  async getSession(sessionId: string, includeMessages: boolean = false): Promise<{ success: boolean; data: AgentSession; error?: string }> {
+  async getSession(
+    sessionId: string,
+    includeMessages: boolean = false
+  ): Promise<{ success: boolean; data: AgentSession; error?: string }> {
     const params: Record<string, string> = {};
     if (includeMessages) params.include_messages = 'true';
 

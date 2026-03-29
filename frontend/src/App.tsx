@@ -208,64 +208,38 @@ const AppContent: React.FC = () => {
       {/* Manage Mode Routes - Admin only */}
       <Route
         path="/manage/*"
-        element={
-          isAdmin ? (
-            <ManageRoutes />
-          ) : (
-            <Navigate to="/work" replace />
-          )
-        }
+        element={isAdmin ? <ManageRoutes /> : <Navigate to="/work" replace />}
       />
 
       {/* Legacy Routes - redirect based on user role */}
       <Route
         path="/dashboard"
         element={
-          isAdmin ? (
-            <Navigate to="/manage/dashboard" replace />
-          ) : (
-            <Navigate to="/work" replace />
-          )
+          isAdmin ? <Navigate to="/manage/dashboard" replace /> : <Navigate to="/work" replace />
         }
       />
       <Route
         path="/messages"
         element={
-          isAdmin ? (
-            <Navigate to="/manage/messages" replace />
-          ) : (
-            <Navigate to="/work" replace />
-          )
+          isAdmin ? <Navigate to="/manage/messages" replace /> : <Navigate to="/work" replace />
         }
       />
       <Route
         path="/analysis"
         element={
-          isAdmin ? (
-            <Navigate to="/manage/analysis" replace />
-          ) : (
-            <Navigate to="/work" replace />
-          )
+          isAdmin ? <Navigate to="/manage/analysis" replace /> : <Navigate to="/work" replace />
         }
       />
       <Route
         path="/management"
         element={
-          isAdmin ? (
-            <Navigate to="/manage/users" replace />
-          ) : (
-            <Navigate to="/work" replace />
-          )
+          isAdmin ? <Navigate to="/manage/users" replace /> : <Navigate to="/work" replace />
         }
       />
       <Route
         path="/security"
         element={
-          isAdmin ? (
-            <Navigate to="/manage/security" replace />
-          ) : (
-            <Navigate to="/work" replace />
-          )
+          isAdmin ? <Navigate to="/manage/security" replace /> : <Navigate to="/work" replace />
         }
       />
       <Route path="/workspace" element={<Navigate to="/work" replace />} />

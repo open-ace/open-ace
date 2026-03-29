@@ -125,9 +125,7 @@ export const AlertManagement: React.FC = () => {
   const handleMarkAsRead = async (alertId: string) => {
     try {
       await alertsApi.markAsRead(alertId);
-      setAlerts((prev) =>
-        prev.map((a) => (a.id === alertId ? { ...a, is_read: true } : a))
-      );
+      setAlerts((prev) => prev.map((a) => (a.id === alertId ? { ...a, is_read: true } : a)));
       setUnreadCount((prev) => Math.max(0, prev - 1));
     } catch (err) {
       console.error('Failed to mark alert as read:', err);
@@ -255,7 +253,11 @@ export const AlertManagement: React.FC = () => {
           </div>
           <div className="col-md-3">
             <label className="form-label">{t('severity', language)}</label>
-            <Select options={SEVERITY_OPTIONS} value={severityFilter} onChange={setSeverityFilter} />
+            <Select
+              options={SEVERITY_OPTIONS}
+              value={severityFilter}
+              onChange={setSeverityFilter}
+            />
           </div>
           <div className="col-md-3">
             <label className="form-label">{t('readStatus', language)}</label>
@@ -381,9 +383,7 @@ export const AlertManagement: React.FC = () => {
                 type="checkbox"
                 id="pushEnabled"
                 checked={preferences.push_enabled}
-                onChange={(e) =>
-                  setPreferences({ ...preferences, push_enabled: e.target.checked })
-                }
+                onChange={(e) => setPreferences({ ...preferences, push_enabled: e.target.checked })}
               />
               <label className="form-check-label" htmlFor="pushEnabled">
                 {t('pushNotifications', language)}
@@ -395,10 +395,8 @@ export const AlertManagement: React.FC = () => {
             <input
               type="url"
               className="form-control"
-              value={preferences.webhook_url || ''}
-              onChange={(e) =>
-                setPreferences({ ...preferences, webhook_url: e.target.value })
-              }
+              value={preferences.webhook_url ?? ''}
+              onChange={(e) => setPreferences({ ...preferences, webhook_url: e.target.value })}
               placeholder="https://example.com/webhook"
             />
           </div>

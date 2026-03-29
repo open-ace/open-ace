@@ -27,7 +27,14 @@ export const Report: React.FC = () => {
   });
   const [endDate, setEndDate] = useState<string>(() => formatDate(new Date(), 'iso'));
 
-  const { data: report, isLoading, isFetching, isError, error, refetch } = useMyUsage(startDate, endDate);
+  const {
+    data: report,
+    isLoading,
+    isFetching,
+    isError,
+    error,
+    refetch,
+  } = useMyUsage(startDate, endDate);
 
   // Prepare chart data - by tool
   const chartData = useMemo(() => {
@@ -37,12 +44,12 @@ export const Report: React.FC = () => {
     const aggregated: Record<string, { date: string; tool: string; tokens: number }> = {};
 
     report.daily_usage.forEach((item) => {
-      const toolName = item.tool_name || 'unknown';
+      const toolName = item.tool_name ?? 'unknown';
       const key = `${item.date}-${toolName}`;
       if (!aggregated[key]) {
         aggregated[key] = { date: item.date, tool: toolName, tokens: 0 };
       }
-      aggregated[key].tokens += item.tokens_used || 0;
+      aggregated[key].tokens += item.tokens_used ?? 0;
     });
 
     return Object.values(aggregated).sort((a, b) => a.date.localeCompare(b.date));
@@ -56,11 +63,11 @@ export const Report: React.FC = () => {
     const aggregated: Record<string, { tool: string; tokens: number }> = {};
 
     report.daily_usage.forEach((item) => {
-      const toolName = item.tool_name || 'unknown';
+      const toolName = item.tool_name ?? 'unknown';
       if (!aggregated[toolName]) {
         aggregated[toolName] = { tool: toolName, tokens: 0 };
       }
-      aggregated[toolName].tokens += item.tokens_used || 0;
+      aggregated[toolName].tokens += item.tokens_used ?? 0;
     });
 
     return Object.values(aggregated).sort((a, b) => b.tokens - a.tokens);
@@ -71,7 +78,7 @@ export const Report: React.FC = () => {
   }
 
   if (isError) {
-    return <Error message={error?.message || t('error', language)} onRetry={() => refetch()} />;
+    return <Error message={error?.message ?? t('error', language)} onRetry={() => refetch()} />;
   }
 
   return (
@@ -183,10 +190,7 @@ export const Report: React.FC = () => {
         <div className="col-md-4 mb-4">
           <Card title={t('tokenDistribution', language)}>
             {tokenDistributionData.length > 0 ? (
-              <TokenDistributionChart
-                data={tokenDistributionData}
-                height={300}
-              />
+              <TokenDistributionChart data={tokenDistributionData} height={300} />
             ) : (
               <EmptyState icon="bi-pie-chart" title={t('noData', language)} />
             )}
@@ -211,9 +215,9 @@ export const Report: React.FC = () => {
               </thead>
               <tbody>
                 {report.daily_usage.slice(0, 20).map((item, index) => (
-                  <tr key={`${item.date}-${item.tool_name || index}`}>
+                  <tr key={`${item.date}-${item.tool_name ?? index}`}>
                     <td>{item.date}</td>
-                    <td>{item.tool_name || '-'}</td>
+                    <td>{item.tool_name ?? '-'}</td>
                     <td className="text-end">{formatTokens(item.input_tokens)}</td>
                     <td className="text-end">{formatTokens(item.output_tokens)}</td>
                     <td className="text-end">{formatTokens(item.tokens_used)}</td>

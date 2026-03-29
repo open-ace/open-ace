@@ -106,7 +106,7 @@ function observeLCP(): void {
     });
 
     observer.observe({ type: 'largest-contentful-paint', buffered: true });
-  } catch (e) {
+  } catch {
     // LCP not supported
   }
 }
@@ -136,7 +136,7 @@ function observeFID(): void {
     });
 
     observer.observe({ type: 'first-input', buffered: true });
-  } catch (e) {
+  } catch {
     // FID not supported
   }
 }
@@ -184,7 +184,7 @@ function observeCLS(): void {
     });
 
     window.addEventListener('pagehide', reportCLS);
-  } catch (e) {
+  } catch {
     // CLS not supported
   }
 }
@@ -233,7 +233,7 @@ function observeINP(): void {
     });
 
     window.addEventListener('pagehide', reportINP);
-  } catch (e) {
+  } catch {
     // INP not supported
   }
 }
@@ -244,7 +244,7 @@ function observeINP(): void {
 function getFCP(): void {
   if (!('performance' in window)) return;
 
-  const paintEntries = performance.getEntriesByType('paint');
+  const paintEntries = window.performance.getEntriesByType('paint');
   const fcpEntry = paintEntries.find((entry) => entry.name === 'first-contentful-paint');
 
   if (fcpEntry) {
@@ -264,7 +264,7 @@ function getFCP(): void {
 function getTTFB(): void {
   if (!('performance' in window)) return;
 
-  const navigationEntries = performance.getEntriesByType(
+  const navigationEntries = window.performance.getEntriesByType(
     'navigation'
   ) as PerformanceNavigationTiming[];
   const navigationEntry = navigationEntries[0];
@@ -298,10 +298,10 @@ export function trackTiming(name: string, duration: number): void {
  * Start a timing measurement
  */
 export function startMeasure(name: string): () => number {
-  const start = performance.now();
+  const start = window.performance.now();
 
   return () => {
-    const duration = performance.now() - start;
+    const duration = window.performance.now() - start;
     trackTiming(name, duration);
     return duration;
   };

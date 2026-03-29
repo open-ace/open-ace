@@ -106,8 +106,6 @@ export const ssoApi = {
   },
 
   async unlinkIdentity(userId: number, providerName: string): Promise<void> {
-    await apiClient.delete<{ message: string }>(
-      `/api/sso/identities/${userId}/${providerName}`
-    );
+    await apiClient.delete<{ message: string }>(`/api/sso/identities/${userId}/${providerName}`);
   },
 };

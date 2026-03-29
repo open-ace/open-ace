@@ -28,8 +28,13 @@ export const Card: React.FC<CardProps> = ({
   'data-testid': testId,
 }) => {
   return (
-    <div id={id} data-testid={testId} style={style} className={cn('card', variantClasses[variant], className)}>
-      {(title || subtitle || icon) && (
+    <div
+      id={id}
+      data-testid={testId}
+      style={style}
+      className={cn('card', variantClasses[variant], className)}
+    >
+      {(title ?? subtitle ?? icon) && (
         <div className="card-header d-flex align-items-center">
           {icon && <span className="me-2">{icon}</span>}
           <div>

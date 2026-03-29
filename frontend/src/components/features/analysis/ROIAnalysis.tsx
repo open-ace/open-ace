@@ -47,10 +47,13 @@ const getCacheKey = (startDate: string, endDate: string, tool: string) =>
   `roi_${startDate}_${endDate}_${tool}`;
 
 // Simple cache for ROI data
-const roiDataCache = new Map<string, {
-  data: CachedData;
-  timestamp: number;
-}>();
+const roiDataCache = new Map<
+  string,
+  {
+    data: CachedData;
+    timestamp: number;
+  }
+>();
 
 interface CachedData {
   roiMetrics: ROIMetrics | null;
@@ -114,70 +117,77 @@ export const ROIAnalysis: React.FC = () => {
   }, []);
 
   // Fetch data with caching
-  const fetchData = useCallback(async (forceRefresh = false) => {
-    if (!startDate || !endDate) return;
+  const fetchData = useCallback(
+    async (forceRefresh = false) => {
+      if (!startDate || !endDate) return;
 
-    const cacheKey = getCacheKey(startDate, endDate, selectedTool);
-    const cached = roiDataCache.get(cacheKey);
-    const now = Date.now();
+      const cacheKey = getCacheKey(startDate, endDate, selectedTool);
+      const cached = roiDataCache.get(cacheKey);
+      const now = Date.now();
 
-    // Use cache if valid and not forcing refresh
-    if (!forceRefresh && cached && now - cached.timestamp < CACHE_TTL) {
-      const data = cached.data;
-      setRoiMetrics(data.roiMetrics);
-      setRoiTrend(data.roiTrend);
-      setCostBreakdown(data.costBreakdown);
-      setDailyCosts(data.dailyCosts);
-      setSuggestions(data.suggestions);
-      setEfficiency(data.efficiency);
-      setIsLoading(false);
-      return;
-    }
+      // Use cache if valid and not forcing refresh
+      if (!forceRefresh && cached && now - cached.timestamp < CACHE_TTL) {
+        const data = cached.data;
+        setRoiMetrics(data.roiMetrics);
+        setRoiTrend(data.roiTrend);
+        setCostBreakdown(data.costBreakdown);
+        setDailyCosts(data.dailyCosts);
+        setSuggestions(data.suggestions);
+        setEfficiency(data.efficiency);
+        setIsLoading(false);
+        return;
+      }
 
-    if (isInitialLoad.current) {
-      setIsLoading(true);
-    } else {
-      setIsRefreshing(true);
-    }
-    setError(null);
+      if (isInitialLoad.current) {
+        setIsLoading(true);
+      } else {
+        setIsRefreshing(true);
+      }
+      setError(null);
 
-    try {
-      const [roi, trend, breakdown, daily, sugg, eff] = await Promise.all([
-        roiApi.getROI({ start_date: startDate, end_date: endDate, tool_name: selectedTool || undefined }),
-        roiApi.getROITrend(6),
-        roiApi.getCostBreakdown({ start_date: startDate, end_date: endDate }),
-        roiApi.getDailyCosts({ start_date: startDate, end_date: endDate }),
-        roiApi.getOptimizationSuggestions(30),
-        roiApi.getEfficiencyReport(30),
-      ]);
+      try {
+        const [roi, trend, breakdown, daily, sugg, eff] = await Promise.all([
+          roiApi.getROI({
+            start_date: startDate,
+            end_date: endDate,
+            tool_name: selectedTool || undefined,
+          }),
+          roiApi.getROITrend(6),
+          roiApi.getCostBreakdown({ start_date: startDate, end_date: endDate }),
+          roiApi.getDailyCosts({ start_date: startDate, end_date: endDate }),
+          roiApi.getOptimizationSuggestions(30),
+          roiApi.getEfficiencyReport(30),
+        ]);
 
-      const data: CachedData = {
-        roiMetrics: roi,
-        roiTrend: trend,
-        costBreakdown: breakdown.breakdown,
-        dailyCosts: daily,
-        suggestions: sugg,
-        efficiency: eff,
-      };
+        const data: CachedData = {
+          roiMetrics: roi,
+          roiTrend: trend,
+          costBreakdown: breakdown.breakdown,
+          dailyCosts: daily,
+          suggestions: sugg,
+          efficiency: eff,
+        };
 
-      // Update cache
-      roiDataCache.set(cacheKey, { data, timestamp: now });
+        // Update cache
+        roiDataCache.set(cacheKey, { data, timestamp: now });
 
-      setRoiMetrics(roi);
-      setRoiTrend(trend);
-      setCostBreakdown(breakdown.breakdown);
-      setDailyCosts(daily);
-      setSuggestions(sugg);
-      setEfficiency(eff);
-      isInitialLoad.current = false;
-    } catch (err) {
-      const errorMessage = err instanceof Error ? (err as Error).message : 'Failed to fetch data';
-      setError(errorMessage);
-    } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
-    }
-  }, [startDate, endDate, selectedTool]);
+        setRoiMetrics(roi);
+        setRoiTrend(trend);
+        setCostBreakdown(breakdown.breakdown);
+        setDailyCosts(daily);
+        setSuggestions(sugg);
+        setEfficiency(eff);
+        isInitialLoad.current = false;
+      } catch (err) {
+        const errorMessage = err instanceof Error ? (err as Error).message : 'Failed to fetch data';
+        setError(errorMessage);
+      } finally {
+        setIsLoading(false);
+        setIsRefreshing(false);
+      }
+    },
+    [startDate, endDate, selectedTool]
+  );
 
   useEffect(() => {
     fetchData();
@@ -198,7 +208,7 @@ export const ROIAnalysis: React.FC = () => {
   const roiTrendData = useMemo(() => {
     if (!roiTrend.length) return { labels: [], data: [] };
     return {
-      labels: roiTrend.map((item) => item.month || item.period?.split(' to ')[0] || ''),
+      labels: roiTrend.map((item) => item.month ?? item.period?.split(' to ')[0] ?? ''),
       data: roiTrend.map((item) => item.roi_percentage),
     };
   }, [roiTrend]);
@@ -207,14 +217,14 @@ export const ROIAnalysis: React.FC = () => {
     if (!dailyCosts.length) return { labels: [], data: [] };
     return {
       labels: dailyCosts.map((d) => d.date),
-      data: dailyCosts.map((d) => d.cost || d.total_cost || 0),
+      data: dailyCosts.map((d) => d.cost ?? d.total_cost ?? 0),
     };
   }, [dailyCosts]);
 
   const costBreakdownData = useMemo(() => {
     if (!costBreakdown.length) return { labels: [], data: [] };
     return {
-      labels: costBreakdown.map((c) => c.category || c.tool_name || c.model || 'Unknown'),
+      labels: costBreakdown.map((c) => c.category ?? c.tool_name ?? c.model ?? 'Unknown'),
       data: costBreakdown.map((c) => c.total_cost),
     };
   }, [costBreakdown]);
@@ -282,12 +292,7 @@ export const ROIAnalysis: React.FC = () => {
       {/* Header */}
       <div className="d-flex justify-content-between align-items-center mb-4">
         <h2>{t('roiAnalysis', language)}</h2>
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={() => fetchData(true)}
-          disabled={isRefreshing}
-        >
+        <Button variant="primary" size="sm" onClick={() => fetchData(true)} disabled={isRefreshing}>
           {isRefreshing ? (
             <>
               <Loading size="sm" className="me-1" />
@@ -360,9 +365,15 @@ export const ROIAnalysis: React.FC = () => {
           <div className="col-md-3">
             <StatCard
               label={t('efficiencyScore', language)}
-              value={`${(roiMetrics.efficiency_score || 85).toFixed(0)}%`}
+              value={`${(roiMetrics.efficiency_score ?? 85).toFixed(0)}%`}
               icon={<i className="bi bi-speedometer2 fs-4" />}
-              variant={(roiMetrics.efficiency_score || 85) >= 80 ? 'success' : (roiMetrics.efficiency_score || 85) >= 60 ? 'warning' : 'danger'}
+              variant={
+                (roiMetrics.efficiency_score ?? 85) >= 80
+                  ? 'success'
+                  : (roiMetrics.efficiency_score ?? 85) >= 60
+                    ? 'warning'
+                    : 'danger'
+              }
             />
           </div>
         </div>
@@ -420,19 +431,23 @@ export const ROIAnalysis: React.FC = () => {
                 <tbody>
                   <tr>
                     <td>{t('overallEfficiency', language)}</td>
-                    <td className="text-end">{(efficiency.overall_efficiency || 0).toFixed(1)}%</td>
+                    <td className="text-end">{(efficiency.overall_efficiency ?? 0).toFixed(1)}%</td>
                   </tr>
                   <tr>
                     <td>{t('avgTokensPerRequest', language)}</td>
-                    <td className="text-end">{formatTokens(efficiency.avg_tokens_per_request || 0)}</td>
+                    <td className="text-end">
+                      {formatTokens(efficiency.avg_tokens_per_request ?? 0)}
+                    </td>
                   </tr>
                   <tr>
                     <td>{t('avgCostPerRequest', language)}</td>
-                    <td className="text-end">${(efficiency.avg_cost_per_request || 0).toFixed(4)}</td>
+                    <td className="text-end">
+                      ${(efficiency.avg_cost_per_request ?? 0).toFixed(4)}
+                    </td>
                   </tr>
                   <tr>
                     <td>{t('wastePercentage', language)}</td>
-                    <td className="text-end">{(efficiency.waste_percentage || 0).toFixed(1)}%</td>
+                    <td className="text-end">{(efficiency.waste_percentage ?? 0).toFixed(1)}%</td>
                   </tr>
                 </tbody>
               </table>
@@ -440,7 +455,7 @@ export const ROIAnalysis: React.FC = () => {
             <div className="col-md-6">
               <h6>{t('recommendations', language)}</h6>
               <ul className="list-unstyled">
-                {(efficiency.recommendations || []).map((rec, index) => (
+                {(efficiency.recommendations ?? []).map((rec, index) => (
                   <li key={index} className="mb-1">
                     <i className="bi bi-lightbulb text-warning me-2" />
                     {rec}
@@ -473,11 +488,16 @@ export const ROIAnalysis: React.FC = () => {
                     </td>
                     <td>{s.description}</td>
                     <td>
-                      <span className={cn('badge', `bg-${getImpactVariant(s.impact || s.priority || 'low')}`)}>
-                        {s.impact || s.priority || 'low'}
+                      <span
+                        className={cn(
+                          'badge',
+                          `bg-${getImpactVariant(s.impact ?? s.priority ?? 'low')}`
+                        )}
+                      >
+                        {s.impact ?? s.priority ?? 'low'}
                       </span>
                     </td>
-                    <td>${(s.potential_savings || 0).toFixed(2)}</td>
+                    <td>${(s.potential_savings ?? 0).toFixed(2)}</td>
                   </tr>
                 ))}
               </tbody>

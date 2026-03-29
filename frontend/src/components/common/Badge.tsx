@@ -111,7 +111,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
         className={cn('rounded-circle me-1', config.color, pulse && 'animate-pulse')}
         style={{ width: 8, height: 8 }}
       />
-      <Badge variant={config.variant}>{label || status}</Badge>
+      <Badge variant={config.variant}>{label ?? status}</Badge>
     </span>
   );
 };

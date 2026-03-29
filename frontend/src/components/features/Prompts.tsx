@@ -8,7 +8,18 @@ import { promptsApi } from '@/api';
 import type { PromptTemplate, PromptVariable, CategoryInfo } from '@/api';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
-import { Card, Button, Select, Loading, Error, EmptyState, Badge, Modal, TextInput, Textarea } from '@/components/common';
+import {
+  Card,
+  Button,
+  Select,
+  Loading,
+  Error,
+  EmptyState,
+  Badge,
+  Modal,
+  TextInput,
+  Textarea,
+} from '@/components/common';
 import type { BadgeVariant } from '@/components/common';
 
 const ITEMS_PER_PAGE = 20;
@@ -113,7 +124,11 @@ export const Prompts: React.FC = () => {
   };
 
   const handleDelete = async (id: number) => {
-    if (!window.confirm(t('confirmDeletePrompt', language) || 'Are you sure you want to delete this prompt?')) {
+    if (
+      !window.confirm(
+        t('confirmDeletePrompt', language) || 'Are you sure you want to delete this prompt?'
+      )
+    ) {
       return;
     }
     try {
@@ -195,13 +210,13 @@ export const Prompts: React.FC = () => {
             className="form-control"
             style={{ maxWidth: '300px', height: '31px' }}
             placeholder={t('searchPrompts', language) || 'Search prompts...'}
-            value={filters.search || ''}
+            value={filters.search ?? ''}
             onChange={(e) => handleSearch(e.target.value)}
           />
           {/* Category Filter */}
           <Select
             options={categoryOptions}
-            value={filters.category || ''}
+            value={filters.category ?? ''}
             onChange={(value) => handleFilterChange('category', value)}
             size="sm"
             style={{ width: 'auto', minWidth: '120px' }}
@@ -219,7 +234,9 @@ export const Prompts: React.FC = () => {
         <EmptyState
           icon="bi-file-text"
           title={t('noPromptsFound', language) || 'No prompts found'}
-          description={t('noPromptsFoundHelp', language) || 'Create your first prompt template to get started'}
+          description={
+            t('noPromptsFoundHelp', language) || 'Create your first prompt template to get started'
+          }
         />
       ) : (
         <>
@@ -230,9 +247,9 @@ export const Prompts: React.FC = () => {
                   template={template}
                   language={language}
                   isSelected={selectedTemplate?.id === template.id}
-                  onSelect={() => setSelectedTemplate(
-                    selectedTemplate?.id === template.id ? null : template
-                  )}
+                  onSelect={() =>
+                    setSelectedTemplate(selectedTemplate?.id === template.id ? null : template)
+                  }
                   onEdit={() => {
                     setSelectedTemplate(template);
                     setShowEditModal(true);
@@ -345,12 +362,7 @@ const PromptCard: React.FC<PromptCardProps> = ({
   onRender,
 }) => {
   return (
-    <div
-      className={cn(
-        'card h-100',
-        isSelected && 'border-primary'
-      )}
-    >
+    <div className={cn('card h-100', isSelected && 'border-primary')}>
       <div className="card-body d-flex flex-column">
         {/* Header */}
         <div className="d-flex justify-content-between align-items-start mb-2">
@@ -436,13 +448,13 @@ const PromptFormModal: React.FC<PromptFormModalProps> = ({
   onSuccess,
   onClose,
 }) => {
-  const [name, setName] = useState(template?.name || '');
-  const [description, setDescription] = useState(template?.description || '');
-  const [category, setCategory] = useState(template?.category || 'general');
-  const [content, setContent] = useState(template?.content || '');
-  const [tags, setTags] = useState(template?.tags.join(', ') || '');
-  const [isPublic, setIsPublic] = useState(template?.is_public || false);
-  const [variables, setVariables] = useState<PromptVariable[]>(template?.variables || []);
+  const [name, setName] = useState(template?.name ?? '');
+  const [description, setDescription] = useState(template?.description ?? '');
+  const [category, setCategory] = useState(template?.category ?? 'general');
+  const [content, setContent] = useState(template?.content ?? '');
+  const [tags, setTags] = useState(template?.tags.join(', ') ?? '');
+  const [isPublic, setIsPublic] = useState(template?.is_public ?? false);
+  const [variables, setVariables] = useState<PromptVariable[]>(template?.variables ?? []);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -451,13 +463,13 @@ const PromptFormModal: React.FC<PromptFormModalProps> = ({
   // Reset form when modal opens
   useEffect(() => {
     if (isOpen) {
-      setName(template?.name || '');
-      setDescription(template?.description || '');
-      setCategory(template?.category || 'general');
-      setContent(template?.content || '');
-      setTags(template?.tags.join(', ') || '');
-      setIsPublic(template?.is_public || false);
-      setVariables(template?.variables || []);
+      setName(template?.name ?? '');
+      setDescription(template?.description ?? '');
+      setCategory(template?.category ?? 'general');
+      setContent(template?.content ?? '');
+      setTags(template?.tags.join(', ') ?? '');
+      setIsPublic(template?.is_public ?? false);
+      setVariables(template?.variables ?? []);
       setError(null);
     }
   }, [isOpen, template]);
@@ -478,7 +490,10 @@ const PromptFormModal: React.FC<PromptFormModalProps> = ({
         description,
         category,
         content,
-        tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
+        tags: tags
+          .split(',')
+          .map((t) => t.trim())
+          .filter(Boolean),
         is_public: isPublic,
         variables,
       };
@@ -525,14 +540,16 @@ const PromptFormModal: React.FC<PromptFormModalProps> = ({
   return (
     <Modal
       isOpen={isOpen}
-      title={isEdit ? t('editPrompt', language) || 'Edit Prompt' : t('addPrompt', language) || 'Add Prompt'}
+      title={
+        isEdit
+          ? t('editPrompt', language) || 'Edit Prompt'
+          : t('addPrompt', language) || 'Add Prompt'
+      }
       onClose={onClose}
       size="lg"
     >
       <form onSubmit={handleSubmit}>
-        {error && (
-          <div className="alert alert-danger">{error}</div>
-        )}
+        {error && <div className="alert alert-danger">{error}</div>}
 
         <div className="mb-3">
           <TextInput
@@ -555,11 +572,7 @@ const PromptFormModal: React.FC<PromptFormModalProps> = ({
 
         <div className="mb-3">
           <label className="form-label">{t('category', language) || 'Category'}</label>
-          <Select
-            options={categoryOptions}
-            value={category}
-            onChange={setCategory}
-          />
+          <Select options={categoryOptions} value={category} onChange={setCategory} />
         </div>
 
         <div className="mb-3">
@@ -567,7 +580,10 @@ const PromptFormModal: React.FC<PromptFormModalProps> = ({
             label={t('promptContent', language) || 'Content'}
             value={content}
             onChange={setContent}
-            placeholder={t('promptContentHelp', language) || 'Enter prompt content. Use {variable_name} for variables.'}
+            placeholder={
+              t('promptContentHelp', language) ||
+              'Enter prompt content. Use {variable_name} for variables.'
+            }
             rows={6}
             required
           />
@@ -606,14 +622,14 @@ const PromptFormModal: React.FC<PromptFormModalProps> = ({
                   </div>
                   <div className="col-md-4">
                     <TextInput
-                      value={variable.description || ''}
+                      value={variable.description ?? ''}
                       onChange={(value) => updateVariable(index, 'description', value)}
                       placeholder={t('description', language)}
                     />
                   </div>
                   <div className="col-md-3">
                     <TextInput
-                      value={variable.default || ''}
+                      value={variable.default ?? ''}
                       onChange={(value) => updateVariable(index, 'default', value)}
                       placeholder={t('defaultValue', language) || 'Default'}
                     />
@@ -702,7 +718,7 @@ const RenderModal: React.FC<RenderModalProps> = ({
     if (isOpen) {
       const initialVars: Record<string, string> = {};
       template.variables.forEach((v) => {
-        initialVars[v.name] = v.default || '';
+        initialVars[v.name] = v.default ?? '';
       });
       setVariables(initialVars);
     }
@@ -749,11 +765,9 @@ const RenderModal: React.FC<RenderModalProps> = ({
                 )}
               </label>
               <TextInput
-                value={variables[variable.name] || variable.default || ''}
-                onChange={(value) =>
-                  setVariables({ ...variables, [variable.name]: value })
-                }
-                placeholder={variable.description || variable.name}
+                value={variables[variable.name] ?? variable.default ?? ''}
+                onChange={(value) => setVariables({ ...variables, [variable.name]: value })}
+                placeholder={variable.description ?? variable.name}
               />
             </div>
           ))}

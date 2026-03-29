@@ -187,9 +187,9 @@ export const LineChart: React.FC<LineChartProps> = ({
     datasets: datasets.map((dataset, index) => ({
       ...dataset,
       data: dataset.data.map(formatValue),
-      borderColor: dataset.borderColor || COLOR_ARRAY[index % COLOR_ARRAY.length],
+      borderColor: dataset.borderColor ?? COLOR_ARRAY[index % COLOR_ARRAY.length],
       backgroundColor:
-        dataset.backgroundColor || COLOR_ARRAY_LIGHT[index % COLOR_ARRAY_LIGHT.length],
+        dataset.backgroundColor ?? COLOR_ARRAY_LIGHT[index % COLOR_ARRAY_LIGHT.length],
       fill: dataset.fill ?? true,
       tension: dataset.tension ?? 0.4,
       // For single point, use pointRadius to make it visible
@@ -222,12 +222,12 @@ export const LineChart: React.FC<LineChartProps> = ({
         callbacks: {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           label: (context: any) => {
-            const label = context.dataset?.label || '';
+            const label = context.dataset?.label ?? '';
             const value = context.parsed?.y;
             if (unit !== 'none') {
-              return `${label}: ${value?.toFixed(2) || 0}${unit}`;
+              return `${label}: ${value?.toFixed(2) ?? 0}${unit}`;
             }
-            return `${label}: ${value?.toLocaleString() || 0}`;
+            return `${label}: ${value?.toLocaleString() ?? 0}`;
           },
         },
       },
@@ -320,8 +320,8 @@ export const BarChart: React.FC<BarChartProps> = ({
       ...dataset,
       data: dataset.data.map(formatValue),
       backgroundColor:
-        dataset.backgroundColor || COLOR_ARRAY_LIGHT[index % COLOR_ARRAY_LIGHT.length],
-      borderColor: dataset.borderColor || COLOR_ARRAY[index % COLOR_ARRAY.length],
+        dataset.backgroundColor ?? COLOR_ARRAY_LIGHT[index % COLOR_ARRAY_LIGHT.length],
+      borderColor: dataset.borderColor ?? COLOR_ARRAY[index % COLOR_ARRAY.length],
       borderWidth: dataset.borderWidth ?? 1,
     })),
   };
@@ -348,12 +348,12 @@ export const BarChart: React.FC<BarChartProps> = ({
         callbacks: {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           label: (context: any) => {
-            const label = context.dataset?.label || '';
+            const label = context.dataset?.label ?? '';
             const value = context.parsed?.y;
             if (unit !== 'none') {
-              return `${label}: ${value?.toFixed(2) || 0}${unit}`;
+              return `${label}: ${value?.toFixed(2) ?? 0}${unit}`;
             }
-            return `${label}: ${value?.toLocaleString() || 0}`;
+            return `${label}: ${value?.toLocaleString() ?? 0}`;
           },
         },
       },
@@ -418,7 +418,7 @@ export const PieChart: React.FC<PieChartProps> = ({
     datasets: [
       {
         data,
-        backgroundColor: backgroundColor || COLOR_ARRAY_LIGHT,
+        backgroundColor: backgroundColor ?? COLOR_ARRAY_LIGHT,
         borderColor,
         borderWidth: 2,
       },
@@ -476,7 +476,7 @@ export const DoughnutChart: React.FC<DoughnutChartProps> = ({
     datasets: [
       {
         data,
-        backgroundColor: backgroundColor || COLOR_ARRAY_LIGHT,
+        backgroundColor: backgroundColor ?? COLOR_ARRAY_LIGHT,
         borderColor,
         borderWidth: 2,
       },
@@ -541,7 +541,7 @@ export const TokenTrendChart: React.FC<TokenTrendChartProps> = ({
 
     return {
       label: tool.toUpperCase(),
-      data: dates.map((date) => toMillions(dataMap.get(`${date}-${tool}`) || 0)),
+      data: dates.map((date) => toMillions(dataMap.get(`${date}-${tool}`) ?? 0)),
       borderColor: colors.border,
       backgroundColor: colors.background,
       fill: false,
@@ -551,7 +551,7 @@ export const TokenTrendChart: React.FC<TokenTrendChartProps> = ({
 
   // Calculate max value for y-axis
   const maxTokens = Math.max(...data.map((d) => toMillions(d.tokens)));
-  const yMax = Math.ceil(maxTokens) || 1;
+  const yMax = Math.ceil(maxTokens) ?? 1;
 
   const options = {
     responsive: true,
@@ -565,9 +565,9 @@ export const TokenTrendChart: React.FC<TokenTrendChartProps> = ({
         callbacks: {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           label: (context: any) => {
-            const label = context.dataset?.label || '';
+            const label = context.dataset?.label ?? '';
             const value = context.parsed?.y;
-            return `${label}: ${value?.toFixed(2) || 0}M tokens`;
+            return `${label}: ${value?.toFixed(2) ?? 0}M tokens`;
           },
         },
       },

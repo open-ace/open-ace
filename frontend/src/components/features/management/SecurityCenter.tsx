@@ -31,7 +31,11 @@ import {
   Badge,
 } from '@/components/common';
 import { useToast } from '@/components/common';
-import type { ContentFilterRule, CreateFilterRuleRequest, SecuritySettings as SecuritySettingsType } from '@/api';
+import type {
+  ContentFilterRule,
+  CreateFilterRuleRequest,
+  SecuritySettings as SecuritySettingsType,
+} from '@/api';
 
 const TYPE_OPTIONS = [
   { value: 'keyword', label: 'Keyword' },
@@ -59,7 +63,13 @@ export const SecurityCenter: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('filter');
 
   // --- Filter Rules State ---
-  const { data: rules, isLoading: rulesLoading, isError: rulesError, error: rulesErrorMsg, refetch: refetchRules } = useFilterRules();
+  const {
+    data: rules,
+    isLoading: rulesLoading,
+    isError: rulesError,
+    error: rulesErrorMsg,
+    refetch: refetchRules,
+  } = useFilterRules();
   const createRule = useCreateFilterRule();
   const updateRule = useUpdateFilterRule();
   const deleteRule = useDeleteFilterRule();
@@ -76,7 +86,13 @@ export const SecurityCenter: React.FC = () => {
   });
 
   // --- Security Settings State ---
-  const { data: settings, isLoading: settingsLoading, isError: settingsError, error: settingsErrorMsg, refetch: refetchSettings } = useSecuritySettings();
+  const {
+    data: settings,
+    isLoading: settingsLoading,
+    isError: settingsError,
+    error: settingsErrorMsg,
+    refetch: refetchSettings,
+  } = useSecuritySettings();
   const updateSettings = useUpdateSecuritySettings();
 
   const [settingsFormData, setSettingsFormData] = useState<Partial<SecuritySettingsType>>({});
@@ -102,7 +118,7 @@ export const SecurityCenter: React.FC = () => {
       type: rule.type,
       severity: rule.severity,
       action: rule.action,
-      description: rule.description || '',
+      description: rule.description ?? '',
       is_enabled: rule.is_enabled,
     });
     setShowRuleModal(true);
@@ -211,7 +227,12 @@ export const SecurityCenter: React.FC = () => {
     }
 
     if (rulesError) {
-      return <Error message={rulesErrorMsg?.message || t('error', language)} onRetry={() => refetchRules()} />;
+      return (
+        <Error
+          message={rulesErrorMsg?.message || t('error', language)}
+          onRetry={() => refetchRules()}
+        />
+      );
     }
 
     return (
@@ -322,7 +343,10 @@ export const SecurityCenter: React.FC = () => {
                 options={TYPE_OPTIONS}
                 value={ruleFormData.type}
                 onChange={(value) =>
-                  setRuleFormData({ ...ruleFormData, type: value as CreateFilterRuleRequest['type'] })
+                  setRuleFormData({
+                    ...ruleFormData,
+                    type: value as CreateFilterRuleRequest['type'],
+                  })
                 }
               />
             </div>
@@ -332,7 +356,10 @@ export const SecurityCenter: React.FC = () => {
                 options={SEVERITY_OPTIONS}
                 value={ruleFormData.severity}
                 onChange={(value) =>
-                  setRuleFormData({ ...ruleFormData, severity: value as CreateFilterRuleRequest['severity'] })
+                  setRuleFormData({
+                    ...ruleFormData,
+                    severity: value as CreateFilterRuleRequest['severity'],
+                  })
                 }
               />
             </div>
@@ -342,15 +369,20 @@ export const SecurityCenter: React.FC = () => {
                 options={ACTION_OPTIONS}
                 value={ruleFormData.action}
                 onChange={(value) =>
-                  setRuleFormData({ ...ruleFormData, action: value as CreateFilterRuleRequest['action'] })
+                  setRuleFormData({
+                    ...ruleFormData,
+                    action: value as CreateFilterRuleRequest['action'],
+                  })
                 }
               />
             </div>
             <div className="col-12">
               <label className="form-label">{t('description', language)}</label>
               <TextInput
-                value={ruleFormData.description || ''}
-                onChange={(value: string) => setRuleFormData({ ...ruleFormData, description: value })}
+                value={ruleFormData.description ?? ''}
+                onChange={(value: string) =>
+                  setRuleFormData({ ...ruleFormData, description: value })
+                }
                 placeholder={t('enterDescription', language)}
               />
             </div>
@@ -360,7 +392,9 @@ export const SecurityCenter: React.FC = () => {
                   className="form-check-input"
                   type="checkbox"
                   checked={ruleFormData.is_enabled}
-                  onChange={(e) => setRuleFormData({ ...ruleFormData, is_enabled: e.target.checked })}
+                  onChange={(e) =>
+                    setRuleFormData({ ...ruleFormData, is_enabled: e.target.checked })
+                  }
                   id="ruleEnabled"
                 />
                 <label className="form-check-label" htmlFor="ruleEnabled">
@@ -381,7 +415,12 @@ export const SecurityCenter: React.FC = () => {
     }
 
     if (settingsError) {
-      return <Error message={settingsErrorMsg?.message || t('error', language)} onRetry={() => refetchSettings()} />;
+      return (
+        <Error
+          message={settingsErrorMsg?.message || t('error', language)}
+          onRetry={() => refetchSettings()}
+        />
+      );
     }
 
     return (
@@ -465,7 +504,9 @@ export const SecurityCenter: React.FC = () => {
                     className="form-check-input"
                     type="checkbox"
                     checked={currentSettings.password_require_number}
-                    onChange={(e) => handleSettingsInputChange('password_require_number', e.target.checked)}
+                    onChange={(e) =>
+                      handleSettingsInputChange('password_require_number', e.target.checked)
+                    }
                     id="requireNumber"
                   />
                   <label className="form-check-label" htmlFor="requireNumber">
@@ -477,7 +518,9 @@ export const SecurityCenter: React.FC = () => {
                     className="form-check-input"
                     type="checkbox"
                     checked={currentSettings.password_require_special}
-                    onChange={(e) => handleSettingsInputChange('password_require_special', e.target.checked)}
+                    onChange={(e) =>
+                      handleSettingsInputChange('password_require_special', e.target.checked)
+                    }
                     id="requireSpecial"
                   />
                   <label className="form-check-label" htmlFor="requireSpecial">
@@ -531,11 +574,7 @@ export const SecurityCenter: React.FC = () => {
           <Button variant="secondary" onClick={handleResetSettings}>
             {t('reset', language)}
           </Button>
-          <Button
-            variant="primary"
-            onClick={handleSaveSettings}
-            loading={updateSettings.isPending}
-          >
+          <Button variant="primary" onClick={handleSaveSettings} loading={updateSettings.isPending}>
             {t('save', language)}
           </Button>
         </div>

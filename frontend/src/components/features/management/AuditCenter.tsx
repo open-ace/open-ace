@@ -26,7 +26,13 @@ import {
 } from '@/components/common';
 import type { BadgeVariant } from '@/components/common';
 import { formatDateTime } from '@/utils';
-import { complianceApi, type AuditPattern, type AuditAnomaly, type SecurityScore, type UserProfile } from '@/api';
+import {
+  complianceApi,
+  type AuditPattern,
+  type AuditAnomaly,
+  type SecurityScore,
+  type UserProfile,
+} from '@/api';
 import type { AuditLogFilters } from '@/api';
 
 const ITEMS_PER_PAGE = 20;
@@ -191,8 +197,8 @@ export const AuditCenter: React.FC = () => {
       return <Error message={error?.message || t('error', language)} onRetry={() => refetch()} />;
     }
 
-    const logs = data?.logs || [];
-    const total = data?.total || 0;
+    const logs = data?.logs ?? [];
+    const total = data?.total ?? 0;
     const totalPages = Math.ceil(total / ITEMS_PER_PAGE);
 
     return (
@@ -204,7 +210,7 @@ export const AuditCenter: React.FC = () => {
               <label className="form-label">{t('tableAction', language)}</label>
               <Select
                 options={actionOptions}
-                value={filters.action || ''}
+                value={filters.action ?? ''}
                 onChange={(value) => handleFilterChange('action', value)}
               />
             </div>
@@ -212,7 +218,7 @@ export const AuditCenter: React.FC = () => {
               <label className="form-label">{t('resourceType', language)}</label>
               <Select
                 options={resourceTypeOptions}
-                value={filters.resource_type || ''}
+                value={filters.resource_type ?? ''}
                 onChange={(value) => handleFilterChange('resource_type', value)}
               />
             </div>
@@ -221,7 +227,7 @@ export const AuditCenter: React.FC = () => {
               <input
                 type="date"
                 className="form-control"
-                value={filters.start_date || ''}
+                value={filters.start_date ?? ''}
                 onChange={(e) => handleFilterChange('start_date', e.target.value)}
               />
             </div>
@@ -230,7 +236,7 @@ export const AuditCenter: React.FC = () => {
               <input
                 type="date"
                 className="form-control"
-                value={filters.end_date || ''}
+                value={filters.end_date ?? ''}
                 onChange={(e) => handleFilterChange('end_date', e.target.value)}
               />
             </div>
@@ -277,22 +283,24 @@ export const AuditCenter: React.FC = () => {
                       <td>
                         <small>{formatDateTime(log.timestamp)}</small>
                       </td>
-                      <td>{log.username || `User ${log.user_id}`}</td>
+                      <td>{log.username ?? `User ${log.user_id}`}</td>
                       <td>
-                        <Badge variant={ACTION_COLORS[log.action] || 'secondary'}>{log.action}</Badge>
+                        <Badge variant={ACTION_COLORS[log.action] ?? 'secondary'}>
+                          {log.action}
+                        </Badge>
                       </td>
                       <td>{log.resource_type}</td>
                       <td>
                         <code>{log.resource_id}</code>
                       </td>
                       <td>
-                        <small className="text-muted">{log.ip_address || '-'}</small>
+                        <small className="text-muted">{log.ip_address ?? '-'}</small>
                       </td>
                       <td>
                         {log.details && Object.keys(log.details).length > 0 && (
                           <button
                             className="btn btn-link btn-sm p-0"
-                            onClick={() => alert(JSON.stringify(log.details, null, 2))}
+                            onClick={() => window.alert(JSON.stringify(log.details, null, 2))}
                           >
                             <i className="bi bi-eye" />
                           </button>
@@ -321,7 +329,10 @@ export const AuditCenter: React.FC = () => {
                     {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
                       const pageNum = i + 1;
                       return (
-                        <li key={pageNum} className={`page-item ${page === pageNum ? 'active' : ''}`}>
+                        <li
+                          key={pageNum}
+                          className={`page-item ${page === pageNum ? 'active' : ''}`}
+                        >
                           <button className="page-link" onClick={() => setPage(pageNum)}>
                             {pageNum}
                           </button>
@@ -370,8 +381,8 @@ export const AuditCenter: React.FC = () => {
                     securityScore.overall_score >= 80
                       ? 'text-success'
                       : securityScore.overall_score >= 60
-                      ? 'text-warning'
-                      : 'text-danger'
+                        ? 'text-warning'
+                        : 'text-danger'
                   )}
                 >
                   <div
@@ -382,8 +393,8 @@ export const AuditCenter: React.FC = () => {
                         securityScore.overall_score >= 80
                           ? '#198754'
                           : securityScore.overall_score >= 60
-                          ? '#ffc107'
-                          : '#dc3545',
+                            ? '#ffc107'
+                            : '#dc3545',
                     }}
                   >
                     {securityScore.overall_score}
@@ -402,8 +413,8 @@ export const AuditCenter: React.FC = () => {
                           (data as { status: string }).status === 'good'
                             ? 'text-success'
                             : (data as { status: string }).status === 'warning'
-                            ? 'text-warning'
-                            : 'text-danger'
+                              ? 'text-warning'
+                              : 'text-danger'
                         )}
                       >
                         {(data as { score: number }).score}%
@@ -416,8 +427,8 @@ export const AuditCenter: React.FC = () => {
                           (data as { status: string }).status === 'good'
                             ? 'bg-success'
                             : (data as { status: string }).status === 'warning'
-                            ? 'bg-warning'
-                            : 'bg-danger'
+                              ? 'bg-warning'
+                              : 'bg-danger'
                         )}
                         style={{ width: `${(data as { score: number }).score}%` }}
                       />
@@ -556,7 +567,7 @@ export const AuditCenter: React.FC = () => {
                 type="number"
                 className="form-control"
                 placeholder={t('enterUserId', language)}
-                value={selectedUserId || ''}
+                value={selectedUserId ?? ''}
                 onChange={(e) => setSelectedUserId(parseInt(e.target.value) || null)}
               />
             </div>
@@ -611,7 +622,12 @@ export const AuditCenter: React.FC = () => {
       {/* Header */}
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h5>{t('auditCenter', language)}</h5>
-        <Button variant="primary" size="sm" onClick={() => activeTab === 'log' ? refetch() : fetchAnalysisData()} loading={isFetching}>
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={() => (activeTab === 'log' ? refetch() : fetchAnalysisData())}
+          loading={isFetching}
+        >
           {isFetching ? null : <i className="bi bi-arrow-clockwise me-1" />}
           {t('refresh', language)}
         </Button>

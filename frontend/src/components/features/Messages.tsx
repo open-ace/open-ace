@@ -7,14 +7,7 @@ import { cn } from '@/utils';
 import { useMessages, useMessageCount, useHosts, useSenders } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
-import {
-  Card,
-  Select,
-  SearchableSelect,
-  Loading,
-  Error,
-  EmptyState,
-} from '@/components/common';
+import { Card, Select, SearchableSelect, Loading, Error, EmptyState } from '@/components/common';
 import { formatDateTime, formatDate, formatTokens } from '@/utils';
 import type { Message, MessageFilters } from '@/types';
 
@@ -35,11 +28,11 @@ export const Messages: React.FC = () => {
 
   // Get hosts for filter
   const { data: hostsData } = useHosts();
-  const hosts = hostsData || [];
+  const hosts = hostsData ?? [];
 
   // Get senders for filter
   const { data: sendersData } = useSenders(filters.host);
-  const senders = sendersData || [];
+  const senders = sendersData ?? [];
 
   // Only fetch messages when at least one role is selected
   const hasRoleFilter = selectedRoles.length > 0;
@@ -79,7 +72,7 @@ export const Messages: React.FC = () => {
   // Sender options
   const senderOptions = useMemo(
     () => [
-      { value: '', label: t('dashboardFilterAllSenders', language) || 'All Senders' },
+      { value: '', label: t('dashboardFilterAllSenders', language) ?? 'All Senders' },
       ...senders.map((sender: string) => ({ value: sender, label: sender })),
     ],
     [senders, language]
@@ -120,7 +113,7 @@ export const Messages: React.FC = () => {
               type="date"
               className="form-control form-control-sm"
               style={{ width: '150px' }}
-              value={filters.startDate || ''}
+              value={filters.startDate ?? ''}
               onChange={(e) => handleFilterChange('startDate', e.target.value)}
             />
           </div>
@@ -129,7 +122,7 @@ export const Messages: React.FC = () => {
             <small className="text-muted">{t('tableHost', language)}:</small>
             <Select
               options={hostOptions}
-              value={filters.host || ''}
+              value={filters.host ?? ''}
               onChange={(value) => handleFilterChange('host', value)}
               size="sm"
               className="flex-grow-0"
@@ -141,7 +134,7 @@ export const Messages: React.FC = () => {
             <small className="text-muted">{t('tableTool', language)}:</small>
             <Select
               options={toolOptions}
-              value={filters.tool || ''}
+              value={filters.tool ?? ''}
               onChange={(value) => handleFilterChange('tool', value)}
               size="sm"
               className="flex-grow-0"
@@ -153,7 +146,7 @@ export const Messages: React.FC = () => {
             <small className="text-muted">{t('tableSender', language)}:</small>
             <SearchableSelect
               options={senderOptions}
-              value={filters.sender || ''}
+              value={filters.sender ?? ''}
               onChange={(value) => handleFilterChange('sender', value)}
               placeholder={t('dashboardFilterAllSenders', language) || 'All Senders'}
               searchPlaceholder={t('searchSender', language)}
@@ -168,9 +161,9 @@ export const Messages: React.FC = () => {
             <input
               type="text"
               className="form-control form-control-sm"
-              placeholder={t('searchMessages', language) || 'Search messages...'}
+              placeholder={t('searchMessages', language) ?? 'Search messages...'}
               style={{ width: '250px' }}
-              value={filters.search || ''}
+              value={filters.search ?? ''}
               onChange={(e) => handleFilterChange('search', e.target.value)}
             />
           </div>
@@ -233,7 +226,7 @@ export const Messages: React.FC = () => {
       {!hasRoleFilter ? (
         <EmptyState
           icon="bi-funnel"
-          title={t('selectRole', language) || 'Select Role'}
+          title={t('selectRole', language) ?? 'Select Role'}
           description="Please select at least one role to view messages"
         />
       ) : isLoading ? (
@@ -354,10 +347,10 @@ const MessageCard = React.memo<MessageCardProps>(({ message, language }) => {
           {message.role === 'user' && (
             <div className="message-meta">
               {/* Host Name */}
-              {(message.host_name || message.host) && (
+              {(message.host_name ?? message.host) && (
                 <span className="text-muted">
                   <i className="bi bi-pc-display-horizontal me-1" />
-                  {message.host_name || message.host}
+                  {message.host_name ?? message.host}
                 </span>
               )}
 

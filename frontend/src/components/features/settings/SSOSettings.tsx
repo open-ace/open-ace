@@ -69,7 +69,8 @@ export const SSOSettings: React.FC = () => {
       setRegisteredProviders(result.registered);
       setPredefinedProviders(result.predefined);
     } catch (err) {
-      const errorMessage = err instanceof Error ? (err as Error).message : 'Failed to fetch providers';
+      const errorMessage =
+        err instanceof Error ? (err as Error).message : 'Failed to fetch providers';
       setError(errorMessage);
     } finally {
       setIsLoading(false);
@@ -264,7 +265,7 @@ export const SSOSettings: React.FC = () => {
                 { value: 'oauth2', label: 'OAuth 2.0' },
                 { value: 'oidc', label: 'OpenID Connect' },
               ]}
-              value={formData.provider_type || 'oauth2'}
+              value={formData.provider_type ?? 'oauth2'}
               onChange={(value) =>
                 setFormData({ ...formData, provider_type: value as 'oauth2' | 'oidc' })
               }
@@ -296,7 +297,7 @@ export const SSOSettings: React.FC = () => {
           <div className="col-md-6">
             <label className="form-label">{t('redirectUri', language)}</label>
             <TextInput
-              value={formData.redirect_uri || ''}
+              value={formData.redirect_uri ?? ''}
               onChange={(value: string) => setFormData({ ...formData, redirect_uri: value })}
               placeholder={t('enterRedirectUri', language)}
             />
@@ -306,7 +307,7 @@ export const SSOSettings: React.FC = () => {
           <div className="col-md-6">
             <label className="form-label">{t('scope', language)}</label>
             <TextInput
-              value={formData.scope || ''}
+              value={formData.scope ?? ''}
               onChange={(value: string) => setFormData({ ...formData, scope: value })}
               placeholder="openid profile email"
             />
@@ -322,15 +323,17 @@ export const SSOSettings: React.FC = () => {
               <div className="col-md-6">
                 <label className="form-label">{t('authorizationUrl', language)}</label>
                 <TextInput
-                  value={formData.authorization_url || ''}
-                  onChange={(value: string) => setFormData({ ...formData, authorization_url: value })}
+                  value={formData.authorization_url ?? ''}
+                  onChange={(value: string) =>
+                    setFormData({ ...formData, authorization_url: value })
+                  }
                   placeholder="https://provider.com/oauth/authorize"
                 />
               </div>
               <div className="col-md-6">
                 <label className="form-label">{t('tokenUrl', language)}</label>
                 <TextInput
-                  value={formData.token_url || ''}
+                  value={formData.token_url ?? ''}
                   onChange={(value: string) => setFormData({ ...formData, token_url: value })}
                   placeholder="https://provider.com/oauth/token"
                 />
@@ -338,7 +341,7 @@ export const SSOSettings: React.FC = () => {
               <div className="col-md-6">
                 <label className="form-label">{t('userinfoUrl', language)}</label>
                 <TextInput
-                  value={formData.userinfo_url || ''}
+                  value={formData.userinfo_url ?? ''}
                   onChange={(value: string) => setFormData({ ...formData, userinfo_url: value })}
                   placeholder="https://provider.com/oauth/userinfo"
                 />
@@ -346,7 +349,7 @@ export const SSOSettings: React.FC = () => {
               <div className="col-md-6">
                 <label className="form-label">{t('issuerUrl', language)}</label>
                 <TextInput
-                  value={formData.issuer_url || ''}
+                  value={formData.issuer_url ?? ''}
                   onChange={(value: string) => setFormData({ ...formData, issuer_url: value })}
                   placeholder="https://provider.com"
                 />

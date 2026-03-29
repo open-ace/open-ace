@@ -191,8 +191,8 @@ export const messagesApi = {
    */
   async getConversationDetails(
     sessionId: string
-  ): Promise<ConversationHistory & { messages: ConversationMessage[] } | null> {
-    return apiClient.get<ConversationHistory & { messages: ConversationMessage[] } | null>(
+  ): Promise<(ConversationHistory & { messages: ConversationMessage[] }) | null> {
+    return apiClient.get<(ConversationHistory & { messages: ConversationMessage[] }) | null>(
       `/api/conversation-details/${sessionId}`
     );
   },

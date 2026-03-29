@@ -24,11 +24,7 @@ import {
   PieChart,
 } from '@/components/common';
 import { formatTokens } from '@/utils';
-import {
-  useDailyHourlyUsage,
-  useRecommendations,
-  useHosts,
-} from '@/hooks';
+import { useDailyHourlyUsage, useRecommendations, useHosts } from '@/hooks';
 
 // Anomaly type options
 const anomalyTypeOptions = [
@@ -53,7 +49,7 @@ export const AnomalyDetection: React.FC = () => {
 
   // Get hosts for filter
   const { data: hostsData } = useHosts();
-  const hosts = hostsData || [];
+  const hosts = hostsData ?? [];
 
   // Quick date range options
   const [quickRange, setQuickRange] = useState<'7' | '30' | '90' | 'all'>('30');
@@ -115,7 +111,7 @@ export const AnomalyDetection: React.FC = () => {
   const isLoading = dailyLoading;
 
   // Prepare chart data
-  const dailyTrend = dailyHourly?.daily || [];
+  const dailyTrend = dailyHourly?.daily ?? [];
 
   // Detect anomalies
   const anomalies = useMemo(() => detectAnomalies(dailyTrend), [dailyTrend]);
@@ -242,20 +238,12 @@ export const AnomalyDetection: React.FC = () => {
           {/* Host Filter */}
           <div className="col-md-3">
             <label className="form-label">{t('tableHost', language)}</label>
-            <Select
-              options={hostOptions}
-              value={selectedHost}
-              onChange={setSelectedHost}
-            />
+            <Select options={hostOptions} value={selectedHost} onChange={setSelectedHost} />
           </div>
           {/* Severity Filter */}
           <div className="col-md-3">
             <label className="form-label">{t('severity', language)}</label>
-            <Select
-              options={severityOptions}
-              value={severityFilter}
-              onChange={setSeverityFilter}
-            />
+            <Select options={severityOptions} value={severityFilter} onChange={setSeverityFilter} />
           </div>
         </div>
       </Card>
@@ -263,9 +251,7 @@ export const AnomalyDetection: React.FC = () => {
       {isLoading ? (
         <Loading size="lg" text={t('loading', language)} />
       ) : dailyError ? (
-        <Error
-          message={dailyErrorMsg?.message || t('error', language)}
-        />
+        <Error message={dailyErrorMsg?.message || t('error', language)} />
       ) : (
         <>
           {/* Statistics Cards */}
@@ -349,7 +335,10 @@ export const AnomalyDetection: React.FC = () => {
               <Card title={t('anomalyList', language)} style={{ height: '100%' }}>
                 {filteredAnomalies.length > 0 ? (
                   <div style={{ maxHeight: '400px', overflowY: 'auto', overflowX: 'hidden' }}>
-                    <table className="table table-sm table-hover mb-0" style={{ tableLayout: 'fixed', width: '100%' }}>
+                    <table
+                      className="table table-sm table-hover mb-0"
+                      style={{ tableLayout: 'fixed', width: '100%' }}
+                    >
                       <thead>
                         <tr>
                           <th style={{ width: '35%' }}>{t('tableDate', language)}</th>
@@ -361,10 +350,25 @@ export const AnomalyDetection: React.FC = () => {
                       <tbody>
                         {filteredAnomalies.map((anomaly, index) => (
                           <tr key={index}>
-                            <td style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{anomaly.date}</td>
+                            <td
+                              style={{
+                                whiteSpace: 'nowrap',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                              }}
+                            >
+                              {anomaly.date}
+                            </td>
                             <td>
-                              <span className={cn('badge', anomaly.type === 'spike' ? 'bg-danger' : 'bg-info')}>
-                                {anomaly.type === 'spike' ? t('usageSpike', language) : t('usageDrop', language)}
+                              <span
+                                className={cn(
+                                  'badge',
+                                  anomaly.type === 'spike' ? 'bg-danger' : 'bg-info'
+                                )}
+                              >
+                                {anomaly.type === 'spike'
+                                  ? t('usageSpike', language)
+                                  : t('usageDrop', language)}
                               </span>
                             </td>
                             <td style={{ whiteSpace: 'nowrap' }}>{formatTokens(anomaly.tokens)}</td>
@@ -372,8 +376,11 @@ export const AnomalyDetection: React.FC = () => {
                               <span
                                 className={cn(
                                   'badge',
-                                  anomaly.severity === 'high' ? 'bg-danger' :
-                                  anomaly.severity === 'medium' ? 'bg-warning' : 'bg-info'
+                                  anomaly.severity === 'high'
+                                    ? 'bg-danger'
+                                    : anomaly.severity === 'medium'
+                                      ? 'bg-warning'
+                                      : 'bg-info'
                                 )}
                               >
                                 {anomaly.severity}
@@ -397,7 +404,10 @@ export const AnomalyDetection: React.FC = () => {
             <div className="col-md-6">
               <Card title={t('recommendations', language)} style={{ height: '100%' }}>
                 {recommendations && recommendations.length > 0 ? (
-                  <ul className="list-group list-group-flush" style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                  <ul
+                    className="list-group list-group-flush"
+                    style={{ maxHeight: '400px', overflowY: 'auto' }}
+                  >
                     {recommendations.map((rec, index) => (
                       <li key={index} className="list-group-item">
                         <div className="d-flex justify-content-between align-items-start">
@@ -465,7 +475,7 @@ function getRecommendationIcon(type: string): string {
     security: 'bi-shield-check',
     usage: 'bi-graph-up',
   };
-  return icons[type] || 'bi-lightbulb';
+  return icons[type] ?? 'bi-lightbulb';
 }
 
 function getImpactBadge(impact: string | undefined): string {
