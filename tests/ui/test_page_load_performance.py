@@ -99,8 +99,8 @@ async def test_page_load():
         # If on login page, perform login
         if "/login" in current_url or "login" in await page.title():
             print("\n2. Performing login...")
-            await page.fill('#username', USERNAME)
-            await page.fill('#password', PASSWORD)
+            await page.fill("#username", USERNAME)
+            await page.fill("#password", PASSWORD)
             await page.click('button[type="submit"]')
 
             # Wait for navigation

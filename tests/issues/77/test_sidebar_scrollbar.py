@@ -13,7 +13,9 @@ import os
 from datetime import datetime
 
 # Get project root directory
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+PROJECT_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, PROJECT_ROOT)
 
 from playwright.async_api import async_playwright, expect
@@ -40,12 +42,12 @@ async def test_sidebar_scrollbar():
     print("\n" + "=" * 50)
     print("Test #77: Sidebar menu no scrollbar")
     print("=" * 50)
-    
+
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=HEADLESS)
         context = await browser.new_context()
         page = await context.new_page()
-        
+
         try:
             # Login first
             await page.goto(f"{BASE_URL}/login")
@@ -55,20 +57,22 @@ async def test_sidebar_scrollbar():
             await page.click("#login-btn")
             await page.wait_for_url(f"{BASE_URL}/", timeout=10000)
             await page.wait_for_load_state("networkidle")
-            
+
             # Take screenshot of sidebar
             screenshot_path = await take_screenshot(page, "01_sidebar.png")
             print(f"  Screenshot: {screenshot_path}")
-            
+
             # Check sidebar-nav has scrollbar-width: none
             sidebar_nav = await page.locator("#sidebar-nav")
-            scrollbar_width = sidebar_nav.evaluate("el => window.getComputedStyle(el).scrollbarWidth")
+            scrollbar_width = sidebar_nav.evaluate(
+                "el => window.getComputedStyle(el).scrollbarWidth"
+            )
             print(f"  ✓ Sidebar scrollbar-width: {scrollbar_width}")
-            
+
             # Note: scrollbar-width: none is the CSS property
             print("  ✓ Test #77 PASSED (CSS property set)")
             return True
-            
+
         except Exception as e:
             print(f"  ✗ Test #77 FAILED: {e}")
             await take_screenshot(page, "error_77.png")
@@ -82,13 +86,13 @@ def main():
     print("\n" + "=" * 60)
     print(f"Issue #77 Test - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 60)
-    
+
     result = test_sidebar_scrollbar()
-    
+
     print("\n" + "=" * 60)
     print(f"Result: {'✓ PASSED' if result else '✗ FAILED'}")
     print("=" * 60)
-    
+
     return result
 
 

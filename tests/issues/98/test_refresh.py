@@ -19,23 +19,17 @@ async def test_messages_refresh():
     """Test Messages page refresh functionality."""
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(
-            viewport={"width": 1400, "height": 900},
-            locale="zh-CN"
-        )
+        context = await browser.new_context(viewport={"width": 1400, "height": 900}, locale="zh-CN")
         page = await context.new_page()
 
         # Track network requests
         api_requests = []
-        
+
         def track_request(request):
             if "/api/messages" in request.url:
-                api_requests.append({
-                    "url": request.url,
-                    "time": time.time()
-                })
+                api_requests.append({"url": request.url, "time": time.time()})
                 print(f"  [API Request] {request.url}")
-        
+
         page.on("request", track_request)
 
         try:
@@ -46,8 +40,8 @@ async def test_messages_refresh():
 
             # Step 2: Login
             print("[Step 2] Logging in...")
-            await page.fill('#username', "admin")
-            await page.fill('#password', "admin123")
+            await page.fill("#username", "admin")
+            await page.fill("#password", "admin123")
             await page.click('button[type="submit"]')
             await page.wait_for_url(lambda url: "/login" not in url, timeout=10000)
             print("✓ Login successful")
@@ -71,12 +65,12 @@ async def test_messages_refresh():
             if btn_count > 0:
                 # Clear previous requests
                 api_requests.clear()
-                
+
                 # Click refresh button
                 print("  Clicking refresh button...")
                 await refresh_btn.first.click()
                 await page.wait_for_timeout(3000)
-                
+
                 # Check if API request was made
                 print(f"  API requests after click: {len(api_requests)}")
                 if len(api_requests) > 0:
@@ -88,7 +82,7 @@ async def test_messages_refresh():
 
             # Step 5: Check auto-refresh toggle
             print("\n[Step 5] Checking auto-refresh toggle...")
-            auto_refresh_switch = page.locator('#messagesAutoRefreshSwitch')
+            auto_refresh_switch = page.locator("#messagesAutoRefreshSwitch")
             switch_count = await auto_refresh_switch.count()
             print(f"  Found {switch_count} auto-refresh switch(es)")
 
@@ -129,14 +123,14 @@ async def test_messages_refresh():
 
             # Step 6: Check page structure
             print("\n[Step 6] Checking page structure...")
-            
+
             # Check for messages container
-            messages_list = page.locator('.messages-list, .message-item')
+            messages_list = page.locator(".messages-list, .message-item")
             msg_count = await messages_list.count()
             print(f"  Found {msg_count} message element(s)")
 
             # Check for loading indicator
-            loading = page.locator('.loading, .spinner-border')
+            loading = page.locator(".loading, .spinner-border")
             loading_count = await loading.count()
             print(f"  Found {loading_count} loading indicator(s)")
 
@@ -163,5 +157,6 @@ async def test_messages_refresh():
 
 if __name__ == "__main__":
     import os
+
     os.makedirs("screenshots/issues/98", exist_ok=True)
     asyncio.run(test_messages_refresh())

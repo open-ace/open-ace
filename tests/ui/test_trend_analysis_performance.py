@@ -34,10 +34,7 @@ async def test_trend_analysis_performance():
 
         def on_request(request):
             if "/api/" in request.url:
-                api_requests.append({
-                    "url": request.url,
-                    "start_time": time.time()
-                })
+                api_requests.append({"url": request.url, "start_time": time.time()})
 
         def on_response(response):
             if "/api/" in response.url:
@@ -57,8 +54,8 @@ async def test_trend_analysis_performance():
 
         if "/login" in page.url:
             print("   Performing login...")
-            await page.fill('#username', USERNAME)
-            await page.fill('#password', PASSWORD)
+            await page.fill("#username", USERNAME)
+            await page.fill("#password", PASSWORD)
             await page.click('button[type="submit"]')
             await page.wait_for_load_state("networkidle", timeout=15000)
             print("   Login completed")
@@ -71,7 +68,9 @@ async def test_trend_analysis_performance():
         start_time = time.time()
 
         # Direct navigation to Trend Analysis page
-        await page.goto(f"{BASE_URL}/manage/analysis/trend", wait_until="networkidle", timeout=30000)
+        await page.goto(
+            f"{BASE_URL}/manage/analysis/trend", wait_until="networkidle", timeout=30000
+        )
 
         page_load_time = time.time() - start_time
         print(f"   Page load time: {page_load_time:.2f}s")
@@ -94,7 +93,9 @@ async def test_trend_analysis_performance():
     trend_api_requests = [r for r in api_requests if "analysis" in r["url"] or "trend" in r["url"]]
     for req in trend_api_requests:
         if "duration" in req:
-            print(f"   {req['url'].split('/')[-1]}: {req['duration']:.3f}s (status: {req['status']})")
+            print(
+                f"   {req['url'].split('/')[-1]}: {req['duration']:.3f}s (status: {req['status']})"
+            )
 
     # Print results
     print("\n" + "=" * 60)

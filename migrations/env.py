@@ -43,6 +43,7 @@ def get_url():
     Uses the centralized database configuration.
     """
     from app.repositories.database import get_database_url
+
     return get_database_url()
 
 
@@ -87,9 +88,7 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        context.configure(
-            connection=connection, target_metadata=target_metadata
-        )
+        context.configure(connection=connection, target_metadata=target_metadata)
 
         with context.begin_transaction():
             context.run_migrations()

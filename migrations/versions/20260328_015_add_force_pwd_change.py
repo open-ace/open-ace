@@ -9,73 +9,80 @@ This migration adds must_change_password field to users table:
 - Used for default admin account security
 
 """
+
 from typing import Union
 
 from alembic import op
 import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
-revision: str = '015_add_must_change_password'
-down_revision: Union[str, None] = '014_optimize_msg_indexes'
+revision: str = "015_add_must_change_password"
+down_revision: Union[str, None] = "014_optimize_msg_indexes"
 branch_labels: Union[str, None] = None
 depends_on: Union[str, None] = None
 
 
 def _column_exists(conn, table_name: str, column_name: str) -> bool:
     """Check if a column exists in the table."""
-    if conn.dialect.name == 'postgresql':
-        result = conn.execute(sa.text(
-            "SELECT 1 FROM information_schema.columns "
-            "WHERE table_name = :table_name AND column_name = :column_name"
-        ), {'table_name': table_name, 'column_name': column_name})
+    if conn.dialect.name == "postgresql":
+        result = conn.execute(
+            sa.text(
+                "SELECT 1 FROM information_schema.columns "
+                "WHERE table_name = :table_name AND column_name = :column_name"
+            ),
+            {"table_name": table_name, "column_name": column_name},
+        )
     else:
         # SQLite
-        result = conn.execute(sa.text(
-            "SELECT 1 FROM pragma_table_info(:table_name) "
-            "WHERE name = :column_name"
-        ), {'table_name': table_name, 'column_name': column_name})
+        result = conn.execute(
+            sa.text("SELECT 1 FROM pragma_table_info(:table_name) " "WHERE name = :column_name"),
+            {"table_name": table_name, "column_name": column_name},
+        )
     return result.fetchone() is not None
 
 
 def upgrade() -> None:
     """Add must_change_password column to users table."""
     conn = op.get_bind()
-    is_postgresql = conn.dialect.name == 'postgresql'
+    is_postgresql = conn.dialect.name == "postgresql"
 
-    if not _column_exists(conn, 'users', 'must_change_password'):
+    if not _column_exists(conn, "users", "must_change_password"):
         if is_postgresql:
-            op.execute("""
+            op.execute(
+                """
                 ALTER TABLE users
                 ADD COLUMN must_change_password BOOLEAN DEFAULT FALSE
-            """)
+            """
+            )
         else:
             # SQLite uses BOOLEAN type (stored as INTEGER 0/1)
-            op.add_column('users', sa.Column(
-                'must_change_password',
-                sa.Boolean(),
-                server_default=sa.false()
-            ))
+            op.add_column(
+                "users", sa.Column("must_change_password", sa.Boolean(), server_default=sa.false())
+            )
 
         # Set must_change_password=TRUE for existing admin users with default password
         # This ensures existing admin accounts also require password change
-        op.execute("""
+        op.execute(
+            """
             UPDATE users
             SET must_change_password = TRUE
             WHERE role = 'admin' AND password_hash IS NOT NULL
-        """)
+        """
+        )
 
 
 def downgrade() -> None:
     """Remove must_change_password column from users table."""
     conn = op.get_bind()
-    is_postgresql = conn.dialect.name == 'postgresql'
+    is_postgresql = conn.dialect.name == "postgresql"
 
-    if _column_exists(conn, 'users', 'must_change_password'):
+    if _column_exists(conn, "users", "must_change_password"):
         if is_postgresql:
             op.execute("ALTER TABLE users DROP COLUMN must_change_password")
         else:
             # SQLite requires recreating the table without the column
-            op.execute("""
+            op.execute(
+                """
                 CREATE TABLE users_new (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     username TEXT NOT NULL UNIQUE,
@@ -94,8 +101,10 @@ def downgrade() -> None:
                     tenant_id INTEGER,
                     linux_account TEXT
                 )
-            """)
-            op.execute("""
+            """
+            )
+            op.execute(
+                """
                 INSERT INTO users_new (
                     id, username, password_hash, email, role,
                     daily_token_quota, monthly_token_quota,
@@ -110,13 +119,14 @@ def downgrade() -> None:
                     is_active, created_at, updated_at, last_login,
                     deleted_at, tenant_id, linux_account
                 FROM users
-            """)
+            """
+            )
             op.execute("DROP TABLE users")
             op.execute("ALTER TABLE users_new RENAME TO users")
 
             # Recreate indexes
-            op.create_index('idx_users_username', 'users', ['username'])
-            op.create_index('idx_users_email', 'users', ['email'])
-            op.create_index('idx_users_role', 'users', ['role'])
-            op.create_index('idx_users_active', 'users', ['is_active'])
-            op.create_index('idx_users_tenant', 'users', ['tenant_id'])
+            op.create_index("idx_users_username", "users", ["username"])
+            op.create_index("idx_users_email", "users", ["email"])
+            op.create_index("idx_users_role", "users", ["role"])
+            op.create_index("idx_users_active", "users", ["is_active"])
+            op.create_index("idx_users_tenant", "users", ["tenant_id"])

@@ -24,11 +24,11 @@ sys.path.insert(0, project_root)
 from playwright.sync_api import sync_playwright
 
 # Test configuration
-BASE_URL = os.environ.get('BASE_URL', 'http://localhost:5001/')
-USERNAME = os.environ.get('USERNAME', 'admin')
-PASSWORD = os.environ.get('PASSWORD', 'admin123')
-HEADLESS = os.environ.get('HEADLESS', 'true').lower() == 'true'
-VIEWPORT_SIZE = {'width': 1400, 'height': 900}
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001/")
+USERNAME = os.environ.get("USERNAME", "admin")
+PASSWORD = os.environ.get("PASSWORD", "admin123")
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
+VIEWPORT_SIZE = {"width": 1400, "height": 900}
 
 # Performance thresholds
 API_FIRST_REQUEST_THRESHOLD = 1.0  # 1 second
@@ -36,13 +36,15 @@ API_CACHED_REQUEST_THRESHOLD = 0.05  # 50ms
 PAGE_LOAD_THRESHOLD = 3.0  # 3 seconds
 
 # Screenshot directory
-SCREENSHOT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'screenshots')
+SCREENSHOT_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "screenshots"
+)
 os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
 
 def take_screenshot(page, name):
     """Take a screenshot and save it."""
-    path = os.path.join(SCREENSHOT_DIR, f'anomaly_performance_{name}.png')
+    path = os.path.join(SCREENSHOT_DIR, f"anomaly_performance_{name}.png")
     page.screenshot(path=path)
     print(f"  Screenshot saved: {path}")
     return path
@@ -55,20 +57,19 @@ def test_api_performance():
     print("=" * 60)
 
     results = {
-        'first_request_under_1s': False,
-        'cached_request_under_50ms': False,
+        "first_request_under_1s": False,
+        "cached_request_under_50ms": False,
     }
 
     # Clear cache by using different date range
-    start_date = '2026-02-28'
-    end_date = '2026-03-29'
+    start_date = "2026-02-28"
+    end_date = "2026-03-29"
 
     # First request (may hit cache or not)
     print(f"\n[API Test 1] First request to anomaly-detection API...")
     start_time = time.time()
     response = requests.get(
-        f"{BASE_URL}api/analysis/anomaly-detection",
-        params={'start': start_date, 'end': end_date}
+        f"{BASE_URL}api/analysis/anomaly-detection", params={"start": start_date, "end": end_date}
     )
     first_request_time = time.time() - start_time
 
@@ -80,7 +81,7 @@ def test_api_performance():
 
     if first_request_time < API_FIRST_REQUEST_THRESHOLD:
         print(f"  ✓ First request under {API_FIRST_REQUEST_THRESHOLD}s threshold")
-        results['first_request_under_1s'] = True
+        results["first_request_under_1s"] = True
     else:
         print(f"  ✗ First request exceeded {API_FIRST_REQUEST_THRESHOLD}s threshold")
 
@@ -88,8 +89,7 @@ def test_api_performance():
     print(f"\n[API Test 2] Cached request to anomaly-detection API...")
     start_time = time.time()
     response = requests.get(
-        f"{BASE_URL}api/analysis/anomaly-detection",
-        params={'start': start_date, 'end': end_date}
+        f"{BASE_URL}api/analysis/anomaly-detection", params={"start": start_date, "end": end_date}
     )
     cached_request_time = time.time() - start_time
 
@@ -98,7 +98,7 @@ def test_api_performance():
 
     if cached_request_time < API_CACHED_REQUEST_THRESHOLD:
         print(f"  ✓ Cached request under {API_CACHED_REQUEST_THRESHOLD}s threshold")
-        results['cached_request_under_50ms'] = True
+        results["cached_request_under_50ms"] = True
     else:
         print(f"  ✗ Cached request exceeded {API_CACHED_REQUEST_THRESHOLD}s threshold")
 
@@ -106,8 +106,7 @@ def test_api_performance():
     print(f"\n[API Test 3] Anomaly trend API...")
     start_time = time.time()
     response = requests.get(
-        f"{BASE_URL}api/analysis/anomaly-trend",
-        params={'start': start_date, 'end': end_date}
+        f"{BASE_URL}api/analysis/anomaly-trend", params={"start": start_date, "end": end_date}
     )
     trend_request_time = time.time() - start_time
 
@@ -117,8 +116,7 @@ def test_api_performance():
     # Cached trend request
     start_time = time.time()
     response = requests.get(
-        f"{BASE_URL}api/analysis/anomaly-trend",
-        params={'start': start_date, 'end': end_date}
+        f"{BASE_URL}api/analysis/anomaly-trend", params={"start": start_date, "end": end_date}
     )
     cached_trend_time = time.time() - start_time
 
@@ -135,9 +133,9 @@ def test_page_load_performance():
 
     screenshots = []
     results = {
-        'page_load_under_3s': False,
-        'data_loaded': False,
-        'charts_rendered': False,
+        "page_load_under_3s": False,
+        "data_loaded": False,
+        "charts_rendered": False,
     }
 
     with sync_playwright() as p:
@@ -149,20 +147,20 @@ def test_page_load_performance():
             # Step 1: Login
             print("\n[Step 1] Logging in...")
             page.goto(f"{BASE_URL}login")
-            page.wait_for_load_state('networkidle')
-            page.fill('#username', USERNAME)
-            page.fill('#password', PASSWORD)
+            page.wait_for_load_state("networkidle")
+            page.fill("#username", USERNAME)
+            page.fill("#password", PASSWORD)
             page.click('button[type="submit"]')
-            page.wait_for_url(lambda url: '/login' not in url, timeout=15000)
-            page.wait_for_load_state('networkidle')
+            page.wait_for_url(lambda url: "/login" not in url, timeout=15000)
+            page.wait_for_load_state("networkidle")
             print(f"✓ Login successful")
-            screenshots.append(take_screenshot(page, '01_after_login'))
+            screenshots.append(take_screenshot(page, "01_after_login"))
 
             # Step 2: Navigate to Anomaly Detection page and measure load time
             print("\n[Step 2] Navigating to Anomaly Detection page...")
             start_time = time.time()
             page.goto(f"{BASE_URL}manage/analysis/anomaly")
-            page.wait_for_load_state('networkidle')
+            page.wait_for_load_state("networkidle")
 
             # Wait for data to load
             time.sleep(2)
@@ -172,26 +170,26 @@ def test_page_load_performance():
 
             if page_load_time < PAGE_LOAD_THRESHOLD:
                 print(f"  ✓ Page load under {PAGE_LOAD_THRESHOLD}s threshold")
-                results['page_load_under_3s'] = True
+                results["page_load_under_3s"] = True
             else:
                 print(f"  ✗ Page load exceeded {PAGE_LOAD_THRESHOLD}s threshold")
 
-            screenshots.append(take_screenshot(page, '02_page_loaded'))
+            screenshots.append(take_screenshot(page, "02_page_loaded"))
 
             # Step 3: Check if data is loaded
             print("\n[Step 3] Checking if data is loaded...")
 
             # Check for stat cards
-            stat_cards = page.locator('.anomaly-detection .stat-card')
+            stat_cards = page.locator(".anomaly-detection .stat-card")
             stat_count = stat_cards.count()
             print(f"  Found {stat_count} stat cards")
 
             if stat_count >= 4:
                 print("  ✓ Stat cards loaded")
-                results['data_loaded'] = True
+                results["data_loaded"] = True
 
             # Check for anomaly list
-            anomaly_rows = page.locator('.anomaly-detection .table tbody tr')
+            anomaly_rows = page.locator(".anomaly-detection .table tbody tr")
             row_count = anomaly_rows.count()
             print(f"  Found {row_count} anomaly rows")
 
@@ -199,15 +197,15 @@ def test_page_load_performance():
             print("\n[Step 4] Checking if charts are rendered...")
 
             # Check for line chart (trend)
-            line_chart = page.locator('.anomaly-detection .line-chart, .anomaly-detection canvas')
+            line_chart = page.locator(".anomaly-detection .line-chart, .anomaly-detection canvas")
             line_count = line_chart.count()
             print(f"  Found {line_count} chart elements")
 
             if line_count >= 1:
                 print("  ✓ Charts rendered")
-                results['charts_rendered'] = True
+                results["charts_rendered"] = True
 
-            screenshots.append(take_screenshot(page, '03_final'))
+            screenshots.append(take_screenshot(page, "03_final"))
 
             # Summary
             print("\n" + "=" * 60)
@@ -233,7 +231,7 @@ def test_page_load_performance():
 
         except Exception as e:
             print(f"\n✗ Test failed: {e}")
-            screenshots.append(take_screenshot(page, 'error'))
+            screenshots.append(take_screenshot(page, "error"))
             raise
 
         finally:

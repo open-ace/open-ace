@@ -44,9 +44,7 @@ def rsa_key_pair():
 
     # Generate private key
     private_key = rsa.generate_private_key(
-        public_exponent=65537,
-        key_size=2048,
-        backend=default_backend()
+        public_exponent=65537, key_size=2048, backend=default_backend()
     )
 
     # Get public key
@@ -56,26 +54,25 @@ def rsa_key_pair():
     private_pem = private_key.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.PKCS8,
-        encryption_algorithm=serialization.NoEncryption()
+        encryption_algorithm=serialization.NoEncryption(),
     )
 
     public_pem = public_key.public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo
+        encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo
     )
 
     # Get JWK format
     public_numbers = public_key.public_numbers()
-    n = public_numbers.n.to_bytes((public_numbers.n.bit_length() + 7) // 8, 'big')
-    e = public_numbers.e.to_bytes((public_numbers.e.bit_length() + 7) // 8, 'big')
+    n = public_numbers.n.to_bytes((public_numbers.n.bit_length() + 7) // 8, "big")
+    e = public_numbers.e.to_bytes((public_numbers.e.bit_length() + 7) // 8, "big")
 
     jwk = {
         "kty": "RSA",
         "kid": "test_key_id",
         "use": "sig",
         "alg": "RS256",
-        "n": base64.urlsafe_b64encode(n).rstrip(b'=').decode('utf-8'),
-        "e": base64.urlsafe_b64encode(e).rstrip(b'=').decode('utf-8'),
+        "n": base64.urlsafe_b64encode(n).rstrip(b"=").decode("utf-8"),
+        "e": base64.urlsafe_b64encode(e).rstrip(b"=").decode("utf-8"),
     }
 
     return {
@@ -89,9 +86,7 @@ def rsa_key_pair():
 class TestOIDCSignatureVerification:
     """Test OIDC ID token signature verification."""
 
-    def test_verify_id_token_with_valid_signature(
-        self, oidc_config, rsa_key_pair
-    ):
+    def test_verify_id_token_with_valid_signature(self, oidc_config, rsa_key_pair):
         """Test that a valid ID token with correct signature is verified."""
         provider = OIDCProvider(oidc_config)
 
@@ -119,16 +114,14 @@ class TestOIDCSignatureVerification:
         # Mock JWKS response
         jwks_response = {"keys": [rsa_key_pair["jwk"]]}
 
-        with patch.object(provider, '_get_jwks', return_value=jwks_response):
+        with patch.object(provider, "_get_jwks", return_value=jwks_response):
             result = provider._verify_id_token(id_token)
 
         assert result is not None
         assert result["sub"] == "user123"
         assert result["email"] == "test@example.com"
 
-    def test_verify_id_token_rejects_invalid_signature(
-        self, oidc_config, rsa_key_pair
-    ):
+    def test_verify_id_token_rejects_invalid_signature(self, oidc_config, rsa_key_pair):
         """Test that an ID token with invalid signature is rejected."""
         provider = OIDCProvider(oidc_config)
 
@@ -139,14 +132,12 @@ class TestOIDCSignatureVerification:
 
         # Generate a different key
         different_key = rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=2048,
-            backend=default_backend()
+            public_exponent=65537, key_size=2048, backend=default_backend()
         )
         different_pem = different_key.private_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PrivateFormat.PKCS8,
-            encryption_algorithm=serialization.NoEncryption()
+            encryption_algorithm=serialization.NoEncryption(),
         )
 
         now = int(time.time())
@@ -169,15 +160,13 @@ class TestOIDCSignatureVerification:
         # Mock JWKS response with original key
         jwks_response = {"keys": [rsa_key_pair["jwk"]]}
 
-        with patch.object(provider, '_get_jwks', return_value=jwks_response):
+        with patch.object(provider, "_get_jwks", return_value=jwks_response):
             result = provider._verify_id_token(id_token)
 
         # Should reject the token with invalid signature
         assert result is None
 
-    def test_verify_id_token_rejects_expired_token(
-        self, oidc_config, rsa_key_pair
-    ):
+    def test_verify_id_token_rejects_expired_token(self, oidc_config, rsa_key_pair):
         """Test that expired ID tokens are rejected."""
         provider = OIDCProvider(oidc_config)
 
@@ -200,14 +189,12 @@ class TestOIDCSignatureVerification:
 
         jwks_response = {"keys": [rsa_key_pair["jwk"]]}
 
-        with patch.object(provider, '_get_jwks', return_value=jwks_response):
+        with patch.object(provider, "_get_jwks", return_value=jwks_response):
             result = provider._verify_id_token(id_token)
 
         assert result is None
 
-    def test_verify_id_token_rejects_wrong_audience(
-        self, oidc_config, rsa_key_pair
-    ):
+    def test_verify_id_token_rejects_wrong_audience(self, oidc_config, rsa_key_pair):
         """Test that tokens with wrong audience are rejected."""
         provider = OIDCProvider(oidc_config)
 
@@ -229,14 +216,12 @@ class TestOIDCSignatureVerification:
 
         jwks_response = {"keys": [rsa_key_pair["jwk"]]}
 
-        with patch.object(provider, '_get_jwks', return_value=jwks_response):
+        with patch.object(provider, "_get_jwks", return_value=jwks_response):
             result = provider._verify_id_token(id_token)
 
         assert result is None
 
-    def test_verify_id_token_rejects_wrong_issuer(
-        self, oidc_config, rsa_key_pair
-    ):
+    def test_verify_id_token_rejects_wrong_issuer(self, oidc_config, rsa_key_pair):
         """Test that tokens with wrong issuer are rejected."""
         provider = OIDCProvider(oidc_config)
 
@@ -258,7 +243,7 @@ class TestOIDCSignatureVerification:
 
         jwks_response = {"keys": [rsa_key_pair["jwk"]]}
 
-        with patch.object(provider, '_get_jwks', return_value=jwks_response):
+        with patch.object(provider, "_get_jwks", return_value=jwks_response):
             result = provider._verify_id_token(id_token)
 
         assert result is None
@@ -270,7 +255,7 @@ class TestOIDCSignatureVerification:
         jwks_response = {"keys": [rsa_key_pair["jwk"]]}
 
         # Mock the requests.get call
-        with patch('requests.get') as mock_get:
+        with patch("requests.get") as mock_get:
             mock_response = MagicMock()
             mock_response.json.return_value = jwks_response
             mock_response.raise_for_status = MagicMock()

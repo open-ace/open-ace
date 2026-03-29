@@ -25,7 +25,7 @@ from datetime import datetime
 # Add shared modules
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(script_dir)))
-sys.path.insert(0, os.path.join(project_root, 'scripts', 'shared'))
+sys.path.insert(0, os.path.join(project_root, "scripts", "shared"))
 
 from db import get_connection, DB_PATH
 
@@ -49,9 +49,9 @@ def test_database_schema():
 
         # Required columns for issue 94
         required_columns = {
-            'feishu_conversation_id': 'Renamed from conversation_label',
-            'agent_session_id': 'New: Tool process session identifier',
-            'conversation_id': 'New: One round of conversation identifier'
+            "feishu_conversation_id": "Renamed from conversation_label",
+            "agent_session_id": "New: Tool process session identifier",
+            "conversation_id": "New: One round of conversation identifier",
         }
 
         for col_name, description in required_columns.items():
@@ -63,22 +63,25 @@ def test_database_schema():
                 results.append((f"Column: {col_name}", False, description))
 
         # Verify old column is removed
-        if 'conversation_label' not in columns:
+        if "conversation_label" not in columns:
             print(f"  ✓ conversation_label: REMOVED (correctly renamed)")
-            results.append(("Old column removed", True, "conversation_label renamed to feishu_conversation_id"))
+            results.append(
+                ("Old column removed", True, "conversation_label renamed to feishu_conversation_id")
+            )
         else:
             print(f"  ✗ conversation_label: STILL EXISTS (should be removed)")
             results.append(("Old column removed", False, "conversation_label should be removed"))
 
         # Check indexes
         print("\nChecking indexes...")
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='daily_messages'")
+        cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='daily_messages'"
+        )
         indexes = [idx[0] for idx in cursor.fetchall()]
 
+        # Optimized indexes (migration 014): conversation_id and agent_session_id are covered by composite index
         required_indexes = [
-            'idx_messages_agent_session',
-            'idx_messages_conversation',
-            'idx_messages_feishu_conv'
+            "idx_messages_conversation",  # Covers date, conversation_id, agent_session_id
         ]
 
         for idx_name in required_indexes:
@@ -122,7 +125,9 @@ def test_data_migration():
             return results
 
         # Check feishu_conversation_id coverage
-        cursor.execute("SELECT COUNT(*) FROM daily_messages WHERE feishu_conversation_id IS NOT NULL")
+        cursor.execute(
+            "SELECT COUNT(*) FROM daily_messages WHERE feishu_conversation_id IS NOT NULL"
+        )
         with_feishu_conv = cursor.fetchone()[0]
         feishu_pct = (with_feishu_conv / total_messages * 100) if total_messages > 0 else 0
         print(f"\nMessages with feishu_conversation_id: {with_feishu_conv} ({feishu_pct:.1f}%)")
@@ -189,14 +194,16 @@ def test_concept_definitions():
     try:
         # Test Agent Session concept
         print("\n[Agent Session Concept]")
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT agent_session_id, COUNT(*) as msg_count
             FROM daily_messages
             WHERE agent_session_id IS NOT NULL
             GROUP BY agent_session_id
             ORDER BY msg_count DESC
             LIMIT 5
-        """)
+        """
+        )
         sessions = cursor.fetchall()
 
         if sessions:
@@ -207,7 +214,9 @@ def test_concept_definitions():
             # Verify session has multiple messages (a session should contain multiple conversations)
             if sessions[0][1] > 1:
                 print(f"  ✓ Agent sessions contain multiple messages")
-                results.append(("Agent Session concept", True, f"Top session: {sessions[0][1]} messages"))
+                results.append(
+                    ("Agent Session concept", True, f"Top session: {sessions[0][1]} messages")
+                )
             else:
                 print(f"  ⚠ Agent sessions have only 1 message each")
                 results.append(("Agent Session concept", True, "Single message sessions"))
@@ -217,14 +226,16 @@ def test_concept_definitions():
 
         # Test Conversation concept
         print("\n[Conversation Concept]")
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT conversation_id, COUNT(*) as msg_count
             FROM daily_messages
             WHERE conversation_id IS NOT NULL
             GROUP BY conversation_id
             ORDER BY msg_count DESC
             LIMIT 5
-        """)
+        """
+        )
         conversations = cursor.fetchall()
 
         if conversations:
@@ -235,7 +246,13 @@ def test_concept_definitions():
             # Verify conversations have appropriate structure
             if conversations[0][1] >= 1:
                 print(f"  ✓ Conversations contain messages")
-                results.append(("Conversation concept", True, f"Top conversation: {conversations[0][1]} messages"))
+                results.append(
+                    (
+                        "Conversation concept",
+                        True,
+                        f"Top conversation: {conversations[0][1]} messages",
+                    )
+                )
             else:
                 print(f"  ✗ Conversations appear empty")
                 results.append(("Conversation concept", False, "Empty conversations"))
@@ -245,13 +262,15 @@ def test_concept_definitions():
 
         # Test Message role breakdown
         print("\n[Message Role Breakdown]")
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT role, COUNT(*) as count
             FROM daily_messages
             WHERE role IS NOT NULL
             GROUP BY role
             ORDER BY count DESC
-        """)
+        """
+        )
         roles = cursor.fetchall()
 
         if roles:
@@ -261,7 +280,7 @@ def test_concept_definitions():
 
             # Should have user and assistant at minimum
             role_names = [r[0] for r in roles]
-            if 'user' in role_names and 'assistant' in role_names:
+            if "user" in role_names and "assistant" in role_names:
                 print(f"  ✓ Has user and assistant roles")
                 results.append(("Message roles", True, f"Roles: {role_names}"))
             else:
@@ -293,7 +312,8 @@ def test_conversation_structure():
 
     try:
         # Find a conversation with multiple messages
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT conversation_id, COUNT(*) as msg_count
             FROM daily_messages
             WHERE conversation_id IS NOT NULL
@@ -301,7 +321,8 @@ def test_conversation_structure():
             HAVING msg_count >= 2
             ORDER BY msg_count DESC
             LIMIT 1
-        """)
+        """
+        )
         result = cursor.fetchone()
 
         if result:
@@ -309,12 +330,15 @@ def test_conversation_structure():
             print(f"\nAnalyzing conversation: {conv_id} ({msg_count} messages)")
 
             # Get all messages in this conversation
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT message_id, parent_id, role, content
                 FROM daily_messages
                 WHERE conversation_id = ?
                 ORDER BY timestamp ASC
-            """, (conv_id,))
+            """,
+                (conv_id,),
+            )
             messages = cursor.fetchall()
 
             print(f"\n  Message chain:")
@@ -322,18 +346,22 @@ def test_conversation_structure():
             has_assistant = False
             for msg in messages:
                 msg_id, parent_id, role, content = msg
-                content_preview = (content[:50] + '...') if content and len(content) > 50 else content
+                content_preview = (
+                    (content[:50] + "...") if content and len(content) > 50 else content
+                )
                 print(f"    - [{role}] {msg_id} (parent: {parent_id})")
                 print(f"      Content: {content_preview}")
 
-                if role == 'user':
+                if role == "user":
                     has_user = True
-                elif role == 'assistant':
+                elif role == "assistant":
                     has_assistant = True
 
             if has_user and has_assistant:
                 print(f"\n  ✓ Conversation has user and assistant messages")
-                results.append(("Conversation structure", True, f"{msg_count} messages, has user+assistant"))
+                results.append(
+                    ("Conversation structure", True, f"{msg_count} messages, has user+assistant")
+                )
             elif has_user:
                 print(f"\n  ⚠ Conversation only has user messages")
                 results.append(("Conversation structure", True, "Only user messages"))
@@ -366,12 +394,14 @@ def test_session_agent_mapping():
 
     try:
         # Check if agent_session_id follows the expected pattern (tool_sessionid)
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT DISTINCT agent_session_id, tool_name
             FROM daily_messages
             WHERE agent_session_id IS NOT NULL
             LIMIT 10
-        """)
+        """
+        )
         mappings = cursor.fetchall()
 
         if mappings:
@@ -381,8 +411,8 @@ def test_session_agent_mapping():
 
             for session_id, tool_name in mappings:
                 # Expected pattern: toolname_sessionid (e.g., claude_abc123)
-                if '_' in session_id:
-                    session_tool = session_id.split('_')[0]
+                if "_" in session_id:
+                    session_tool = session_id.split("_")[0]
                     if session_tool == tool_name:
                         print(f"  ✓ {session_id} → {tool_name} (matches)")
                         valid_pattern += 1
@@ -395,10 +425,18 @@ def test_session_agent_mapping():
 
             if valid_pattern > 0:
                 print(f"\n  ✓ Found {valid_pattern} valid session patterns")
-                results.append(("Session-tool mapping", True, f"{valid_pattern} valid, {invalid_pattern} invalid"))
+                results.append(
+                    (
+                        "Session-tool mapping",
+                        True,
+                        f"{valid_pattern} valid, {invalid_pattern} invalid",
+                    )
+                )
             else:
                 print(f"\n  ⚠ No valid session patterns found")
-                results.append(("Session-tool mapping", True, f"{invalid_pattern} invalid patterns"))
+                results.append(
+                    ("Session-tool mapping", True, f"{invalid_pattern} invalid patterns")
+                )
         else:
             print(f"\n  ⚠ No agent session data found")
             results.append(("Session-tool mapping", True, "No data"))
@@ -465,6 +503,6 @@ def run_all_tests():
         return False
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     success = run_all_tests()
     sys.exit(0 if success else 1)

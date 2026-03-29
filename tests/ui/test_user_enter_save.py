@@ -24,14 +24,18 @@ sys.path.insert(0, skill_dir)
 try:
     from playwright.async_api import async_playwright, expect
 except ImportError:
-    print("Error: playwright not installed. Run: pip install playwright && playwright install chromium")
+    print(
+        "Error: playwright not installed. Run: pip install playwright && playwright install chromium"
+    )
     sys.exit(1)
 
 # Test configuration
-BASE_URL = os.environ.get('BASE_URL', 'http://localhost:5001')
-USERNAME = os.environ.get('TEST_USERNAME', 'admin')
-PASSWORD = os.environ.get('TEST_PASSWORD', 'admin123')
-SCREENSHOT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(skill_dir))), 'screenshots')
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
+SCREENSHOT_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(skill_dir))), "screenshots"
+)
 TIMEOUT = 60000  # 60 seconds timeout
 
 # Ensure screenshot directory exists
@@ -59,7 +63,7 @@ async def test_user_enter_save():
     async with async_playwright() as p:
         # Launch browser in headless mode
         browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(viewport={'width': 1280, 'height': 900})
+        context = await browser.new_context(viewport={"width": 1280, "height": 900})
         page = await context.new_page()
 
         try:
@@ -69,31 +73,31 @@ async def test_user_enter_save():
 
             # Step 1: Navigate to login page
             print("\n[Step 1] Navigate to login page")
-            await page.goto(f'{BASE_URL}/login')
-            await page.wait_for_load_state('networkidle')
-            screenshots.append(await take_screenshot(page, 'test_enter_save_01_login.png'))
+            await page.goto(f"{BASE_URL}/login")
+            await page.wait_for_load_state("networkidle")
+            screenshots.append(await take_screenshot(page, "test_enter_save_01_login.png"))
             print("  ✓ Login page loaded")
 
             # Step 2: Login
             print("\n[Step 2] Login as admin")
-            await page.fill('#username', USERNAME)
-            await page.fill('#password', PASSWORD)
+            await page.fill("#username", USERNAME)
+            await page.fill("#password", PASSWORD)
             await page.click('button[type="submit"]')
-            await page.wait_for_load_state('networkidle')
+            await page.wait_for_load_state("networkidle")
             time.sleep(2)
             print("  ✓ Logged in successfully")
 
             # Step 3: Navigate to Management page
             print("\n[Step 3] Navigate to Management page")
-            await page.click('#nav-management')
-            await page.wait_for_load_state('networkidle')
+            await page.click("#nav-management")
+            await page.wait_for_load_state("networkidle")
             time.sleep(1)
-            screenshots.append(await take_screenshot(page, 'test_enter_save_02_management.png'))
+            screenshots.append(await take_screenshot(page, "test_enter_save_02_management.png"))
             print("  ✓ Management page loaded")
 
             # Step 4: Click Users tab
             print("\n[Step 4] Click Users tab")
-            users_tab = page.locator('#users-tab')
+            users_tab = page.locator("#users-tab")
             await expect(users_tab).to_be_visible()
             await users_tab.click()
             time.sleep(1)
@@ -105,22 +109,24 @@ async def test_user_enter_save():
             await expect(add_user_btn).to_be_visible()
             await add_user_btn.click()
             time.sleep(1)
-            screenshots.append(await take_screenshot(page, 'test_enter_save_03_add_user_modal.png'))
+            screenshots.append(await take_screenshot(page, "test_enter_save_03_add_user_modal.png"))
             print("  ✓ Add User modal opened")
 
             # Step 6: Check modal is visible
             print("\n[Step 6] Check modal is visible")
-            modal = page.locator('.modal.show')
+            modal = page.locator(".modal.show")
             await expect(modal).to_be_visible()
             print("  ✓ Modal is visible")
 
             # Step 7: Fill in user form
             print("\n[Step 7] Fill in user form")
             # Find all text inputs in the modal
-            inputs = await modal.locator('input[type="text"], input[type="email"], input[type="password"]').all()
+            inputs = await modal.locator(
+                'input[type="text"], input[type="email"], input[type="password"]'
+            ).all()
 
             # Fill username
-            username_input = modal.locator('input').first
+            username_input = modal.locator("input").first
             await username_input.fill(test_username)
             print(f"  ✓ Username filled: {test_username}")
 
@@ -137,14 +143,14 @@ async def test_user_enter_save():
                 await password_inputs[1].fill(test_password)
                 print("  ✓ Password fields filled")
 
-            screenshots.append(await take_screenshot(page, 'test_enter_save_04_form_filled.png'))
+            screenshots.append(await take_screenshot(page, "test_enter_save_04_form_filled.png"))
 
             # Step 8: Press Enter to submit
             print("\n[Step 8] Press Enter to submit form")
             # Focus on the last input and press Enter
-            await password_inputs[-1].press('Enter')
+            await password_inputs[-1].press("Enter")
             time.sleep(2)
-            screenshots.append(await take_screenshot(page, 'test_enter_save_05_after_enter.png'))
+            screenshots.append(await take_screenshot(page, "test_enter_save_05_after_enter.png"))
 
             # Step 9: Verify modal closed (form submitted)
             print("\n[Step 9] Verify modal closed")
@@ -153,13 +159,15 @@ async def test_user_enter_save():
                 print("  ✓ Modal closed - form submitted successfully via Enter key")
             else:
                 # Check if there's an error message
-                error_alert = modal.locator('.alert-danger')
+                error_alert = modal.locator(".alert-danger")
                 if await error_alert.count() > 0:
                     error_text = await error_alert.inner_text()
                     print(f"  ! Form submission returned error: {error_text}")
                     # This might be due to duplicate username, which is expected
-                    if 'already exists' in error_text.lower() or 'duplicate' in error_text.lower():
-                        print("  ✓ Enter key triggered form submission (duplicate user error is expected)")
+                    if "already exists" in error_text.lower() or "duplicate" in error_text.lower():
+                        print(
+                            "  ✓ Enter key triggered form submission (duplicate user error is expected)"
+                        )
                     else:
                         raise Exception(f"Unexpected error: {error_text}")
                 else:
@@ -179,13 +187,13 @@ async def test_user_enter_save():
 
         except Exception as e:
             print(f"\n✗ Test failed: {e}")
-            screenshots.append(await take_screenshot(page, 'test_enter_save_error.png'))
+            screenshots.append(await take_screenshot(page, "test_enter_save_error.png"))
             return False
 
         finally:
             await browser.close()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     success = pytest.main([__file__, "-v"])
     sys.exit(0 if success == 0 else 1)

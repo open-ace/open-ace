@@ -39,8 +39,8 @@ async def test_recommendations_api():
             # Step 1: Login
             print("\n[Step 1] Logging in...")
             await page.goto(f"{BASE_URL}/login")
-            await page.fill('#username', USERNAME)
-            await page.fill('#password', PASSWORD)
+            await page.fill("#username", USERNAME)
+            await page.fill("#password", PASSWORD)
             await page.click('button[type="submit"]')
 
             # Wait for redirect to dashboard
@@ -51,12 +51,12 @@ async def test_recommendations_api():
             print("\n[Step 2] Navigating to Analysis page...")
             start_time = time.time()
             # Wait for sidebar to be visible
-            await page.wait_for_selector('.sidebar', timeout=10000)
+            await page.wait_for_selector(".sidebar", timeout=10000)
             # Click on Analysis nav item (using text content in span)
             await page.click('.sidebar .nav-link:has-text("Analysis")')
 
             # Wait for analysis section to be visible
-            await page.wait_for_selector('#analysis-section', state='visible', timeout=5000)
+            await page.wait_for_selector("#analysis-section", state="visible", timeout=5000)
             navigation_time = time.time() - start_time
             print(f"✓ Analysis page loaded in {navigation_time:.2f} seconds")
 
@@ -67,7 +67,7 @@ async def test_recommendations_api():
             time.sleep(2)
 
             # Check if recommendations container exists
-            recommendations_container = page.locator('#recommendations-content')
+            recommendations_container = page.locator("#recommendations-content")
             rec_count = await recommendations_container.count()
             if rec_count > 0:
                 print("✓ Recommendations container found")
@@ -81,15 +81,13 @@ async def test_recommendations_api():
             api_responses = []
 
             def handle_response(response):
-                if '/api/analysis/recommendations' in response.url:
-                    api_responses.append({
-                        'url': response.url,
-                        'status': response.status,
-                        'ok': response.ok
-                    })
+                if "/api/analysis/recommendations" in response.url:
+                    api_responses.append(
+                        {"url": response.url, "status": response.status, "ok": response.ok}
+                    )
                     print(f"  API Response: {response.status} - {response.url}")
 
-            page.on('response', handle_response)
+            page.on("response", handle_response)
 
             # Reload to capture API call
             await page.reload()
@@ -98,9 +96,9 @@ async def test_recommendations_api():
             # Check API responses
             if api_responses:
                 for resp in api_responses:
-                    if resp['status'] == 200:
+                    if resp["status"] == 200:
                         print(f"✓ Recommendations API returned 200 OK")
-                    elif resp['status'] == 500:
+                    elif resp["status"] == 500:
                         print(f"✗ Recommendations API returned 500 Error - Issue #69 NOT fixed!")
                         raise Exception("API returned 500 error - TypeError still present")
             else:
@@ -121,7 +119,7 @@ async def test_recommendations_api():
                 print("✓ No error messages found in UI")
 
             # Take screenshot
-            timestamp = time.strftime('%Y%m%d_%H%M%S')
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
             screenshot_path = f"screenshots/issues/69/test_recommendations_{timestamp}.png"
             await page.screenshot(path=screenshot_path)
             print(f"\n✓ Screenshot saved to {screenshot_path}")
@@ -133,7 +131,7 @@ async def test_recommendations_api():
 
         except Exception as e:
             print(f"\n✗ Test failed: {e}")
-            timestamp = time.strftime('%Y%m%d_%H%M%S')
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
             screenshot_path = f"screenshots/issues/69/test_recommendations_error_{timestamp}.png"
             await page.screenshot(path=screenshot_path)
             print(f"Error screenshot saved to {screenshot_path}")

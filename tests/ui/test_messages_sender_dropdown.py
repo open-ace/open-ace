@@ -34,8 +34,8 @@ async def test_sender_dropdown_zindex_and_translation():
             # Step 1: Login
             print("\n[Step 1] Logging in...")
             await page.goto(f"{BASE_URL}/login")
-            await page.fill('#username', USERNAME)
-            await page.fill('#password', PASSWORD)
+            await page.fill("#username", USERNAME)
+            await page.fill("#password", PASSWORD)
             await page.click('button[type="submit"]')
 
             # Wait for redirect to dashboard
@@ -44,11 +44,11 @@ async def test_sender_dropdown_zindex_and_translation():
 
             # Step 2: Navigate to Messages page
             print("\n[Step 2] Navigating to Messages page...")
-            await page.wait_for_load_state('networkidle', timeout=15000)
+            await page.wait_for_load_state("networkidle", timeout=15000)
 
             # Navigate directly to messages page
             await page.goto(f"{BASE_URL}/manage/messages")
-            await page.wait_for_load_state('networkidle', timeout=15000)
+            await page.wait_for_load_state("networkidle", timeout=15000)
             print("✓ Messages page loaded")
 
             # Step 3: Find sender dropdown
@@ -58,20 +58,20 @@ async def test_sender_dropdown_zindex_and_translation():
             print("✓ Sender label visible")
 
             # Find the searchable select near Sender label
-            sender_dropdown = page.locator('.searchable-select').nth(0)  # First searchable select
+            sender_dropdown = page.locator(".searchable-select").nth(0)  # First searchable select
             await expect(sender_dropdown).to_be_visible()
             print("✓ Sender dropdown found")
 
             # Step 4: Click to open dropdown
             print("\n[Step 4] Opening sender dropdown...")
-            dropdown_button = sender_dropdown.locator('button')
+            dropdown_button = sender_dropdown.locator("button")
             await dropdown_button.click()
             await page.wait_for_timeout(500)
             print("✓ Dropdown opened")
 
             # Step 5: Check dropdown content - should NOT show 'dashboardFilterAllSenders'
             print("\n[Step 5] Checking dropdown content...")
-            dropdown_menu = sender_dropdown.locator('.position-absolute')
+            dropdown_menu = sender_dropdown.locator(".position-absolute")
 
             # Check if dropdown is visible
             await expect(dropdown_menu).to_be_visible()
@@ -82,24 +82,33 @@ async def test_sender_dropdown_zindex_and_translation():
             print(f"  Dropdown content: {dropdown_text[:100]}...")
 
             # Check that it doesn't show the translation key
-            assert 'dashboardFilterAllSenders' not in dropdown_text, \
-                f"ERROR: Dropdown shows translation key instead of translated text: {dropdown_text}"
+            assert (
+                "dashboardFilterAllSenders" not in dropdown_text
+            ), f"ERROR: Dropdown shows translation key instead of translated text: {dropdown_text}"
             print("✓ Dropdown does NOT show translation key 'dashboardFilterAllSenders'")
 
             # Check that it shows proper text (should show 'All Senders' or '所有发送者')
-            has_proper_text = 'All Senders' in dropdown_text or '所有发送者' in dropdown_text or '发送者' in dropdown_text
+            has_proper_text = (
+                "All Senders" in dropdown_text
+                or "所有发送者" in dropdown_text
+                or "发送者" in dropdown_text
+            )
             assert has_proper_text, f"Dropdown should show proper text, got: {dropdown_text}"
             print("✓ Dropdown shows proper translated text")
 
             # Step 6: Check z-index - dropdown should be above message cards
             print("\n[Step 6] Checking z-index...")
-            dropdown_style = await dropdown_menu.evaluate('el => window.getComputedStyle(el).zIndex')
+            dropdown_style = await dropdown_menu.evaluate(
+                "el => window.getComputedStyle(el).zIndex"
+            )
             print(f"  Dropdown z-index: {dropdown_style}")
 
             # Check if dropdown is fully visible (not clipped by message cards)
             dropdown_box = await dropdown_menu.bounding_box()
             if dropdown_box:
-                print(f"  Dropdown position: x={dropdown_box['x']}, y={dropdown_box['y']}, width={dropdown_box['width']}, height={dropdown_box['height']}")
+                print(
+                    f"  Dropdown position: x={dropdown_box['x']}, y={dropdown_box['y']}, width={dropdown_box['width']}, height={dropdown_box['height']}"
+                )
 
                 # Take screenshot to verify
                 await page.screenshot(path="screenshots/messages_sender_dropdown.png")
@@ -107,7 +116,7 @@ async def test_sender_dropdown_zindex_and_translation():
 
             # Step 7: Close dropdown by clicking outside
             print("\n[Step 7] Closing dropdown...")
-            await page.keyboard.press('Escape')
+            await page.keyboard.press("Escape")
             await page.wait_for_timeout(300)
             print("✓ Dropdown closed")
 

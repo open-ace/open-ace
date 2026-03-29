@@ -16,10 +16,10 @@ import os
 from datetime import datetime
 
 # 配置
-BASE_URL = os.environ.get('BASE_URL', 'http://localhost:5001/')
-USERNAME = os.environ.get('USERNAME', 'admin')
-PASSWORD = os.environ.get('PASSWORD', 'admin123')
-SCREENSHOT_DIR = 'screenshots'
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001/")
+USERNAME = os.environ.get("USERNAME", "admin")
+PASSWORD = os.environ.get("PASSWORD", "admin123")
+SCREENSHOT_DIR = "screenshots"
 
 
 @pytest.mark.asyncio
@@ -30,11 +30,11 @@ async def test_issue38():
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
     # 生成时间戳
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(viewport={'width': 1400, 'height': 900})
+        context = await browser.new_context(viewport={"width": 1400, "height": 900})
         page = await context.new_page()
 
         results = []
@@ -42,42 +42,47 @@ async def test_issue38():
         try:
             # 1. 登录
             print("1. 登录系统...")
-            await page.goto(f'{BASE_URL}login')
-            await page.wait_for_load_state('networkidle')
-            await page.fill('#username', USERNAME)
-            await page.fill('#password', PASSWORD)
+            await page.goto(f"{BASE_URL}login")
+            await page.wait_for_load_state("networkidle")
+            await page.fill("#username", USERNAME)
+            await page.fill("#password", PASSWORD)
             await page.click('button[type="submit"]')
-            await page.wait_for_load_state('networkidle')
+            await page.wait_for_load_state("networkidle")
             await asyncio.sleep(2)
             print("   ✓ 登录成功")
             results.append(("登录", True, ""))
 
             # 2. 导航到 Analysis 页面
             print("2. 导航到 Analysis 页面...")
-            await page.click('text=Analysis')
-            await page.wait_for_load_state('networkidle')
+            await page.click("text=Analysis")
+            await page.wait_for_load_state("networkidle")
             await asyncio.sleep(2)
             print("   ✓ 已进入 Analysis 页面")
             results.append(("导航到 Analysis", True, ""))
 
             # 3. 先设置日期范围（在点击 Tab 之前）
             print("3. 设置日期范围...")
-            await page.evaluate('''() => {
+            await page.evaluate(
+                """() => {
                 document.getElementById('analysis-start-date').value = '2026-03-01';
                 document.getElementById('analysis-end-date').value = '2026-03-13';
-            }''')
+            }"""
+            )
             await asyncio.sleep(1)
 
             # 4. 点击 Conversation History Tab
             print("4. 点击 Conversation History Tab...")
-            await page.evaluate('''() => {
+            await page.evaluate(
+                """() => {
                 const tab = document.getElementById('conversation-history-tab');
                 if (tab) tab.click();
-            }''')
+            }"""
+            )
             await asyncio.sleep(3)  # Wait for data to load
-            
+
             # 检查表格状态
-            table_info = await page.evaluate('''() => {
+            table_info = await page.evaluate(
+                """() => {
                 const table = document.getElementById('conversation-history-table');
                 const rows = document.querySelectorAll('#conversation-history-table .tabulator-row');
                 const placeholder = document.querySelector('#conversation-history-table .tabulator-placeholder');
@@ -87,11 +92,14 @@ async def test_issue38():
                     placeholderExists: !!placeholder,
                     tableHTML: table ? table.innerHTML.substring(0, 200) : 'no table'
                 };
-            }''')
+            }"""
+            )
             print(f"   表格信息: {table_info}")
-            
+
             try:
-                await page.wait_for_selector('#conversation-history-table .tabulator-row', timeout=10000)
+                await page.wait_for_selector(
+                    "#conversation-history-table .tabulator-row", timeout=10000
+                )
                 print("   ✓ Conversation History 表格已加载")
                 results.append(("切换到 Conversation History", True, ""))
             except:
@@ -100,13 +108,17 @@ async def test_issue38():
                 # 继续测试，因为即使无数据，Page Size 功能也应该正常工作
 
             # 4. 截图初始状态
-            await page.screenshot(path=f'{SCREENSHOT_DIR}/issue38_01_initial_{timestamp}.png', full_page=True)
+            await page.screenshot(
+                path=f"{SCREENSHOT_DIR}/issue38_01_initial_{timestamp}.png", full_page=True
+            )
 
             # 5. 获取初始表格行数
             print("4. 获取初始表格行数...")
-            initial_rows = await page.evaluate('''() => {
+            initial_rows = await page.evaluate(
+                """() => {
                 return document.querySelectorAll('#conversation-history-table .tabulator-row').length;
-            }''')
+            }"""
+            )
             print(f"   初始行数: {initial_rows}")
             results.append(("初始表格数据", True, f"行数: {initial_rows}"))
 
@@ -114,7 +126,7 @@ async def test_issue38():
             print("5. 测试 Page Size 功能...")
 
             # 查找 Page Size 选择器
-            page_size_selector = await page.query_selector('.tabulator-page-size')
+            page_size_selector = await page.query_selector(".tabulator-page-size")
             if not page_size_selector:
                 print("   ! 未找到 Page Size 选择器")
                 results.append(("Page Size 选择器", False, "未找到"))
@@ -124,17 +136,22 @@ async def test_issue38():
             print("   找到 Page Size 选择器")
 
             # 选择新的 Page Size (50)
-            await page.select_option('.tabulator-page-size', '50')
+            await page.select_option(".tabulator-page-size", "50")
             await asyncio.sleep(2)  # 等待数据重新加载
 
             # 截图：选择新 Page Size 后
-            await page.screenshot(path=f'{SCREENSHOT_DIR}/issue38_02_after_page_size_50_{timestamp}.png', full_page=True)
+            await page.screenshot(
+                path=f"{SCREENSHOT_DIR}/issue38_02_after_page_size_50_{timestamp}.png",
+                full_page=True,
+            )
 
             # 7. 验证表格数据仍然存在
             print("6. 验证表格数据...")
 
             # 检查是否有 "No sessions found" 占位符
-            no_data_visible = await page.is_visible('#conversation-history-table .tabulator-placeholder')
+            no_data_visible = await page.is_visible(
+                "#conversation-history-table .tabulator-placeholder"
+            )
 
             if no_data_visible:
                 print("   ✗ 失败: 表格内容消失，显示 'No sessions found'")
@@ -143,29 +160,37 @@ async def test_issue38():
                 return False
 
             # 获取新的表格行数
-            new_rows = await page.evaluate('''() => {
+            new_rows = await page.evaluate(
+                """() => {
                 return document.querySelectorAll('#conversation-history-table .tabulator-row').length;
-            }''')
+            }"""
+            )
             print(f"   ✓ 表格数据仍然存在，当前行数: {new_rows}")
             results.append(("Page Size 变更后数据保留", True, f"新行数: {new_rows}"))
 
             # 8. 再次切换 Page Size 验证
             print("7. 再次切换 Page Size 验证...")
-            await page.select_option('.tabulator-page-size', '10')
+            await page.select_option(".tabulator-page-size", "10")
             await asyncio.sleep(2)
 
             # 截图：最终状态
-            await page.screenshot(path=f'{SCREENSHOT_DIR}/issue38_03_final_{timestamp}.png', full_page=True)
+            await page.screenshot(
+                path=f"{SCREENSHOT_DIR}/issue38_03_final_{timestamp}.png", full_page=True
+            )
 
             # 验证数据仍然存在
-            no_data_visible = await page.is_visible('#conversation-history-table .tabulator-placeholder')
+            no_data_visible = await page.is_visible(
+                "#conversation-history-table .tabulator-placeholder"
+            )
             if no_data_visible:
                 print("   ✗ 失败: 再次切换后数据消失")
                 results.append(("再次切换 Page Size", False, "数据消失"))
             else:
-                final_rows = await page.evaluate('''() => {
+                final_rows = await page.evaluate(
+                    """() => {
                     return document.querySelectorAll('#conversation-history-table .tabulator-row').length;
-                }''')
+                }"""
+                )
                 print(f"   ✓ 数据仍然存在，行数: {final_rows}")
                 results.append(("再次切换 Page Size", True, f"行数: {final_rows}"))
 
@@ -174,7 +199,9 @@ async def test_issue38():
         except Exception as e:
             print(f"   ✗ 测试出错: {str(e)}")
             results.append(("测试执行", False, str(e)))
-            await page.screenshot(path=f'{SCREENSHOT_DIR}/issue38_error_{timestamp}.png', full_page=True)
+            await page.screenshot(
+                path=f"{SCREENSHOT_DIR}/issue38_error_{timestamp}.png", full_page=True
+            )
 
         finally:
             await browser.close()
@@ -199,6 +226,6 @@ async def test_issue38():
     return failed == 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     success = asyncio.run(test_issue38())
     exit(0 if success else 1)

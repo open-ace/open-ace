@@ -62,6 +62,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest pytest-cov pytest-asyncio
+          pip install playwright
+          playwright install chromium --with-deps
 
       - name: Run tests
         run: |

@@ -13,7 +13,9 @@ import os
 from datetime import datetime
 
 # Get project root directory
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+PROJECT_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, PROJECT_ROOT)
 
 from playwright.async_api import async_playwright, expect
@@ -38,38 +40,38 @@ async def test_login_button():
     print("\n" + "=" * 50)
     print("Test #78: Login page Sign In button visible")
     print("=" * 50)
-    
+
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=HEADLESS)
         context = await browser.new_context()
         page = await context.new_page()
-        
+
         try:
             # Navigate to login page
             await page.goto(f"{BASE_URL}/login")
             await page.wait_for_load_state("networkidle")
-            
+
             # Take screenshot of login page
             screenshot_path = await take_screenshot(page, "01_login_page.png")
             print(f"  Screenshot: {screenshot_path}")
-            
+
             # Check Sign In button exists and is visible
             login_btn = await page.locator("#login-btn")
             expect(login_btn).to_be_visible()
-            
+
             # Check button has correct text
             btn_text = login_btn.inner_text()
             assert "Sign In" in btn_text, f"Button text should contain 'Sign In', got: {btn_text}"
             print(f"  ✓ Sign In button is visible with text: '{btn_text}'")
-            
+
             # Check button has background color (not transparent)
             btn_style = login_btn.evaluate("el => window.getComputedStyle(el).backgroundColor")
             print(f"  ✓ Button background color: {btn_style}")
             assert btn_style != "rgba(0, 0, 0, 0)", "Button should have a background color"
-            
+
             print("  ✓ Test #78 PASSED")
             return True
-            
+
         except Exception as e:
             print(f"  ✗ Test #78 FAILED: {e}")
             await take_screenshot(page, "error_78.png")
@@ -83,13 +85,13 @@ def main():
     print("\n" + "=" * 60)
     print(f"Issue #78 Test - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 60)
-    
+
     result = test_login_button()
-    
+
     print("\n" + "=" * 60)
     print(f"Result: {'✓ PASSED' if result else '✗ FAILED'}")
     print("=" * 60)
-    
+
     return result
 
 

@@ -40,34 +40,38 @@ async def test_analysis_page():
             print("\n[Step 1] Logging in...")
             await page.goto(f"{BASE_URL}/login")
             # Wait for React app to load
-            await page.wait_for_selector('#username', timeout=10000)
-            await page.fill('#username', USERNAME)
-            await page.fill('#password', PASSWORD)
+            await page.wait_for_selector("#username", timeout=10000)
+            await page.fill("#username", USERNAME)
+            await page.fill("#password", PASSWORD)
             await page.click('button[type="submit"]')
 
             # Wait for redirect to dashboard (React SPA navigation)
             await page.wait_for_url(f"{BASE_URL}/", timeout=15000)
             # Wait for React app to fully render
-            await page.wait_for_load_state('networkidle', timeout=10000)
+            await page.wait_for_load_state("networkidle", timeout=10000)
             print("✓ Login successful")
 
             # Step 2: Navigate to Analysis page
             print("\n[Step 2] Navigating to Analysis page...")
             start_time = time.time()
             # Wait for sidebar to be visible (React component)
-            await page.wait_for_selector('.sidebar, nav.sidebar', timeout=15000)
+            await page.wait_for_selector(".sidebar, nav.sidebar", timeout=15000)
             # Click on Analysis nav item (using text content in span)
-            await page.click('.sidebar .nav-link:has-text("Analysis"), nav.sidebar .nav-link:has-text("Analysis")')
+            await page.click(
+                '.sidebar .nav-link:has-text("Analysis"), nav.sidebar .nav-link:has-text("Analysis")'
+            )
 
             # Wait for analysis section to be visible
-            await page.wait_for_selector('.analysis', state='visible', timeout=5000)
+            await page.wait_for_selector(".analysis", state="visible", timeout=5000)
             navigation_time = time.time() - start_time
             print(f"✓ Analysis page loaded in {navigation_time:.2f} seconds")
 
             # Step 3: Click Conversation History tab
             print("\n[Step 3] Clicking Conversation History tab...")
-            await page.click('#conversation-history-tab')
-            await page.wait_for_selector('#conversation-history-table', state='visible', timeout=5000)
+            await page.click("#conversation-history-tab")
+            await page.wait_for_selector(
+                "#conversation-history-table", state="visible", timeout=5000
+            )
             print("✓ Conversation History tab loaded")
 
             # Step 4: Check if conversation history table is displayed
@@ -77,7 +81,7 @@ async def test_analysis_page():
             time.sleep(2)
 
             # Check for table rows
-            table_rows = await page.locator('.tabulator-row')
+            table_rows = await page.locator(".tabulator-row")
             row_count = await table_rows.count()
 
             if row_count > 0:
@@ -100,30 +104,30 @@ async def test_analysis_page():
                 print("✓ Timeline button clicked")
 
                 # Wait for modal to open
-                await page.wait_for_selector('#timelineModal', state='visible', timeout=5000)
+                await page.wait_for_selector("#timelineModal", state="visible", timeout=5000)
                 time.sleep(1)
 
                 # Check if modal has content
-                modal_visible = await page.is_visible('#timelineModal')
+                modal_visible = await page.is_visible("#timelineModal")
                 if modal_visible:
                     print("✓ Timeline modal opened")
 
                     # Check for timeline items
-                    timeline_items = await page.locator('.timeline-item')
+                    timeline_items = await page.locator(".timeline-item")
                     item_count = await timeline_items.count()
 
                     if item_count > 0:
                         print(f"✓ Found {item_count} timeline items")
 
                         # Verify timeline only shows User and Assistant
-                        role_labels = timeline_items.locator('.card-body strong')
+                        role_labels = timeline_items.locator(".card-body strong")
                         role_count = await role_labels.count()
 
                         valid_roles = 0
                         for i in range(role_count):
                             role = await role_labels.nth(i).inner_text()
                             role = role.strip()
-                            if role in ['User', '用户', 'Assistant', 'AI 助手', 'AI']:
+                            if role in ["User", "用户", "Assistant", "AI 助手", "AI"]:
                                 valid_roles += 1
 
                         if valid_roles == role_count:
@@ -138,7 +142,7 @@ async def test_analysis_page():
                 print("⚠ No Timeline buttons found (may be expected if no data)")
 
             # Take screenshot
-            timestamp = time.strftime('%Y%m%d_%H%M%S')
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
             screenshot_path = f"screenshots/test_analysis_conversation_history_{timestamp}.png"
             await page.screenshot(path=screenshot_path)
             print(f"\n✓ Screenshot saved to {screenshot_path}")
@@ -149,8 +153,10 @@ async def test_analysis_page():
 
         except Exception as e:
             print(f"\n✗ Test failed: {e}")
-            timestamp = time.strftime('%Y%m%d_%H%M%S')
-            screenshot_path = f"screenshots/test_analysis_conversation_history_error_{timestamp}.png"
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            screenshot_path = (
+                f"screenshots/test_analysis_conversation_history_error_{timestamp}.png"
+            )
             await page.screenshot(path=screenshot_path)
             print(f"Error screenshot saved to {screenshot_path}")
             raise

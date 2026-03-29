@@ -18,59 +18,54 @@ Solution:
   needed for queries that don't include date in the filter
 
 """
+
 from typing import Union
 
 from alembic import op
 import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
-revision: str = '016_add_dashboard_indexes'
-down_revision: Union[str, None] = '015_add_must_change_password'
+revision: str = "016_add_dashboard_indexes"
+down_revision: Union[str, None] = "015_add_must_change_password"
 branch_labels: Union[str, None] = None
 depends_on: Union[str, None] = None
 
 
 def _index_exists(conn, table_name: str, index_name: str) -> bool:
     """Check if an index exists in the database."""
-    if conn.dialect.name == 'postgresql':
-        result = conn.execute(sa.text(
-            "SELECT 1 FROM pg_indexes WHERE indexname = :index_name"
-        ), {'index_name': index_name})
+    if conn.dialect.name == "postgresql":
+        result = conn.execute(
+            sa.text("SELECT 1 FROM pg_indexes WHERE indexname = :index_name"),
+            {"index_name": index_name},
+        )
     else:
         # SQLite
-        result = conn.execute(sa.text(
-            "SELECT 1 FROM sqlite_master WHERE type='index' AND name = :index_name"
-        ), {'index_name': index_name})
+        result = conn.execute(
+            sa.text("SELECT 1 FROM sqlite_master WHERE type='index' AND name = :index_name"),
+            {"index_name": index_name},
+        )
     return result.fetchone() is not None
 
 
 def upgrade() -> None:
     """Upgrade database schema."""
     conn = op.get_bind()
-    
+
     # Add index on tool_name for GROUP BY tool_name queries (summary API)
-    if not _index_exists(conn, 'daily_messages', 'idx_messages_tool_name'):
-        op.create_index(
-            'idx_messages_tool_name',
-            'daily_messages',
-            ['tool_name']
-        )
-    
+    if not _index_exists(conn, "daily_messages", "idx_messages_tool_name"):
+        op.create_index("idx_messages_tool_name", "daily_messages", ["tool_name"])
+
     # Add index on host_name for DISTINCT host_name queries (hosts API)
-    if not _index_exists(conn, 'daily_messages', 'idx_messages_host_name'):
-        op.create_index(
-            'idx_messages_host_name',
-            'daily_messages',
-            ['host_name']
-        )
+    if not _index_exists(conn, "daily_messages", "idx_messages_host_name"):
+        op.create_index("idx_messages_host_name", "daily_messages", ["host_name"])
 
 
 def downgrade() -> None:
     """Downgrade database schema."""
     conn = op.get_bind()
-    
-    if _index_exists(conn, 'daily_messages', 'idx_messages_tool_name'):
-        op.drop_index('idx_messages_tool_name', 'daily_messages')
-    
-    if _index_exists(conn, 'daily_messages', 'idx_messages_host_name'):
-        op.drop_index('idx_messages_host_name', 'daily_messages')
+
+    if _index_exists(conn, "daily_messages", "idx_messages_tool_name"):
+        op.drop_index("idx_messages_tool_name", "daily_messages")
+
+    if _index_exists(conn, "daily_messages", "idx_messages_host_name"):
+        op.drop_index("idx_messages_host_name", "daily_messages")

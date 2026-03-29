@@ -14,7 +14,9 @@ import time
 from datetime import datetime
 
 # Get project root directory
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+PROJECT_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, PROJECT_ROOT)
 
 from playwright.async_api import async_playwright, expect
@@ -41,12 +43,12 @@ async def test_data_status_simplified():
     print("\n" + "=" * 50)
     print("Test #74: Data Status panel simplified display")
     print("=" * 50)
-    
+
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=HEADLESS)
         context = await browser.new_context()
         page = await context.new_page()
-        
+
         try:
             # Login first
             await page.goto(f"{BASE_URL}/login")
@@ -56,29 +58,29 @@ async def test_data_status_simplified():
             await page.click("#login-btn")
             await page.wait_for_url(f"{BASE_URL}/", timeout=10000)
             await page.wait_for_load_state("networkidle")
-            
+
             # Wait for data status to load
             await page.wait_for_selector("#data-status-container", timeout=10000)
             time.sleep(1)
-            
+
             # Take screenshot
             screenshot_path = await take_screenshot(page, "01_data_status.png")
             print(f"  Screenshot: {screenshot_path}")
-            
+
             # Check data status header is NOT present (simplified)
             header = await page.locator("#data-status-container .data-status-header")
             header_count = header.count()
             assert header_count == 0, f"Data status header should not exist, found {header_count}"
             print("  ✓ Data status header removed (simplified)")
-            
+
             # Check data status list exists
             status_list = await page.locator("#data-status-container .data-status-list")
             expect(status_list).to_be_visible()
             print("  ✓ Data status list is visible")
-            
+
             print("  ✓ Test #74 PASSED")
             return True
-            
+
         except Exception as e:
             print(f"  ✗ Test #74 FAILED: {e}")
             await take_screenshot(page, "error_74.png")
@@ -92,13 +94,13 @@ def main():
     print("\n" + "=" * 60)
     print(f"Issue #74 Test - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 60)
-    
+
     result = test_data_status_simplified()
-    
+
     print("\n" + "=" * 60)
     print(f"Result: {'✓ PASSED' if result else '✗ FAILED'}")
     print("=" * 60)
-    
+
     return result
 
 

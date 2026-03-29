@@ -44,24 +44,24 @@ async def test_auto_refresh_today():
 
             # Navigate to Messages page
             print("\n[Step 2] Navigating to Messages page...")
-            await page.click('#nav-messages')
-            await page.wait_for_selector('#messages-container', state='visible', timeout=5000)
+            await page.click("#nav-messages")
+            await page.wait_for_selector("#messages-container", state="visible", timeout=5000)
             print("✓ Messages page loaded")
 
             # Check current date filter
-            date_filter = await page.locator('#date-filter')
+            date_filter = await page.locator("#date-filter")
             current_date = date_filter.input_value()
             print(f"  Current date filter: {current_date}")
 
             # Get initial message count
             time.sleep(2)  # Wait for messages to load
-            messages = await page.locator('.message-item')
+            messages = await page.locator(".message-item")
             initial_count = messages.count()
             print(f"  Initial message count: {initial_count}")
 
             # Enable auto-refresh
             print("\n[Step 3] Enabling auto-refresh...")
-            auto_refresh_checkbox = await page.locator('#auto-refresh')
+            auto_refresh_checkbox = await page.locator("#auto-refresh")
             auto_refresh_checkbox.check()
             print("✓ Auto-refresh enabled")
 
@@ -72,7 +72,7 @@ async def test_auto_refresh_today():
             # Check if page is still responsive
             print("\n[Step 5] Checking page responsiveness...")
             try:
-                await page.hover('#nav-dashboard')
+                await page.hover("#nav-dashboard")
                 print("✓ Page is responsive after auto-refresh")
             except Exception as e:
                 print(f"✗ Page became unresponsive: {e}")
@@ -127,16 +127,17 @@ async def test_auto_refresh_historical_date():
 
             # Navigate to Messages page
             print("\n[Step 2] Navigating to Messages page...")
-            await page.click('#nav-messages')
-            await page.wait_for_selector('#messages-container', state='visible', timeout=5000)
+            await page.click("#nav-messages")
+            await page.wait_for_selector("#messages-container", state="visible", timeout=5000)
             print("✓ Messages page loaded")
 
             # Set date to yesterday
             print("\n[Step 3] Setting date to yesterday...")
-            date_filter = await page.locator('#date-filter')
+            date_filter = await page.locator("#date-filter")
             # Calculate yesterday's date
             from datetime import datetime, timedelta
-            yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+
+            yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
             date_filter.fill(yesterday)
             print(f"  Date set to: {yesterday}")
 
@@ -146,7 +147,7 @@ async def test_auto_refresh_historical_date():
 
             # Enable auto-refresh
             print("\n[Step 4] Enabling auto-refresh...")
-            auto_refresh_checkbox = await page.locator('#auto-refresh')
+            auto_refresh_checkbox = await page.locator("#auto-refresh")
             auto_refresh_checkbox.check()
             print("✓ Auto-refresh enabled")
 
@@ -174,7 +175,9 @@ async def test_auto_refresh_historical_date():
 
         except Exception as e:
             print(f"\n✗ Test failed: {e}")
-            await page.screenshot(path="screenshots/issues/47/test_auto_refresh_historical_error.png")
+            await page.screenshot(
+                path="screenshots/issues/47/test_auto_refresh_historical_error.png"
+            )
             raise
         finally:
             await browser.close()
@@ -183,6 +186,7 @@ async def test_auto_refresh_historical_date():
 def main():
     """Run all tests."""
     import os
+
     os.makedirs("screenshots/issues/47", exist_ok=True)
 
     print("\n" + "=" * 60)

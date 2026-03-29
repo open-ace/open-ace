@@ -12,6 +12,7 @@ USERNAME = "admin"
 PASSWORD = "admin123"
 SCREENSHOT_DIR = "screenshots/issues/80"
 
+
 def take_screenshot(page, name):
     """截图并保存"""
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
@@ -19,6 +20,7 @@ def take_screenshot(page, name):
     page.screenshot(path=path)
     print(f"   截图已保存到：{path}")
     return path
+
 
 def test_manage_language_dropdown():
     """测试 Manage 模式下的语言切换下拉列表"""
@@ -61,7 +63,7 @@ def test_manage_language_dropdown():
         print("3. 切换到 Manage 模式...")
         # 查找并点击 Manage 模式切换按钮
         try:
-            manage_btn = page.locator('button.mode-btn').filter(has_text="Manage").first
+            manage_btn = page.locator("button.mode-btn").filter(has_text="Manage").first
             if manage_btn.count() > 0:
                 manage_btn.click()
                 page.wait_for_url("**/manage/**", timeout=5000)
@@ -83,10 +85,10 @@ def test_manage_language_dropdown():
         print("4. 查找语言切换按钮...")
         lang_button = None
         selectors = [
-            'i.bi-globe',
+            "i.bi-globe",
             'button[data-bs-toggle="dropdown"] i',
-            'header i.bi-globe',
-            '.dropdown i.bi-globe'
+            "header i.bi-globe",
+            ".dropdown i.bi-globe",
         ]
 
         for selector in selectors:
@@ -150,13 +152,17 @@ def test_manage_language_dropdown():
 
             # 检查文字是否可见
             # 白色文字在蓝色背景上应该可见
-            if "rgb(255, 255, 255)" in color and ("rgb(14, 165, 233)" in bg_color or "rgb(2, 132, 199)" in bg_color):
+            if "rgb(255, 255, 255)" in color and (
+                "rgb(14, 165, 233)" in bg_color or "rgb(2, 132, 199)" in bg_color
+            ):
                 print(f"      ✓ 白色文字在蓝色背景上可见")
             # 深色文字在透明/浅色背景上应该可见
             elif "rgb(15, 23, 42)" in color or "rgb(0, 0, 0)" in color:
                 print(f"      ✓ 深色文字可见")
             # 白色文字在白色背景上不可见
-            elif "rgb(255, 255, 255)" in color and ("rgb(255, 255, 255)" in bg_color or "rgba(0, 0, 0, 0)" in bg_color):
+            elif "rgb(255, 255, 255)" in color and (
+                "rgb(255, 255, 255)" in bg_color or "rgba(0, 0, 0, 0)" in bg_color
+            ):
                 print(f"      ✗ 失败：白色文字在白色/透明背景上不可见")
                 all_pass = False
             else:
@@ -180,6 +186,7 @@ def test_manage_language_dropdown():
         print("=" * 60)
 
         return all_pass
+
 
 if __name__ == "__main__":
     result = test_manage_language_dropdown()

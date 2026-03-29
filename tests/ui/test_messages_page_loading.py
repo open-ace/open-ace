@@ -35,8 +35,8 @@ async def test_messages_page_loading():
             # Step 1: Login
             print("\n[Step 1] Logging in...")
             await page.goto(f"{BASE_URL}/login")
-            await page.fill('#username', USERNAME)
-            await page.fill('#password', PASSWORD)
+            await page.fill("#username", USERNAME)
+            await page.fill("#password", PASSWORD)
             await page.click('button[type="submit"]')
 
             # Wait for redirect to dashboard (with longer timeout)
@@ -47,12 +47,12 @@ async def test_messages_page_loading():
             print("\n[Step 2] Navigating to Messages page...")
             start_time = time.time()
             # Wait for sidebar to be visible
-            await page.wait_for_selector('.sidebar', timeout=10000)
+            await page.wait_for_selector(".sidebar", timeout=10000)
             # Click on Messages nav item (using text content in span)
             await page.click('.sidebar .nav-link:has-text("Messages")')
 
             # Wait for messages container to be visible
-            await page.wait_for_selector('#messages-container', state='visible', timeout=5000)
+            await page.wait_for_selector("#messages-container", state="visible", timeout=5000)
 
             # Check if loading spinner appears and disappears quickly
             loading_time = time.time() - start_time
@@ -64,8 +64,8 @@ async def test_messages_page_loading():
             # Wait for either messages or "no messages" message
             try:
                 # Check for message items
-                messages = page.locator('.message-item')
-                no_messages = page.locator('text=No messages found')
+                messages = page.locator(".message-item")
+                no_messages = page.locator("text=No messages found")
 
                 # Wait a bit for content to load
                 time.sleep(2)
@@ -79,7 +79,7 @@ async def test_messages_page_loading():
                     print("✓ No messages found (expected for empty date)")
                 else:
                     # Check if still loading
-                    spinner = page.locator('.spinner-border')
+                    spinner = page.locator(".spinner-border")
                     spinner_count = await spinner.count()
                     if spinner_count > 0:
                         print("⚠ Page still loading after 2 seconds...")
@@ -97,7 +97,7 @@ async def test_messages_page_loading():
 
             # Step 4: Test auto-refresh toggle (should not block)
             print("\n[Step 4] Testing auto-refresh toggle...")
-            auto_refresh_checkbox = page.locator('#auto-refresh')
+            auto_refresh_checkbox = page.locator("#auto-refresh")
 
             # Enable auto-refresh
             await auto_refresh_checkbox.check()
@@ -109,7 +109,7 @@ async def test_messages_page_loading():
             # Check if page is still responsive
             try:
                 # Try to interact with the page
-                await page.hover('#nav-dashboard')
+                await page.hover("#nav-dashboard")
                 print("✓ Page is responsive after enabling auto-refresh")
             except Exception as e:
                 print(f"✗ Page became unresponsive: {e}")

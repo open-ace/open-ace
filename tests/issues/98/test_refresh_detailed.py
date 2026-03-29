@@ -19,27 +19,21 @@ async def test_messages_refresh_detailed():
     """Test Messages page refresh functionality in detail."""
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(
-            viewport={"width": 1400, "height": 900},
-            locale="zh-CN"
-        )
+        context = await browser.new_context(viewport={"width": 1400, "height": 900}, locale="zh-CN")
         page = await context.new_page()
 
         # Track network requests
         api_requests = []
-        
+
         def track_request(request):
             if "/api/messages" in request.url and "/count" not in request.url:
-                api_requests.append({
-                    "url": request.url,
-                    "time": time.time()
-                })
+                api_requests.append({"url": request.url, "time": time.time()})
                 print(f"  [API Request] {request.url}")
-        
+
         def track_response(response):
             if "/api/messages" in response.url and "/count" not in response.url:
                 print(f"  [API Response] {response.url} - Status: {response.status}")
-        
+
         page.on("request", track_request)
         page.on("response", track_response)
 
@@ -51,8 +45,8 @@ async def test_messages_refresh_detailed():
 
             # Step 2: Login
             print("[Step 2] Logging in...")
-            await page.fill('#username', "admin")
-            await page.fill('#password', "admin123")
+            await page.fill("#username", "admin")
+            await page.fill("#password", "admin123")
             await page.click('button[type="submit"]')
             await page.wait_for_url(lambda url: "/login" not in url, timeout=10000)
             print("✓ Login successful")
@@ -66,9 +60,9 @@ async def test_messages_refresh_detailed():
             # Step 4: Check refresh button state
             print("\n[Step 4] Checking refresh button state...")
             refresh_btn = page.locator('button:has-text("刷新"), button:has-text("Refresh")')
-            
+
             # Check if button has spinner (loading state)
-            spinner = refresh_btn.locator('.spinner-border')
+            spinner = refresh_btn.locator(".spinner-border")
             spinner_count = await spinner.count()
             print(f"  Spinner count before click: {spinner_count}")
 
@@ -82,7 +76,7 @@ async def test_messages_refresh_detailed():
             # Click refresh button
             print("  Clicking refresh button...")
             await refresh_btn.first.click()
-            
+
             # Immediately check for spinner
             await page.wait_for_timeout(100)
             spinner_count_after = await spinner.count()
@@ -90,7 +84,7 @@ async def test_messages_refresh_detailed():
 
             # Wait for response
             await page.wait_for_timeout(2000)
-            
+
             # Check final state
             spinner_count_final = await spinner.count()
             print(f"  Spinner count after 2s: {spinner_count_final}")
@@ -104,8 +98,8 @@ async def test_messages_refresh_detailed():
 
             # Step 5: Check auto-refresh toggle state
             print("\n[Step 5] Checking auto-refresh toggle state...")
-            auto_refresh_switch = page.locator('#messagesAutoRefreshSwitch')
-            
+            auto_refresh_switch = page.locator("#messagesAutoRefreshSwitch")
+
             # Check if switch exists
             switch_count = await auto_refresh_switch.count()
             print(f"  Auto-refresh switch count: {switch_count}")
@@ -116,7 +110,7 @@ async def test_messages_refresh_detailed():
                 print(f"  Auto-refresh is checked: {is_checked}")
 
                 # Get the switch's parent element
-                switch_parent = auto_refresh_switch.locator('xpath=..')
+                switch_parent = auto_refresh_switch.locator("xpath=..")
                 parent_html = await switch_parent.inner_html()
                 print(f"  Switch parent HTML: {parent_html[:200]}...")
 
@@ -130,10 +124,10 @@ async def test_messages_refresh_detailed():
 
             # Step 6: Test auto-refresh timing
             print("\n[Step 6] Testing auto-refresh timing...")
-            
+
             # Clear previous requests
             api_requests.clear()
-            
+
             # Make sure auto-refresh is on
             is_checked = await auto_refresh_switch.is_checked()
             if not is_checked:
@@ -143,10 +137,10 @@ async def test_messages_refresh_detailed():
 
             print("  Waiting 35 seconds for auto-refresh to trigger...")
             start_time = time.time()
-            
+
             # Wait and track requests
             await page.wait_for_timeout(35000)
-            
+
             end_time = time.time()
             print(f"  Waited {end_time - start_time:.1f} seconds")
             print(f"  API requests during wait: {len(api_requests)}")
@@ -160,9 +154,10 @@ async def test_messages_refresh_detailed():
 
             # Step 7: Check React Query state via browser console
             print("\n[Step 7] Checking React Query state...")
-            
+
             # Execute JavaScript to check React Query state
-            result = await page.evaluate('''() => {
+            result = await page.evaluate(
+                """() => {
                 // Try to find React Query devtools or state
                 const root = document.querySelector('#root');
                 if (!root) return { error: 'No root element' };
@@ -175,7 +170,8 @@ async def test_messages_refresh_detailed():
                     pendingQueries: pendingQueries.length,
                     fetchingQueries: fetchingQueries.length,
                 };
-            }''')
+            }"""
+            )
             print(f"  React Query state: {result}")
 
             # Take final screenshot
@@ -201,5 +197,6 @@ async def test_messages_refresh_detailed():
 
 if __name__ == "__main__":
     import os
+
     os.makedirs("screenshots/issues/98", exist_ok=True)
     asyncio.run(test_messages_refresh_detailed())

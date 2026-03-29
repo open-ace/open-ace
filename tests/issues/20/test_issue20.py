@@ -48,23 +48,23 @@ async def test_remote_data_fetch_interval():
 
             # Navigate to Messages page
             print("\n[Step 2] Navigating to Messages page...")
-            await page.click('#nav-messages')
-            await page.wait_for_selector('#messages-container', state='visible', timeout=5000)
+            await page.click("#nav-messages")
+            await page.wait_for_selector("#messages-container", state="visible", timeout=5000)
             print("✓ Messages page loaded")
 
             # Monitor console for remote fetch messages
             remote_fetch_times = []
 
             def handle_console(msg):
-                if 'Remote data fetched successfully' in msg.text:
+                if "Remote data fetched successfully" in msg.text:
                     remote_fetch_times.append(time.time())
                     print(f"  [Console] {msg.text}")
 
-            page.on('console', handle_console)
+            page.on("console", handle_console)
 
             # Enable auto-refresh
             print("\n[Step 3] Enabling auto-refresh...")
-            await page.locator('#auto-refresh').check()
+            await page.locator("#auto-refresh").check()
             print("✓ Auto-refresh enabled")
 
             # Wait 15 seconds - remote data should NOT be fetched immediately
@@ -78,7 +78,7 @@ async def test_remote_data_fetch_interval():
                 print(f"⚠ Remote data was fetched {len(remote_fetch_times)} times in 15 seconds")
 
             # Disable auto-refresh
-            await page.locator('#auto-refresh').uncheck()
+            await page.locator("#auto-refresh").uncheck()
             print("✓ Auto-refresh disabled")
 
             print("\n" + "=" * 60)
@@ -91,4 +91,5 @@ async def test_remote_data_fetch_interval():
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(test_remote_data_fetch_interval())

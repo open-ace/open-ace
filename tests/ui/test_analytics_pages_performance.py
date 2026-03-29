@@ -40,10 +40,7 @@ async def test_analytics_pages_performance():
 
         def on_request(request):
             if "/api/" in request.url:
-                api_requests.append({
-                    "url": request.url,
-                    "start_time": time.time()
-                })
+                api_requests.append({"url": request.url, "start_time": time.time()})
 
         def on_response(response):
             if "/api/" in response.url:
@@ -63,8 +60,8 @@ async def test_analytics_pages_performance():
 
         if "/login" in page.url:
             print("   Performing login...")
-            await page.fill('#username', USERNAME)
-            await page.fill('#password', PASSWORD)
+            await page.fill("#username", USERNAME)
+            await page.fill("#password", PASSWORD)
             await page.click('button[type="submit"]')
             await page.wait_for_load_state("networkidle", timeout=15000)
             print("   Login completed")
@@ -74,62 +71,62 @@ async def test_analytics_pages_performance():
             {
                 "name": "ROI Analysis",
                 "url": "/manage/analysis/roi",
-                "api_keywords": ["roi", "cost"]
+                "api_keywords": ["roi", "cost"],
             },
             {
                 "name": "Analytics Report",
                 "url": "/manage/analysis/report",
-                "api_keywords": ["analytics", "report", "forecast"]
+                "api_keywords": ["analytics", "report", "forecast"],
             },
             {
                 "name": "Cost Optimization",
                 "url": "/manage/analysis/cost",
-                "api_keywords": ["cost", "optimize", "efficiency"]
+                "api_keywords": ["cost", "optimize", "efficiency"],
             },
-            {
-                "name": "Usage Overview",
-                "url": "/manage/usage",
-                "api_keywords": ["usage", "today"]
-            }
+            {"name": "Usage Overview", "url": "/manage/usage", "api_keywords": ["usage", "today"]},
         ]
 
         results = []
 
         for page_info in pages_to_test:
             print(f"\n2. Testing {page_info['name']} page...")
-            
+
             # Clear previous API requests
             api_requests.clear()
-            
+
             # Navigate to page
             start_time = time.time()
-            await page.goto(f"{BASE_URL}{page_info['url']}", wait_until="networkidle", timeout=30000)
+            await page.goto(
+                f"{BASE_URL}{page_info['url']}", wait_until="networkidle", timeout=30000
+            )
             page_load_time = time.time() - start_time
-            
+
             # Wait for content to render
             await asyncio.sleep(1)
-            
+
             # Take screenshot
-            screenshot_path = f"screenshots/issues/33/{page_info['name'].lower().replace(' ', '_')}.png"
+            screenshot_path = (
+                f"screenshots/issues/33/{page_info['name'].lower().replace(' ', '_')}.png"
+            )
             await page.screenshot(path=screenshot_path)
-            
+
             # Find relevant API calls
             api_times = []
             for req in api_requests:
                 if any(kw in req["url"] for kw in page_info["api_keywords"]) and "duration" in req:
                     api_times.append(req["duration"])
-            
+
             total_api_time = sum(api_times)
-            
+
             result = {
                 "name": page_info["name"],
                 "page_load_time": page_load_time,
                 "api_times": api_times,
                 "total_api_time": total_api_time,
-                "screenshot": screenshot_path
+                "screenshot": screenshot_path,
             }
             results.append(result)
-            
+
             print(f"   Page load time: {page_load_time:.2f}s")
             print(f"   API calls: {len(api_times)}")
             if api_times:
@@ -151,7 +148,7 @@ async def test_analytics_pages_performance():
         if result["api_times"]:
             print(f"   API calls: {len(result['api_times'])}")
             print(f"   Total API time: {result['total_api_time']:.3f}s")
-        
+
         if result["page_load_time"] >= 3:
             all_passed = False
 

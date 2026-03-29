@@ -15,59 +15,63 @@ Issue 85: Workspace 右侧页面标题只保留左侧图标和文字
 import pytest
 import sys
 import os
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from playwright.async_api import async_playwright, expect
 import time
 
 # 测试配置
-BASE_URL = os.environ.get('BASE_URL', 'http://localhost:5001')
-USERNAME = os.environ.get('USERNAME', 'testuser')
-PASSWORD = os.environ.get('PASSWORD', 'testuser')
-HEADLESS = os.environ.get('HEADLESS', 'true').lower() == 'true'
-SCREENSHOT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'screenshots', 'issues')
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+USERNAME = os.environ.get("USERNAME", "testuser")
+PASSWORD = os.environ.get("PASSWORD", "testuser")
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
+SCREENSHOT_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "screenshots",
+    "issues",
+)
+
 
 @pytest.mark.asyncio
 async def test_issue83_85():
     """测试 Issue 83 和 85"""
 
     # 确保截图目录存在
-    os.makedirs(os.path.join(SCREENSHOT_DIR, '83'), exist_ok=True)
-    os.makedirs(os.path.join(SCREENSHOT_DIR, '85'), exist_ok=True)
+    os.makedirs(os.path.join(SCREENSHOT_DIR, "83"), exist_ok=True)
+    os.makedirs(os.path.join(SCREENSHOT_DIR, "85"), exist_ok=True)
 
     results = []
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=HEADLESS)
-        context = await browser.new_context(
-            viewport={'width': 1280, 'height': 900}
-        )
+        context = await browser.new_context(viewport={"width": 1280, "height": 900})
         page = await context.new_page()
 
         try:
             # Step 1: 登录系统
             print("Step 1: 登录系统...")
-            await page.goto(f'{BASE_URL}/login')
-            await page.fill('#username', USERNAME)
-            await page.fill('#password', PASSWORD)
+            await page.goto(f"{BASE_URL}/login")
+            await page.fill("#username", USERNAME)
+            await page.fill("#password", PASSWORD)
             await page.click('button[type="submit"]')
 
             # 等待登录完成
-            await page.wait_for_url('**/', timeout=10000)
+            await page.wait_for_url("**/", timeout=10000)
             time.sleep(1)
             print("  ✓ 登录成功")
             results.append(("登录系统", True, ""))
 
             # Step 2: 点击 Workspace 菜单
             print("Step 2: 点击 Workspace 菜单...")
-            workspace_nav = page.locator('#nav-workspace')
+            workspace_nav = page.locator("#nav-workspace")
             await workspace_nav.click()
             time.sleep(0.5)
             print("  ✓ 点击 Workspace 菜单")
             results.append(("点击 Workspace 菜单", True, ""))
 
             # 截图：Workspace 页面
-            screenshot_path = os.path.join(SCREENSHOT_DIR, '85', 'workspace_page.png')
+            screenshot_path = os.path.join(SCREENSHOT_DIR, "85", "workspace_page.png")
             await page.screenshot(path=screenshot_path)
             print(f"  截图保存: {screenshot_path}")
 
@@ -75,40 +79,50 @@ async def test_issue83_85():
             print("Step 3: 验证 Issue 85 - 标题栏只显示左侧图标和文字...")
 
             # 检查标题栏存在
-            navbar = page.locator('#workspace-section .navbar')
+            navbar = page.locator("#workspace-section .navbar")
             await expect(navbar).to_be_visible()
 
             # 检查左侧标题存在
-            navbar_brand = page.locator('#workspace-section .navbar-brand')
-            await expect(navbar_brand).to_contain_text('Workspace')
+            navbar_brand = page.locator("#workspace-section .navbar-brand")
+            await expect(navbar_brand).to_contain_text("Workspace")
             print("  ✓ 标题栏左侧显示 'Workspace'")
 
             # 检查 User Workspace 文字不存在
-            user_workspace = page.locator('#workspace-section .navbar .text-white:has-text("User Workspace")')
+            user_workspace = page.locator(
+                '#workspace-section .navbar .text-white:has-text("User Workspace")'
+            )
             user_workspace_count = await user_workspace.count()
             if user_workspace_count == 0:
                 print("  ✓ 'User Workspace' 文字已移除")
                 results.append(("Issue 85: User Workspace 文字已移除", True, ""))
             else:
                 print(f"  ✗ 'User Workspace' 文字仍然存在 (count: {user_workspace_count})")
-                results.append(("Issue 85: User Workspace 文字已移除", False, f"找到 {user_workspace_count} 个"))
+                results.append(
+                    (
+                        "Issue 85: User Workspace 文字已移除",
+                        False,
+                        f"找到 {user_workspace_count} 个",
+                    )
+                )
 
             # 检查 Logout 按钮不存在
-            logout_btn = page.locator('#workspace-section .navbar #logout-workspace-btn')
+            logout_btn = page.locator("#workspace-section .navbar #logout-workspace-btn")
             logout_btn_count = await logout_btn.count()
             if logout_btn_count == 0:
                 print("  ✓ Logout 按钮已移除")
                 results.append(("Issue 85: Logout 按钮已移除", True, ""))
             else:
                 print(f"  ✗ Logout 按钮仍然存在 (count: {logout_btn_count})")
-                results.append(("Issue 85: Logout 按钮已移除", False, f"找到 {logout_btn_count} 个"))
+                results.append(
+                    ("Issue 85: Logout 按钮已移除", False, f"找到 {logout_btn_count} 个")
+                )
 
             # Step 4: 验证 Issue 83 - 页面自动获得焦点
             print("Step 4: 验证 Issue 83 - 页面自动获得焦点...")
 
             # 检查 workspace-section 有 tabindex 属性
-            workspace_section = page.locator('#workspace-section')
-            tabindex = await workspace_section.get_attribute('tabindex')
+            workspace_section = page.locator("#workspace-section")
+            tabindex = await workspace_section.get_attribute("tabindex")
             if tabindex is not None:
                 print(f"  ✓ workspace-section 有 tabindex 属性: {tabindex}")
                 results.append(("Issue 83: tabindex 属性存在", True, f"tabindex={tabindex}"))
@@ -118,21 +132,27 @@ async def test_issue83_85():
 
             # 检查焦点是否在 workspace-frame (iframe) 上
             # 对于 iframe，焦点应该在 iframe 元素上，这样键盘操作才能传递到 iframe 内部
-            focused_element = await page.evaluate('document.activeElement.id')
-            focused_tag = await page.evaluate('document.activeElement.tagName')
-            if focused_element == 'workspace-frame' or focused_tag == 'IFRAME':
+            focused_element = await page.evaluate("document.activeElement.id")
+            focused_tag = await page.evaluate("document.activeElement.tagName")
+            if focused_element == "workspace-frame" or focused_tag == "IFRAME":
                 print("  ✓ workspace-frame (iframe) 已获得焦点，键盘操作可传递到 iframe 内部")
                 results.append(("Issue 83: 页面自动获得焦点", True, "焦点在 iframe 上"))
-            elif focused_element == 'workspace-section':
+            elif focused_element == "workspace-section":
                 print("  ✓ workspace-section 已获得焦点")
                 results.append(("Issue 83: 页面自动获得焦点", True, ""))
             else:
                 # 焦点可能在其他元素上，但只要 tabindex 存在就说明功能已实现
                 print(f"  ! 当前焦点在: {focused_element} ({focused_tag})")
-                results.append(("Issue 83: 页面自动获得焦点", True, f"焦点在 {focused_element}，但 tabindex 已设置"))
+                results.append(
+                    (
+                        "Issue 83: 页面自动获得焦点",
+                        True,
+                        f"焦点在 {focused_element}，但 tabindex 已设置",
+                    )
+                )
 
             # 截图：最终状态
-            screenshot_path = os.path.join(SCREENSHOT_DIR, '83', 'workspace_focus.png')
+            screenshot_path = os.path.join(SCREENSHOT_DIR, "83", "workspace_focus.png")
             await page.screenshot(path=screenshot_path)
             print(f"  截图保存: {screenshot_path}")
 
@@ -141,7 +161,7 @@ async def test_issue83_85():
             results.append(("测试执行", False, str(e)))
 
             # 错误截图
-            error_screenshot = os.path.join(SCREENSHOT_DIR, 'error.png')
+            error_screenshot = os.path.join(SCREENSHOT_DIR, "error.png")
             await page.screenshot(path=error_screenshot)
             print(f"  错误截图: {error_screenshot}")
 
@@ -169,6 +189,7 @@ async def test_issue83_85():
 
     return failed == 0
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     success = pytest.main([__file__, "-v"])
     sys.exit(0 if success == 0 else 1)

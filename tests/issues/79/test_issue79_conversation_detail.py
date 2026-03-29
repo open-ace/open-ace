@@ -43,24 +43,24 @@ async def test_conversation_detail_modal():
             # Step 1: Login
             print("\n[Step 1] Logging in...")
             await page.goto(f"{BASE_URL}/login")
-            await page.wait_for_selector('#username', timeout=10000)
-            await page.fill('#username', USERNAME)
-            await page.fill('#password', PASSWORD)
+            await page.wait_for_selector("#username", timeout=10000)
+            await page.fill("#username", USERNAME)
+            await page.fill("#password", PASSWORD)
             await page.click('button[type="submit"]')
             await page.wait_for_url(f"{BASE_URL}/", timeout=15000)
-            await page.wait_for_load_state('networkidle', timeout=10000)
+            await page.wait_for_load_state("networkidle", timeout=10000)
             print("   ✓ Login successful")
             test_results.append(("Login", "PASS", ""))
 
             # Step 2: Navigate to Conversation History page
             print("\n[Step 2] Navigating to Conversation History page...")
             await page.goto(f"{BASE_URL}/manage/analysis/conversation-history")
-            await page.wait_for_load_state('networkidle', timeout=10000)
+            await page.wait_for_load_state("networkidle", timeout=10000)
             print("   ✓ Conversation History page loaded")
             test_results.append(("Navigate to Conversation History", "PASS", ""))
 
             # Take screenshot of the page
-            timestamp = time.strftime('%Y%m%d_%H%M%S')
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
             screenshot_path = f"screenshots/issues/79/01_conversation_history_page_{timestamp}.png"
             await page.screenshot(path=screenshot_path)
             screenshots.append(screenshot_path)
@@ -71,7 +71,7 @@ async def test_conversation_detail_modal():
             await page.wait_for_timeout(2000)
 
             # Check for table
-            table = page.locator('table, .table')
+            table = page.locator("table, .table")
             if await table.count() > 0:
                 print("   ✓ Table found")
                 test_results.append(("Table Load", "PASS", ""))
@@ -81,7 +81,7 @@ async def test_conversation_detail_modal():
 
             # Step 4: Find and click Actions button
             print("\n[Step 4] Finding and clicking Actions button...")
-            actions_btn = page.locator('button:has(.bi-eye), .btn-outline-primary:has(.bi-eye)')
+            actions_btn = page.locator("button:has(.bi-eye), .btn-outline-primary:has(.bi-eye)")
             btn_count = await actions_btn.count()
 
             if btn_count > 0:
@@ -114,7 +114,7 @@ async def test_conversation_detail_modal():
 
             # Step 6: Check Message Statistics
             print("\n[Step 6] Checking Message Statistics...")
-            stats_badges = page.locator('.modal .badge')
+            stats_badges = page.locator(".modal .badge")
             stats_count = await stats_badges.count()
             if stats_count > 0:
                 print(f"   ✓ Found {stats_count} statistics badges")
@@ -125,7 +125,7 @@ async def test_conversation_detail_modal():
 
             # Step 7: Check Tab Navigation
             print("\n[Step 7] Checking Tab Navigation...")
-            tabs = page.locator('.modal .nav-tabs .nav-link')
+            tabs = page.locator(".modal .nav-tabs .nav-link")
             tabs_count = await tabs.count()
             if tabs_count >= 2:
                 print(f"   ✓ Found {tabs_count} tabs (Timeline, Latency)")
@@ -136,14 +136,14 @@ async def test_conversation_detail_modal():
 
             # Step 8: Check Message List (Timeline Tab)
             print("\n[Step 8] Checking Message List (Timeline Tab)...")
-            messages = page.locator('.modal .message-item')
+            messages = page.locator(".modal .message-item")
             messages_count = await messages.count()
             if messages_count > 0:
                 print(f"   ✓ Found {messages_count} messages")
                 test_results.append(("Message List", "PASS", f"Found {messages_count} messages"))
 
                 # Check for role badges
-                role_badges = page.locator('.modal .message-item .badge')
+                role_badges = page.locator(".modal .message-item .badge")
                 role_count = await role_badges.count()
                 if role_count > 0:
                     print(f"   ✓ Found {role_count} role badges")
@@ -167,7 +167,7 @@ async def test_conversation_detail_modal():
 
             # Step 9: Check Role Filter
             print("\n[Step 9] Checking Role Filter...")
-            role_filter_btns = page.locator('.modal .btn-group .btn')
+            role_filter_btns = page.locator(".modal .btn-group .btn")
             filter_count = await role_filter_btns.count()
             if filter_count >= 3:
                 print(f"   ✓ Found {filter_count} role filter buttons")
@@ -188,7 +188,9 @@ async def test_conversation_detail_modal():
 
             # Step 10: Switch to Latency Tab
             print("\n[Step 10] Switching to Latency Tab...")
-            latency_tab = page.locator('.modal .nav-tabs .nav-link:has-text("Latency"), .modal .nav-tabs .nav-link:has-text("延迟")')
+            latency_tab = page.locator(
+                '.modal .nav-tabs .nav-link:has-text("Latency"), .modal .nav-tabs .nav-link:has-text("延迟")'
+            )
             if await latency_tab.count() > 0:
                 await latency_tab.first.click()
                 await page.wait_for_timeout(1000)
@@ -202,17 +204,19 @@ async def test_conversation_detail_modal():
                 print(f"   ✓ Screenshot saved: {screenshot_path}")
 
                 # Check for latency statistics
-                latency_stats = page.locator('.modal .card.bg-light')
+                latency_stats = page.locator(".modal .card.bg-light")
                 stats_count = await latency_stats.count()
                 if stats_count >= 4:
                     print(f"   ✓ Found {stats_count} latency statistics cards")
-                    test_results.append(("Latency Statistics", "PASS", f"Found {stats_count} cards"))
+                    test_results.append(
+                        ("Latency Statistics", "PASS", f"Found {stats_count} cards")
+                    )
                 else:
                     print(f"   ⚠ Found only {stats_count} latency statistics cards")
                     test_results.append(("Latency Statistics", "WARN", f"Only {stats_count} cards"))
 
                 # Check for latency chart
-                chart = page.locator('.modal canvas')
+                chart = page.locator(".modal canvas")
                 if await chart.count() > 0:
                     print("   ✓ Latency chart found")
                     test_results.append(("Latency Chart", "PASS", ""))
@@ -221,7 +225,7 @@ async def test_conversation_detail_modal():
                     test_results.append(("Latency Chart", "WARN", "No chart"))
 
                 # Check for latency table
-                latency_table = page.locator('.modal .table-responsive table')
+                latency_table = page.locator(".modal .table-responsive table")
                 if await latency_table.count() > 0:
                     print("   ✓ Latency details table found")
                     test_results.append(("Latency Table", "PASS", ""))
@@ -234,13 +238,17 @@ async def test_conversation_detail_modal():
 
             # Step 11: Test Expand/Collapse (go back to Timeline tab)
             print("\n[Step 11] Testing Expand/Collapse functionality...")
-            timeline_tab = page.locator('.modal .nav-tabs .nav-link:has-text("Timeline"), .modal .nav-tabs .nav-link:has-text("时间线")')
+            timeline_tab = page.locator(
+                '.modal .nav-tabs .nav-link:has-text("Timeline"), .modal .nav-tabs .nav-link:has-text("时间线")'
+            )
             if await timeline_tab.count() > 0:
                 await timeline_tab.first.click()
                 await page.wait_for_timeout(500)
 
                 # Look for expand button
-                expand_btn = page.locator('.modal .message-item button:has-text("Expand"), .modal .message-item button:has-text("展开")')
+                expand_btn = page.locator(
+                    '.modal .message-item button:has-text("Expand"), .modal .message-item button:has-text("展开")'
+                )
                 if await expand_btn.count() > 0:
                     print(f"   ✓ Found {await expand_btn.count()} expand buttons")
                     await expand_btn.first.click()
@@ -256,7 +264,9 @@ async def test_conversation_detail_modal():
 
             # Step 12: Close Modal
             print("\n[Step 12] Closing Modal...")
-            close_btn = page.locator('.modal .btn-close, .modal button:has-text("Close"), .modal button:has-text("关闭")')
+            close_btn = page.locator(
+                '.modal .btn-close, .modal button:has-text("Close"), .modal button:has-text("关闭")'
+            )
             if await close_btn.count() > 0:
                 await close_btn.first.click()
                 await page.wait_for_timeout(500)
@@ -289,8 +299,9 @@ async def test_conversation_detail_modal():
         except Exception as e:
             print(f"\n✗ Test failed with error: {e}")
             import traceback
+
             traceback.print_exc()
-            timestamp = time.strftime('%Y%m%d_%H%M%S')
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
             screenshot_path = f"screenshots/issues/79/error_{timestamp}.png"
             await page.screenshot(path=screenshot_path)
             print(f"Error screenshot saved to {screenshot_path}")
@@ -302,5 +313,6 @@ async def test_conversation_detail_modal():
 
 if __name__ == "__main__":
     import os
+
     os.makedirs("screenshots/issues/79", exist_ok=True)
     asyncio.run(test_conversation_detail_modal())
