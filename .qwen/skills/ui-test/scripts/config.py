@@ -8,7 +8,7 @@ USERNAME = "admin"
 PASSWORD = "admin123"
 
 # 浏览器配置
-VIEWPORT_SIZE = {'width': 1400, 'height': 900}
+VIEWPORT_SIZE = {"width": 1400, "height": 900}
 HEADLESS = False  # 设为 True 则不显示浏览器窗口
 
 # 超时设置（毫秒）

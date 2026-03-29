@@ -20,11 +20,12 @@ sys.path.insert(0, skill_dir)
 from playwright.async_api import async_playwright
 from config import BASE_URL, USERNAME, PASSWORD, VIEWPORT_SIZE
 
+
 async def test_issue23():
     """Test that openclaw assistant messages display model info."""
     results = []
     screenshots = []
-    
+
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=False)
         context = await browser.new_context(viewport=VIEWPORT_SIZE)
