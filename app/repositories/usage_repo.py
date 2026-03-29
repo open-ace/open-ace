@@ -434,3 +434,39 @@ class UsageRepository:
             })
 
         return results
+
+    def get_request_count_total(
+        self,
+        start_date: str,
+        end_date: str,
+        host_name: Optional[str] = None
+    ) -> int:
+        """
+        Get total request count from daily_usage table.
+
+        Request count represents the number of API calls to LLM providers,
+        which is different from message count (each message in conversation).
+
+        Args:
+            start_date: Start date string (YYYY-MM-DD).
+            end_date: End date string (YYYY-MM-DD).
+            host_name: Optional host name filter.
+
+        Returns:
+            int: Total request count.
+        """
+        conditions = ['date >= ?', 'date <= ?']
+        params = [start_date, end_date]
+
+        if host_name:
+            conditions.append('host_name = ?')
+            params.append(host_name)
+
+        query = f'''
+            SELECT SUM(request_count) as total_requests
+            FROM daily_usage
+            WHERE {' AND '.join(conditions)}
+        '''
+
+        result = self.db.fetch_one(query, tuple(params))
+        return int(result.get('total_requests', 0) or 0) if result else 0

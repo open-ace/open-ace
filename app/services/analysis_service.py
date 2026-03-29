@@ -77,13 +77,15 @@ class AnalysisService:
         hourly_data = self.message_repo.get_hourly_usage(start_date, end_date, host_name)
         # Use lightweight query for conversation stats instead of full history
         conversation_stats = self.message_repo.get_conversation_stats_summary(host_name=host_name)
+        # Get request count from daily_usage table (API calls, not messages)
+        total_requests = self.usage_repo.get_request_count_total(start_date, end_date, host_name)
 
         # Calculate all metrics from shared data
         total_tokens = sum(u.get('tokens_used', 0) for u in usage_data)
         total_input = sum(u.get('input_tokens', 0) for u in usage_data)
         total_output = sum(u.get('output_tokens', 0) for u in usage_data)
-        # Count messages (each row in daily_messages is a message)
-        total_requests = len(usage_data)
+        # Message count = number of rows in daily_messages
+        total_messages = len(usage_data)
 
         # If tokens are 0 from usage_data, get from messages
         if total_tokens == 0 and user_tokens:
@@ -111,7 +113,7 @@ class AnalysisService:
 
         # Sessions and averages
         total_sessions = len(set((u.get('date'), u.get('tool_name')) for u in usage_data))
-        total_messages = sum(u.get('message_count', 0) for u in user_tokens) if user_tokens else total_requests
+        # total_messages already calculated above from usage_data row count
 
         # Key metrics
         key_metrics = {
@@ -633,6 +635,7 @@ class AnalysisService:
 
         return {'tools': tools}
 
+    @cached(ttl=300, key_prefix='analysis', skip_args=[0])
     def get_recommendations(
         self,
         host_name: Optional[str] = None
@@ -695,6 +698,7 @@ class AnalysisService:
 
         return recommendations
 
+    @cached(ttl=60, key_prefix='analysis', skip_args=[0])
     def get_user_segmentation(
         self,
         start_date: Optional[str] = None,
@@ -744,6 +748,7 @@ class AnalysisService:
 
         return segments
 
+    @cached(ttl=60, key_prefix='analysis', skip_args=[0])
     def detect_anomalies(
         self,
         start_date: Optional[str] = None,
