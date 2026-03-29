@@ -18,7 +18,7 @@ def send_email(
     smtp_config: Dict,
     to_email: str,
     from_email: Optional[str] = None,
-    is_html: bool = False
+    is_html: bool = False,
 ) -> bool:
     """
     Send an email with the given subject and body.
@@ -35,14 +35,14 @@ def send_email(
         True if email sent successfully, False otherwise
     """
     try:
-        smtp_server = smtp_config.get('smtp_server', 'smtp.gmail.com')
-        smtp_port = smtp_config.get('smtp_port', 587)
-        use_tls = smtp_config.get('use_tls', True)
-        username = smtp_config.get('smtp_username', '')
-        password = smtp_config.get('smtp_password', '')
+        smtp_server = smtp_config.get("smtp_server", "smtp.gmail.com")
+        smtp_port = smtp_config.get("smtp_port", 587)
+        use_tls = smtp_config.get("use_tls", True)
+        username = smtp_config.get("smtp_username", "")
+        password = smtp_config.get("smtp_password", "")
 
         if not from_email:
-            from_email = smtp_config.get('from_email', username)
+            from_email = smtp_config.get("from_email", username)
 
         if not from_email or not to_email:
             print("Error: Missing email addresses")
@@ -50,15 +50,15 @@ def send_email(
 
         # Create message
         msg = MIMEMultipart()
-        msg['From'] = from_email
-        msg['To'] = to_email
-        msg['Subject'] = subject
+        msg["From"] = from_email
+        msg["To"] = to_email
+        msg["Subject"] = subject
 
         # Attach body with correct content type
         if is_html:
-            msg.attach(MIMEText(body, 'html', 'utf-8'))
+            msg.attach(MIMEText(body, "html", "utf-8"))
         else:
-            msg.attach(MIMEText(body, 'plain', 'utf-8'))
+            msg.attach(MIMEText(body, "plain", "utf-8"))
 
         # Connect to SMTP server
         # Port 465 usually means SSL, ports 587/25 usually mean TLS
@@ -104,7 +104,7 @@ def format_report_email(
     summary: Dict[str, Dict],
     daily_data: List[Dict],
     tool_name: Optional[str] = None,
-    report_date: Optional[str] = None
+    report_date: Optional[str] = None,
 ) -> str:
     """
     Format the email body from usage data.
@@ -125,19 +125,19 @@ def format_report_email(
     daily_tables = ""
     if daily_data:
         # Sort by tool name
-        sorted_tools = sorted(set(e['tool_name'] for e in daily_data))
+        sorted_tools = sorted(set(e["tool_name"] for e in daily_data))
         for tool in sorted_tools:
-            tool_entries = [e for e in daily_data if e['tool_name'] == tool]
+            tool_entries = [e for e in daily_data if e["tool_name"] == tool]
             # Sort by date descending (most recent first)
-            tool_entries = sorted(tool_entries, key=lambda x: x['date'], reverse=True)
+            tool_entries = sorted(tool_entries, key=lambda x: x["date"], reverse=True)
 
             daily_tables += f"""
             <tr>
                 <td class="tool-name">{tool.upper()}</td>
                 <td class="tool-data">"""
             for entry in tool_entries:
-                tokens = format_tokens(entry['tokens_used'])
-                request_count = entry.get('request_count', 0)
+                tokens = format_tokens(entry["tokens_used"])
+                request_count = entry.get("request_count", 0)
                 daily_tables += f"""
                 <div class="daily-entry">
                     <span class="date">{entry['date']}</span>
@@ -158,14 +158,14 @@ def format_report_email(
 
     # Build HTML table for summary (all-time stats)
     summary_rows = ""
-    for tool, stats in sorted(summary.items(), key=lambda x: x[1]['total_tokens'], reverse=True):
+    for tool, stats in sorted(summary.items(), key=lambda x: x[1]["total_tokens"], reverse=True):
         summary_rows += f"""
             <tr>
                 <td class="summary-tool">{tool.upper()}</td>
                 <td class="summary-days">{stats['days_count']} days</td>
                 <td class="summary-tokens">{format_tokens(stats['total_tokens'])}</td>
                 <td class="summary-avg">{format_tokens(int(stats['avg_tokens']))}/day</td>"""
-        if stats.get('total_requests'):
+        if stats.get("total_requests"):
             summary_rows += f"""
                 <td class="summary-requests">{stats['total_requests']:,} total</td>"""
         summary_rows += """
@@ -365,11 +365,11 @@ def test_email_config(smtp_config: Dict) -> bool:
         True if connection successful, False otherwise
     """
     try:
-        smtp_server = smtp_config.get('smtp_server', 'smtp.gmail.com')
-        smtp_port = smtp_config.get('smtp_port', 587)
-        use_tls = smtp_config.get('use_tls', True)
-        username = smtp_config.get('smtp_username', '')
-        password = smtp_config.get('smtp_password', '')
+        smtp_server = smtp_config.get("smtp_server", "smtp.gmail.com")
+        smtp_port = smtp_config.get("smtp_port", 587)
+        use_tls = smtp_config.get("use_tls", True)
+        username = smtp_config.get("smtp_username", "")
+        password = smtp_config.get("smtp_password", "")
 
         # Port 465 usually means SSL, ports 587/25 usually mean TLS
         use_ssl = smtp_port == 465

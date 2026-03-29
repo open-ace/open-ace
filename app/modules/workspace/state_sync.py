@@ -25,22 +25,24 @@ logger = logging.getLogger(__name__)
 
 class SyncEventType(Enum):
     """Sync event types."""
-    SESSION_START = 'session_start'
-    SESSION_END = 'session_end'
-    SESSION_UPDATE = 'session_update'
-    MESSAGE_SENT = 'message_sent'
-    MESSAGE_RECEIVED = 'message_received'
-    TOOL_CALL = 'tool_call'
-    TOOL_RESULT = 'tool_result'
-    ERROR = 'error'
-    ACTIVITY = 'activity'
-    STATUS_CHANGE = 'status_change'
-    METRICS_UPDATE = 'metrics_update'
+
+    SESSION_START = "session_start"
+    SESSION_END = "session_end"
+    SESSION_UPDATE = "session_update"
+    MESSAGE_SENT = "message_sent"
+    MESSAGE_RECEIVED = "message_received"
+    TOOL_CALL = "tool_call"
+    TOOL_RESULT = "tool_result"
+    ERROR = "error"
+    ACTIVITY = "activity"
+    STATUS_CHANGE = "status_change"
+    METRICS_UPDATE = "metrics_update"
 
 
 @dataclass
 class SyncEvent:
     """A synchronization event."""
+
     event_id: str
     event_type: str
     timestamp: datetime
@@ -54,30 +56,34 @@ class SyncEvent:
     def to_dict(self) -> dict:
         """Convert to dictionary."""
         return {
-            'event_id': self.event_id,
-            'event_type': self.event_type,
-            'timestamp': self.timestamp.isoformat(),
-            'source': self.source,
-            'session_id': self.session_id,
-            'user_id': self.user_id,
-            'tool_name': self.tool_name,
-            'data': self.data,
-            'metadata': self.metadata,
+            "event_id": self.event_id,
+            "event_type": self.event_type,
+            "timestamp": self.timestamp.isoformat(),
+            "source": self.source,
+            "session_id": self.session_id,
+            "user_id": self.user_id,
+            "tool_name": self.tool_name,
+            "data": self.data,
+            "metadata": self.metadata,
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> 'SyncEvent':
+    def from_dict(cls, data: dict) -> "SyncEvent":
         """Create from dictionary."""
         return cls(
-            event_id=data.get('event_id', ''),
-            event_type=data.get('event_type', ''),
-            timestamp=datetime.fromisoformat(data['timestamp']) if data.get('timestamp') else datetime.utcnow(),
-            source=data.get('source', ''),
-            session_id=data.get('session_id'),
-            user_id=data.get('user_id'),
-            tool_name=data.get('tool_name'),
-            data=data.get('data', {}),
-            metadata=data.get('metadata', {}),
+            event_id=data.get("event_id", ""),
+            event_type=data.get("event_type", ""),
+            timestamp=(
+                datetime.fromisoformat(data["timestamp"])
+                if data.get("timestamp")
+                else datetime.utcnow()
+            ),
+            source=data.get("source", ""),
+            session_id=data.get("session_id"),
+            user_id=data.get("user_id"),
+            tool_name=data.get("tool_name"),
+            data=data.get("data", {}),
+            metadata=data.get("metadata", {}),
         )
 
     def to_json(self) -> str:
@@ -85,7 +91,7 @@ class SyncEvent:
         return json.dumps(self.to_dict())
 
     @classmethod
-    def from_json(cls, json_str: str) -> 'SyncEvent':
+    def from_json(cls, json_str: str) -> "SyncEvent":
         """Create from JSON string."""
         return cls.from_dict(json.loads(json_str))
 
@@ -93,6 +99,7 @@ class SyncEvent:
 @dataclass
 class SyncState:
     """Synchronization state for a client."""
+
     client_id: str
     connected_at: datetime
     last_activity: datetime
@@ -104,13 +111,13 @@ class SyncState:
     def to_dict(self) -> dict:
         """Convert to dictionary."""
         return {
-            'client_id': self.client_id,
-            'connected_at': self.connected_at.isoformat(),
-            'last_activity': self.last_activity.isoformat(),
-            'subscriptions': list(self.subscriptions),
-            'user_id': self.user_id,
-            'session_id': self.session_id,
-            'metadata': self.metadata,
+            "client_id": self.client_id,
+            "connected_at": self.connected_at.isoformat(),
+            "last_activity": self.last_activity.isoformat(),
+            "subscriptions": list(self.subscriptions),
+            "user_id": self.user_id,
+            "session_id": self.session_id,
+            "metadata": self.metadata,
         }
 
     def is_active(self, timeout_seconds: int = 60) -> bool:
@@ -149,6 +156,7 @@ class StateSyncManager:
             try:
                 import psycopg2
                 from psycopg2.extras import RealDictCursor
+
                 url = get_database_url()
                 conn = psycopg2.connect(url)
                 conn.cursor_factory = RealDictCursor
@@ -172,7 +180,8 @@ class StateSyncManager:
         id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
 
         # Create sync_events table for event persistence
-        cursor.execute(f'''
+        cursor.execute(
+            f"""
             CREATE TABLE IF NOT EXISTS sync_events (
                 id {id_type},
                 event_id TEXT NOT NULL UNIQUE,
@@ -185,21 +194,28 @@ class StateSyncManager:
                 data TEXT,
                 metadata TEXT
             )
-        ''')
+        """
+        )
 
         # Create indexes
-        cursor.execute('''
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_sync_events_timestamp
             ON sync_events(timestamp)
-        ''')
-        cursor.execute('''
+        """
+        )
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_sync_events_session_id
             ON sync_events(session_id)
-        ''')
-        cursor.execute('''
+        """
+        )
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_sync_events_user_id
             ON sync_events(user_id)
-        ''')
+        """
+        )
 
         conn.commit()
         conn.close()
@@ -208,7 +224,7 @@ class StateSyncManager:
         self,
         client_id: Optional[str] = None,
         user_id: Optional[int] = None,
-        subscriptions: Optional[List[str]] = None
+        subscriptions: Optional[List[str]] = None,
     ) -> SyncState:
         """
         Register a new client connection.
@@ -237,14 +253,16 @@ class StateSyncManager:
         logger.info(f"Client registered: {client_id}")
 
         # Emit connection event
-        self.emit_event(SyncEvent(
-            event_id=str(uuid.uuid4()),
-            event_type=SyncEventType.ACTIVITY.value,
-            timestamp=now,
-            source='system',
-            user_id=user_id,
-            data={'action': 'client_connected', 'client_id': client_id}
-        ))
+        self.emit_event(
+            SyncEvent(
+                event_id=str(uuid.uuid4()),
+                event_type=SyncEventType.ACTIVITY.value,
+                timestamp=now,
+                source="system",
+                user_id=user_id,
+                data={"action": "client_connected", "client_id": client_id},
+            )
+        )
 
         return state
 
@@ -262,14 +280,16 @@ class StateSyncManager:
             state = self._clients.pop(client_id)
 
             # Emit disconnection event
-            self.emit_event(SyncEvent(
-                event_id=str(uuid.uuid4()),
-                event_type=SyncEventType.ACTIVITY.value,
-                timestamp=datetime.utcnow(),
-                source='system',
-                user_id=state.user_id,
-                data={'action': 'client_disconnected', 'client_id': client_id}
-            ))
+            self.emit_event(
+                SyncEvent(
+                    event_id=str(uuid.uuid4()),
+                    event_type=SyncEventType.ACTIVITY.value,
+                    timestamp=datetime.utcnow(),
+                    source="system",
+                    user_id=state.user_id,
+                    data={"action": "client_disconnected", "client_id": client_id},
+                )
+            )
 
             logger.info(f"Client unregistered: {client_id}")
             return True
@@ -329,7 +349,7 @@ class StateSyncManager:
             logger.warning("Event queue full, dropping event")
 
         # Call registered handlers
-        handlers = self._handlers.get(event.event_type, []) + self._handlers.get('*', [])
+        handlers = self._handlers.get(event.event_type, []) + self._handlers.get("*", [])
         for handler in handlers:
             try:
                 handler(event)
@@ -344,21 +364,24 @@ class StateSyncManager:
         cursor = conn.cursor()
 
         try:
-            cursor.execute('''
+            cursor.execute(
+                """
                 INSERT OR IGNORE INTO sync_events
                 (event_id, event_type, timestamp, source, session_id, user_id, tool_name, data, metadata)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                event.event_id,
-                event.event_type,
-                event.timestamp.isoformat(),
-                event.source,
-                event.session_id,
-                event.user_id,
-                event.tool_name,
-                json.dumps(event.data),
-                json.dumps(event.metadata)
-            ))
+            """,
+                (
+                    event.event_id,
+                    event.event_type,
+                    event.timestamp.isoformat(),
+                    event.source,
+                    event.session_id,
+                    event.user_id,
+                    event.tool_name,
+                    json.dumps(event.data),
+                    json.dumps(event.metadata),
+                ),
+            )
             conn.commit()
         except sqlite3.Error as e:
             logger.error(f"Failed to persist event: {e}")
@@ -371,7 +394,7 @@ class StateSyncManager:
         session_id: Optional[str] = None,
         user_id: Optional[int] = None,
         since: Optional[datetime] = None,
-        limit: int = 100
+        limit: int = 100,
     ) -> List[SyncEvent]:
         """
         Get events from the persistence store.
@@ -393,29 +416,32 @@ class StateSyncManager:
         params = []
 
         if event_type:
-            conditions.append('event_type = ?')
+            conditions.append("event_type = ?")
             params.append(event_type)
 
         if session_id:
-            conditions.append('session_id = ?')
+            conditions.append("session_id = ?")
             params.append(session_id)
 
         if user_id:
-            conditions.append('user_id = ?')
+            conditions.append("user_id = ?")
             params.append(user_id)
 
         if since:
-            conditions.append('timestamp > ?')
+            conditions.append("timestamp > ?")
             params.append(since.isoformat())
 
-        where_clause = ' AND '.join(conditions) if conditions else '1=1'
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
 
-        cursor.execute(f'''
+        cursor.execute(
+            f"""
             SELECT * FROM sync_events
             WHERE {where_clause}
             ORDER BY timestamp DESC
             LIMIT ?
-        ''', params + [limit])
+        """,
+            params + [limit],
+        )
 
         rows = cursor.fetchall()
         conn.close()
@@ -509,7 +535,7 @@ class StateSyncManager:
         """
         count = 0
         for client_id, state in self._clients.items():
-            if event.event_type in state.subscriptions or '*' in state.subscriptions:
+            if event.event_type in state.subscriptions or "*" in state.subscriptions:
                 # In a real implementation, this would send via WebSocket
                 # For now, we just track that the client would receive it
                 count += 1
@@ -528,7 +554,8 @@ class StateSyncManager:
             int: Number of clients removed.
         """
         inactive = [
-            client_id for client_id, state in self._clients.items()
+            client_id
+            for client_id, state in self._clients.items()
             if not state.is_active(timeout_seconds)
         ]
 
@@ -555,7 +582,7 @@ class StateSyncManager:
 
         cutoff = datetime.utcnow() - timedelta(days=days_old)
 
-        cursor.execute('DELETE FROM sync_events WHERE timestamp < ?', (cutoff.isoformat(),))
+        cursor.execute("DELETE FROM sync_events WHERE timestamp < ?", (cutoff.isoformat(),))
         deleted = cursor.rowcount
 
         conn.commit()
@@ -576,38 +603,43 @@ class StateSyncManager:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        cursor.execute('SELECT COUNT(*) as count FROM sync_events')
-        total_events = cursor.fetchone()['count']
+        cursor.execute("SELECT COUNT(*) as count FROM sync_events")
+        total_events = cursor.fetchone()["count"]
 
-        cursor.execute('''
+        cursor.execute(
+            """
             SELECT COUNT(*) as count FROM sync_events
             WHERE timestamp > ?
-        ''', ((datetime.utcnow() - timedelta(hours=1)).isoformat(),))
-        events_last_hour = cursor.fetchone()['count']
+        """,
+            ((datetime.utcnow() - timedelta(hours=1)).isoformat(),),
+        )
+        events_last_hour = cursor.fetchone()["count"]
 
         conn.close()
 
         return {
-            'connected_clients': len(self._clients),
-            'active_clients': len(self.get_active_clients()),
-            'total_events': total_events,
-            'events_last_hour': events_last_hour,
-            'event_queue_size': self._event_queue.qsize(),
-            'registered_handlers': sum(len(h) for h in self._handlers.values()),
+            "connected_clients": len(self._clients),
+            "active_clients": len(self.get_active_clients()),
+            "total_events": total_events,
+            "events_last_hour": events_last_hour,
+            "event_queue_size": self._event_queue.qsize(),
+            "registered_handlers": sum(len(h) for h in self._handlers.values()),
         }
 
     def _row_to_event(self, row: sqlite3.Row) -> SyncEvent:
         """Convert a database row to SyncEvent."""
         return SyncEvent(
-            event_id=row['event_id'],
-            event_type=row['event_type'],
-            timestamp=datetime.fromisoformat(row['timestamp']) if row['timestamp'] else datetime.utcnow(),
-            source=row['source'] or '',
-            session_id=row['session_id'],
-            user_id=row['user_id'],
-            tool_name=row['tool_name'],
-            data=json.loads(row['data']) if row['data'] else {},
-            metadata=json.loads(row['metadata']) if row['metadata'] else {},
+            event_id=row["event_id"],
+            event_type=row["event_type"],
+            timestamp=(
+                datetime.fromisoformat(row["timestamp"]) if row["timestamp"] else datetime.utcnow()
+            ),
+            source=row["source"] or "",
+            session_id=row["session_id"],
+            user_id=row["user_id"],
+            tool_name=row["tool_name"],
+            data=json.loads(row["data"]) if row["data"] else {},
+            metadata=json.loads(row["metadata"]) if row["metadata"] else {},
         )
 
 

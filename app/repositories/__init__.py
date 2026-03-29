@@ -7,8 +7,8 @@ from app.repositories.usage_repo import UsageRepository
 from app.repositories.user_repo import UserRepository
 
 __all__ = [
-    'UsageRepository',
-    'MessageRepository',
-    'UserRepository',
-    'TenantRepository',
+    "UsageRepository",
+    "MessageRepository",
+    "UserRepository",
+    "TenantRepository",
 ]

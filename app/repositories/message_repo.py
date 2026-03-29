@@ -19,7 +19,7 @@ class MessageRepository:
     def __init__(self, db: Optional[Database] = None):
         """
         Initialize repository.
-        
+
         Args:
             db: Optional Database instance for dependency injection.
         """
@@ -31,7 +31,7 @@ class MessageRepository:
         tool_name: str,
         message_id: str,
         role: str,
-        host_name: str = 'localhost',
+        host_name: str = "localhost",
         parent_id: Optional[str] = None,
         content: Optional[str] = None,
         full_entry: Optional[str] = None,
@@ -79,8 +79,10 @@ class MessageRepository:
             bool: True if successful.
         """
         from app.repositories.database import is_postgresql
+
         if is_postgresql():
-            self.db.execute('''
+            self.db.execute(
+                """
                 INSERT INTO daily_messages
                 (date, tool_name, host_name, message_id, parent_id, role, content,
                  full_entry, tokens_used, input_tokens, output_tokens, model,
@@ -106,13 +108,34 @@ class MessageRepository:
                     is_group_chat = EXCLUDED.is_group_chat,
                     agent_session_id = EXCLUDED.agent_session_id,
                     conversation_id = EXCLUDED.conversation_id
-            ''', (date, tool_name, host_name, message_id, parent_id, role, content,
-                  full_entry, tokens_used, input_tokens, output_tokens, model,
-                  timestamp, sender_id, sender_name, message_source,
-                  feishu_conversation_id, group_subject, is_group_chat,
-                  agent_session_id, conversation_id))
+            """,
+                (
+                    date,
+                    tool_name,
+                    host_name,
+                    message_id,
+                    parent_id,
+                    role,
+                    content,
+                    full_entry,
+                    tokens_used,
+                    input_tokens,
+                    output_tokens,
+                    model,
+                    timestamp,
+                    sender_id,
+                    sender_name,
+                    message_source,
+                    feishu_conversation_id,
+                    group_subject,
+                    is_group_chat,
+                    agent_session_id,
+                    conversation_id,
+                ),
+            )
         else:
-            self.db.execute('''
+            self.db.execute(
+                """
                 INSERT OR REPLACE INTO daily_messages
                 (date, tool_name, host_name, message_id, parent_id, role, content,
                  full_entry, tokens_used, input_tokens, output_tokens, model,
@@ -120,11 +143,31 @@ class MessageRepository:
                  feishu_conversation_id, group_subject, is_group_chat,
                  agent_session_id, conversation_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (date, tool_name, host_name, message_id, parent_id, role, content,
-                  full_entry, tokens_used, input_tokens, output_tokens, model,
-                  timestamp, sender_id, sender_name, message_source,
-                  feishu_conversation_id, group_subject, is_group_chat,
-                  agent_session_id, conversation_id))
+            """,
+                (
+                    date,
+                    tool_name,
+                    host_name,
+                    message_id,
+                    parent_id,
+                    role,
+                    content,
+                    full_entry,
+                    tokens_used,
+                    input_tokens,
+                    output_tokens,
+                    model,
+                    timestamp,
+                    sender_id,
+                    sender_name,
+                    message_source,
+                    feishu_conversation_id,
+                    group_subject,
+                    is_group_chat,
+                    agent_session_id,
+                    conversation_id,
+                ),
+            )
 
         logger.debug(f"Saved message: {date} - {tool_name} - {message_id}")
         return True
@@ -138,7 +181,7 @@ class MessageRepository:
         sender_name: Optional[str] = None,
         search: Optional[str] = None,
         limit: Optional[int] = None,
-        offset: int = 0
+        offset: int = 0,
     ) -> List[Dict]:
         """
         Get messages for a specific date.
@@ -156,44 +199,44 @@ class MessageRepository:
         Returns:
             List[Dict]: List of message records.
         """
-        conditions = ['date = ?']
+        conditions = ["date = ?"]
         params = [date]
 
         if tool_name:
-            conditions.append('tool_name = ?')
+            conditions.append("tool_name = ?")
             params.append(tool_name)
 
         if host_name:
-            conditions.append('host_name = ?')
+            conditions.append("host_name = ?")
             params.append(host_name)
 
         if role:
             # Support multiple roles (comma-separated)
-            roles = [r.strip() for r in role.split(',')]
+            roles = [r.strip() for r in role.split(",")]
             if len(roles) == 1:
-                conditions.append('role = ?')
+                conditions.append("role = ?")
                 params.append(roles[0])
             else:
-                placeholders = ','.join(['?' for _ in roles])
-                conditions.append(f'role IN ({placeholders})')
+                placeholders = ",".join(["?" for _ in roles])
+                conditions.append(f"role IN ({placeholders})")
                 params.extend(roles)
 
         if sender_name:
-            conditions.append('sender_name = ?')
+            conditions.append("sender_name = ?")
             params.append(sender_name)
 
         if search:
-            conditions.append('content LIKE ?')
-            params.append(f'%{search}%')
+            conditions.append("content LIKE ?")
+            params.append(f"%{search}%")
 
-        query = f'''
+        query = f"""
             SELECT * FROM daily_messages
             WHERE {' AND '.join(conditions)}
             ORDER BY timestamp DESC
-        '''
+        """
 
         if limit:
-            query += f' LIMIT {limit} OFFSET {offset}'
+            query += f" LIMIT {limit} OFFSET {offset}"
 
         return self.db.fetch_all(query, tuple(params))
 
@@ -206,7 +249,7 @@ class MessageRepository:
         role: Optional[str] = None,
         search: Optional[str] = None,
         limit: Optional[int] = None,
-        offset: int = 0
+        offset: int = 0,
     ) -> List[Dict]:
         """
         Get messages for a date range.
@@ -224,40 +267,40 @@ class MessageRepository:
         Returns:
             List[Dict]: List of message records.
         """
-        conditions = ['date >= ?', 'date <= ?']
+        conditions = ["date >= ?", "date <= ?"]
         params = [start_date, end_date]
 
         if tool_name:
-            conditions.append('tool_name = ?')
+            conditions.append("tool_name = ?")
             params.append(tool_name)
 
         if host_name:
-            conditions.append('host_name = ?')
+            conditions.append("host_name = ?")
             params.append(host_name)
 
         if role:
             # Support multiple roles (comma-separated)
-            roles = [r.strip() for r in role.split(',')]
+            roles = [r.strip() for r in role.split(",")]
             if len(roles) == 1:
-                conditions.append('role = ?')
+                conditions.append("role = ?")
                 params.append(roles[0])
             else:
-                placeholders = ','.join(['?' for _ in roles])
-                conditions.append(f'role IN ({placeholders})')
+                placeholders = ",".join(["?" for _ in roles])
+                conditions.append(f"role IN ({placeholders})")
                 params.extend(roles)
 
         if search:
-            conditions.append('content LIKE ?')
-            params.append(f'%{search}%')
+            conditions.append("content LIKE ?")
+            params.append(f"%{search}%")
 
-        query = f'''
+        query = f"""
             SELECT * FROM daily_messages
             WHERE {' AND '.join(conditions)}
             ORDER BY date DESC, timestamp DESC
-        '''
+        """
 
         if limit:
-            query += f' LIMIT {limit} OFFSET {offset}'
+            query += f" LIMIT {limit} OFFSET {offset}"
 
         return self.db.fetch_all(query, tuple(params))
 
@@ -268,11 +311,11 @@ class MessageRepository:
         host_name: Optional[str] = None,
         sender_name: Optional[str] = None,
         limit: int = 50,
-        offset: int = 0
+        offset: int = 0,
     ) -> List[Dict]:
         """
         Get conversation history with aggregated statistics.
-        
+
         Args:
             date: Optional date filter.
             tool_name: Optional tool name filter.
@@ -280,7 +323,7 @@ class MessageRepository:
             sender_name: Optional sender name filter.
             limit: Limit on number of results.
             offset: Offset for pagination.
-            
+
         Returns:
             List[Dict]: List of conversation records.
         """
@@ -288,25 +331,27 @@ class MessageRepository:
         params = []
 
         if date:
-            conditions.append('date = ?')
+            conditions.append("date = ?")
             params.append(date)
 
         if tool_name:
-            conditions.append('tool_name = ?')
+            conditions.append("tool_name = ?")
             params.append(tool_name)
 
         if host_name:
-            conditions.append('host_name = ?')
+            conditions.append("host_name = ?")
             params.append(host_name)
 
         if sender_name:
-            conditions.append('sender_name = ?')
+            conditions.append("sender_name = ?")
             params.append(sender_name)
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
         # Add condition to filter out records without any session ID
-        id_filter = "COALESCE(conversation_id, feishu_conversation_id, agent_session_id) IS NOT NULL"
+        id_filter = (
+            "COALESCE(conversation_id, feishu_conversation_id, agent_session_id) IS NOT NULL"
+        )
         if where_clause:
             where_clause = f"{where_clause} AND {id_filter}"
         else:
@@ -314,7 +359,7 @@ class MessageRepository:
 
         # Use COALESCE to get the first available session ID
         # Priority: feishu_conversation_id > agent_session_id > conversation_id
-        query = f'''
+        query = f"""
             SELECT 
                 COALESCE(conversation_id, feishu_conversation_id, agent_session_id) as conversation_id,
                 agent_session_id as session_id,
@@ -334,7 +379,7 @@ class MessageRepository:
             GROUP BY COALESCE(conversation_id, feishu_conversation_id, agent_session_id), agent_session_id, tool_name, host_name, sender_name
             ORDER BY last_message_time DESC
             LIMIT ? OFFSET ?
-        '''
+        """
 
         params.extend([limit, offset])
         return self.db.fetch_all(query, tuple(params))
@@ -342,34 +387,34 @@ class MessageRepository:
     def get_conversation_timeline(self, session_id: str) -> List[Dict]:
         """
         Get timeline of messages for a conversation.
-        
+
         Args:
             session_id: Conversation/session ID.
-            
+
         Returns:
             List[Dict]: List of messages in the conversation.
         """
         # Use COALESCE to match session_id from multiple possible fields
-        query = '''
+        query = """
             SELECT * FROM daily_messages
             WHERE COALESCE(conversation_id, feishu_conversation_id, agent_session_id) = ?
             ORDER BY timestamp ASC
-        '''
+        """
 
         return self.db.fetch_all(query, (session_id,))
 
     def get_conversation_details(self, session_id: str) -> Optional[Dict]:
         """
         Get details of a conversation.
-        
+
         Args:
             session_id: Conversation/session ID.
-            
+
         Returns:
             Optional[Dict]: Conversation details or None.
         """
         # Use COALESCE to match session_id from multiple possible fields
-        query = '''
+        query = """
             SELECT 
                 COALESCE(conversation_id, feishu_conversation_id, agent_session_id) as conversation_id,
                 agent_session_id as session_id,
@@ -387,17 +432,17 @@ class MessageRepository:
             FROM daily_messages
             WHERE COALESCE(conversation_id, feishu_conversation_id, agent_session_id) = ?
             GROUP BY COALESCE(conversation_id, feishu_conversation_id, agent_session_id)
-        '''
+        """
 
         return self.db.fetch_one(query, (session_id,))
 
     def get_all_senders(self, host_name: Optional[str] = None) -> List[str]:
         """
         Get list of all senders.
-        
+
         Args:
             host_name: Optional host name filter.
-            
+
         Returns:
             List[str]: List of sender names.
         """
@@ -405,17 +450,17 @@ class MessageRepository:
         params = []
 
         if host_name:
-            conditions.append('host_name = ?')
+            conditions.append("host_name = ?")
             params.append(host_name)
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
-        query = f'''
+        query = f"""
             SELECT DISTINCT sender_name 
             FROM daily_messages 
             {where_clause}
             ORDER BY sender_name
-        '''
+        """
 
         rows = self.db.fetch_all(query, tuple(params))
 
@@ -425,11 +470,11 @@ class MessageRepository:
             if not name:
                 return False
             # Filter out Feishu user IDs (starts with "ou_" followed by hex characters)
-            if name.startswith('ou_') and len(name) > 10:
+            if name.startswith("ou_") and len(name) > 10:
                 return False
             return True
 
-        return [row['sender_name'] for row in rows if is_valid_sender(row['sender_name'])]
+        return [row["sender_name"] for row in rows if is_valid_sender(row["sender_name"])]
 
     def count_messages(
         self,
@@ -439,7 +484,7 @@ class MessageRepository:
         host_name: Optional[str] = None,
         sender_name: Optional[str] = None,
         role: Optional[str] = None,
-        search: Optional[str] = None
+        search: Optional[str] = None,
     ) -> int:
         """
         Count messages matching filters.
@@ -460,52 +505,52 @@ class MessageRepository:
         params = []
 
         if start_date:
-            conditions.append('date >= ?')
+            conditions.append("date >= ?")
             params.append(start_date)
 
         if end_date:
-            conditions.append('date <= ?')
+            conditions.append("date <= ?")
             params.append(end_date)
 
         if tool_name:
-            conditions.append('tool_name = ?')
+            conditions.append("tool_name = ?")
             params.append(tool_name)
 
         if host_name:
-            conditions.append('host_name = ?')
+            conditions.append("host_name = ?")
             params.append(host_name)
 
         if sender_name:
-            conditions.append('sender_name = ?')
+            conditions.append("sender_name = ?")
             params.append(sender_name)
 
         if role:
             # Support multiple roles (comma-separated)
-            roles = [r.strip() for r in role.split(',')]
+            roles = [r.strip() for r in role.split(",")]
             if len(roles) == 1:
-                conditions.append('role = ?')
+                conditions.append("role = ?")
                 params.append(roles[0])
             else:
-                placeholders = ','.join(['?' for _ in roles])
-                conditions.append(f'role IN ({placeholders})')
+                placeholders = ",".join(["?" for _ in roles])
+                conditions.append(f"role IN ({placeholders})")
                 params.extend(roles)
 
         if search:
-            conditions.append('content LIKE ?')
-            params.append(f'%{search}%')
+            conditions.append("content LIKE ?")
+            params.append(f"%{search}%")
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
-        query = f'SELECT COUNT(*) as count FROM daily_messages {where_clause}'
+        query = f"SELECT COUNT(*) as count FROM daily_messages {where_clause}"
 
         result = self.db.fetch_one(query, tuple(params))
-        return result['count'] if result else 0
+        return result["count"] if result else 0
 
     def get_user_token_totals(
         self,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
-        host_name: Optional[str] = None
+        host_name: Optional[str] = None,
     ) -> List[Dict]:
         """
         Get total tokens per user for segmentation analysis.
@@ -522,20 +567,20 @@ class MessageRepository:
         params = []
 
         if start_date:
-            conditions.append('date >= ?')
+            conditions.append("date >= ?")
             params.append(start_date)
 
         if end_date:
-            conditions.append('date <= ?')
+            conditions.append("date <= ?")
             params.append(end_date)
 
         if host_name:
-            conditions.append('host_name = ?')
+            conditions.append("host_name = ?")
             params.append(host_name)
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
-        query = f'''
+        query = f"""
             SELECT
                 sender_name,
                 sender_id,
@@ -547,7 +592,7 @@ class MessageRepository:
             {where_clause}
             GROUP BY sender_name, sender_id
             ORDER BY total_tokens DESC
-        '''
+        """
 
         return self.db.fetch_all(query, tuple(params))
 
@@ -555,7 +600,7 @@ class MessageRepository:
         self,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
-        host_name: Optional[str] = None
+        host_name: Optional[str] = None,
     ) -> List[Dict]:
         """
         Get hourly usage patterns from message timestamps.
@@ -575,15 +620,15 @@ class MessageRepository:
         params = []
 
         if start_date:
-            conditions.append('date >= ?')
+            conditions.append("date >= ?")
             params.append(start_date)
 
         if end_date:
-            conditions.append('date <= ?')
+            conditions.append("date <= ?")
             params.append(end_date)
 
         if host_name:
-            conditions.append('host_name = ?')
+            conditions.append("host_name = ?")
             params.append(host_name)
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
@@ -591,7 +636,7 @@ class MessageRepository:
         # Use optimized SQL without regex validation for better performance
         if is_postgresql():
             # Simplified query - direct timestamp cast without regex
-            query = f'''
+            query = f"""
                 SELECT
                     EXTRACT(HOUR FROM timestamp::timestamp) as hour,
                     COUNT(*) as requests,
@@ -601,9 +646,9 @@ class MessageRepository:
                 {"AND" if conditions else "WHERE"} timestamp IS NOT NULL AND timestamp::text != ''
                 GROUP BY EXTRACT(HOUR FROM timestamp::timestamp)
                 ORDER BY hour
-            '''
+            """
         else:
-            query = f'''
+            query = f"""
                 SELECT
                     CAST(strftime('%H', timestamp) AS INTEGER) as hour,
                     COUNT(*) as requests,
@@ -613,7 +658,7 @@ class MessageRepository:
                 {"AND" if conditions else "WHERE"} timestamp IS NOT NULL AND timestamp != ''
                 GROUP BY strftime('%H', timestamp)
                 ORDER BY hour
-            '''
+            """
 
         rows = self.db.fetch_all(query, tuple(params))
 
@@ -623,23 +668,19 @@ class MessageRepository:
         # We need to add 8 hours and handle day overflow
         aggregated = {}
         for row in rows:
-            utc_hour = row['hour']
+            utc_hour = row["hour"]
             cst_hour = (utc_hour + 8) % 24
 
             key = cst_hour
             if key not in aggregated:
-                aggregated[key] = {
-                    'hour': cst_hour,
-                    'tokens': 0,
-                    'requests': 0
-                }
+                aggregated[key] = {"hour": cst_hour, "tokens": 0, "requests": 0}
 
-            aggregated[key]['tokens'] += row['tokens'] or 0
-            aggregated[key]['requests'] += row['requests'] or 0
+            aggregated[key]["tokens"] += row["tokens"] or 0
+            aggregated[key]["requests"] += row["requests"] or 0
 
         # Convert to list and sort by hour
         result = list(aggregated.values())
-        result.sort(key=lambda x: x['hour'])
+        result.sort(key=lambda x: x["hour"])
 
         return result
 
@@ -647,7 +688,7 @@ class MessageRepository:
         self,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
-        host_name: Optional[str] = None
+        host_name: Optional[str] = None,
     ) -> List[Dict]:
         """
         Get total tokens per day for trend analysis.
@@ -664,20 +705,20 @@ class MessageRepository:
         params = []
 
         if start_date:
-            conditions.append('date >= ?')
+            conditions.append("date >= ?")
             params.append(start_date)
 
         if end_date:
-            conditions.append('date <= ?')
+            conditions.append("date <= ?")
             params.append(end_date)
 
         if host_name:
-            conditions.append('host_name = ?')
+            conditions.append("host_name = ?")
             params.append(host_name)
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
-        query = f'''
+        query = f"""
             SELECT
                 date,
                 SUM(tokens_used) as total_tokens,
@@ -688,7 +729,7 @@ class MessageRepository:
             {where_clause}
             GROUP BY date
             ORDER BY date ASC
-        '''
+        """
 
         return self.db.fetch_all(query, tuple(params))
 
@@ -696,7 +737,7 @@ class MessageRepository:
         self,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
-        host_name: Optional[str] = None
+        host_name: Optional[str] = None,
     ) -> List[Dict]:
         """
         Get total tokens per tool for comparison analysis.
@@ -713,20 +754,20 @@ class MessageRepository:
         params = []
 
         if start_date:
-            conditions.append('date >= ?')
+            conditions.append("date >= ?")
             params.append(start_date)
 
         if end_date:
-            conditions.append('date <= ?')
+            conditions.append("date <= ?")
             params.append(end_date)
 
         if host_name:
-            conditions.append('host_name = ?')
+            conditions.append("host_name = ?")
             params.append(host_name)
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
-        query = f'''
+        query = f"""
             SELECT
                 tool_name,
                 SUM(tokens_used) as total_tokens,
@@ -737,14 +778,11 @@ class MessageRepository:
             {where_clause}
             GROUP BY tool_name
             ORDER BY total_tokens DESC
-        '''
+        """
 
         return self.db.fetch_all(query, tuple(params))
 
-    def get_conversation_stats_summary(
-        self,
-        host_name: Optional[str] = None
-    ) -> Dict:
+    def get_conversation_stats_summary(self, host_name: Optional[str] = None) -> Dict:
         """
         Get conversation statistics summary without fetching full history.
 
@@ -762,18 +800,20 @@ class MessageRepository:
         params = []
 
         if host_name:
-            conditions.append('host_name = ?')
+            conditions.append("host_name = ?")
             params.append(host_name)
 
         # Add condition to filter out records without any session ID
-        id_filter = "COALESCE(conversation_id, feishu_conversation_id, agent_session_id) IS NOT NULL"
+        id_filter = (
+            "COALESCE(conversation_id, feishu_conversation_id, agent_session_id) IS NOT NULL"
+        )
         if conditions:
             where_clause = f"WHERE {' AND '.join(conditions)} AND {id_filter}"
         else:
             where_clause = f"WHERE {id_filter}"
 
         # Use a single aggregate query instead of GROUP BY + LIMIT
-        query = f'''
+        query = f"""
             SELECT
                 COUNT(DISTINCT COALESCE(conversation_id, feishu_conversation_id, agent_session_id)) as total_conversations,
                 COUNT(*) as total_messages,
@@ -782,38 +822,41 @@ class MessageRepository:
                 SUM(output_tokens) as total_output_tokens
             FROM daily_messages
             {where_clause}
-        '''
+        """
 
         result = self.db.fetch_one(query, tuple(params))
 
         if result:
-            total_conversations = result.get('total_conversations', 0) or 0
-            total_messages = result.get('total_messages', 0) or 0
-            total_tokens = result.get('total_tokens', 0) or 0
+            total_conversations = result.get("total_conversations", 0) or 0
+            total_messages = result.get("total_messages", 0) or 0
+            total_tokens = result.get("total_tokens", 0) or 0
 
             return {
-                'total_conversations': total_conversations,
-                'total_messages': total_messages,
-                'total_tokens': total_tokens,
-                'average_messages_per_conversation': total_messages / total_conversations if total_conversations > 0 else 0,
-                'average_tokens_per_conversation': total_tokens / total_conversations if total_conversations > 0 else 0,
-                'avg_conversation_length': total_messages / total_conversations if total_conversations > 0 else 0
+                "total_conversations": total_conversations,
+                "total_messages": total_messages,
+                "total_tokens": total_tokens,
+                "average_messages_per_conversation": (
+                    total_messages / total_conversations if total_conversations > 0 else 0
+                ),
+                "average_tokens_per_conversation": (
+                    total_tokens / total_conversations if total_conversations > 0 else 0
+                ),
+                "avg_conversation_length": (
+                    total_messages / total_conversations if total_conversations > 0 else 0
+                ),
             }
 
         return {
-            'total_conversations': 0,
-            'total_messages': 0,
-            'total_tokens': 0,
-            'average_messages_per_conversation': 0,
-            'average_tokens_per_conversation': 0,
-            'avg_conversation_length': 0
+            "total_conversations": 0,
+            "total_messages": 0,
+            "total_tokens": 0,
+            "average_messages_per_conversation": 0,
+            "average_tokens_per_conversation": 0,
+            "avg_conversation_length": 0,
         }
 
     def get_daily_range_lightweight(
-        self,
-        start_date: str,
-        end_date: str,
-        host_name: Optional[str] = None
+        self, start_date: str, end_date: str, host_name: Optional[str] = None
     ) -> List[Dict]:
         """
         Get lightweight daily range data for batch analysis.
@@ -829,14 +872,14 @@ class MessageRepository:
         Returns:
             List[Dict]: List of lightweight usage records.
         """
-        conditions = ['date >= ?', 'date <= ?']
+        conditions = ["date >= ?", "date <= ?"]
         params = [start_date, end_date]
 
         if host_name:
-            conditions.append('host_name = ?')
+            conditions.append("host_name = ?")
             params.append(host_name)
 
-        query = f'''
+        query = f"""
             SELECT
                 date,
                 tool_name,
@@ -846,15 +889,12 @@ class MessageRepository:
                 output_tokens
             FROM daily_messages
             WHERE {' AND '.join(conditions)}
-        '''
+        """
 
         return self.db.fetch_all(query, tuple(params))
 
     def get_batch_analysis_aggregates(
-        self,
-        start_date: str,
-        end_date: str,
-        host_name: Optional[str] = None
+        self, start_date: str, end_date: str, host_name: Optional[str] = None
     ) -> Dict:
         """
         Get all aggregates needed for batch analysis in a single query.
@@ -872,17 +912,17 @@ class MessageRepository:
         """
         from app.repositories.database import is_postgresql
 
-        conditions = ['date >= ?', 'date <= ?']
+        conditions = ["date >= ?", "date <= ?"]
         params = [start_date, end_date]
 
         if host_name:
-            conditions.append('host_name = ?')
+            conditions.append("host_name = ?")
             params.append(host_name)
 
         where_clause = f"WHERE {' AND '.join(conditions)}"
 
         # Single query to get all basic aggregates
-        query = f'''
+        query = f"""
             SELECT
                 COUNT(*) as total_messages,
                 SUM(tokens_used) as total_tokens,
@@ -894,29 +934,29 @@ class MessageRepository:
                 COUNT(DISTINCT date) as unique_days
             FROM daily_messages
             {where_clause}
-        '''
+        """
 
         result = self.db.fetch_one(query, tuple(params))
 
         if not result:
             return {
-                'total_messages': 0,
-                'total_tokens': 0,
-                'total_input_tokens': 0,
-                'total_output_tokens': 0,
-                'unique_tools': 0,
-                'unique_hosts': 0,
-                'unique_users': 0,
-                'unique_days': 0
+                "total_messages": 0,
+                "total_tokens": 0,
+                "total_input_tokens": 0,
+                "total_output_tokens": 0,
+                "unique_tools": 0,
+                "unique_hosts": 0,
+                "unique_users": 0,
+                "unique_days": 0,
             }
 
         return {
-            'total_messages': result.get('total_messages', 0) or 0,
-            'total_tokens': result.get('total_tokens', 0) or 0,
-            'total_input_tokens': result.get('total_input_tokens', 0) or 0,
-            'total_output_tokens': result.get('total_output_tokens', 0) or 0,
-            'unique_tools': result.get('unique_tools', 0) or 0,
-            'unique_hosts': result.get('unique_hosts', 0) or 0,
-            'unique_users': result.get('unique_users', 0) or 0,
-            'unique_days': result.get('unique_days', 0) or 0
+            "total_messages": result.get("total_messages", 0) or 0,
+            "total_tokens": result.get("total_tokens", 0) or 0,
+            "total_input_tokens": result.get("total_input_tokens", 0) or 0,
+            "total_output_tokens": result.get("total_output_tokens", 0) or 0,
+            "unique_tools": result.get("unique_tools", 0) or 0,
+            "unique_hosts": result.get("unique_hosts", 0) or 0,
+            "unique_users": result.get("unique_users", 0) or 0,
+            "unique_days": result.get("unique_days", 0) or 0,
         }

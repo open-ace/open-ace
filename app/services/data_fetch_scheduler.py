@@ -104,11 +104,11 @@ class DataFetchScheduler:
                 pass
 
         return {
-            'running': self._running,
-            'enabled': self._enabled,
-            'interval': self._interval,
-            'last_run': self._last_run.isoformat() if self._last_run else None,
-            'next_run': next_run_str,
+            "running": self._running,
+            "enabled": self._enabled,
+            "interval": self._interval,
+            "last_run": self._last_run.isoformat() if self._last_run else None,
+            "next_run": next_run_str,
         }
 
     def _run_loop(self):
@@ -151,7 +151,9 @@ def init_scheduler():
     import os
 
     # Add scripts/shared to path for config import
-    scripts_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'scripts', 'shared')
+    scripts_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "scripts", "shared"
+    )
     if scripts_path not in sys.path:
         sys.path.insert(0, scripts_path)
 

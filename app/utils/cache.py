@@ -18,12 +18,13 @@ from typing import Any, Callable, Dict, Optional, TypeVar
 
 logger = logging.getLogger(__name__)
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 @dataclass
 class CacheEntry:
     """Cache entry with metadata."""
+
     value: Any
     expires_at: Optional[float] = None
     created_at: float = 0.0
@@ -171,12 +172,12 @@ class MemoryCache(CacheBackend):
             hit_rate = self._hits / total_requests if total_requests > 0 else 0
 
             return {
-                'size': len(self._cache),
-                'max_size': self.max_size,
-                'hits': self._hits,
-                'misses': self._misses,
-                'hit_rate': round(hit_rate, 4),
-                'entries': len(self._cache),
+                "size": len(self._cache),
+                "max_size": self.max_size,
+                "hits": self._hits,
+                "misses": self._misses,
+                "hit_rate": round(hit_rate, 4),
+                "entries": len(self._cache),
             }
 
 
@@ -185,12 +186,12 @@ class RedisCache(CacheBackend):
 
     def __init__(
         self,
-        host: str = 'localhost',
+        host: str = "localhost",
         port: int = 6379,
         db: int = 0,
         password: Optional[str] = None,
-        prefix: str = 'openace:',
-        default_ttl: int = 300
+        prefix: str = "openace:",
+        default_ttl: int = 300,
     ):
         """
         Initialize Redis cache.
@@ -216,6 +217,7 @@ class RedisCache(CacheBackend):
         if self._client is None:
             try:
                 import redis
+
                 self._client = redis.Redis(
                     host=self.host,
                     port=self.port,
@@ -322,11 +324,7 @@ class CacheManager:
                     cls._instance = super().__new__(cls)
         return cls._instance
 
-    def __init__(
-        self,
-        backend: Optional[str] = None,
-        **kwargs
-    ):
+    def __init__(self, backend: Optional[str] = None, **kwargs):
         """
         Initialize cache manager.
 
@@ -334,19 +332,19 @@ class CacheManager:
             backend: Cache backend ('memory' or 'redis').
             **kwargs: Backend-specific arguments.
         """
-        if hasattr(self, '_initialized') and self._initialized:
+        if hasattr(self, "_initialized") and self._initialized:
             return
 
-        backend = backend or os.environ.get('CACHE_BACKEND', 'memory')
+        backend = backend or os.environ.get("CACHE_BACKEND", "memory")
 
-        if backend == 'redis':
+        if backend == "redis":
             try:
                 self._backend = RedisCache(
-                    host=kwargs.get('host', os.environ.get('REDIS_HOST', 'localhost')),
-                    port=kwargs.get('port', int(os.environ.get('REDIS_PORT', 6379))),
-                    db=kwargs.get('db', 0),
-                    password=kwargs.get('password', os.environ.get('REDIS_PASSWORD')),
-                    default_ttl=kwargs.get('default_ttl', 300),
+                    host=kwargs.get("host", os.environ.get("REDIS_HOST", "localhost")),
+                    port=kwargs.get("port", int(os.environ.get("REDIS_PORT", 6379))),
+                    db=kwargs.get("db", 0),
+                    password=kwargs.get("password", os.environ.get("REDIS_PASSWORD")),
+                    default_ttl=kwargs.get("default_ttl", 300),
                 )
                 # Test connection
                 self._backend._get_client().ping()
@@ -354,13 +352,13 @@ class CacheManager:
             except Exception as e:
                 logger.warning(f"Failed to connect to Redis: {e}, falling back to memory cache")
                 self._backend = MemoryCache(
-                    max_size=kwargs.get('max_size', 1000),
-                    default_ttl=kwargs.get('default_ttl', 300),
+                    max_size=kwargs.get("max_size", 1000),
+                    default_ttl=kwargs.get("default_ttl", 300),
                 )
         else:
             self._backend = MemoryCache(
-                max_size=kwargs.get('max_size', 1000),
-                default_ttl=kwargs.get('default_ttl', 300),
+                max_size=kwargs.get("max_size", 1000),
+                default_ttl=kwargs.get("default_ttl", 300),
             )
             logger.info("Using in-memory cache backend")
 
@@ -391,7 +389,7 @@ class CacheManager:
         """Get cache statistics."""
         if isinstance(self._backend, MemoryCache):
             return self._backend.stats()
-        return {'backend': 'redis'}
+        return {"backend": "redis"}
 
     @staticmethod
     def make_key(*args, **kwargs) -> str:
@@ -416,11 +414,7 @@ class CacheManager:
         return key_string
 
 
-def cached(
-    ttl: int = 300,
-    key_prefix: str = '',
-    skip_args: Optional[list] = None
-):
+def cached(ttl: int = 300, key_prefix: str = "", skip_args: Optional[list] = None):
     """
     Decorator for caching function results.
 
@@ -432,6 +426,7 @@ def cached(
     Returns:
         Decorator function.
     """
+
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         cache = CacheManager()
 
@@ -439,9 +434,7 @@ def cached(
             # Skip self/cls for methods
             effective_args = args
             if skip_args:
-                effective_args = tuple(
-                    a for i, a in enumerate(args) if i not in skip_args
-                )
+                effective_args = tuple(a for i, a in enumerate(args) if i not in skip_args)
 
             # Generate cache key
             key = CacheManager.make_key(key_prefix, func.__name__, *effective_args, **kwargs)
@@ -478,7 +471,7 @@ def get_cache() -> CacheManager:
     return _cache
 
 
-def init_cache(backend: str = 'memory', **kwargs) -> CacheManager:
+def init_cache(backend: str = "memory", **kwargs) -> CacheManager:
     """
     Initialize the global cache.
 

@@ -24,9 +24,10 @@ def get_default_sender_name(tool: str = "qwen") -> str:
     hostname = socket.gethostname()
     return f"{user}-{hostname}-{tool}"
 
+
 # Add shared directory to path
 script_dir = os.path.dirname(os.path.abspath(__file__))
-shared_dir = os.path.join(script_dir, 'shared')
+shared_dir = os.path.join(script_dir, "shared")
 if shared_dir not in sys.path:
     sys.path.insert(0, script_dir)
 from shared import db
@@ -35,27 +36,27 @@ from shared import db
 def get_agent_session_id_from_path(project_path: str) -> Optional[str]:
     """
     Extract agent_session_id from project path.
-    
+
     Project path format: /path/to/{tool_name}_{session_id}/...
     Example: /path/to/qwen_12345/... -> qwen_12345
-    
+
     Args:
         project_path: The project directory path
-        
+
     Returns:
         agent_session_id string or None if not found
     """
     if not project_path:
         return None
-    
+
     # Try to match pattern: toolname_sessionid
     # Examples: qwen_abc123, claude_def456, openclaw_ghi789
-    match = re.search(r'([a-z]+)_([a-f0-9]+)', project_path)
+    match = re.search(r"([a-z]+)_([a-f0-9]+)", project_path)
     if match:
         tool_name = match.group(1)
         session_id = match.group(2)
         return f"{tool_name}_{session_id}"
-    
+
     return None
 
 
@@ -153,7 +154,9 @@ def extract_content_from_entry(entry: dict) -> Optional[str]:
                     elif "functionCall" in part:
                         # Function call in parts
                         fc = part.get("functionCall", {})
-                        texts.append(f"[Function: {fc.get('name', 'unknown')}({json.dumps(fc.get('args', {}))})]")
+                        texts.append(
+                            f"[Function: {fc.get('name', 'unknown')}({json.dumps(fc.get('args', {}))})]"
+                        )
             # Return plain text for assistant messages too
             if len(texts) == 1:
                 return texts[0]
@@ -170,26 +173,32 @@ def extract_content_from_entry(entry: dict) -> Optional[str]:
             # Return plain text for system parts too
             if len(parts) == 1 and isinstance(parts[0], dict) and "text" in parts[0]:
                 return parts[0].get("text", "")
-            return "\n".join([p.get("text", "") if isinstance(p, dict) else str(p) for p in parts]) if parts else json.dumps(msg, ensure_ascii=False)
+            return (
+                "\n".join([p.get("text", "") if isinstance(p, dict) else str(p) for p in parts])
+                if parts
+                else json.dumps(msg, ensure_ascii=False)
+            )
 
     return None
 
 
-def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> tuple:
+def process_jsonl_file(filepath: Path, hostname: str = "localhost") -> tuple:
     """Process a single JSONL file and return daily token aggregates and messages.
 
     Returns:
         tuple: (daily_stats dict, messages list)
     """
-    daily = defaultdict(lambda: {
-        "prompt_tokens": 0,
-        "candidates_tokens": 0,
-        "thoughts_tokens": 0,
-        "cached_tokens": 0,
-        "total_tokens": 0,
-        "request_count": 0,
-        "models_used": set(),
-    })
+    daily = defaultdict(
+        lambda: {
+            "prompt_tokens": 0,
+            "candidates_tokens": 0,
+            "thoughts_tokens": 0,
+            "cached_tokens": 0,
+            "total_tokens": 0,
+            "request_count": 0,
+            "models_used": set(),
+        }
+    )
     messages = []
 
     # First pass: build message tree for conversation_id tracking
@@ -267,7 +276,7 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> tuple:
                                 "user": "user",
                                 "assistant": "assistant",
                                 "system": "system",
-                                "tool_result": "system"
+                                "tool_result": "system",
                             }
                             role = role_map.get(entry_type, "system")
 
@@ -275,7 +284,9 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> tuple:
                             content = extract_content_from_entry(entry)
 
                             # Get token counts
-                            input_tokens = tokens.get("prompt_tokens", 0) + tokens.get("thoughts_tokens", 0)
+                            input_tokens = tokens.get("prompt_tokens", 0) + tokens.get(
+                                "thoughts_tokens", 0
+                            )
                             output_tokens = tokens.get("candidates_tokens", 0)
                             total_tokens = tokens.get("total_tokens", 0)
 
@@ -286,12 +297,18 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> tuple:
                             full_entry_json = json.dumps(entry, ensure_ascii=False)
 
                             # Extract agent_session_id from sessionId field (primary) or project directory path (fallback)
-                            agent_session_id = entry.get('sessionId')  # Qwen logs have sessionId field
+                            agent_session_id = entry.get(
+                                "sessionId"
+                            )  # Qwen logs have sessionId field
                             if not agent_session_id:
-                                if 'project_path' in entry:
-                                    agent_session_id = get_agent_session_id_from_path(entry['project_path'])
-                                elif 'project' in entry:
-                                    agent_session_id = get_agent_session_id_from_path(entry['project'])
+                                if "project_path" in entry:
+                                    agent_session_id = get_agent_session_id_from_path(
+                                        entry["project_path"]
+                                    )
+                                elif "project" in entry:
+                                    agent_session_id = get_agent_session_id_from_path(
+                                        entry["project"]
+                                    )
 
                             # Determine conversation_id: find root message of this conversation
                             uuid = entry.get("uuid")
@@ -303,25 +320,27 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> tuple:
                                     conversation_id = f"conv_{root_uuid}"
 
                             # Collect message for batch insert
-                            messages.append({
-                                "date": date_key,
-                                "tool_name": "qwen",
-                                "host_name": hostname,
-                                "message_id": message_id,
-                                "parent_id": entry.get("parent_id"),
-                                "role": role,
-                                "content": content or "",
-                                "full_entry": full_entry_json,
-                                "tokens_used": total_tokens,
-                                "input_tokens": input_tokens,
-                                "output_tokens": output_tokens,
-                                "model": model,
-                                "timestamp": ts,
-                                "sender_id": "qwen_user",
-                                "sender_name": get_default_sender_name("qwen"),
-                                "agent_session_id": agent_session_id,
-                                "conversation_id": conversation_id
-                            })
+                            messages.append(
+                                {
+                                    "date": date_key,
+                                    "tool_name": "qwen",
+                                    "host_name": hostname,
+                                    "message_id": message_id,
+                                    "parent_id": entry.get("parent_id"),
+                                    "role": role,
+                                    "content": content or "",
+                                    "full_entry": full_entry_json,
+                                    "tokens_used": total_tokens,
+                                    "input_tokens": input_tokens,
+                                    "output_tokens": output_tokens,
+                                    "model": model,
+                                    "timestamp": ts,
+                                    "sender_id": "qwen_user",
+                                    "sender_name": get_default_sender_name("qwen"),
+                                    "agent_session_id": agent_session_id,
+                                    "conversation_id": conversation_id,
+                                }
+                            )
 
                 if tokens["total_tokens"] == 0:
                     # Still count requests even if tokens are 0 (e.g., cache hits)
@@ -406,7 +425,9 @@ def find_qwen_project_dir() -> Optional[Path]:
     return None
 
 
-def fetch_and_save(days: int = 7, project_dir: Optional[Path] = None, hostname: Optional[str] = None) -> bool:
+def fetch_and_save(
+    days: int = 7, project_dir: Optional[Path] = None, hostname: Optional[str] = None
+) -> bool:
     """
     Fetch Qwen usage and save to database.
 
@@ -419,7 +440,7 @@ def fetch_and_save(days: int = 7, project_dir: Optional[Path] = None, hostname: 
         True if successful, False otherwise
     """
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    shared_dir = os.path.join(script_dir, 'shared')
+    shared_dir = os.path.join(script_dir, "shared")
     if shared_dir not in sys.path:
         sys.path.insert(0, script_dir)
     from shared import db, utils
@@ -427,7 +448,7 @@ def fetch_and_save(days: int = 7, project_dir: Optional[Path] = None, hostname: 
     if hostname is None:
         # Try to load hostname from config
         config = utils.load_config()
-        hostname = config.get('host_name', 'localhost')
+        hostname = config.get("host_name", "localhost")
 
     if project_dir is None:
         project_dir = find_qwen_project_dir()
@@ -466,15 +487,17 @@ def fetch_and_save(days: int = 7, project_dir: Optional[Path] = None, hostname: 
             return False
 
     # Aggregate across all projects
-    aggregated = defaultdict(lambda: {
-        "prompt_tokens": 0,
-        "candidates_tokens": 0,
-        "thoughts_tokens": 0,
-        "cached_tokens": 0,
-        "total_tokens": 0,
-        "request_count": 0,
-        "models_used": set(),
-    })
+    aggregated = defaultdict(
+        lambda: {
+            "prompt_tokens": 0,
+            "candidates_tokens": 0,
+            "thoughts_tokens": 0,
+            "cached_tokens": 0,
+            "total_tokens": 0,
+            "request_count": 0,
+            "models_used": set(),
+        }
+    )
 
     # Collect all messages for batch insert
     all_messages = []
@@ -490,7 +513,14 @@ def fetch_and_save(days: int = 7, project_dir: Optional[Path] = None, hostname: 
             daily, messages = process_jsonl_file(f, hostname)
             # Aggregate daily stats
             for date, stats in daily.items():
-                for key in ["prompt_tokens", "candidates_tokens", "thoughts_tokens", "cached_tokens", "total_tokens", "request_count"]:
+                for key in [
+                    "prompt_tokens",
+                    "candidates_tokens",
+                    "thoughts_tokens",
+                    "cached_tokens",
+                    "total_tokens",
+                    "request_count",
+                ]:
                     aggregated[date][key] += stats[key]
                 aggregated[date]["models_used"].update(stats["models_used"])
             # Collect messages for batch insert
@@ -506,7 +536,7 @@ def fetch_and_save(days: int = 7, project_dir: Optional[Path] = None, hostname: 
 
     # Filter by date range
     today = datetime.now().strftime("%Y-%m-%d")
-    start_date = (datetime.now() - timedelta(days=days-1)).strftime("%Y-%m-%d")
+    start_date = (datetime.now() - timedelta(days=days - 1)).strftime("%Y-%m-%d")
 
     saved = 0
     for date, stats in aggregated.items():
@@ -522,7 +552,7 @@ def fetch_and_save(days: int = 7, project_dir: Optional[Path] = None, hostname: 
                 output_tokens=stats["candidates_tokens"],
                 cache_tokens=stats["cached_tokens"],
                 request_count=stats["request_count"],
-                models_used=sorted(stats["models_used"])
+                models_used=sorted(stats["models_used"]),
             ):
                 saved += 1
             print(f"  {date}: {total:,} tokens, {stats['request_count']} requests")
@@ -532,12 +562,16 @@ def fetch_and_save(days: int = 7, project_dir: Optional[Path] = None, hostname: 
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Fetch Qwen token usage')
-    parser.add_argument('--days', type=int, default=7, help='Number of days')
-    parser.add_argument('--project', help='Specific project directory')
-    parser.add_argument('--hostname', help='Host name to identify this machine')
+    parser = argparse.ArgumentParser(description="Fetch Qwen token usage")
+    parser.add_argument("--days", type=int, default=7, help="Number of days")
+    parser.add_argument("--project", help="Specific project directory")
+    parser.add_argument("--hostname", help="Host name to identify this machine")
     args = parser.parse_args()
 
     db.init_database()
-    success = fetch_and_save(days=args.days, project_dir=Path(args.project) if args.project else None, hostname=args.hostname)
+    success = fetch_and_save(
+        days=args.days,
+        project_dir=Path(args.project) if args.project else None,
+        hostname=args.hostname,
+    )
     sys.exit(0 if success else 1)

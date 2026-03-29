@@ -21,7 +21,7 @@ class MessageService:
     def __init__(self, message_repo: Optional[MessageRepository] = None):
         """
         Initialize service.
-        
+
         Args:
             message_repo: Optional MessageRepository instance for dependency injection.
         """
@@ -38,7 +38,7 @@ class MessageService:
         role: Optional[str] = None,
         search: Optional[str] = None,
         limit: int = 50,
-        offset: int = 0
+        offset: int = 0,
     ) -> Dict:
         """
         Get messages with pagination.
@@ -67,7 +67,7 @@ class MessageService:
                 sender_name=sender_name,
                 search=search,
                 limit=limit,
-                offset=offset
+                offset=offset,
             )
             total = self.message_repo.count_messages(
                 start_date=date,
@@ -76,13 +76,13 @@ class MessageService:
                 host_name=host_name,
                 sender_name=sender_name,
                 role=role,
-                search=search
+                search=search,
             )
         else:
             if not start_date:
-                start_date = datetime.now().strftime('%Y-%m-%d')
+                start_date = datetime.now().strftime("%Y-%m-%d")
             if not end_date:
-                end_date = datetime.now().strftime('%Y-%m-%d')
+                end_date = datetime.now().strftime("%Y-%m-%d")
 
             messages = self.message_repo.get_messages_by_date_range(
                 start_date=start_date,
@@ -92,7 +92,7 @@ class MessageService:
                 role=role,
                 search=search,
                 limit=limit,
-                offset=offset
+                offset=offset,
             )
             total = self.message_repo.count_messages(
                 start_date=start_date,
@@ -101,15 +101,15 @@ class MessageService:
                 host_name=host_name,
                 sender_name=sender_name,
                 role=role,
-                search=search
+                search=search,
             )
 
         return {
-            'messages': messages,
-            'total': total,
-            'limit': limit,
-            'offset': offset,
-            'has_more': (offset + limit) < total
+            "messages": messages,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": (offset + limit) < total,
         }
 
     def get_conversation_history(
@@ -119,11 +119,11 @@ class MessageService:
         host_name: Optional[str] = None,
         sender_name: Optional[str] = None,
         limit: int = 50,
-        offset: int = 0
+        offset: int = 0,
     ) -> List[Dict]:
         """
         Get conversation history.
-        
+
         Args:
             date: Optional date filter.
             tool_name: Optional tool name filter.
@@ -131,7 +131,7 @@ class MessageService:
             sender_name: Optional sender name filter.
             limit: Maximum number of results.
             offset: Offset for pagination.
-            
+
         Returns:
             List[Dict]: List of conversations.
         """
@@ -141,16 +141,16 @@ class MessageService:
             host_name=host_name,
             sender_name=sender_name,
             limit=limit,
-            offset=offset
+            offset=offset,
         )
 
     def get_conversation_timeline(self, session_id: str) -> List[Dict]:
         """
         Get timeline of messages for a conversation.
-        
+
         Args:
             session_id: Conversation/session ID.
-            
+
         Returns:
             List[Dict]: List of messages in the conversation.
         """
@@ -159,16 +159,16 @@ class MessageService:
     def get_conversation_details(self, session_id: str) -> Optional[Dict]:
         """
         Get details of a conversation.
-        
+
         Args:
             session_id: Conversation/session ID.
-            
+
         Returns:
             Optional[Dict]: Conversation details or None.
         """
         return self.message_repo.get_conversation_details(session_id)
 
-    @cached(ttl=300, key_prefix='message', skip_args=[0])
+    @cached(ttl=300, key_prefix="message", skip_args=[0])
     def get_all_senders(self, host_name: Optional[str] = None) -> List[str]:
         """
         Get list of all senders.
@@ -216,7 +216,7 @@ class MessageService:
             tool_name=tool_name,
             host_name=host_name,
             sender_name=sender_name,
-            search=search
+            search=search,
         )
 
     def save_message(
@@ -225,7 +225,7 @@ class MessageService:
         tool_name: str,
         message_id: str,
         role: str,
-        host_name: str = 'localhost',
+        host_name: str = "localhost",
         parent_id: Optional[str] = None,
         content: Optional[str] = None,
         full_entry: Optional[str] = None,
@@ -270,5 +270,5 @@ class MessageService:
             group_subject=group_subject,
             is_group_chat=is_group_chat,
             agent_session_id=agent_session_id,
-            conversation_id=conversation_id
+            conversation_id=conversation_id,
         )

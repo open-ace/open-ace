@@ -29,7 +29,7 @@ except ImportError:
 
 # Add shared directory to path
 script_dir = os.path.dirname(os.path.abspath(__file__))
-shared_dir = os.path.join(script_dir, 'shared')
+shared_dir = os.path.join(script_dir, "shared")
 if shared_dir not in sys.path:
     sys.path.insert(0, shared_dir)
 
@@ -45,7 +45,7 @@ def get_agent_session_id_from_path(project_path: str, tool_name: str = "openclaw
 
     Project path format: /path/to/{tool_name}_{session_id}/...
     Example: /path/to/openclaw_12345/... -> openclaw_12345
-    
+
     For openclaw, also supports UUID session IDs from session files:
     Example: ~/.openclaw/agents/main/sessions/abc123-def4.jsonl -> openclaw_abc123
 
@@ -61,7 +61,7 @@ def get_agent_session_id_from_path(project_path: str, tool_name: str = "openclaw
 
     # Try to match pattern: toolname_sessionid
     # Examples: openclaw_abc123, claude_def456, qwen_ghi789
-    match = re.search(r'([a-z]+)_([a-f0-9]+)', project_path)
+    match = re.search(r"([a-z]+)_([a-f0-9]+)", project_path)
     if match:
         tool_name = match.group(1)
         session_id = match.group(2)
@@ -70,7 +70,9 @@ def get_agent_session_id_from_path(project_path: str, tool_name: str = "openclaw
     # For openclaw, try to extract UUID from session file path
     # Format: ~/.openclaw/agents/main/sessions/{uuid}.jsonl
     if tool_name == "openclaw":
-        match = re.search(r'sessions/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})', project_path)
+        match = re.search(
+            r"sessions/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})", project_path
+        )
         if match:
             session_id = match.group(1)[:8]  # Use first 8 chars of UUID
             return f"openclaw_{session_id}"
@@ -101,6 +103,7 @@ def parse_timestamp(ts_str: str) -> str:
                 dt = datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%SZ")
             # Convert UTC to local time (UTC+8 for China)
             from datetime import timedelta
+
             local_dt = dt + timedelta(hours=8)
             return local_dt.strftime("%Y-%m-%d")
         else:
@@ -123,7 +126,7 @@ def get_openclaw_gateway_token() -> Optional[str]:
         return None
 
     try:
-        with open(openclaw_config_path, 'r') as f:
+        with open(openclaw_config_path, "r") as f:
             data = json.load(f)
             return data.get("gateway", {}).get("auth", {}).get("token")
     except Exception as e:
@@ -135,11 +138,8 @@ def get_openclaw_gateway_token() -> Optional[str]:
 # WebSocket API Functions (for token usage)
 # ============================================================================
 
-async def get_openclaw_usage(
-    gateway_url: str,
-    token: str,
-    days: int = 7
-) -> Optional[Dict]:
+
+async def get_openclaw_usage(gateway_url: str, token: str, days: int = 7) -> Optional[Dict]:
     """
     Fetch daily usage data from OpenClaw gateway.
 
@@ -147,7 +147,7 @@ async def get_openclaw_usage(
     """
     # Calculate date range
     end_date = datetime.now().strftime("%Y-%m-%d")
-    start_date = (datetime.now() - timedelta(days=days-1)).strftime("%Y-%m-%d")
+    start_date = (datetime.now() - timedelta(days=days - 1)).strftime("%Y-%m-%d")
 
     print(f"Fetching {days} days of OpenClaw usage data...")
     print(f"Date range: {start_date} to {end_date}")
@@ -225,7 +225,7 @@ async def get_openclaw_usage(
                 "type": "req",
                 "id": str(uuid.uuid4()),
                 "method": "connect",
-                "params": connect_params
+                "params": connect_params,
             }
 
             await websocket.send(json.dumps(connect_request))
@@ -250,8 +250,8 @@ async def get_openclaw_usage(
                     "startDate": start_date,
                     "endDate": end_date,
                     "days": days,
-                    "mode": "utc"
-                }
+                    "mode": "utc",
+                },
             }
 
             await websocket.send(json.dumps(usage_request))
@@ -284,6 +284,7 @@ async def get_openclaw_usage(
     except Exception as e:
         print(f"Error: {e}")
         import traceback
+
         traceback.print_exc()
         return None
 
@@ -308,7 +309,11 @@ def parse_usage_response(response: dict) -> Dict:
             # Try both formats: new (input/output/cacheRead/cacheWrite) and old (tokens/totalTokens)
             tokens = day_entry.get("totalTokens") or day_entry.get("tokens")
             # Also check for request count if available
-            requests = day_entry.get("requests") or day_entry.get("requestCount") or day_entry.get("totalRequests")
+            requests = (
+                day_entry.get("requests")
+                or day_entry.get("requestCount")
+                or day_entry.get("totalRequests")
+            )
             # Try both formats: new (input/output/cacheRead/cacheWrite) and old (inputTokens/outputTokens)
             input_tokens = day_entry.get("input") or day_entry.get("inputTokens", 0)
             output_tokens = day_entry.get("output") or day_entry.get("outputTokens", 0)
@@ -323,7 +328,9 @@ def parse_usage_response(response: dict) -> Dict:
                 daily_input_tokens[date] = int(input_tokens) if input_tokens else 0
                 daily_output_tokens[date] = int(output_tokens) if output_tokens else 0
                 daily_cache_read_tokens[date] = int(cache_read_tokens) if cache_read_tokens else 0
-                daily_cache_write_tokens[date] = int(cache_write_tokens) if cache_write_tokens else 0
+                daily_cache_write_tokens[date] = (
+                    int(cache_write_tokens) if cache_write_tokens else 0
+                )
                 daily_models[date] = models if models else []
 
     # If we have request counts, return as a dict with both tokens and requests
@@ -335,7 +342,7 @@ def parse_usage_response(response: dict) -> Dict:
             "output_tokens": daily_output_tokens,
             "cache_read_tokens": daily_cache_read_tokens,
             "cache_write_tokens": daily_cache_write_tokens,
-            "models": daily_models
+            "models": daily_models,
         }
 
     return {
@@ -345,15 +352,12 @@ def parse_usage_response(response: dict) -> Dict:
         "output_tokens": daily_output_tokens,
         "cache_read_tokens": daily_cache_read_tokens,
         "cache_write_tokens": daily_cache_write_tokens,
-        "models": daily_models
+        "models": daily_models,
     }
 
 
 async def fetch_and_save_usage(
-    days: int = 7,
-    gateway_url: str = None,
-    token: str = None,
-    hostname: str = None
+    days: int = 7, gateway_url: str = None, token: str = None, hostname: str = None
 ) -> bool:
     """
     Fetch OpenClaw usage via WebSocket API and save to database.
@@ -370,23 +374,25 @@ async def fetch_and_save_usage(
     # Try to load config.json for defaults
     if gateway_url is None or token is None:
         config = utils.load_config()
-        openclaw_config = config.get('tools', {}).get('openclaw', {})
+        openclaw_config = config.get("tools", {}).get("openclaw", {})
 
         if gateway_url is None:
-            gateway_url = openclaw_config.get('gateway_url', 'http://localhost:18789')
+            gateway_url = openclaw_config.get("gateway_url", "http://localhost:18789")
 
         if token is None:
             # token_env can be either an environment variable name or the actual token
-            token_env = openclaw_config.get('token_env', 'OPENCLAW_TOKEN')
+            token_env = openclaw_config.get("token_env", "OPENCLAW_TOKEN")
             # First try as environment variable
             token = os.getenv(token_env)
             # If not found and starts with Config, treat as direct token value
             if not token:
                 # Check if it looks like an environment variable reference
-                if token_env.startswith('${') or token_env.startswith('$'):
+                if token_env.startswith("${") or token_env.startswith("$"):
                     # It's trying to reference an env var that doesn't exist
                     print(f"Error: Environment variable '{token_env}' not found")
-                    print("Please set the environment variable or update config.json with the token directly")
+                    print(
+                        "Please set the environment variable or update config.json with the token directly"
+                    )
                     return False
                 else:
                     # It's the actual token value (not a variable name)
@@ -394,11 +400,13 @@ async def fetch_and_save_usage(
 
     if not token:
         print("Error: OpenClaw token not provided")
-        print("Please set OPENCLAW_TOKEN environment variable or configure token_env in config.json")
+        print(
+            "Please set OPENCLAW_TOKEN environment variable or configure token_env in config.json"
+        )
         return False
 
     if hostname is None:
-        hostname = config.get('host_name', 'localhost')
+        hostname = config.get("host_name", "localhost")
 
     result = await get_openclaw_usage(gateway_url, token, days)
 
@@ -442,7 +450,7 @@ async def fetch_and_save_usage(
                 output_tokens=output_tokens,
                 cache_tokens=cache_tokens,
                 request_count=request_count,
-                models_used=models if models else None
+                models_used=models if models else None,
             ):
                 saved += 1
                 if request_count > 0:
@@ -460,6 +468,7 @@ async def fetch_and_save_usage(
 # ============================================================================
 # Local File Processing Functions (for messages)
 # ============================================================================
+
 
 def find_openclaw_sessions_dir() -> Optional[Path]:
     """Find the OpenClaw sessions directory."""
@@ -588,19 +597,33 @@ def extract_content_from_entry(entry: dict) -> tuple:
                     texts.append("[Document content]")
 
             if texts:
-                return ("\n".join(texts), sender_id, sender_name, message_source, conversation_label, group_subject, is_group_chat)
+                return (
+                    "\n".join(texts),
+                    sender_id,
+                    sender_name,
+                    message_source,
+                    conversation_label,
+                    group_subject,
+                    is_group_chat,
+                )
 
     elif entry_type == "session":
         # Session start - get basic info
         session_id = entry.get("id", "")
         timestamp = entry.get("timestamp", "")
         cwd = entry.get("cwd", "")
-        return (json.dumps({
-            "type": "session_start",
-            "id": session_id,
-            "timestamp": timestamp,
-            "cwd": cwd
-        }, ensure_ascii=False), None, None, "openclaw", None, None, None)
+        return (
+            json.dumps(
+                {"type": "session_start", "id": session_id, "timestamp": timestamp, "cwd": cwd},
+                ensure_ascii=False,
+            ),
+            None,
+            None,
+            "openclaw",
+            None,
+            None,
+            None,
+        )
 
     return ("", None, None, "openclaw", None, None, None)
 
@@ -632,24 +655,24 @@ def extract_user_message_metadata(text: str) -> Optional[dict]:
     is_group_chat = None
 
     # ========== Step 1: Detect message source ==========
-    if 'conversation_label' in text or 'Feishu' in text:
+    if "conversation_label" in text or "Feishu" in text:
         message_source = "feishu"
-    elif 'Slack' in text:
+    elif "Slack" in text:
         message_source = "slack"
 
     # ========== Step 2: Handle Feishu System message format ==========
     # Pattern: "System: [...] Feishu[default] message in group XXX: ACTUAL_CONTENT"
     # or: "System: [...] Feishu message from User: ACTUAL_CONTENT"
     feishu_system_match = re.search(
-        r'System:\s*\[[^\]]+\]\s*Feishu\[[^\]]*\]\s*(?:message\s+in\s+group\s+\w+|message\s+from\s+\w+):\s*(.+?)(?:\n\nConversation info|$)',
+        r"System:\s*\[[^\]]+\]\s*Feishu\[[^\]]*\]\s*(?:message\s+in\s+group\s+\w+|message\s+from\s+\w+):\s*(.+?)(?:\n\nConversation info|$)",
         text,
-        re.DOTALL
+        re.DOTALL,
     )
     if feishu_system_match:
         # Extract the actual content after the colon
         actual_content = feishu_system_match.group(1).strip()
         # Remove any leading sender_id: pattern if present
-        prefix_match = re.match(r'^(ou_[a-f0-9]+):\s*(.+)$', actual_content, re.DOTALL)
+        prefix_match = re.match(r"^(ou_[a-f0-9]+):\s*(.+)$", actual_content, re.DOTALL)
         if prefix_match:
             sender_id = prefix_match.group(1)
             actual_content = prefix_match.group(2).strip()
@@ -662,21 +685,21 @@ def extract_user_message_metadata(text: str) -> Optional[dict]:
             "sender_id": sender_id,
             "sender_name": sender_name,
             "cleaned_content": cleaned_content,
-            "message_source": "feishu"
+            "message_source": "feishu",
         }
 
     # ========== Step 3: Handle Slack System message format ==========
     # Pattern: "System: [...] Slack message in #channel from Name: ACTUAL_CONTENT"
     slack_match = re.search(
-        r'Slack\s+(?:message\s+in\s+\S+\s+from|DM\s+from)\s+([^:]+):\s*(.+?)(?:\n\nConversation info|$)',
+        r"Slack\s+(?:message\s+in\s+\S+\s+from|DM\s+from)\s+([^:]+):\s*(.+?)(?:\n\nConversation info|$)",
         text,
-        re.DOTALL
+        re.DOTALL,
     )
     if slack_match:
         extracted_name = slack_match.group(1).strip()
         extracted_content = slack_match.group(2).strip()
         # Remove user mention tags like <@U0AE9GW0KLJ>
-        extracted_content = re.sub(r'<@[A-Z0-9]+>', '', extracted_content).strip()
+        extracted_content = re.sub(r"<@[A-Z0-9]+>", "", extracted_content).strip()
         # Try to extract sender_id from metadata
         slack_sender_id = None
         slack_id_match = re.search(r'"sender_id":\s*"(U[A-Z0-9]+)"', text)
@@ -686,38 +709,49 @@ def extract_user_message_metadata(text: str) -> Optional[dict]:
             "sender_id": slack_sender_id,
             "sender_name": extracted_name,
             "cleaned_content": extracted_content,
-            "message_source": "slack"
+            "message_source": "slack",
         }
 
     # ========== Step 4: Handle simple sender_id: content format ==========
     # Pattern: "ou_xxxxx: content" or "on_xxxxx: content" or "oc_xxxxx: content" or "Uxxxx: content"
-    simple_match = re.match(r'^(ou_[a-f0-9]+|on_[a-f0-9]+|oc_[a-f0-9]+|U[A-Z0-9]+):\s*(.+)$', text.strip(), re.DOTALL)
+    simple_match = re.match(
+        r"^(ou_[a-f0-9]+|on_[a-f0-9]+|oc_[a-f0-9]+|U[A-Z0-9]+):\s*(.+)$", text.strip(), re.DOTALL
+    )
     if simple_match:
         sender_id = simple_match.group(1)
         actual_content = simple_match.group(2).strip()
         message_source = "openclaw"
-        if sender_id.startswith('ou_') or sender_id.startswith('on_') or sender_id.startswith('oc_'):
+        if (
+            sender_id.startswith("ou_")
+            or sender_id.startswith("on_")
+            or sender_id.startswith("oc_")
+        ):
             message_source = "feishu"
         return {
             "sender_id": sender_id,
             "sender_name": None,  # Will be resolved later from cache
             "cleaned_content": actual_content,
-            "message_source": message_source
+            "message_source": message_source,
         }
 
     # ========== Step 5: Fallback - try to extract content from metadata blocks ==========
     # Remove ```json``` code blocks
-    content = re.sub(r'```json\s*\n?\s*```', '', text)
-    content = re.sub(r'```\s*\n?\s*```', '', content)
+    content = re.sub(r"```json\s*\n?\s*```", "", text)
+    content = re.sub(r"```\s*\n?\s*```", "", content)
 
     # Remove "Replied message" blocks
-    content = re.sub(r'Replied message \(untrusted, for context\):\s*```json\s*\n?"[^"]*"\s*```', '', content, flags=re.DOTALL)
+    content = re.sub(
+        r'Replied message \(untrusted, for context\):\s*```json\s*\n?"[^"]*"\s*```',
+        "",
+        content,
+        flags=re.DOTALL,
+    )
 
     # Remove standalone JSON string lines like "body": "..."
-    content = re.sub(r'^\s*"body":\s*"[^"]*"\s*$', '', content, flags=re.MULTILINE)
+    content = re.sub(r'^\s*"body":\s*"[^"]*"\s*$', "", content, flags=re.MULTILINE)
 
     # Remove metadata lines
-    lines = content.split('\n')
+    lines = content.split("\n")
     cleaned_lines = []
     skip_until_empty = False
 
@@ -725,45 +759,48 @@ def extract_user_message_metadata(text: str) -> Optional[dict]:
         stripped = line.strip()
 
         # Skip metadata patterns
-        if stripped.startswith('Conversation info'):
+        if stripped.startswith("Conversation info"):
             skip_until_empty = True
             continue
-        if stripped.startswith('Sender (untrusted'):
+        if stripped.startswith("Sender (untrusted"):
             continue
-        if stripped.startswith('```json') or stripped.startswith('```'):
+        if stripped.startswith("```json") or stripped.startswith("```"):
             continue
-        if stripped.startswith('[message_id:'):
+        if stripped.startswith("[message_id:"):
             continue
-        if stripped.startswith('[Thread history'):
+        if stripped.startswith("[Thread history"):
             continue
-        if stripped.startswith('[Slack') or stripped.startswith('[Feishu'):
+        if stripped.startswith("[Slack") or stripped.startswith("[Feishu"):
             continue
-        if stripped.startswith('[media attached:'):
+        if stripped.startswith("[media attached:"):
             continue
-        if stripped.startswith('System:'):
+        if stripped.startswith("System:"):
             continue
-        if stripped.startswith('{') or stripped.startswith('}'):
+        if stripped.startswith("{") or stripped.startswith("}"):
             continue
         # Skip JSON key-value lines
         if re.match(r'^"[^"]+"\s*:\s*("[^"]*"|\d+|true|false|null)\s*,?\s*$', stripped):
             continue
-        if re.match(r'^"(message_id|sender_id|reply_to_id|conversation_label|sender|timestamp|group_subject|is_group_chat|label|id|name)"\s*:', stripped):
+        if re.match(
+            r'^"(message_id|sender_id|reply_to_id|conversation_label|sender|timestamp|group_subject|is_group_chat|label|id|name)"\s*:',
+            stripped,
+        ):
             continue
         if stripped.endswith('"]') or stripped.endswith('"}'):
             continue
-        if stripped.startswith('Replied message'):
+        if stripped.startswith("Replied message"):
             continue
-        if stripped == '':
+        if stripped == "":
             if skip_until_empty:
                 skip_until_empty = False
                 continue
             continue
 
         # Remove timestamp prefix
-        stripped = re.sub(r'^\[[A-Za-z]{3}\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}.*?\]\s*', '', stripped)
+        stripped = re.sub(r"^\[[A-Za-z]{3}\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}.*?\]\s*", "", stripped)
 
         # Remove "Sender: " prefix
-        sender_prefix_match = re.match(r'^[\u4e00-\u9fa5a-zA-Z\s]+:\s*(.+)$', stripped)
+        sender_prefix_match = re.match(r"^[\u4e00-\u9fa5a-zA-Z\s]+:\s*(.+)$", stripped)
         if sender_prefix_match and len(stripped) < 100:
             stripped = sender_prefix_match.group(1)
 
@@ -771,11 +808,11 @@ def extract_user_message_metadata(text: str) -> Optional[dict]:
             cleaned_lines.append(stripped)
 
     if cleaned_lines:
-        cleaned_content = '\n'.join(cleaned_lines).strip()
+        cleaned_content = "\n".join(cleaned_lines).strip()
 
     # Try to extract sender_id from JSON metadata
     try:
-        json_blocks = re.findall(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', text, re.DOTALL)
+        json_blocks = re.findall(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", text, re.DOTALL)
         for full_block in json_blocks:
             try:
                 data = json.loads(full_block)
@@ -787,7 +824,15 @@ def extract_user_message_metadata(text: str) -> Optional[dict]:
                     # Only extract sender_name from Sender metadata blocks (have 'id' field starting with ou_/on_/oc_)
                     # This prevents extracting 'name' from other JSON blocks like Gitee repo lists
                     block_id = data.get("id", "")
-                    if block_id and isinstance(block_id, str) and (block_id.startswith("ou_") or block_id.startswith("on_") or block_id.startswith("oc_")):
+                    if (
+                        block_id
+                        and isinstance(block_id, str)
+                        and (
+                            block_id.startswith("ou_")
+                            or block_id.startswith("on_")
+                            or block_id.startswith("oc_")
+                        )
+                    ):
                         if "label" in data and data.get("label") != sender_id:
                             sender_name = data.get("label")
                         if "name" in data and data.get("name") != sender_id:
@@ -811,11 +856,13 @@ def extract_user_message_metadata(text: str) -> Optional[dict]:
         "message_source": message_source,
         "conversation_label": conversation_label,
         "group_subject": group_subject,
-        "is_group_chat": is_group_chat
+        "is_group_chat": is_group_chat,
     }
 
 
-def process_jsonl_file(filepath: Path, hostname: str = 'localhost', tool_name: str = "openclaw") -> tuple:
+def process_jsonl_file(
+    filepath: Path, hostname: str = "localhost", tool_name: str = "openclaw"
+) -> tuple:
     """Process a single JSONL file and return daily token aggregates and messages.
 
     Args:
@@ -826,14 +873,16 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost', tool_name: s
     Returns:
         tuple: (daily_stats dict, messages list)
     """
-    daily = defaultdict(lambda: {
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "request_count": 0,
-        "models_used": set(),
-    })
+    daily = defaultdict(
+        lambda: {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "request_count": 0,
+            "models_used": set(),
+        }
+    )
     messages = []
 
     # Extract agent_session_id from file path
@@ -899,28 +948,40 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost', tool_name: s
                             is_group_chat = result[6] if result and len(result) > 6 else None
 
                             # Try to get group subject from conversation_label if not already found
-                            if message_source == "feishu" and (not group_subject and conversation_label):
-                                feishu_config = utils.load_config().get('feishu', {})
-                                app_id = feishu_config.get('app_id')
-                                app_secret = feishu_config.get('app_secret')
+                            if message_source == "feishu" and (
+                                not group_subject and conversation_label
+                            ):
+                                feishu_config = utils.load_config().get("feishu", {})
+                                app_id = feishu_config.get("app_id")
+                                app_secret = feishu_config.get("app_secret")
                                 if app_id and app_secret:
-                                    group_name = feishu_group_cache.get_group_name_from_conversation_label(conversation_label, app_id, app_secret)
+                                    group_name = (
+                                        feishu_group_cache.get_group_name_from_conversation_label(
+                                            conversation_label, app_id, app_secret
+                                        )
+                                    )
                                     if group_name:
                                         group_subject = group_name
 
                             # Try to get Feishu user name if not already found
-                            if message_source == "feishu" and sender_id and (not sender_name or sender_name == sender_id):
+                            if (
+                                message_source == "feishu"
+                                and sender_id
+                                and (not sender_name or sender_name == sender_id)
+                            ):
                                 # Try to get user name from cache first
                                 cached_name = feishu_user_cache.get_user_name_from_cache(sender_id)
                                 if cached_name:
                                     sender_name = cached_name
                                 else:
                                     # Try to fetch from API if config is available
-                                    feishu_config = utils.load_config().get('feishu', {})
-                                    app_id = feishu_config.get('app_id')
-                                    app_secret = feishu_config.get('app_secret')
+                                    feishu_config = utils.load_config().get("feishu", {})
+                                    app_id = feishu_config.get("app_id")
+                                    app_secret = feishu_config.get("app_secret")
                                     if app_id and app_secret:
-                                        api_name = feishu_user_cache.get_user_name(sender_id, app_id, app_secret)
+                                        api_name = feishu_user_cache.get_user_name(
+                                            sender_id, app_id, app_secret
+                                        )
                                         if api_name:
                                             sender_name = api_name
 
@@ -931,7 +992,9 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost', tool_name: s
                             # Generate conversation_id: each user message starts a new conversation
                             if role == "user":
                                 conversation_counter += 1
-                                current_conversation_id = f"conv_{agent_session_id}_{conversation_counter}"
+                                current_conversation_id = (
+                                    f"conv_{agent_session_id}_{conversation_counter}"
+                                )
 
                             # Get token counts
                             input_tokens = tokens.get("input_tokens", 0)
@@ -960,7 +1023,12 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost', tool_name: s
 
                             # For assistant messages without sender, try to get sender from parent
                             # Priority: toolResult > error > assistant > user
-                            if role == "assistant" and not sender_id and not sender_name and parent_id:
+                            if (
+                                role == "assistant"
+                                and not sender_id
+                                and not sender_name
+                                and parent_id
+                            ):
                                 if parent_id in toolResult_senders:
                                     sender_id, sender_name = toolResult_senders[parent_id]
                                 elif parent_id in error_senders:
@@ -972,7 +1040,12 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost', tool_name: s
 
                             # For toolResult messages without sender, try to get sender from parent
                             # Priority: assistant > toolResult > user
-                            if role == "toolResult" and not sender_id and not sender_name and parent_id:
+                            if (
+                                role == "toolResult"
+                                and not sender_id
+                                and not sender_name
+                                and parent_id
+                            ):
                                 if parent_id in assistant_senders:
                                     sender_id, sender_name = assistant_senders[parent_id]
                                 elif parent_id in toolResult_senders:
@@ -994,29 +1067,31 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost', tool_name: s
                                 toolResult_senders[message_id] = (sender_id, sender_name)
 
                             # Collect message for batch insert
-                            messages.append({
-                                "date": date_key,
-                                "tool_name": tool_name,
-                                "host_name": hostname,
-                                "message_id": message_id,
-                                "parent_id": parent_id,
-                                "role": role,
-                                "content": content,
-                                "full_entry": full_entry_json,
-                                "tokens_used": total_tokens,
-                                "input_tokens": input_tokens,
-                                "output_tokens": output_tokens,
-                                "model": model,
-                                "timestamp": ts,
-                                "sender_id": sender_id,
-                                "sender_name": sender_name,
-                                "message_source": message_source,
-                                "feishu_conversation_id": conversation_label,
-                                "group_subject": group_subject,
-                                "is_group_chat": is_group_chat,
-                                "agent_session_id": agent_session_id,
-                                "conversation_id": current_conversation_id
-                            })
+                            messages.append(
+                                {
+                                    "date": date_key,
+                                    "tool_name": tool_name,
+                                    "host_name": hostname,
+                                    "message_id": message_id,
+                                    "parent_id": parent_id,
+                                    "role": role,
+                                    "content": content,
+                                    "full_entry": full_entry_json,
+                                    "tokens_used": total_tokens,
+                                    "input_tokens": input_tokens,
+                                    "output_tokens": output_tokens,
+                                    "model": model,
+                                    "timestamp": ts,
+                                    "sender_id": sender_id,
+                                    "sender_name": sender_name,
+                                    "message_source": message_source,
+                                    "feishu_conversation_id": conversation_label,
+                                    "group_subject": group_subject,
+                                    "is_group_chat": is_group_chat,
+                                    "agent_session_id": agent_session_id,
+                                    "conversation_id": current_conversation_id,
+                                }
+                            )
 
                 elif entry_type == "custom":
                     # Process custom entries (e.g., openclaw:prompt-error)
@@ -1029,7 +1104,11 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost', tool_name: s
                         # For openclaw:prompt-error, extract error info
                         if custom_type == "openclaw:prompt-error":
                             data = entry.get("data", {})
-                            error = data.get("error", "unknown") if isinstance(data, dict) else "unknown"
+                            error = (
+                                data.get("error", "unknown")
+                                if isinstance(data, dict)
+                                else "unknown"
+                            )
                             model = data.get("model") if isinstance(data, dict) else None
                             provider = data.get("provider") if isinstance(data, dict) else None
 
@@ -1058,41 +1137,48 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost', tool_name: s
                             full_entry_json = json.dumps(entry, ensure_ascii=False)
 
                             # Collect error message for batch insert
-                            messages.append({
-                                "date": date_key,
-                                "tool_name": "openclaw",
-                                "host_name": hostname,
-                                "message_id": message_id,
-                                "parent_id": parent_id,
-                                "role": "error",
-                                "content": content,
-                                "full_entry": full_entry_json,
-                                "tokens_used": 0,
-                                "input_tokens": 0,
-                                "output_tokens": 0,
-                                "model": model,
-                                "timestamp": ts,
-                                "sender_id": sender_id,
-                                "sender_name": sender_name,
-                                "message_source": "openclaw",
-                                "feishu_conversation_id": None,
-                                "group_subject": None,
-                                "is_group_chat": None,
-                                "agent_session_id": agent_session_id,
-                                "conversation_id": current_conversation_id
-                            })
+                            messages.append(
+                                {
+                                    "date": date_key,
+                                    "tool_name": "openclaw",
+                                    "host_name": hostname,
+                                    "message_id": message_id,
+                                    "parent_id": parent_id,
+                                    "role": "error",
+                                    "content": content,
+                                    "full_entry": full_entry_json,
+                                    "tokens_used": 0,
+                                    "input_tokens": 0,
+                                    "output_tokens": 0,
+                                    "model": model,
+                                    "timestamp": ts,
+                                    "sender_id": sender_id,
+                                    "sender_name": sender_name,
+                                    "message_source": "openclaw",
+                                    "feishu_conversation_id": None,
+                                    "group_subject": None,
+                                    "is_group_chat": None,
+                                    "agent_session_id": agent_session_id,
+                                    "conversation_id": current_conversation_id,
+                                }
+                            )
                             # Store error sender for future messages (assistant can inherit from error)
                             if sender_id or sender_name:
                                 error_senders[message_id] = (sender_id, sender_name)
                         # For other custom types (e.g., model-snapshot), skip them
                         # as they are just status notifications without meaningful content
 
-                if sum([
-                    tokens["input_tokens"],
-                    tokens["output_tokens"],
-                    tokens["cache_read_tokens"],
-                    tokens["cache_write_tokens"],
-                ]) == 0:
+                if (
+                    sum(
+                        [
+                            tokens["input_tokens"],
+                            tokens["output_tokens"],
+                            tokens["cache_read_tokens"],
+                            tokens["cache_write_tokens"],
+                        ]
+                    )
+                    == 0
+                ):
                     # Count assistant messages as requests even if tokens are 0
                     if role == "assistant":
                         daily[date_key]["request_count"] += 1
@@ -1116,7 +1202,12 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost', tool_name: s
     return dict(daily), messages
 
 
-def fetch_and_save_messages(days: int = 7, sessions_dir: Optional[Path] = None, hostname: Optional[str] = None, tool_name: str = "openclaw") -> bool:
+def fetch_and_save_messages(
+    days: int = 7,
+    sessions_dir: Optional[Path] = None,
+    hostname: Optional[str] = None,
+    tool_name: str = "openclaw",
+) -> bool:
     """
     Fetch OpenClaw messages and save to database.
 
@@ -1140,7 +1231,7 @@ def fetch_and_save_messages(days: int = 7, sessions_dir: Optional[Path] = None, 
     from typing import Dict, Optional
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    shared_dir = os.path.join(script_dir, 'shared')
+    shared_dir = os.path.join(script_dir, "shared")
     if shared_dir not in sys.path:
         sys.path.insert(0, shared_dir)
 
@@ -1150,7 +1241,7 @@ def fetch_and_save_messages(days: int = 7, sessions_dir: Optional[Path] = None, 
     if hostname is None:
         # Try to load hostname from config
         config = utils.load_config()
-        hostname = config.get('host_name', 'localhost')
+        hostname = config.get("host_name", "localhost")
 
     if sessions_dir is None:
         sessions_dir = find_openclaw_sessions_dir()
@@ -1170,14 +1261,16 @@ def fetch_and_save_messages(days: int = 7, sessions_dir: Optional[Path] = None, 
     print(f"Found {len(jsonl_files)} session files in {sessions_dir}")
 
     # Aggregate across all files
-    aggregated = defaultdict(lambda: {
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "request_count": 0,
-        "models_used": set(),
-    })
+    aggregated = defaultdict(
+        lambda: {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "request_count": 0,
+            "models_used": set(),
+        }
+    )
 
     # Collect all messages for batch insert
     all_messages = []
@@ -1185,7 +1278,13 @@ def fetch_and_save_messages(days: int = 7, sessions_dir: Optional[Path] = None, 
     for f in sorted(jsonl_files, key=lambda x: x.name):
         daily, messages = process_jsonl_file(f, hostname, tool_name)
         for date, stats in daily.items():
-            for key in ["input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "request_count"]:
+            for key in [
+                "input_tokens",
+                "output_tokens",
+                "cache_read_tokens",
+                "cache_write_tokens",
+                "request_count",
+            ]:
                 aggregated[date][key] += stats[key]
             aggregated[date]["models_used"].update(stats["models_used"])
         all_messages.extend(messages)
@@ -1200,7 +1299,7 @@ def fetch_and_save_messages(days: int = 7, sessions_dir: Optional[Path] = None, 
 
     # Filter by date range
     today = datetime.now().strftime("%Y-%m-%d")
-    start_date = (datetime.now() - timedelta(days=days-1)).strftime("%Y-%m-%d")
+    start_date = (datetime.now() - timedelta(days=days - 1)).strftime("%Y-%m-%d")
 
     saved = 0
     for date, stats in aggregated.items():
@@ -1221,7 +1320,7 @@ def fetch_and_save_messages(days: int = 7, sessions_dir: Optional[Path] = None, 
                 output_tokens=stats["output_tokens"],
                 cache_tokens=stats["cache_read_tokens"] + stats["cache_write_tokens"],
                 request_count=stats["request_count"],
-                models_used=sorted(stats["models_used"])
+                models_used=sorted(stats["models_used"]),
             ):
                 saved += 1
             print(f"  {date}: {total:,} tokens, {stats['request_count']} requests")
@@ -1234,16 +1333,29 @@ def fetch_and_save_messages(days: int = 7, sessions_dir: Optional[Path] = None, 
 # Main Entry Point
 # ============================================================================
 
+
 def main():
-    parser = argparse.ArgumentParser(description='Fetch OpenClaw token usage and messages')
-    parser.add_argument('--days', type=int, default=7, help='Number of days')
-    parser.add_argument('--url', default=None, help='Gateway URL (reads from config.json if not provided)')
-    parser.add_argument('--token', default=None, help='OpenClaw token (reads from config.json if not provided)')
-    parser.add_argument('--hostname', default=None, help='Host name to identify this machine')
-    parser.add_argument('--sessions-dir', help='Specific sessions directory')
-    parser.add_argument('--tool', default='openclaw', help='Tool name (default: openclaw, can be qclaw, stepclaw, etc.)')
-    parser.add_argument('--mode', choices=['usage', 'messages', 'both'], default='both',
-                        help='Mode: usage (WebSocket API only), messages (session logs only), both (default)')
+    parser = argparse.ArgumentParser(description="Fetch OpenClaw token usage and messages")
+    parser.add_argument("--days", type=int, default=7, help="Number of days")
+    parser.add_argument(
+        "--url", default=None, help="Gateway URL (reads from config.json if not provided)"
+    )
+    parser.add_argument(
+        "--token", default=None, help="OpenClaw token (reads from config.json if not provided)"
+    )
+    parser.add_argument("--hostname", default=None, help="Host name to identify this machine")
+    parser.add_argument("--sessions-dir", help="Specific sessions directory")
+    parser.add_argument(
+        "--tool",
+        default="openclaw",
+        help="Tool name (default: openclaw, can be qclaw, stepclaw, etc.)",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["usage", "messages", "both"],
+        default="both",
+        help="Mode: usage (WebSocket API only), messages (session logs only), both (default)",
+    )
     args = parser.parse_args()
 
     # Initialize database
@@ -1251,19 +1363,18 @@ def main():
 
     success = True
 
-    if args.mode in ['usage', 'both']:
+    if args.mode in ["usage", "both"]:
         print("=" * 60)
         print("Fetching token usage via WebSocket API...")
         print("=" * 60)
-        usage_success = asyncio.run(fetch_and_save_usage(
-            days=args.days,
-            gateway_url=args.url,
-            token=args.token,
-            hostname=args.hostname
-        ))
+        usage_success = asyncio.run(
+            fetch_and_save_usage(
+                days=args.days, gateway_url=args.url, token=args.token, hostname=args.hostname
+            )
+        )
         success = success and usage_success
 
-    if args.mode in ['messages', 'both']:
+    if args.mode in ["messages", "both"]:
         print("\n" + "=" * 60)
         print("Fetching messages from session logs...")
         print("=" * 60)
@@ -1271,7 +1382,7 @@ def main():
             days=args.days,
             sessions_dir=Path(args.sessions_dir) if args.sessions_dir else None,
             hostname=args.hostname,
-            tool_name=args.tool
+            tool_name=args.tool,
         )
         success = success and messages_success
 

@@ -24,26 +24,23 @@ class AuthService:
     def __init__(self, user_repo: Optional[UserRepository] = None):
         """
         Initialize service.
-        
+
         Args:
             user_repo: Optional UserRepository instance for dependency injection.
         """
         self.user_repo = user_repo or UserRepository()
 
     def login(
-        self,
-        username: str,
-        password: str,
-        password_verify_func
+        self, username: str, password: str, password_verify_func
     ) -> Tuple[Optional[Dict], Optional[str]]:
         """
         Authenticate a user and create a session.
-        
+
         Args:
             username: Username.
             password: Plain text password.
             password_verify_func: Function to verify password hash.
-            
+
         Returns:
             Tuple[Optional[Dict], Optional[str]]: (User data, Session token) or (None, error message).
         """
@@ -54,12 +51,12 @@ class AuthService:
             logger.warning(f"Login failed: user not found - {username}")
             return None, "Invalid username or password"
 
-        if not user.get('is_active'):
+        if not user.get("is_active"):
             logger.warning(f"Login failed: user inactive - {username}")
             return None, "Account is disabled"
 
         # Verify password
-        if not password_verify_func(password, user.get('password_hash', '')):
+        if not password_verify_func(password, user.get("password_hash", "")):
             logger.warning(f"Login failed: invalid password - {username}")
             return None, "Invalid username or password"
 
@@ -67,33 +64,33 @@ class AuthService:
         token = secrets.token_hex(32)
         expires_at = datetime.utcnow() + timedelta(hours=SESSION_EXPIRATION_HOURS)
 
-        if not self.user_repo.create_session(user['id'], token, expires_at):
+        if not self.user_repo.create_session(user["id"], token, expires_at):
             logger.error(f"Failed to create session for user - {username}")
             return None, "Failed to create session"
 
         # Update last login
-        self.user_repo.update_last_login(user['id'])
+        self.user_repo.update_last_login(user["id"])
 
         logger.info(f"User logged in: {username}")
 
         # Check if user must change password
-        must_change_password = bool(user.get('must_change_password'))
+        must_change_password = bool(user.get("must_change_password"))
 
         return {
-            'id': user['id'],
-            'username': user['username'],
-            'email': user.get('email'),
-            'role': user['role'],
-            'must_change_password': must_change_password
+            "id": user["id"],
+            "username": user["username"],
+            "email": user.get("email"),
+            "role": user["role"],
+            "must_change_password": must_change_password,
         }, token
 
     def logout(self, token: str) -> bool:
         """
         Logout a user by deleting their session.
-        
+
         Args:
             token: Session token.
-            
+
         Returns:
             bool: True if successful.
         """
@@ -105,7 +102,7 @@ class AuthService:
         current_password: str,
         new_password: str,
         password_verify_func,
-        password_hash_func
+        password_hash_func,
     ) -> Tuple[bool, Optional[str]]:
         """
         Change user password.
@@ -126,7 +123,7 @@ class AuthService:
             return False, "User not found"
 
         # Verify current password
-        if not password_verify_func(current_password, user.get('password_hash', '')):
+        if not password_verify_func(current_password, user.get("password_hash", "")):
             return False, "Current password is incorrect"
 
         # Validate new password
@@ -147,10 +144,10 @@ class AuthService:
     def get_session(self, token: str) -> Optional[Dict]:
         """
         Get session data by token.
-        
+
         Args:
             token: Session token.
-            
+
         Returns:
             Optional[Dict]: Session data or None.
         """
@@ -159,58 +156,58 @@ class AuthService:
     def get_user_profile(self, user_id: int) -> Optional[Dict]:
         """
         Get user profile.
-        
+
         Args:
             user_id: User ID.
-            
+
         Returns:
             Optional[Dict]: User profile or None.
         """
         user = self.user_repo.get_user_by_id(user_id)
         if user:
             # Remove sensitive data
-            user.pop('password_hash', None)
+            user.pop("password_hash", None)
         return user
 
     def is_admin(self, token: str) -> bool:
         """
         Check if the session belongs to an admin user.
-        
+
         Args:
             token: Session token.
-            
+
         Returns:
             bool: True if admin.
         """
         session = self.get_session(token)
-        return session and session.get('role') == 'admin'
+        return session and session.get("role") == "admin"
 
     def require_auth(self, token: str) -> Tuple[bool, Optional[Dict]]:
         """
         Require authentication and return session data.
-        
+
         Args:
             token: Session token.
-            
+
         Returns:
             Tuple[bool, Optional[Dict]]: (Is authenticated, Session data or error).
         """
         if not token:
-            return False, {'error': 'Authentication required'}
+            return False, {"error": "Authentication required"}
 
         session = self.get_session(token)
         if not session:
-            return False, {'error': 'Invalid or expired session'}
+            return False, {"error": "Invalid or expired session"}
 
         return True, session
 
     def require_admin(self, token: str) -> Tuple[bool, Optional[Dict]]:
         """
         Require admin role and return session data.
-        
+
         Args:
             token: Session token.
-            
+
         Returns:
             Tuple[bool, Optional[Dict]]: (Is admin, Session data or error).
         """
@@ -218,7 +215,7 @@ class AuthService:
         if not is_auth:
             return False, session
 
-        if session.get('role') != 'admin':
-            return False, {'error': 'Admin access required'}
+        if session.get("role") != "admin":
+            return False, {"error": "Admin access required"}
 
         return True, session

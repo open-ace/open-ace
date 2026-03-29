@@ -31,7 +31,7 @@ def load_cache() -> Dict:
         return {"groups": {}, "last_updated": 0}
 
     try:
-        with open(CACHE_FILE, encoding='utf-8') as f:
+        with open(CACHE_FILE, encoding="utf-8") as f:
             return json.load(f)
     except (OSError, json.JSONDecodeError):
         return {"groups": {}, "last_updated": 0}
@@ -40,17 +40,14 @@ def load_cache() -> Dict:
 def save_cache(cache: Dict):
     """Save group cache to file."""
     ensure_cache_dir()
-    with open(CACHE_FILE, 'w', encoding='utf-8') as f:
+    with open(CACHE_FILE, "w", encoding="utf-8") as f:
         json.dump(cache, f, ensure_ascii=False, indent=2)
 
 
 def get_feishu_token(app_id: str, app_secret: str) -> Optional[str]:
     """Get Feishu API access token using tenant access token."""
     url = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
-    payload = {
-        "app_id": app_id,
-        "app_secret": app_secret
-    }
+    payload = {"app_id": app_id, "app_secret": app_secret}
 
     try:
         response = requests.post(url, json=payload, timeout=10)
@@ -71,10 +68,7 @@ def get_group_subject(group_id: str, token: str) -> Optional[str]:
     """Get group subject from Feishu API using internal API."""
     # Use the chat get API to get group info
     url = f"https://open.feishu.cn/open-apis/chat/v4/chat/{group_id}"
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
-    }
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
     try:
         response = requests.get(url, headers=headers, timeout=10)
@@ -92,7 +86,9 @@ def get_group_subject(group_id: str, token: str) -> Optional[str]:
         return None
 
 
-def get_group_subject_from_conversation_label(label: str, app_id: str, app_secret: str) -> Optional[str]:
+def get_group_subject_from_conversation_label(
+    label: str, app_id: str, app_secret: str
+) -> Optional[str]:
     """Get group subject using conversation_label."""
     # conversation_label format in Feishu is typically: chat_[chat_id]_[timestamp]
     if not label or not label.startswith("chat_"):
@@ -128,10 +124,7 @@ def get_group_subject_from_conversation_label(label: str, app_id: str, app_secre
 
     if group_name:
         # Cache the result
-        cache["groups"][chat_id] = {
-            "name": group_name,
-            "cached_at": time.time()
-        }
+        cache["groups"][chat_id] = {"name": group_name, "cached_at": time.time()}
         save_cache(cache)
 
     return group_name
@@ -157,16 +150,15 @@ def get_group_name(group_id: str, app_id: str, app_secret: str) -> Optional[str]
 
     if group_name:
         # Cache the result
-        cache["groups"][group_id] = {
-            "name": group_name,
-            "cached_at": time.time()
-        }
+        cache["groups"][group_id] = {"name": group_name, "cached_at": time.time()}
         save_cache(cache)
 
     return group_name
 
 
-def get_group_name_from_conversation_label(label: str, app_id: str, app_secret: str) -> Optional[str]:
+def get_group_name_from_conversation_label(
+    label: str, app_id: str, app_secret: str
+) -> Optional[str]:
     """Get group name using conversation_label."""
     if not label:
         return None
@@ -184,10 +176,7 @@ def get_group_name_from_conversation_label(label: str, app_id: str, app_secret: 
 
     if group_name:
         # Cache the result
-        cache["groups"][label] = {
-            "name": group_name,
-            "cached_at": time.time()
-        }
+        cache["groups"][label] = {"name": group_name, "cached_at": time.time()}
         save_cache(cache)
 
     return group_name
@@ -235,5 +224,7 @@ if __name__ == "__main__":
         print("Usage:")
         print("  python3 feishu_group_cache.py clear     - Clear group cache")
         print("  python3 feishu_group_cache.py list      - List cached groups")
-        print("  python3 feishu_group_cache.py test <conversation_label|group_id> <app_id> [app_secret]")
+        print(
+            "  python3 feishu_group_cache.py test <conversation_label|group_id> <app_id> [app_secret]"
+        )
         print("                                           - Test fetching group info")

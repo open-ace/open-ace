@@ -49,12 +49,12 @@ class GovernanceRepository:
         Returns:
             List[Dict]: List of filter rules.
         """
-        query = 'SELECT * FROM content_filter_rules ORDER BY created_at DESC'
+        query = "SELECT * FROM content_filter_rules ORDER BY created_at DESC"
         rules = self.db.fetch_all(query)
 
         # Convert is_enabled to boolean
         for rule in rules:
-            rule['is_enabled'] = bool(rule.get('is_enabled', 1))
+            rule["is_enabled"] = bool(rule.get("is_enabled", 1))
 
         return rules
 
@@ -68,22 +68,22 @@ class GovernanceRepository:
         Returns:
             Optional[Dict]: Rule data or None.
         """
-        query = 'SELECT * FROM content_filter_rules WHERE id = ?'
+        query = "SELECT * FROM content_filter_rules WHERE id = ?"
         rule = self.db.fetch_one(query, (rule_id,))
 
         if rule:
-            rule['is_enabled'] = bool(rule.get('is_enabled', 1))
+            rule["is_enabled"] = bool(rule.get("is_enabled", 1))
 
         return rule
 
     def create_filter_rule(
         self,
         pattern: str,
-        rule_type: str = 'keyword',
-        severity: str = 'medium',
-        action: str = 'warn',
+        rule_type: str = "keyword",
+        severity: str = "medium",
+        action: str = "warn",
         description: Optional[str] = None,
-        is_enabled: bool = True
+        is_enabled: bool = True,
     ) -> Optional[int]:
         """
         Create a new filter rule.
@@ -100,19 +100,22 @@ class GovernanceRepository:
             Optional[int]: Rule ID if successful.
         """
         try:
-            cursor = self.db.execute('''
+            cursor = self.db.execute(
+                """
                 INSERT INTO content_filter_rules
                 (pattern, type, severity, action, is_enabled, description, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                pattern,
-                rule_type,
-                severity,
-                action,
-                1 if is_enabled else 0,
-                description,
-                datetime.utcnow().isoformat()
-            ))
+            """,
+                (
+                    pattern,
+                    rule_type,
+                    severity,
+                    action,
+                    1 if is_enabled else 0,
+                    description,
+                    datetime.utcnow().isoformat(),
+                ),
+            )
             return cursor.lastrowid
         except Exception as e:
             logger.error(f"Error creating filter rule: {e}")
@@ -126,7 +129,7 @@ class GovernanceRepository:
         severity: Optional[str] = None,
         action: Optional[str] = None,
         description: Optional[str] = None,
-        is_enabled: Optional[bool] = None
+        is_enabled: Optional[bool] = None,
     ) -> bool:
         """
         Update a filter rule.
@@ -147,28 +150,28 @@ class GovernanceRepository:
         params = []
 
         if pattern is not None:
-            updates.append('pattern = ?')
+            updates.append("pattern = ?")
             params.append(pattern)
         if rule_type is not None:
-            updates.append('type = ?')
+            updates.append("type = ?")
             params.append(rule_type)
         if severity is not None:
-            updates.append('severity = ?')
+            updates.append("severity = ?")
             params.append(severity)
         if action is not None:
-            updates.append('action = ?')
+            updates.append("action = ?")
             params.append(action)
         if description is not None:
-            updates.append('description = ?')
+            updates.append("description = ?")
             params.append(description)
         if is_enabled is not None:
-            updates.append('is_enabled = ?')
+            updates.append("is_enabled = ?")
             params.append(1 if is_enabled else 0)
 
         if not updates:
             return False
 
-        updates.append('updated_at = ?')
+        updates.append("updated_at = ?")
         params.append(datetime.utcnow().isoformat())
         params.append(rule_id)
 
@@ -191,7 +194,7 @@ class GovernanceRepository:
         Returns:
             bool: True if successful.
         """
-        query = 'DELETE FROM content_filter_rules WHERE id = ?'
+        query = "DELETE FROM content_filter_rules WHERE id = ?"
 
         try:
             cursor = self.db.execute(query, (rule_id,))
@@ -212,33 +215,31 @@ class GovernanceRepository:
             Dict: Security settings.
         """
         default_settings = {
-            'session_timeout': 30,
-            'max_login_attempts': 5,
-            'password_min_length': 8,
-            'password_require_uppercase': True,
-            'password_require_lowercase': True,
-            'password_require_number': True,
-            'password_require_special': False,
-            'two_factor_enabled': False,
-            'ip_whitelist': [],
+            "session_timeout": 30,
+            "max_login_attempts": 5,
+            "password_min_length": 8,
+            "password_require_uppercase": True,
+            "password_require_lowercase": True,
+            "password_require_number": True,
+            "password_require_special": False,
+            "two_factor_enabled": False,
+            "ip_whitelist": [],
         }
 
         try:
             # Try to load from database first
-            rows = self.db.fetch_all(
-                'SELECT setting_key, setting_value FROM security_settings'
-            )
+            rows = self.db.fetch_all("SELECT setting_key, setting_value FROM security_settings")
 
             if rows:
                 for row in rows:
-                    key = row['setting_key']
-                    value = row['setting_value']
+                    key = row["setting_key"]
+                    value = row["setting_value"]
 
                     # Parse value based on key
-                    if key == 'ip_whitelist':
+                    if key == "ip_whitelist":
                         default_settings[key] = json.loads(value) if value else []
-                    elif value.lower() in ('true', 'false'):
-                        default_settings[key] = value.lower() == 'true'
+                    elif value.lower() in ("true", "false"):
+                        default_settings[key] = value.lower() == "true"
                     elif value.isdigit():
                         default_settings[key] = int(value)
                     else:
@@ -253,7 +254,7 @@ class GovernanceRepository:
         try:
             self._ensure_config_dir()
             if os.path.exists(SETTINGS_FILE):
-                with open(SETTINGS_FILE, 'r') as f:
+                with open(SETTINGS_FILE, "r") as f:
                     saved_settings = json.load(f)
                     default_settings.update(saved_settings)
         except Exception as e:
@@ -274,25 +275,31 @@ class GovernanceRepository:
         try:
             # Try to save to database first
             from app.repositories.database import adapt_sql
+
             with self.db.connection() as conn:
                 cursor = conn.cursor()
 
                 for key, value in settings.items():
                     # Convert value to string for storage
                     if isinstance(value, bool):
-                        str_value = 'true' if value else 'false'
+                        str_value = "true" if value else "false"
                     elif isinstance(value, (list, dict)):
                         str_value = json.dumps(value)
                     else:
                         str_value = str(value)
 
-                    cursor.execute(adapt_sql('''
+                    cursor.execute(
+                        adapt_sql(
+                            """
                         INSERT INTO security_settings (setting_key, setting_value, updated_at)
                         VALUES (?, ?, CURRENT_TIMESTAMP)
                         ON CONFLICT(setting_key) DO UPDATE SET
                             setting_value = excluded.setting_value,
                             updated_at = CURRENT_TIMESTAMP
-                    '''), (key, str_value))
+                    """
+                        ),
+                        (key, str_value),
+                    )
 
                 conn.commit()
 
@@ -307,7 +314,7 @@ class GovernanceRepository:
                 current_settings = self.get_security_settings()
                 current_settings.update(settings)
 
-                with open(SETTINGS_FILE, 'w') as f:
+                with open(SETTINGS_FILE, "w") as f:
                     json.dump(current_settings, f, indent=2)
 
                 return True

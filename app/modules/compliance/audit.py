@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class AnomalyDetection:
     """Detected anomaly in audit data."""
+
     anomaly_type: str
     severity: str  # low, medium, high
     description: str
@@ -55,9 +56,7 @@ class AuditAnalyzer:
         self.audit_logger = audit_logger or AuditLogger()
 
     def analyze_patterns(
-        self,
-        start_time: Optional[datetime] = None,
-        end_time: Optional[datetime] = None
+        self, start_time: Optional[datetime] = None, end_time: Optional[datetime] = None
     ) -> Dict[str, Any]:
         """
         Analyze patterns in audit logs.
@@ -106,22 +105,20 @@ class AuditAnalyzer:
                 user_activity[log.user_id] += 1
 
         return {
-            'period': {
-                'start': start_time.isoformat(),
-                'end': end_time.isoformat(),
+            "period": {
+                "start": start_time.isoformat(),
+                "end": end_time.isoformat(),
             },
-            'total_events': len(logs),
-            'hourly_distribution': dict(sorted(hourly_activity.items())),
-            'daily_distribution': dict(sorted(daily_activity.items())),
-            'action_distribution': dict(sorted(action_distribution.items(), key=lambda x: -x[1])),
-            'unique_users': len(user_activity),
-            'top_users': sorted(user_activity.items(), key=lambda x: -x[1])[:10],
+            "total_events": len(logs),
+            "hourly_distribution": dict(sorted(hourly_activity.items())),
+            "daily_distribution": dict(sorted(daily_activity.items())),
+            "action_distribution": dict(sorted(action_distribution.items(), key=lambda x: -x[1])),
+            "unique_users": len(user_activity),
+            "top_users": sorted(user_activity.items(), key=lambda x: -x[1])[:10],
         }
 
     def detect_anomalies(
-        self,
-        start_time: Optional[datetime] = None,
-        end_time: Optional[datetime] = None
+        self, start_time: Optional[datetime] = None, end_time: Optional[datetime] = None
     ) -> List[AnomalyDetection]:
         """
         Detect anomalies in audit logs.
@@ -160,13 +157,11 @@ class AuditAnalyzer:
         return anomalies
 
     def _detect_failed_login_anomaly(
-        self,
-        start_time: datetime,
-        end_time: datetime
+        self, start_time: datetime, end_time: datetime
     ) -> Optional[AnomalyDetection]:
         """Detect failed login anomalies."""
         failed_logins = self.audit_logger.query(
-            action='login_failed',
+            action="login_failed",
             start_time=start_time,
             end_time=end_time,
             limit=1000,
@@ -183,7 +178,8 @@ class AuditAnalyzer:
 
         # Find users with excessive failures
         affected_users = [
-            user_id for user_id, logs in user_failures.items()
+            user_id
+            for user_id, logs in user_failures.items()
             if len(logs) >= self.FAILED_LOGIN_THRESHOLD
         ]
 
@@ -191,23 +187,21 @@ class AuditAnalyzer:
             return None
 
         return AnomalyDetection(
-            anomaly_type='excessive_failed_logins',
-            severity='high' if len(affected_users) > 3 else 'medium',
-            description=f'{len(affected_users)} user(s) with excessive failed login attempts',
+            anomaly_type="excessive_failed_logins",
+            severity="high" if len(affected_users) > 3 else "medium",
+            description=f"{len(affected_users)} user(s) with excessive failed login attempts",
             affected_users=affected_users,
             occurrences=len(failed_logins),
             first_seen=min(l.timestamp for l in failed_logins if l.timestamp),
             last_seen=max(l.timestamp for l in failed_logins if l.timestamp),
             details={
-                'threshold': self.FAILED_LOGIN_THRESHOLD,
-                'user_breakdown': {str(k): len(v) for k, v in user_failures.items()},
+                "threshold": self.FAILED_LOGIN_THRESHOLD,
+                "user_breakdown": {str(k): len(v) for k, v in user_failures.items()},
             },
         )
 
     def _detect_rapid_activity_anomaly(
-        self,
-        start_time: datetime,
-        end_time: datetime
+        self, start_time: datetime, end_time: datetime
     ) -> List[AnomalyDetection]:
         """Detect rapid activity anomalies."""
         logs = self.audit_logger.query(
@@ -222,34 +216,34 @@ class AuditAnalyzer:
         user_hourly_activity = defaultdict(lambda: defaultdict(int))
         for log in logs:
             if log.user_id and log.timestamp:
-                hour_key = log.timestamp.strftime('%Y-%m-%d %H')
+                hour_key = log.timestamp.strftime("%Y-%m-%d %H")
                 user_hourly_activity[log.user_id][hour_key] += 1
 
         # Find users with rapid activity
         for user_id, hourly in user_hourly_activity.items():
             for hour, count in hourly.items():
                 if count > self.RAPID_ACTION_THRESHOLD:
-                    anomalies.append(AnomalyDetection(
-                        anomaly_type='rapid_activity',
-                        severity='medium',
-                        description=f'User {user_id} had {count} actions in one hour',
-                        affected_users=[user_id],
-                        occurrences=count,
-                        first_seen=datetime.strptime(hour, '%Y-%m-%d %H'),
-                        last_seen=datetime.strptime(hour, '%Y-%m-%d %H') + timedelta(hours=1),
-                        details={
-                            'hour': hour,
-                            'action_count': count,
-                            'threshold': self.RAPID_ACTION_THRESHOLD,
-                        },
-                    ))
+                    anomalies.append(
+                        AnomalyDetection(
+                            anomaly_type="rapid_activity",
+                            severity="medium",
+                            description=f"User {user_id} had {count} actions in one hour",
+                            affected_users=[user_id],
+                            occurrences=count,
+                            first_seen=datetime.strptime(hour, "%Y-%m-%d %H"),
+                            last_seen=datetime.strptime(hour, "%Y-%m-%d %H") + timedelta(hours=1),
+                            details={
+                                "hour": hour,
+                                "action_count": count,
+                                "threshold": self.RAPID_ACTION_THRESHOLD,
+                            },
+                        )
+                    )
 
         return anomalies
 
     def _detect_off_hours_anomaly(
-        self,
-        start_time: datetime,
-        end_time: datetime
+        self, start_time: datetime, end_time: datetime
     ) -> List[AnomalyDetection]:
         """Detect off-hours activity anomalies."""
         logs = self.audit_logger.query(
@@ -263,11 +257,10 @@ class AuditAnalyzer:
         OFF_HOURS_END = 6
 
         off_hours_logs = [
-            log for log in logs
-            if log.timestamp and (
-                log.timestamp.hour >= OFF_HOURS_START or
-                log.timestamp.hour < OFF_HOURS_END
-            )
+            log
+            for log in logs
+            if log.timestamp
+            and (log.timestamp.hour >= OFF_HOURS_START or log.timestamp.hour < OFF_HOURS_END)
         ]
 
         if not off_hours_logs:
@@ -282,25 +275,25 @@ class AuditAnalyzer:
         anomalies = []
         for user_id, logs_list in user_off_hours.items():
             if len(logs_list) > 10:  # Threshold for off-hours activity
-                anomalies.append(AnomalyDetection(
-                    anomaly_type='off_hours_activity',
-                    severity='low',
-                    description=f'User {user_id} active during off-hours',
-                    affected_users=[user_id],
-                    occurrences=len(logs_list),
-                    first_seen=min(l.timestamp for l in logs_list if l.timestamp),
-                    last_seen=max(l.timestamp for l in logs_list if l.timestamp),
-                    details={
-                        'activity_count': len(logs_list),
-                    },
-                ))
+                anomalies.append(
+                    AnomalyDetection(
+                        anomaly_type="off_hours_activity",
+                        severity="low",
+                        description=f"User {user_id} active during off-hours",
+                        affected_users=[user_id],
+                        occurrences=len(logs_list),
+                        first_seen=min(l.timestamp for l in logs_list if l.timestamp),
+                        last_seen=max(l.timestamp for l in logs_list if l.timestamp),
+                        details={
+                            "activity_count": len(logs_list),
+                        },
+                    )
+                )
 
         return anomalies
 
     def _detect_action_pattern_anomaly(
-        self,
-        start_time: datetime,
-        end_time: datetime
+        self, start_time: datetime, end_time: datetime
     ) -> List[AnomalyDetection]:
         """Detect unusual action patterns."""
         logs = self.audit_logger.query(
@@ -312,40 +305,42 @@ class AuditAnalyzer:
         anomalies = []
 
         # Check for role changes
-        role_changes = [l for l in logs if l.action == 'user_role_change']
+        role_changes = [l for l in logs if l.action == "user_role_change"]
         if len(role_changes) > 5:
-            anomalies.append(AnomalyDetection(
-                anomaly_type='frequent_role_changes',
-                severity='high',
-                description=f'{len(role_changes)} role changes detected',
-                affected_users=list(set(l.user_id for l in role_changes if l.user_id)),
-                occurrences=len(role_changes),
-                first_seen=min(l.timestamp for l in role_changes if l.timestamp),
-                last_seen=max(l.timestamp for l in role_changes if l.timestamp),
-                details={},
-            ))
+            anomalies.append(
+                AnomalyDetection(
+                    anomaly_type="frequent_role_changes",
+                    severity="high",
+                    description=f"{len(role_changes)} role changes detected",
+                    affected_users=list(set(l.user_id for l in role_changes if l.user_id)),
+                    occurrences=len(role_changes),
+                    first_seen=min(l.timestamp for l in role_changes if l.timestamp),
+                    last_seen=max(l.timestamp for l in role_changes if l.timestamp),
+                    details={},
+                )
+            )
 
         # Check for permission changes
-        permission_changes = [l for l in logs if l.action in ('permission_grant', 'permission_revoke')]
+        permission_changes = [
+            l for l in logs if l.action in ("permission_grant", "permission_revoke")
+        ]
         if len(permission_changes) > 10:
-            anomalies.append(AnomalyDetection(
-                anomaly_type='frequent_permission_changes',
-                severity='medium',
-                description=f'{len(permission_changes)} permission changes detected',
-                affected_users=list(set(l.user_id for l in permission_changes if l.user_id)),
-                occurrences=len(permission_changes),
-                first_seen=min(l.timestamp for l in permission_changes if l.timestamp),
-                last_seen=max(l.timestamp for l in permission_changes if l.timestamp),
-                details={},
-            ))
+            anomalies.append(
+                AnomalyDetection(
+                    anomaly_type="frequent_permission_changes",
+                    severity="medium",
+                    description=f"{len(permission_changes)} permission changes detected",
+                    affected_users=list(set(l.user_id for l in permission_changes if l.user_id)),
+                    occurrences=len(permission_changes),
+                    first_seen=min(l.timestamp for l in permission_changes if l.timestamp),
+                    last_seen=max(l.timestamp for l in permission_changes if l.timestamp),
+                    details={},
+                )
+            )
 
         return anomalies
 
-    def get_user_behavior_profile(
-        self,
-        user_id: int,
-        days: int = 30
-    ) -> Dict[str, Any]:
+    def get_user_behavior_profile(self, user_id: int, days: int = 30) -> Dict[str, Any]:
         """
         Get behavior profile for a user.
 
@@ -368,10 +363,10 @@ class AuditAnalyzer:
 
         if not logs:
             return {
-                'user_id': user_id,
-                'period_days': days,
-                'total_actions': 0,
-                'message': 'No activity found for this user',
+                "user_id": user_id,
+                "period_days": days,
+                "total_actions": 0,
+                "message": "No activity found for this user",
             }
 
         # Analyze patterns
@@ -390,23 +385,29 @@ class AuditAnalyzer:
         peak_day = max(daily_activity.items(), key=lambda x: x[1])[0] if daily_activity else 0
 
         return {
-            'user_id': user_id,
-            'period_days': days,
-            'total_actions': len(logs),
-            'actions_per_day': len(logs) / days,
-            'action_breakdown': dict(action_counts),
-            'peak_activity_hour': peak_hour,
-            'peak_activity_day': ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][peak_day],
-            'hourly_distribution': dict(sorted(hourly_activity.items())),
-            'daily_distribution': dict(sorted(daily_activity.items())),
-            'first_activity': min(l.timestamp for l in logs if l.timestamp).isoformat(),
-            'last_activity': max(l.timestamp for l in logs if l.timestamp).isoformat(),
+            "user_id": user_id,
+            "period_days": days,
+            "total_actions": len(logs),
+            "actions_per_day": len(logs) / days,
+            "action_breakdown": dict(action_counts),
+            "peak_activity_hour": peak_hour,
+            "peak_activity_day": [
+                "Monday",
+                "Tuesday",
+                "Wednesday",
+                "Thursday",
+                "Friday",
+                "Saturday",
+                "Sunday",
+            ][peak_day],
+            "hourly_distribution": dict(sorted(hourly_activity.items())),
+            "daily_distribution": dict(sorted(daily_activity.items())),
+            "first_activity": min(l.timestamp for l in logs if l.timestamp).isoformat(),
+            "last_activity": max(l.timestamp for l in logs if l.timestamp).isoformat(),
         }
 
     def generate_security_score(
-        self,
-        start_time: Optional[datetime] = None,
-        end_time: Optional[datetime] = None
+        self, start_time: Optional[datetime] = None, end_time: Optional[datetime] = None
     ) -> Dict[str, Any]:
         """
         Generate a security score based on audit analysis.
@@ -431,9 +432,9 @@ class AuditAnalyzer:
 
         # Deduct points for anomalies
         for anomaly in anomalies:
-            if anomaly.severity == 'high':
+            if anomaly.severity == "high":
                 score -= 20
-            elif anomaly.severity == 'medium':
+            elif anomaly.severity == "medium":
                 score -= 10
             else:
                 score -= 5
@@ -443,66 +444,57 @@ class AuditAnalyzer:
 
         # Determine grade
         if score >= 90:
-            grade = 'A'
+            grade = "A"
         elif score >= 80:
-            grade = 'B'
+            grade = "B"
         elif score >= 70:
-            grade = 'C'
+            grade = "C"
         elif score >= 60:
-            grade = 'D'
+            grade = "D"
         else:
-            grade = 'F'
+            grade = "F"
 
         return {
-            'score': score,
-            'grade': grade,
-            'anomaly_count': len(anomalies),
-            'high_severity_count': len([a for a in anomalies if a.severity == 'high']),
-            'medium_severity_count': len([a for a in anomalies if a.severity == 'medium']),
-            'low_severity_count': len([a for a in anomalies if a.severity == 'low']),
-            'anomalies': [
+            "score": score,
+            "grade": grade,
+            "anomaly_count": len(anomalies),
+            "high_severity_count": len([a for a in anomalies if a.severity == "high"]),
+            "medium_severity_count": len([a for a in anomalies if a.severity == "medium"]),
+            "low_severity_count": len([a for a in anomalies if a.severity == "low"]),
+            "anomalies": [
                 {
-                    'type': a.anomaly_type,
-                    'severity': a.severity,
-                    'description': a.description,
+                    "type": a.anomaly_type,
+                    "severity": a.severity,
+                    "description": a.description,
                 }
                 for a in anomalies
             ],
-            'recommendations': self._generate_security_recommendations(anomalies),
+            "recommendations": self._generate_security_recommendations(anomalies),
         }
 
-    def _generate_security_recommendations(
-        self,
-        anomalies: List[AnomalyDetection]
-    ) -> List[str]:
+    def _generate_security_recommendations(self, anomalies: List[AnomalyDetection]) -> List[str]:
         """Generate security recommendations based on anomalies."""
         recommendations = []
 
         for anomaly in anomalies:
-            if anomaly.anomaly_type == 'excessive_failed_logins':
+            if anomaly.anomaly_type == "excessive_failed_logins":
                 recommendations.append(
-                    'Review failed login attempts and consider implementing '
-                    'account lockout policies or MFA'
+                    "Review failed login attempts and consider implementing "
+                    "account lockout policies or MFA"
                 )
-            elif anomaly.anomaly_type == 'rapid_activity':
+            elif anomaly.anomaly_type == "rapid_activity":
                 recommendations.append(
-                    'Investigate rapid activity patterns for potential '
-                    'automated scripts or compromised accounts'
+                    "Investigate rapid activity patterns for potential "
+                    "automated scripts or compromised accounts"
                 )
-            elif anomaly.anomaly_type == 'off_hours_activity':
-                recommendations.append(
-                    'Review off-hours activity for unauthorized access'
-                )
-            elif anomaly.anomaly_type == 'frequent_role_changes':
-                recommendations.append(
-                    'Implement approval workflow for role changes'
-                )
-            elif anomaly.anomaly_type == 'frequent_permission_changes':
-                recommendations.append(
-                    'Review permission management process'
-                )
+            elif anomaly.anomaly_type == "off_hours_activity":
+                recommendations.append("Review off-hours activity for unauthorized access")
+            elif anomaly.anomaly_type == "frequent_role_changes":
+                recommendations.append("Implement approval workflow for role changes")
+            elif anomaly.anomaly_type == "frequent_permission_changes":
+                recommendations.append("Review permission management process")
 
         if not recommendations:
-            recommendations.append('No security issues detected. Continue monitoring.')
+            recommendations.append("No security issues detected. Continue monitoring.")
 
         return list(set(recommendations))  # Remove duplicates

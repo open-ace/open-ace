@@ -41,63 +41,79 @@ class TenantRepository:
         """
         try:
             from app.repositories.database import adapt_sql
+
             with self.db.connection() as conn:
                 cursor = conn.cursor()
 
                 # Insert tenant
-                cursor.execute(adapt_sql('''
+                cursor.execute(
+                    adapt_sql(
+                        """
                     INSERT INTO tenants
                     (name, slug, status, plan, contact_email, contact_phone,
                      contact_name, quota, settings, trial_ends_at, subscription_ends_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                '''), (
-                    tenant.name,
-                    tenant.slug,
-                    tenant.status,
-                    tenant.plan,
-                    tenant.contact_email,
-                    tenant.contact_phone,
-                    tenant.contact_name,
-                    json.dumps(tenant.quota.to_dict()),
-                    json.dumps(tenant.settings.to_dict()),
-                    tenant.trial_ends_at,
-                    tenant.subscription_ends_at,
-                ))
+                """
+                    ),
+                    (
+                        tenant.name,
+                        tenant.slug,
+                        tenant.status,
+                        tenant.plan,
+                        tenant.contact_email,
+                        tenant.contact_phone,
+                        tenant.contact_name,
+                        json.dumps(tenant.quota.to_dict()),
+                        json.dumps(tenant.settings.to_dict()),
+                        tenant.trial_ends_at,
+                        tenant.subscription_ends_at,
+                    ),
+                )
                 tenant_id = cursor.lastrowid
 
                 # Insert tenant_quotas
                 quota_dict = tenant.quota.to_dict()
-                cursor.execute(adapt_sql('''
+                cursor.execute(
+                    adapt_sql(
+                        """
                     INSERT INTO tenant_quotas
                     (tenant_id, daily_token_limit, monthly_token_limit,
                      daily_request_limit, monthly_request_limit, max_users, max_sessions_per_user)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
-                '''), (
-                    tenant_id,
-                    quota_dict.get('daily_token_limit', 1000000),
-                    quota_dict.get('monthly_token_limit', 30000000),
-                    quota_dict.get('daily_request_limit', 10000),
-                    quota_dict.get('monthly_request_limit', 300000),
-                    quota_dict.get('max_users', 100),
-                    quota_dict.get('max_sessions_per_user', 5),
-                ))
+                """
+                    ),
+                    (
+                        tenant_id,
+                        quota_dict.get("daily_token_limit", 1000000),
+                        quota_dict.get("monthly_token_limit", 30000000),
+                        quota_dict.get("daily_request_limit", 10000),
+                        quota_dict.get("monthly_request_limit", 300000),
+                        quota_dict.get("max_users", 100),
+                        quota_dict.get("max_sessions_per_user", 5),
+                    ),
+                )
 
                 # Insert tenant_settings
                 settings_dict = tenant.settings.to_dict()
-                cursor.execute(adapt_sql('''
+                cursor.execute(
+                    adapt_sql(
+                        """
                     INSERT INTO tenant_settings
                     (tenant_id, content_filter_enabled, audit_log_enabled,
                      audit_log_retention_days, data_retention_days, sso_enabled, sso_provider)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
-                '''), (
-                    tenant_id,
-                    1 if settings_dict.get('content_filter_enabled', True) else 0,
-                    1 if settings_dict.get('audit_log_enabled', True) else 0,
-                    settings_dict.get('audit_log_retention_days', 90),
-                    settings_dict.get('data_retention_days', 365),
-                    1 if settings_dict.get('sso_enabled', False) else 0,
-                    settings_dict.get('sso_provider'),
-                ))
+                """
+                    ),
+                    (
+                        tenant_id,
+                        1 if settings_dict.get("content_filter_enabled", True) else 0,
+                        1 if settings_dict.get("audit_log_enabled", True) else 0,
+                        settings_dict.get("audit_log_retention_days", 90),
+                        settings_dict.get("data_retention_days", 365),
+                        1 if settings_dict.get("sso_enabled", False) else 0,
+                        settings_dict.get("sso_provider"),
+                    ),
+                )
 
                 conn.commit()
 
@@ -120,9 +136,9 @@ class TenantRepository:
             Optional[Tenant]: Tenant instance or None.
         """
         if include_deleted:
-            query = 'SELECT * FROM tenants WHERE id = ?'
+            query = "SELECT * FROM tenants WHERE id = ?"
         else:
-            query = 'SELECT * FROM tenants WHERE id = ? AND deleted_at IS NULL'
+            query = "SELECT * FROM tenants WHERE id = ? AND deleted_at IS NULL"
 
         row = self.db.fetch_one(query, (tenant_id,))
         return self._row_to_tenant(row) if row else None
@@ -139,9 +155,9 @@ class TenantRepository:
             Optional[Tenant]: Tenant instance or None.
         """
         if include_deleted:
-            query = 'SELECT * FROM tenants WHERE slug = ?'
+            query = "SELECT * FROM tenants WHERE slug = ?"
         else:
-            query = 'SELECT * FROM tenants WHERE slug = ? AND deleted_at IS NULL'
+            query = "SELECT * FROM tenants WHERE slug = ? AND deleted_at IS NULL"
 
         row = self.db.fetch_one(query, (slug,))
         return self._row_to_tenant(row) if row else None
@@ -152,7 +168,7 @@ class TenantRepository:
         plan: Optional[str] = None,
         include_deleted: bool = False,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
     ) -> List[Tenant]:
         """
         Get all tenants with optional filters.
@@ -171,24 +187,24 @@ class TenantRepository:
         params = []
 
         if not include_deleted:
-            conditions.append('deleted_at IS NULL')
+            conditions.append("deleted_at IS NULL")
 
         if status:
-            conditions.append('status = ?')
+            conditions.append("status = ?")
             params.append(status)
 
         if plan:
-            conditions.append('plan = ?')
+            conditions.append("plan = ?")
             params.append(plan)
 
-        where_clause = ' AND '.join(conditions) if conditions else '1=1'
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
 
-        query = f'''
+        query = f"""
             SELECT * FROM tenants
             WHERE {where_clause}
             ORDER BY created_at DESC
             LIMIT ? OFFSET ?
-        '''
+        """
 
         rows = self.db.fetch_all(query, tuple(params + [limit, offset]))
         return [self._row_to_tenant(row) for row in rows]
@@ -208,26 +224,38 @@ class TenantRepository:
             return False
 
         # Handle nested objects
-        if 'quota' in updates and isinstance(updates['quota'], dict):
-            updates['quota'] = json.dumps(updates['quota'])
-        if 'settings' in updates and isinstance(updates['settings'], dict):
-            updates['settings'] = json.dumps(updates['settings'])
+        if "quota" in updates and isinstance(updates["quota"], dict):
+            updates["quota"] = json.dumps(updates["quota"])
+        if "settings" in updates and isinstance(updates["settings"], dict):
+            updates["settings"] = json.dumps(updates["settings"])
 
         set_clauses = []
         params = []
 
         for key, value in updates.items():
-            if key in ('name', 'slug', 'status', 'plan', 'contact_email',
-                       'contact_phone', 'contact_name', 'quota', 'settings',
-                       'trial_ends_at', 'subscription_ends_at', 'user_count',
-                       'total_tokens_used', 'total_requests_made'):
-                set_clauses.append(f'{key} = ?')
+            if key in (
+                "name",
+                "slug",
+                "status",
+                "plan",
+                "contact_email",
+                "contact_phone",
+                "contact_name",
+                "quota",
+                "settings",
+                "trial_ends_at",
+                "subscription_ends_at",
+                "user_count",
+                "total_tokens_used",
+                "total_requests_made",
+            ):
+                set_clauses.append(f"{key} = ?")
                 params.append(value)
 
         if not set_clauses:
             return False
 
-        set_clauses.append('updated_at = ?')
+        set_clauses.append("updated_at = ?")
         params.append(datetime.utcnow())
         params.append(tenant_id)
 
@@ -251,7 +279,9 @@ class TenantRepository:
         Returns:
             bool: True if successful.
         """
-        query = 'UPDATE tenants SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL'
+        query = (
+            "UPDATE tenants SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL"
+        )
 
         try:
             cursor = self.db.execute(query, (datetime.utcnow(), datetime.utcnow(), tenant_id))
@@ -270,7 +300,7 @@ class TenantRepository:
         Returns:
             bool: True if successful.
         """
-        query = 'UPDATE tenants SET deleted_at = NULL, updated_at = ? WHERE id = ?'
+        query = "UPDATE tenants SET deleted_at = NULL, updated_at = ? WHERE id = ?"
 
         try:
             cursor = self.db.execute(query, (datetime.utcnow(), tenant_id))
@@ -291,11 +321,14 @@ class TenantRepository:
         """
         try:
             from app.repositories.database import adapt_sql
+
             with self.db.connection() as conn:
                 cursor = conn.cursor()
                 # Delete related records first
-                cursor.execute(adapt_sql('DELETE FROM tenant_usage WHERE tenant_id = ?'), (tenant_id,))
-                cursor.execute(adapt_sql('DELETE FROM tenants WHERE id = ?'), (tenant_id,))
+                cursor.execute(
+                    adapt_sql("DELETE FROM tenant_usage WHERE tenant_id = ?"), (tenant_id,)
+                )
+                cursor.execute(adapt_sql("DELETE FROM tenants WHERE id = ?"), (tenant_id,))
                 conn.commit()
                 return cursor.rowcount > 0
 
@@ -304,11 +337,7 @@ class TenantRepository:
             return False
 
     def record_usage(
-        self,
-        tenant_id: int,
-        tokens: int = 0,
-        requests: int = 1,
-        date: Optional[str] = None
+        self, tenant_id: int, tokens: int = 0, requests: int = 1, date: Optional[str] = None
     ) -> bool:
         """
         Record usage for a tenant.
@@ -323,30 +352,41 @@ class TenantRepository:
             bool: True if successful.
         """
         if date is None:
-            date = datetime.utcnow().strftime('%Y-%m-%d')
+            date = datetime.utcnow().strftime("%Y-%m-%d")
 
         try:
             from app.repositories.database import adapt_sql
+
             with self.db.connection() as conn:
                 cursor = conn.cursor()
 
                 # Insert or update usage
-                cursor.execute(adapt_sql('''
+                cursor.execute(
+                    adapt_sql(
+                        """
                     INSERT INTO tenant_usage (tenant_id, date, tokens_used, requests_made)
                     VALUES (?, ?, ?, ?)
                     ON CONFLICT(tenant_id, date) DO UPDATE SET
                         tokens_used = tokens_used + ?,
                         requests_made = requests_made + ?
-                '''), (tenant_id, date, tokens, requests, tokens, requests))
+                """
+                    ),
+                    (tenant_id, date, tokens, requests, tokens, requests),
+                )
 
                 # Update tenant totals
-                cursor.execute(adapt_sql('''
+                cursor.execute(
+                    adapt_sql(
+                        """
                     UPDATE tenants SET
                         total_tokens_used = total_tokens_used + ?,
                         total_requests_made = total_requests_made + ?,
                         updated_at = ?
                     WHERE id = ?
-                '''), (tokens, requests, datetime.utcnow(), tenant_id))
+                """
+                    ),
+                    (tokens, requests, datetime.utcnow(), tenant_id),
+                )
 
                 conn.commit()
                 return True
@@ -360,7 +400,7 @@ class TenantRepository:
         tenant_id: int,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
-        limit: int = 30
+        limit: int = 30,
     ) -> List[TenantUsage]:
         """
         Get usage history for a tenant.
@@ -374,34 +414,34 @@ class TenantRepository:
         Returns:
             List[TenantUsage]: Usage records.
         """
-        conditions = ['tenant_id = ?']
+        conditions = ["tenant_id = ?"]
         params = [tenant_id]
 
         if start_date:
-            conditions.append('date >= ?')
+            conditions.append("date >= ?")
             params.append(start_date)
 
         if end_date:
-            conditions.append('date <= ?')
+            conditions.append("date <= ?")
             params.append(end_date)
 
-        query = f'''
+        query = f"""
             SELECT * FROM tenant_usage
             WHERE {' AND '.join(conditions)}
             ORDER BY date DESC
             LIMIT ?
-        '''
+        """
 
         rows = self.db.fetch_all(query, tuple(params + [limit]))
 
         return [
             TenantUsage(
-                tenant_id=row['tenant_id'],
-                date=row['date'],
-                tokens_used=row['tokens_used'],
-                requests_made=row['requests_made'],
-                active_users=row['active_users'],
-                new_users=row['new_users'],
+                tenant_id=row["tenant_id"],
+                date=row["date"],
+                tokens_used=row["tokens_used"],
+                requests_made=row["requests_made"],
+                active_users=row["active_users"],
+                new_users=row["new_users"],
             )
             for row in rows
         ]
@@ -419,14 +459,20 @@ class TenantRepository:
         """
         try:
             from app.repositories.database import adapt_sql
+
             with self.db.connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute(adapt_sql('''
+                cursor.execute(
+                    adapt_sql(
+                        """
                     UPDATE tenants SET
                         user_count = MAX(0, user_count + ?),
                         updated_at = ?
                     WHERE id = ?
-                '''), (delta, datetime.utcnow(), tenant_id))
+                """
+                    ),
+                    (delta, datetime.utcnow(), tenant_id),
+                )
                 conn.commit()
                 return cursor.rowcount > 0
 
@@ -446,85 +492,88 @@ class TenantRepository:
         """
         if status:
             result = self.db.fetch_one(
-                'SELECT COUNT(*) as count FROM tenants WHERE status = ?',
-                (status,)
+                "SELECT COUNT(*) as count FROM tenants WHERE status = ?", (status,)
             )
         else:
-            result = self.db.fetch_one('SELECT COUNT(*) as count FROM tenants')
+            result = self.db.fetch_one("SELECT COUNT(*) as count FROM tenants")
 
-        return result['count'] if result else 0
+        return result["count"] if result else 0
 
     def _row_to_tenant(self, row: dict) -> Tenant:
         """Convert database row to Tenant model."""
         quota = QuotaConfig()
         settings = TenantSettings()
-        tenant_id = row.get('id')
+        tenant_id = row.get("id")
 
         # Try to load from dedicated tables first
         if tenant_id:
             try:
                 quota_row = self.db.fetch_one(
-                    'SELECT * FROM tenant_quotas WHERE tenant_id = ?',
-                    (tenant_id,)
+                    "SELECT * FROM tenant_quotas WHERE tenant_id = ?", (tenant_id,)
                 )
                 if quota_row:
                     quota = QuotaConfig(
-                        daily_token_limit=quota_row.get('daily_token_limit', 1000000),
-                        monthly_token_limit=quota_row.get('monthly_token_limit', 30000000),
-                        daily_request_limit=quota_row.get('daily_request_limit', 10000),
-                        monthly_request_limit=quota_row.get('monthly_request_limit', 300000),
-                        max_users=quota_row.get('max_users', 100),
-                        max_sessions_per_user=quota_row.get('max_sessions_per_user', 5),
+                        daily_token_limit=quota_row.get("daily_token_limit", 1000000),
+                        monthly_token_limit=quota_row.get("monthly_token_limit", 30000000),
+                        daily_request_limit=quota_row.get("daily_request_limit", 10000),
+                        monthly_request_limit=quota_row.get("monthly_request_limit", 300000),
+                        max_users=quota_row.get("max_users", 100),
+                        max_sessions_per_user=quota_row.get("max_sessions_per_user", 5),
                     )
             except Exception:
                 pass
 
             try:
                 settings_row = self.db.fetch_one(
-                    'SELECT * FROM tenant_settings WHERE tenant_id = ?',
-                    (tenant_id,)
+                    "SELECT * FROM tenant_settings WHERE tenant_id = ?", (tenant_id,)
                 )
                 if settings_row:
                     settings = TenantSettings(
-                        content_filter_enabled=bool(settings_row.get('content_filter_enabled', 1)),
-                        audit_log_enabled=bool(settings_row.get('audit_log_enabled', 1)),
-                        audit_log_retention_days=settings_row.get('audit_log_retention_days', 90),
-                        data_retention_days=settings_row.get('data_retention_days', 365),
-                        sso_enabled=bool(settings_row.get('sso_enabled', 0)),
-                        sso_provider=settings_row.get('sso_provider'),
+                        content_filter_enabled=bool(settings_row.get("content_filter_enabled", 1)),
+                        audit_log_enabled=bool(settings_row.get("audit_log_enabled", 1)),
+                        audit_log_retention_days=settings_row.get("audit_log_retention_days", 90),
+                        data_retention_days=settings_row.get("data_retention_days", 365),
+                        sso_enabled=bool(settings_row.get("sso_enabled", 0)),
+                        sso_provider=settings_row.get("sso_provider"),
                     )
             except Exception:
                 pass
 
         # Fallback to JSON fields if dedicated tables don't have data
-        if quota == QuotaConfig() and row.get('quota'):
+        if quota == QuotaConfig() and row.get("quota"):
             try:
-                quota = QuotaConfig.from_dict(json.loads(row['quota']))
+                quota = QuotaConfig.from_dict(json.loads(row["quota"]))
             except (json.JSONDecodeError, TypeError):
                 pass
 
-        if settings == TenantSettings() and row.get('settings'):
+        if settings == TenantSettings() and row.get("settings"):
             try:
-                settings = TenantSettings.from_dict(json.loads(row['settings']))
+                settings = TenantSettings.from_dict(json.loads(row["settings"]))
             except (json.JSONDecodeError, TypeError):
                 pass
 
         return Tenant(
-            id=row.get('id'),
-            name=row.get('name', ''),
-            slug=row.get('slug', ''),
-            status=row.get('status', 'active'),
-            plan=row.get('plan', 'standard'),
-            contact_email=row.get('contact_email', ''),
-            contact_phone=row.get('contact_phone'),
-            contact_name=row.get('contact_name'),
+            id=row.get("id"),
+            name=row.get("name", ""),
+            slug=row.get("slug", ""),
+            status=row.get("status", "active"),
+            plan=row.get("plan", "standard"),
+            contact_email=row.get("contact_email", ""),
+            contact_phone=row.get("contact_phone"),
+            contact_name=row.get("contact_name"),
             quota=quota,
             settings=settings,
-            created_at=datetime.fromisoformat(row['created_at']) if row.get('created_at') else None,
-            updated_at=datetime.fromisoformat(row['updated_at']) if row.get('updated_at') else None,
-            trial_ends_at=datetime.fromisoformat(row['trial_ends_at']) if row.get('trial_ends_at') else None,
-            subscription_ends_at=datetime.fromisoformat(row['subscription_ends_at']) if row.get('subscription_ends_at') else None,
-            user_count=row.get('user_count', 0),
-            total_tokens_used=row.get('total_tokens_used', 0),
-            total_requests_made=row.get('total_requests_made', 0),
+            created_at=datetime.fromisoformat(row["created_at"]) if row.get("created_at") else None,
+            updated_at=datetime.fromisoformat(row["updated_at"]) if row.get("updated_at") else None,
+            trial_ends_at=(
+                datetime.fromisoformat(row["trial_ends_at"]) if row.get("trial_ends_at") else None
+            ),
+            subscription_ends_at=(
+                datetime.fromisoformat(row["subscription_ends_at"])
+                if row.get("subscription_ends_at")
+                else None
+            ),
+            user_count=row.get("user_count", 0),
+            total_tokens_used=row.get("total_tokens_used", 0),
+            total_requests_made=row.get("total_requests_made", 0),
         )

@@ -46,7 +46,7 @@ class OIDCProvider(OAuth2Provider):
         state: str,
         redirect_uri: Optional[str] = None,
         code_challenge: Optional[str] = None,
-        nonce: Optional[str] = None
+        nonce: Optional[str] = None,
     ) -> str:
         """
         Get the authorization URL for the OIDC flow.
@@ -61,21 +61,21 @@ class OIDCProvider(OAuth2Provider):
             str: Authorization URL.
         """
         params = {
-            'client_id': self.config.client_id,
-            'response_type': 'code',
-            'redirect_uri': redirect_uri or self.config.redirect_uri,
-            'scope': ' '.join(self.config.scope),
-            'state': state,
+            "client_id": self.config.client_id,
+            "response_type": "code",
+            "redirect_uri": redirect_uri or self.config.redirect_uri,
+            "scope": " ".join(self.config.scope),
+            "state": state,
         }
 
         # Add nonce for ID token validation
         if nonce:
-            params['nonce'] = nonce
+            params["nonce"] = nonce
 
         # Add PKCE if provided
         if code_challenge:
-            params['code_challenge'] = code_challenge
-            params['code_challenge_method'] = 'S256'
+            params["code_challenge"] = code_challenge
+            params["code_challenge_method"] = "S256"
 
         # Add extra parameters
         params.update(self.config.extra_params)
@@ -83,10 +83,7 @@ class OIDCProvider(OAuth2Provider):
         return f"{self.config.authorization_url}?{urllib.parse.urlencode(params)}"
 
     def exchange_code(
-        self,
-        code: str,
-        redirect_uri: Optional[str] = None,
-        code_verifier: Optional[str] = None
+        self, code: str, redirect_uri: Optional[str] = None, code_verifier: Optional[str] = None
     ) -> SSOAuthResult:
         """
         Exchange authorization code for tokens.
@@ -152,9 +149,11 @@ class OIDCProvider(OAuth2Provider):
 
         # Check cache (cache for 1 hour)
         cache_ttl = timedelta(hours=1)
-        if (self._jwks_cache is not None and
-            self._jwks_cache_time is not None and
-            datetime.utcnow() - self._jwks_cache_time < cache_ttl):
+        if (
+            self._jwks_cache is not None
+            and self._jwks_cache_time is not None
+            and datetime.utcnow() - self._jwks_cache_time < cache_ttl
+        ):
             return self._jwks_cache
 
         # Fetch JWKS from well-known endpoint
@@ -189,8 +188,8 @@ class OIDCProvider(OAuth2Provider):
         try:
             jwks = self._get_jwks()
 
-            for key in jwks.get('keys', []):
-                if key.get('kid') == kid:
+            for key in jwks.get("keys", []):
+                if key.get("kid") == kid:
                     # Convert JWK to PEM format
                     return self._jwk_to_pem(key)
 
@@ -216,14 +215,8 @@ class OIDCProvider(OAuth2Provider):
         from cryptography.hazmat.backends import default_backend
 
         # Extract RSA components
-        n = int.from_bytes(
-            base64.urlsafe_b64decode(jwk['n'] + '=='),
-            byteorder='big'
-        )
-        e = int.from_bytes(
-            base64.urlsafe_b64decode(jwk['e'] + '=='),
-            byteorder='big'
-        )
+        n = int.from_bytes(base64.urlsafe_b64decode(jwk["n"] + "=="), byteorder="big")
+        e = int.from_bytes(base64.urlsafe_b64decode(jwk["e"] + "=="), byteorder="big")
 
         # Construct RSA public key
         public_key = rsa.RSAPublicNumbers(e, n).public_key(default_backend())
@@ -231,10 +224,10 @@ class OIDCProvider(OAuth2Provider):
         # Serialize to PEM format
         pem = public_key.public_bytes(
             encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
         )
 
-        return pem.decode('utf-8')
+        return pem.decode("utf-8")
 
     def _verify_id_token(self, id_token: str) -> Optional[Dict[str, Any]]:
         """
@@ -255,7 +248,7 @@ class OIDCProvider(OAuth2Provider):
         try:
             # First, decode the header to get the key ID (kid)
             unverified_header = jwt.get_unverified_header(id_token)
-            kid = unverified_header.get('kid')
+            kid = unverified_header.get("kid")
 
             if not kid:
                 raise ValueError("No 'kid' in JWT header")
@@ -269,15 +262,15 @@ class OIDCProvider(OAuth2Provider):
             payload = jwt.decode(
                 id_token,
                 key=signing_key,
-                algorithms=['RS256'],
+                algorithms=["RS256"],
                 audience=self.config.client_id,
                 issuer=self.config.issuer_url,
                 options={
-                    'verify_signature': True,
-                    'verify_exp': True,
-                    'verify_aud': True,
-                    'verify_iss': True,
-                }
+                    "verify_signature": True,
+                    "verify_exp": True,
+                    "verify_aud": True,
+                    "verify_iss": True,
+                },
             )
 
             logger.debug(f"Successfully verified ID token for sub: {payload.get('sub')}")
@@ -317,15 +310,15 @@ class OIDCProvider(OAuth2Provider):
         """
         return SSOUser(
             provider=self.name,
-            provider_user_id=str(data.get('sub', '')),
-            email=data.get('email'),
-            username=data.get('preferred_username', data.get('username')),
-            name=data.get('name'),
-            first_name=data.get('given_name'),
-            last_name=data.get('family_name'),
-            picture=data.get('picture'),
-            locale=data.get('locale'),
-            email_verified=data.get('email_verified', False),
+            provider_user_id=str(data.get("sub", "")),
+            email=data.get("email"),
+            username=data.get("preferred_username", data.get("username")),
+            name=data.get("name"),
+            first_name=data.get("given_name"),
+            last_name=data.get("family_name"),
+            picture=data.get("picture"),
+            locale=data.get("locale"),
+            email_verified=data.get("email_verified", False),
             raw_data=data,
         )
 
@@ -347,15 +340,15 @@ class GoogleProvider(OIDCProvider):
         """Parse Google user info."""
         return SSOUser(
             provider=self.name,
-            provider_user_id=str(data.get('sub', '')),
-            email=data.get('email'),
-            username=data.get('email'),  # Google uses email as username
-            name=data.get('name'),
-            first_name=data.get('given_name'),
-            last_name=data.get('family_name'),
-            picture=data.get('picture'),
-            locale=data.get('locale'),
-            email_verified=data.get('email_verified', False),
+            provider_user_id=str(data.get("sub", "")),
+            email=data.get("email"),
+            username=data.get("email"),  # Google uses email as username
+            name=data.get("name"),
+            first_name=data.get("given_name"),
+            last_name=data.get("family_name"),
+            picture=data.get("picture"),
+            locale=data.get("locale"),
+            email_verified=data.get("email_verified", False),
             raw_data=data,
         )
 
@@ -367,13 +360,13 @@ class MicrosoftProvider(OIDCProvider):
         """Parse Microsoft user info."""
         return SSOUser(
             provider=self.name,
-            provider_user_id=str(data.get('sub', '')),
-            email=data.get('email', data.get('upn')),
-            username=data.get('preferred_username', data.get('upn')),
-            name=data.get('name'),
-            first_name=data.get('given_name'),
-            last_name=data.get('family_name'),
-            picture=data.get('picture'),
+            provider_user_id=str(data.get("sub", "")),
+            email=data.get("email", data.get("upn")),
+            username=data.get("preferred_username", data.get("upn")),
+            name=data.get("name"),
+            first_name=data.get("given_name"),
+            last_name=data.get("family_name"),
+            picture=data.get("picture"),
             locale=None,
             email_verified=True,  # Microsoft accounts are verified
             raw_data=data,
@@ -387,15 +380,15 @@ class OktaProvider(OIDCProvider):
         """Parse Okta user info."""
         return SSOUser(
             provider=self.name,
-            provider_user_id=str(data.get('sub', '')),
-            email=data.get('email'),
-            username=data.get('preferred_username', data.get('email')),
-            name=data.get('name'),
-            first_name=data.get('given_name'),
-            last_name=data.get('family_name'),
-            picture=data.get('picture'),
-            locale=data.get('locale'),
-            email_verified=data.get('email_verified', False),
+            provider_user_id=str(data.get("sub", "")),
+            email=data.get("email"),
+            username=data.get("preferred_username", data.get("email")),
+            name=data.get("name"),
+            first_name=data.get("given_name"),
+            last_name=data.get("family_name"),
+            picture=data.get("picture"),
+            locale=data.get("locale"),
+            email_verified=data.get("email_verified", False),
             raw_data=data,
         )
 
@@ -407,28 +400,28 @@ class Auth0Provider(OIDCProvider):
         """Parse Auth0 user info."""
         return SSOUser(
             provider=self.name,
-            provider_user_id=str(data.get('sub', '')),
-            email=data.get('email'),
-            username=data.get('nickname', data.get('preferred_username')),
-            name=data.get('name'),
-            first_name=data.get('given_name'),
-            last_name=data.get('family_name'),
-            picture=data.get('picture'),
-            locale=data.get('locale'),
-            email_verified=data.get('email_verified', False),
+            provider_user_id=str(data.get("sub", "")),
+            email=data.get("email"),
+            username=data.get("nickname", data.get("preferred_username")),
+            name=data.get("name"),
+            first_name=data.get("given_name"),
+            last_name=data.get("family_name"),
+            picture=data.get("picture"),
+            locale=data.get("locale"),
+            email_verified=data.get("email_verified", False),
             raw_data=data,
         )
 
 
 # Provider class mapping
 PROVIDER_CLASSES = {
-    'oauth2': OAuth2Provider,
-    'oidc': OIDCProvider,
-    'google': GoogleProvider,
-    'microsoft': MicrosoftProvider,
-    'github': OAuth2Provider,  # GitHub uses OAuth2, not OIDC
-    'okta': OktaProvider,
-    'auth0': Auth0Provider,
+    "oauth2": OAuth2Provider,
+    "oidc": OIDCProvider,
+    "google": GoogleProvider,
+    "microsoft": MicrosoftProvider,
+    "github": OAuth2Provider,  # GitHub uses OAuth2, not OIDC
+    "okta": OktaProvider,
+    "auth0": Auth0Provider,
 }
 
 

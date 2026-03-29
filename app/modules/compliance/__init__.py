@@ -14,8 +14,8 @@ from app.modules.compliance.report import ComplianceReport, ReportGenerator
 from app.modules.compliance.retention import DataRetentionManager
 
 __all__ = [
-    'ComplianceReport',
-    'ReportGenerator',
-    'AuditAnalyzer',
-    'DataRetentionManager',
+    "ComplianceReport",
+    "ReportGenerator",
+    "AuditAnalyzer",
+    "DataRetentionManager",
 ]

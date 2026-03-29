@@ -94,12 +94,12 @@ class WorkspaceService:
         name: str,
         content: str,
         user_id: Optional[int] = None,
-        username: str = '',
-        description: str = '',
-        category: str = 'general',
+        username: str = "",
+        description: str = "",
+        category: str = "general",
         variables: Optional[List[Dict[str, str]]] = None,
         tags: Optional[List[str]] = None,
-        is_public: bool = False
+        is_public: bool = False,
     ) -> PromptTemplate:
         """
         Create a new prompt template.
@@ -127,7 +127,7 @@ class WorkspaceService:
             tags=tags or [],
             author_id=user_id,
             author_name=username,
-            is_public=is_public
+            is_public=is_public,
         )
 
         template_id = self.prompts.create_template(template)
@@ -136,11 +136,7 @@ class WorkspaceService:
         logger.info(f"Created prompt template: {name} (ID: {template_id})")
         return template
 
-    def render_prompt(
-        self,
-        template_id: int,
-        variables: Dict[str, str]
-    ) -> str:
+    def render_prompt(self, template_id: int, variables: Dict[str, str]) -> str:
         """
         Render a prompt template with variables.
 
@@ -174,9 +170,9 @@ class WorkspaceService:
         tool_name: str,
         user_id: Optional[int] = None,
         session_type: str = SessionType.CHAT.value,
-        title: str = '',
+        title: str = "",
         model: Optional[str] = None,
-        context: Optional[Dict[str, Any]] = None
+        context: Optional[Dict[str, Any]] = None,
     ) -> AgentSession:
         """
         Start a new agent session.
@@ -198,20 +194,22 @@ class WorkspaceService:
             session_type=session_type,
             title=title,
             model=model,
-            context=context
+            context=context,
         )
 
         # Emit session start event
-        self.sync.emit_event(SyncEvent(
-            event_id=str(__import__('uuid').uuid4()),
-            event_type=SyncEventType.SESSION_START.value,
-            timestamp=__import__('datetime').datetime.utcnow(),
-            source='workspace',
-            session_id=session.session_id,
-            user_id=user_id,
-            tool_name=tool_name,
-            data={'title': title, 'model': model}
-        ))
+        self.sync.emit_event(
+            SyncEvent(
+                event_id=str(__import__("uuid").uuid4()),
+                event_type=SyncEventType.SESSION_START.value,
+                timestamp=__import__("datetime").datetime.utcnow(),
+                source="workspace",
+                session_id=session.session_id,
+                user_id=user_id,
+                tool_name=tool_name,
+                data={"title": title, "model": model},
+            )
+        )
 
         logger.info(f"Started session: {session.session_id} for tool: {tool_name}")
         return session
@@ -222,7 +220,7 @@ class WorkspaceService:
         role: str,
         content: str,
         tokens_used: int = 0,
-        model: Optional[str] = None
+        model: Optional[str] = None,
     ) -> int:
         """
         Add a message to a session.
@@ -238,23 +236,23 @@ class WorkspaceService:
             int: Message ID.
         """
         message_id = self.sessions.add_message(
-            session_id=session_id,
-            role=role,
-            content=content,
-            tokens_used=tokens_used,
-            model=model
+            session_id=session_id, role=role, content=content, tokens_used=tokens_used, model=model
         )
 
         # Emit message event
-        event_type = SyncEventType.MESSAGE_SENT if role == 'user' else SyncEventType.MESSAGE_RECEIVED
-        self.sync.emit_event(SyncEvent(
-            event_id=str(__import__('uuid').uuid4()),
-            event_type=event_type.value,
-            timestamp=__import__('datetime').datetime.utcnow(),
-            source='workspace',
-            session_id=session_id,
-            data={'role': role, 'tokens_used': tokens_used}
-        ))
+        event_type = (
+            SyncEventType.MESSAGE_SENT if role == "user" else SyncEventType.MESSAGE_RECEIVED
+        )
+        self.sync.emit_event(
+            SyncEvent(
+                event_id=str(__import__("uuid").uuid4()),
+                event_type=event_type.value,
+                timestamp=__import__("datetime").datetime.utcnow(),
+                source="workspace",
+                session_id=session_id,
+                data={"role": role, "tokens_used": tokens_used},
+            )
+        )
 
         return message_id
 
@@ -272,13 +270,15 @@ class WorkspaceService:
 
         if success:
             # Emit session end event
-            self.sync.emit_event(SyncEvent(
-                event_id=str(__import__('uuid').uuid4()),
-                event_type=SyncEventType.SESSION_END.value,
-                timestamp=__import__('datetime').datetime.utcnow(),
-                source='workspace',
-                session_id=session_id
-            ))
+            self.sync.emit_event(
+                SyncEvent(
+                    event_id=str(__import__("uuid").uuid4()),
+                    event_type=SyncEventType.SESSION_END.value,
+                    timestamp=__import__("datetime").datetime.utcnow(),
+                    source="workspace",
+                    session_id=session_id,
+                )
+            )
 
             logger.info(f"Ended session: {session_id}")
 
@@ -330,7 +330,7 @@ class WorkspaceService:
         message: str,
         session_id: Optional[str] = None,
         model: Optional[str] = None,
-        **kwargs
+        **kwargs,
     ) -> Dict[str, Any]:
         """
         Send a message to an AI tool.
@@ -346,34 +346,27 @@ class WorkspaceService:
             Dict with response data.
         """
         result = await self.tools.send_message(
-            tool_name=tool_name,
-            message=message,
-            session_id=session_id,
-            model=model,
-            **kwargs
+            tool_name=tool_name, message=message, session_id=session_id, model=model, **kwargs
         )
 
         # Emit tool call event
-        self.sync.emit_event(SyncEvent(
-            event_id=str(__import__('uuid').uuid4()),
-            event_type=SyncEventType.TOOL_CALL.value,
-            timestamp=__import__('datetime').datetime.utcnow(),
-            source='workspace',
-            session_id=session_id,
-            tool_name=tool_name,
-            data={'model': model, 'success': result.get('success', False)}
-        ))
+        self.sync.emit_event(
+            SyncEvent(
+                event_id=str(__import__("uuid").uuid4()),
+                event_type=SyncEventType.TOOL_CALL.value,
+                timestamp=__import__("datetime").datetime.utcnow(),
+                source="workspace",
+                session_id=session_id,
+                tool_name=tool_name,
+                data={"model": model, "success": result.get("success", False)},
+            )
+        )
 
         return result
 
     # ==================== Collaboration Operations ====================
 
-    def create_team(
-        self,
-        name: str,
-        owner_id: int,
-        description: str = ''
-    ) -> Team:
+    def create_team(self, name: str, owner_id: int, description: str = "") -> Team:
         """
         Create a new team.
 
@@ -385,21 +378,17 @@ class WorkspaceService:
         Returns:
             Team: The created team.
         """
-        return self.collaboration.create_team(
-            name=name,
-            owner_id=owner_id,
-            description=description
-        )
+        return self.collaboration.create_team(name=name, owner_id=owner_id, description=description)
 
     def share_session(
         self,
         session_id: str,
         shared_by: int,
         shared_by_name: str,
-        permission: str = 'view',
-        share_type: str = 'user',
+        permission: str = "view",
+        share_type: str = "user",
         target_id: Optional[int] = None,
-        target_name: str = ''
+        target_name: str = "",
     ) -> SharedSession:
         """
         Share a session with a user or team.
@@ -423,7 +412,7 @@ class WorkspaceService:
             permission=permission,
             share_type=share_type,
             target_id=target_id,
-            target_name=target_name
+            target_name=target_name,
         )
 
     def add_annotation(
@@ -433,7 +422,7 @@ class WorkspaceService:
         username: str,
         content: str,
         message_id: Optional[str] = None,
-        annotation_type: str = 'comment'
+        annotation_type: str = "comment",
     ) -> Annotation:
         """
         Add an annotation to a session.
@@ -455,7 +444,7 @@ class WorkspaceService:
             username=username,
             content=content,
             message_id=message_id,
-            annotation_type=annotation_type
+            annotation_type=annotation_type,
         )
 
     def create_knowledge_entry(
@@ -465,9 +454,9 @@ class WorkspaceService:
         author_id: int,
         author_name: str,
         team_id: Optional[str] = None,
-        category: str = 'general',
+        category: str = "general",
         tags: Optional[List[str]] = None,
-        is_published: bool = False
+        is_published: bool = False,
     ) -> KnowledgeEntry:
         """
         Create a knowledge base entry.
@@ -493,7 +482,7 @@ class WorkspaceService:
             team_id=team_id,
             category=category,
             tags=tags,
-            is_published=is_published
+            is_published=is_published,
         )
 
     # ==================== Statistics ====================
@@ -512,11 +501,7 @@ class WorkspaceService:
         tool_stats = self.tools.get_tool_stats()
         sync_stats = self.sync.get_stats()
 
-        return {
-            'sessions': session_stats,
-            'tools': tool_stats,
-            'sync': sync_stats
-        }
+        return {"sessions": session_stats, "tools": tool_stats, "sync": sync_stats}
 
 
 # Global workspace service instance

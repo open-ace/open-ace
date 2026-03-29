@@ -14,66 +14,67 @@ logger = logging.getLogger(__name__)
 
 
 # Recommended indexes for performance
+# Optimized indexes (migration 014): removed redundant single-column indexes
 RECOMMENDED_INDEXES = {
-    'daily_usage': [
-        ('idx_usage_date', ['date']),
-        ('idx_usage_tool', ['tool_name']),
-        ('idx_usage_host', ['host_name']),
-        ('idx_usage_date_tool', ['date', 'tool_name']),
-        ('idx_usage_date_tool_host', ['date', 'tool_name', 'host_name']),
+    "daily_usage": [
+        ("idx_usage_date", ["date"]),
+        ("idx_usage_tool", ["tool_name"]),
+        ("idx_usage_host", ["host_name"]),
+        ("idx_usage_date_tool", ["date", "tool_name"]),
+        ("idx_usage_date_tool_host", ["date", "tool_name", "host_name"]),
     ],
-    'daily_messages': [
-        ('idx_messages_date', ['date']),
-        ('idx_messages_sender_name', ['sender_name']),
-        ('idx_messages_sender_id', ['sender_id']),
-        ('idx_messages_tool', ['tool_name']),
-        ('idx_messages_feishu_conv', ['feishu_conversation_id']),
-        ('idx_messages_conv_id', ['conversation_id']),
-        ('idx_messages_date_sender', ['date', 'sender_name']),
-        ('idx_messages_date_conv', ['date', 'feishu_conversation_id']),
-        ('idx_messages_query_optimized', ['date', 'tool_name', 'host_name']),
+    "daily_messages": [
+        # Essential composite indexes for common queries
+        ("idx_messages_date_tool_host", ["date", "tool_name", "host_name"]),
+        ("idx_messages_date_role_timestamp", ["date", "role", "timestamp"]),
+        # Single-column indexes for specific queries
+        ("idx_messages_sender_id", ["sender_id"]),
+        ("idx_messages_timestamp", ["timestamp"]),
+        # New composite indexes for better coverage
+        ("idx_messages_conversation", ["date", "conversation_id", "agent_session_id"]),
+        ("idx_messages_date_sender_id", ["date", "sender_id"]),
     ],
-    'users': [
-        ('idx_users_username', ['username']),
-        ('idx_users_email', ['email']),
-        ('idx_users_role', ['role']),
-        ('idx_users_active', ['is_active']),
+    "users": [
+        ("idx_users_username", ["username"]),
+        ("idx_users_email", ["email"]),
+        ("idx_users_role", ["role"]),
+        ("idx_users_active", ["is_active"]),
     ],
-    'sessions': [
-        ('idx_sessions_token', ['token']),
-        ('idx_sessions_user', ['user_id']),
-        ('idx_sessions_expires', ['expires_at']),
-        ('idx_sessions_active', ['is_active', 'expires_at']),
+    "sessions": [
+        ("idx_sessions_token", ["token"]),
+        ("idx_sessions_user", ["user_id"]),
+        ("idx_sessions_expires", ["expires_at"]),
+        ("idx_sessions_active", ["is_active", "expires_at"]),
     ],
-    'audit_logs': [
-        ('idx_audit_timestamp', ['timestamp']),
-        ('idx_audit_user_id', ['user_id']),
-        ('idx_audit_action', ['action']),
-        ('idx_audit_resource', ['resource_type', 'resource_id']),
-        ('idx_audit_severity', ['severity']),
+    "audit_logs": [
+        ("idx_audit_timestamp", ["timestamp"]),
+        ("idx_audit_user_id", ["user_id"]),
+        ("idx_audit_action", ["action"]),
+        ("idx_audit_resource", ["resource_type", "resource_id"]),
+        ("idx_audit_severity", ["severity"]),
     ],
-    'quota_usage': [
-        ('idx_quota_user', ['user_id']),
-        ('idx_quota_date', ['date']),
-        ('idx_quota_user_date', ['user_id', 'date']),
+    "quota_usage": [
+        ("idx_quota_user", ["user_id"]),
+        ("idx_quota_date", ["date"]),
+        ("idx_quota_user_date", ["user_id", "date"]),
     ],
-    'quota_alerts': [
-        ('idx_quota_alerts_user', ['user_id']),
-        ('idx_quota_alerts_created', ['created_at']),
-        ('idx_quota_alerts_unack', ['acknowledged', 'created_at']),
+    "quota_alerts": [
+        ("idx_quota_alerts_user", ["user_id"]),
+        ("idx_quota_alerts_created", ["created_at"]),
+        ("idx_quota_alerts_unack", ["acknowledged", "created_at"]),
     ],
-    'tenants': [
-        ('idx_tenants_slug', ['slug']),
-        ('idx_tenants_status', ['status']),
+    "tenants": [
+        ("idx_tenants_slug", ["slug"]),
+        ("idx_tenants_status", ["status"]),
     ],
-    'tenant_usage': [
-        ('idx_tenant_usage_tenant', ['tenant_id']),
-        ('idx_tenant_usage_date', ['date']),
-        ('idx_tenant_usage_tenant_date', ['tenant_id', 'date']),
+    "tenant_usage": [
+        ("idx_tenant_usage_tenant", ["tenant_id"]),
+        ("idx_tenant_usage_date", ["date"]),
+        ("idx_tenant_usage_tenant_date", ["tenant_id", "date"]),
     ],
-    'content_filter_rules': [
-        ('idx_filter_rules_type', ['type']),
-        ('idx_filter_rules_enabled', ['is_enabled']),
+    "content_filter_rules": [
+        ("idx_filter_rules_type", ["type"]),
+        ("idx_filter_rules_enabled", ["is_enabled"]),
     ],
 }
 
@@ -108,9 +109,9 @@ class DatabaseOptimizer:
             Dict with results.
         """
         results = {
-            'created': [],
-            'skipped': [],
-            'errors': [],
+            "created": [],
+            "skipped": [],
+            "errors": [],
         }
 
         tables_to_index = tables or list(RECOMMENDED_INDEXES.keys())
@@ -120,28 +121,34 @@ class DatabaseOptimizer:
 
             for table in tables_to_index:
                 if table not in RECOMMENDED_INDEXES:
-                    results['skipped'].append({
-                        'table': table,
-                        'reason': 'No recommended indexes',
-                    })
+                    results["skipped"].append(
+                        {
+                            "table": table,
+                            "reason": "No recommended indexes",
+                        }
+                    )
                     continue
 
                 for index_name, columns in RECOMMENDED_INDEXES[table]:
                     try:
-                        columns_str = ', '.join(columns)
-                        sql = f'CREATE INDEX IF NOT EXISTS {index_name} ON {table} ({columns_str})'
+                        columns_str = ", ".join(columns)
+                        sql = f"CREATE INDEX IF NOT EXISTS {index_name} ON {table} ({columns_str})"
                         cursor.execute(sql)
-                        results['created'].append({
-                            'table': table,
-                            'index': index_name,
-                            'columns': columns,
-                        })
+                        results["created"].append(
+                            {
+                                "table": table,
+                                "index": index_name,
+                                "columns": columns,
+                            }
+                        )
                     except Exception as e:
-                        results['errors'].append({
-                            'table': table,
-                            'index': index_name,
-                            'error': str(e),
-                        })
+                        results["errors"].append(
+                            {
+                                "table": table,
+                                "index": index_name,
+                                "error": str(e),
+                            }
+                        )
 
             conn.commit()
 
@@ -159,8 +166,8 @@ class DatabaseOptimizer:
             Dict with results.
         """
         results = {
-            'dropped': [],
-            'errors': [],
+            "dropped": [],
+            "errors": [],
         }
 
         tables_to_process = tables or list(RECOMMENDED_INDEXES.keys())
@@ -174,13 +181,15 @@ class DatabaseOptimizer:
 
                 for index_name, _ in RECOMMENDED_INDEXES[table]:
                     try:
-                        cursor.execute(f'DROP INDEX IF EXISTS {index_name}')
-                        results['dropped'].append(index_name)
+                        cursor.execute(f"DROP INDEX IF EXISTS {index_name}")
+                        results["dropped"].append(index_name)
                     except Exception as e:
-                        results['errors'].append({
-                            'index': index_name,
-                            'error': str(e),
-                        })
+                        results["errors"].append(
+                            {
+                                "index": index_name,
+                                "error": str(e),
+                            }
+                        )
 
             conn.commit()
 
@@ -197,10 +206,10 @@ class DatabaseOptimizer:
             Dict with analysis results.
         """
         analysis = {
-            'table': table_name,
-            'row_count': 0,
-            'indexes': [],
-            'recommendations': [],
+            "table": table_name,
+            "row_count": 0,
+            "indexes": [],
+            "recommendations": [],
         }
 
         with self.db.connection() as conn:
@@ -208,11 +217,11 @@ class DatabaseOptimizer:
 
             # Get row count
             try:
-                cursor.execute(f'SELECT COUNT(*) as count FROM {table_name}')
+                cursor.execute(f"SELECT COUNT(*) as count FROM {table_name}")
                 result = cursor.fetchone()
-                analysis['row_count'] = result[0] if result else 0
+                analysis["row_count"] = result[0] if result else 0
             except Exception:
-                analysis['row_count'] = 'error'
+                analysis["row_count"] = "error"
 
             # Get existing indexes
             try:
@@ -223,25 +232,29 @@ class DatabaseOptimizer:
                     idx_name = idx[1]
                     cursor.execute(f"PRAGMA index_info({idx_name})")
                     columns = [col[2] for col in cursor.fetchall()]
-                    analysis['indexes'].append({
-                        'name': idx_name,
-                        'columns': columns,
-                        'unique': bool(idx[2]),
-                    })
+                    analysis["indexes"].append(
+                        {
+                            "name": idx_name,
+                            "columns": columns,
+                            "unique": bool(idx[2]),
+                        }
+                    )
             except Exception:
                 pass
 
         # Generate recommendations
         if table_name in RECOMMENDED_INDEXES:
-            existing_names = {idx['name'] for idx in analysis['indexes']}
+            existing_names = {idx["name"] for idx in analysis["indexes"]}
             for idx_name, columns in RECOMMENDED_INDEXES[table_name]:
                 if idx_name not in existing_names:
-                    analysis['recommendations'].append({
-                        'type': 'create_index',
-                        'index': idx_name,
-                        'columns': columns,
-                        'reason': 'Recommended index for common queries',
-                    })
+                    analysis["recommendations"].append(
+                        {
+                            "type": "create_index",
+                            "index": idx_name,
+                            "columns": columns,
+                            "reason": "Recommended index for common queries",
+                        }
+                    )
 
         return analysis
 
@@ -263,22 +276,22 @@ class DatabaseOptimizer:
 
             for table in tables:
                 table_stat = {
-                    'name': table,
-                    'row_count': 0,
-                    'size_estimate': 0,
+                    "name": table,
+                    "row_count": 0,
+                    "size_estimate": 0,
                 }
 
                 try:
                     # Get row count
-                    cursor.execute(f'SELECT COUNT(*) FROM {table}')
-                    table_stat['row_count'] = cursor.fetchone()[0]
+                    cursor.execute(f"SELECT COUNT(*) FROM {table}")
+                    table_stat["row_count"] = cursor.fetchone()[0]
 
                     # Estimate size (rough)
                     cursor.execute("PRAGMA page_count")
                     page_count = cursor.fetchone()[0]
                     cursor.execute("PRAGMA page_size")
                     page_size = cursor.fetchone()[0]
-                    table_stat['size_estimate'] = page_count * page_size
+                    table_stat["size_estimate"] = page_count * page_size
 
                 except Exception:
                     pass
@@ -297,7 +310,7 @@ class DatabaseOptimizer:
         try:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute('VACUUM')
+                cursor.execute("VACUUM")
                 conn.commit()
 
             logger.info("Database VACUUM completed")
@@ -317,7 +330,7 @@ class DatabaseOptimizer:
         try:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute('ANALYZE')
+                cursor.execute("ANALYZE")
                 conn.commit()
 
             logger.info("Database ANALYZE completed")
@@ -335,10 +348,10 @@ class DatabaseOptimizer:
             Dict with optimization results.
         """
         results = {
-            'indexes': self.create_indexes(),
-            'analyze': self.analyze(),
-            'vacuum': self.vacuum(),
-            'stats': self.get_table_stats(),
+            "indexes": self.create_indexes(),
+            "analyze": self.analyze(),
+            "vacuum": self.vacuum(),
+            "stats": self.get_table_stats(),
         }
 
         return results
@@ -356,10 +369,10 @@ class DatabaseOptimizer:
         """
         with self.db.connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(f'EXPLAIN QUERY PLAN {query}', params)
+            cursor.execute(f"EXPLAIN QUERY PLAN {query}", params)
             rows = cursor.fetchall()
 
-        return [dict(row) if hasattr(row, 'keys') else {'detail': row[0]} for row in rows]
+        return [dict(row) if hasattr(row, "keys") else {"detail": row[0]} for row in rows]
 
 
 def optimize_database() -> Dict[str, Any]:

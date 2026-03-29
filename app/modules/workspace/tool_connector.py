@@ -18,30 +18,33 @@ logger = logging.getLogger(__name__)
 
 class ToolStatus(Enum):
     """Tool status enumeration."""
-    ONLINE = 'online'
-    OFFLINE = 'offline'
-    MAINTENANCE = 'maintenance'
-    UNKNOWN = 'unknown'
+
+    ONLINE = "online"
+    OFFLINE = "offline"
+    MAINTENANCE = "maintenance"
+    UNKNOWN = "unknown"
 
 
 class ToolType(Enum):
     """Tool type enumeration."""
-    CHAT = 'chat'
-    AGENT = 'agent'
-    WORKFLOW = 'workflow'
-    EMBEDDING = 'embedding'
-    IMAGE = 'image'
+
+    CHAT = "chat"
+    AGENT = "agent"
+    WORKFLOW = "workflow"
+    EMBEDDING = "embedding"
+    IMAGE = "image"
 
 
 @dataclass
 class ToolInfo:
     """Information about an AI tool."""
+
     name: str
     display_name: str
     tool_type: str = ToolType.CHAT.value
-    description: str = ''
-    version: str = ''
-    endpoint: str = ''
+    description: str = ""
+    version: str = ""
+    endpoint: str = ""
     status: str = ToolStatus.UNKNOWN.value
     capabilities: List[str] = field(default_factory=list)
     models: List[str] = field(default_factory=list)
@@ -57,46 +60,48 @@ class ToolInfo:
     def to_dict(self) -> dict:
         """Convert to dictionary."""
         return {
-            'name': self.name,
-            'display_name': self.display_name,
-            'tool_type': self.tool_type,
-            'description': self.description,
-            'version': self.version,
-            'endpoint': self.endpoint,
-            'status': self.status,
-            'capabilities': self.capabilities,
-            'models': self.models,
-            'default_model': self.default_model,
-            'max_tokens': self.max_tokens,
-            'supports_streaming': self.supports_streaming,
-            'supports_vision': self.supports_vision,
-            'supports_tools': self.supports_tools,
-            'config': self.config,
-            'last_check': self.last_check.isoformat() if self.last_check else None,
-            'metadata': self.metadata,
+            "name": self.name,
+            "display_name": self.display_name,
+            "tool_type": self.tool_type,
+            "description": self.description,
+            "version": self.version,
+            "endpoint": self.endpoint,
+            "status": self.status,
+            "capabilities": self.capabilities,
+            "models": self.models,
+            "default_model": self.default_model,
+            "max_tokens": self.max_tokens,
+            "supports_streaming": self.supports_streaming,
+            "supports_vision": self.supports_vision,
+            "supports_tools": self.supports_tools,
+            "config": self.config,
+            "last_check": self.last_check.isoformat() if self.last_check else None,
+            "metadata": self.metadata,
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> 'ToolInfo':
+    def from_dict(cls, data: dict) -> "ToolInfo":
         """Create from dictionary."""
         return cls(
-            name=data.get('name', ''),
-            display_name=data.get('display_name', ''),
-            tool_type=data.get('tool_type', ToolType.CHAT.value),
-            description=data.get('description', ''),
-            version=data.get('version', ''),
-            endpoint=data.get('endpoint', ''),
-            status=data.get('status', ToolStatus.UNKNOWN.value),
-            capabilities=data.get('capabilities', []),
-            models=data.get('models', []),
-            default_model=data.get('default_model'),
-            max_tokens=data.get('max_tokens', 4096),
-            supports_streaming=data.get('supports_streaming', False),
-            supports_vision=data.get('supports_vision', False),
-            supports_tools=data.get('supports_tools', False),
-            config=data.get('config', {}),
-            last_check=datetime.fromisoformat(data['last_check']) if data.get('last_check') else None,
-            metadata=data.get('metadata', {}),
+            name=data.get("name", ""),
+            display_name=data.get("display_name", ""),
+            tool_type=data.get("tool_type", ToolType.CHAT.value),
+            description=data.get("description", ""),
+            version=data.get("version", ""),
+            endpoint=data.get("endpoint", ""),
+            status=data.get("status", ToolStatus.UNKNOWN.value),
+            capabilities=data.get("capabilities", []),
+            models=data.get("models", []),
+            default_model=data.get("default_model"),
+            max_tokens=data.get("max_tokens", 4096),
+            supports_streaming=data.get("supports_streaming", False),
+            supports_vision=data.get("supports_vision", False),
+            supports_tools=data.get("supports_tools", False),
+            config=data.get("config", {}),
+            last_check=(
+                datetime.fromisoformat(data["last_check"]) if data.get("last_check") else None
+            ),
+            metadata=data.get("metadata", {}),
         )
 
 
@@ -105,11 +110,7 @@ class ToolAdapter(ABC):
 
     @abstractmethod
     async def send_message(
-        self,
-        message: str,
-        session_id: Optional[str] = None,
-        model: Optional[str] = None,
-        **kwargs
+        self, message: str, session_id: Optional[str] = None, model: Optional[str] = None, **kwargs
     ) -> Dict[str, Any]:
         """
         Send a message to the tool.
@@ -153,18 +154,14 @@ class MockToolAdapter(ToolAdapter):
         self.tool_info = tool_info
 
     async def send_message(
-        self,
-        message: str,
-        session_id: Optional[str] = None,
-        model: Optional[str] = None,
-        **kwargs
+        self, message: str, session_id: Optional[str] = None, model: Optional[str] = None, **kwargs
     ) -> Dict[str, Any]:
         """Send a mock message."""
         return {
-            'success': True,
-            'response': f"Mock response from {self.tool_info.name}: {message[:50]}...",
-            'tokens_used': len(message.split()),
-            'model': model or self.tool_info.default_model,
+            "success": True,
+            "response": f"Mock response from {self.tool_info.name}: {message[:50]}...",
+            "tokens_used": len(message.split()),
+            "model": model or self.tool_info.default_model,
         }
 
     async def check_health(self) -> bool:
@@ -198,55 +195,55 @@ class ToolConnector:
         """Register default AI tools."""
         default_tools = [
             ToolInfo(
-                name='claude',
-                display_name='Claude (Anthropic)',
+                name="claude",
+                display_name="Claude (Anthropic)",
                 tool_type=ToolType.CHAT.value,
-                description='Anthropic\'s Claude AI assistant',
-                models=['claude-3-opus', 'claude-3-sonnet', 'claude-3-haiku'],
-                default_model='claude-3-sonnet',
+                description="Anthropic's Claude AI assistant",
+                models=["claude-3-opus", "claude-3-sonnet", "claude-3-haiku"],
+                default_model="claude-3-sonnet",
                 max_tokens=200000,
                 supports_streaming=True,
                 supports_vision=True,
                 supports_tools=True,
-                capabilities=['chat', 'analysis', 'coding', 'writing'],
+                capabilities=["chat", "analysis", "coding", "writing"],
             ),
             ToolInfo(
-                name='qwen',
-                display_name='Qwen (Alibaba)',
+                name="qwen",
+                display_name="Qwen (Alibaba)",
                 tool_type=ToolType.CHAT.value,
-                description='Alibaba\'s Qwen AI assistant',
-                models=['qwen-turbo', 'qwen-plus', 'qwen-max'],
-                default_model='qwen-plus',
+                description="Alibaba's Qwen AI assistant",
+                models=["qwen-turbo", "qwen-plus", "qwen-max"],
+                default_model="qwen-plus",
                 max_tokens=32000,
                 supports_streaming=True,
                 supports_vision=True,
                 supports_tools=True,
-                capabilities=['chat', 'analysis', 'coding', 'writing'],
+                capabilities=["chat", "analysis", "coding", "writing"],
             ),
             ToolInfo(
-                name='openclaw',
-                display_name='OpenClaw',
+                name="openclaw",
+                display_name="OpenClaw",
                 tool_type=ToolType.AGENT.value,
-                description='OpenClaw agent platform',
-                models=['default'],
-                default_model='default',
+                description="OpenClaw agent platform",
+                models=["default"],
+                default_model="default",
                 max_tokens=128000,
                 supports_streaming=True,
                 supports_tools=True,
-                capabilities=['chat', 'agent', 'workflow', 'tools'],
+                capabilities=["chat", "agent", "workflow", "tools"],
             ),
             ToolInfo(
-                name='openai',
-                display_name='OpenAI GPT',
+                name="openai",
+                display_name="OpenAI GPT",
                 tool_type=ToolType.CHAT.value,
-                description='OpenAI\'s GPT models',
-                models=['gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo'],
-                default_model='gpt-4-turbo',
+                description="OpenAI's GPT models",
+                models=["gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"],
+                default_model="gpt-4-turbo",
                 max_tokens=128000,
                 supports_streaming=True,
                 supports_vision=True,
                 supports_tools=True,
-                capabilities=['chat', 'analysis', 'coding', 'writing'],
+                capabilities=["chat", "analysis", "coding", "writing"],
             ),
         ]
 
@@ -255,11 +252,7 @@ class ToolConnector:
 
         logger.info(f"Registered {len(default_tools)} default tools")
 
-    def register_tool(
-        self,
-        tool_info: ToolInfo,
-        adapter: Optional[ToolAdapter] = None
-    ) -> None:
+    def register_tool(self, tool_info: ToolInfo, adapter: Optional[ToolAdapter] = None) -> None:
         """
         Register a new tool.
 
@@ -305,9 +298,7 @@ class ToolConnector:
         return self._tools.get(tool_name)
 
     def list_tools(
-        self,
-        tool_type: Optional[str] = None,
-        status: Optional[str] = None
+        self, tool_type: Optional[str] = None, status: Optional[str] = None
     ) -> List[ToolInfo]:
         """
         List all registered tools.
@@ -357,7 +348,7 @@ class ToolConnector:
         message: str,
         session_id: Optional[str] = None,
         model: Optional[str] = None,
-        **kwargs
+        **kwargs,
     ) -> Dict[str, Any]:
         """
         Send a message to a tool.
@@ -383,56 +374,50 @@ class ToolConnector:
         # Check if tool is available
         if tool.status == ToolStatus.OFFLINE.value:
             return {
-                'success': False,
-                'error': f"Tool {tool_name} is offline",
+                "success": False,
+                "error": f"Tool {tool_name} is offline",
             }
 
         if tool.status == ToolStatus.MAINTENANCE.value:
             return {
-                'success': False,
-                'error': f"Tool {tool_name} is under maintenance",
+                "success": False,
+                "error": f"Tool {tool_name} is under maintenance",
             }
 
         # Use custom handler if set
         if tool_name in self._handlers:
             try:
                 result = self._handlers[tool_name](
-                    message=message,
-                    session_id=session_id,
-                    model=model,
-                    **kwargs
+                    message=message, session_id=session_id, model=model, **kwargs
                 )
                 return result
             except Exception as e:
                 logger.error(f"Handler error for {tool_name}: {e}")
                 return {
-                    'success': False,
-                    'error': str(e),
+                    "success": False,
+                    "error": str(e),
                 }
 
         # Use adapter if set
         if tool_name in self._adapters:
             try:
                 result = await self._adapters[tool_name].send_message(
-                    message=message,
-                    session_id=session_id,
-                    model=model,
-                    **kwargs
+                    message=message, session_id=session_id, model=model, **kwargs
                 )
                 return result
             except Exception as e:
                 logger.error(f"Adapter error for {tool_name}: {e}")
                 return {
-                    'success': False,
-                    'error': str(e),
+                    "success": False,
+                    "error": str(e),
                 }
 
         # No handler or adapter - return mock response
         return {
-            'success': True,
-            'response': f"Message sent to {tool_name} (no adapter configured)",
-            'message': message[:100],
-            'model': model or tool.default_model,
+            "success": True,
+            "response": f"Message sent to {tool_name} (no adapter configured)",
+            "message": message[:100],
+            "model": model or tool.default_model,
         }
 
     async def check_tool_health(self, tool_name: str) -> bool:
@@ -451,7 +436,9 @@ class ToolConnector:
         if tool_name in self._adapters:
             try:
                 is_healthy = await self._adapters[tool_name].check_health()
-                self._tools[tool_name].status = ToolStatus.ONLINE.value if is_healthy else ToolStatus.OFFLINE.value
+                self._tools[tool_name].status = (
+                    ToolStatus.ONLINE.value if is_healthy else ToolStatus.OFFLINE.value
+                )
                 self._tools[tool_name].last_check = datetime.utcnow()
                 return is_healthy
             except Exception as e:
@@ -494,12 +481,14 @@ class ToolConnector:
         for tool in tools:
             if tool:
                 for model in tool.models:
-                    models.append({
-                        'tool': tool.name,
-                        'model': model,
-                        'is_default': model == tool.default_model,
-                        'max_tokens': tool.max_tokens,
-                    })
+                    models.append(
+                        {
+                            "tool": tool.name,
+                            "model": model,
+                            "is_default": model == tool.default_model,
+                            "max_tokens": tool.max_tokens,
+                        }
+                    )
 
         return models
 
@@ -526,10 +515,7 @@ class ToolConnector:
         Returns:
             List of matching ToolInfo objects.
         """
-        return [
-            tool for tool in self._tools.values()
-            if capability in tool.capabilities
-        ]
+        return [tool for tool in self._tools.values() if capability in tool.capabilities]
 
     def update_tool_status(self, tool_name: str, status: str) -> bool:
         """
@@ -560,20 +546,22 @@ class ToolConnector:
         total = len(self._tools)
         online = sum(1 for t in self._tools.values() if t.status == ToolStatus.ONLINE.value)
         offline = sum(1 for t in self._tools.values() if t.status == ToolStatus.OFFLINE.value)
-        maintenance = sum(1 for t in self._tools.values() if t.status == ToolStatus.MAINTENANCE.value)
+        maintenance = sum(
+            1 for t in self._tools.values() if t.status == ToolStatus.MAINTENANCE.value
+        )
 
         by_type: Dict[str, int] = {}
         for tool in self._tools.values():
             by_type[tool.tool_type] = by_type.get(tool.tool_type, 0) + 1
 
         return {
-            'total': total,
-            'online': online,
-            'offline': offline,
-            'maintenance': maintenance,
-            'by_type': by_type,
-            'adapters_configured': len(self._adapters),
-            'handlers_configured': len(self._handlers),
+            "total": total,
+            "online": online,
+            "offline": offline,
+            "maintenance": maintenance,
+            "by_type": by_type,
+            "adapters_configured": len(self._adapters),
+            "handlers_configured": len(self._handlers),
         }
 
 

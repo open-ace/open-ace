@@ -12,10 +12,10 @@ from typing import Optional
 def format_tokens(tokens: int) -> str:
     """
     Format token count with human-readable units (K, M, B).
-    
+
     Args:
         tokens: Token count.
-        
+
     Returns:
         str: Formatted token string.
     """
@@ -32,10 +32,10 @@ def format_tokens(tokens: int) -> str:
 def parse_date(date_str: str) -> Optional[str]:
     """
     Validate and normalize a date string (YYYY-MM-DD).
-    
+
     Args:
         date_str: Date string to validate.
-        
+
     Returns:
         Optional[str]: Validated date string or None.
     """
@@ -51,7 +51,7 @@ def parse_date(date_str: str) -> Optional[str]:
 def get_today() -> str:
     """
     Get today's date in YYYY-MM-DD format.
-    
+
     Returns:
         str: Today's date.
     """
@@ -61,10 +61,10 @@ def get_today() -> str:
 def get_days_ago(days: int) -> str:
     """
     Get the date that was 'days' days ago.
-    
+
     Args:
         days: Number of days ago.
-        
+
     Returns:
         str: Date string.
     """
@@ -75,11 +75,11 @@ def get_days_ago(days: int) -> str:
 def get_date_range(days: int, end_date: Optional[str] = None) -> tuple:
     """
     Get a date range for the past N days.
-    
+
     Args:
         days: Number of days.
         end_date: Optional end date (defaults to today).
-        
+
     Returns:
         tuple: (start_date, end_date)
     """

@@ -22,7 +22,7 @@ class TenantService:
 
     # Default quota limits by plan
     PLAN_QUOTAS = {
-        'free': QuotaConfig(
+        "free": QuotaConfig(
             daily_token_limit=100_000,
             monthly_token_limit=1_000_000,
             daily_request_limit=100,
@@ -30,7 +30,7 @@ class TenantService:
             max_users=5,
             max_sessions_per_user=2,
         ),
-        'standard': QuotaConfig(
+        "standard": QuotaConfig(
             daily_token_limit=1_000_000,
             monthly_token_limit=30_000_000,
             daily_request_limit=1_000,
@@ -38,7 +38,7 @@ class TenantService:
             max_users=50,
             max_sessions_per_user=5,
         ),
-        'premium': QuotaConfig(
+        "premium": QuotaConfig(
             daily_token_limit=10_000_000,
             monthly_token_limit=300_000_000,
             daily_request_limit=10_000,
@@ -46,7 +46,7 @@ class TenantService:
             max_users=200,
             max_sessions_per_user=10,
         ),
-        'enterprise': QuotaConfig(
+        "enterprise": QuotaConfig(
             daily_token_limit=100_000_000,
             monthly_token_limit=3_000_000_000,
             daily_request_limit=100_000,
@@ -59,7 +59,7 @@ class TenantService:
     def __init__(
         self,
         tenant_repo: Optional[TenantRepository] = None,
-        user_repo: Optional[UserRepository] = None
+        user_repo: Optional[UserRepository] = None,
     ):
         """
         Initialize tenant service.
@@ -75,10 +75,10 @@ class TenantService:
         self,
         name: str,
         slug: Optional[str] = None,
-        plan: str = 'standard',
-        contact_email: str = '',
+        plan: str = "standard",
+        contact_email: str = "",
         contact_name: Optional[str] = None,
-        trial_days: Optional[int] = None
+        trial_days: Optional[int] = None,
     ) -> Optional[Tenant]:
         """
         Create a new tenant.
@@ -105,13 +105,13 @@ class TenantService:
             return None
 
         # Get quota for plan
-        quota = self.PLAN_QUOTAS.get(plan, self.PLAN_QUOTAS['standard'])
+        quota = self.PLAN_QUOTAS.get(plan, self.PLAN_QUOTAS["standard"])
 
         # Create tenant
         tenant = Tenant(
             name=name,
             slug=slug,
-            status='trial' if trial_days else 'active',
+            status="trial" if trial_days else "active",
             plan=plan,
             contact_email=contact_email,
             contact_name=contact_name,
@@ -160,7 +160,7 @@ class TenantService:
         status: Optional[str] = None,
         plan: Optional[str] = None,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
     ) -> List[Tenant]:
         """
         List tenants with optional filters.
@@ -176,11 +176,7 @@ class TenantService:
         """
         return self.tenant_repo.get_all(status=status, plan=plan, limit=limit, offset=offset)
 
-    def update_tenant(
-        self,
-        tenant_id: int,
-        updates: Dict[str, Any]
-    ) -> bool:
+    def update_tenant(self, tenant_id: int, updates: Dict[str, Any]) -> bool:
         """
         Update tenant fields.
 
@@ -192,18 +188,14 @@ class TenantService:
             bool: True if successful.
         """
         # Handle quota updates
-        if 'plan' in updates:
-            new_plan = updates['plan']
+        if "plan" in updates:
+            new_plan = updates["plan"]
             if new_plan in self.PLAN_QUOTAS:
-                updates['quota'] = self.PLAN_QUOTAS[new_plan].to_dict()
+                updates["quota"] = self.PLAN_QUOTAS[new_plan].to_dict()
 
         return self.tenant_repo.update(tenant_id, updates)
 
-    def update_quota(
-        self,
-        tenant_id: int,
-        quota_updates: Dict[str, int]
-    ) -> bool:
+    def update_quota(self, tenant_id: int, quota_updates: Dict[str, int]) -> bool:
         """
         Update tenant quota configuration.
 
@@ -221,13 +213,9 @@ class TenantService:
         current_quota = tenant.quota.to_dict()
         current_quota.update(quota_updates)
 
-        return self.tenant_repo.update(tenant_id, {'quota': current_quota})
+        return self.tenant_repo.update(tenant_id, {"quota": current_quota})
 
-    def update_settings(
-        self,
-        tenant_id: int,
-        settings_updates: Dict[str, Any]
-    ) -> bool:
+    def update_settings(self, tenant_id: int, settings_updates: Dict[str, Any]) -> bool:
         """
         Update tenant settings.
 
@@ -245,7 +233,7 @@ class TenantService:
         current_settings = tenant.settings.to_dict()
         current_settings.update(settings_updates)
 
-        return self.tenant_repo.update(tenant_id, {'settings': current_settings})
+        return self.tenant_repo.update(tenant_id, {"settings": current_settings})
 
     def suspend_tenant(self, tenant_id: int, reason: Optional[str] = None) -> bool:
         """
@@ -259,7 +247,7 @@ class TenantService:
             bool: True if successful.
         """
         logger.info(f"Suspending tenant {tenant_id}: {reason or 'No reason provided'}")
-        return self.tenant_repo.update(tenant_id, {'status': 'suspended'})
+        return self.tenant_repo.update(tenant_id, {"status": "suspended"})
 
     def activate_tenant(self, tenant_id: int) -> bool:
         """
@@ -271,7 +259,7 @@ class TenantService:
         Returns:
             bool: True if successful.
         """
-        return self.tenant_repo.update(tenant_id, {'status': 'active'})
+        return self.tenant_repo.update(tenant_id, {"status": "active"})
 
     def delete_tenant(self, tenant_id: int, hard: bool = False) -> bool:
         """
@@ -290,12 +278,7 @@ class TenantService:
         else:
             return self.tenant_repo.delete(tenant_id)
 
-    def record_usage(
-        self,
-        tenant_id: int,
-        tokens: int = 0,
-        requests: int = 1
-    ) -> bool:
+    def record_usage(self, tenant_id: int, tokens: int = 0, requests: int = 1) -> bool:
         """
         Record usage for a tenant.
 
@@ -309,11 +292,7 @@ class TenantService:
         """
         return self.tenant_repo.record_usage(tenant_id, tokens, requests)
 
-    def get_usage_history(
-        self,
-        tenant_id: int,
-        days: int = 30
-    ) -> List[TenantUsage]:
+    def get_usage_history(self, tenant_id: int, days: int = 30) -> List[TenantUsage]:
         """
         Get usage history for a tenant.
 
@@ -324,15 +303,10 @@ class TenantService:
         Returns:
             List[TenantUsage]: Usage records.
         """
-        start_date = (datetime.utcnow() - timedelta(days=days)).strftime('%Y-%m-%d')
+        start_date = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
         return self.tenant_repo.get_usage(tenant_id, start_date=start_date)
 
-    def check_quota(
-        self,
-        tenant_id: int,
-        tokens: int = 0,
-        requests: int = 1
-    ) -> Dict[str, Any]:
+    def check_quota(self, tenant_id: int, tokens: int = 0, requests: int = 1) -> Dict[str, Any]:
         """
         Check if tenant has quota available.
 
@@ -346,13 +320,13 @@ class TenantService:
         """
         tenant = self.get_tenant(tenant_id)
         if not tenant:
-            return {'allowed': False, 'reason': 'Tenant not found', 'tenant': None}
+            return {"allowed": False, "reason": "Tenant not found", "tenant": None}
 
         if not tenant.is_active():
-            return {'allowed': False, 'reason': 'Tenant is not active', 'tenant': tenant.to_dict()}
+            return {"allowed": False, "reason": "Tenant is not active", "tenant": tenant.to_dict()}
 
         # Get today's usage
-        today = datetime.utcnow().strftime('%Y-%m-%d')
+        today = datetime.utcnow().strftime("%Y-%m-%d")
         usage_records = self.tenant_repo.get_usage(tenant_id, start_date=today, end_date=today)
 
         today_tokens = sum(u.tokens_used for u in usage_records)
@@ -361,22 +335,22 @@ class TenantService:
         # Check limits
         if (today_tokens + tokens) > tenant.quota.daily_token_limit:
             return {
-                'allowed': False,
-                'reason': f"Daily token quota exceeded. Used: {today_tokens}/{tenant.quota.daily_token_limit}",
-                'tenant': tenant.to_dict(),
+                "allowed": False,
+                "reason": f"Daily token quota exceeded. Used: {today_tokens}/{tenant.quota.daily_token_limit}",
+                "tenant": tenant.to_dict(),
             }
 
         if (today_requests + requests) > tenant.quota.daily_request_limit:
             return {
-                'allowed': False,
-                'reason': f"Daily request quota exceeded. Used: {today_requests}/{tenant.quota.daily_request_limit}",
-                'tenant': tenant.to_dict(),
+                "allowed": False,
+                "reason": f"Daily request quota exceeded. Used: {today_requests}/{tenant.quota.daily_request_limit}",
+                "tenant": tenant.to_dict(),
             }
 
         return {
-            'allowed': True,
-            'reason': None,
-            'tenant': tenant.to_dict(),
+            "allowed": True,
+            "reason": None,
+            "tenant": tenant.to_dict(),
         }
 
     def can_add_user(self, tenant_id: int) -> bool:
@@ -440,36 +414,44 @@ class TenantService:
         total_requests = sum(u.requests_made for u in usage)
 
         return {
-            'tenant': tenant.to_dict(),
-            'usage_30_days': {
-                'tokens': total_tokens,
-                'requests': total_requests,
-                'daily_average': {
-                    'tokens': total_tokens // 30 if total_tokens else 0,
-                    'requests': total_requests // 30 if total_requests else 0,
+            "tenant": tenant.to_dict(),
+            "usage_30_days": {
+                "tokens": total_tokens,
+                "requests": total_requests,
+                "daily_average": {
+                    "tokens": total_tokens // 30 if total_tokens else 0,
+                    "requests": total_requests // 30 if total_requests else 0,
                 },
             },
-            'quota_usage': {
-                'daily_tokens': {
-                    'used': usage[0].tokens_used if usage else 0,
-                    'limit': tenant.quota.daily_token_limit,
-                    'percentage': round(
-                        (usage[0].tokens_used / tenant.quota.daily_token_limit * 100) if usage and tenant.quota.daily_token_limit > 0 else 0,
-                        2
+            "quota_usage": {
+                "daily_tokens": {
+                    "used": usage[0].tokens_used if usage else 0,
+                    "limit": tenant.quota.daily_token_limit,
+                    "percentage": round(
+                        (
+                            (usage[0].tokens_used / tenant.quota.daily_token_limit * 100)
+                            if usage and tenant.quota.daily_token_limit > 0
+                            else 0
+                        ),
+                        2,
                     ),
                 },
-                'daily_requests': {
-                    'used': usage[0].requests_made if usage else 0,
-                    'limit': tenant.quota.daily_request_limit,
-                    'percentage': round(
-                        (usage[0].requests_made / tenant.quota.daily_request_limit * 100) if usage and tenant.quota.daily_request_limit > 0 else 0,
-                        2
+                "daily_requests": {
+                    "used": usage[0].requests_made if usage else 0,
+                    "limit": tenant.quota.daily_request_limit,
+                    "percentage": round(
+                        (
+                            (usage[0].requests_made / tenant.quota.daily_request_limit * 100)
+                            if usage and tenant.quota.daily_request_limit > 0
+                            else 0
+                        ),
+                        2,
                     ),
                 },
             },
-            'users': {
-                'count': tenant.user_count,
-                'limit': tenant.quota.max_users,
+            "users": {
+                "count": tenant.user_count,
+                "limit": tenant.quota.max_users,
             },
         }
 
@@ -484,9 +466,9 @@ class TenantService:
             str: Generated slug.
         """
         # Convert to lowercase and replace non-alphanumeric with hyphens
-        slug = re.sub(r'[^a-z0-9]+', '-', name.lower())
+        slug = re.sub(r"[^a-z0-9]+", "-", name.lower())
         # Remove leading/trailing hyphens
-        slug = slug.strip('-')
+        slug = slug.strip("-")
         # Limit length
         slug = slug[:50]
 
@@ -506,7 +488,4 @@ class TenantService:
         Returns:
             Dict mapping plan names to quota configurations.
         """
-        return {
-            plan: quota.to_dict()
-            for plan, quota in self.PLAN_QUOTAS.items()
-        }
+        return {plan: quota.to_dict() for plan, quota in self.PLAN_QUOTAS.items()}

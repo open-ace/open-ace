@@ -24,9 +24,10 @@ def get_default_sender_name(tool: str = "claude") -> str:
     hostname = socket.gethostname()
     return f"{user}-{hostname}-{tool}"
 
+
 # Add shared directory to path
 script_dir = os.path.dirname(os.path.abspath(__file__))
-shared_dir = os.path.join(script_dir, 'shared')
+shared_dir = os.path.join(script_dir, "shared")
 if shared_dir not in sys.path:
     sys.path.insert(0, script_dir)
 from shared import db
@@ -35,27 +36,27 @@ from shared import db
 def get_agent_session_id_from_path(project_path: str) -> Optional[str]:
     """
     Extract agent_session_id from project path.
-    
+
     Project path format: /path/to/{tool_name}_{session_id}/...
     Example: /path/to/claude_12345/... -> claude_12345
-    
+
     Args:
         project_path: The project directory path
-        
+
     Returns:
         agent_session_id string or None if not found
     """
     if not project_path:
         return None
-    
+
     # Try to match pattern: toolname_sessionid
     # Examples: claude_abc123, qwen_def456, openclaw_ghi789
-    match = re.search(r'([a-z]+)_([a-f0-9]+)', project_path)
+    match = re.search(r"([a-z]+)_([a-f0-9]+)", project_path)
     if match:
         tool_name = match.group(1)
         session_id = match.group(2)
         return f"{tool_name}_{session_id}"
-    
+
     return None
 
 
@@ -127,7 +128,9 @@ def extract_content_from_entry(entry: dict) -> Optional[str]:
             elif isinstance(content, list) and len(content) > 0:
                 # Check if this is a tool result response (not actual user message)
                 # Tool result responses contain tool_use_id but no actual user text
-                has_tool_result = any(isinstance(p, dict) and p.get("type") == "tool_result" for p in content)
+                has_tool_result = any(
+                    isinstance(p, dict) and p.get("type") == "tool_result" for p in content
+                )
                 has_text = any(isinstance(p, dict) and p.get("type") == "text" for p in content)
 
                 if has_tool_result and not has_text:
@@ -142,7 +145,11 @@ def extract_content_from_entry(entry: dict) -> Optional[str]:
                     elif isinstance(part, dict) and "text" in part:
                         # Qwen format: {"text": "content"}
                         texts.append(part.get("text", ""))
-                    elif isinstance(part, dict) and "content" in part and isinstance(part.get("content"), str):
+                    elif (
+                        isinstance(part, dict)
+                        and "content" in part
+                        and isinstance(part.get("content"), str)
+                    ):
                         # Tool result format: {"type": "tool_result", "content": "..."}
                         # Only include if it's not the sole content type
                         texts.append(part.get("content"))
@@ -158,7 +165,11 @@ def extract_content_from_entry(entry: dict) -> Optional[str]:
                 for part in content:
                     if isinstance(part, dict) and part.get("type") == "text":
                         texts.append(part.get("text", ""))
-                return json.dumps(texts, ensure_ascii=False) if texts else json.dumps(content, ensure_ascii=False)
+                return (
+                    json.dumps(texts, ensure_ascii=False)
+                    if texts
+                    else json.dumps(content, ensure_ascii=False)
+                )
             # Handle toolUse and other content types
             tool_uses = msg.get("tool_uses", [])
             if tool_uses:
@@ -174,20 +185,22 @@ def extract_content_from_entry(entry: dict) -> Optional[str]:
     return None
 
 
-def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> tuple:
+def process_jsonl_file(filepath: Path, hostname: str = "localhost") -> tuple:
     """Process a single JSONL file and return daily token aggregates and messages.
 
     Returns:
         tuple: (daily_stats dict, messages list)
     """
-    daily = defaultdict(lambda: {
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_creation_tokens": 0,
-        "request_count": 0,
-        "models_used": set(),
-    })
+    daily = defaultdict(
+        lambda: {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_creation_tokens": 0,
+            "request_count": 0,
+            "models_used": set(),
+        }
+    )
     messages = []
 
     # First pass: build message tree for conversation_id tracking
@@ -258,13 +271,18 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> tuple:
                     msg = entry.get("message", {})
                     if isinstance(msg, dict):
                         # Get message ID - try different sources
-                        message_id = msg.get("id") or entry.get("id") or entry.get("uuid") or entry.get("messageId")
+                        message_id = (
+                            msg.get("id")
+                            or entry.get("id")
+                            or entry.get("uuid")
+                            or entry.get("messageId")
+                        )
                         if message_id:
                             # Determine role based on entry type
                             role_map = {
                                 "user": "user",
                                 "assistant": "assistant",
-                                "system": "system"
+                                "system": "system",
                             }
                             role = role_map.get(entry_type, "system")
 
@@ -291,10 +309,12 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> tuple:
 
                             # Extract agent_session_id from project directory path
                             agent_session_id = None
-                            if 'project_path' in entry:
-                                agent_session_id = get_agent_session_id_from_path(entry['project_path'])
-                            elif 'project' in entry:
-                                agent_session_id = get_agent_session_id_from_path(entry['project'])
+                            if "project_path" in entry:
+                                agent_session_id = get_agent_session_id_from_path(
+                                    entry["project_path"]
+                                )
+                            elif "project" in entry:
+                                agent_session_id = get_agent_session_id_from_path(entry["project"])
 
                             # Determine conversation_id: find root message of this conversation
                             uuid = entry.get("uuid")
@@ -306,32 +326,39 @@ def process_jsonl_file(filepath: Path, hostname: str = 'localhost') -> tuple:
                                     conversation_id = f"conv_{root_uuid}"
 
                             # Collect message for batch insert
-                            messages.append({
-                                "date": date_key,
-                                "tool_name": "claude",
-                                "host_name": hostname,
-                                "message_id": message_id,
-                                "parent_id": entry.get("parent_id") or entry.get("parentUuid"),
-                                "role": role,
-                                "content": content or "",
-                                "full_entry": full_entry_json,
-                                "tokens_used": total_tokens,
-                                "input_tokens": input_tokens,
-                                "output_tokens": output_tokens,
-                                "model": model,
-                                "timestamp": ts,
-                                "sender_id": "claude_user",
-                                "sender_name": get_default_sender_name("claude"),
-                                "agent_session_id": agent_session_id,
-                                "conversation_id": conversation_id
-                            })
+                            messages.append(
+                                {
+                                    "date": date_key,
+                                    "tool_name": "claude",
+                                    "host_name": hostname,
+                                    "message_id": message_id,
+                                    "parent_id": entry.get("parent_id") or entry.get("parentUuid"),
+                                    "role": role,
+                                    "content": content or "",
+                                    "full_entry": full_entry_json,
+                                    "tokens_used": total_tokens,
+                                    "input_tokens": input_tokens,
+                                    "output_tokens": output_tokens,
+                                    "model": model,
+                                    "timestamp": ts,
+                                    "sender_id": "claude_user",
+                                    "sender_name": get_default_sender_name("claude"),
+                                    "agent_session_id": agent_session_id,
+                                    "conversation_id": conversation_id,
+                                }
+                            )
 
-                if sum([
-                    tokens["input_tokens"],
-                    tokens["output_tokens"],
-                    tokens["cache_read_tokens"],
-                    tokens["cache_creation_tokens"],
-                ]) == 0:
+                if (
+                    sum(
+                        [
+                            tokens["input_tokens"],
+                            tokens["output_tokens"],
+                            tokens["cache_read_tokens"],
+                            tokens["cache_creation_tokens"],
+                        ]
+                    )
+                    == 0
+                ):
                     # Still count requests even if tokens are 0 (e.g., cache hits)
                     if tokens["is_assistant_message"]:
                         daily[date_key]["request_count"] += 1
@@ -398,7 +425,9 @@ def find_claude_project_dir() -> Optional[Path]:
     return None
 
 
-def fetch_and_save(days: int = 7, project_dir: Optional[Path] = None, hostname: Optional[str] = None) -> bool:
+def fetch_and_save(
+    days: int = 7, project_dir: Optional[Path] = None, hostname: Optional[str] = None
+) -> bool:
     """
     Fetch Claude usage and save to database.
 
@@ -412,7 +441,7 @@ def fetch_and_save(days: int = 7, project_dir: Optional[Path] = None, hostname: 
     """
     # Add shared directory to path for db module
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    shared_dir = os.path.join(script_dir, 'shared')
+    shared_dir = os.path.join(script_dir, "shared")
     if shared_dir not in sys.path:
         sys.path.insert(0, script_dir)
     from shared import db, utils
@@ -420,7 +449,7 @@ def fetch_and_save(days: int = 7, project_dir: Optional[Path] = None, hostname: 
     if hostname is None:
         # Try to load hostname from config
         config = utils.load_config()
-        hostname = config.get('host_name', 'localhost')
+        hostname = config.get("host_name", "localhost")
 
     if project_dir is None:
         project_dir = find_claude_project_dir()
@@ -448,14 +477,16 @@ def fetch_and_save(days: int = 7, project_dir: Optional[Path] = None, hostname: 
             return False
 
     # Aggregate across all projects
-    aggregated = defaultdict(lambda: {
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_creation_tokens": 0,
-        "request_count": 0,
-        "models_used": set(),
-    })
+    aggregated = defaultdict(
+        lambda: {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_creation_tokens": 0,
+            "request_count": 0,
+            "models_used": set(),
+        }
+    )
 
     # Collect all messages for batch insert
     all_messages = []
@@ -471,7 +502,13 @@ def fetch_and_save(days: int = 7, project_dir: Optional[Path] = None, hostname: 
             daily, messages = process_jsonl_file(f, hostname)
             # Aggregate daily stats
             for date, stats in daily.items():
-                for key in ["input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens", "request_count"]:
+                for key in [
+                    "input_tokens",
+                    "output_tokens",
+                    "cache_read_tokens",
+                    "cache_creation_tokens",
+                    "request_count",
+                ]:
                     aggregated[date][key] += stats[key]
                 aggregated[date]["models_used"].update(stats["models_used"])
             # Collect messages for batch insert
@@ -487,7 +524,7 @@ def fetch_and_save(days: int = 7, project_dir: Optional[Path] = None, hostname: 
 
     # Filter by date range
     today = datetime.now().strftime("%Y-%m-%d")
-    start_date = (datetime.now() - timedelta(days=days-1)).strftime("%Y-%m-%d")
+    start_date = (datetime.now() - timedelta(days=days - 1)).strftime("%Y-%m-%d")
 
     saved = 0
     for date, stats in aggregated.items():
@@ -508,7 +545,7 @@ def fetch_and_save(days: int = 7, project_dir: Optional[Path] = None, hostname: 
                 output_tokens=stats["output_tokens"],
                 cache_tokens=stats["cache_read_tokens"] + stats["cache_creation_tokens"],
                 request_count=stats["request_count"],
-                models_used=sorted(stats["models_used"])
+                models_used=sorted(stats["models_used"]),
             ):
                 saved += 1
             print(f"  {date}: {total:,} tokens, {stats['request_count']} requests")
@@ -518,12 +555,16 @@ def fetch_and_save(days: int = 7, project_dir: Optional[Path] = None, hostname: 
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Fetch Claude token usage')
-    parser.add_argument('--days', type=int, default=7, help='Number of days')
-    parser.add_argument('--project', help='Specific project directory')
-    parser.add_argument('--hostname', help='Host name to identify this machine')
+    parser = argparse.ArgumentParser(description="Fetch Claude token usage")
+    parser.add_argument("--days", type=int, default=7, help="Number of days")
+    parser.add_argument("--project", help="Specific project directory")
+    parser.add_argument("--hostname", help="Host name to identify this machine")
     args = parser.parse_args()
 
     db.init_database()
-    success = fetch_and_save(days=args.days, project_dir=Path(args.project) if args.project else None, hostname=args.hostname)
+    success = fetch_and_save(
+        days=args.days,
+        project_dir=Path(args.project) if args.project else None,
+        hostname=args.hostname,
+    )
     sys.exit(0 if success else 1)

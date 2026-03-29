@@ -21,12 +21,13 @@ DB_PATH = os.path.join(DB_DIR, "ace.db")
 
 # Remote user name - default is 'openclaw' but can be overridden
 # This is used for remote deployment and fetching data from remote machines
-REMOTE_USER = os.environ.get('AI_TOKEN_REMOTE_USER', 'openclaw')
+REMOTE_USER = os.environ.get("AI_TOKEN_REMOTE_USER", "openclaw")
 
 # Remote configuration directory on remote machines
 # This is used when deploying to or fetching data from remote machines
 REMOTE_CONFIG_DIR = f"/home/{REMOTE_USER}/.open-ace"
 REMOTE_DB_PATH = f"{REMOTE_CONFIG_DIR}/ace.db"
+
 
 def _load_user_config() -> dict:
     """Load user configuration from config.json if it exists."""
@@ -42,7 +43,7 @@ def _load_user_config() -> dict:
 def _get_web_port() -> int:
     """Get web server port with priority: config file > environment variable > default."""
     # Priority 1: Environment variable
-    env_port = os.environ.get('AI_TOKEN_WEB_PORT')
+    env_port = os.environ.get("AI_TOKEN_WEB_PORT")
     if env_port:
         try:
             return int(env_port)
@@ -51,8 +52,8 @@ def _get_web_port() -> int:
 
     # Priority 2: Config file
     user_config = _load_user_config()
-    server_config = user_config.get('server', {})
-    config_port = server_config.get('web_port')
+    server_config = user_config.get("server", {})
+    config_port = server_config.get("web_port")
     if config_port:
         try:
             return int(config_port)
@@ -66,19 +67,19 @@ def _get_web_port() -> int:
 def _get_web_host() -> str:
     """Get web server host with priority: config file > environment variable > default."""
     # Priority 1: Environment variable
-    env_host = os.environ.get('AI_TOKEN_WEB_HOST')
+    env_host = os.environ.get("AI_TOKEN_WEB_HOST")
     if env_host:
         return env_host
 
     # Priority 2: Config file
     user_config = _load_user_config()
-    server_config = user_config.get('server', {})
-    config_host = server_config.get('web_host')
+    server_config = user_config.get("server", {})
+    config_host = server_config.get("web_host")
     if config_host:
         return config_host
 
     # Priority 3: Default
-    return '0.0.0.0'
+    return "0.0.0.0"
 
 
 # Web server configuration
@@ -112,8 +113,8 @@ def load_remote_config() -> dict:
 def get_remote_users() -> list:
     """Get list of configured remote users."""
     config = load_remote_config()
-    if 'remote_users' in config:
-        return config['remote_users']
+    if "remote_users" in config:
+        return config["remote_users"]
     return [REMOTE_USER]
 
 
@@ -128,14 +129,10 @@ def get_database_config() -> dict:
             - path: Database path (for SQLite, optional)
     """
     user_config = _load_user_config()
-    db_config = user_config.get('database', {})
+    db_config = user_config.get("database", {})
 
     # Default configuration
-    default_config = {
-        'type': 'sqlite',
-        'path': DB_PATH,
-        'url': None
-    }
+    default_config = {"type": "sqlite", "path": DB_PATH, "url": None}
 
     # Merge with user config
     default_config.update(db_config)
@@ -150,22 +147,22 @@ def get_database_url() -> str:
         str: Database URL.
     """
     # Priority 1: Environment variable DATABASE_URL
-    if os.environ.get('DATABASE_URL'):
-        return os.environ['DATABASE_URL']
+    if os.environ.get("DATABASE_URL"):
+        return os.environ["DATABASE_URL"]
 
     # Priority 2: Config file
     db_config = get_database_config()
-    db_type = db_config.get('type', 'sqlite').lower()
+    db_type = db_config.get("type", "sqlite").lower()
 
-    if db_type == 'postgresql':
-        url = db_config.get('url')
+    if db_type == "postgresql":
+        url = db_config.get("url")
         if url:
             return url
         # If type is postgresql but no url, fall back to SQLite
         print(f"Warning: database type is postgresql but no url configured, using SQLite")
 
     # Priority 3: Default SQLite
-    db_path = db_config.get('path', DB_PATH)
+    db_path = db_config.get("path", DB_PATH)
     return f"sqlite:///{db_path}"
 
 
@@ -179,13 +176,10 @@ def get_data_fetch_config() -> dict:
             - enabled: Whether auto fetch is enabled (default: True)
     """
     user_config = _load_user_config()
-    fetch_config = user_config.get('data_fetch', {})
+    fetch_config = user_config.get("data_fetch", {})
 
     # Default configuration
-    default_config = {
-        'interval': 300,  # 5 minutes
-        'enabled': True
-    }
+    default_config = {"interval": 300, "enabled": True}  # 5 minutes
 
     # Merge with user config
     default_config.update(fetch_config)
@@ -200,7 +194,7 @@ def get_data_fetch_interval() -> int:
         int: Fetch interval in seconds.
     """
     # Priority 1: Environment variable
-    env_interval = os.environ.get('DATA_FETCH_INTERVAL')
+    env_interval = os.environ.get("DATA_FETCH_INTERVAL")
     if env_interval:
         try:
             return int(env_interval)
@@ -209,7 +203,7 @@ def get_data_fetch_interval() -> int:
 
     # Priority 2: Config file
     fetch_config = get_data_fetch_config()
-    return fetch_config.get('interval', 300)
+    return fetch_config.get("interval", 300)
 
 
 def is_data_fetch_enabled() -> bool:
@@ -220,10 +214,10 @@ def is_data_fetch_enabled() -> bool:
         bool: True if data fetch is enabled.
     """
     # Priority 1: Environment variable
-    env_enabled = os.environ.get('DATA_FETCH_ENABLED')
+    env_enabled = os.environ.get("DATA_FETCH_ENABLED")
     if env_enabled:
-        return env_enabled.lower() in ('true', '1', 'yes')
+        return env_enabled.lower() in ("true", "1", "yes")
 
     # Priority 2: Config file
     fetch_config = get_data_fetch_config()
-    return fetch_config.get('enabled', True)
+    return fetch_config.get("enabled", True)

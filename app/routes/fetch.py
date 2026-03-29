@@ -18,18 +18,13 @@ from app.services.message_service import MessageService
 from app.services.usage_service import UsageService
 from app.utils.helpers import get_today
 
-fetch_bp = Blueprint('fetch', __name__)
+fetch_bp = Blueprint("fetch", __name__)
 usage_service = UsageService()
 message_service = MessageService()
 logger = logging.getLogger(__name__)
 
 # Global state for fetch status
-_fetch_status = {
-    'is_running': False,
-    'last_run': None,
-    'last_result': None,
-    'error': None
-}
+_fetch_status = {"is_running": False, "last_run": None, "last_result": None, "error": None}
 _fetch_lock = threading.Lock()
 
 
@@ -38,10 +33,10 @@ def run_fetch_scripts():
     global _fetch_status
 
     with _fetch_lock:
-        if _fetch_status['is_running']:
+        if _fetch_status["is_running"]:
             return
-        _fetch_status['is_running'] = True
-        _fetch_status['error'] = None
+        _fetch_status["is_running"] = True
+        _fetch_status["error"] = None
 
     try:
         # Get project root directory
@@ -50,111 +45,112 @@ def run_fetch_scripts():
         results = {}
 
         # Run fetch_qwen.py
-        qwen_script = os.path.join(project_root, 'scripts', 'fetch_qwen.py')
+        qwen_script = os.path.join(project_root, "scripts", "fetch_qwen.py")
         if os.path.exists(qwen_script):
             try:
                 result = subprocess.run(
-                    ['python3', qwen_script, '--days', '1'],
+                    ["python3", qwen_script, "--days", "1"],
                     capture_output=True,
                     text=True,
                     timeout=300,  # 5 minutes timeout
-                    cwd=project_root
+                    cwd=project_root,
                 )
-                results['qwen'] = {
-                    'success': result.returncode == 0,
-                    'output': result.stdout[-1000:] if result.stdout else '',
-                    'error': result.stderr[-500:] if result.stderr else None
+                results["qwen"] = {
+                    "success": result.returncode == 0,
+                    "output": result.stdout[-1000:] if result.stdout else "",
+                    "error": result.stderr[-500:] if result.stderr else None,
                 }
             except subprocess.TimeoutExpired:
-                results['qwen'] = {'success': False, 'error': 'Timeout after 5 minutes'}
+                results["qwen"] = {"success": False, "error": "Timeout after 5 minutes"}
             except Exception as e:
-                results['qwen'] = {'success': False, 'error': str(e)}
+                results["qwen"] = {"success": False, "error": str(e)}
 
         # Run fetch_claude.py if exists
-        claude_script = os.path.join(project_root, 'scripts', 'fetch_claude.py')
+        claude_script = os.path.join(project_root, "scripts", "fetch_claude.py")
         if os.path.exists(claude_script):
             try:
                 result = subprocess.run(
-                    ['python3', claude_script, '--days', '1'],
+                    ["python3", claude_script, "--days", "1"],
                     capture_output=True,
                     text=True,
                     timeout=300,
-                    cwd=project_root
+                    cwd=project_root,
                 )
-                results['claude'] = {
-                    'success': result.returncode == 0,
-                    'output': result.stdout[-1000:] if result.stdout else '',
-                    'error': result.stderr[-500:] if result.stderr else None
+                results["claude"] = {
+                    "success": result.returncode == 0,
+                    "output": result.stdout[-1000:] if result.stdout else "",
+                    "error": result.stderr[-500:] if result.stderr else None,
                 }
             except subprocess.TimeoutExpired:
-                results['claude'] = {'success': False, 'error': 'Timeout after 5 minutes'}
+                results["claude"] = {"success": False, "error": "Timeout after 5 minutes"}
             except Exception as e:
-                results['claude'] = {'success': False, 'error': str(e)}
+                results["claude"] = {"success": False, "error": str(e)}
 
         # Run fetch_openclaw.py if exists
-        openclaw_script = os.path.join(project_root, 'scripts', 'fetch_openclaw.py')
+        openclaw_script = os.path.join(project_root, "scripts", "fetch_openclaw.py")
         if os.path.exists(openclaw_script):
             try:
                 result = subprocess.run(
-                    ['python3', openclaw_script, '--days', '1', '--mode', 'messages'],
+                    ["python3", openclaw_script, "--days", "1", "--mode", "messages"],
                     capture_output=True,
                     text=True,
                     timeout=300,
-                    cwd=project_root
+                    cwd=project_root,
                 )
-                results['openclaw'] = {
-                    'success': result.returncode == 0,
-                    'output': result.stdout[-1000:] if result.stdout else '',
-                    'error': result.stderr[-500:] if result.stderr else None
+                results["openclaw"] = {
+                    "success": result.returncode == 0,
+                    "output": result.stdout[-1000:] if result.stdout else "",
+                    "error": result.stderr[-500:] if result.stderr else None,
                 }
             except subprocess.TimeoutExpired:
-                results['openclaw'] = {'success': False, 'error': 'Timeout after 5 minutes'}
+                results["openclaw"] = {"success": False, "error": "Timeout after 5 minutes"}
             except Exception as e:
-                results['openclaw'] = {'success': False, 'error': str(e)}
+                results["openclaw"] = {"success": False, "error": str(e)}
 
         with _fetch_lock:
-            _fetch_status['last_run'] = datetime.now().isoformat()
-            _fetch_status['last_result'] = results
-            _fetch_status['is_running'] = False
+            _fetch_status["last_run"] = datetime.now().isoformat()
+            _fetch_status["last_result"] = results
+            _fetch_status["is_running"] = False
 
         logger.info(f"Data fetch completed: {results}")
 
     except Exception as e:
         logger.exception("Error running fetch scripts")
         with _fetch_lock:
-            _fetch_status['error'] = str(e)
-            _fetch_status['is_running'] = False
+            _fetch_status["error"] = str(e)
+            _fetch_status["is_running"] = False
 
 
-@fetch_bp.route('/fetch/data', methods=['POST'])
+@fetch_bp.route("/fetch/data", methods=["POST"])
 def api_fetch_data():
     """Trigger data collection from all sources."""
     global _fetch_status
 
     with _fetch_lock:
-        if _fetch_status['is_running']:
-            return jsonify({
-                'success': False,
-                'message': 'Data fetch is already running',
-                'status': _fetch_status
-            })
+        if _fetch_status["is_running"]:
+            return jsonify(
+                {
+                    "success": False,
+                    "message": "Data fetch is already running",
+                    "status": _fetch_status,
+                }
+            )
 
     # Start fetch in background thread
     thread = threading.Thread(target=run_fetch_scripts)
     thread.daemon = True
     thread.start()
 
-    return jsonify({
-        'success': True,
-        'message': 'Data fetch started in background',
-        'status': {
-            'is_running': True,
-            'last_run': _fetch_status['last_run']
+    return jsonify(
+        {
+            "success": True,
+            "message": "Data fetch started in background",
+            "status": {"is_running": True, "last_run": _fetch_status["last_run"]},
         }
-    })
+    )
 
 
-@fetch_bp.route('/fetch/status')
+@fetch_bp.route("/fetch/status")
 def api_fetch_status():
     """Get data fetch status."""
     from app.services.data_fetch_scheduler import scheduler
@@ -165,34 +161,28 @@ def api_fetch_status():
     # Add scheduler status
     scheduler_status = scheduler.get_status()
 
-    return jsonify({
-        'success': True,
-        'status': fetch_status,
-        'scheduler': scheduler_status
-    })
+    return jsonify({"success": True, "status": fetch_status, "scheduler": scheduler_status})
 
 
-@fetch_bp.route('/fetch')
+@fetch_bp.route("/fetch")
 def api_fetch():
     """Fetch data from local sources."""
     # This would integrate with the existing fetch scripts
-    return jsonify({
-        'success': True,
-        'message': 'Fetch endpoint - integrate with existing fetch scripts'
-    })
+    return jsonify(
+        {"success": True, "message": "Fetch endpoint - integrate with existing fetch scripts"}
+    )
 
 
-@fetch_bp.route('/fetch/remote')
+@fetch_bp.route("/fetch/remote")
 def api_fetch_remote():
     """Fetch data from remote sources."""
     # This would integrate with the existing remote fetch functionality
-    return jsonify({
-        'success': True,
-        'message': 'Remote fetch endpoint - integrate with existing remote fetch'
-    })
+    return jsonify(
+        {"success": True, "message": "Remote fetch endpoint - integrate with existing remote fetch"}
+    )
 
 
-@fetch_bp.route('/data-status')
+@fetch_bp.route("/data-status")
 def api_data_status():
     """Get data status information."""
     try:
@@ -218,20 +208,19 @@ def api_data_status():
         # Get date range
         today = get_today()
 
-        return jsonify({
-            'status': 'ok',
-            'database_exists': db_exists,
-            'last_update': last_update,
-            'tools_count': len(tools),
-            'hosts_count': len(hosts),
-            'senders_count': len(senders),
-            'tools': tools[:10],  # First 10 tools
-            'hosts': hosts[:10],  # First 10 hosts
-            'date': today
-        })
+        return jsonify(
+            {
+                "status": "ok",
+                "database_exists": db_exists,
+                "last_update": last_update,
+                "tools_count": len(tools),
+                "hosts_count": len(hosts),
+                "senders_count": len(senders),
+                "tools": tools[:10],  # First 10 tools
+                "hosts": hosts[:10],  # First 10 hosts
+                "date": today,
+            }
+        )
     except Exception as e:
         logger.exception("Error getting data status")
-        return jsonify({
-            'status': 'error',
-            'error': str(e)
-        }), 500
+        return jsonify({"status": "error", "error": str(e)}), 500

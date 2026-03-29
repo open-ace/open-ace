@@ -44,6 +44,7 @@ class PgConnectionWrapper:
         else:
             self._conn.close()
 
+
 # Connection pool configuration
 POOL_MIN_CONN = 1
 POOL_MAX_CONN = 10
@@ -55,14 +56,15 @@ _pg_pool: Optional[Any] = None
 def _get_db_path() -> str:
     """Get database path from config."""
     from scripts.shared.config import get_database_url
+
     url = get_database_url()
-    if url and url.startswith('postgresql'):
+    if url and url.startswith("postgresql"):
         # For PostgreSQL, we still need a path for SessionManager's SQLite compatibility
         # But the actual connection will use PostgreSQL
         return DEFAULT_SQLITE_PATH
     # For SQLite, extract path from URL
-    if url and url.startswith('sqlite'):
-        return url.replace('sqlite:///', '')
+    if url and url.startswith("sqlite"):
+        return url.replace("sqlite:///", "")
     return DEFAULT_SQLITE_PATH
 
 
@@ -79,6 +81,7 @@ def get_database_url() -> str:
     """
     # Import here to avoid circular import
     from scripts.shared.config import get_database_url as _get_database_url
+
     return _get_database_url()
 
 
@@ -89,7 +92,7 @@ def is_postgresql() -> bool:
     Returns:
         bool: True if using PostgreSQL.
     """
-    return get_database_url().startswith('postgresql')
+    return get_database_url().startswith("postgresql")
 
 
 def get_param_placeholder() -> str:
@@ -99,7 +102,7 @@ def get_param_placeholder() -> str:
     Returns:
         str: Parameter placeholder ('%s' for PostgreSQL, '?' for SQLite).
     """
-    return '%s' if is_postgresql() else '?'
+    return "%s" if is_postgresql() else "?"
 
 
 def adapt_sql(query: str) -> str:
@@ -116,7 +119,7 @@ def adapt_sql(query: str) -> str:
     if is_postgresql():
         # Replace ? with %s, but be careful with string literals
         # Simple approach: just replace all ? with %s
-        return query.replace('?', '%s')
+        return query.replace("?", "%s")
     return query
 
 
@@ -161,35 +164,34 @@ def get_postgresql_connection() -> Any:
         psycopg2.connection: PostgreSQL connection.
     """
     global _pg_pool
-    
+
     try:
         import psycopg2
         from psycopg2.extras import RealDictCursor
         from psycopg2 import pool
-        
+
         url = get_database_url()
-        
+
         # Initialize pool if not exists
         if _pg_pool is None:
             try:
-                _pg_pool = pool.ThreadedConnectionPool(
-                    POOL_MIN_CONN,
-                    POOL_MAX_CONN,
-                    url
+                _pg_pool = pool.ThreadedConnectionPool(POOL_MIN_CONN, POOL_MAX_CONN, url)
+                logger.info(
+                    f"PostgreSQL connection pool initialized (min={POOL_MIN_CONN}, max={POOL_MAX_CONN})"
                 )
-                logger.info(f"PostgreSQL connection pool initialized (min={POOL_MIN_CONN}, max={POOL_MAX_CONN})")
             except Exception as e:
-                logger.warning(f"Failed to create connection pool: {e}, falling back to direct connection")
+                logger.warning(
+                    f"Failed to create connection pool: {e}, falling back to direct connection"
+                )
                 conn = psycopg2.connect(url)
                 return PgConnectionWrapper(conn, cursor_factory=RealDictCursor, from_pool=False)
         # Get connection from pool
         conn = _pg_pool.getconn()
         return PgConnectionWrapper(conn, cursor_factory=RealDictCursor, from_pool=True)
-        
+
     except ImportError:
         raise ImportError(
-            "psycopg2 is required for PostgreSQL. "
-            "Install it with: pip install psycopg2-binary"
+            "psycopg2 is required for PostgreSQL. " "Install it with: pip install psycopg2-binary"
         )
 
 
@@ -208,7 +210,7 @@ def release_postgresql_connection(conn: Any) -> None:
         return
 
     # Handle raw connection (legacy)
-    if _pg_pool is not None and hasattr(conn, '_from_pool') and conn._from_pool:
+    if _pg_pool is not None and hasattr(conn, "_from_pool") and conn._from_pool:
         try:
             _pg_pool.putconn(conn)
         except Exception as e:
@@ -256,7 +258,7 @@ class Database:
             db_url: Optional custom database URL.
         """
         self.db_url = db_url or get_database_url()
-        self._is_postgresql = self.db_url.startswith('postgresql')
+        self._is_postgresql = self.db_url.startswith("postgresql")
 
     @property
     def is_postgresql(self) -> bool:
@@ -274,7 +276,7 @@ class Database:
         """Get SQLite connection."""
         ensure_db_dir()
         # Extract path from URL
-        if self.db_url.startswith('sqlite:///'):
+        if self.db_url.startswith("sqlite:///"):
             db_path = self.db_url[10:]
         else:
             db_path = DEFAULT_SQLITE_PATH
@@ -317,7 +319,9 @@ class Database:
             conn.commit()
             return cursor
 
-    def fetch_one(self, query: str, params: tuple = (), commit: bool = False) -> Optional[Dict[str, Any]]:
+    def fetch_one(
+        self, query: str, params: tuple = (), commit: bool = False
+    ) -> Optional[Dict[str, Any]]:
         """
         Execute a query and return a single row.
 
@@ -333,6 +337,7 @@ class Database:
             # Use RealDictCursor for PostgreSQL
             if is_postgresql():
                 from psycopg2.extras import RealDictCursor
+
                 cursor = conn.cursor(cursor_factory=RealDictCursor)
             else:
                 cursor = conn.cursor()
@@ -366,6 +371,7 @@ class Database:
             # Use RealDictCursor for PostgreSQL
             if is_postgresql():
                 from psycopg2.extras import RealDictCursor
+
                 cursor = conn.cursor(cursor_factory=RealDictCursor)
             else:
                 cursor = conn.cursor()
@@ -407,12 +413,11 @@ class Database:
         if self._is_postgresql:
             result = self.fetch_one(
                 "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = %s)",
-                (table_name,)
+                (table_name,),
             )
-            return result.get('exists', False) if result else False
+            return result.get("exists", False) if result else False
         else:
             result = self.fetch_one(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-                (table_name,)
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,)
             )
             return result is not None

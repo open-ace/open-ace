@@ -13,10 +13,10 @@ from app.modules.governance.content_filter import ContentFilter, FilterResult
 from app.modules.governance.quota_manager import QuotaAlert, QuotaManager
 
 __all__ = [
-    'AuditLogger',
-    'AuditLog',
-    'ContentFilter',
-    'FilterResult',
-    'QuotaManager',
-    'QuotaAlert',
+    "AuditLogger",
+    "AuditLog",
+    "ContentFilter",
+    "FilterResult",
+    "QuotaManager",
+    "QuotaAlert",
 ]

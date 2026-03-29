@@ -31,7 +31,7 @@ def load_cache() -> Dict:
         return {"users": {}, "last_updated": 0}
 
     try:
-        with open(CACHE_FILE, encoding='utf-8') as f:
+        with open(CACHE_FILE, encoding="utf-8") as f:
             return json.load(f)
     except (OSError, json.JSONDecodeError):
         return {"users": {}, "last_updated": 0}
@@ -40,17 +40,14 @@ def load_cache() -> Dict:
 def save_cache(cache: Dict):
     """Save user cache to file."""
     ensure_cache_dir()
-    with open(CACHE_FILE, 'w', encoding='utf-8') as f:
+    with open(CACHE_FILE, "w", encoding="utf-8") as f:
         json.dump(cache, f, ensure_ascii=False, indent=2)
 
 
 def get_feishu_token(app_id: str, app_secret: str) -> Optional[str]:
     """Get Feishu API access token using tenant access token."""
     url = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
-    payload = {
-        "app_id": app_id,
-        "app_secret": app_secret
-    }
+    payload = {"app_id": app_id, "app_secret": app_secret}
 
     try:
         response = requests.post(url, json=payload, timeout=10)
@@ -85,10 +82,7 @@ def get_user_info(user_id: str, app_id: str, app_secret: str) -> Optional[Dict]:
     # Call Feishu user info API
     url = f"https://open.feishu.cn/open-apis/contact/v3/users/{user_id}"
     params = {"user_id_type": "open_id"}  # ou_ prefix indicates open_id
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
-    }
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
     try:
         response = requests.get(url, headers=headers, params=params, timeout=10)
@@ -101,13 +95,12 @@ def get_user_info(user_id: str, app_id: str, app_secret: str) -> Optional[Dict]:
 
             # Debug: log available fields
             if not user_info.get("name") and not user_info.get("zh_name"):
-                print(f"Warning: User {user_id} has no name field. Available fields: {list(user_info.keys())}")
+                print(
+                    f"Warning: User {user_id} has no name field. Available fields: {list(user_info.keys())}"
+                )
 
             # Cache the result (use 'user' nested structure)
-            cache["users"][user_id] = {
-                "data": user_info,
-                "cached_at": time.time()
-            }
+            cache["users"][user_id] = {"data": user_info, "cached_at": time.time()}
             save_cache(cache)
 
             return user_info

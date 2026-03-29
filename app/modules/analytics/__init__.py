@@ -13,9 +13,9 @@ from app.modules.analytics.roi_calculator import ROICalculator, ROIMetrics
 from app.modules.analytics.usage_analytics import UsageAnalytics
 
 __all__ = [
-    'UsageAnalytics',
-    'ROICalculator',
-    'ROIMetrics',
-    'CostOptimizer',
-    'OptimizationSuggestion',
+    "UsageAnalytics",
+    "ROICalculator",
+    "ROIMetrics",
+    "CostOptimizer",
+    "OptimizationSuggestion",
 ]

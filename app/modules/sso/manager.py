@@ -58,10 +58,15 @@ class SSOManager:
             cursor = conn.cursor()
 
             # Use SERIAL for PostgreSQL, AUTOINCREMENT for SQLite
-            id_type = "SERIAL PRIMARY KEY" if self.db.is_postgresql else "INTEGER PRIMARY KEY AUTOINCREMENT"
+            id_type = (
+                "SERIAL PRIMARY KEY"
+                if self.db.is_postgresql
+                else "INTEGER PRIMARY KEY AUTOINCREMENT"
+            )
 
             # SSO providers table
-            cursor.execute(f'''
+            cursor.execute(
+                f"""
                 CREATE TABLE IF NOT EXISTS sso_providers (
                     id {id_type},
                     name TEXT UNIQUE NOT NULL,
@@ -73,10 +78,12 @@ class SSOManager:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (tenant_id) REFERENCES tenants(id)
                 )
-            ''')
+            """
+            )
 
             # SSO identities table (links SSO users to local users)
-            cursor.execute(f'''
+            cursor.execute(
+                f"""
                 CREATE TABLE IF NOT EXISTS sso_identities (
                     id {id_type},
                     user_id INTEGER NOT NULL,
@@ -88,10 +95,12 @@ class SSOManager:
                     UNIQUE(provider_name, provider_user_id),
                     FOREIGN KEY (user_id) REFERENCES users(id)
                 )
-            ''')
+            """
+            )
 
             # SSO sessions table
-            cursor.execute(f'''
+            cursor.execute(
+                f"""
                 CREATE TABLE IF NOT EXISTS sso_sessions (
                     id {id_type},
                     session_token TEXT UNIQUE NOT NULL,
@@ -103,15 +112,16 @@ class SSOManager:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (user_id) REFERENCES users(id)
                 )
-            ''')
+            """
+            )
 
             # Create indexes
             indexes = [
-                'CREATE INDEX IF NOT EXISTS idx_sso_providers_tenant ON sso_providers(tenant_id)',
-                'CREATE INDEX IF NOT EXISTS idx_sso_identities_user ON sso_identities(user_id)',
-                'CREATE INDEX IF NOT EXISTS idx_sso_identities_provider ON sso_identities(provider_name, provider_user_id)',
-                'CREATE INDEX IF NOT EXISTS idx_sso_sessions_token ON sso_sessions(session_token)',
-                'CREATE INDEX IF NOT EXISTS idx_sso_sessions_user ON sso_sessions(user_id)',
+                "CREATE INDEX IF NOT EXISTS idx_sso_providers_tenant ON sso_providers(tenant_id)",
+                "CREATE INDEX IF NOT EXISTS idx_sso_identities_user ON sso_identities(user_id)",
+                "CREATE INDEX IF NOT EXISTS idx_sso_identities_provider ON sso_identities(provider_name, provider_user_id)",
+                "CREATE INDEX IF NOT EXISTS idx_sso_sessions_token ON sso_sessions(session_token)",
+                "CREATE INDEX IF NOT EXISTS idx_sso_sessions_user ON sso_sessions(user_id)",
             ]
             for idx in indexes:
                 cursor.execute(idx)
@@ -131,7 +141,7 @@ class SSOManager:
         scope: Optional[List[str]] = None,
         issuer_url: Optional[str] = None,
         tenant_id: Optional[int] = None,
-        extra_params: Optional[Dict[str, Any]] = None
+        extra_params: Optional[Dict[str, Any]] = None,
     ) -> bool:
         """
         Register a new SSO provider.
@@ -162,7 +172,7 @@ class SSOManager:
             token_url=token_url,
             userinfo_url=userinfo_url,
             redirect_uri=redirect_uri,
-            scope=scope or ['openid', 'profile', 'email'],
+            scope=scope or ["openid", "profile", "email"],
             issuer_url=issuer_url,
             tenant_id=tenant_id,
             extra_params=extra_params or {},
@@ -171,7 +181,8 @@ class SSOManager:
         try:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute('''
+                cursor.execute(
+                    """
                     INSERT INTO sso_providers
                     (name, provider_type, config, tenant_id)
                     VALUES (?, ?, ?, ?)
@@ -180,16 +191,18 @@ class SSOManager:
                         config = ?,
                         tenant_id = ?,
                         updated_at = ?
-                ''', (
-                    name,
-                    provider_type,
-                    json.dumps(config.__dict__),
-                    tenant_id,
-                    provider_type,
-                    json.dumps(config.__dict__),
-                    tenant_id,
-                    datetime.utcnow(),
-                ))
+                """,
+                    (
+                        name,
+                        provider_type,
+                        json.dumps(config.__dict__),
+                        tenant_id,
+                        provider_type,
+                        json.dumps(config.__dict__),
+                        tenant_id,
+                        datetime.utcnow(),
+                    ),
+                )
                 conn.commit()
 
             # Clear cached provider
@@ -210,7 +223,7 @@ class SSOManager:
         client_secret: str,
         redirect_uri: str,
         tenant_id: Optional[int] = None,
-        extra_params: Optional[Dict[str, Any]] = None
+        extra_params: Optional[Dict[str, Any]] = None,
     ) -> bool:
         """
         Register a predefined SSO provider (e.g., 'google', 'github').
@@ -233,15 +246,15 @@ class SSOManager:
 
         return self.register_provider(
             name=provider_name,
-            provider_type=predefined['provider_type'],
+            provider_type=predefined["provider_type"],
             client_id=client_id,
             client_secret=client_secret,
-            authorization_url=predefined['authorization_url'],
-            token_url=predefined['token_url'],
-            userinfo_url=predefined.get('userinfo_url'),
+            authorization_url=predefined["authorization_url"],
+            token_url=predefined["token_url"],
+            userinfo_url=predefined.get("userinfo_url"),
             redirect_uri=redirect_uri,
-            scope=predefined.get('scope'),
-            issuer_url=predefined.get('issuer_url'),
+            scope=predefined.get("scope"),
+            issuer_url=predefined.get("issuer_url"),
             tenant_id=tenant_id,
             extra_params=extra_params,
         )
@@ -262,28 +275,27 @@ class SSOManager:
 
         # Load from database
         row = self.db.fetch_one(
-            'SELECT * FROM sso_providers WHERE name = ? AND is_active = 1',
-            (name,)
+            "SELECT * FROM sso_providers WHERE name = ? AND is_active = 1", (name,)
         )
 
         if not row:
             return None
 
         try:
-            config_data = json.loads(row['config'])
+            config_data = json.loads(row["config"])
             config = SSOProviderConfig(
-                name=config_data.get('name', name),
-                provider_type=config_data.get('provider_type', 'oauth2'),
-                client_id=config_data.get('client_id', ''),
-                client_secret=config_data.get('client_secret', ''),
-                authorization_url=config_data.get('authorization_url', ''),
-                token_url=config_data.get('token_url', ''),
-                userinfo_url=config_data.get('userinfo_url'),
-                redirect_uri=config_data.get('redirect_uri'),
-                scope=config_data.get('scope', ['openid', 'profile', 'email']),
-                issuer_url=config_data.get('issuer_url'),
-                tenant_id=config_data.get('tenant_id'),
-                extra_params=config_data.get('extra_params', {}),
+                name=config_data.get("name", name),
+                provider_type=config_data.get("provider_type", "oauth2"),
+                client_id=config_data.get("client_id", ""),
+                client_secret=config_data.get("client_secret", ""),
+                authorization_url=config_data.get("authorization_url", ""),
+                token_url=config_data.get("token_url", ""),
+                userinfo_url=config_data.get("userinfo_url"),
+                redirect_uri=config_data.get("redirect_uri"),
+                scope=config_data.get("scope", ["openid", "profile", "email"]),
+                issuer_url=config_data.get("issuer_url"),
+                tenant_id=config_data.get("tenant_id"),
+                extra_params=config_data.get("extra_params", {}),
             )
 
             # Create provider instance
@@ -311,12 +323,12 @@ class SSOManager:
         """
         if tenant_id:
             rows = self.db.fetch_all(
-                'SELECT name, provider_type, tenant_id, is_active FROM sso_providers WHERE tenant_id = ?',
-                (tenant_id,)
+                "SELECT name, provider_type, tenant_id, is_active FROM sso_providers WHERE tenant_id = ?",
+                (tenant_id,),
             )
         else:
             rows = self.db.fetch_all(
-                'SELECT name, provider_type, tenant_id, is_active FROM sso_providers'
+                "SELECT name, provider_type, tenant_id, is_active FROM sso_providers"
             )
 
         return [dict(row) for row in rows]
@@ -326,10 +338,7 @@ class SSOManager:
         try:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute(
-                    'UPDATE sso_providers SET is_active = 0 WHERE name = ?',
-                    (name,)
-                )
+                cursor.execute("UPDATE sso_providers SET is_active = 0 WHERE name = ?", (name,))
                 conn.commit()
 
             if name in self._providers:
@@ -346,10 +355,7 @@ class SSOManager:
         try:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute(
-                    'UPDATE sso_providers SET is_active = 1 WHERE name = ?',
-                    (name,)
-                )
+                cursor.execute("UPDATE sso_providers SET is_active = 1 WHERE name = ?", (name,))
                 conn.commit()
 
             return True
@@ -359,9 +365,7 @@ class SSOManager:
             return False
 
     def start_authentication(
-        self,
-        provider_name: str,
-        redirect_uri: str
+        self, provider_name: str, redirect_uri: str
     ) -> Optional[Dict[str, str]]:
         """
         Start the SSO authentication flow.
@@ -386,7 +390,7 @@ class SSOManager:
 
         # Generate nonce for OIDC
         nonce = None
-        if hasattr(provider, 'generate_nonce'):
+        if hasattr(provider, "generate_nonce"):
             nonce = OIDCProvider.generate_nonce()
 
         # Build authorization URL
@@ -401,16 +405,12 @@ class SSOManager:
         self._store_auth_state(state, code_verifier, provider_name, nonce)
 
         return {
-            'authorization_url': auth_url,
-            'state': state,
+            "authorization_url": auth_url,
+            "state": state,
         }
 
     def complete_authentication(
-        self,
-        provider_name: str,
-        code: str,
-        state: str,
-        redirect_uri: str
+        self, provider_name: str, code: str, state: str, redirect_uri: str
     ) -> SSOAuthResult:
         """
         Complete the SSO authentication flow.
@@ -428,7 +428,7 @@ class SSOManager:
         if not provider:
             return SSOAuthResult(
                 success=False,
-                error='provider_not_found',
+                error="provider_not_found",
             )
 
         # Verify state
@@ -436,11 +436,11 @@ class SSOManager:
         if not auth_state:
             return SSOAuthResult(
                 success=False,
-                error='invalid_state',
+                error="invalid_state",
             )
 
         # Get PKCE code verifier
-        code_verifier = auth_state.get('code_verifier')
+        code_verifier = auth_state.get("code_verifier")
 
         # Exchange code for tokens
         result = provider.authenticate(code, redirect_uri)
@@ -455,7 +455,7 @@ class SSOManager:
         user_id: int,
         provider_name: str,
         provider_user_id: str,
-        provider_data: Optional[Dict[str, Any]] = None
+        provider_data: Optional[Dict[str, Any]] = None,
     ) -> bool:
         """
         Link an SSO identity to a local user.
@@ -472,7 +472,8 @@ class SSOManager:
         try:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute('''
+                cursor.execute(
+                    """
                     INSERT INTO sso_identities
                     (user_id, provider_name, provider_user_id, provider_data, last_used_at)
                     VALUES (?, ?, ?, ?, ?)
@@ -480,30 +481,30 @@ class SSOManager:
                         user_id = ?,
                         provider_data = ?,
                         last_used_at = ?
-                ''', (
-                    user_id,
-                    provider_name,
-                    provider_user_id,
-                    json.dumps(provider_data) if provider_data else None,
-                    datetime.utcnow(),
-                    user_id,
-                    json.dumps(provider_data) if provider_data else None,
-                    datetime.utcnow(),
-                ))
+                """,
+                    (
+                        user_id,
+                        provider_name,
+                        provider_user_id,
+                        json.dumps(provider_data) if provider_data else None,
+                        datetime.utcnow(),
+                        user_id,
+                        json.dumps(provider_data) if provider_data else None,
+                        datetime.utcnow(),
+                    ),
+                )
                 conn.commit()
 
-            logger.info(f"Linked SSO identity: {provider_name}:{provider_user_id} -> user:{user_id}")
+            logger.info(
+                f"Linked SSO identity: {provider_name}:{provider_user_id} -> user:{user_id}"
+            )
             return True
 
         except Exception as e:
             logger.error(f"Failed to link SSO identity: {e}")
             return False
 
-    def get_user_by_sso_identity(
-        self,
-        provider_name: str,
-        provider_user_id: str
-    ) -> Optional[int]:
+    def get_user_by_sso_identity(self, provider_name: str, provider_user_id: str) -> Optional[int]:
         """
         Get local user ID by SSO identity.
 
@@ -514,12 +515,15 @@ class SSOManager:
         Returns:
             Optional[int]: Local user ID or None.
         """
-        row = self.db.fetch_one('''
+        row = self.db.fetch_one(
+            """
             SELECT user_id FROM sso_identities
             WHERE provider_name = ? AND provider_user_id = ?
-        ''', (provider_name, provider_user_id))
+        """,
+            (provider_name, provider_user_id),
+        )
 
-        return row['user_id'] if row else None
+        return row["user_id"] if row else None
 
     def create_sso_session(
         self,
@@ -527,7 +531,7 @@ class SSOManager:
         provider_name: str,
         access_token: str,
         refresh_token: Optional[str] = None,
-        expires_in: int = 3600
+        expires_in: int = 3600,
     ) -> Optional[str]:
         """
         Create an SSO session.
@@ -548,18 +552,21 @@ class SSOManager:
         try:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute('''
+                cursor.execute(
+                    """
                     INSERT INTO sso_sessions
                     (session_token, user_id, provider_name, access_token, refresh_token, expires_at)
                     VALUES (?, ?, ?, ?, ?, ?)
-                ''', (
-                    session_token,
-                    user_id,
-                    provider_name,
-                    access_token,
-                    refresh_token,
-                    expires_at,
-                ))
+                """,
+                    (
+                        session_token,
+                        user_id,
+                        provider_name,
+                        access_token,
+                        refresh_token,
+                        expires_at,
+                    ),
+                )
                 conn.commit()
 
             return session_token
@@ -578,10 +585,13 @@ class SSOManager:
         Returns:
             Optional[Dict]: Session data or None.
         """
-        row = self.db.fetch_one('''
+        row = self.db.fetch_one(
+            """
             SELECT * FROM sso_sessions
             WHERE session_token = ? AND expires_at > ?
-        ''', (session_token, datetime.utcnow()))
+        """,
+            (session_token, datetime.utcnow()),
+        )
 
         if not row:
             return None
@@ -593,10 +603,7 @@ class SSOManager:
         try:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute(
-                    'DELETE FROM sso_sessions WHERE session_token = ?',
-                    (session_token,)
-                )
+                cursor.execute("DELETE FROM sso_sessions WHERE session_token = ?", (session_token,))
                 conn.commit()
                 return True
 
@@ -610,8 +617,7 @@ class SSOManager:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    'DELETE FROM sso_sessions WHERE expires_at < ?',
-                    (datetime.utcnow(),)
+                    "DELETE FROM sso_sessions WHERE expires_at < ?", (datetime.utcnow(),)
                 )
                 deleted = cursor.rowcount
                 conn.commit()
@@ -622,11 +628,7 @@ class SSOManager:
             return 0
 
     def _store_auth_state(
-        self,
-        state: str,
-        code_verifier: str,
-        provider_name: str,
-        nonce: Optional[str] = None
+        self, state: str, code_verifier: str, provider_name: str, nonce: Optional[str] = None
     ) -> None:
         """Store authentication state for verification."""
         # In production, use Redis with TTL
@@ -634,7 +636,8 @@ class SSOManager:
         try:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute('''
+                cursor.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS sso_auth_states (
                         state TEXT PRIMARY KEY,
                         code_verifier TEXT NOT NULL,
@@ -642,11 +645,15 @@ class SSOManager:
                         nonce TEXT,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
-                ''')
-                cursor.execute('''
+                """
+                )
+                cursor.execute(
+                    """
                     INSERT INTO sso_auth_states (state, code_verifier, provider_name, nonce)
                     VALUES (?, ?, ?, ?)
-                ''', (state, code_verifier, provider_name, nonce))
+                """,
+                    (state, code_verifier, provider_name, nonce),
+                )
                 conn.commit()
 
         except Exception as e:
@@ -655,10 +662,7 @@ class SSOManager:
     def _get_auth_state(self, state: str) -> Optional[Dict[str, Any]]:
         """Get authentication state."""
         try:
-            row = self.db.fetch_one(
-                'SELECT * FROM sso_auth_states WHERE state = ?',
-                (state,)
-            )
+            row = self.db.fetch_one("SELECT * FROM sso_auth_states WHERE state = ?", (state,))
             return dict(row) if row else None
 
         except Exception as e:
@@ -670,10 +674,7 @@ class SSOManager:
         try:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute(
-                    'DELETE FROM sso_auth_states WHERE state = ?',
-                    (state,)
-                )
+                cursor.execute("DELETE FROM sso_auth_states WHERE state = ?", (state,))
                 conn.commit()
 
         except Exception as e:

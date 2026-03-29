@@ -18,31 +18,34 @@ logger = logging.getLogger(__name__)
 
 class RiskLevel(Enum):
     """Risk level for filtered content."""
-    LOW = 'low'
-    MEDIUM = 'medium'
-    HIGH = 'high'
-    CRITICAL = 'critical'
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
 
 
 class ContentType(Enum):
     """Types of sensitive content."""
-    PII_EMAIL = 'pii_email'
-    PII_PHONE = 'pii_phone'
-    PII_SSN = 'pii_ssn'
-    PII_CREDIT_CARD = 'pii_credit_card'
-    PII_ADDRESS = 'pii_address'
-    PII_PASSPORT = 'pii_passport'
-    PII_DRIVER_LICENSE = 'pii_driver_license'
-    SENSITIVE_KEYWORD = 'sensitive_keyword'
-    PROFANITY = 'profanity'
-    CUSTOM_PATTERN = 'custom_pattern'
+
+    PII_EMAIL = "pii_email"
+    PII_PHONE = "pii_phone"
+    PII_SSN = "pii_ssn"
+    PII_CREDIT_CARD = "pii_credit_card"
+    PII_ADDRESS = "pii_address"
+    PII_PASSPORT = "pii_passport"
+    PII_DRIVER_LICENSE = "pii_driver_license"
+    SENSITIVE_KEYWORD = "sensitive_keyword"
+    PROFANITY = "profanity"
+    CUSTOM_PATTERN = "custom_pattern"
 
 
 @dataclass
 class FilterResult:
     """Result of content filtering."""
+
     passed: bool
-    risk_level: str = 'low'
+    risk_level: str = "low"
     matched_rules: List[Dict[str, Any]] = field(default_factory=list)
     redacted_content: Optional[str] = None
     suggestion: Optional[str] = None
@@ -51,24 +54,28 @@ class FilterResult:
     def to_dict(self) -> dict:
         """Convert to dictionary."""
         return {
-            'passed': self.passed,
-            'risk_level': self.risk_level,
-            'matched_rules': self.matched_rules,
-            'redacted_content': self.redacted_content,
-            'suggestion': self.suggestion,
-            'timestamp': self.timestamp.isoformat() if self.timestamp else None,
+            "passed": self.passed,
+            "risk_level": self.risk_level,
+            "matched_rules": self.matched_rules,
+            "redacted_content": self.redacted_content,
+            "suggestion": self.suggestion,
+            "timestamp": self.timestamp.isoformat() if self.timestamp else None,
         }
 
 
 # Predefined redaction templates for performance
 REDACTION_TEMPLATES = {
-    'pii_email': lambda m: f"{m.group().split('@')[0][0]}***@{m.group().split('@')[1]}" if '@' in m.group() else '*' * len(m.group()),
-    'pii_phone_us': lambda m: m.group()[:3] + '-***-****',
-    'pii_phone_intl': lambda m: m.group()[:3] + '-***-****',
-    'pii_ssn': lambda m: '***-**-****',
-    'pii_credit_card': lambda m: '****-****-****-****',
-    'pii_credit_card_amex': lambda m: '****-****-****-****',
-    'default': lambda m: '*' * len(m.group()),
+    "pii_email": lambda m: (
+        f"{m.group().split('@')[0][0]}***@{m.group().split('@')[1]}"
+        if "@" in m.group()
+        else "*" * len(m.group())
+    ),
+    "pii_phone_us": lambda m: m.group()[:3] + "-***-****",
+    "pii_phone_intl": lambda m: m.group()[:3] + "-***-****",
+    "pii_ssn": lambda m: "***-**-****",
+    "pii_credit_card": lambda m: "****-****-****-****",
+    "pii_credit_card_amex": lambda m: "****-****-****-****",
+    "default": lambda m: "*" * len(m.group()),
 }
 
 
@@ -85,35 +92,35 @@ class ContentFilter:
 
     # Default PII patterns
     DEFAULT_PII_PATTERNS = {
-        'pii_email': r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}',
-        'pii_phone_us': r'\b(\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b',
-        'pii_phone_intl': r'\b\+?[1-9]\d{1,3}[-.\s]?\d{1,14}\b',
-        'pii_ssn': r'\b\d{3}-\d{2}-\d{4}\b',
-        'pii_credit_card': r'\b(?:\d{4}[-\s]?){3}\d{4}\b',
-        'pii_credit_card_amex': r'\b\d{4}[-\s]?\d{6}[-\s]?\d{5}\b',
-        'pii_zip_us': r'\b\d{5}(-\d{4})?\b',
-        'pii_ip_v4': r'\b(?:\d{1,3}\.){3}\d{1,3}\b',
-        'pii_ip_v6': r'\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b',
+        "pii_email": r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
+        "pii_phone_us": r"\b(\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b",
+        "pii_phone_intl": r"\b\+?[1-9]\d{1,3}[-.\s]?\d{1,14}\b",
+        "pii_ssn": r"\b\d{3}-\d{2}-\d{4}\b",
+        "pii_credit_card": r"\b(?:\d{4}[-\s]?){3}\d{4}\b",
+        "pii_credit_card_amex": r"\b\d{4}[-\s]?\d{6}[-\s]?\d{5}\b",
+        "pii_zip_us": r"\b\d{5}(-\d{4})?\b",
+        "pii_ip_v4": r"\b(?:\d{1,3}\.){3}\d{1,3}\b",
+        "pii_ip_v6": r"\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b",
     }
 
     # Default sensitive keywords (can be customized)
     DEFAULT_SENSITIVE_KEYWORDS = [
-        'password',
-        'secret',
-        'api_key',
-        'apikey',
-        'access_token',
-        'auth_token',
-        'private_key',
-        'ssh_key',
-        'credential',
+        "password",
+        "secret",
+        "api_key",
+        "apikey",
+        "access_token",
+        "auth_token",
+        "private_key",
+        "ssh_key",
+        "credential",
     ]
 
     def __init__(
         self,
         config: Optional[Dict[str, Any]] = None,
         custom_patterns: Optional[Dict[str, str]] = None,
-        custom_keywords: Optional[List[str]] = None
+        custom_keywords: Optional[List[str]] = None,
     ):
         """
         Initialize content filter.
@@ -128,10 +135,10 @@ class ContentFilter:
             custom_keywords: Additional keywords to detect.
         """
         self.config = config or {}
-        self.enabled = self.config.get('enabled', True)
-        self.redact_pii = self.config.get('redact_pii', True)
-        self.block_high_risk = self.config.get('block_high_risk', True)
-        self.log_matches = self.config.get('log_matches', True)
+        self.enabled = self.config.get("enabled", True)
+        self.redact_pii = self.config.get("redact_pii", True)
+        self.block_high_risk = self.config.get("block_high_risk", True)
+        self.log_matches = self.config.get("log_matches", True)
 
         # Compile patterns
         self.patterns = dict(self.DEFAULT_PII_PATTERNS)
@@ -139,8 +146,7 @@ class ContentFilter:
             self.patterns.update(custom_patterns)
 
         self.compiled_patterns = {
-            name: re.compile(pattern, re.IGNORECASE)
-            for name, pattern in self.patterns.items()
+            name: re.compile(pattern, re.IGNORECASE) for name, pattern in self.patterns.items()
         }
 
         # Keywords
@@ -150,23 +156,19 @@ class ContentFilter:
 
         # Risk level mapping
         self.risk_mapping = {
-            'pii_ssn': 'critical',
-            'pii_credit_card': 'critical',
-            'pii_credit_card_amex': 'critical',
-            'pii_passport': 'critical',
-            'pii_driver_license': 'high',
-            'pii_email': 'medium',
-            'pii_phone_us': 'medium',
-            'pii_phone_intl': 'medium',
-            'sensitive_keyword': 'high',
-            'custom_pattern': 'medium',
+            "pii_ssn": "critical",
+            "pii_credit_card": "critical",
+            "pii_credit_card_amex": "critical",
+            "pii_passport": "critical",
+            "pii_driver_license": "high",
+            "pii_email": "medium",
+            "pii_phone_us": "medium",
+            "pii_phone_intl": "medium",
+            "sensitive_keyword": "high",
+            "custom_pattern": "medium",
         }
 
-    def check_content(
-        self,
-        content: str,
-        context: Optional[Dict[str, Any]] = None
-    ) -> FilterResult:
+    def check_content(self, content: str, context: Optional[Dict[str, Any]] = None) -> FilterResult:
         """
         Check content for sensitive information.
 
@@ -178,34 +180,36 @@ class ContentFilter:
             FilterResult: Result of the filtering check.
         """
         if not self.enabled:
-            return FilterResult(passed=True, risk_level='low')
+            return FilterResult(passed=True, risk_level="low")
 
         if not content:
-            return FilterResult(passed=True, risk_level='low')
+            return FilterResult(passed=True, risk_level="low")
 
         matched_rules = []
-        overall_risk = 'low'
+        overall_risk = "low"
         redacted = content
 
         # Check PII patterns
         for pattern_name, compiled_pattern in self.compiled_patterns.items():
             matches = compiled_pattern.findall(content)
             if matches:
-                risk = self.risk_mapping.get(pattern_name, 'medium')
-                matched_rules.append({
-                    'type': pattern_name,
-                    'count': len(matches),
-                    'risk': risk,
-                    'sample': matches[0] if matches else None,
-                })
+                risk = self.risk_mapping.get(pattern_name, "medium")
+                matched_rules.append(
+                    {
+                        "type": pattern_name,
+                        "count": len(matches),
+                        "risk": risk,
+                        "sample": matches[0] if matches else None,
+                    }
+                )
 
                 # Update overall risk
-                if risk == 'critical':
-                    overall_risk = 'critical'
-                elif risk == 'high' and overall_risk not in ['critical']:
-                    overall_risk = 'high'
-                elif risk == 'medium' and overall_risk not in ['critical', 'high']:
-                    overall_risk = 'medium'
+                if risk == "critical":
+                    overall_risk = "critical"
+                elif risk == "high" and overall_risk not in ["critical"]:
+                    overall_risk = "high"
+                elif risk == "medium" and overall_risk not in ["critical", "high"]:
+                    overall_risk = "medium"
 
                 # Redact if enabled
                 if self.redact_pii:
@@ -214,19 +218,21 @@ class ContentFilter:
         # Check sensitive keywords
         keyword_matches = self._check_keywords(content)
         if keyword_matches:
-            matched_rules.append({
-                'type': 'sensitive_keyword',
-                'count': len(keyword_matches),
-                'risk': 'high',
-                'keywords': list(keyword_matches),
-            })
+            matched_rules.append(
+                {
+                    "type": "sensitive_keyword",
+                    "count": len(keyword_matches),
+                    "risk": "high",
+                    "keywords": list(keyword_matches),
+                }
+            )
 
-            if overall_risk not in ['critical']:
-                overall_risk = 'high'
+            if overall_risk not in ["critical"]:
+                overall_risk = "high"
 
         # Determine if passed
         passed = True
-        if self.block_high_risk and overall_risk in ['high', 'critical']:
+        if self.block_high_risk and overall_risk in ["high", "critical"]:
             passed = False
 
         # Log if enabled
@@ -260,15 +266,10 @@ class ContentFilter:
 
         return found
 
-    def _redact_matches(
-        self,
-        content: str,
-        pattern: re.Pattern,
-        pattern_name: str
-    ) -> str:
+    def _redact_matches(self, content: str, pattern: re.Pattern, pattern_name: str) -> str:
         """Redact matched patterns in content using predefined templates."""
         # Use predefined template for better performance
-        redact_func = REDACTION_TEMPLATES.get(pattern_name, REDACTION_TEMPLATES['default'])
+        redact_func = REDACTION_TEMPLATES.get(pattern_name, REDACTION_TEMPLATES["default"])
         return pattern.sub(redact_func, content)
 
     def _generate_suggestion(self, matched_rules: List[Dict]) -> str:
@@ -276,24 +277,24 @@ class ContentFilter:
         suggestions = []
 
         for rule in matched_rules:
-            rule_type = rule.get('type', '')
-            if 'email' in rule_type:
-                suggestions.append('Remove or mask email addresses')
-            elif 'phone' in rule_type:
-                suggestions.append('Remove or mask phone numbers')
-            elif 'ssn' in rule_type:
-                suggestions.append('Remove Social Security Numbers')
-            elif 'credit_card' in rule_type:
-                suggestions.append('Remove credit card numbers')
-            elif 'keyword' in rule_type:
-                suggestions.append('Remove sensitive keywords or credentials')
+            rule_type = rule.get("type", "")
+            if "email" in rule_type:
+                suggestions.append("Remove or mask email addresses")
+            elif "phone" in rule_type:
+                suggestions.append("Remove or mask phone numbers")
+            elif "ssn" in rule_type:
+                suggestions.append("Remove Social Security Numbers")
+            elif "credit_card" in rule_type:
+                suggestions.append("Remove credit card numbers")
+            elif "keyword" in rule_type:
+                suggestions.append("Remove sensitive keywords or credentials")
 
         if suggestions:
-            return 'Suggestions: ' + '; '.join(set(suggestions))
+            return "Suggestions: " + "; ".join(set(suggestions))
 
-        return 'Please review and remove sensitive information before proceeding.'
+        return "Please review and remove sensitive information before proceeding."
 
-    def add_custom_pattern(self, name: str, pattern: str, risk: str = 'medium') -> None:
+    def add_custom_pattern(self, name: str, pattern: str, risk: str = "medium") -> None:
         """
         Add a custom pattern to detect.
 
@@ -318,10 +319,10 @@ class ContentFilter:
     def get_stats(self) -> Dict[str, Any]:
         """Get filter statistics."""
         return {
-            'enabled': self.enabled,
-            'redact_pii': self.redact_pii,
-            'block_high_risk': self.block_high_risk,
-            'pattern_count': len(self.patterns),
-            'keyword_count': len(self.keywords),
-            'patterns': list(self.patterns.keys()),
+            "enabled": self.enabled,
+            "redact_pii": self.redact_pii,
+            "block_high_risk": self.block_high_risk,
+            "pattern_count": len(self.patterns),
+            "keyword_count": len(self.keywords),
+            "patterns": list(self.patterns.keys()),
         }

@@ -13,8 +13,7 @@ from werkzeug.exceptions import HTTPException
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -29,22 +28,20 @@ def create_app(config=None):
     Returns:
         Flask application instance.
     """
-    app = Flask(__name__,
-                static_folder='../static',
-                template_folder='../templates')
+    app = Flask(__name__, static_folder="../static", template_folder="../templates")
 
     # Load configuration
-    app.config['TEMPLATES_AUTO_RELOAD'] = True
+    app.config["TEMPLATES_AUTO_RELOAD"] = True
 
     # SECRET_KEY configuration with security checks
-    secret_key = os.environ.get('SECRET_KEY')
+    secret_key = os.environ.get("SECRET_KEY")
     if not secret_key:
-        flask_env = os.environ.get('FLASK_ENV', 'development')
-        if flask_env == 'production':
+        flask_env = os.environ.get("FLASK_ENV", "development")
+        if flask_env == "production":
             raise RuntimeError("SECRET_KEY environment variable must be set in production!")
-        secret_key = 'dev-secret-key'
+        secret_key = "dev-secret-key"
         logger.warning("Using development SECRET_KEY - DO NOT use in production!")
-    app.config['SECRET_KEY'] = secret_key
+    app.config["SECRET_KEY"] = secret_key
 
     if config:
         if isinstance(config, dict):
@@ -59,15 +56,12 @@ def create_app(config=None):
     register_blueprints(app)
 
     # Health check endpoint
-    @app.route('/health')
+    @app.route("/health")
     def health_check():
         """Health check endpoint for Docker and load balancers."""
         from app.utils.version import get_git_commit
-        return jsonify({
-            'status': 'healthy',
-            'service': 'open-ace',
-            'version': get_git_commit()
-        })
+
+        return jsonify({"status": "healthy", "service": "open-ace", "version": get_git_commit()})
 
     # Start background services
     start_background_services()
@@ -82,16 +76,16 @@ def register_error_handlers(app):
     @app.errorhandler(HTTPException)
     def handle_http_exception(e):
         """Handle all HTTP exceptions and return JSON for API routes."""
-        if request.path.startswith('/api/'):
-            return jsonify({'error': e.description}), e.code
+        if request.path.startswith("/api/"):
+            return jsonify({"error": e.description}), e.code
         return e.get_response()
 
     @app.errorhandler(Exception)
     def handle_generic_exception(e):
         """Handle unexpected exceptions."""
         logger.exception("Unexpected error occurred")
-        if request.path.startswith('/api/'):
-            return jsonify({'error': 'Internal server error'}), 500
+        if request.path.startswith("/api/"):
+            return jsonify({"error": "Internal server error"}), 500
         raise e
 
 
@@ -115,22 +109,22 @@ def register_blueprints(app):
     from app.routes.usage import usage_bp
     from app.routes.workspace import workspace_bp
 
-    app.register_blueprint(usage_bp, url_prefix='/api')
-    app.register_blueprint(messages_bp, url_prefix='/api')
-    app.register_blueprint(analysis_bp, url_prefix='/api')
-    app.register_blueprint(auth_bp, url_prefix='/api')
-    app.register_blueprint(admin_bp, url_prefix='/api')
-    app.register_blueprint(upload_bp, url_prefix='/api')
-    app.register_blueprint(fetch_bp, url_prefix='/api')
-    app.register_blueprint(report_bp, url_prefix='/api')
-    app.register_blueprint(governance_bp, url_prefix='/api')
-    app.register_blueprint(analytics_bp, url_prefix='/api')
-    app.register_blueprint(workspace_bp, url_prefix='/api/workspace')
-    app.register_blueprint(tenant_bp, url_prefix='/api')
-    app.register_blueprint(sso_bp, url_prefix='/api')
-    app.register_blueprint(compliance_bp, url_prefix='/api')
-    app.register_blueprint(alerts_bp, url_prefix='/api')
-    app.register_blueprint(roi_bp, url_prefix='/api')
+    app.register_blueprint(usage_bp, url_prefix="/api")
+    app.register_blueprint(messages_bp, url_prefix="/api")
+    app.register_blueprint(analysis_bp, url_prefix="/api")
+    app.register_blueprint(auth_bp, url_prefix="/api")
+    app.register_blueprint(admin_bp, url_prefix="/api")
+    app.register_blueprint(upload_bp, url_prefix="/api")
+    app.register_blueprint(fetch_bp, url_prefix="/api")
+    app.register_blueprint(report_bp, url_prefix="/api")
+    app.register_blueprint(governance_bp, url_prefix="/api")
+    app.register_blueprint(analytics_bp, url_prefix="/api")
+    app.register_blueprint(workspace_bp, url_prefix="/api/workspace")
+    app.register_blueprint(tenant_bp, url_prefix="/api")
+    app.register_blueprint(sso_bp, url_prefix="/api")
+    app.register_blueprint(compliance_bp, url_prefix="/api")
+    app.register_blueprint(alerts_bp, url_prefix="/api")
+    app.register_blueprint(roi_bp, url_prefix="/api")
     app.register_blueprint(pages_bp)
 
     logger.info("All blueprints registered")
@@ -140,6 +134,7 @@ def start_background_services():
     """Start background services like data fetch scheduler."""
     try:
         from app.services.data_fetch_scheduler import init_scheduler
+
         init_scheduler()
         logger.info("Background services started")
     except Exception as e:

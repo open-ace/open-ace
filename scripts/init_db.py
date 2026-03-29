@@ -19,8 +19,9 @@ if script_dir not in sys.path:
 from shared import db
 
 
-def create_default_admin(username: str = 'admin', password: str = 'admin123',
-                         email: str = 'admin@localhost') -> bool:
+def create_default_admin(
+    username: str = "admin", password: str = "admin123", email: str = "admin@localhost"
+) -> bool:
     """Create a default admin user with forced password change on first login."""
     # Hash password using bcrypt
     password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
@@ -36,11 +37,11 @@ def create_default_admin(username: str = 'admin', password: str = 'admin123',
         username=username,
         password_hash=password_hash,
         email=email,
-        role='admin',
+        role="admin",
         daily_token_quota=10000000,  # 10M tokens
         daily_request_quota=10000,
         is_active=1,
-        must_change_password=True  # Force password change on first login
+        must_change_password=True,  # Force password change on first login
     )
 
     if result:
@@ -71,5 +72,5 @@ def main():
     print("\nPlease change the default password after first login!")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

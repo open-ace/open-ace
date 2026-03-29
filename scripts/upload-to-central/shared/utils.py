@@ -39,6 +39,7 @@ def parse_date(date_str: str) -> Optional[str]:
         return None
     try:
         from datetime import datetime
+
         datetime.strptime(date_str, "%Y-%m-%d")
         return date_str
     except ValueError:
@@ -60,8 +61,8 @@ def load_config(config_path: str = None) -> Dict:
             config = json.load(f)
 
     # If host_name is not set in config, use system hostname
-    if not config.get('host_name'):
-        config['host_name'] = platform.node()
+    if not config.get("host_name"):
+        config["host_name"] = platform.node()
 
     return config
 
@@ -75,38 +76,40 @@ def save_config(config: Dict, config_path: str = None) -> None:
         config_path = CONFIG_PATH
 
     os.makedirs(os.path.dirname(config_path), exist_ok=True)
-    with open(config_path, 'w') as f:
+    with open(config_path, "w") as f:
         json.dump(config, f, indent=2)
 
 
 def get_today() -> str:
     """Get today's date in YYYY-MM-DD format."""
     from datetime import datetime
+
     return datetime.now().strftime("%Y-%m-%d")
 
 
 def get_days_ago(days: int) -> str:
     """Get the date that was 'days' days ago."""
     from datetime import datetime, timedelta
+
     return (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
 
 def aggregate_daily_stats(entries: List[Dict]) -> Dict:
     """Aggregate daily statistics from multiple entries."""
-    total = sum(e.get('tokens_used', 0) for e in entries)
-    input_total = sum(e.get('input_tokens', 0) for e in entries)
-    output_total = sum(e.get('output_tokens', 0) for e in entries)
-    cache_total = sum(e.get('cache_tokens', 0) for e in entries)
+    total = sum(e.get("tokens_used", 0) for e in entries)
+    input_total = sum(e.get("input_tokens", 0) for e in entries)
+    output_total = sum(e.get("output_tokens", 0) for e in entries)
+    cache_total = sum(e.get("cache_tokens", 0) for e in entries)
 
     all_models = set()
     for e in entries:
-        if e.get('models_used'):
-            all_models.update(e['models_used'])
+        if e.get("models_used"):
+            all_models.update(e["models_used"])
 
     return {
-        'total_tokens': total,
-        'input_tokens': input_total,
-        'output_tokens': output_total,
-        'cache_tokens': cache_total,
-        'models': sorted(all_models)
+        "total_tokens": total,
+        "input_tokens": input_total,
+        "output_tokens": output_total,
+        "cache_tokens": cache_total,
+        "models": sorted(all_models),
     }

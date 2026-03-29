@@ -22,27 +22,29 @@ logger = logging.getLogger(__name__)
 
 class PromptCategory(Enum):
     """Prompt template categories."""
-    GENERAL = 'general'
-    CODING = 'coding'
-    WRITING = 'writing'
-    ANALYSIS = 'analysis'
-    TRANSLATION = 'translation'
-    SUMMARIZATION = 'summarization'
-    CUSTOM = 'custom'
+
+    GENERAL = "general"
+    CODING = "coding"
+    WRITING = "writing"
+    ANALYSIS = "analysis"
+    TRANSLATION = "translation"
+    SUMMARIZATION = "summarization"
+    CUSTOM = "custom"
 
 
 @dataclass
 class PromptTemplate:
     """Prompt template data model."""
+
     id: Optional[int] = None
-    name: str = ''
-    description: str = ''
+    name: str = ""
+    description: str = ""
     category: str = PromptCategory.GENERAL.value
-    content: str = ''
+    content: str = ""
     variables: List[Dict[str, str]] = field(default_factory=list)
     tags: List[str] = field(default_factory=list)
     author_id: Optional[int] = None
-    author_name: str = ''
+    author_name: str = ""
     is_public: bool = False
     is_featured: bool = False
     use_count: int = 0
@@ -52,58 +54,62 @@ class PromptTemplate:
     def to_dict(self) -> dict:
         """Convert to dictionary."""
         return {
-            'id': self.id,
-            'name': self.name,
-            'description': self.description,
-            'category': self.category,
-            'content': self.content,
-            'variables': self.variables,
-            'tags': self.tags,
-            'author_id': self.author_id,
-            'author_name': self.author_name,
-            'is_public': self.is_public,
-            'is_featured': self.is_featured,
-            'use_count': self.use_count,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "category": self.category,
+            "content": self.content,
+            "variables": self.variables,
+            "tags": self.tags,
+            "author_id": self.author_id,
+            "author_name": self.author_name,
+            "is_public": self.is_public,
+            "is_featured": self.is_featured,
+            "use_count": self.use_count,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> 'PromptTemplate':
+    def from_dict(cls, data: dict) -> "PromptTemplate":
         """Create from dictionary."""
         return cls(
-            id=data.get('id'),
-            name=data.get('name', ''),
-            description=data.get('description', ''),
-            category=data.get('category', PromptCategory.GENERAL.value),
-            content=data.get('content', ''),
-            variables=data.get('variables', []),
-            tags=data.get('tags', []),
-            author_id=data.get('author_id'),
-            author_name=data.get('author_name', ''),
-            is_public=data.get('is_public', False),
-            is_featured=data.get('is_featured', False),
-            use_count=data.get('use_count', 0),
-            created_at=datetime.fromisoformat(data['created_at']) if data.get('created_at') else None,
-            updated_at=datetime.fromisoformat(data['updated_at']) if data.get('updated_at') else None,
+            id=data.get("id"),
+            name=data.get("name", ""),
+            description=data.get("description", ""),
+            category=data.get("category", PromptCategory.GENERAL.value),
+            content=data.get("content", ""),
+            variables=data.get("variables", []),
+            tags=data.get("tags", []),
+            author_id=data.get("author_id"),
+            author_name=data.get("author_name", ""),
+            is_public=data.get("is_public", False),
+            is_featured=data.get("is_featured", False),
+            use_count=data.get("use_count", 0),
+            created_at=(
+                datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None
+            ),
+            updated_at=(
+                datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else None
+            ),
         )
 
     def render(self, **kwargs) -> str:
         """Render the prompt template with provided variables."""
         result = self.content
         for var in self.variables:
-            var_name = var.get('name', '')
-            var_default = var.get('default', '')
+            var_name = var.get("name", "")
+            var_default = var.get("default", "")
             value = kwargs.get(var_name, var_default)
-            result = result.replace(f'{{{var_name}}}', str(value))
+            result = result.replace(f"{{{var_name}}}", str(value))
         return result
 
     def validate_variables(self, **kwargs) -> List[str]:
         """Validate that all required variables are provided."""
         missing = []
         for var in self.variables:
-            var_name = var.get('name', '')
-            var_required = var.get('required', False)
+            var_name = var.get("name", "")
+            var_required = var.get("required", False)
             if var_required and var_name not in kwargs:
                 missing.append(var_name)
         return missing
@@ -128,6 +134,7 @@ class PromptLibrary:
             try:
                 import psycopg2
                 from psycopg2.extras import RealDictCursor
+
                 url = get_database_url()
                 conn = psycopg2.connect(url)
                 conn.cursor_factory = RealDictCursor
@@ -151,7 +158,8 @@ class PromptLibrary:
         id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
 
         # Create prompt_templates table
-        cursor.execute(f'''
+        cursor.execute(
+            f"""
             CREATE TABLE IF NOT EXISTS prompt_templates (
                 id {id_type},
                 name TEXT NOT NULL,
@@ -168,21 +176,28 @@ class PromptLibrary:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-        ''')
+        """
+        )
 
         # Create index for faster queries
-        cursor.execute('''
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_prompt_templates_category
             ON prompt_templates(category)
-        ''')
-        cursor.execute('''
+        """
+        )
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_prompt_templates_author
             ON prompt_templates(author_id)
-        ''')
-        cursor.execute('''
+        """
+        )
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_prompt_templates_public
             ON prompt_templates(is_public)
-        ''')
+        """
+        )
 
         conn.commit()
         conn.close()
@@ -201,56 +216,62 @@ class PromptLibrary:
         cursor = conn.cursor()
 
         now = datetime.utcnow().isoformat()
-        
+
         if is_postgresql():
             # PostgreSQL: use RETURNING clause
-            cursor.execute('''
+            cursor.execute(
+                """
                 INSERT INTO prompt_templates
                 (name, description, category, content, variables, tags, author_id,
                  author_name, is_public, is_featured, use_count, created_at, updated_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
-            ''', (
-                template.name,
-                template.description,
-                template.category,
-                template.content,
-                json.dumps(template.variables),
-                json.dumps(template.tags),
-                template.author_id,
-                template.author_name,
-                1 if template.is_public else 0,
-                1 if template.is_featured else 0,
-                template.use_count,
-                now,
-                now
-            ))
+            """,
+                (
+                    template.name,
+                    template.description,
+                    template.category,
+                    template.content,
+                    json.dumps(template.variables),
+                    json.dumps(template.tags),
+                    template.author_id,
+                    template.author_name,
+                    1 if template.is_public else 0,
+                    1 if template.is_featured else 0,
+                    template.use_count,
+                    now,
+                    now,
+                ),
+            )
             row = cursor.fetchone()
-            template_id = row['id'] if row else None
+            template_id = row["id"] if row else None
         else:
             # SQLite: use lastrowid
-            cursor.execute('''
+            cursor.execute(
+                """
                 INSERT INTO prompt_templates
                 (name, description, category, content, variables, tags, author_id,
                  author_name, is_public, is_featured, use_count, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                template.name,
-                template.description,
-                template.category,
-                template.content,
-                json.dumps(template.variables),
-                json.dumps(template.tags),
-                template.author_id,
-                template.author_name,
-                1 if template.is_public else 0,
-                1 if template.is_featured else 0,
-                template.use_count,
-                now,
-                now
-            ))
+            """,
+                (
+                    template.name,
+                    template.description,
+                    template.category,
+                    template.content,
+                    json.dumps(template.variables),
+                    json.dumps(template.tags),
+                    template.author_id,
+                    template.author_name,
+                    1 if template.is_public else 0,
+                    1 if template.is_featured else 0,
+                    template.use_count,
+                    now,
+                    now,
+                ),
+            )
             template_id = cursor.lastrowid
-        
+
         conn.commit()
         conn.close()
 
@@ -270,7 +291,7 @@ class PromptLibrary:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        cursor.execute(adapt_sql('SELECT * FROM prompt_templates WHERE id = ?'), (template_id,))
+        cursor.execute(adapt_sql("SELECT * FROM prompt_templates WHERE id = ?"), (template_id,))
         row = cursor.fetchone()
         conn.close()
 
@@ -295,24 +316,29 @@ class PromptLibrary:
         cursor = conn.cursor()
 
         now = datetime.utcnow().isoformat()
-        cursor.execute(adapt_sql('''
+        cursor.execute(
+            adapt_sql(
+                """
             UPDATE prompt_templates
             SET name = ?, description = ?, category = ?, content = ?,
                 variables = ?, tags = ?, is_public = ?, is_featured = ?,
                 updated_at = ?
             WHERE id = ?
-        '''), (
-            template.name,
-            template.description,
-            template.category,
-            template.content,
-            json.dumps(template.variables),
-            json.dumps(template.tags),
-            1 if template.is_public else 0,
-            1 if template.is_featured else 0,
-            now,
-            template.id
-        ))
+        """
+            ),
+            (
+                template.name,
+                template.description,
+                template.category,
+                template.content,
+                json.dumps(template.variables),
+                json.dumps(template.tags),
+                1 if template.is_public else 0,
+                1 if template.is_featured else 0,
+                now,
+                template.id,
+            ),
+        )
 
         success = cursor.rowcount > 0
         conn.commit()
@@ -337,10 +363,12 @@ class PromptLibrary:
         cursor = conn.cursor()
 
         if user_id is not None:
-            cursor.execute(adapt_sql('DELETE FROM prompt_templates WHERE id = ? AND author_id = ?'),
-                          (template_id, user_id))
+            cursor.execute(
+                adapt_sql("DELETE FROM prompt_templates WHERE id = ? AND author_id = ?"),
+                (template_id, user_id),
+            )
         else:
-            cursor.execute(adapt_sql('DELETE FROM prompt_templates WHERE id = ?'), (template_id,))
+            cursor.execute(adapt_sql("DELETE FROM prompt_templates WHERE id = ?"), (template_id,))
 
         success = cursor.rowcount > 0
         conn.commit()
@@ -358,7 +386,7 @@ class PromptLibrary:
         search: Optional[str] = None,
         tags: Optional[List[str]] = None,
         page: int = 1,
-        limit: int = 20
+        limit: int = 20,
     ) -> Dict[str, Any]:
         """
         List prompt templates with filters.
@@ -383,42 +411,50 @@ class PromptLibrary:
         params = []
 
         if user_id is not None and include_public:
-            conditions.append('(author_id = ? OR is_public = 1)')
+            conditions.append("(author_id = ? OR is_public = 1)")
             params.append(user_id)
         elif user_id is not None:
-            conditions.append('author_id = ?')
+            conditions.append("author_id = ?")
             params.append(user_id)
         elif include_public:
-            conditions.append('is_public = 1')
+            conditions.append("is_public = 1")
 
         if category:
-            conditions.append('category = ?')
+            conditions.append("category = ?")
             params.append(category)
 
         if search:
-            conditions.append('(name LIKE ? OR description LIKE ?)')
-            params.extend([f'%{search}%', f'%{search}%'])
+            conditions.append("(name LIKE ? OR description LIKE ?)")
+            params.extend([f"%{search}%", f"%{search}%"])
 
         if tags:
             for tag in tags:
-                conditions.append('tags LIKE ?')
-                params.append(f'%{tag}%')
+                conditions.append("tags LIKE ?")
+                params.append(f"%{tag}%")
 
-        where_clause = ' AND '.join(conditions) if conditions else '1=1'
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
 
         # Get total count
-        cursor.execute(adapt_sql(f'SELECT COUNT(*) as count FROM prompt_templates WHERE {where_clause}'), params)
-        total = cursor.fetchone()['count']
+        cursor.execute(
+            adapt_sql(f"SELECT COUNT(*) as count FROM prompt_templates WHERE {where_clause}"),
+            params,
+        )
+        total = cursor.fetchone()["count"]
         total_pages = (total + limit - 1) // limit if total > 0 else 1
 
         # Get paginated results
         offset = (page - 1) * limit
-        cursor.execute(adapt_sql(f'''
+        cursor.execute(
+            adapt_sql(
+                f"""
             SELECT * FROM prompt_templates
             WHERE {where_clause}
             ORDER BY is_featured DESC, use_count DESC, created_at DESC
             LIMIT ? OFFSET ?
-        '''), params + [limit, offset])
+        """
+            ),
+            params + [limit, offset],
+        )
 
         rows = cursor.fetchall()
         conn.close()
@@ -426,11 +462,11 @@ class PromptLibrary:
         templates = [self._row_to_template(row) for row in rows]
 
         return {
-            'templates': templates,
-            'total': total,
-            'page': page,
-            'limit': limit,
-            'total_pages': total_pages
+            "templates": templates,
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "total_pages": total_pages,
         }
 
     def increment_use_count(self, template_id: int) -> bool:
@@ -446,11 +482,16 @@ class PromptLibrary:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        cursor.execute(adapt_sql('''
+        cursor.execute(
+            adapt_sql(
+                """
             UPDATE prompt_templates
             SET use_count = use_count + 1
             WHERE id = ?
-        '''), (template_id,))
+        """
+            ),
+            (template_id,),
+        )
 
         success = cursor.rowcount > 0
         conn.commit()
@@ -471,12 +512,17 @@ class PromptLibrary:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        cursor.execute(adapt_sql('''
+        cursor.execute(
+            adapt_sql(
+                """
             SELECT * FROM prompt_templates
             WHERE is_featured = 1 AND is_public = 1
             ORDER BY use_count DESC
             LIMIT ?
-        '''), (limit,))
+        """
+            ),
+            (limit,),
+        )
 
         rows = cursor.fetchall()
         conn.close()
@@ -493,18 +539,20 @@ class PromptLibrary:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        cursor.execute('''
+        cursor.execute(
+            """
             SELECT category, COUNT(*) as count
             FROM prompt_templates
             WHERE is_public = 1
             GROUP BY category
             ORDER BY count DESC
-        ''')
+        """
+        )
 
         rows = cursor.fetchall()
         conn.close()
 
-        return [{'category': row['category'], 'count': row['count']} for row in rows]
+        return [{"category": row["category"], "count": row["count"]} for row in rows]
 
     def get_popular_tags(self, limit: int = 20) -> List[Dict[str, Any]]:
         """
@@ -519,10 +567,12 @@ class PromptLibrary:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        cursor.execute('''
+        cursor.execute(
+            """
             SELECT tags FROM prompt_templates
             WHERE is_public = 1 AND tags IS NOT NULL
-        ''')
+        """
+        )
 
         rows = cursor.fetchall()
         conn.close()
@@ -531,7 +581,7 @@ class PromptLibrary:
         tag_counts: Dict[str, int] = {}
         for row in rows:
             try:
-                tags = json.loads(row['tags'])
+                tags = json.loads(row["tags"])
                 for tag in tags:
                     tag_counts[tag] = tag_counts.get(tag, 0) + 1
             except (json.JSONDecodeError, TypeError):
@@ -539,14 +589,14 @@ class PromptLibrary:
 
         # Sort by count and return top tags
         sorted_tags = sorted(tag_counts.items(), key=lambda x: x[1], reverse=True)[:limit]
-        return [{'tag': tag, 'count': count} for tag, count in sorted_tags]
+        return [{"tag": tag, "count": count} for tag, count in sorted_tags]
 
     def _row_to_template(self, row: sqlite3.Row) -> PromptTemplate:
         """Convert a database row to PromptTemplate."""
         # Handle datetime fields - PostgreSQL returns datetime objects, SQLite returns strings
-        created_at_val = row['created_at']
-        updated_at_val = row['updated_at']
-        
+        created_at_val = row["created_at"]
+        updated_at_val = row["updated_at"]
+
         if created_at_val:
             if isinstance(created_at_val, datetime):
                 created_at = created_at_val
@@ -556,7 +606,7 @@ class PromptLibrary:
                 created_at = None
         else:
             created_at = None
-            
+
         if updated_at_val:
             if isinstance(updated_at_val, datetime):
                 updated_at = updated_at_val
@@ -566,20 +616,20 @@ class PromptLibrary:
                 updated_at = None
         else:
             updated_at = None
-        
+
         return PromptTemplate(
-            id=row['id'],
-            name=row['name'],
-            description=row['description'] or '',
-            category=row['category'] or PromptCategory.GENERAL.value,
-            content=row['content'] or '',
-            variables=json.loads(row['variables']) if row['variables'] else [],
-            tags=json.loads(row['tags']) if row['tags'] else [],
-            author_id=row['author_id'],
-            author_name=row['author_name'] or '',
-            is_public=bool(row['is_public']),
-            is_featured=bool(row['is_featured']),
-            use_count=row['use_count'] or 0,
+            id=row["id"],
+            name=row["name"],
+            description=row["description"] or "",
+            category=row["category"] or PromptCategory.GENERAL.value,
+            content=row["content"] or "",
+            variables=json.loads(row["variables"]) if row["variables"] else [],
+            tags=json.loads(row["tags"]) if row["tags"] else [],
+            author_id=row["author_id"],
+            author_name=row["author_name"] or "",
+            is_public=bool(row["is_public"]),
+            is_featured=bool(row["is_featured"]),
+            use_count=row["use_count"] or 0,
             created_at=created_at,
             updated_at=updated_at,
         )
@@ -588,64 +638,113 @@ class PromptLibrary:
         """Seed the library with default prompt templates."""
         default_templates = [
             PromptTemplate(
-                name='Code Review',
-                description='Review code for best practices, bugs, and improvements',
+                name="Code Review",
+                description="Review code for best practices, bugs, and improvements",
                 category=PromptCategory.CODING.value,
-                content='Please review the following code and provide feedback on:\n1. Code quality and readability\n2. Potential bugs or issues\n3. Performance considerations\n4. Best practices and improvements\n\nCode:\n```\n{code}\n```',
-                variables=[{'name': 'code', 'description': 'The code to review', 'required': True, 'default': ''}],
-                tags=['code', 'review', 'quality'],
-                is_public=True,
-                is_featured=True
-            ),
-            PromptTemplate(
-                name='Summarize Text',
-                description='Summarize long text into key points',
-                category=PromptCategory.SUMMARIZATION.value,
-                content='Please summarize the following text into key points. Be concise and capture the main ideas.\n\nText:\n{text}',
-                variables=[{'name': 'text', 'description': 'The text to summarize', 'required': True, 'default': ''}],
-                tags=['summarize', 'text', 'key-points'],
-                is_public=True,
-                is_featured=True
-            ),
-            PromptTemplate(
-                name='Translate',
-                description='Translate text between languages',
-                category=PromptCategory.TRANSLATION.value,
-                content='Please translate the following text from {source_language} to {target_language}:\n\n{text}',
+                content="Please review the following code and provide feedback on:\n1. Code quality and readability\n2. Potential bugs or issues\n3. Performance considerations\n4. Best practices and improvements\n\nCode:\n```\n{code}\n```",
                 variables=[
-                    {'name': 'text', 'description': 'The text to translate', 'required': True, 'default': ''},
-                    {'name': 'source_language', 'description': 'Source language', 'required': True, 'default': 'English'},
-                    {'name': 'target_language', 'description': 'Target language', 'required': True, 'default': 'Chinese'}
+                    {
+                        "name": "code",
+                        "description": "The code to review",
+                        "required": True,
+                        "default": "",
+                    }
                 ],
-                tags=['translate', 'language', 'multilingual'],
+                tags=["code", "review", "quality"],
                 is_public=True,
-                is_featured=True
+                is_featured=True,
             ),
             PromptTemplate(
-                name='Explain Concept',
-                description='Explain a complex concept in simple terms',
+                name="Summarize Text",
+                description="Summarize long text into key points",
+                category=PromptCategory.SUMMARIZATION.value,
+                content="Please summarize the following text into key points. Be concise and capture the main ideas.\n\nText:\n{text}",
+                variables=[
+                    {
+                        "name": "text",
+                        "description": "The text to summarize",
+                        "required": True,
+                        "default": "",
+                    }
+                ],
+                tags=["summarize", "text", "key-points"],
+                is_public=True,
+                is_featured=True,
+            ),
+            PromptTemplate(
+                name="Translate",
+                description="Translate text between languages",
+                category=PromptCategory.TRANSLATION.value,
+                content="Please translate the following text from {source_language} to {target_language}:\n\n{text}",
+                variables=[
+                    {
+                        "name": "text",
+                        "description": "The text to translate",
+                        "required": True,
+                        "default": "",
+                    },
+                    {
+                        "name": "source_language",
+                        "description": "Source language",
+                        "required": True,
+                        "default": "English",
+                    },
+                    {
+                        "name": "target_language",
+                        "description": "Target language",
+                        "required": True,
+                        "default": "Chinese",
+                    },
+                ],
+                tags=["translate", "language", "multilingual"],
+                is_public=True,
+                is_featured=True,
+            ),
+            PromptTemplate(
+                name="Explain Concept",
+                description="Explain a complex concept in simple terms",
                 category=PromptCategory.GENERAL.value,
                 content='Please explain the concept of "{concept}" in simple terms that a {audience} would understand. Include examples if helpful.',
                 variables=[
-                    {'name': 'concept', 'description': 'The concept to explain', 'required': True, 'default': ''},
-                    {'name': 'audience', 'description': 'Target audience level', 'required': False, 'default': 'beginner'}
+                    {
+                        "name": "concept",
+                        "description": "The concept to explain",
+                        "required": True,
+                        "default": "",
+                    },
+                    {
+                        "name": "audience",
+                        "description": "Target audience level",
+                        "required": False,
+                        "default": "beginner",
+                    },
                 ],
-                tags=['explain', 'concept', 'learning'],
+                tags=["explain", "concept", "learning"],
                 is_public=True,
-                is_featured=False
+                is_featured=False,
             ),
             PromptTemplate(
-                name='Write Documentation',
-                description='Generate documentation for code or APIs',
+                name="Write Documentation",
+                description="Generate documentation for code or APIs",
                 category=PromptCategory.WRITING.value,
-                content='Please write documentation for the following {doc_type}:\n\n{content}\n\nInclude:\n- Description\n- Parameters/Arguments\n- Return values\n- Usage examples',
+                content="Please write documentation for the following {doc_type}:\n\n{content}\n\nInclude:\n- Description\n- Parameters/Arguments\n- Return values\n- Usage examples",
                 variables=[
-                    {'name': 'content', 'description': 'The code or API to document', 'required': True, 'default': ''},
-                    {'name': 'doc_type', 'description': 'Type of documentation (function, class, API)', 'required': False, 'default': 'function'}
+                    {
+                        "name": "content",
+                        "description": "The code or API to document",
+                        "required": True,
+                        "default": "",
+                    },
+                    {
+                        "name": "doc_type",
+                        "description": "Type of documentation (function, class, API)",
+                        "required": False,
+                        "default": "function",
+                    },
                 ],
-                tags=['documentation', 'code', 'api'],
+                tags=["documentation", "code", "api"],
                 is_public=True,
-                is_featured=False
+                is_featured=False,
             ),
         ]
 
@@ -653,7 +752,9 @@ class PromptLibrary:
             # Check if template already exists
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute(adapt_sql('SELECT id FROM prompt_templates WHERE name = ?'), (template.name,))
+            cursor.execute(
+                adapt_sql("SELECT id FROM prompt_templates WHERE name = ?"), (template.name,)
+            )
             exists = cursor.fetchone()
             conn.close()
 

@@ -10,13 +10,13 @@ from app.services.usage_service import UsageService
 from app.services.workspace_service import WorkspaceService, get_workspace_service
 
 __all__ = [
-    'UsageService',
-    'MessageService',
-    'AuthService',
-    'AnalysisService',
-    'PermissionService',
-    'Permission',
-    'WorkspaceService',
-    'get_workspace_service',
-    'TenantService',
+    "UsageService",
+    "MessageService",
+    "AuthService",
+    "AnalysisService",
+    "PermissionService",
+    "Permission",
+    "WorkspaceService",
+    "get_workspace_service",
+    "TenantService",
 ]

@@ -12,9 +12,9 @@ from app.modules.sso.oidc import OIDCProvider
 from app.modules.sso.provider import SSOProvider, SSOProviderConfig
 
 __all__ = [
-    'SSOProvider',
-    'SSOProviderConfig',
-    'OAuth2Provider',
-    'OIDCProvider',
-    'SSOManager',
+    "SSOProvider",
+    "SSOProviderConfig",
+    "OAuth2Provider",
+    "OIDCProvider",
+    "SSOManager",
 ]

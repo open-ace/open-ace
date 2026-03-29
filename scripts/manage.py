@@ -27,7 +27,7 @@ from typing import Optional
 
 # Project directories
 DEV_DIR = Path(__file__).parent.parent  # Development directory
-DEPLOY_DIR = Path.home() / "open-ace"   # Deployment directory
+DEPLOY_DIR = Path.home() / "open-ace"  # Deployment directory
 CONFIG_DIR = Path.home() / ".open-ace"  # Configuration directory
 LOG_DIR = DEPLOY_DIR / "logs"
 
@@ -35,11 +35,12 @@ LOG_DIR = DEPLOY_DIR / "logs"
 sys.path.insert(0, str(DEV_DIR / "scripts" / "shared"))
 try:
     import config
+
     WEB_PORT = config.WEB_PORT
     WEB_HOST = config.WEB_HOST
 except ImportError:
-    WEB_PORT = int(os.environ.get('AI_TOKEN_WEB_PORT', '5001'))
-    WEB_HOST = os.environ.get('AI_TOKEN_WEB_HOST', '0.0.0.0')
+    WEB_PORT = int(os.environ.get("AI_TOKEN_WEB_PORT", "5001"))
+    WEB_HOST = os.environ.get("AI_TOKEN_WEB_HOST", "0.0.0.0")
 
 
 def print_header(text: str):
@@ -59,7 +60,9 @@ def print_error(text: str):
     print(f"✗ {text}")
 
 
-def run_command(cmd: str, capture: bool = False, check: bool = True) -> Optional[subprocess.CompletedProcess]:
+def run_command(
+    cmd: str, capture: bool = False, check: bool = True
+) -> Optional[subprocess.CompletedProcess]:
     """Run a shell command."""
     try:
         if capture:
@@ -75,6 +78,7 @@ def run_command(cmd: str, capture: bool = False, check: bool = True) -> Optional
 # Configuration Setup (from setup.py)
 # ============================================================================
 
+
 def get_remote_config() -> dict:
     """Get remote configuration from config file."""
     config_file = CONFIG_DIR / "config.json"
@@ -89,7 +93,7 @@ def get_remote_config() -> dict:
                 return {
                     "host": host_info.get("host", ""),
                     "user": host_info.get("user", "openclaw"),
-                    "dir": host_info.get("base_dir", "/home/openclaw/open-ace")
+                    "dir": host_info.get("base_dir", "/home/openclaw/open-ace"),
                 }
         except (json.JSONDecodeError, IOError) as e:
             print_error(f"Failed to load config: {e}")
@@ -123,24 +127,20 @@ def init_config():
             # Create default config
             default_config = {
                 "host_name": "localhost",
-                "database": {
-                    "type": "sqlite",
-                    "path": str(CONFIG_DIR / "ace.db"),
-                    "url": None
-                },
+                "database": {"type": "sqlite", "path": str(CONFIG_DIR / "ace.db"), "url": None},
                 "server": {
                     "upload_auth_key": "your-auth-key-here",
                     "server_url": f"http://localhost:{WEB_PORT}",
                     "web_port": WEB_PORT,
-                    "web_host": WEB_HOST
+                    "web_host": WEB_HOST,
                 },
                 "tools": {
                     "openclaw": {"enabled": True, "hostname": "localhost"},
                     "claude": {"enabled": True, "hostname": "localhost"},
-                    "qwen": {"enabled": True, "hostname": "localhost"}
-                }
+                    "qwen": {"enabled": True, "hostname": "localhost"},
+                },
             }
-            with open(config_file, 'w') as f:
+            with open(config_file, "w") as f:
                 json.dump(default_config, f, indent=2)
             print_success(f"Created default config: {config_file}")
     else:
@@ -174,6 +174,7 @@ def show_config():
 # Local Deployment
 # ============================================================================
 
+
 def deploy_local():
     """Deploy to local ~/open-ace directory."""
     print_header("Deploying to Local Directory")
@@ -190,8 +191,14 @@ def deploy_local():
     # Step 2: Sync files
     print("\n2. Syncing files...")
     exclude_patterns = [
-        ".git", ".qwen", "__pycache__", "*.pyc", ".DS_Store",
-        "logs/*", ".pytest_cache", "*.egg-info"
+        ".git",
+        ".qwen",
+        "__pycache__",
+        "*.pyc",
+        ".DS_Store",
+        "logs/*",
+        ".pytest_cache",
+        "*.egg-info",
     ]
 
     rsync_cmd = "rsync -avz"
@@ -280,19 +287,20 @@ def start_service(dev_mode: bool = False):
     # Set environment variables
     env = os.environ.copy()
     if dev_mode:
-        env['FLASK_DEBUG'] = 'true'
+        env["FLASK_DEBUG"] = "true"
         print("Debug mode: ON")
 
-    with open(log_file, 'a') as log:
+    with open(log_file, "a") as log:
         subprocess.Popen(
             [sys.executable, str(work_dir / "web.py")],
             stdout=log,
             stderr=log,
             cwd=work_dir,
-            env=env
+            env=env,
         )
 
     import time
+
     time.sleep(2)
 
     # Verify it started
@@ -311,7 +319,7 @@ def stop_service():
     # Find and kill process on web port
     result = run_command(f"lsof -ti :{WEB_PORT}", capture=True, check=False)
     if result and result.stdout.strip():
-        pids = result.stdout.strip().split('\n')
+        pids = result.stdout.strip().split("\n")
         for pid in pids:
             run_command(f"kill -9 {pid}", check=False)
         print_success(f"Web server stopped (killed PIDs: {', '.join(pids)})")
@@ -329,7 +337,7 @@ def status_service():
         print(f"\nProcess info:\n{result.stdout}")
 
         # Show process start time
-        pid = result.stdout.split('\n')[1].split()[1] if '\n' in result.stdout else None
+        pid = result.stdout.split("\n")[1].split()[1] if "\n" in result.stdout else None
         if pid:
             time_result = run_command(f"ps -p {pid} -o lstart=", capture=True, check=False)
             if time_result and time_result.stdout.strip():
@@ -346,6 +354,7 @@ def status_service():
 # ============================================================================
 # Remote Deployment
 # ============================================================================
+
 
 def deploy_remote():
     """Deploy to remote machine."""
@@ -370,8 +379,13 @@ def deploy_remote():
     # Step 2: Sync files
     print("\n2. Syncing files...")
     exclude_patterns = [
-        ".git", ".qwen", "logs/*", "__pycache__", "*.pyc", ".DS_Store",
-        "scripts/shared/email_notifier.py"
+        ".git",
+        ".qwen",
+        "logs/*",
+        "__pycache__",
+        "*.pyc",
+        ".DS_Store",
+        "scripts/shared/email_notifier.py",
     ]
 
     rsync_cmd = "rsync -avz"
@@ -399,7 +413,9 @@ rm -f ../scripts/shared/email_notifier.py
 
     # Step 4: Update __init__.py
     print("\n4. Updating __init__.py...")
-    run_command(f"ssh {user}@{host} \"cat > {remote_dir}/scripts/shared/__init__.py << 'EOF'\nfrom . import db, utils, config\n\n__all__ = ['db', 'utils', 'config']\nEOF\"")
+    run_command(
+        f"ssh {user}@{host} \"cat > {remote_dir}/scripts/shared/__init__.py << 'EOF'\nfrom . import db, utils, config\n\n__all__ = ['db', 'utils', 'config']\nEOF\""
+    )
     print_success("__init__.py updated")
 
     # Step 5: Fix ownership
@@ -416,7 +432,7 @@ rm -f ../scripts/shared/email_notifier.py
     print("\n7. Testing deployment...")
     result = run_command(
         f"ssh {user}@{host} 'cd {remote_dir} && python3 scripts/fetch_openclaw.py --days 1 2>&1 | tail -5'",
-        capture=True
+        capture=True,
     )
     if result:
         print(f"Test output:\n{result.stdout}")
@@ -444,11 +460,15 @@ def sync_remote():
 
     # Sync shared modules
     print("Syncing shared modules...")
-    run_command(f"rsync -avz scripts/shared/__init__.py scripts/shared/db.py scripts/shared/config.py scripts/shared/utils.py scripts/shared/feishu_user_cache.py {user}@{host}:{remote_dir}/scripts/shared/")
+    run_command(
+        f"rsync -avz scripts/shared/__init__.py scripts/shared/db.py scripts/shared/config.py scripts/shared/utils.py scripts/shared/feishu_user_cache.py {user}@{host}:{remote_dir}/scripts/shared/"
+    )
 
     # Sync main scripts
     print("Syncing main scripts...")
-    run_command(f"rsync -avz scripts/fetch_openclaw.py scripts/upload_to_server.py {user}@{host}:{remote_dir}/scripts/")
+    run_command(
+        f"rsync -avz scripts/fetch_openclaw.py scripts/upload_to_server.py {user}@{host}:{remote_dir}/scripts/"
+    )
 
     print_success("Sync completed!")
 
@@ -472,12 +492,15 @@ def status_remote():
     run_command(f"ssh {user}@{host} 'ls -la {remote_dir}/scripts/'")
 
     print("\nTesting data collection...")
-    run_command(f"ssh {user}@{host} 'cd {remote_dir} && python3 scripts/fetch_openclaw.py --days 1 2>&1 | tail -5'")
+    run_command(
+        f"ssh {user}@{host} 'cd {remote_dir} && python3 scripts/fetch_openclaw.py --days 1 2>&1 | tail -5'"
+    )
 
 
 # ============================================================================
 # Main Entry Point
 # ============================================================================
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -493,36 +516,34 @@ Examples:
   python3 scripts/manage.py restart    # Restart web server
   python3 scripts/manage.py status     # Check service status
   python3 scripts/manage.py --remote deploy  # Deploy to remote machine
-        """
+        """,
     )
 
     parser.add_argument(
-        'action',
-        choices=['init', 'deploy', 'install', 'start', 'stop', 'restart', 'status', 'sync', 'show'],
-        help='Action to perform'
+        "action",
+        choices=["init", "deploy", "install", "start", "stop", "restart", "status", "sync", "show"],
+        help="Action to perform",
     )
 
     parser.add_argument(
-        '--remote',
-        action='store_true',
-        help='Operate on remote machine instead of local'
+        "--remote", action="store_true", help="Operate on remote machine instead of local"
     )
 
     parser.add_argument(
-        '--dev',
-        action='store_true',
-        help='Run in development directory instead of deployment directory'
+        "--dev",
+        action="store_true",
+        help="Run in development directory instead of deployment directory",
     )
 
     args = parser.parse_args()
 
     # Remote operations
     if args.remote:
-        if args.action == 'deploy':
+        if args.action == "deploy":
             deploy_remote()
-        elif args.action == 'sync':
+        elif args.action == "sync":
             sync_remote()
-        elif args.action == 'status':
+        elif args.action == "status":
             status_remote()
         else:
             print_error(f"Action '{args.action}' not supported for remote mode")
@@ -531,28 +552,28 @@ Examples:
         return 0
 
     # Local operations (default)
-    if args.action == 'init':
+    if args.action == "init":
         init_config()
-    elif args.action == 'show':
+    elif args.action == "show":
         show_config()
-    elif args.action == 'deploy':
+    elif args.action == "deploy":
         deploy_local()
-    elif args.action == 'install':
+    elif args.action == "install":
         install_service()
-    elif args.action == 'start':
+    elif args.action == "start":
         start_service(dev_mode=args.dev)
-    elif args.action == 'stop':
+    elif args.action == "stop":
         stop_service()
-    elif args.action == 'restart':
+    elif args.action == "restart":
         stop_service()
         start_service(dev_mode=args.dev)
-    elif args.action == 'status':
+    elif args.action == "status":
         status_service()
-    elif args.action == 'sync':
+    elif args.action == "sync":
         print_error("sync is only available in remote mode (--remote)")
 
     return 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

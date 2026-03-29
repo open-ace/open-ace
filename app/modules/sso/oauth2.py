@@ -38,10 +38,7 @@ class OAuth2Provider(SSOProvider):
         self._http_session = None
 
     def get_authorization_url(
-        self,
-        state: str,
-        redirect_uri: Optional[str] = None,
-        code_challenge: Optional[str] = None
+        self, state: str, redirect_uri: Optional[str] = None, code_challenge: Optional[str] = None
     ) -> str:
         """
         Get the authorization URL for the OAuth flow.
@@ -55,17 +52,17 @@ class OAuth2Provider(SSOProvider):
             str: Authorization URL.
         """
         params = {
-            'client_id': self.config.client_id,
-            'response_type': 'code',
-            'redirect_uri': redirect_uri or self.config.redirect_uri,
-            'scope': ' '.join(self.config.scope),
-            'state': state,
+            "client_id": self.config.client_id,
+            "response_type": "code",
+            "redirect_uri": redirect_uri or self.config.redirect_uri,
+            "scope": " ".join(self.config.scope),
+            "state": state,
         }
 
         # Add PKCE if provided
         if code_challenge:
-            params['code_challenge'] = code_challenge
-            params['code_challenge_method'] = 'S256'
+            params["code_challenge"] = code_challenge
+            params["code_challenge_method"] = "S256"
 
         # Add extra parameters
         params.update(self.config.extra_params)
@@ -73,10 +70,7 @@ class OAuth2Provider(SSOProvider):
         return f"{self.config.authorization_url}?{urllib.parse.urlencode(params)}"
 
     def exchange_code(
-        self,
-        code: str,
-        redirect_uri: Optional[str] = None,
-        code_verifier: Optional[str] = None
+        self, code: str, redirect_uri: Optional[str] = None, code_verifier: Optional[str] = None
     ) -> SSOAuthResult:
         """
         Exchange authorization code for tokens.
@@ -90,15 +84,15 @@ class OAuth2Provider(SSOProvider):
             SSOAuthResult: Authentication result with tokens.
         """
         data = {
-            'client_id': self.config.client_id,
-            'client_secret': self.config.client_secret,
-            'code': code,
-            'grant_type': 'authorization_code',
-            'redirect_uri': redirect_uri or self.config.redirect_uri,
+            "client_id": self.config.client_id,
+            "client_secret": self.config.client_secret,
+            "code": code,
+            "grant_type": "authorization_code",
+            "redirect_uri": redirect_uri or self.config.redirect_uri,
         }
 
         if code_verifier:
-            data['code_verifier'] = code_verifier
+            data["code_verifier"] = code_verifier
 
         try:
             # Use synchronous HTTP request
@@ -107,15 +101,15 @@ class OAuth2Provider(SSOProvider):
 
             req = urllib.request.Request(
                 self.config.token_url,
-                data=urllib.parse.urlencode(data).encode('utf-8'),
+                data=urllib.parse.urlencode(data).encode("utf-8"),
                 headers={
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                }
+                    "Accept": "application/json",
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
             )
 
             with urllib.request.urlopen(req, timeout=30) as response:
-                token_data = json.loads(response.read().decode('utf-8'))
+                token_data = json.loads(response.read().decode("utf-8"))
 
             token = self._parse_token_response(token_data)
 
@@ -125,20 +119,20 @@ class OAuth2Provider(SSOProvider):
             )
 
         except urllib.error.HTTPError as e:
-            error_body = e.read().decode('utf-8')
+            error_body = e.read().decode("utf-8")
             logger.error(f"OAuth2 token exchange failed: {e.code} - {error_body}")
 
             try:
                 error_data = json.loads(error_body)
                 return SSOAuthResult(
                     success=False,
-                    error=error_data.get('error', 'token_exchange_failed'),
-                    error_description=error_data.get('error_description'),
+                    error=error_data.get("error", "token_exchange_failed"),
+                    error_description=error_data.get("error_description"),
                 )
             except json.JSONDecodeError:
                 return SSOAuthResult(
                     success=False,
-                    error='token_exchange_failed',
+                    error="token_exchange_failed",
                     error_description=error_body,
                 )
 
@@ -146,7 +140,7 @@ class OAuth2Provider(SSOProvider):
             logger.error(f"OAuth2 token exchange error: {e}")
             return SSOAuthResult(
                 success=False,
-                error='token_exchange_error',
+                error="token_exchange_error",
                 error_description=str(e),
             )
 
@@ -171,13 +165,13 @@ class OAuth2Provider(SSOProvider):
             req = urllib.request.Request(
                 self.config.userinfo_url,
                 headers={
-                    'Authorization': f'Bearer {access_token}',
-                    'Accept': 'application/json',
-                }
+                    "Authorization": f"Bearer {access_token}",
+                    "Accept": "application/json",
+                },
             )
 
             with urllib.request.urlopen(req, timeout=30) as response:
-                user_data = json.loads(response.read().decode('utf-8'))
+                user_data = json.loads(response.read().decode("utf-8"))
 
             return self._parse_user_info(user_data)
 
@@ -196,10 +190,10 @@ class OAuth2Provider(SSOProvider):
             Optional[SSOToken]: New token or None.
         """
         data = {
-            'client_id': self.config.client_id,
-            'client_secret': self.config.client_secret,
-            'refresh_token': refresh_token,
-            'grant_type': 'refresh_token',
+            "client_id": self.config.client_id,
+            "client_secret": self.config.client_secret,
+            "refresh_token": refresh_token,
+            "grant_type": "refresh_token",
         }
 
         try:
@@ -208,15 +202,15 @@ class OAuth2Provider(SSOProvider):
 
             req = urllib.request.Request(
                 self.config.token_url,
-                data=urllib.parse.urlencode(data).encode('utf-8'),
+                data=urllib.parse.urlencode(data).encode("utf-8"),
                 headers={
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                }
+                    "Accept": "application/json",
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
             )
 
             with urllib.request.urlopen(req, timeout=30) as response:
-                token_data = json.loads(response.read().decode('utf-8'))
+                token_data = json.loads(response.read().decode("utf-8"))
 
             return self._parse_token_response(token_data)
 
@@ -234,16 +228,16 @@ class OAuth2Provider(SSOProvider):
         Returns:
             SSOToken: Parsed token.
         """
-        expires_in = data.get('expires_in', 3600)
+        expires_in = data.get("expires_in", 3600)
         expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
 
         return SSOToken(
-            access_token=data.get('access_token', ''),
-            token_type=data.get('token_type', 'Bearer'),
+            access_token=data.get("access_token", ""),
+            token_type=data.get("token_type", "Bearer"),
             expires_in=expires_in,
-            refresh_token=data.get('refresh_token'),
-            id_token=data.get('id_token'),
-            scope=data.get('scope'),
+            refresh_token=data.get("refresh_token"),
+            id_token=data.get("id_token"),
+            scope=data.get("scope"),
             expires_at=expires_at,
         )
 
@@ -262,15 +256,15 @@ class OAuth2Provider(SSOProvider):
         # Generic parsing - works for most OAuth2 providers
         return SSOUser(
             provider=self.name,
-            provider_user_id=str(data.get('id', data.get('sub', ''))),
-            email=data.get('email'),
-            username=data.get('login', data.get('username', data.get('preferred_username'))),
-            name=data.get('name'),
-            first_name=data.get('given_name', data.get('first_name')),
-            last_name=data.get('family_name', data.get('last_name')),
-            picture=data.get('picture', data.get('avatar_url')),
-            locale=data.get('locale'),
-            email_verified=data.get('email_verified', False),
+            provider_user_id=str(data.get("id", data.get("sub", ""))),
+            email=data.get("email"),
+            username=data.get("login", data.get("username", data.get("preferred_username"))),
+            name=data.get("name"),
+            first_name=data.get("given_name", data.get("first_name")),
+            last_name=data.get("family_name", data.get("last_name")),
+            picture=data.get("picture", data.get("avatar_url")),
+            locale=data.get("locale"),
+            email_verified=data.get("email_verified", False),
             raw_data=data,
         )
 
@@ -286,8 +280,8 @@ class OAuth2Provider(SSOProvider):
         code_verifier = secrets.token_urlsafe(96)[:128]
 
         # Generate code challenge
-        challenge_bytes = hashlib.sha256(code_verifier.encode('utf-8')).digest()
-        code_challenge = base64.urlsafe_b64encode(challenge_bytes).decode('utf-8').rstrip('=')
+        challenge_bytes = hashlib.sha256(code_verifier.encode("utf-8")).digest()
+        code_challenge = base64.urlsafe_b64encode(challenge_bytes).decode("utf-8").rstrip("=")
 
         return code_verifier, code_challenge
 
@@ -309,11 +303,11 @@ class GitHubProvider(OAuth2Provider):
         """Parse GitHub user info."""
         return SSOUser(
             provider=self.name,
-            provider_user_id=str(data.get('id', '')),
-            email=data.get('email'),
-            username=data.get('login'),
-            name=data.get('name'),
-            picture=data.get('avatar_url'),
+            provider_user_id=str(data.get("id", "")),
+            email=data.get("email"),
+            username=data.get("login"),
+            name=data.get("name"),
+            picture=data.get("avatar_url"),
             locale=None,
             email_verified=False,  # GitHub doesn't provide this
             raw_data=data,
@@ -330,20 +324,20 @@ class GitHubProvider(OAuth2Provider):
                 import urllib.request
 
                 req = urllib.request.Request(
-                    'https://api.github.com/user/emails',
+                    "https://api.github.com/user/emails",
                     headers={
-                        'Authorization': f'Bearer {access_token}',
-                        'Accept': 'application/json',
-                    }
+                        "Authorization": f"Bearer {access_token}",
+                        "Accept": "application/json",
+                    },
                 )
 
                 with urllib.request.urlopen(req, timeout=30) as response:
-                    emails = json.loads(response.read().decode('utf-8'))
+                    emails = json.loads(response.read().decode("utf-8"))
 
                 # Find primary verified email
                 for email_info in emails:
-                    if email_info.get('primary') and email_info.get('verified'):
-                        user.email = email_info.get('email')
+                    if email_info.get("primary") and email_info.get("verified"):
+                        user.email = email_info.get("email")
                         user.email_verified = True
                         break
 

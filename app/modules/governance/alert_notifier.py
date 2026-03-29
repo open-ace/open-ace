@@ -28,22 +28,25 @@ logger = logging.getLogger(__name__)
 
 class AlertType(Enum):
     """Alert types."""
-    QUOTA = 'quota'
-    SYSTEM = 'system'
-    SECURITY = 'security'
-    PERFORMANCE = 'performance'
+
+    QUOTA = "quota"
+    SYSTEM = "system"
+    SECURITY = "security"
+    PERFORMANCE = "performance"
 
 
 class AlertSeverity(Enum):
     """Alert severity levels."""
-    INFO = 'info'
-    WARNING = 'warning'
-    CRITICAL = 'critical'
+
+    INFO = "info"
+    WARNING = "warning"
+    CRITICAL = "critical"
 
 
 @dataclass
 class Alert:
     """Alert data structure."""
+
     alert_id: str
     alert_type: str
     severity: str
@@ -61,31 +64,32 @@ class Alert:
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
         return {
-            'alert_id': self.alert_id,
-            'alert_type': self.alert_type,
-            'severity': self.severity,
-            'title': self.title,
-            'message': self.message,
-            'user_id': self.user_id,
-            'username': self.username,
-            'tool_name': self.tool_name,
-            'metadata': self.metadata,
-            'created_at': self.created_at.isoformat(),
-            'read': self.read,
-            'action_url': self.action_url,
-            'action_text': self.action_text,
+            "alert_id": self.alert_id,
+            "alert_type": self.alert_type,
+            "severity": self.severity,
+            "title": self.title,
+            "message": self.message,
+            "user_id": self.user_id,
+            "username": self.username,
+            "tool_name": self.tool_name,
+            "metadata": self.metadata,
+            "created_at": self.created_at.isoformat(),
+            "read": self.read,
+            "action_url": self.action_url,
+            "action_text": self.action_text,
         }
 
 
 @dataclass
 class NotificationPreference:
     """User notification preferences."""
+
     user_id: int
     email_enabled: bool = True
     push_enabled: bool = True
     webhook_url: Optional[str] = None
-    alert_types: List[str] = field(default_factory=lambda: ['quota', 'system', 'security'])
-    min_severity: str = 'warning'  # info, warning, critical
+    alert_types: List[str] = field(default_factory=lambda: ["quota", "system", "security"])
+    min_severity: str = "warning"  # info, warning, critical
 
 
 class AlertNotifier:
@@ -112,6 +116,7 @@ class AlertNotifier:
             try:
                 import psycopg2
                 from psycopg2.extras import RealDictCursor
+
                 url = get_database_url()
                 conn = psycopg2.connect(url)
                 conn.cursor_factory = RealDictCursor
@@ -135,7 +140,8 @@ class AlertNotifier:
         id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
 
         # Create alerts table
-        cursor.execute(f'''
+        cursor.execute(
+            f"""
             CREATE TABLE IF NOT EXISTS alerts (
                 id {id_type},
                 alert_id TEXT UNIQUE NOT NULL,
@@ -152,10 +158,12 @@ class AlertNotifier:
                 action_url TEXT,
                 action_text TEXT
             )
-        ''')
+        """
+        )
 
         # Create notification_preferences table
-        cursor.execute('''
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS notification_preferences (
                 user_id INTEGER PRIMARY KEY,
                 email_enabled INTEGER DEFAULT 1,
@@ -164,21 +172,28 @@ class AlertNotifier:
                 alert_types TEXT,
                 min_severity TEXT DEFAULT 'warning'
             )
-        ''')
+        """
+        )
 
         # Create indexes
-        cursor.execute('''
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_alerts_user_id
             ON alerts(user_id)
-        ''')
-        cursor.execute('''
+        """
+        )
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_alerts_created_at
             ON alerts(created_at)
-        ''')
-        cursor.execute('''
+        """
+        )
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_alerts_read
             ON alerts(read)
-        ''')
+        """
+        )
 
         conn.commit()
         conn.close()
@@ -202,7 +217,9 @@ class AlertNotifier:
         if callback in self._subscribers:
             self._subscribers.remove(callback)
 
-    def register_websocket(self, client_id: str, websocket: Any, user_id: Optional[int] = None) -> None:
+    def register_websocket(
+        self, client_id: str, websocket: Any, user_id: Optional[int] = None
+    ) -> None:
         """
         Register a WebSocket client.
 
@@ -299,26 +316,31 @@ class AlertNotifier:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        cursor.execute(adapt_sql('''
+        cursor.execute(
+            adapt_sql(
+                """
             INSERT INTO alerts
             (alert_id, alert_type, severity, title, message, user_id, username,
              tool_name, metadata, created_at, read, action_url, action_text)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        '''), (
-            alert.alert_id,
-            alert.alert_type,
-            alert.severity,
-            alert.title,
-            alert.message,
-            alert.user_id,
-            alert.username,
-            alert.tool_name,
-            json.dumps(alert.metadata),
-            alert.created_at.isoformat(),
-            1 if alert.read else 0,
-            alert.action_url,
-            alert.action_text,
-        ))
+        """
+            ),
+            (
+                alert.alert_id,
+                alert.alert_type,
+                alert.severity,
+                alert.title,
+                alert.message,
+                alert.user_id,
+                alert.username,
+                alert.tool_name,
+                json.dumps(alert.metadata),
+                alert.created_at.isoformat(),
+                1 if alert.read else 0,
+                alert.action_url,
+                alert.action_text,
+            ),
+        )
 
         alert_id = cursor.lastrowid
         conn.commit()
@@ -335,10 +357,7 @@ class AlertNotifier:
             target_user_id: Optional specific user to target.
         """
         alert_dict = alert.to_dict()
-        message = json.dumps({
-            'type': 'alert',
-            'data': alert_dict
-        })
+        message = json.dumps({"type": "alert", "data": alert_dict})
 
         if target_user_id is not None:
             # Send to specific user's clients
@@ -394,28 +413,33 @@ class AlertNotifier:
         params = []
 
         if user_id is not None:
-            conditions.append('user_id = ?')
+            conditions.append("user_id = ?")
             params.append(user_id)
 
         if alert_type:
-            conditions.append('alert_type = ?')
+            conditions.append("alert_type = ?")
             params.append(alert_type)
 
         if severity:
-            conditions.append('severity = ?')
+            conditions.append("severity = ?")
             params.append(severity)
 
         if unread_only:
-            conditions.append('read = 0')
+            conditions.append("read = 0")
 
-        where_clause = ' AND '.join(conditions) if conditions else '1=1'
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
 
-        cursor.execute(adapt_sql(f'''
+        cursor.execute(
+            adapt_sql(
+                f"""
             SELECT * FROM alerts
             WHERE {where_clause}
             ORDER BY created_at DESC
             LIMIT ? OFFSET ?
-        '''), params + [limit, offset])
+        """
+            ),
+            params + [limit, offset],
+        )
 
         rows = cursor.fetchall()
         conn.close()
@@ -437,13 +461,13 @@ class AlertNotifier:
 
         if user_id is not None:
             cursor.execute(
-                adapt_sql('SELECT COUNT(*) as count FROM alerts WHERE user_id = ? AND read = 0'),
-                (user_id,)
+                adapt_sql("SELECT COUNT(*) as count FROM alerts WHERE user_id = ? AND read = 0"),
+                (user_id,),
             )
         else:
-            cursor.execute('SELECT COUNT(*) as count FROM alerts WHERE read = 0')
+            cursor.execute("SELECT COUNT(*) as count FROM alerts WHERE read = 0")
 
-        count = cursor.fetchone()['count']
+        count = cursor.fetchone()["count"]
         conn.close()
 
         return count or 0
@@ -461,10 +485,7 @@ class AlertNotifier:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        cursor.execute(
-            adapt_sql('UPDATE alerts SET read = 1 WHERE alert_id = ?'),
-            (alert_id,)
-        )
+        cursor.execute(adapt_sql("UPDATE alerts SET read = 1 WHERE alert_id = ?"), (alert_id,))
 
         success = cursor.rowcount > 0
         conn.commit()
@@ -487,11 +508,10 @@ class AlertNotifier:
 
         if user_id is not None:
             cursor.execute(
-                adapt_sql('UPDATE alerts SET read = 1 WHERE user_id = ? AND read = 0'),
-                (user_id,)
+                adapt_sql("UPDATE alerts SET read = 1 WHERE user_id = ? AND read = 0"), (user_id,)
             )
         else:
-            cursor.execute('UPDATE alerts SET read = 1 WHERE read = 0')
+            cursor.execute("UPDATE alerts SET read = 1 WHERE read = 0")
 
         count = cursor.rowcount
         conn.commit()
@@ -512,7 +532,7 @@ class AlertNotifier:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        cursor.execute(adapt_sql('DELETE FROM alerts WHERE alert_id = ?'), (alert_id,))
+        cursor.execute(adapt_sql("DELETE FROM alerts WHERE alert_id = ?"), (alert_id,))
         success = cursor.rowcount > 0
         conn.commit()
         conn.close()
@@ -533,7 +553,7 @@ class AlertNotifier:
         cursor = conn.cursor()
 
         cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
-        cursor.execute(adapt_sql('DELETE FROM alerts WHERE created_at < ? AND read = 1'), (cutoff,))
+        cursor.execute(adapt_sql("DELETE FROM alerts WHERE created_at < ? AND read = 1"), (cutoff,))
 
         count = cursor.rowcount
         conn.commit()
@@ -556,20 +576,23 @@ class AlertNotifier:
         cursor = conn.cursor()
 
         cursor.execute(
-            adapt_sql('SELECT * FROM notification_preferences WHERE user_id = ?'),
-            (user_id,)
+            adapt_sql("SELECT * FROM notification_preferences WHERE user_id = ?"), (user_id,)
         )
         row = cursor.fetchone()
         conn.close()
 
         if row:
             return NotificationPreference(
-                user_id=row['user_id'],
-                email_enabled=bool(row['email_enabled']),
-                push_enabled=bool(row['push_enabled']),
-                webhook_url=row['webhook_url'],
-                alert_types=json.loads(row['alert_types']) if row['alert_types'] else ['quota', 'system', 'security'],
-                min_severity=row['min_severity'] or 'warning',
+                user_id=row["user_id"],
+                email_enabled=bool(row["email_enabled"]),
+                push_enabled=bool(row["push_enabled"]),
+                webhook_url=row["webhook_url"],
+                alert_types=(
+                    json.loads(row["alert_types"])
+                    if row["alert_types"]
+                    else ["quota", "system", "security"]
+                ),
+                min_severity=row["min_severity"] or "warning",
             )
 
         # Return default preferences
@@ -589,7 +612,8 @@ class AlertNotifier:
         cursor = conn.cursor()
 
         if is_postgresql():
-            cursor.execute('''
+            cursor.execute(
+                """
                 INSERT INTO notification_preferences
                 (user_id, email_enabled, push_enabled, webhook_url, alert_types, min_severity)
                 VALUES (%s, %s, %s, %s, %s, %s)
@@ -599,27 +623,32 @@ class AlertNotifier:
                     webhook_url = EXCLUDED.webhook_url,
                     alert_types = EXCLUDED.alert_types,
                     min_severity = EXCLUDED.min_severity
-            ''', (
-                preferences.user_id,
-                preferences.email_enabled,
-                preferences.push_enabled,
-                preferences.webhook_url,
-                json.dumps(preferences.alert_types),
-                preferences.min_severity,
-            ))
+            """,
+                (
+                    preferences.user_id,
+                    preferences.email_enabled,
+                    preferences.push_enabled,
+                    preferences.webhook_url,
+                    json.dumps(preferences.alert_types),
+                    preferences.min_severity,
+                ),
+            )
         else:
-            cursor.execute('''
+            cursor.execute(
+                """
                 INSERT OR REPLACE INTO notification_preferences
                 (user_id, email_enabled, push_enabled, webhook_url, alert_types, min_severity)
                 VALUES (?, ?, ?, ?, ?, ?)
-            ''', (
-                preferences.user_id,
-                1 if preferences.email_enabled else 0,
-                1 if preferences.push_enabled else 0,
-                preferences.webhook_url,
-                json.dumps(preferences.alert_types),
-                preferences.min_severity,
-            ))
+            """,
+                (
+                    preferences.user_id,
+                    1 if preferences.email_enabled else 0,
+                    1 if preferences.push_enabled else 0,
+                    preferences.webhook_url,
+                    json.dumps(preferences.alert_types),
+                    preferences.min_severity,
+                ),
+            )
 
         conn.commit()
         conn.close()
@@ -629,19 +658,23 @@ class AlertNotifier:
     def _row_to_alert(self, row: sqlite3.Row) -> Alert:
         """Convert a database row to Alert."""
         return Alert(
-            alert_id=row['alert_id'],
-            alert_type=row['alert_type'],
-            severity=row['severity'],
-            title=row['title'],
-            message=row['message'] or '',
-            user_id=row['user_id'],
-            username=row['username'],
-            tool_name=row['tool_name'],
-            metadata=json.loads(row['metadata']) if row['metadata'] else {},
-            created_at=datetime.fromisoformat(row['created_at']) if row['created_at'] else datetime.utcnow(),
-            read=bool(row['read']),
-            action_url=row['action_url'],
-            action_text=row['action_text'],
+            alert_id=row["alert_id"],
+            alert_type=row["alert_type"],
+            severity=row["severity"],
+            title=row["title"],
+            message=row["message"] or "",
+            user_id=row["user_id"],
+            username=row["username"],
+            tool_name=row["tool_name"],
+            metadata=json.loads(row["metadata"]) if row["metadata"] else {},
+            created_at=(
+                datetime.fromisoformat(row["created_at"])
+                if row["created_at"]
+                else datetime.utcnow()
+            ),
+            read=bool(row["read"]),
+            action_url=row["action_url"],
+            action_text=row["action_text"],
         )
 
 
@@ -669,7 +702,7 @@ def create_quota_alert(
     user_id: int,
     username: str,
     usage_percent: float,
-    quota_type: str = 'tokens',
+    quota_type: str = "tokens",
 ) -> Alert:
     """
     Create a quota alert.
@@ -710,11 +743,11 @@ def create_quota_alert(
         user_id=user_id,
         username=username,
         metadata={
-            'usage_percent': usage_percent,
-            'quota_type': quota_type,
+            "usage_percent": usage_percent,
+            "quota_type": quota_type,
         },
-        action_url='/report',
-        action_text='View Usage',
+        action_url="/report",
+        action_text="View Usage",
     )
 
 

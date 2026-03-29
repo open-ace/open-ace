@@ -27,10 +27,7 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(script_dir))
 sys.path.insert(0, project_root)
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 # SQLite database path
@@ -50,21 +47,19 @@ def get_postgresql_connection():
         import psycopg2
         from psycopg2.extras import execute_values
 
-        url = os.environ.get('DATABASE_URL')
+        url = os.environ.get("DATABASE_URL")
         if not url:
             raise ValueError("DATABASE_URL environment variable not set")
 
         return psycopg2.connect(url)
     except ImportError:
-        raise ImportError(
-            "psycopg2 is required. Install with: pip install psycopg2-binary"
-        )
+        raise ImportError("psycopg2 is required. Install with: pip install psycopg2-binary")
 
 
 def get_table_columns(cursor, table_name: str) -> List[str]:
     """Get column names for a table."""
     cursor.execute(f"PRAGMA table_info({table_name})")
-    return [row['name'] for row in cursor.fetchall()]
+    return [row["name"] for row in cursor.fetchall()]
 
 
 def migrate_table(
@@ -72,7 +67,7 @@ def migrate_table(
     pg_conn: Any,
     table_name: str,
     columns: Optional[List[str]] = None,
-    batch_size: int = 5000
+    batch_size: int = 5000,
 ) -> int:
     """
     Migrate a single table from SQLite to PostgreSQL.
@@ -94,10 +89,13 @@ def migrate_table(
     sqlite_columns = get_table_columns(sqlite_cur, table_name)
 
     # Get PostgreSQL columns
-    pg_cur.execute("""
+    pg_cur.execute(
+        """
         SELECT column_name FROM information_schema.columns
         WHERE table_name = %s ORDER BY ordinal_position
-    """, (table_name,))
+    """,
+        (table_name,),
+    )
     pg_columns = [row[0] for row in pg_cur.fetchall()]
 
     # Find common columns
@@ -123,7 +121,7 @@ def migrate_table(
     logger.info(f"  {table_name}: Migrating {total_rows} rows...")
 
     # Read data from SQLite in batches
-    cols_str = ', '.join(columns)
+    cols_str = ", ".join(columns)
     total_migrated = 0
     offset = 0
 
@@ -143,7 +141,7 @@ def migrate_table(
             for val in row:
                 if isinstance(val, str):
                     # Remove NUL characters (0x00)
-                    cleaned_row.append(val.replace('\x00', ''))
+                    cleaned_row.append(val.replace("\x00", ""))
                 else:
                     cleaned_row.append(val)
             data.append(tuple(cleaned_row))
@@ -182,7 +180,7 @@ def migrate_all_tables():
     logger.info(f"PostgreSQL target: {os.environ.get('DATABASE_URL', 'Not set')}")
 
     # Check prerequisites
-    if not os.environ.get('DATABASE_URL'):
+    if not os.environ.get("DATABASE_URL"):
         logger.error("DATABASE_URL environment variable not set")
         sys.exit(1)
 
@@ -196,19 +194,19 @@ def migrate_all_tables():
 
     # Tables to migrate (in dependency order)
     tables = [
-        ('users', None),
-        ('sessions', None),
-        ('tenants', None),
-        ('tenant_usage', None),
-        ('tenant_quotas', None),
-        ('tenant_settings', None),
-        ('daily_usage', None),
-        ('daily_messages', None),
-        ('content_filter_rules', None),
-        ('quota_usage', None),
-        ('quota_alerts', None),
-        ('audit_logs', None),
-        ('security_settings', None),
+        ("users", None),
+        ("sessions", None),
+        ("tenants", None),
+        ("tenant_usage", None),
+        ("tenant_quotas", None),
+        ("tenant_settings", None),
+        ("daily_usage", None),
+        ("daily_messages", None),
+        ("content_filter_rules", None),
+        ("quota_usage", None),
+        ("quota_alerts", None),
+        ("audit_logs", None),
+        ("security_settings", None),
     ]
 
     total_migrated = 0
@@ -218,8 +216,7 @@ def migrate_all_tables():
             # Check if table exists in SQLite
             sqlite_cur = sqlite_conn.cursor()
             sqlite_cur.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-                (table_name,)
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,)
             )
             if not sqlite_cur.fetchone():
                 logger.info(f"  {table_name}: Skipped (not in SQLite)")
@@ -246,9 +243,16 @@ def verify_migration():
     pg_conn = get_postgresql_connection()
 
     tables = [
-        'users', 'sessions', 'tenants', 'tenant_usage',
-        'daily_usage', 'daily_messages', 'content_filter_rules',
-        'quota_usage', 'quota_alerts', 'audit_logs'
+        "users",
+        "sessions",
+        "tenants",
+        "tenant_usage",
+        "daily_usage",
+        "daily_messages",
+        "content_filter_rules",
+        "quota_usage",
+        "quota_alerts",
+        "audit_logs",
     ]
 
     print(f"\n{'Table':<25} {'SQLite':>10} {'PostgreSQL':>12} {'Match':>8}")
@@ -263,7 +267,7 @@ def verify_migration():
             sqlite_cur.execute(f"SELECT COUNT(*) FROM {table}")
             sqlite_count = sqlite_cur.fetchone()[0]
         except:
-            sqlite_count = 'N/A'
+            sqlite_count = "N/A"
 
         # PostgreSQL count
         pg_cur = pg_conn.cursor()
@@ -271,15 +275,15 @@ def verify_migration():
             pg_cur.execute(f"SELECT COUNT(*) FROM {table}")
             pg_count = pg_cur.fetchone()[0]
         except:
-            pg_count = 'N/A'
+            pg_count = "N/A"
 
         # Check match
         if isinstance(sqlite_count, int) and isinstance(pg_count, int):
-            match = '✓' if sqlite_count == pg_count else '✗'
+            match = "✓" if sqlite_count == pg_count else "✗"
             if sqlite_count != pg_count:
                 all_match = False
         else:
-            match = '-'
+            match = "-"
 
         print(f"{table:<25} {str(sqlite_count):>10} {str(pg_count):>12} {match:>8}")
 
@@ -296,19 +300,15 @@ def main():
     """Main entry point."""
     import argparse
 
-    parser = argparse.ArgumentParser(
-        description='Migrate data from SQLite to PostgreSQL'
+    parser = argparse.ArgumentParser(description="Migrate data from SQLite to PostgreSQL")
+    parser.add_argument(
+        "--verify", action="store_true", help="Verify migration by comparing row counts"
     )
     parser.add_argument(
-        '--verify',
-        action='store_true',
-        help='Verify migration by comparing row counts'
-    )
-    parser.add_argument(
-        '--source',
+        "--source",
         type=str,
         default=None,
-        help='Source SQLite database path (default: ~/.open-ace/ace.db)'
+        help="Source SQLite database path (default: ~/.open-ace/ace.db)",
     )
 
     args = parser.parse_args()
@@ -324,5 +324,5 @@ def main():
         verify_migration()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

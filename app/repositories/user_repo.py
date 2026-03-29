@@ -20,7 +20,7 @@ class UserRepository:
     def __init__(self, db: Optional[Database] = None):
         """
         Initialize repository.
-        
+
         Args:
             db: Optional Database instance for dependency injection.
         """
@@ -31,19 +31,19 @@ class UserRepository:
         username: str,
         email: str,
         password_hash: str,
-        role: str = 'user',
-        is_active: bool = True
+        role: str = "user",
+        is_active: bool = True,
     ) -> Optional[int]:
         """
         Create a new user.
-        
+
         Args:
             username: Username.
             email: Email address.
             password_hash: Hashed password.
             role: User role.
             is_active: Whether user is active.
-            
+
         Returns:
             Optional[int]: User ID if successful, None otherwise.
         """
@@ -53,17 +53,24 @@ class UserRepository:
 
             # Use RETURNING for PostgreSQL, or lastrowid for SQLite
             if self.db.is_postgresql:
-                result = self.db.fetch_one('''
+                result = self.db.fetch_one(
+                    """
                     INSERT INTO users (username, email, password_hash, role, is_active, created_at)
                     VALUES (?, ?, ?, ?, ?, ?)
                     RETURNING id
-                ''', (username, email, password_hash, role, is_active_int, datetime.utcnow()), commit=True)
-                return result['id'] if result else None
+                """,
+                    (username, email, password_hash, role, is_active_int, datetime.utcnow()),
+                    commit=True,
+                )
+                return result["id"] if result else None
             else:
-                cursor = self.db.execute('''
+                cursor = self.db.execute(
+                    """
                     INSERT INTO users (username, email, password_hash, role, is_active, created_at)
                     VALUES (?, ?, ?, ?, ?, ?)
-                ''', (username, email, password_hash, role, is_active_int, datetime.utcnow()))
+                """,
+                    (username, email, password_hash, role, is_active_int, datetime.utcnow()),
+                )
                 return cursor.lastrowid
         except Exception as e:
             logger.error(f"Error creating user: {e}")
@@ -72,46 +79,44 @@ class UserRepository:
     def get_user_by_id(self, user_id: int) -> Optional[Dict]:
         """
         Get user by ID.
-        
+
         Args:
             user_id: User ID.
-            
+
         Returns:
             Optional[Dict]: User data or None.
         """
-        query = 'SELECT * FROM users WHERE id = ?'
+        query = "SELECT * FROM users WHERE id = ?"
         return self.db.fetch_one(query, (user_id,))
 
     def get_user_by_username(self, username: str) -> Optional[Dict]:
         """
         Get user by username.
-        
+
         Args:
             username: Username.
-            
+
         Returns:
             Optional[Dict]: User data or None.
         """
-        query = 'SELECT * FROM users WHERE username = ?'
+        query = "SELECT * FROM users WHERE username = ?"
         return self.db.fetch_one(query, (username,))
 
     def get_user_by_email(self, email: str) -> Optional[Dict]:
         """
         Get user by email.
-        
+
         Args:
             email: Email address.
-            
+
         Returns:
             Optional[Dict]: User data or None.
         """
-        query = 'SELECT * FROM users WHERE email = ?'
+        query = "SELECT * FROM users WHERE email = ?"
         return self.db.fetch_one(query, (email,))
 
     def get_all_users(
-        self,
-        include_inactive: bool = True,
-        include_deleted: bool = False
+        self, include_inactive: bool = True, include_deleted: bool = False
     ) -> List[Dict]:
         """
         Get all users.
@@ -125,14 +130,14 @@ class UserRepository:
         """
         conditions = []
         if not include_inactive:
-            conditions.append('is_active = 1')
+            conditions.append("is_active = 1")
         if not include_deleted:
-            conditions.append('deleted_at IS NULL')
+            conditions.append("deleted_at IS NULL")
 
         if conditions:
             query = f"SELECT * FROM users WHERE {' AND '.join(conditions)} ORDER BY created_at DESC"
         else:
-            query = 'SELECT * FROM users ORDER BY created_at DESC'
+            query = "SELECT * FROM users ORDER BY created_at DESC"
 
         return self.db.fetch_all(query)
 
@@ -143,7 +148,7 @@ class UserRepository:
         email: Optional[str] = None,
         role: Optional[str] = None,
         is_active: Optional[bool] = None,
-        linux_account: Optional[str] = None
+        linux_account: Optional[str] = None,
     ) -> bool:
         """
         Update user information.
@@ -163,24 +168,24 @@ class UserRepository:
         params = []
 
         if username is not None:
-            updates.append('username = ?')
+            updates.append("username = ?")
             params.append(username)
 
         if email is not None:
-            updates.append('email = ?')
+            updates.append("email = ?")
             params.append(email)
 
         if role is not None:
-            updates.append('role = ?')
+            updates.append("role = ?")
             params.append(role)
 
         if is_active is not None:
-            updates.append('is_active = ?')
+            updates.append("is_active = ?")
             # Convert boolean to integer for PostgreSQL compatibility
             params.append(1 if is_active else 0)
 
         if linux_account is not None:
-            updates.append('linux_account = ?')
+            updates.append("linux_account = ?")
             params.append(linux_account)
 
         if not updates:
@@ -199,15 +204,15 @@ class UserRepository:
     def update_password(self, user_id: int, password_hash: str) -> bool:
         """
         Update user password.
-        
+
         Args:
             user_id: User ID.
             password_hash: New hashed password.
-            
+
         Returns:
             bool: True if successful.
         """
-        query = 'UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?'
+        query = "UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?"
 
         try:
             cursor = self.db.execute(query, (password_hash, user_id))
@@ -227,7 +232,7 @@ class UserRepository:
         Returns:
             bool: True if successful.
         """
-        query = 'UPDATE users SET must_change_password = ? WHERE id = ?'
+        query = "UPDATE users SET must_change_password = ? WHERE id = ?"
         must_change_int = 1 if must_change else 0
 
         try:
@@ -240,14 +245,14 @@ class UserRepository:
     def update_last_login(self, user_id: int) -> bool:
         """
         Update user's last login time.
-        
+
         Args:
             user_id: User ID.
-            
+
         Returns:
             bool: True if successful.
         """
-        query = 'UPDATE users SET last_login = ? WHERE id = ?'
+        query = "UPDATE users SET last_login = ? WHERE id = ?"
 
         try:
             self.db.execute(query, (datetime.utcnow(), user_id))
@@ -271,7 +276,7 @@ class UserRepository:
             return self.hard_delete_user(user_id)
 
         # Soft delete - set deleted_at timestamp
-        query = 'UPDATE users SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL'
+        query = "UPDATE users SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL"
 
         try:
             cursor = self.db.execute(query, (datetime.utcnow(), user_id))
@@ -290,7 +295,7 @@ class UserRepository:
         Returns:
             bool: True if successful.
         """
-        query = 'UPDATE users SET deleted_at = NULL WHERE id = ?'
+        query = "UPDATE users SET deleted_at = NULL WHERE id = ?"
 
         try:
             cursor = self.db.execute(query, (user_id,))
@@ -309,7 +314,7 @@ class UserRepository:
         Returns:
             bool: True if successful.
         """
-        query = 'DELETE FROM users WHERE id = ?'
+        query = "DELETE FROM users WHERE id = ?"
 
         try:
             cursor = self.db.execute(query, (user_id,))
@@ -324,18 +329,18 @@ class UserRepository:
         daily_token_quota: Optional[int] = None,
         monthly_token_quota: Optional[int] = None,
         daily_request_quota: Optional[int] = None,
-        monthly_request_quota: Optional[int] = None
+        monthly_request_quota: Optional[int] = None,
     ) -> bool:
         """
         Update user quota settings.
-        
+
         Args:
             user_id: User ID.
             daily_token_quota: Daily token limit.
             monthly_token_quota: Monthly token limit.
             daily_request_quota: Daily request limit.
             monthly_request_quota: Monthly request limit.
-            
+
         Returns:
             bool: True if successful.
         """
@@ -343,19 +348,19 @@ class UserRepository:
         params = []
 
         if daily_token_quota is not None:
-            updates.append('daily_token_quota = ?')
+            updates.append("daily_token_quota = ?")
             params.append(daily_token_quota)
 
         if monthly_token_quota is not None:
-            updates.append('monthly_token_quota = ?')
+            updates.append("monthly_token_quota = ?")
             params.append(monthly_token_quota)
 
         if daily_request_quota is not None:
-            updates.append('daily_request_quota = ?')
+            updates.append("daily_request_quota = ?")
             params.append(daily_request_quota)
 
         if monthly_request_quota is not None:
-            updates.append('monthly_request_quota = ?')
+            updates.append("monthly_request_quota = ?")
             params.append(monthly_request_quota)
 
         if not updates:
@@ -375,27 +380,22 @@ class UserRepository:
 
     # Session management methods
 
-    def create_session(
-        self,
-        user_id: int,
-        token: str,
-        expires_at: datetime
-    ) -> bool:
+    def create_session(self, user_id: int, token: str, expires_at: datetime) -> bool:
         """
         Create a new session.
-        
+
         Args:
             user_id: User ID.
             token: Session token.
             expires_at: Expiration time.
-            
+
         Returns:
             bool: True if successful.
         """
-        query = '''
+        query = """
             INSERT INTO sessions (user_id, token, created_at, expires_at)
             VALUES (?, ?, ?, ?)
-        '''
+        """
 
         try:
             self.db.execute(query, (user_id, token, datetime.utcnow(), expires_at))
@@ -407,33 +407,33 @@ class UserRepository:
     def get_session_by_token(self, token: str) -> Optional[Dict]:
         """
         Get session by token with user information.
-        
+
         Args:
             token: Session token.
-            
+
         Returns:
             Optional[Dict]: Session data with user info or None.
         """
-        query = '''
+        query = """
             SELECT s.*, u.username, u.email, u.role
             FROM sessions s
             JOIN users u ON s.user_id = u.id
             WHERE s.token = ? AND s.expires_at > ?
-        '''
+        """
 
         return self.db.fetch_one(query, (token, datetime.utcnow()))
 
     def delete_session(self, token: str) -> bool:
         """
         Delete a session.
-        
+
         Args:
             token: Session token.
-            
+
         Returns:
             bool: True if successful.
         """
-        query = 'DELETE FROM sessions WHERE token = ?'
+        query = "DELETE FROM sessions WHERE token = ?"
 
         try:
             self.db.execute(query, (token,))
@@ -449,7 +449,7 @@ class UserRepository:
         Returns:
             int: Number of sessions deleted.
         """
-        query = 'DELETE FROM sessions WHERE expires_at < ?'
+        query = "DELETE FROM sessions WHERE expires_at < ?"
 
         try:
             cursor = self.db.execute(query, (datetime.utcnow(),))

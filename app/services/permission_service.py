@@ -18,47 +18,49 @@ logger = logging.getLogger(__name__)
 
 class Permission(Enum):
     """System permissions."""
+
     # Dashboard permissions
-    VIEW_DASHBOARD = 'view_dashboard'
+    VIEW_DASHBOARD = "view_dashboard"
 
     # Messages permissions
-    VIEW_MESSAGES = 'view_messages'
-    EXPORT_MESSAGES = 'export_messages'
+    VIEW_MESSAGES = "view_messages"
+    EXPORT_MESSAGES = "export_messages"
 
     # Analysis permissions
-    VIEW_ANALYSIS = 'view_analysis'
-    RUN_ANALYSIS = 'run_analysis'
-    EXPORT_ANALYSIS = 'export_analysis'
+    VIEW_ANALYSIS = "view_analysis"
+    RUN_ANALYSIS = "run_analysis"
+    EXPORT_ANALYSIS = "export_analysis"
 
     # User management permissions
-    VIEW_USERS = 'view_users'
-    CREATE_USER = 'create_user'
-    EDIT_USER = 'edit_user'
-    DELETE_USER = 'delete_user'
+    VIEW_USERS = "view_users"
+    CREATE_USER = "create_user"
+    EDIT_USER = "edit_user"
+    DELETE_USER = "delete_user"
 
     # Permission management
-    MANAGE_PERMISSIONS = 'manage_permissions'
+    MANAGE_PERMISSIONS = "manage_permissions"
 
     # Quota management
-    VIEW_QUOTA = 'view_quota'
-    MANAGE_QUOTA = 'manage_quota'
+    VIEW_QUOTA = "view_quota"
+    MANAGE_QUOTA = "manage_quota"
 
     # Audit logs
-    VIEW_AUDIT_LOGS = 'view_audit_logs'
-    EXPORT_AUDIT_LOGS = 'export_audit_logs'
+    VIEW_AUDIT_LOGS = "view_audit_logs"
+    EXPORT_AUDIT_LOGS = "export_audit_logs"
 
     # Content filter
-    VIEW_CONTENT_FILTER = 'view_content_filter'
-    MANAGE_CONTENT_FILTER = 'manage_content_filter'
+    VIEW_CONTENT_FILTER = "view_content_filter"
+    MANAGE_CONTENT_FILTER = "manage_content_filter"
 
     # System administration
-    ADMIN_ACCESS = 'admin_access'
-    SYSTEM_CONFIG = 'system_config'
+    ADMIN_ACCESS = "admin_access"
+    SYSTEM_CONFIG = "system_config"
 
 
 @dataclass
 class Role:
     """Role definition."""
+
     name: str
     description: str
     permissions: Set[str] = field(default_factory=set)
@@ -70,14 +72,14 @@ class Role:
 
 # Default role definitions
 DEFAULT_ROLES = {
-    'admin': Role(
-        name='admin',
-        description='Full system administrator with all permissions',
-        permissions={p.value for p in Permission}
+    "admin": Role(
+        name="admin",
+        description="Full system administrator with all permissions",
+        permissions={p.value for p in Permission},
     ),
-    'manager': Role(
-        name='manager',
-        description='Team manager with view and export permissions',
+    "manager": Role(
+        name="manager",
+        description="Team manager with view and export permissions",
         permissions={
             Permission.VIEW_DASHBOARD.value,
             Permission.VIEW_MESSAGES.value,
@@ -90,24 +92,24 @@ DEFAULT_ROLES = {
             Permission.VIEW_AUDIT_LOGS.value,
             Permission.EXPORT_AUDIT_LOGS.value,
             Permission.VIEW_CONTENT_FILTER.value,
-        }
+        },
     ),
-    'user': Role(
-        name='user',
-        description='Regular user with basic view permissions',
+    "user": Role(
+        name="user",
+        description="Regular user with basic view permissions",
         permissions={
             Permission.VIEW_DASHBOARD.value,
             Permission.VIEW_MESSAGES.value,
             Permission.VIEW_ANALYSIS.value,
             Permission.VIEW_QUOTA.value,
-        }
+        },
     ),
-    'readonly': Role(
-        name='readonly',
-        description='Read-only access to dashboard',
+    "readonly": Role(
+        name="readonly",
+        description="Read-only access to dashboard",
         permissions={
             Permission.VIEW_DASHBOARD.value,
-        }
+        },
     ),
 }
 
@@ -122,11 +124,7 @@ class PermissionService:
     - Permission checking and validation
     """
 
-    def __init__(
-        self,
-        db: Optional[Database] = None,
-        user_repo: Optional[UserRepository] = None
-    ):
+    def __init__(self, db: Optional[Database] = None, user_repo: Optional[UserRepository] = None):
         """
         Initialize permission service.
 
@@ -145,10 +143,15 @@ class PermissionService:
             cursor = conn.cursor()
 
             # Use SERIAL for PostgreSQL, AUTOINCREMENT for SQLite
-            id_type = "SERIAL PRIMARY KEY" if self.db.is_postgresql else "INTEGER PRIMARY KEY AUTOINCREMENT"
+            id_type = (
+                "SERIAL PRIMARY KEY"
+                if self.db.is_postgresql
+                else "INTEGER PRIMARY KEY AUTOINCREMENT"
+            )
 
             # User permissions table (for custom permissions)
-            cursor.execute(f'''
+            cursor.execute(
+                f"""
                 CREATE TABLE IF NOT EXISTS user_permissions (
                     id {id_type},
                     user_id INTEGER NOT NULL,
@@ -158,10 +161,12 @@ class PermissionService:
                     UNIQUE(user_id, permission),
                     FOREIGN KEY (user_id) REFERENCES users(id)
                 )
-            ''')
+            """
+            )
 
             # Role permissions override table
-            cursor.execute(f'''
+            cursor.execute(
+                f"""
                 CREATE TABLE IF NOT EXISTS role_permissions (
                     id {id_type},
                     role_name TEXT NOT NULL,
@@ -169,11 +174,16 @@ class PermissionService:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(role_name, permission)
                 )
-            ''')
+            """
+            )
 
             # Create indexes
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_permissions_user ON user_permissions(user_id)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_role_permissions_role ON role_permissions(role_name)')
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_user_permissions_user ON user_permissions(user_id)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_role_permissions_role ON role_permissions(role_name)"
+            )
 
             conn.commit()
 
@@ -182,18 +192,16 @@ class PermissionService:
 
     def _load_role_permissions(self) -> None:
         """Load custom role permissions from database."""
-        rows = self.db.fetch_all('SELECT role_name, permission FROM role_permissions')
+        rows = self.db.fetch_all("SELECT role_name, permission FROM role_permissions")
 
         for row in rows:
-            role_name = row.get('role_name')
-            permission = row.get('permission')
+            role_name = row.get("role_name")
+            permission = row.get("permission")
 
             if role_name and permission:
                 if role_name not in self.roles:
                     self.roles[role_name] = Role(
-                        name=role_name,
-                        description=f'Custom role: {role_name}',
-                        permissions=set()
+                        name=role_name, description=f"Custom role: {role_name}", permissions=set()
                     )
                 self.roles[role_name].permissions.add(permission)
 
@@ -230,20 +238,19 @@ class PermissionService:
         if not user:
             return set()
 
-        role_name = user.get('role', 'user')
-        role = self.roles.get(role_name, self.roles.get('user'))
+        role_name = user.get("role", "user")
+        role = self.roles.get(role_name, self.roles.get("user"))
 
         # Start with role permissions
         permissions = set(role.permissions) if role else set()
 
         # Add custom user permissions
         custom_perms = self.db.fetch_all(
-            'SELECT permission FROM user_permissions WHERE user_id = ?',
-            (user_id,)
+            "SELECT permission FROM user_permissions WHERE user_id = ?", (user_id,)
         )
 
         for perm in custom_perms:
-            permissions.add(perm.get('permission'))
+            permissions.add(perm.get("permission"))
 
         return permissions
 
@@ -282,12 +289,7 @@ class PermissionService:
 
         return False, f"Permission denied: {permission}"
 
-    def grant_permission(
-        self,
-        user_id: int,
-        permission: str,
-        granted_by: int
-    ) -> bool:
+    def grant_permission(self, user_id: int, permission: str, granted_by: int) -> bool:
         """
         Grant a permission to a user.
 
@@ -302,11 +304,14 @@ class PermissionService:
         try:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute('''
+                cursor.execute(
+                    """
                     INSERT OR IGNORE INTO user_permissions
                     (user_id, permission, granted_by)
                     VALUES (?, ?, ?)
-                ''', (user_id, permission, granted_by))
+                """,
+                    (user_id, permission, granted_by),
+                )
                 conn.commit()
 
             logger.info(f"Permission '{permission}' granted to user {user_id} by {granted_by}")
@@ -330,10 +335,13 @@ class PermissionService:
         try:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute('''
+                cursor.execute(
+                    """
                     DELETE FROM user_permissions
                     WHERE user_id = ? AND permission = ?
-                ''', (user_id, permission))
+                """,
+                    (user_id, permission),
+                )
                 conn.commit()
 
             logger.info(f"Permission '{permission}' revoked from user {user_id}")
@@ -343,12 +351,7 @@ class PermissionService:
             logger.error(f"Failed to revoke permission: {e}")
             return False
 
-    def create_role(
-        self,
-        role_name: str,
-        description: str,
-        permissions: Set[str]
-    ) -> bool:
+    def create_role(self, role_name: str, description: str, permissions: Set[str]) -> bool:
         """
         Create a new role.
 
@@ -369,17 +372,18 @@ class PermissionService:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
                 for perm in permissions:
-                    cursor.execute('''
+                    cursor.execute(
+                        """
                         INSERT INTO role_permissions (role_name, permission)
                         VALUES (?, ?)
-                    ''', (role_name, perm))
+                    """,
+                        (role_name, perm),
+                    )
                 conn.commit()
 
             # Add to memory
             self.roles[role_name] = Role(
-                name=role_name,
-                description=description,
-                permissions=permissions
+                name=role_name, description=description, permissions=permissions
             )
 
             logger.info(f"Role '{role_name}' created with {len(permissions)} permissions")
@@ -389,11 +393,7 @@ class PermissionService:
             logger.error(f"Failed to create role: {e}")
             return False
 
-    def update_role_permissions(
-        self,
-        role_name: str,
-        permissions: Set[str]
-    ) -> bool:
+    def update_role_permissions(self, role_name: str, permissions: Set[str]) -> bool:
         """
         Update permissions for a role.
 
@@ -413,14 +413,17 @@ class PermissionService:
                 cursor = conn.cursor()
 
                 # Remove old permissions
-                cursor.execute('DELETE FROM role_permissions WHERE role_name = ?', (role_name,))
+                cursor.execute("DELETE FROM role_permissions WHERE role_name = ?", (role_name,))
 
                 # Add new permissions
                 for perm in permissions:
-                    cursor.execute('''
+                    cursor.execute(
+                        """
                         INSERT INTO role_permissions (role_name, permission)
                         VALUES (?, ?)
-                    ''', (role_name, perm))
+                    """,
+                        (role_name, perm),
+                    )
 
                 conn.commit()
 
@@ -455,7 +458,7 @@ class PermissionService:
         try:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute('DELETE FROM role_permissions WHERE role_name = ?', (role_name,))
+                cursor.execute("DELETE FROM role_permissions WHERE role_name = ?", (role_name,))
                 conn.commit()
 
             del self.roles[role_name]
@@ -481,7 +484,7 @@ class PermissionService:
         result = []
 
         for user in users:
-            user_id = user.get('id')
+            user_id = user.get("id")
             if user_id and self.has_permission(user_id, permission):
                 result.append(user)
 
@@ -498,19 +501,24 @@ class PermissionService:
             List[Dict]: List of permission changes.
         """
         if user_id:
-            return self.db.fetch_all('''
+            return self.db.fetch_all(
+                """
                 SELECT up.*, u.username as granted_by_username
                 FROM user_permissions up
                 LEFT JOIN users u ON up.granted_by = u.id
                 WHERE up.user_id = ?
                 ORDER BY up.granted_at DESC
-            ''', (user_id,))
+            """,
+                (user_id,),
+            )
         else:
-            return self.db.fetch_all('''
+            return self.db.fetch_all(
+                """
                 SELECT up.*, u.username, grantor.username as granted_by_username
                 FROM user_permissions up
                 JOIN users u ON up.user_id = u.id
                 LEFT JOIN users grantor ON up.granted_by = grantor.id
                 ORDER BY up.granted_at DESC
                 LIMIT 100
-            ''')
+            """
+            )

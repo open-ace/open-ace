@@ -14,14 +14,16 @@ from typing import Any, Dict, List, Optional
 
 class ProviderType(Enum):
     """SSO provider types."""
-    OAUTH2 = 'oauth2'
-    OIDC = 'oidc'
-    SAML = 'saml'
+
+    OAUTH2 = "oauth2"
+    OIDC = "oidc"
+    SAML = "saml"
 
 
 @dataclass
 class SSOProviderConfig:
     """Configuration for an SSO provider."""
+
     name: str
     provider_type: str
     client_id: str
@@ -30,7 +32,7 @@ class SSOProviderConfig:
     token_url: str
     userinfo_url: Optional[str] = None
     redirect_uri: Optional[str] = None
-    scope: List[str] = field(default_factory=lambda: ['openid', 'profile', 'email'])
+    scope: List[str] = field(default_factory=lambda: ["openid", "profile", "email"])
     issuer_url: Optional[str] = None
     jwks_url: Optional[str] = None
 
@@ -46,26 +48,27 @@ class SSOProviderConfig:
     def to_dict(self) -> dict:
         """Convert to dictionary."""
         return {
-            'name': self.name,
-            'provider_type': self.provider_type,
-            'client_id': self.client_id,
-            'client_secret': '***',  # Don't expose secret
-            'authorization_url': self.authorization_url,
-            'token_url': self.token_url,
-            'userinfo_url': self.userinfo_url,
-            'redirect_uri': self.redirect_uri,
-            'scope': self.scope,
-            'issuer_url': self.issuer_url,
-            'jwks_url': self.jwks_url,
-            'extra_params': self.extra_params,
-            'tenant_id': self.tenant_id,
-            'is_active': self.is_active,
+            "name": self.name,
+            "provider_type": self.provider_type,
+            "client_id": self.client_id,
+            "client_secret": "***",  # Don't expose secret
+            "authorization_url": self.authorization_url,
+            "token_url": self.token_url,
+            "userinfo_url": self.userinfo_url,
+            "redirect_uri": self.redirect_uri,
+            "scope": self.scope,
+            "issuer_url": self.issuer_url,
+            "jwks_url": self.jwks_url,
+            "extra_params": self.extra_params,
+            "tenant_id": self.tenant_id,
+            "is_active": self.is_active,
         }
 
 
 @dataclass
 class SSOUser:
     """User information from SSO provider."""
+
     provider: str
     provider_user_id: str
     email: Optional[str] = None
@@ -81,24 +84,25 @@ class SSOUser:
     def to_dict(self) -> dict:
         """Convert to dictionary."""
         return {
-            'provider': self.provider,
-            'provider_user_id': self.provider_user_id,
-            'email': self.email,
-            'username': self.username,
-            'name': self.name,
-            'first_name': self.first_name,
-            'last_name': self.last_name,
-            'picture': self.picture,
-            'locale': self.locale,
-            'email_verified': self.email_verified,
+            "provider": self.provider,
+            "provider_user_id": self.provider_user_id,
+            "email": self.email,
+            "username": self.username,
+            "name": self.name,
+            "first_name": self.first_name,
+            "last_name": self.last_name,
+            "picture": self.picture,
+            "locale": self.locale,
+            "email_verified": self.email_verified,
         }
 
 
 @dataclass
 class SSOToken:
     """SSO token information."""
+
     access_token: str
-    token_type: str = 'Bearer'
+    token_type: str = "Bearer"
     expires_in: int = 3600
     refresh_token: Optional[str] = None
     id_token: Optional[str] = None
@@ -108,13 +112,13 @@ class SSOToken:
     def to_dict(self) -> dict:
         """Convert to dictionary."""
         return {
-            'access_token': '***',  # Don't expose token
-            'token_type': self.token_type,
-            'expires_in': self.expires_in,
-            'refresh_token': '***' if self.refresh_token else None,
-            'id_token': '***' if self.id_token else None,
-            'scope': self.scope,
-            'expires_at': self.expires_at.isoformat() if self.expires_at else None,
+            "access_token": "***",  # Don't expose token
+            "token_type": self.token_type,
+            "expires_in": self.expires_in,
+            "refresh_token": "***" if self.refresh_token else None,
+            "id_token": "***" if self.id_token else None,
+            "scope": self.scope,
+            "expires_at": self.expires_at.isoformat() if self.expires_at else None,
         }
 
     def is_expired(self) -> bool:
@@ -127,6 +131,7 @@ class SSOToken:
 @dataclass
 class SSOAuthResult:
     """Result of SSO authentication."""
+
     success: bool
     user: Optional[SSOUser] = None
     token: Optional[SSOToken] = None
@@ -136,11 +141,11 @@ class SSOAuthResult:
     def to_dict(self) -> dict:
         """Convert to dictionary."""
         return {
-            'success': self.success,
-            'user': self.user.to_dict() if self.user else None,
-            'token': self.token.to_dict() if self.token else None,
-            'error': self.error,
-            'error_description': self.error_description,
+            "success": self.success,
+            "user": self.user.to_dict() if self.user else None,
+            "token": self.token.to_dict() if self.token else None,
+            "error": self.error,
+            "error_description": self.error_description,
         }
 
 
@@ -234,7 +239,7 @@ class SSOProvider(ABC):
                 result.user = user
             else:
                 result.success = False
-                result.error = 'failed_to_get_user_info'
+                result.error = "failed_to_get_user_info"
 
         return result
 
@@ -255,53 +260,53 @@ class SSOProvider(ABC):
 
 # Predefined provider configurations
 PROVIDER_CONFIGS = {
-    'google': {
-        'name': 'Google',
-        'provider_type': 'oidc',
-        'authorization_url': 'https://accounts.google.com/o/oauth2/v2/auth',
-        'token_url': 'https://oauth2.googleapis.com/token',
-        'userinfo_url': 'https://openidconnect.googleapis.com/v1/userinfo',
-        'issuer_url': 'https://accounts.google.com',
-        'jwks_url': 'https://www.googleapis.com/oauth2/v3/certs',
-        'scope': ['openid', 'profile', 'email'],
+    "google": {
+        "name": "Google",
+        "provider_type": "oidc",
+        "authorization_url": "https://accounts.google.com/o/oauth2/v2/auth",
+        "token_url": "https://oauth2.googleapis.com/token",
+        "userinfo_url": "https://openidconnect.googleapis.com/v1/userinfo",
+        "issuer_url": "https://accounts.google.com",
+        "jwks_url": "https://www.googleapis.com/oauth2/v3/certs",
+        "scope": ["openid", "profile", "email"],
     },
-    'microsoft': {
-        'name': 'Microsoft',
-        'provider_type': 'oidc',
-        'authorization_url': 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize',
-        'token_url': 'https://login.microsoftonline.com/common/oauth2/v2.0/token',
-        'userinfo_url': 'https://graph.microsoft.com/oidc/userinfo',
-        'issuer_url': 'https://login.microsoftonline.com/common/v2.0',
-        'jwks_url': 'https://login.microsoftonline.com/common/discovery/v2.0/keys',
-        'scope': ['openid', 'profile', 'email'],
+    "microsoft": {
+        "name": "Microsoft",
+        "provider_type": "oidc",
+        "authorization_url": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+        "token_url": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+        "userinfo_url": "https://graph.microsoft.com/oidc/userinfo",
+        "issuer_url": "https://login.microsoftonline.com/common/v2.0",
+        "jwks_url": "https://login.microsoftonline.com/common/discovery/v2.0/keys",
+        "scope": ["openid", "profile", "email"],
     },
-    'github': {
-        'name': 'GitHub',
-        'provider_type': 'oauth2',
-        'authorization_url': 'https://github.com/login/oauth/authorize',
-        'token_url': 'https://github.com/login/oauth/access_token',
-        'userinfo_url': 'https://api.github.com/user',
-        'scope': ['user:email', 'read:user'],
+    "github": {
+        "name": "GitHub",
+        "provider_type": "oauth2",
+        "authorization_url": "https://github.com/login/oauth/authorize",
+        "token_url": "https://github.com/login/oauth/access_token",
+        "userinfo_url": "https://api.github.com/user",
+        "scope": ["user:email", "read:user"],
     },
-    'okta': {
-        'name': 'Okta',
-        'provider_type': 'oidc',
+    "okta": {
+        "name": "Okta",
+        "provider_type": "oidc",
         # These need to be configured per-tenant
-        'authorization_url': '',  # https://{domain}/oauth2/v1/authorize
-        'token_url': '',  # https://{domain}/oauth2/v1/token
-        'userinfo_url': '',  # https://{domain}/oauth2/v1/userinfo
-        'issuer_url': '',  # https://{domain}
-        'scope': ['openid', 'profile', 'email'],
+        "authorization_url": "",  # https://{domain}/oauth2/v1/authorize
+        "token_url": "",  # https://{domain}/oauth2/v1/token
+        "userinfo_url": "",  # https://{domain}/oauth2/v1/userinfo
+        "issuer_url": "",  # https://{domain}
+        "scope": ["openid", "profile", "email"],
     },
-    'auth0': {
-        'name': 'Auth0',
-        'provider_type': 'oidc',
+    "auth0": {
+        "name": "Auth0",
+        "provider_type": "oidc",
         # These need to be configured per-tenant
-        'authorization_url': '',  # https://{domain}/authorize
-        'token_url': '',  # https://{domain}/oauth/token
-        'userinfo_url': '',  # https://{domain}/userinfo
-        'issuer_url': '',  # https://{domain}
-        'scope': ['openid', 'profile', 'email'],
+        "authorization_url": "",  # https://{domain}/authorize
+        "token_url": "",  # https://{domain}/oauth/token
+        "userinfo_url": "",  # https://{domain}/userinfo
+        "issuer_url": "",  # https://{domain}
+        "scope": ["openid", "profile", "email"],
     },
 }
 
