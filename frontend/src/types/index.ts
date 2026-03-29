@@ -47,6 +47,13 @@ export interface SummaryData {
   [tool: string]: ToolSummary;
 }
 
+// Trend data types
+export interface TrendDataPoint {
+  date: string;
+  tool: string;
+  tokens: number;
+}
+
 // Message types
 export interface Message {
   id: string;

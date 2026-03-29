@@ -224,6 +224,7 @@ class UsageService:
             host_name=host_name,
         )
 
+    @cached(ttl=60, key_prefix="usage", skip_args=[0])
     def get_trend_data(
         self, start_date: str, end_date: str, host_name: Optional[str] = None
     ) -> List[Dict]:

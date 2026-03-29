@@ -416,6 +416,8 @@ class UsageRepository:
         """
         Get usage data aggregated by date and tool for trend charts.
 
+        Uses pre-aggregated daily_stats table for fast queries.
+
         Args:
             start_date: Start date string (YYYY-MM-DD).
             end_date: End date string (YYYY-MM-DD).
@@ -431,12 +433,13 @@ class UsageRepository:
             conditions.append("host_name = ?")
             params.append(host_name)
 
+        # Use pre-aggregated daily_stats table for fast queries
         query = f"""
             SELECT
                 date,
                 tool_name,
-                SUM(tokens_used) as tokens
-            FROM daily_messages
+                SUM(total_tokens) as tokens
+            FROM daily_stats
             WHERE {' AND '.join(conditions)}
             GROUP BY date, tool_name
             ORDER BY date ASC, tool_name ASC

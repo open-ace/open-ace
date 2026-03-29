@@ -484,30 +484,12 @@ class DailyStatsRepository:
         Returns:
             bool: True if stats are empty or stale.
         """
-        # Check if daily_stats has data
+        # Simple check: just verify daily_stats has data
+        # Data freshness is ensured by upload triggers
         query = "SELECT COUNT(*) as count FROM daily_stats"
         result = self.db.fetch_one(query)
 
-        if not result or result["count"] == 0:
-            return True
-
-        # Check if stats cover all dates in daily_messages
-        query_dates = """
-            SELECT COUNT(DISTINCT date) as msg_dates FROM daily_messages
-        """
-        result_dates = self.db.fetch_one(query_dates)
-
-        query_stats_dates = """
-            SELECT COUNT(DISTINCT date) as stats_dates FROM daily_stats
-        """
-        result_stats = self.db.fetch_one(query_stats_dates)
-
-        if result_dates and result_stats:
-            msg_dates = result_dates["msg_dates"] or 0
-            stats_dates = result_stats["stats_dates"] or 0
-            return msg_dates > stats_dates
-
-        return False
+        return not result or result["count"] == 0
 
     def refresh_hourly_stats(self, date: Optional[str] = None) -> bool:
         """

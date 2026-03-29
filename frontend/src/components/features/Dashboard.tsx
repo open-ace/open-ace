@@ -4,7 +4,7 @@
 
 import React, { useState, useMemo, startTransition } from 'react';
 import { cn } from '@/utils';
-import { useDashboard, useTrendData } from '@/hooks';
+import { useDashboard } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
 import {
@@ -51,11 +51,6 @@ export const Dashboard: React.FC = () => {
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
-  const { todayData, summaryData, hosts, isLoading, isError, error, refetch } = useDashboard({
-    tool: selectedTool || undefined,
-    host: selectedHost || undefined,
-  });
-
   // Get date range for trend data (last 30 days)
   const { startDate, endDate } = useMemo(() => {
     const end = new Date();
@@ -66,7 +61,14 @@ export const Dashboard: React.FC = () => {
     };
   }, []);
 
-  const trendQuery = useTrendData(startDate, endDate, selectedHost || undefined);
+  // Use combined dashboard hook with trend data for parallel fetching
+  const { todayData, summaryData, hosts, trendData, isLoading, isError, error, refetch } =
+    useDashboard({
+      tool: selectedTool || undefined,
+      host: selectedHost || undefined,
+      startDate,
+      endDate,
+    });
 
   // Sort handler - use startTransition for non-urgent updates (rerender-transitions optimization)
   const handleSort = (key: SortKey) => {
@@ -176,10 +178,8 @@ export const Dashboard: React.FC = () => {
         <div className="row">
           <div className="col-md-8 mb-4">
             <Card title={t('trendChart', language)}>
-              {trendQuery.isLoading ? (
-                <Loading />
-              ) : trendQuery.data && trendQuery.data.length > 0 ? (
-                <TokenTrendChart data={trendQuery.data} height={300} />
+              {trendData && trendData.length > 0 ? (
+                <TokenTrendChart data={trendData} height={300} />
               ) : (
                 <EmptyState icon="bi-graph-up" title={t('noData', language)} />
               )}
@@ -187,10 +187,10 @@ export const Dashboard: React.FC = () => {
           </div>
           <div className="col-md-4 mb-4">
             <Card title={t('tokenDistribution', language)}>
-              {trendQuery.data && trendQuery.data.length > 0 ? (
+              {trendData && trendData.length > 0 ? (
                 <TokenDistributionChart
                   data={Object.values(
-                    trendQuery.data.reduce(
+                    trendData.reduce(
                       (acc, item) => {
                         const tool = item.tool;
                         if (!acc[tool]) {

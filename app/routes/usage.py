@@ -87,17 +87,28 @@ def api_tools():
 
 @usage_bp.route("/hosts")
 def api_hosts():
-    """Get list of all hosts."""
-    hosts = usage_service.get_all_hosts()
+    """Get list of all hosts from pre-aggregated summary table."""
+    # Ensure summary is up to date
+    if summary_service.needs_refresh():
+        summary_service.refresh_summary()
+
+    hosts = summary_service.get_all_hosts()
     return jsonify(hosts)
 
 
 @usage_bp.route("/trend")
 def api_trend():
     """Get usage trend data aggregated by date for charts."""
+    from app.repositories.daily_stats_repo import DailyStatsRepository
+
     start_date = request.args.get("start", get_days_ago(30))
     end_date = request.args.get("end", get_today())
     host = request.args.get("host")
+
+    # Ensure daily_stats is up to date
+    daily_stats_repo = DailyStatsRepository()
+    if daily_stats_repo.needs_refresh():
+        daily_stats_repo.refresh_stats()
 
     entries = usage_service.get_trend_data(start_date, end_date, host_name=host)
     return jsonify(entries)

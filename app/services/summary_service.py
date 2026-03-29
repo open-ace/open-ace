@@ -321,3 +321,22 @@ class SummaryService:
                 return age > 3600  # Refresh if older than 1 hour
             return True
         return True  # No data, needs refresh
+
+    def get_all_hosts(self) -> List[str]:
+        """
+        Get list of all hosts from usage_summary table.
+
+        This is much faster than querying daily_messages directly
+        because usage_summary has far fewer rows.
+
+        Returns:
+            List[str]: List of unique host names.
+        """
+        query = """
+            SELECT DISTINCT host_name
+            FROM usage_summary
+            WHERE host_name IS NOT NULL
+            ORDER BY host_name
+        """
+        rows = self.db.fetch_all(query)
+        return [row["host_name"] for row in rows]

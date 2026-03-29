@@ -76,8 +76,14 @@ export default defineConfig({
           if (id.includes('src/api/')) {
             return 'api';
           }
-          // 组件模块
-          if (id.includes('src/components/')) {
+          // 页面组件 - 懒加载，不打包到 components chunk
+          // 这些组件会自动生成单独的 chunk
+          if (id.includes('src/components/features/')) {
+            // 让懒加载的页面组件保持独立
+            return;
+          }
+          // 公共组件模块（不包括 features）
+          if (id.includes('src/components/common/') || id.includes('src/components/layout/')) {
             return 'components';
           }
           // Hooks

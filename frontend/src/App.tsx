@@ -5,38 +5,49 @@
  * - /work/* - Work mode (WorkLayout with three-column layout) - All users
  * - /manage/* - Manage mode (ManageLayout with sidebar navigation) - Admin only
  * - /login, /logout - Public routes
+ *
+ * Performance optimizations:
+ * - Route-level code splitting with React.lazy
+ * - Lazy-loaded page components reduce initial bundle size
  */
 
-import React, { useEffect } from 'react';
+import React, { useEffect, Suspense, lazy } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Layout, WorkLayout, ManageLayout } from '@/components/layout';
-import {
-  Dashboard,
-  Messages,
-  Analysis,
-  Login,
-  LogoutSuccess,
-  Report,
-  Workspace,
-  Sessions,
-  Prompts,
-  TrendAnalysis,
-  AnomalyDetection,
-  ROIAnalysis,
-  TenantManagement,
-  SSOSettings,
-  ConversationHistory,
-} from '@/components/features';
-import { UserManagement } from '@/components/features/management/UserManagement';
-import { AuditCenter } from '@/components/features/management/AuditCenter';
-import { QuotaAlerts } from '@/components/features/management/QuotaAlerts';
-import { ComplianceMgmt } from '@/components/features/management/ComplianceMgmt';
-import { SecurityCenter } from '@/components/features/management/SecurityCenter';
-import { LoadingOverlay } from '@/components/common';
+import { Login } from '@/components/features/Login';
+import { LogoutSuccess } from '@/components/features/LogoutSuccess';
+import { LoadingOverlay, Loading } from '@/components/common';
 import { useAuth, useTheme } from '@/hooks';
 import { useAppStore } from '@/store';
 import { t } from '@/i18n';
+
+// Lazy-loaded page components for code splitting
+// Each page is loaded only when navigated to, reducing initial bundle size
+const Dashboard = lazy(() => import('@/components/features/Dashboard').then(m => ({ default: m.Dashboard })));
+const Messages = lazy(() => import('@/components/features/Messages').then(m => ({ default: m.Messages })));
+const Analysis = lazy(() => import('@/components/features/Analysis').then(m => ({ default: m.Analysis })));
+const Report = lazy(() => import('@/components/features/Report').then(m => ({ default: m.Report })));
+const Workspace = lazy(() => import('@/components/features/Workspace').then(m => ({ default: m.Workspace })));
+const Sessions = lazy(() => import('@/components/features/Sessions').then(m => ({ default: m.Sessions })));
+const Prompts = lazy(() => import('@/components/features/Prompts').then(m => ({ default: m.Prompts })));
+const TrendAnalysis = lazy(() => import('@/components/features/analysis/TrendAnalysis').then(m => ({ default: m.TrendAnalysis })));
+const AnomalyDetection = lazy(() => import('@/components/features/analysis/AnomalyDetection').then(m => ({ default: m.AnomalyDetection })));
+const ROIAnalysis = lazy(() => import('@/components/features/analysis/ROIAnalysis').then(m => ({ default: m.ROIAnalysis })));
+const ConversationHistory = lazy(() => import('@/components/features/ConversationHistory').then(m => ({ default: m.ConversationHistory })));
+const UserManagement = lazy(() => import('@/components/features/management/UserManagement').then(m => ({ default: m.UserManagement })));
+const AuditCenter = lazy(() => import('@/components/features/management/AuditCenter').then(m => ({ default: m.AuditCenter })));
+const QuotaAlerts = lazy(() => import('@/components/features/management/QuotaAlerts').then(m => ({ default: m.QuotaAlerts })));
+const ComplianceMgmt = lazy(() => import('@/components/features/management/ComplianceMgmt').then(m => ({ default: m.ComplianceMgmt })));
+const SecurityCenter = lazy(() => import('@/components/features/management/SecurityCenter').then(m => ({ default: m.SecurityCenter })));
+const TenantManagement = lazy(() => import('@/components/features/management/TenantManagement').then(m => ({ default: m.TenantManagement })));
+const SSOSettings = lazy(() => import('@/components/features/settings/SSOSettings').then(m => ({ default: m.SSOSettings })));
+
+// Page loading fallback
+const PageLoader: React.FC = () => {
+  const language = useAppStore((state) => state.language);
+  return <Loading size="lg" text={t('loading', language)} />;
+};
 
 // Create Query Client
 const queryClient = new QueryClient({
@@ -98,28 +109,20 @@ const LegacyAppContent: React.FC = () => {
   // Render section content
   const renderSection = () => {
     const section = getActiveSection();
-    switch (section) {
-      case 'dashboard':
-        return <Dashboard />;
-      case 'messages':
-        return <Messages />;
-      case 'analysis':
-        return <Analysis />;
-      case 'management':
-        return <UserManagement />;
-      case 'report':
-        return <Report />;
-      case 'workspace':
-        return <Workspace />;
-      case 'sessions':
-        return <Sessions />;
-      case 'prompts':
-        return <Prompts />;
-      case 'security':
-        return <SecurityCenter />;
-      default:
-        return <Dashboard />;
-    }
+    return (
+      <Suspense fallback={<PageLoader />}>
+        {section === 'dashboard' && <Dashboard />}
+        {section === 'messages' && <Messages />}
+        {section === 'analysis' && <Analysis />}
+        {section === 'management' && <UserManagement />}
+        {section === 'report' && <Report />}
+        {section === 'workspace' && <Workspace />}
+        {section === 'sessions' && <Sessions />}
+        {section === 'prompts' && <Prompts />}
+        {section === 'security' && <SecurityCenter />}
+        {!['dashboard', 'messages', 'analysis', 'management', 'report', 'workspace', 'sessions', 'prompts', 'security'].includes(section) && <Dashboard />}
+      </Suspense>
+    );
   };
 
   const activeSection = getActiveSection();
@@ -139,12 +142,14 @@ const LegacyAppContent: React.FC = () => {
 const WorkRoutes: React.FC = () => {
   return (
     <WorkLayout>
-      <Routes>
-        <Route path="/" element={<Workspace />} />
-        <Route path="/sessions" element={<Sessions />} />
-        <Route path="/prompts" element={<Prompts />} />
-        <Route path="*" element={<Navigate to="/work" replace />} />
-      </Routes>
+      <Suspense fallback={<PageLoader />}>
+        <Routes>
+          <Route path="/" element={<Workspace />} />
+          <Route path="/sessions" element={<Sessions />} />
+          <Route path="/prompts" element={<Prompts />} />
+          <Route path="*" element={<Navigate to="/work" replace />} />
+        </Routes>
+      </Suspense>
     </WorkLayout>
   );
 };
@@ -153,34 +158,36 @@ const WorkRoutes: React.FC = () => {
 const ManageRoutes: React.FC = () => {
   return (
     <ManageLayout>
-      <Routes>
-        {/* Overview */}
-        <Route path="/dashboard" element={<Dashboard />} />
+      <Suspense fallback={<PageLoader />}>
+        <Routes>
+          {/* Overview */}
+          <Route path="/dashboard" element={<Dashboard />} />
 
-        {/* Analysis */}
-        <Route path="/analysis" element={<Navigate to="/manage/analysis/trend" replace />} />
-        <Route path="/analysis/trend" element={<TrendAnalysis />} />
-        <Route path="/analysis/anomaly" element={<AnomalyDetection />} />
-        <Route path="/analysis/roi" element={<ROIAnalysis />} />
-        <Route path="/analysis/conversation-history" element={<ConversationHistory />} />
-        <Route path="/messages" element={<Messages />} />
+          {/* Analysis */}
+          <Route path="/analysis" element={<Navigate to="/manage/analysis/trend" replace />} />
+          <Route path="/analysis/trend" element={<TrendAnalysis />} />
+          <Route path="/analysis/anomaly" element={<AnomalyDetection />} />
+          <Route path="/analysis/roi" element={<ROIAnalysis />} />
+          <Route path="/analysis/conversation-history" element={<ConversationHistory />} />
+          <Route path="/messages" element={<Messages />} />
 
-        {/* Governance - Merged Pages */}
-        <Route path="/audit" element={<AuditCenter />} />
-        <Route path="/quota" element={<QuotaAlerts />} />
-        <Route path="/compliance" element={<ComplianceMgmt />} />
-        <Route path="/security" element={<SecurityCenter />} />
+          {/* Governance - Merged Pages */}
+          <Route path="/audit" element={<AuditCenter />} />
+          <Route path="/quota" element={<QuotaAlerts />} />
+          <Route path="/compliance" element={<ComplianceMgmt />} />
+          <Route path="/security" element={<SecurityCenter />} />
 
-        {/* Users */}
-        <Route path="/users" element={<UserManagement />} />
-        <Route path="/tenants" element={<TenantManagement />} />
+          {/* Users */}
+          <Route path="/users" element={<UserManagement />} />
+          <Route path="/tenants" element={<TenantManagement />} />
 
-        {/* Settings */}
-        <Route path="/settings/sso" element={<SSOSettings />} />
+          {/* Settings */}
+          <Route path="/settings/sso" element={<SSOSettings />} />
 
-        {/* Default */}
-        <Route path="*" element={<Navigate to="/manage/dashboard" replace />} />
-      </Routes>
+          {/* Default */}
+          <Route path="*" element={<Navigate to="/manage/dashboard" replace />} />
+        </Routes>
+      </Suspense>
     </ManageLayout>
   );
 };

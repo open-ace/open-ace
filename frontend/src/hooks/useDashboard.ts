@@ -4,17 +4,20 @@
  * Performance optimizations:
  * - Uses useQueries for parallel data fetching (async-parallel)
  * - Combines results to reduce redundant state checks
+ * - Includes trend data in single query batch for faster initial load
  */
 
 import { useQuery, useQueries } from '@tanstack/react-query';
 import { dashboardApi } from '@/api';
-import type { ToolUsage, SummaryData } from '@/types';
+import type { ToolUsage, SummaryData, TrendDataPoint } from '@/types';
 
 interface UseDashboardOptions {
   tool?: string;
   host?: string;
   autoRefresh?: boolean;
   refreshInterval?: number;
+  startDate?: string;
+  endDate?: string;
 }
 
 export function useTodayUsage(options: UseDashboardOptions = {}) {
@@ -39,7 +42,7 @@ export function useSummary(host?: string) {
 }
 
 export function useTrendData(startDate: string, endDate: string, host?: string) {
-  return useQuery({
+  return useQuery<TrendDataPoint[]>({
     queryKey: ['dashboard', 'trend', { startDate, endDate, host }],
     queryFn: () => dashboardApi.getTrendData(startDate, endDate, host),
     staleTime: 5 * 60 * 1000, // 5 minutes
@@ -56,9 +59,10 @@ export function useHosts() {
 }
 
 export function useDashboard(options: UseDashboardOptions = {}) {
-  const { tool, host, autoRefresh = false, refreshInterval = 60000 } = options;
+  const { tool, host, autoRefresh = false, refreshInterval = 60000, startDate, endDate } = options;
 
   // Use useQueries for parallel data fetching (async-parallel optimization)
+  // Include trend data in the same batch for faster initial load
   const queries = useQueries({
     queries: [
       {
@@ -79,17 +83,24 @@ export function useDashboard(options: UseDashboardOptions = {}) {
         queryFn: dashboardApi.getHosts,
         staleTime: 30 * 60 * 1000, // 30 minutes
       },
+      {
+        queryKey: ['dashboard', 'trend', { startDate, endDate, host }],
+        queryFn: () => dashboardApi.getTrendData(startDate ?? '', endDate ?? '', host),
+        staleTime: 5 * 60 * 1000, // 5 minutes
+        enabled: !!startDate && !!endDate,
+      },
     ],
     combine: (results) => ({
       todayData: (results[0].data as ToolUsage[]) ?? [],
       summaryData: (results[1].data as SummaryData) ?? {},
       hosts: (results[2].data as string[]) ?? [],
-      isLoading: results[0].isLoading || results[1].isLoading,
-      isFetching: results[0].isFetching || results[1].isFetching,
-      isError: results[0].isError || results[1].isError,
-      error: results[0].error ?? results[1].error,
+      trendData: (results[3].data as TrendDataPoint[]) ?? [],
+      isLoading: results[0].isLoading || results[1].isLoading || results[3].isLoading,
+      isFetching: results[0].isFetching || results[1].isFetching || results[3].isFetching,
+      isError: results[0].isError || results[1].isError || results[3].isError,
+      error: results[0].error ?? results[1].error ?? results[3].error,
       refetch: async () => {
-        await Promise.all([results[0].refetch(), results[1].refetch()]);
+        await Promise.all([results[0].refetch(), results[1].refetch(), results[3].refetch()]);
       },
     }),
   });
