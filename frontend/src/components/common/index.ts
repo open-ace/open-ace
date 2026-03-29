@@ -29,13 +29,23 @@ export { Divider } from './Divider';
 // Mode Switcher - Dual-track system
 export { ModeSwitcher } from './ModeSwitcher';
 
-// Chart components
+// Chart components - lazy loading for performance optimization
+// Chart.js (~60KB) is loaded on demand when charts are rendered
 export {
-  LineChart,
-  BarChart,
-  PieChart,
-  DoughnutChart,
-  TokenTrendChart,
-  ToolUsageChart,
-  TokenDistributionChart,
-} from './Charts';
+  LazyLineChart as LineChart,
+  LazyBarChart as BarChart,
+  LazyPieChart as PieChart,
+  LazyDoughnutChart as DoughnutChart,
+  LazyTokenTrendChart as TokenTrendChart,
+  LazyToolUsageChart as ToolUsageChart,
+  LazyTokenDistributionChart as TokenDistributionChart,
+} from './LazyCharts';
+export type {
+  LineChartProps,
+  BarChartProps,
+  PieChartProps,
+  DoughnutChartProps,
+  TokenTrendChartProps,
+  ToolUsageChartProps,
+  TokenDistributionChartProps,
+} from './LazyCharts';
