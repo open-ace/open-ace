@@ -2,7 +2,7 @@
  * Dashboard Component - Main dashboard with usage statistics
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, startTransition } from 'react';
 import { cn } from '@/utils';
 import { useDashboard, useTrendData } from '@/hooks';
 import { useLanguage } from '@/store';
@@ -62,14 +62,16 @@ export const Dashboard: React.FC = () => {
 
   const trendQuery = useTrendData(startDate, endDate, selectedHost || undefined);
 
-  // Sort handler
+  // Sort handler - use startTransition for non-urgent updates (rerender-transitions optimization)
   const handleSort = (key: SortKey) => {
-    if (sortKey === key) {
-      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortKey(key);
-      setSortDirection('desc');
-    }
+    startTransition(() => {
+      if (sortKey === key) {
+        setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+      } else {
+        setSortKey(key);
+        setSortDirection('desc');
+      }
+    });
   };
 
   // Sorted summary data
@@ -296,13 +298,14 @@ export const Dashboard: React.FC = () => {
 
 /**
  * Today's Usage Card
+ * Memoized for performance (rerender-memo optimization)
  */
 interface TodayCardProps {
   item: ToolUsage;
   language: Language;
 }
 
-const TodayCard: React.FC<TodayCardProps> = ({ item, language }) => {
+const TodayCard = React.memo<TodayCardProps>(({ item, language }) => {
   const colors = TOOL_COLORS[item.tool_name] || { card: 'bg-secondary' };
 
   return (
@@ -354,10 +357,11 @@ const TodayCard: React.FC<TodayCardProps> = ({ item, language }) => {
       </div>
     </div>
   );
-};
+});
 
 /**
  * Summary Card
+ * Memoized for performance (rerender-memo optimization)
  */
 interface SummaryCardProps {
   tool: string;
@@ -365,7 +369,7 @@ interface SummaryCardProps {
   language: Language;
 }
 
-const SummaryCard: React.FC<SummaryCardProps> = ({ tool, stats, language }) => {
+const SummaryCard = React.memo<SummaryCardProps>(({ tool, stats, language }) => {
   const colors = TOOL_COLORS[tool] || { card: 'bg-secondary' };
 
   return (
@@ -390,4 +394,4 @@ const SummaryCard: React.FC<SummaryCardProps> = ({ tool, stats, language }) => {
       </div>
     </div>
   );
-};
+});

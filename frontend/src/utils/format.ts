@@ -1,19 +1,43 @@
 /**
  * Format Utilities - Number and date formatting helpers
+ *
+ * Performance optimizations:
+ * - formatTokens uses module-level Map cache (js-cache-function-results)
  */
+
+// Module-level cache for formatTokens (js-cache-function-results optimization)
+const tokenFormatCache = new Map<number, string>();
+const MAX_CACHE_SIZE = 1000; // Limit cache size to prevent memory issues
 
 /**
  * Format a number of tokens with K/M/B suffixes
+ * Cached for performance - same values return cached results
  */
 export function formatTokens(tokens: number): string {
-  if (tokens >= 1_000_000_000) {
-    return (tokens / 1_000_000_000).toFixed(2) + 'B';
-  } else if (tokens >= 1_000_000) {
-    return (tokens / 1_000_000).toFixed(2) + 'M';
-  } else if (tokens >= 1_000) {
-    return (tokens / 1_000).toFixed(2) + 'K';
+  // Check cache first
+  const cached = tokenFormatCache.get(tokens);
+  if (cached !== undefined) {
+    return cached;
   }
-  return tokens.toString();
+
+  // Calculate result
+  let result: string;
+  if (tokens >= 1_000_000_000) {
+    result = (tokens / 1_000_000_000).toFixed(2) + 'B';
+  } else if (tokens >= 1_000_000) {
+    result = (tokens / 1_000_000).toFixed(2) + 'M';
+  } else if (tokens >= 1_000) {
+    result = (tokens / 1_000).toFixed(2) + 'K';
+  } else {
+    result = tokens.toString();
+  }
+
+  // Cache result with size limit
+  if (tokenFormatCache.size < MAX_CACHE_SIZE) {
+    tokenFormatCache.set(tokens, result);
+  }
+
+  return result;
 }
 
 /**

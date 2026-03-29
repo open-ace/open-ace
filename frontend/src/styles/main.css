@@ -1053,6 +1053,7 @@ link[rel='dns-prefetch'] {
 }
 
 /* Message Item - Card with expand/collapse functionality */
+/* Performance optimization: content-visibility for long lists (rendering-content-visibility) */
 .message-item {
   background-color: var(--bg-primary);
   border: 1px solid var(--border-color);
@@ -1061,6 +1062,8 @@ link[rel='dns-prefetch'] {
   overflow: hidden;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   transition: box-shadow 0.2s ease;
+  content-visibility: auto;
+  contain-intrinsic-size: 0 80px; /* Estimated height for virtual rendering */
 }
 
 .message-item:hover {

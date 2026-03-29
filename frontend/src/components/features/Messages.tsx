@@ -302,13 +302,14 @@ export const Messages: React.FC = () => {
  * - Click entire card to expand/collapse
  * - Smooth shadow transition on hover and expand
  * - Chevron rotation animation
+ * - Memoized for performance (rerender-memo optimization)
  */
 interface MessageCardProps {
   message: Message;
   language: Language;
 }
 
-const MessageCard: React.FC<MessageCardProps> = ({ message, language }) => {
+const MessageCard = React.memo<MessageCardProps>(({ message, language }) => {
   const [expanded, setExpanded] = React.useState(false);
 
   const roleColors: Record<string, string> = {
@@ -421,4 +422,4 @@ const MessageCard: React.FC<MessageCardProps> = ({ message, language }) => {
       </div>
     </div>
   );
-};
+});

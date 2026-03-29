@@ -551,13 +551,14 @@ export const TrendAnalysis: React.FC = () => {
 
 /**
  * Usage Heatmap Component
+ * Memoized for performance (rerender-memo optimization)
  */
 interface UsageHeatmapProps {
   hourlyData: Array<{ hour: number; tokens: number; requests: number }>;
   language: Language;
 }
 
-const UsageHeatmap: React.FC<UsageHeatmapProps> = ({ hourlyData, language }) => {
+const UsageHeatmap = React.memo<UsageHeatmapProps>(({ hourlyData, language }) => {
   const maxTokens = Math.max(...hourlyData.map((d) => d.tokens), 1);
 
   return (
@@ -609,7 +610,7 @@ const UsageHeatmap: React.FC<UsageHeatmapProps> = ({ hourlyData, language }) => 
       </div>
     </div>
   );
-};
+});
 
 /**
  * Helper Functions
