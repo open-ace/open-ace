@@ -7,19 +7,37 @@ API routes for usage data operations.
 
 from flask import Blueprint, jsonify, request
 
+from app.services.summary_service import SummaryService
 from app.services.usage_service import UsageService
 from app.utils.helpers import get_days_ago, get_today
 
 usage_bp = Blueprint('usage', __name__)
 usage_service = UsageService()
+summary_service = SummaryService()
 
 
 @usage_bp.route('/summary')
 def api_summary():
-    """Get summary statistics for all tools."""
+    """Get summary statistics for all tools from pre-aggregated summary table."""
     host = request.args.get('host')
-    summary = usage_service.get_usage_summary(host_name=host)
+    
+    # Check if summary needs refresh and refresh if stale
+    if summary_service.needs_refresh():
+        summary_service.refresh_summary()
+    
+    summary = summary_service.get_summary(host_name=host)
     return jsonify(summary)
+
+
+@usage_bp.route('/summary/refresh', methods=['POST'])
+def api_refresh_summary():
+    """Refresh summary data from daily_messages table."""
+    host = request.args.get('host')
+    success = summary_service.refresh_summary(host_name=host)
+    if success:
+        return jsonify({'status': 'success', 'message': 'Summary refreshed'})
+    else:
+        return jsonify({'status': 'error', 'message': 'Failed to refresh summary'}), 500
 
 
 @usage_bp.route('/today')
