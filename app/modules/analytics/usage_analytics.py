@@ -7,6 +7,7 @@ Analyzes trends, detects anomalies, and generates reports.
 """
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
@@ -14,8 +15,12 @@ from typing import Any, Dict, List, Optional
 
 from app.repositories.database import Database
 from app.repositories.usage_repo import UsageRepository
+from app.utils.cache import cached
 
 logger = logging.getLogger(__name__)
+
+# Thread pool for parallel queries
+_executor = ThreadPoolExecutor(max_workers=4)
 
 
 class TrendDirection(Enum):
@@ -155,6 +160,7 @@ class UsageAnalytics:
         self.db = db or Database()
         self.usage_repo = usage_repo or UsageRepository()
 
+    @cached(ttl=60, key_prefix='analytics', skip_args=[0])
     def generate_report(
         self,
         start_date: str,
@@ -464,6 +470,7 @@ class UsageAnalytics:
             if row.get('host_name')
         }
 
+    @cached(ttl=120, key_prefix='analytics', skip_args=[0])
     def get_forecast(self, days: int = 7) -> Dict[str, Any]:
         """
         Get usage forecast based on historical data.
@@ -514,6 +521,7 @@ class UsageAnalytics:
             'confidence': 0.7,  # Simple forecast confidence
         }
 
+    @cached(ttl=60, key_prefix='analytics', skip_args=[0])
     def get_efficiency_metrics(self, start_date: str, end_date: str) -> Dict[str, Any]:
         """
         Calculate efficiency metrics.

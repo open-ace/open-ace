@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from app.repositories.usage_repo import UsageRepository
+from app.utils.cache import cached
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,7 @@ class UsageService:
         """
         self.usage_repo = usage_repo or UsageRepository()
 
+    @cached(ttl=30, key_prefix='usage', skip_args=[0])
     def get_today_usage(
         self,
         tool_name: Optional[str] = None,
@@ -94,6 +96,7 @@ class UsageService:
 
         return result
 
+    @cached(ttl=60, key_prefix='usage', skip_args=[0])
     def get_usage_summary(self, host_name: Optional[str] = None) -> Dict[str, Dict]:
         """
         Get usage summary for all tools.
@@ -106,6 +109,7 @@ class UsageService:
         """
         return self.usage_repo.get_summary_by_tool(host_name)
 
+    @cached(ttl=60, key_prefix='usage', skip_args=[0])
     def get_tool_usage(
         self,
         tool_name: str,
@@ -165,6 +169,7 @@ class UsageService:
         """
         return self.usage_repo.get_daily_range(start_date, end_date, tool_name, host_name)
 
+    @cached(ttl=300, key_prefix='usage', skip_args=[0])
     def get_all_tools(self) -> List[str]:
         """
         Get list of all tools.
@@ -174,6 +179,7 @@ class UsageService:
         """
         return self.usage_repo.get_all_tools()
 
+    @cached(ttl=300, key_prefix='usage', skip_args=[0])
     def get_all_hosts(self) -> List[str]:
         """
         Get list of all hosts.

@@ -7,14 +7,19 @@ Identifies opportunities for cost savings and efficiency improvements.
 """
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from app.repositories.database import Database
+from app.utils.cache import cached
 
 logger = logging.getLogger(__name__)
+
+# Thread pool for parallel queries
+_executor = ThreadPoolExecutor(max_workers=4)
 
 
 class OptimizationType(Enum):
@@ -131,6 +136,7 @@ class CostOptimizer:
         """
         self.db = db or Database()
 
+    @cached(ttl=120, key_prefix='cost', skip_args=[0])
     def analyze(self, days: int = 30) -> List[OptimizationSuggestion]:
         """
         Analyze usage and generate optimization suggestions.
@@ -439,6 +445,7 @@ class CostOptimizer:
         cost = self._calculate_cost(model, input_tokens, output_tokens)
         return (savings / cost * 100) if cost > 0 else 0
 
+    @cached(ttl=60, key_prefix='cost', skip_args=[0])
     def get_cost_trend(self, days: int = 30) -> List[Dict[str, Any]]:
         """
         Get daily cost trend.
@@ -479,6 +486,7 @@ class CostOptimizer:
 
         return trend
 
+    @cached(ttl=120, key_prefix='cost', skip_args=[0])
     def get_efficiency_report(self, days: int = 30) -> Dict[str, Any]:
         """
         Get efficiency analysis report.

@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from app.repositories.message_repo import MessageRepository
+from app.utils.cache import cached
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +168,7 @@ class MessageService:
         """
         return self.message_repo.get_conversation_details(session_id)
 
+    @cached(ttl=300, key_prefix='message', skip_args=[0])
     def get_all_senders(self, host_name: Optional[str] = None) -> List[str]:
         """
         Get list of all senders.

@@ -7,13 +7,18 @@ Provides cost analysis, savings estimation, and productivity metrics.
 """
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from app.repositories.database import Database
+from app.utils.cache import cached
 
 logger = logging.getLogger(__name__)
+
+# Thread pool for parallel queries
+_executor = ThreadPoolExecutor(max_workers=4)
 
 
 @dataclass
@@ -164,6 +169,7 @@ class ROICalculator:
 
         return input_cost, output_cost, total_cost
 
+    @cached(ttl=60, key_prefix='roi', skip_args=[0])
     def calculate_roi(
         self,
         start_date: str,
@@ -286,6 +292,7 @@ class ROICalculator:
             cost_per_token=cost_per_token,
         )
 
+    @cached(ttl=120, key_prefix='roi', skip_args=[0])
     def get_roi_trend(
         self,
         months: int = 6,
@@ -437,6 +444,7 @@ class ROICalculator:
 
         return trends
 
+    @cached(ttl=60, key_prefix='roi', skip_args=[0])
     def get_roi_by_tool(
         self,
         start_date: str,
@@ -445,6 +453,9 @@ class ROICalculator:
         """
         Get ROI breakdown by tool.
 
+        Optimized: Uses a single query with tool grouping instead of
+        multiple queries per tool (N+1 problem fixed).
+
         Args:
             start_date: Start date.
             end_date: End date.
@@ -452,20 +463,101 @@ class ROICalculator:
         Returns:
             Dict mapping tool name to ROI metrics.
         """
+        # Single query to get aggregated data by tool
         query = '''
-            SELECT DISTINCT tool_name FROM daily_usage
+            SELECT
+                tool_name,
+                COUNT(*) as request_count,
+                SUM(input_tokens) as total_input_tokens,
+                SUM(output_tokens) as total_output_tokens
+            FROM daily_usage
             WHERE date >= ? AND date <= ? AND tool_name IS NOT NULL
+            GROUP BY tool_name
         '''
         rows = self.db.fetch_all(query, (start_date, end_date))
+
+        # Single query to get model breakdown by tool
+        model_query = '''
+            SELECT
+                tool_name,
+                models_used as model,
+                SUM(input_tokens) as input_tokens,
+                SUM(output_tokens) as output_tokens
+            FROM daily_usage
+            WHERE date >= ? AND date <= ? AND tool_name IS NOT NULL
+            GROUP BY tool_name, models_used
+        '''
+        model_rows = self.db.fetch_all(model_query, (start_date, end_date))
+
+        # Group model data by tool
+        model_data_by_tool: Dict[str, List[Dict]] = {}
+        for row in model_rows:
+            tool = row.get('tool_name')
+            if tool:
+                if tool not in model_data_by_tool:
+                    model_data_by_tool[tool] = []
+                model_data_by_tool[tool].append(row)
 
         result = {}
         for row in rows:
             tool = row.get('tool_name')
-            if tool:
-                result[tool] = self.calculate_roi(start_date, end_date, tool_name=tool)
+            if not tool:
+                continue
+
+            requests = row.get('request_count') or 0
+            input_tokens = row.get('total_input_tokens') or 0
+            output_tokens = row.get('total_output_tokens') or 0
+            tokens = input_tokens + output_tokens
+
+            # Calculate costs for this tool
+            total_cost = 0.0
+            total_input_cost = 0.0
+            total_output_cost = 0.0
+
+            for model_row in model_data_by_tool.get(tool, []):
+                model = model_row.get('model') or 'default'
+                m_input_tokens = model_row.get('input_tokens') or 0
+                m_output_tokens = model_row.get('output_tokens') or 0
+
+                input_cost, output_cost, cost = self.calculate_cost(
+                    m_input_tokens, m_output_tokens, model
+                )
+                total_input_cost += input_cost
+                total_output_cost += output_cost
+                total_cost += cost
+
+            # Calculate savings
+            estimated_hours_saved = requests * self.AVG_TIME_SAVED_PER_REQUEST / 60
+            estimated_savings = estimated_hours_saved * self.HOURLY_LABOR_COST
+
+            # Calculate ROI
+            if total_cost > 0:
+                roi_percentage = ((estimated_savings - total_cost) / total_cost) * 100
+            else:
+                roi_percentage = 0.0
+
+            result[tool] = ROIMetrics(
+                period=f"{start_date} to {end_date}",
+                start_date=start_date,
+                end_date=end_date,
+                total_cost=total_cost,
+                tokens_used=tokens,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                input_cost=total_input_cost,
+                output_cost=total_output_cost,
+                requests_made=requests,
+                estimated_hours_saved=estimated_hours_saved,
+                estimated_savings=estimated_savings,
+                productivity_gain=(self.PRODUCTIVITY_MULTIPLIER - 1) * 100,
+                roi_percentage=roi_percentage,
+                cost_per_request=total_cost / requests if requests > 0 else 0,
+                cost_per_token=total_cost / tokens if tokens > 0 else 0,
+            )
 
         return result
 
+    @cached(ttl=60, key_prefix='roi', skip_args=[0])
     def get_roi_by_user(
         self,
         start_date: str,
@@ -474,6 +566,9 @@ class ROICalculator:
         """
         Get ROI breakdown by user.
 
+        Optimized: Uses a single query with user grouping instead of
+        multiple queries per user (N+1 problem fixed).
+
         Args:
             start_date: Start date.
             end_date: End date.
@@ -481,20 +576,101 @@ class ROICalculator:
         Returns:
             Dict mapping user ID to ROI metrics.
         """
+        # Single query to get aggregated data by user
         query = '''
-            SELECT DISTINCT user_id FROM daily_usage
+            SELECT
+                user_id,
+                COUNT(*) as request_count,
+                SUM(input_tokens) as total_input_tokens,
+                SUM(output_tokens) as total_output_tokens
+            FROM daily_usage
             WHERE date >= ? AND date <= ? AND user_id IS NOT NULL
+            GROUP BY user_id
         '''
         rows = self.db.fetch_all(query, (start_date, end_date))
+
+        # Single query to get model breakdown by user
+        model_query = '''
+            SELECT
+                user_id,
+                models_used as model,
+                SUM(input_tokens) as input_tokens,
+                SUM(output_tokens) as output_tokens
+            FROM daily_usage
+            WHERE date >= ? AND date <= ? AND user_id IS NOT NULL
+            GROUP BY user_id, models_used
+        '''
+        model_rows = self.db.fetch_all(model_query, (start_date, end_date))
+
+        # Group model data by user
+        model_data_by_user: Dict[int, List[Dict]] = {}
+        for row in model_rows:
+            user_id = row.get('user_id')
+            if user_id:
+                if user_id not in model_data_by_user:
+                    model_data_by_user[user_id] = []
+                model_data_by_user[user_id].append(row)
 
         result = {}
         for row in rows:
             user_id = row.get('user_id')
-            if user_id:
-                result[user_id] = self.calculate_roi(start_date, end_date, user_id=user_id)
+            if not user_id:
+                continue
+
+            requests = row.get('request_count') or 0
+            input_tokens = row.get('total_input_tokens') or 0
+            output_tokens = row.get('total_output_tokens') or 0
+            tokens = input_tokens + output_tokens
+
+            # Calculate costs for this user
+            total_cost = 0.0
+            total_input_cost = 0.0
+            total_output_cost = 0.0
+
+            for model_row in model_data_by_user.get(user_id, []):
+                model = model_row.get('model') or 'default'
+                m_input_tokens = model_row.get('input_tokens') or 0
+                m_output_tokens = model_row.get('output_tokens') or 0
+
+                input_cost, output_cost, cost = self.calculate_cost(
+                    m_input_tokens, m_output_tokens, model
+                )
+                total_input_cost += input_cost
+                total_output_cost += output_cost
+                total_cost += cost
+
+            # Calculate savings
+            estimated_hours_saved = requests * self.AVG_TIME_SAVED_PER_REQUEST / 60
+            estimated_savings = estimated_hours_saved * self.HOURLY_LABOR_COST
+
+            # Calculate ROI
+            if total_cost > 0:
+                roi_percentage = ((estimated_savings - total_cost) / total_cost) * 100
+            else:
+                roi_percentage = 0.0
+
+            result[user_id] = ROIMetrics(
+                period=f"{start_date} to {end_date}",
+                start_date=start_date,
+                end_date=end_date,
+                total_cost=total_cost,
+                tokens_used=tokens,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                input_cost=total_input_cost,
+                output_cost=total_output_cost,
+                requests_made=requests,
+                estimated_hours_saved=estimated_hours_saved,
+                estimated_savings=estimated_savings,
+                productivity_gain=(self.PRODUCTIVITY_MULTIPLIER - 1) * 100,
+                roi_percentage=roi_percentage,
+                cost_per_request=total_cost / requests if requests > 0 else 0,
+                cost_per_token=total_cost / tokens if tokens > 0 else 0,
+            )
 
         return result
 
+    @cached(ttl=60, key_prefix='roi', skip_args=[0])
     def get_cost_breakdown(
         self,
         start_date: str,
@@ -553,6 +729,7 @@ class ROICalculator:
 
         return breakdown
 
+    @cached(ttl=60, key_prefix='roi', skip_args=[0])
     def get_daily_costs(
         self,
         start_date: str,
@@ -608,6 +785,7 @@ class ROICalculator:
 
         return daily_costs
 
+    @cached(ttl=60, key_prefix='roi', skip_args=[0])
     def get_summary_stats(
         self,
         start_date: str,
