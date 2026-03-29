@@ -75,16 +75,18 @@ def _index_exists(conn, table_name: str, index_name: str) -> bool:
 def _constraint_exists(conn, table_name: str, constraint_name: str) -> bool:
     """Check if a constraint exists (PostgreSQL only)."""
     if conn.dialect.name == "postgresql":
+        # Use string formatting for regclass cast, as parameter binding doesn't work with type casts
         result = conn.execute(
             sa.text(
-                """
+                f"""
                 SELECT EXISTS (
                     SELECT FROM pg_constraint
-                    WHERE conname = :constraint_name AND conrelid = :table_name::regclass
+                    WHERE conname = :constraint_name
+                    AND conrelid = '{table_name}'::regclass
                 )
                 """
             ),
-            {"constraint_name": constraint_name, "table_name": table_name},
+            {"constraint_name": constraint_name},
         )
         return result.fetchone()[0]
     return False

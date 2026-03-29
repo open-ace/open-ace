@@ -259,9 +259,10 @@ def list_sessions():
     """List agent sessions from daily_messages table.
 
     Sessions are grouped by agent_session_id (tool process session).
+    For PostgreSQL, uses session_stats materialized view for performance.
     """
     try:
-        from app.repositories.database import Database, is_postgresql
+        from app.repositories.database import Database, is_postgresql, adapt_sql
 
         db = Database()
 
@@ -271,7 +272,7 @@ def list_sessions():
         page = int(request.args.get("page", 1))
         limit = int(request.args.get("limit", 20))
 
-        conditions = ["agent_session_id IS NOT NULL"]
+        conditions = ["session_id IS NOT NULL"]
         params = []
 
         if tool_name:
@@ -283,44 +284,130 @@ def list_sessions():
             params.append(host_name)
 
         if search:
-            conditions.append("(sender_name LIKE ? OR agent_session_id LIKE ?)")
+            conditions.append("(sender_name LIKE ? OR session_id LIKE ?)")
             params.extend([f"%{search}%", f"%{search}%"])
 
         where_clause = " AND ".join(conditions)
 
-        # Get total count
-        count_query = f"""
-            SELECT COUNT(DISTINCT agent_session_id) as count
-            FROM daily_messages
-            WHERE {where_clause}
-        """
-        result = db.fetch_one(count_query, tuple(params))
-        total = result["count"] if result else 0
-        total_pages = (total + limit - 1) // limit if total > 0 else 1
+        # Use materialized view for PostgreSQL (much faster)
+        if is_postgresql():
+            # Check if session_stats materialized view exists
+            mv_check = db.fetch_one(
+                "SELECT EXISTS (SELECT FROM pg_matviews WHERE matviewname = 'session_stats')"
+            )
+            if mv_check and mv_check.get("exists", False):
+                # Get total count from materialized view
+                count_query = adapt_sql(f"""
+                    SELECT COUNT(*) as count
+                    FROM session_stats
+                    WHERE {where_clause}
+                """)
+                result = db.fetch_one(count_query, tuple(params))
+                total = result["count"] if result else 0
+                total_pages = (total + limit - 1) // limit if total > 0 else 1
 
-        # Get paginated sessions
-        offset = (page - 1) * limit
-        sessions_query = f"""
-            SELECT
-                agent_session_id as session_id,
-                tool_name,
-                host_name,
-                sender_name,
-                MAX(sender_id) as sender_id,
-                MAX(date) as date,
-                COUNT(*) as message_count,
-                SUM(tokens_used) as total_tokens,
-                SUM(input_tokens) as total_input_tokens,
-                SUM(output_tokens) as total_output_tokens,
-                MIN(timestamp) as created_at,
-                MAX(timestamp) as updated_at
-            FROM daily_messages
-            WHERE {where_clause}
-            GROUP BY agent_session_id, tool_name, host_name, sender_name
-            ORDER BY updated_at DESC
-            LIMIT ? OFFSET ?
-        """
-        sessions = db.fetch_all(sessions_query, tuple(params + [limit, offset]))
+                # Get paginated sessions from materialized view
+                offset = (page - 1) * limit
+                sessions_query = adapt_sql(f"""
+                    SELECT *
+                    FROM session_stats
+                    WHERE {where_clause}
+                    ORDER BY updated_at DESC
+                    LIMIT ? OFFSET ?
+                """)
+                sessions = db.fetch_all(sessions_query, tuple(params + [limit, offset]))
+            else:
+                # Fallback to original query if materialized view doesn't exist
+                conditions = ["agent_session_id IS NOT NULL"]
+                params = []
+                if tool_name:
+                    conditions.append("tool_name = ?")
+                    params.append(tool_name)
+                if host_name:
+                    conditions.append("host_name = ?")
+                    params.append(host_name)
+                if search:
+                    conditions.append("(sender_name LIKE ? OR agent_session_id LIKE ?)")
+                    params.extend([f"%{search}%", f"%{search}%"])
+                where_clause = " AND ".join(conditions)
+
+                count_query = adapt_sql(f"""
+                    SELECT COUNT(DISTINCT agent_session_id) as count
+                    FROM daily_messages
+                    WHERE {where_clause}
+                """)
+                result = db.fetch_one(count_query, tuple(params))
+                total = result["count"] if result else 0
+                total_pages = (total + limit - 1) // limit if total > 0 else 1
+
+                offset = (page - 1) * limit
+                sessions_query = adapt_sql(f"""
+                    SELECT
+                        agent_session_id as session_id,
+                        tool_name,
+                        host_name,
+                        sender_name,
+                        MAX(sender_id) as sender_id,
+                        MAX(date) as date,
+                        COUNT(*) as message_count,
+                        SUM(tokens_used) as total_tokens,
+                        SUM(input_tokens) as total_input_tokens,
+                        SUM(output_tokens) as total_output_tokens,
+                        MIN(timestamp) as created_at,
+                        MAX(timestamp) as updated_at
+                    FROM daily_messages
+                    WHERE {where_clause}
+                    GROUP BY agent_session_id, tool_name, host_name, sender_name
+                    ORDER BY updated_at DESC
+                    LIMIT ? OFFSET ?
+                """)
+                sessions = db.fetch_all(sessions_query, tuple(params + [limit, offset]))
+        else:
+            # SQLite: use original query
+            conditions = ["agent_session_id IS NOT NULL"]
+            params = []
+            if tool_name:
+                conditions.append("tool_name = ?")
+                params.append(tool_name)
+            if host_name:
+                conditions.append("host_name = ?")
+                params.append(host_name)
+            if search:
+                conditions.append("(sender_name LIKE ? OR agent_session_id LIKE ?)")
+                params.extend([f"%{search}%", f"%{search}%"])
+            where_clause = " AND ".join(conditions)
+
+            count_query = f"""
+                SELECT COUNT(DISTINCT agent_session_id) as count
+                FROM daily_messages
+                WHERE {where_clause}
+            """
+            result = db.fetch_one(count_query, tuple(params))
+            total = result["count"] if result else 0
+            total_pages = (total + limit - 1) // limit if total > 0 else 1
+
+            offset = (page - 1) * limit
+            sessions_query = f"""
+                SELECT
+                    agent_session_id as session_id,
+                    tool_name,
+                    host_name,
+                    sender_name,
+                    MAX(sender_id) as sender_id,
+                    MAX(date) as date,
+                    COUNT(*) as message_count,
+                    SUM(tokens_used) as total_tokens,
+                    SUM(input_tokens) as total_input_tokens,
+                    SUM(output_tokens) as total_output_tokens,
+                    MIN(timestamp) as created_at,
+                    MAX(timestamp) as updated_at
+                FROM daily_messages
+                WHERE {where_clause}
+                GROUP BY agent_session_id, tool_name, host_name, sender_name
+                ORDER BY updated_at DESC
+                LIMIT ? OFFSET ?
+            """
+            sessions = db.fetch_all(sessions_query, tuple(params + [limit, offset]))
 
         # Format sessions for response
         formatted_sessions = []

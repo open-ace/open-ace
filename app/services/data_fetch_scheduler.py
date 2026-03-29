@@ -140,6 +140,28 @@ class DataFetchScheduler:
         except Exception as e:
             logger.exception(f"Error in scheduled data fetch: {e}")
 
+        # Refresh materialized views for PostgreSQL
+        self._refresh_materialized_views()
+
+    def _refresh_materialized_views(self):
+        """Refresh materialized views for PostgreSQL performance optimization."""
+        from app.repositories.database import Database, is_postgresql
+
+        if not is_postgresql():
+            return
+
+        try:
+            db = Database()
+            # Check if session_stats materialized view exists
+            mv_check = db.fetch_one(
+                "SELECT EXISTS (SELECT FROM pg_matviews WHERE matviewname = 'session_stats')"
+            )
+            if mv_check and mv_check.get("exists", False):
+                db.execute("REFRESH MATERIALIZED VIEW session_stats")
+                logger.info("Refreshed session_stats materialized view")
+        except Exception as e:
+            logger.warning(f"Error refreshing materialized views: {e}")
+
 
 # Global scheduler instance
 scheduler = DataFetchScheduler()
