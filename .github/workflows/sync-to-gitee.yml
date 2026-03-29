@@ -25,7 +25,7 @@ jobs:
 
       - name: Add Gitee remote
         run: |
-          git remote add gitee https://x-access-token:${{ secrets.GITEE_TOKEN }}@gitee.com/open-ace/open-ace.git
+          git remote add gitee https://${{ secrets.GITEE_USERNAME }}:${{ secrets.GITEE_TOKEN }}@gitee.com/open-ace/open-ace.git
 
       - name: Push to Gitee (all branches and tags)
         run: |
