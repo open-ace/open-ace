@@ -7,6 +7,8 @@
  * - Anomaly distribution pie chart
  * - Anomaly list table
  * - Optimization recommendations
+ *
+ * Performance optimized: Uses backend API for anomaly detection instead of client-side calculation.
  */
 
 import React, { useState, useMemo } from 'react';
@@ -24,7 +26,7 @@ import {
   PieChart,
 } from '@/components/common';
 import { formatTokens } from '@/utils';
-import { useDailyHourlyUsage, useRecommendations, useHosts } from '@/hooks';
+import { useAnomalyDetection, useAnomalyTrend, useRecommendations, useHosts } from '@/hooks';
 
 // Anomaly type options
 const anomalyTypeOptions = [
@@ -90,13 +92,24 @@ export const AnomalyDetection: React.FC = () => {
     setEndDate(dateRange.end);
   }, [dateRange]);
 
-  // Fetch data
+  // Fetch anomaly data from backend API (optimized)
   const {
-    data: dailyHourly,
-    isLoading: dailyLoading,
-    isError: dailyError,
-    error: dailyErrorMsg,
-  } = useDailyHourlyUsage(startDate, endDate, selectedHost || undefined);
+    data: anomalyData,
+    isLoading: anomalyLoading,
+    isError: anomalyError,
+    error: anomalyErrorMsg,
+  } = useAnomalyDetection(
+    startDate,
+    endDate,
+    selectedHost || undefined,
+    anomalyTypeFilter || undefined,
+    severityFilter || undefined
+  );
+
+  // Fetch anomaly trend from backend API
+  const { data: trendData } = useAnomalyTrend(startDate, endDate, selectedHost || undefined);
+
+  // Fetch recommendations
   const { data: recommendations } = useRecommendations(selectedHost || undefined);
 
   // Host options
@@ -108,54 +121,27 @@ export const AnomalyDetection: React.FC = () => {
     [hosts, language]
   );
 
-  const isLoading = dailyLoading;
+  const isLoading = anomalyLoading;
 
-  // Prepare chart data
-  const dailyTrend = dailyHourly?.daily ?? [];
-
-  // Detect anomalies
-  const anomalies = useMemo(() => detectAnomalies(dailyTrend), [dailyTrend]);
-
-  // Filter anomalies
-  const filteredAnomalies = useMemo(() => {
-    return anomalies.filter((anomaly) => {
-      if (anomalyTypeFilter && anomaly.type !== anomalyTypeFilter) return false;
-      if (severityFilter && anomaly.severity !== severityFilter) return false;
-      return true;
-    });
-  }, [anomalies, anomalyTypeFilter, severityFilter]);
-
-  // Calculate statistics
-  const stats = useMemo(() => {
-    const total = filteredAnomalies.length;
-    const high = filteredAnomalies.filter((a) => a.severity === 'high').length;
-    const medium = filteredAnomalies.filter((a) => a.severity === 'medium').length;
-    const low = filteredAnomalies.filter((a) => a.severity === 'low').length;
-    return { total, high, medium, low };
-  }, [filteredAnomalies]);
+  // Get anomalies and summary from API response
+  const anomalies = anomalyData?.anomalies ?? [];
+  const stats = anomalyData?.summary ?? { total: 0, high: 0, medium: 0, low: 0 };
 
   // Anomaly distribution data for pie chart
   const anomalyDistributionData = useMemo(() => {
-    const spikes = filteredAnomalies.filter((a) => a.type === 'spike').length;
-    const drops = filteredAnomalies.filter((a) => a.type === 'drop').length;
+    const spikes = anomalies.filter((a) => a.type === 'spike').length;
+    const drops = anomalies.filter((a) => a.type === 'drop').length;
     return [spikes, drops];
-  }, [filteredAnomalies]);
+  }, [anomalies]);
 
-  // Anomaly trend data
+  // Anomaly trend data from API
   const anomalyTrendData = useMemo(() => {
-    // Group anomalies by date
-    const anomalyByDate: Record<string, number> = {};
-    filteredAnomalies.forEach((a) => {
-      anomalyByDate[a.date] = (anomalyByDate[a.date] || 0) + 1;
-    });
-
-    // Sort by date
-    const sortedDates = Object.keys(anomalyByDate).sort();
+    const trend = trendData?.trend ?? [];
     return {
-      labels: sortedDates,
-      data: sortedDates.map((d) => anomalyByDate[d]),
+      labels: trend.map((t) => t.date),
+      data: trend.map((t) => t.count),
     };
-  }, [filteredAnomalies]);
+  }, [trendData]);
 
   return (
     <div className="anomaly-detection">
@@ -250,8 +236,8 @@ export const AnomalyDetection: React.FC = () => {
 
       {isLoading ? (
         <Loading size="lg" text={t('loading', language)} />
-      ) : dailyError ? (
-        <Error message={dailyErrorMsg?.message || t('error', language)} />
+      ) : anomalyError ? (
+        <Error message={anomalyErrorMsg?.message || t('error', language)} />
       ) : (
         <>
           {/* Statistics Cards */}
@@ -333,7 +319,7 @@ export const AnomalyDetection: React.FC = () => {
             {/* Anomaly List */}
             <div className="col-md-6">
               <Card title={t('anomalyList', language)} style={{ height: '100%' }}>
-                {filteredAnomalies.length > 0 ? (
+                {anomalies.length > 0 ? (
                   <div style={{ maxHeight: '400px', overflowY: 'auto', overflowX: 'hidden' }}>
                     <table
                       className="table table-sm table-hover mb-0"
@@ -348,7 +334,7 @@ export const AnomalyDetection: React.FC = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {filteredAnomalies.map((anomaly, index) => (
+                        {anomalies.map((anomaly, index) => (
                           <tr key={index}>
                             <td
                               style={{
@@ -440,33 +426,6 @@ export const AnomalyDetection: React.FC = () => {
 /**
  * Helper Functions
  */
-function detectAnomalies(
-  dailyTrend: Array<{ date: string; tokens: number }>
-): Array<{ date: string; tokens: number; type: string; severity: string }> {
-  if (dailyTrend.length < 3) return [];
-
-  const anomalies: Array<{ date: string; tokens: number; type: string; severity: string }> = [];
-  const avgTokens = dailyTrend.reduce((sum, d) => sum + d.tokens, 0) / dailyTrend.length;
-  const stdDev = Math.sqrt(
-    dailyTrend.reduce((sum, d) => sum + Math.pow(d.tokens - avgTokens, 2), 0) / dailyTrend.length
-  );
-
-  dailyTrend.forEach((day) => {
-    const deviation = Math.abs(day.tokens - avgTokens) / stdDev;
-
-    if (deviation > 2) {
-      anomalies.push({
-        date: day.date,
-        tokens: day.tokens,
-        type: day.tokens > avgTokens ? 'spike' : 'drop',
-        severity: deviation > 3 ? 'high' : 'medium',
-      });
-    }
-  });
-
-  return anomalies;
-}
-
 function getRecommendationIcon(type: string): string {
   const icons: Record<string, string> = {
     optimization: 'bi-lightning',

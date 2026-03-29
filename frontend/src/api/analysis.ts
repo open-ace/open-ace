@@ -70,6 +70,40 @@ export interface UserSegmentation {
   dormant: number; // No activity
 }
 
+export interface Anomaly {
+  date: string;
+  tokens: number;
+  expected: number;
+  deviation: number;
+  type: 'spike' | 'drop';
+  severity: 'high' | 'medium' | 'low';
+}
+
+export interface AnomalyDetectionResponse {
+  anomalies: Anomaly[];
+  summary: {
+    total: number;
+    high: number;
+    medium: number;
+    low: number;
+  };
+  statistics?: {
+    average: number;
+    std_deviation: number;
+    data_points: number;
+  };
+}
+
+export interface AnomalyTrendResponse {
+  trend: Array<{
+    date: string;
+    count: number;
+    spikes: number;
+    drops: number;
+  }>;
+  total_anomalies: number;
+}
+
 // Batch response type
 export interface BatchAnalysisResponse {
   key_metrics: KeyMetrics;
@@ -203,5 +237,38 @@ export const analysisApi = {
       params
     );
     return response.recommendations || [];
+  },
+
+  async getAnomalyDetection(
+    startDate?: string,
+    endDate?: string,
+    host?: string,
+    type?: string,
+    severity?: string
+  ): Promise<AnomalyDetectionResponse> {
+    const params: Record<string, string> = {};
+    if (startDate) params.start = startDate;
+    if (endDate) params.end = endDate;
+    if (host) params.host = host;
+    if (type) params.type = type;
+    if (severity) params.severity = severity;
+
+    return apiClient.get<AnomalyDetectionResponse>(
+      '/api/analysis/anomaly-detection',
+      params
+    );
+  },
+
+  async getAnomalyTrend(
+    startDate?: string,
+    endDate?: string,
+    host?: string
+  ): Promise<AnomalyTrendResponse> {
+    const params: Record<string, string> = {};
+    if (startDate) params.start = startDate;
+    if (endDate) params.end = endDate;
+    if (host) params.host = host;
+
+    return apiClient.get<AnomalyTrendResponse>('/api/analysis/anomaly-trend', params);
   },
 };

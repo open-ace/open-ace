@@ -46,6 +46,8 @@ export {
   useToolComparison,
   useUserSegmentation,
   useRecommendations,
+  useAnomalyDetection,
+  useAnomalyTrend,
 } from './useAnalysis';
 export {
   useSessions,

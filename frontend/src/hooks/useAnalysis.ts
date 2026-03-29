@@ -85,3 +85,25 @@ export function useRecommendations(host?: string) {
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
 }
+
+export function useAnomalyDetection(
+  startDate?: string,
+  endDate?: string,
+  host?: string,
+  type?: string,
+  severity?: string
+) {
+  return useQuery({
+    queryKey: ['analysis', 'anomaly-detection', startDate, endDate, host, type, severity],
+    queryFn: () => analysisApi.getAnomalyDetection(startDate, endDate, host, type, severity),
+    staleTime: 60 * 1000, // 1 minute
+  });
+}
+
+export function useAnomalyTrend(startDate?: string, endDate?: string, host?: string) {
+  return useQuery({
+    queryKey: ['analysis', 'anomaly-trend', startDate, endDate, host],
+    queryFn: () => analysisApi.getAnomalyTrend(startDate, endDate, host),
+    staleTime: 60 * 1000, // 1 minute
+  });
+}
