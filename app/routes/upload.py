@@ -142,6 +142,20 @@ def api_upload_messages():
         except Exception as e:
             errors.append(str(e))
 
+    # Update daily_stats for affected dates
+    if saved_count > 0:
+        try:
+            from app.repositories.daily_stats_repo import DailyStatsRepository
+
+            daily_stats_repo = DailyStatsRepository()
+            # Get unique dates from uploaded messages
+            dates = set(msg.get("date") for msg in messages if msg.get("date"))
+            for date in dates:
+                daily_stats_repo.refresh_stats(date)
+                daily_stats_repo.refresh_hourly_stats(date)
+        except Exception as e:
+            logger.warning(f"Failed to update daily_stats: {e}")
+
     return jsonify(
         {
             "success": True,
@@ -211,5 +225,19 @@ def api_upload_batch():
                 results["messages"]["saved"] += 1
         except Exception as e:
             results["messages"]["errors"].append(str(e))
+
+    # Update daily_stats for affected dates
+    if results["messages"]["saved"] > 0:
+        try:
+            from app.repositories.daily_stats_repo import DailyStatsRepository
+
+            daily_stats_repo = DailyStatsRepository()
+            # Get unique dates from uploaded messages
+            dates = set(m.get("date") for m in messages_data if m.get("date"))
+            for date in dates:
+                daily_stats_repo.refresh_stats(date)
+                daily_stats_repo.refresh_hourly_stats(date)
+        except Exception as e:
+            logger.warning(f"Failed to update daily_stats: {e}")
 
     return jsonify({"success": True, "results": results})

@@ -12,6 +12,7 @@ from typing import Dict, List, Optional
 
 from app.repositories.message_repo import MessageRepository
 from app.repositories.usage_repo import UsageRepository
+from app.repositories.daily_stats_repo import DailyStatsRepository
 from app.utils.cache import cached
 from app.utils.helpers import get_today, get_days_ago
 
@@ -28,6 +29,7 @@ class AnalysisService:
         self,
         usage_repo: Optional[UsageRepository] = None,
         message_repo: Optional[MessageRepository] = None,
+        daily_stats_repo: Optional[DailyStatsRepository] = None,
     ):
         """
         Initialize service.
@@ -35,9 +37,11 @@ class AnalysisService:
         Args:
             usage_repo: Optional UsageRepository instance.
             message_repo: Optional MessageRepository instance.
+            daily_stats_repo: Optional DailyStatsRepository instance.
         """
         self.usage_repo = usage_repo or UsageRepository()
         self.message_repo = message_repo or MessageRepository()
+        self.daily_stats_repo = daily_stats_repo or DailyStatsRepository()
 
     @cached(ttl=60, key_prefix="analysis", skip_args=[0])
     def get_batch_analysis(
@@ -49,8 +53,9 @@ class AnalysisService:
         """
         Get all analysis data in a single optimized call.
 
-        This method uses parallel queries and aggregated results to
-        minimize database load and response time.
+        This method uses pre-aggregated data from daily_stats table
+        for fast queries, falling back to daily_messages only for
+        hourly data which cannot be pre-aggregated.
 
         Args:
             start_date: Optional start date filter.
@@ -65,25 +70,26 @@ class AnalysisService:
         if not end_date:
             end_date = get_today()
 
-        # Execute queries in parallel using thread pool
+        # Use pre-aggregated data from daily_stats for fast queries
+        # Only hourly data needs to query daily_messages directly
         futures = {
             _executor.submit(
-                self.message_repo.get_batch_analysis_aggregates, start_date, end_date, host_name
+                self.daily_stats_repo.get_batch_aggregates, start_date, end_date, host_name
             ): "aggregates",
             _executor.submit(
-                self.message_repo.get_user_token_totals, start_date, end_date, host_name
+                self.daily_stats_repo.get_user_totals, start_date, end_date, host_name
             ): "user_tokens",
             _executor.submit(
-                self.message_repo.get_tool_token_totals, start_date, end_date, host_name
+                self.daily_stats_repo.get_tool_totals, start_date, end_date, host_name
             ): "tool_stats",
             _executor.submit(
-                self.message_repo.get_daily_token_totals, start_date, end_date, host_name
+                self.daily_stats_repo.get_daily_totals, start_date, end_date, host_name
             ): "daily_data",
             _executor.submit(
-                self.message_repo.get_hourly_usage, start_date, end_date, host_name
+                self.daily_stats_repo.get_hourly_totals, start_date, end_date, host_name
             ): "hourly_data",
             _executor.submit(
-                self.message_repo.get_conversation_stats_summary, host_name
+                self.daily_stats_repo.get_conversation_stats, host_name
             ): "conversation_stats",
             _executor.submit(
                 self.usage_repo.get_request_count_total, start_date, end_date, host_name
