@@ -592,13 +592,13 @@ class MessageRepository:
         if is_postgresql():
             query = f'''
                 SELECT
-                    EXTRACT(HOUR FROM timestamp::timestamp) as hour,
+                    EXTRACT(HOUR FROM CASE WHEN timestamp::text ~ '^\d' THEN timestamp::timestamp ELSE NULL END) as hour,
                     COUNT(*) as requests,
                     SUM(tokens_used) as tokens
                 FROM daily_messages
                 {where_clause}
-                {"AND" if conditions else "WHERE"} timestamp IS NOT NULL AND timestamp != ''
-                GROUP BY EXTRACT(HOUR FROM timestamp::timestamp)
+                {"AND" if conditions else "WHERE"} timestamp IS NOT NULL AND timestamp::text != ''
+                GROUP BY EXTRACT(HOUR FROM CASE WHEN timestamp::text ~ '^\d' THEN timestamp::timestamp ELSE NULL END)
                 ORDER BY hour
             '''
         else:
@@ -736,6 +736,115 @@ class MessageRepository:
             {where_clause}
             GROUP BY tool_name
             ORDER BY total_tokens DESC
+        '''
+
+        return self.db.fetch_all(query, tuple(params))
+
+    def get_conversation_stats_summary(
+        self,
+        host_name: Optional[str] = None
+    ) -> Dict:
+        """
+        Get conversation statistics summary without fetching full history.
+
+        This is a lightweight query for batch analysis that only returns
+        aggregate statistics, avoiding the expensive GROUP BY operation
+        with full conversation history retrieval.
+
+        Args:
+            host_name: Optional host name filter.
+
+        Returns:
+            Dict: Conversation statistics summary.
+        """
+        conditions = []
+        params = []
+
+        if host_name:
+            conditions.append('host_name = ?')
+            params.append(host_name)
+
+        # Add condition to filter out records without any session ID
+        id_filter = "COALESCE(conversation_id, feishu_conversation_id, agent_session_id) IS NOT NULL"
+        if conditions:
+            where_clause = f"WHERE {' AND '.join(conditions)} AND {id_filter}"
+        else:
+            where_clause = f"WHERE {id_filter}"
+
+        # Use a single aggregate query instead of GROUP BY + LIMIT
+        query = f'''
+            SELECT
+                COUNT(DISTINCT COALESCE(conversation_id, feishu_conversation_id, agent_session_id)) as total_conversations,
+                COUNT(*) as total_messages,
+                SUM(tokens_used) as total_tokens,
+                SUM(input_tokens) as total_input_tokens,
+                SUM(output_tokens) as total_output_tokens
+            FROM daily_messages
+            {where_clause}
+        '''
+
+        result = self.db.fetch_one(query, tuple(params))
+
+        if result:
+            total_conversations = result.get('total_conversations', 0) or 0
+            total_messages = result.get('total_messages', 0) or 0
+            total_tokens = result.get('total_tokens', 0) or 0
+
+            return {
+                'total_conversations': total_conversations,
+                'total_messages': total_messages,
+                'total_tokens': total_tokens,
+                'average_messages_per_conversation': total_messages / total_conversations if total_conversations > 0 else 0,
+                'average_tokens_per_conversation': total_tokens / total_conversations if total_conversations > 0 else 0,
+                'avg_conversation_length': total_messages / total_conversations if total_conversations > 0 else 0
+            }
+
+        return {
+            'total_conversations': 0,
+            'total_messages': 0,
+            'total_tokens': 0,
+            'average_messages_per_conversation': 0,
+            'average_tokens_per_conversation': 0,
+            'avg_conversation_length': 0
+        }
+
+    def get_daily_range_lightweight(
+        self,
+        start_date: str,
+        end_date: str,
+        host_name: Optional[str] = None
+    ) -> List[Dict]:
+        """
+        Get lightweight daily range data for batch analysis.
+
+        This method only returns essential columns needed for aggregation,
+        avoiding the expensive retrieval of content and full_entry fields.
+
+        Args:
+            start_date: Start date string (YYYY-MM-DD).
+            end_date: End date string (YYYY-MM-DD).
+            host_name: Optional host name filter.
+
+        Returns:
+            List[Dict]: List of lightweight usage records.
+        """
+        conditions = ['date >= ?', 'date <= ?']
+        params = [start_date, end_date]
+
+        if host_name:
+            conditions.append('host_name = ?')
+            params.append(host_name)
+
+        query = f'''
+            SELECT
+                date,
+                tool_name,
+                host_name,
+                tokens_used,
+                input_tokens,
+                output_tokens
+            FROM daily_messages
+            WHERE {' AND '.join(conditions)}
         '''
 
         return self.db.fetch_all(query, tuple(params))

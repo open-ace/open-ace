@@ -35,6 +35,7 @@ class AnalysisService:
         self.usage_repo = usage_repo or UsageRepository()
         self.message_repo = message_repo or MessageRepository()
 
+    @cached(ttl=60, key_prefix='analysis', skip_args=[0])
     def get_batch_analysis(
         self,
         start_date: Optional[str] = None,
@@ -60,8 +61,8 @@ class AnalysisService:
         if not end_date:
             end_date = get_today()
 
-        # Fetch all required data ONCE
-        usage_data = self.usage_repo.get_daily_range(start_date, end_date, host_name=host_name)
+        # Fetch all required data ONCE - use lightweight query for better performance
+        usage_data = self.message_repo.get_daily_range_lightweight(start_date, end_date, host_name=host_name)
         user_tokens = self.message_repo.get_user_token_totals(
             start_date=start_date,
             end_date=end_date,
@@ -74,13 +75,15 @@ class AnalysisService:
         )
         daily_data = self.message_repo.get_daily_token_totals(start_date, end_date, host_name)
         hourly_data = self.message_repo.get_hourly_usage(start_date, end_date, host_name)
-        conversations = self.message_repo.get_conversation_history(host_name=host_name, limit=1000)
+        # Use lightweight query for conversation stats instead of full history
+        conversation_stats = self.message_repo.get_conversation_stats_summary(host_name=host_name)
 
         # Calculate all metrics from shared data
         total_tokens = sum(u.get('tokens_used', 0) for u in usage_data)
         total_input = sum(u.get('input_tokens', 0) for u in usage_data)
         total_output = sum(u.get('output_tokens', 0) for u in usage_data)
-        total_requests = sum(u.get('request_count', 0) for u in usage_data)
+        # Count messages (each row in daily_messages is a message)
+        total_requests = len(usage_data)
 
         # If tokens are 0 from usage_data, get from messages
         if total_tokens == 0 and user_tokens:
@@ -134,7 +137,7 @@ class AnalysisService:
             if date not in daily_totals:
                 daily_totals[date] = {'date': date, 'tokens': 0, 'requests': 0}
             daily_totals[date]['tokens'] += u.get('tokens_used', 0)
-            daily_totals[date]['requests'] += u.get('request_count', 0)
+            daily_totals[date]['requests'] += 1  # Each row is a message
 
         if all(d['tokens'] == 0 for d in daily_totals.values()) if daily_totals else True:
             for m in daily_data:
@@ -199,19 +202,8 @@ class AnalysisService:
 
         user_ranking = {'users': users}
 
-        # Conversation stats
-        total_conversations = len(conversations)
-        total_conv_messages = sum(c.get('message_count', 0) for c in conversations)
-        total_conv_tokens = sum(c.get('total_tokens', 0) for c in conversations)
-
-        conversation_stats = {
-            'total_conversations': total_conversations,
-            'total_messages': total_conv_messages,
-            'total_tokens': total_conv_tokens,
-            'average_messages_per_conversation': total_conv_messages / total_conversations if total_conversations > 0 else 0,
-            'average_tokens_per_conversation': total_conv_tokens / total_conversations if total_conversations > 0 else 0,
-            'avg_conversation_length': total_conv_messages / total_conversations if total_conversations > 0 else 0
-        }
+        # Conversation stats - already computed by lightweight query
+        # conversation_stats is directly from get_conversation_stats_summary
 
         # Tool comparison
         tools_comparison = []
