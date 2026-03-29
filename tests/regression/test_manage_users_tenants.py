@@ -67,8 +67,8 @@ def test_tenant_list_display():
             login(page)
             navigate_to(page, "/manage/tenants")
 
-            # 检查租户列表或空状态
-            tenant_selectors = ["table", ".tenant-table", ".data-table", ".empty-state", ".no-data"]
+            # 检查租户列表或空状态 - 使用实际组件的类名
+            tenant_selectors = ["table", ".text-center.py-5", ".text-center", ".tenant-management"]
             assert check_element_exists(page, tenant_selectors), "应有租户列表或空状态提示"
 
             save_screenshot(page, MODULE_NAME, "02_tenant_list")

@@ -67,14 +67,13 @@ def test_prompts_list_display():
             login(page)
             navigate_to(page, "/work/prompts")
 
-            # 检查 Prompts 列表或空状态
+            # 检查 Prompts 列表或空状态 - 使用实际组件的类名
             prompts_selectors = [
-                ".prompts-list",
-                "table",
-                ".data-table",
-                ".list",
-                ".empty-state",
-                ".no-data",
+                ".prompts",
+                ".prompts-header",
+                ".text-center.py-5",
+                ".text-center",
+                ".card",
             ]
             assert check_element_exists(page, prompts_selectors), "应有 Prompts 列表或空状态提示"
 

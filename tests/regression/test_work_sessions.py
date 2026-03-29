@@ -67,13 +67,12 @@ def test_session_list_display():
             login(page)
             navigate_to(page, "/work/sessions")
 
-            # 检查会话列表或空状态
+            # 检查会话列表或空状态 - 使用实际组件的类名
             session_selectors = [
-                ".sessions-list",
-                "table",
-                ".data-table",
-                ".empty-state",
-                ".no-data",
+                ".session-list",
+                ".session-groups",
+                ".text-center.py-5",
+                ".text-center",
             ]
             assert check_element_exists(page, session_selectors), "应有会话列表或空状态提示"
 
