@@ -47,3 +47,7 @@ VERSION
 *.pem
 *.key
 .env.*
+
+# Qwen local settings (except skills)
+.qwen/*
+!.qwen/skills/
