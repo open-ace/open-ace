@@ -23,7 +23,7 @@ jobs:
           pip install black isort ruff mypy types-requests
 
       - name: Run Black
-        run: black --check --diff --target-version py311 --exclude '\.qwen' .
+        run: black --check --diff --exclude '\.qwen' .
 
       - name: Run isort
         run: isort --check-only --diff --skip .qwen .
