@@ -267,7 +267,7 @@ install_systemd_service_remote() {
         sudo tee /etc/systemd/system/open-ace.service > /dev/null << 'EOFSERVICE'
 [Unit]
 Description=Open ACE - Web Dashboard for AI Token Usage
-Documentation=https://github.com/richardhuang/open-ace
+Documentation=https://github.com/open-ace/open-ace
 After=network.target
 
 [Service]

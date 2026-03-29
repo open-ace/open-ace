@@ -209,7 +209,7 @@ Open ACE 根据用户角色提供两个不同的界面：
 
 ```bash
 # 克隆仓库
-git clone https://github.com/your-org/open-ace.git
+git clone https://github.com/open-ace/open-ace.git
 cd open-ace
 
 # 安装 Python 依赖

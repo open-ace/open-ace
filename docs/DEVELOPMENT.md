@@ -16,7 +16,7 @@ This guide covers setting up a development environment and contributing to Open 
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/open-ace.git
+git clone https://github.com/open-ace/open-ace.git
 cd open-ace
 
 # Create virtual environment

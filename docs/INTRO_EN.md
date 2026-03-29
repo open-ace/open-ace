@@ -209,7 +209,7 @@ The workspace can be configured to connect to various AI tool services:
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/open-ace.git
+git clone https://github.com/open-ace/open-ace.git
 cd open-ace
 
 # Install Python dependencies

@@ -56,7 +56,7 @@ What actually happened.
 
 ```bash
 # Fork and clone the repository
-git clone https://github.com/YOUR_USERNAME/open-ace.git
+git clone https://github.com/open-ace/open-ace.git
 cd open-ace
 
 # Create virtual environment

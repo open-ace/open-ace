@@ -1,6 +1,6 @@
 [Unit]
 Description=Open ACE - AI Computing Explorer - Web Dashboard
-Documentation=https://github.com/richardhuang/open-ace
+Documentation=https://github.com/open-ace/open-ace
 After=network.target
 
 [Service]
