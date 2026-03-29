@@ -23,13 +23,13 @@ jobs:
           pip install black isort ruff mypy types-requests
 
       - name: Run Black
-        run: black --check --diff .
+        run: black --check --diff --exclude '\.qwen' .
 
       - name: Run isort
-        run: isort --check-only --diff .
+        run: isort --check-only --diff --skip .qwen .
 
       - name: Run Ruff
-        run: ruff check .
+        run: ruff check --exclude .qwen .
 
       - name: Run MyPy
         run: mypy scripts/shared web.py cli.py --config-file pyproject.toml
