@@ -146,11 +146,59 @@ export const SSOSettings: React.FC = () => {
       {/* Header */}
       <div className="d-flex justify-content-between align-items-center mb-4">
         <h2>{t('ssoSettings', language)}</h2>
-        <Button variant="primary" size="sm" onClick={handleOpenCreate}>
-          <i className="bi bi-plus-lg me-1" />
-          {t('addProvider', language)}
-        </Button>
+        <div className="d-flex gap-2">
+          <Button variant="outline-secondary" size="sm" onClick={fetchProviders}>
+            <i className="bi bi-arrow-clockwise me-1" />
+            {t('refresh', language)}
+          </Button>
+          <Button variant="primary" size="sm" onClick={handleOpenCreate}>
+            <i className="bi bi-plus-lg me-1" />
+            {t('addProvider', language)}
+          </Button>
+        </div>
       </div>
+
+      {/* SSO Configuration Form */}
+      <Card title={t('ssoConfiguration', language)} className="mb-4">
+        <form className="sso-form">
+          <div className="row g-3">
+            <div className="col-md-6">
+              <div className="form-check form-switch">
+                <input
+                  className="form-check-input"
+                  type="checkbox"
+                  id="ssoEnabled"
+                  checked={registeredProviders.some((p) => p.is_enabled)}
+                  onChange={() => {}}
+                />
+                <label className="form-check-label" htmlFor="ssoEnabled">
+                  {t('enableSSO', language)}
+                </label>
+              </div>
+            </div>
+            <div className="col-md-6">
+              <div className="form-check form-switch">
+                <input
+                  className="form-check-input"
+                  type="checkbox"
+                  id="autoProvision"
+                  checked={false}
+                  onChange={() => {}}
+                />
+                <label className="form-check-label" htmlFor="autoProvision">
+                  {t('autoProvisionUsers', language)}
+                </label>
+              </div>
+            </div>
+          </div>
+          <div className="mt-3">
+            <Button variant="primary" type="submit">
+              <i className="bi bi-check-lg me-1" />
+              {t('save', language)}
+            </Button>
+          </div>
+        </form>
+      </Card>
 
       {/* Registered Providers */}
       <Card title={t('registeredProviders', language)} className="mb-4">

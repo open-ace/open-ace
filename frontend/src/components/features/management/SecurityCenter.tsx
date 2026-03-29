@@ -586,7 +586,7 @@ export const SecurityCenter: React.FC = () => {
     <div className="security-center">
       {/* Header */}
       <div className="d-flex justify-content-between align-items-center mb-3">
-        <h5>{t('securityCenter', language)}</h5>
+        <h2>{t('securityCenter', language)}</h2>
         {activeTab === 'filter' && (
           <Button variant="primary" size="sm" onClick={handleOpenCreateRule}>
             <i className="bi bi-plus-lg me-1" />

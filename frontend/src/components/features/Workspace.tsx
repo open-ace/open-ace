@@ -142,6 +142,10 @@ export const Workspace: React.FC = () => {
 
   return (
     <div className="workspace h-100 d-flex flex-column">
+      {/* Page Header */}
+      <div className="page-header mb-3 px-3 pt-3">
+        <h2>{t('workspace', language)}</h2>
+      </div>
       {/* Tab Bar */}
       {tabs.length > 0 && (
         <div

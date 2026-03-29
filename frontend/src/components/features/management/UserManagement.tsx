@@ -188,7 +188,7 @@ export const UserManagement: React.FC = () => {
     <div className="user-management">
       {/* Header */}
       <div className="d-flex justify-content-between align-items-center mb-3">
-        <h5>{t('userList', language)}</h5>
+        <h2>{t('userList', language)}</h2>
         <Button variant="primary" size="sm" onClick={handleOpenCreate}>
           <i className="bi bi-plus-lg me-1" />
           {t('addUser', language)}

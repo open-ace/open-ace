@@ -621,7 +621,7 @@ export const AuditCenter: React.FC = () => {
     <div className="audit-center">
       {/* Header */}
       <div className="d-flex justify-content-between align-items-center mb-3">
-        <h5>{t('auditCenter', language)}</h5>
+        <h2>{t('auditCenter', language)}</h2>
         <Button
           variant="primary"
           size="sm"

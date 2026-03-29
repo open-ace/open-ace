@@ -258,6 +258,42 @@ export const QuotaAlerts: React.FC = () => {
 
     return (
       <>
+        {/* Alert Rules Overview */}
+        <Card title={t('alertRules', language)} className="mb-4">
+          <div className="alert-rules-list">
+            {alerts.length === 0 ? (
+              <EmptyState icon="bi-bell" title={t('noAlerts', language)} />
+            ) : (
+              <div className="table-responsive">
+                <table className="table table-sm">
+                  <thead>
+                    <tr>
+                      <th>{t('title', language)}</th>
+                      <th>{t('severity', language)}</th>
+                      <th>{t('time', language)}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {alerts.slice(0, 5).map((alert) => (
+                      <tr key={alert.id}>
+                        <td>{alert.title}</td>
+                        <td>
+                          <Badge variant={getSeverityVariant(alert.severity)}>
+                            {alert.severity}
+                          </Badge>
+                        </td>
+                        <td>
+                          <small className="text-muted">{formatDateTime(alert.created_at)}</small>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </Card>
+
         {!quotaData || quotaData.length === 0 ? (
           <EmptyState icon="bi-sliders" title={t('noQuotaData', language)} />
         ) : (
@@ -662,7 +698,7 @@ export const QuotaAlerts: React.FC = () => {
     <div className="quota-alerts">
       {/* Header */}
       <div className="d-flex justify-content-between align-items-center mb-3">
-        <h5>{t('quotaAndAlerts', language)}</h5>
+        <h2>{t('quotaAndAlerts', language)}</h2>
         <div className="d-flex gap-2">
           {activeTab === 'alerts' && (
             <>

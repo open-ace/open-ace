@@ -377,6 +377,10 @@ export const ConversationHistory: React.FC = () => {
 
   return (
     <div className="conversation-history">
+      {/* Page Header */}
+      <div className="page-header mb-4">
+        <h2>{t('conversationHistory', language)}</h2>
+      </div>
       {tableContent}
       {/* Conversation Detail Modal */}
       {selectedSession && (
