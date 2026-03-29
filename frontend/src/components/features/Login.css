@@ -99,7 +99,9 @@
   border-radius: 8px;
   padding: 12px 16px;
   font-size: 15px;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
 }
 
 .login-form-group input:focus {

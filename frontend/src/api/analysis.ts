@@ -253,10 +253,7 @@ export const analysisApi = {
     if (type) params.type = type;
     if (severity) params.severity = severity;
 
-    return apiClient.get<AnomalyDetectionResponse>(
-      '/api/analysis/anomaly-detection',
-      params
-    );
+    return apiClient.get<AnomalyDetectionResponse>('/api/analysis/anomaly-detection', params);
   },
 
   async getAnomalyTrend(

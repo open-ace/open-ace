@@ -273,17 +273,26 @@ export const ComplianceMgmt: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {Object.entries(rules).slice(0, 5).map(([dataType, rule]) => (
-                      <tr key={dataType}>
-                        <td>{dataType}</td>
-                        <td>{(rule as { retention_days: number }).retention_days} {t('days', language)}</td>
-                        <td>
-                          <Badge variant={(rule as { action: string }).action === 'delete' ? 'danger' : 'info'}>
-                            {(rule as { action: string }).action}
-                          </Badge>
-                        </td>
-                      </tr>
-                    ))}
+                    {Object.entries(rules)
+                      .slice(0, 5)
+                      .map(([dataType, rule]) => (
+                        <tr key={dataType}>
+                          <td>{dataType}</td>
+                          <td>
+                            {(rule as { retention_days: number }).retention_days}{' '}
+                            {t('days', language)}
+                          </td>
+                          <td>
+                            <Badge
+                              variant={
+                                (rule as { action: string }).action === 'delete' ? 'danger' : 'info'
+                              }
+                            >
+                              {(rule as { action: string }).action}
+                            </Badge>
+                          </td>
+                        </tr>
+                      ))}
                   </tbody>
                 </table>
               </div>

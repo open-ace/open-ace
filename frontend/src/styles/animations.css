@@ -151,7 +151,8 @@
 
 /* Pulse animation */
 @keyframes pulse {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 1;
     transform: scale(1);
   }
@@ -198,7 +199,8 @@
 
 /* Bounce animation */
 @keyframes bounce {
-  0%, 100% {
+  0%,
+  100% {
     transform: translateY(0);
   }
   50% {
@@ -225,13 +227,21 @@
 
 /* Shake animation */
 @keyframes shake {
-  0%, 100% {
+  0%,
+  100% {
     transform: translateX(0);
   }
-  10%, 30%, 50%, 70%, 90% {
+  10%,
+  30%,
+  50%,
+  70%,
+  90% {
     transform: translateX(-5px);
   }
-  20%, 40%, 60%, 80% {
+  20%,
+  40%,
+  60%,
+  80% {
     transform: translateX(5px);
   }
 }
@@ -260,7 +270,8 @@
 
 /* Float animation */
 @keyframes float {
-  0%, 100% {
+  0%,
+  100% {
     transform: translateY(0);
   }
   50% {
@@ -270,11 +281,14 @@
 
 /* Glow animation */
 @keyframes glow {
-  0%, 100% {
+  0%,
+  100% {
     box-shadow: 0 0 5px rgba(14, 165, 233, 0.5);
   }
   50% {
-    box-shadow: 0 0 20px rgba(14, 165, 233, 0.8), 0 0 30px rgba(14, 165, 233, 0.4);
+    box-shadow:
+      0 0 20px rgba(14, 165, 233, 0.8),
+      0 0 30px rgba(14, 165, 233, 0.4);
   }
 }
 
@@ -302,11 +316,21 @@
 }
 
 /* Stagger animation delays */
-.stagger-1 { animation-delay: 0.1s; }
-.stagger-2 { animation-delay: 0.2s; }
-.stagger-3 { animation-delay: 0.3s; }
-.stagger-4 { animation-delay: 0.4s; }
-.stagger-5 { animation-delay: 0.5s; }
+.stagger-1 {
+  animation-delay: 0.1s;
+}
+.stagger-2 {
+  animation-delay: 0.2s;
+}
+.stagger-3 {
+  animation-delay: 0.3s;
+}
+.stagger-4 {
+  animation-delay: 0.4s;
+}
+.stagger-5 {
+  animation-delay: 0.5s;
+}
 
 /* ===== Animation Classes ===== */
 
@@ -396,7 +420,10 @@
 }
 
 .transition-colors {
-  transition: color var(--transition-fast), background-color var(--transition-fast), border-color var(--transition-fast);
+  transition:
+    color var(--transition-fast),
+    background-color var(--transition-fast),
+    border-color var(--transition-fast);
 }
 
 .transition-transform {
@@ -410,7 +437,9 @@
 /* ===== Hover Effects ===== */
 
 .hover-lift {
-  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+  transition:
+    transform var(--transition-fast),
+    box-shadow var(--transition-fast);
 }
 
 .hover-lift:hover {
@@ -451,7 +480,9 @@
   background: rgba(255, 255, 255, 0.3);
   border-radius: 50%;
   transform: translate(-50%, -50%);
-  transition: width 0.3s, height 0.3s;
+  transition:
+    width 0.3s,
+    height 0.3s;
 }
 
 .btn-ripple:active::after {
@@ -462,7 +493,9 @@
 /* ===== Card Animations ===== */
 
 .card {
-  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+  transition:
+    transform var(--transition-fast),
+    box-shadow var(--transition-fast);
 }
 
 .card-hover:hover {
@@ -483,17 +516,23 @@
 /* ===== Toast Animations ===== */
 
 .toast {
-  transition: transform var(--transition-normal), opacity var(--transition-normal);
+  transition:
+    transform var(--transition-normal),
+    opacity var(--transition-normal);
 }
 
 /* ===== Sidebar Animations ===== */
 
 .sidebar {
-  transition: width var(--transition-normal), transform var(--transition-normal);
+  transition:
+    width var(--transition-normal),
+    transform var(--transition-normal);
 }
 
 .sidebar .nav-link {
-  transition: background-color var(--transition-fast), color var(--transition-fast);
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
 }
 
 /* ===== Dropdown Animations ===== */
@@ -575,7 +614,9 @@
 /* ===== Steps Progress Animation ===== */
 
 .step-indicator {
-  transition: background-color var(--transition-fast), transform var(--transition-fast);
+  transition:
+    background-color var(--transition-fast),
+    transform var(--transition-fast);
 }
 
 .step.completed .step-indicator {
@@ -602,7 +643,7 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
-  
+
   .animate-pulse,
   .animate-wave,
   .animate-spin,

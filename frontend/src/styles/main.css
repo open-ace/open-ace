@@ -16,12 +16,12 @@
   --color-primary-hover: #0284c7;
   --color-primary-light: #e0f2fe;
   --color-primary-dark: #0c4a6e;
-  
+
   /* Secondary - Slate Gray */
   --color-secondary: #64748b;
   --color-secondary-hover: #475569;
   --color-secondary-light: #f1f5f9;
-  
+
   /* Accent Colors */
   --color-success: #10b981;
   --color-success-hover: #059669;
@@ -31,7 +31,7 @@
   --color-danger-hover: #dc2626;
   --color-info: #3b82f6;
   --color-info-hover: #2563eb;
-  
+
   /* Purple Accent for special elements */
   --color-accent: #8b5cf6;
   --color-accent-hover: #7c3aed;
@@ -90,9 +90,11 @@
   --spacing-3xl: 4rem;
 
   /* ===== Typography - Modern Font Stack ===== */
-  --font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', sans-serif;
+  --font-family:
+    'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu',
+    sans-serif;
   --font-mono: 'SF Mono', 'Fira Code', 'Fira Mono', 'Roboto Mono', 'Consolas', monospace;
-  
+
   --font-size-xs: 0.75rem;
   --font-size-sm: 0.875rem;
   --font-size-base: 1rem;
@@ -153,7 +155,7 @@
   --color-primary: #38bdf8;
   --color-primary-hover: #0ea5e9;
   --color-primary-light: rgba(14, 165, 233, 0.1);
-  
+
   --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.3), 0 1px 2px -1px rgb(0 0 0 / 0.3);
   --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.3), 0 2px 4px -2px rgb(0 0 0 / 0.3);
   --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.3), 0 4px 6px -4px rgb(0 0 0 / 0.3);
@@ -188,7 +190,12 @@ body {
 }
 
 /* Typography */
-h1, h2, h3, h4, h5, h6 {
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
   font-weight: var(--font-weight-semibold);
   line-height: var(--line-height-tight);
   margin-bottom: var(--spacing-sm);
@@ -196,17 +203,17 @@ h1, h2, h3, h4, h5, h6 {
   letter-spacing: var(--letter-spacing-tight);
 }
 
-h1 { 
-  font-size: var(--font-size-4xl); 
+h1 {
+  font-size: var(--font-size-4xl);
   font-weight: var(--font-weight-bold);
 }
 
-h2 { 
-  font-size: var(--font-size-3xl); 
+h2 {
+  font-size: var(--font-size-3xl);
 }
 
-h3 { 
-  font-size: var(--font-size-2xl); 
+h3 {
+  font-size: var(--font-size-2xl);
 }
 
 h4 {
@@ -240,7 +247,8 @@ a:hover {
 }
 
 /* Code and Pre */
-code, pre {
+code,
+pre {
   font-family: var(--font-mono);
   font-size: 0.9em;
 }
@@ -280,10 +288,18 @@ pre code {
   padding: 0 var(--spacing-md);
 }
 
-.d-none { display: none !important; }
-.d-flex { display: flex; }
-.d-grid { display: grid; }
-.d-block { display: block; }
+.d-none {
+  display: none !important;
+}
+.d-flex {
+  display: flex;
+}
+.d-grid {
+  display: grid;
+}
+.d-block {
+  display: block;
+}
 
 .flex-center {
   display: flex;
@@ -291,8 +307,12 @@ pre code {
   justify-content: center;
 }
 
-.text-center { text-align: center; }
-.text-muted { color: var(--text-muted); }
+.text-center {
+  text-align: center;
+}
+.text-muted {
+  color: var(--text-muted);
+}
 
 /* Card Component - Enhanced with modern design */
 .card {
@@ -408,7 +428,11 @@ pre code {
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: linear-gradient(135deg, var(--color-primary-hover) 0%, var(--color-primary-dark) 100%);
+  background: linear-gradient(
+    135deg,
+    var(--color-primary-hover) 0%,
+    var(--color-primary-dark) 100%
+  );
   box-shadow: 0 4px 8px rgba(14, 165, 233, 0.4);
   transform: translateY(-1px);
 }
@@ -557,7 +581,9 @@ pre code {
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .loading-overlay {
@@ -854,7 +880,11 @@ link[rel='dns-prefetch'] {
 }
 
 .sidebar-toggle-btn:hover {
-  background: linear-gradient(135deg, var(--color-primary-hover) 0%, var(--color-primary-dark) 100%);
+  background: linear-gradient(
+    135deg,
+    var(--color-primary-hover) 0%,
+    var(--color-primary-dark) 100%
+  );
   box-shadow: 0 4px 12px rgba(14, 165, 233, 0.5);
   transform: translateY(-50%) scale(1.1);
 }
@@ -872,7 +902,9 @@ link[rel='dns-prefetch'] {
 .header {
   position: sticky;
   top: 0;
-  z-index: calc(var(--z-fixed) + 10); /* Higher than sidebar (z-fixed: 300) to ensure dropdowns appear above sidebar */
+  z-index: calc(
+    var(--z-fixed) + 10
+  ); /* Higher than sidebar (z-fixed: 300) to ensure dropdowns appear above sidebar */
   background-color: var(--bg-primary);
   border-bottom: 1px solid var(--border-color);
   box-shadow: var(--shadow-sm);
@@ -1153,12 +1185,12 @@ link[rel='dns-prefetch'] {
 }
 
 .message-source.slack {
-  background-color: #4A154B;
+  background-color: #4a154b;
   color: white;
 }
 
 .message-source.feishu {
-  background-color: #00D6B9;
+  background-color: #00d6b9;
   color: white;
 }
 
@@ -1649,7 +1681,9 @@ link[rel='dns-prefetch'] {
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius);
   font-size: var(--font-size-base);
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
 }
 
 .form-control:focus {
@@ -2584,8 +2618,9 @@ link[rel='dns-prefetch'] {
   /* Smooth expand/collapse animation */
   max-height: 400px;
   overflow: hidden;
-  transition: max-height 300ms cubic-bezier(0.4, 0, 0.2, 1),
-              opacity 250ms ease;
+  transition:
+    max-height 300ms cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 250ms ease;
   opacity: 1;
 }
 
