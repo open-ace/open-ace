@@ -1,0 +1,87 @@
+name: Code Review Reminder
+
+on:
+  schedule:
+    # 每3周的周一 9:00 UTC (北京时间 17:00)
+    # cron: "0 9 1-7,8-14,15-21,22-28 * *" 不精确
+    # 使用更简单的方式：每周一运行，在脚本中判断是否是第3周
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+    # 允许手动触发
+
+permissions:
+  issues: write
+
+jobs:
+  check-and-create-reminder:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if it's the 3rd week
+        id: check-week
+        run: |
+          # 获取当前日期
+          current_date=$(date +%Y-%m-%d)
+          # 获取当前周数（从年初开始计算）
+          week_number=$(date +%V)
+          # 每3周提醒一次：周数 mod 3 == 0
+          if [ $(($week_number % 3)) -eq 0 ]; then
+            echo "should_create=true" >> $GITHUB_OUTPUT
+            echo "week_info=第 ${week_number} 周（每3周提醒）" >> $GITHUB_OUTPUT
+          else
+            echo "should_create=false" >> $GITHUB_OUTPUT
+            echo "week_info=第 ${week_number} 周（跳过，非第3周）" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create review reminder issue
+        if: steps.check-week.outputs.should_create == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const weekInfo = process.env.WEEK_INFO;
+            const currentDate = new Date().toISOString().split('T')[0];
+            
+            const issueBody = `## 定期代码审查提醒
+            
+            ${weekInfo} - ${currentDate}
+            
+            请审查以下内容是否需要优化或更新：
+            
+            | 类别 | 检查项 |
+            |------|--------|
+            | 🗄️ 数据库 | 查询性能、索引优化、表结构、迁移脚本 |
+            | ⚙️ 后端 | API 性能、代码质量、错误处理、日志记录 |
+            | 🖥️ 前端 | 包体积、渲染性能、组件优化、依赖更新 |
+            | 🎨 UI | 用户体验、响应式设计、可访问性、交互流畅度 |
+            | 📚 文档 | README、CHANGELOG、API 文档、部署指南 |
+            
+            ### 检查清单
+            
+            - [ ] 数据库查询是否有慢查询需要优化？
+            - [ ] 后端 API 是否有性能瓶颈？
+            - [ ] 前端包体积是否过大？
+            - [ ] UI 是否有用户体验问题？
+            - [ ] 文档是否与当前版本同步？
+            
+            ---
+            
+            *此提醒每3周自动生成一次。完成后请关闭此 issue。*
+            `;
+            
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `📋 定期代码审查提醒 - ${currentDate}`,
+              body: issueBody,
+              labels: ['reminder', 'maintenance']
+            });
+
+      - name: Log result
+        run: |
+          echo "检查结果: ${{ steps.check-week.outputs.week_info }}"
+          if [ "${{ steps.check-week.outputs.should_create }}" == "true" ]; then
+            echo "✅ 已创建审查提醒 issue"
+          else
+            echo "⏭️ 跳过创建（非第3周）"
+          fi
+        env:
+          WEEK_INFO: ${{ steps.check-week.outputs.week_info }}
