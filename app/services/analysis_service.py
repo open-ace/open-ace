@@ -6,6 +6,7 @@ Business logic for usage analysis and reporting.
 """
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
@@ -15,6 +16,9 @@ from app.utils.cache import cached
 from app.utils.helpers import get_today, get_days_ago
 
 logger = logging.getLogger(__name__)
+
+# Thread pool for parallel queries
+_executor = ThreadPoolExecutor(max_workers=4)
 
 
 class AnalysisService:
@@ -45,8 +49,8 @@ class AnalysisService:
         """
         Get all analysis data in a single optimized call.
 
-        This method fetches all required data once and reuses it for
-        multiple analysis calculations, reducing database queries.
+        This method uses parallel queries and aggregated results to
+        minimize database load and response time.
 
         Args:
             start_date: Optional start date filter.
@@ -61,46 +65,64 @@ class AnalysisService:
         if not end_date:
             end_date = get_today()
 
-        # Fetch all required data ONCE - use lightweight query for better performance
-        usage_data = self.message_repo.get_daily_range_lightweight(start_date, end_date, host_name=host_name)
-        user_tokens = self.message_repo.get_user_token_totals(
-            start_date=start_date,
-            end_date=end_date,
-            host_name=host_name
-        )
-        tool_stats = self.message_repo.get_tool_token_totals(
-            start_date=start_date,
-            end_date=end_date,
-            host_name=host_name
-        )
-        daily_data = self.message_repo.get_daily_token_totals(start_date, end_date, host_name)
-        hourly_data = self.message_repo.get_hourly_usage(start_date, end_date, host_name)
-        # Use lightweight query for conversation stats instead of full history
-        conversation_stats = self.message_repo.get_conversation_stats_summary(host_name=host_name)
-        # Get request count from daily_usage table (API calls, not messages)
-        total_requests = self.usage_repo.get_request_count_total(start_date, end_date, host_name)
+        # Execute queries in parallel using thread pool
+        futures = {
+            _executor.submit(
+                self.message_repo.get_batch_analysis_aggregates,
+                start_date, end_date, host_name
+            ): 'aggregates',
+            _executor.submit(
+                self.message_repo.get_user_token_totals,
+                start_date, end_date, host_name
+            ): 'user_tokens',
+            _executor.submit(
+                self.message_repo.get_tool_token_totals,
+                start_date, end_date, host_name
+            ): 'tool_stats',
+            _executor.submit(
+                self.message_repo.get_daily_token_totals,
+                start_date, end_date, host_name
+            ): 'daily_data',
+            _executor.submit(
+                self.message_repo.get_hourly_usage,
+                start_date, end_date, host_name
+            ): 'hourly_data',
+            _executor.submit(
+                self.message_repo.get_conversation_stats_summary,
+                host_name
+            ): 'conversation_stats',
+            _executor.submit(
+                self.usage_repo.get_request_count_total,
+                start_date, end_date, host_name
+            ): 'total_requests',
+        }
 
-        # Calculate all metrics from shared data
-        total_tokens = sum(u.get('tokens_used', 0) for u in usage_data)
-        total_input = sum(u.get('input_tokens', 0) for u in usage_data)
-        total_output = sum(u.get('output_tokens', 0) for u in usage_data)
-        # Message count = number of rows in daily_messages
-        total_messages = len(usage_data)
+        # Collect results
+        results = {}
+        for future in as_completed(futures):
+            key = futures[future]
+            try:
+                results[key] = future.result()
+            except Exception as e:
+                logger.error(f"Query {key} failed: {e}")
+                results[key] = {} if key in ['aggregates', 'conversation_stats'] else []
 
-        # If tokens are 0 from usage_data, get from messages
-        if total_tokens == 0 and user_tokens:
-            total_tokens = sum(u.get('total_tokens', 0) for u in user_tokens)
-            total_input = sum(u.get('total_input_tokens', 0) for u in user_tokens)
-            total_output = sum(u.get('total_output_tokens', 0) for u in user_tokens)
+        # Extract results
+        aggregates = results.get('aggregates', {})
+        user_tokens = results.get('user_tokens', [])
+        tool_stats = results.get('tool_stats', [])
+        daily_data = results.get('daily_data', [])
+        hourly_data = results.get('hourly_data', [])
+        conversation_stats = results.get('conversation_stats', {})
+        total_requests = results.get('total_requests', 0)
 
-        # Get unique tools and hosts
-        tools = set()
-        hosts = set()
-        for u in usage_data:
-            if u.get('tool_name'):
-                tools.add(u['tool_name'])
-            if u.get('host_name'):
-                hosts.add(u['host_name'])
+        # Use aggregates directly instead of computing from raw data
+        total_tokens = aggregates.get('total_tokens', 0)
+        total_input = aggregates.get('total_input_tokens', 0)
+        total_output = aggregates.get('total_output_tokens', 0)
+        total_messages = aggregates.get('total_messages', 0)
+        unique_tools = aggregates.get('unique_tools', 0)
+        unique_hosts = aggregates.get('unique_hosts', 0)
 
         # Top tools
         top_tools = []
@@ -111,9 +133,8 @@ class AnalysisService:
                     'count': ts.get('total_tokens', 0)
                 })
 
-        # Sessions and averages
-        total_sessions = len(set((u.get('date'), u.get('tool_name')) for u in usage_data))
-        # total_messages already calculated above from usage_data row count
+        # Sessions = unique days * unique tools (approximation)
+        total_sessions = aggregates.get('unique_days', 1) * unique_tools if unique_tools > 0 else 1
 
         # Key metrics
         key_metrics = {
@@ -122,51 +143,42 @@ class AnalysisService:
             'total_output_tokens': total_output,
             'total_requests': total_requests,
             'total_messages': total_messages,
-            'unique_tools': len(tools) if tools else 1,
-            'unique_hosts': len(hosts) if hosts else 1,
+            'unique_tools': unique_tools if unique_tools > 0 else 1,
+            'unique_hosts': unique_hosts if unique_hosts > 0 else 1,
             'top_tools': top_tools,
-            'top_hosts': [{'host': h, 'count': 0} for h in hosts][:5] if hosts else [],
-            'total_sessions': total_sessions if total_sessions > 0 else 1,
+            'top_hosts': [],  # Will be populated from daily_data if needed
+            'total_sessions': total_sessions,
             'avg_tokens_per_session': total_tokens / total_sessions if total_sessions > 0 else 0,
             'avg_messages_per_session': total_messages / total_sessions if total_sessions > 0 else 0,
             'date_range': {'start': start_date, 'end': end_date}
         }
 
-        # Daily/Hourly usage
+        # Daily/Hourly usage - use pre-aggregated data
         daily_totals = {}
-        for u in usage_data:
-            date = u.get('date')
-            if date not in daily_totals:
-                daily_totals[date] = {'date': date, 'tokens': 0, 'requests': 0}
-            daily_totals[date]['tokens'] += u.get('tokens_used', 0)
-            daily_totals[date]['requests'] += 1  # Each row is a message
+        for d in daily_data:
+            date = d.get('date')
+            if date:
+                daily_totals[date] = {
+                    'date': date,
+                    'tokens': d.get('total_tokens', 0) or 0,
+                    'requests': d.get('message_count', 0) or 0
+                }
 
-        if all(d['tokens'] == 0 for d in daily_totals.values()) if daily_totals else True:
-            for m in daily_data:
-                date = m.get('date')
-                if date in daily_totals:
-                    daily_totals[date]['tokens'] = m.get('total_tokens', 0)
-                else:
-                    daily_totals[date] = {
-                        'date': date,
-                        'tokens': m.get('total_tokens', 0),
-                        'requests': m.get('message_count', 0)
-                    }
-
-        hourly_result = [{'hour': int(h['hour']), 'tokens': h['tokens'] or 0, 'requests': h['requests'] or 0} for h in hourly_data]
+        hourly_result = [
+            {'hour': int(h['hour']), 'tokens': h['tokens'] or 0, 'requests': h['requests'] or 0}
+            for h in hourly_data
+        ]
 
         daily_hourly_usage = {
             'daily': list(daily_totals.values()),
             'hourly': hourly_result
         }
 
-        # Peak usage
-        daily_totals_for_peak = {}
-        for d in daily_data:
-            date = d.get('date')
-            tokens = d.get('total_tokens', 0)
-            if date:
-                daily_totals_for_peak[date] = tokens
+        # Peak usage - use pre-aggregated data
+        daily_totals_for_peak = {
+            d.get('date'): d.get('total_tokens', 0) or 0
+            for d in daily_data if d.get('date')
+        }
 
         sorted_days = sorted(daily_totals_for_peak.items(), key=lambda x: x[1], reverse=True) if daily_totals_for_peak else []
         peak_days = [{'date': d, 'tokens': t} for d, t in sorted_days[:5]]
@@ -174,9 +186,7 @@ class AnalysisService:
         hourly_totals = {}
         for h in hourly_data:
             hour = int(h.get('hour', 0))
-            if hour not in hourly_totals:
-                hourly_totals[hour] = 0
-            hourly_totals[hour] += h.get('tokens', 0) or 0
+            hourly_totals[hour] = hourly_totals.get(hour, 0) + (h.get('tokens', 0) or 0)
 
         sorted_hours = sorted(hourly_totals.items(), key=lambda x: x[1], reverse=True) if hourly_totals else []
         peak_hours = [{'hour': h, 'avg_tokens': t} for h, t in sorted_hours[:5]]
@@ -203,9 +213,6 @@ class AnalysisService:
             })
 
         user_ranking = {'users': users}
-
-        # Conversation stats - already computed by lightweight query
-        # conversation_stats is directly from get_conversation_stats_summary
 
         # Tool comparison
         tools_comparison = []

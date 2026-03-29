@@ -588,17 +588,18 @@ class MessageRepository:
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
-        # Use different SQL for PostgreSQL vs SQLite
+        # Use optimized SQL without regex validation for better performance
         if is_postgresql():
+            # Simplified query - direct timestamp cast without regex
             query = f'''
                 SELECT
-                    EXTRACT(HOUR FROM CASE WHEN timestamp::text ~ '^\d' THEN timestamp::timestamp ELSE NULL END) as hour,
+                    EXTRACT(HOUR FROM timestamp::timestamp) as hour,
                     COUNT(*) as requests,
                     SUM(tokens_used) as tokens
                 FROM daily_messages
                 {where_clause}
                 {"AND" if conditions else "WHERE"} timestamp IS NOT NULL AND timestamp::text != ''
-                GROUP BY EXTRACT(HOUR FROM CASE WHEN timestamp::text ~ '^\d' THEN timestamp::timestamp ELSE NULL END)
+                GROUP BY EXTRACT(HOUR FROM timestamp::timestamp)
                 ORDER BY hour
             '''
         else:
@@ -848,3 +849,74 @@ class MessageRepository:
         '''
 
         return self.db.fetch_all(query, tuple(params))
+
+    def get_batch_analysis_aggregates(
+        self,
+        start_date: str,
+        end_date: str,
+        host_name: Optional[str] = None
+    ) -> Dict:
+        """
+        Get all aggregates needed for batch analysis in a single query.
+
+        This method replaces multiple separate queries with a single efficient
+        aggregation query, dramatically reducing database load and response time.
+
+        Args:
+            start_date: Start date string (YYYY-MM-DD).
+            end_date: End date string (YYYY-MM-DD).
+            host_name: Optional host name filter.
+
+        Returns:
+            Dict: All aggregate statistics needed for batch analysis.
+        """
+        from app.repositories.database import is_postgresql
+
+        conditions = ['date >= ?', 'date <= ?']
+        params = [start_date, end_date]
+
+        if host_name:
+            conditions.append('host_name = ?')
+            params.append(host_name)
+
+        where_clause = f"WHERE {' AND '.join(conditions)}"
+
+        # Single query to get all basic aggregates
+        query = f'''
+            SELECT
+                COUNT(*) as total_messages,
+                SUM(tokens_used) as total_tokens,
+                SUM(input_tokens) as total_input_tokens,
+                SUM(output_tokens) as total_output_tokens,
+                COUNT(DISTINCT tool_name) as unique_tools,
+                COUNT(DISTINCT host_name) as unique_hosts,
+                COUNT(DISTINCT sender_name) as unique_users,
+                COUNT(DISTINCT date) as unique_days
+            FROM daily_messages
+            {where_clause}
+        '''
+
+        result = self.db.fetch_one(query, tuple(params))
+
+        if not result:
+            return {
+                'total_messages': 0,
+                'total_tokens': 0,
+                'total_input_tokens': 0,
+                'total_output_tokens': 0,
+                'unique_tools': 0,
+                'unique_hosts': 0,
+                'unique_users': 0,
+                'unique_days': 0
+            }
+
+        return {
+            'total_messages': result.get('total_messages', 0) or 0,
+            'total_tokens': result.get('total_tokens', 0) or 0,
+            'total_input_tokens': result.get('total_input_tokens', 0) or 0,
+            'total_output_tokens': result.get('total_output_tokens', 0) or 0,
+            'unique_tools': result.get('unique_tools', 0) or 0,
+            'unique_hosts': result.get('unique_hosts', 0) or 0,
+            'unique_users': result.get('unique_users', 0) or 0,
+            'unique_days': result.get('unique_days', 0) or 0
+        }
