@@ -212,6 +212,8 @@ def upgrade() -> None:
         """)
 
     if _column_exists(conn, "audit_logs", "severity"):
+        # Drop default first
+        op.execute("ALTER TABLE audit_logs ALTER COLUMN severity DROP DEFAULT")
         op.execute("""
             ALTER TABLE audit_logs
             ALTER COLUMN severity TYPE audit_severity
@@ -220,6 +222,8 @@ def upgrade() -> None:
                 ELSE 'info'::audit_severity
             END
         """)
+        # Set new default
+        op.execute("ALTER TABLE audit_logs ALTER COLUMN severity SET DEFAULT 'info'::audit_severity")
 
     # ============================================
     # 2. Convert JSON fields to JSONB
