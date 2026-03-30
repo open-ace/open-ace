@@ -288,11 +288,11 @@ def upgrade() -> None:
             WHERE is_active = TRUE AND deleted_at IS NULL
         """)
 
-    # Unacknowledged alerts
+    # Unacknowledged alerts (acknowledged is integer: 0=unacknowledged, 1=acknowledged)
     if not _index_exists(conn, "quota_alerts", "idx_alerts_unacked_partial"):
         op.execute("""
             CREATE INDEX idx_alerts_unacked_partial ON quota_alerts (created_at, user_id)
-            WHERE acknowledged = FALSE
+            WHERE acknowledged = 0
         """)
 
     # Recent audit logs (last 30 days)
