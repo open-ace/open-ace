@@ -262,8 +262,8 @@ python3 scripts/fetch_openclaw.py
 # 检查 config.json 中的消息日志路径配置
 
 # 3. 验证数据收集
-curl http://localhost:5001/api/today
-curl http://localhost:5001/api/messages?limit=5
+curl http://localhost:5000/api/today
+curl http://localhost:5000/api/messages?limit=5
 ```
 
 ---

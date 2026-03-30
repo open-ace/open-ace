@@ -189,7 +189,7 @@ async def test_login():
         page = await browser.new_page()
 
         # Navigate to login
-        await page.goto('http://localhost:5001/login')
+        await page.goto('http://localhost:5000/login')
 
         # Fill form
         await page.fill('#username', 'admin')
@@ -197,7 +197,7 @@ async def test_login():
         await page.click('button[type="submit"]')
 
         # Wait for redirect
-        await page.wait_for_url('http://localhost:5001/')
+        await page.wait_for_url('http://localhost:5000/')
 
         await browser.close()
 ```

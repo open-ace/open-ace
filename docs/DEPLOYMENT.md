@@ -30,7 +30,7 @@ python3 cli.py config init
 # Start web server
 python3 web.py
 
-# Visit http://localhost:5001
+# Visit http://localhost:5000
 ```
 
 ## Docker Deployment
@@ -66,7 +66,7 @@ The deployment script will prompt for:
 |---------|-------------|---------|
 | Run User | User to run the application | `open-ace` |
 | Deploy Directory | Installation directory | `/home/open-ace/open-ace` |
-| Web Port | Web server port | `5001` |
+| Web Port | Web server port | `5000` |
 | Host Name | Server hostname | Auto-detected |
 | Database User | PostgreSQL username | `open-ace` |
 | Database Name | PostgreSQL database name | `ace` |
@@ -418,8 +418,8 @@ python3 scripts/manage.py local start
 ### Port Already in Use
 
 ```bash
-# Find process using port 5001
-lsof -i :5001
+# Find process using port 5000
+lsof -i :5000
 
 # Kill process
 kill -9 <PID>
@@ -445,5 +445,5 @@ chmod -R 755 ~/.open-ace/
 
 1. **Authentication**: Enable user authentication in production
 2. **HTTPS**: Use reverse proxy (nginx/Apache) with SSL
-3. **Firewall**: Restrict access to port 5001
+3. **Firewall**: Restrict access to port 5000
 4. **Secrets**: Use environment variables for sensitive data

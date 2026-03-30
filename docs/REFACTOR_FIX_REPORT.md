@@ -233,33 +233,33 @@ frontend/src/hooks/useAnalysis.ts
 
 ```bash
 # 测试 Management API
-curl -X GET http://localhost:5001/api/admin/users \
+curl -X GET http://localhost:5000/api/admin/users \
   -H "Authorization: Bearer <admin_token>"
 
-curl -X GET http://localhost:5001/api/admin/quota/usage \
+curl -X GET http://localhost:5000/api/admin/quota/usage \
   -H "Authorization: Bearer <admin_token>"
 
 # 测试 Governance API
-curl -X GET "http://localhost:5001/api/governance/audit-logs?page=1&limit=20" \
+curl -X GET "http://localhost:5000/api/governance/audit-logs?page=1&limit=20" \
   -H "Authorization: Bearer <admin_token>"
 
-curl -X GET http://localhost:5001/api/governance/filter-rules \
+curl -X GET http://localhost:5000/api/governance/filter-rules \
   -H "Authorization: Bearer <admin_token>"
 
-curl -X GET http://localhost:5001/api/governance/security-settings \
+curl -X GET http://localhost:5000/api/governance/security-settings \
   -H "Authorization: Bearer <admin_token>"
 
 # 测试 Report API
-curl -X GET "http://localhost:5001/api/report/my-usage?start=2026-02-21&end=2026-03-21" \
+curl -X GET "http://localhost:5000/api/report/my-usage?start=2026-02-21&end=2026-03-21" \
   -H "Authorization: Bearer <user_token>"
 
 # 测试 Workspace API
-curl -X GET http://localhost:5001/api/workspace/config
+curl -X GET http://localhost:5000/api/workspace/config
 
 # 测试 Analysis API
-curl -X GET "http://localhost:5001/api/analysis/key-metrics?start=2026-02-21&end=2026-03-21"
-curl -X GET "http://localhost:5001/api/analysis/daily-hourly-usage?start=2026-02-21&end=2026-03-21"
-curl -X GET "http://localhost:5001/api/analysis/tool-comparison?start=2026-02-21&end=2026-03-21"
+curl -X GET "http://localhost:5000/api/analysis/key-metrics?start=2026-02-21&end=2026-03-21"
+curl -X GET "http://localhost:5000/api/analysis/daily-hourly-usage?start=2026-02-21&end=2026-03-21"
+curl -X GET "http://localhost:5000/api/analysis/tool-comparison?start=2026-02-21&end=2026-03-21"
 ```
 
 ### 4.3 E2E 测试建议

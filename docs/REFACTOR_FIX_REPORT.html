@@ -458,33 +458,33 @@ frontend/src/hooks/useAnalysis.ts
 </ul>
 <h3 id="42-api">4.2 API 测试</h3>
 <pre><code class="language-bash"># 测试 Management API
-curl -X GET http://localhost:5001/api/admin/users \
+curl -X GET http://localhost:5000/api/admin/users \
   -H &quot;Authorization: Bearer &lt;admin_token&gt;&quot;
 
-curl -X GET http://localhost:5001/api/admin/quota/usage \
+curl -X GET http://localhost:5000/api/admin/quota/usage \
   -H &quot;Authorization: Bearer &lt;admin_token&gt;&quot;
 
 # 测试 Governance API
-curl -X GET &quot;http://localhost:5001/api/governance/audit-logs?page=1&amp;limit=20&quot; \
+curl -X GET &quot;http://localhost:5000/api/governance/audit-logs?page=1&amp;limit=20&quot; \
   -H &quot;Authorization: Bearer &lt;admin_token&gt;&quot;
 
-curl -X GET http://localhost:5001/api/governance/filter-rules \
+curl -X GET http://localhost:5000/api/governance/filter-rules \
   -H &quot;Authorization: Bearer &lt;admin_token&gt;&quot;
 
-curl -X GET http://localhost:5001/api/governance/security-settings \
+curl -X GET http://localhost:5000/api/governance/security-settings \
   -H &quot;Authorization: Bearer &lt;admin_token&gt;&quot;
 
 # 测试 Report API
-curl -X GET &quot;http://localhost:5001/api/report/my-usage?start=2026-02-21&amp;end=2026-03-21&quot; \
+curl -X GET &quot;http://localhost:5000/api/report/my-usage?start=2026-02-21&amp;end=2026-03-21&quot; \
   -H &quot;Authorization: Bearer &lt;user_token&gt;&quot;
 
 # 测试 Workspace API
-curl -X GET http://localhost:5001/api/workspace/config
+curl -X GET http://localhost:5000/api/workspace/config
 
 # 测试 Analysis API
-curl -X GET &quot;http://localhost:5001/api/analysis/key-metrics?start=2026-02-21&amp;end=2026-03-21&quot;
-curl -X GET &quot;http://localhost:5001/api/analysis/daily-hourly-usage?start=2026-02-21&amp;end=2026-03-21&quot;
-curl -X GET &quot;http://localhost:5001/api/analysis/tool-comparison?start=2026-02-21&amp;end=2026-03-21&quot;
+curl -X GET &quot;http://localhost:5000/api/analysis/key-metrics?start=2026-02-21&amp;end=2026-03-21&quot;
+curl -X GET &quot;http://localhost:5000/api/analysis/daily-hourly-usage?start=2026-02-21&amp;end=2026-03-21&quot;
+curl -X GET &quot;http://localhost:5000/api/analysis/tool-comparison?start=2026-02-21&amp;end=2026-03-21&quot;
 </code></pre>
 <h3 id="43-e2e">4.3 E2E 测试建议</h3>
 <p>建议使用 Playwright 创建以下测试用例：</p>

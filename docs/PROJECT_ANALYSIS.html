@@ -1005,7 +1005,7 @@ services:
     image: open-ace:latest
     build: .
     ports:
-      - &quot;5001:5001&quot;
+      - &quot;5000:5000&quot;
     environment:
       - DATABASE_URL=postgresql://openace:password@postgres:5432/openace
       - REDIS_URL=redis://redis:6379/0
@@ -1018,7 +1018,7 @@ services:
       - ./logs:/app/logs
     restart: unless-stopped
     healthcheck:
-      test: [&quot;CMD&quot;, &quot;curl&quot;, &quot;-f&quot;, &quot;http://localhost:5001/health&quot;]
+      test: [&quot;CMD&quot;, &quot;curl&quot;, &quot;-f&quot;, &quot;http://localhost:5000/health&quot;]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -1081,9 +1081,9 @@ USER openace
 
 # 健康检查
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c &quot;import urllib.request; urllib.request.urlopen('http://localhost:5001/health')&quot; || exit 1
+    CMD python -c &quot;import urllib.request; urllib.request.urlopen('http://localhost:5000/health')&quot; || exit 1
 
-EXPOSE 5001
+EXPOSE 5000
 
 CMD [&quot;python&quot;, &quot;web.py&quot;]
 </code></pre>

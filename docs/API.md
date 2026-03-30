@@ -4,7 +4,7 @@ This document describes the REST API endpoints available in Open ACE (AI Computi
 
 ## Overview
 
-- **Base URL**: `http://localhost:5001/api` (default)
+- **Base URL**: `http://localhost:5000/api` (default)
 - **Authentication**: Session token via cookie or Bearer token in Authorization header
 - **Content-Type**: `application/json` for most endpoints
 
