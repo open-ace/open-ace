@@ -1328,7 +1328,8 @@ def init_auth_database() -> None:
     # Add must_change_password column if not exists (migration for existing databases)
     if not _column_exists(cursor, "users", "must_change_password"):
         print("Adding must_change_password column to users table...")
-        _execute(cursor, "ALTER TABLE users ADD COLUMN must_change_password BOOLEAN DEFAULT 0")
+        default_val = "FALSE" if is_postgresql() else "0"
+        _execute(cursor, f"ALTER TABLE users ADD COLUMN must_change_password BOOLEAN DEFAULT {default_val}")
         conn.commit()
 
     conn.close()
