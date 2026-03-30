@@ -295,11 +295,11 @@ def upgrade() -> None:
             WHERE acknowledged = 0
         """)
 
-    # Recent audit logs (last 30 days)
-    if not _index_exists(conn, "audit_logs", "idx_audit_recent_partial"):
+    # Recent audit logs - skip partial index with CURRENT_TIMESTAMP (not IMMUTABLE)
+    # Use regular index instead
+    if not _index_exists(conn, "audit_logs", "idx_audit_recent"):
         op.execute("""
-            CREATE INDEX idx_audit_recent_partial ON audit_logs (timestamp, user_id, action)
-            WHERE timestamp > CURRENT_TIMESTAMP - INTERVAL '30 days'
+            CREATE INDEX idx_audit_recent ON audit_logs (timestamp, user_id, action)
         """)
 
     # ============================================
@@ -482,8 +482,8 @@ def downgrade() -> None:
     if _index_exists(conn, "quota_alerts", "idx_alerts_unacked_partial"):
         op.execute("DROP INDEX idx_alerts_unacked_partial")
 
-    if _index_exists(conn, "audit_logs", "idx_audit_recent_partial"):
-        op.execute("DROP INDEX idx_audit_recent_partial")
+    if _index_exists(conn, "audit_logs", "idx_audit_recent"):
+        op.execute("DROP INDEX idx_audit_recent")
 
     # ============================================
     # 2. Convert JSONB back to TEXT
