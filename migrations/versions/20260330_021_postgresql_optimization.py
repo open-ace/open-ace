@@ -158,7 +158,10 @@ def upgrade() -> None:
     """)
 
     # Convert columns to ENUM types
+    # Note: Must drop default before changing type, then set new default
     if _column_exists(conn, "users", "role"):
+        # Drop default first
+        op.execute("ALTER TABLE users ALTER COLUMN role DROP DEFAULT")
         op.execute("""
             ALTER TABLE users
             ALTER COLUMN role TYPE user_role
@@ -167,8 +170,12 @@ def upgrade() -> None:
                 ELSE 'user'::user_role
             END
         """)
+        # Set new default
+        op.execute("ALTER TABLE users ALTER COLUMN role SET DEFAULT 'user'::user_role")
 
     if _column_exists(conn, "tenants", "status"):
+        # Drop default first
+        op.execute("ALTER TABLE tenants ALTER COLUMN status DROP DEFAULT")
         op.execute("""
             ALTER TABLE tenants
             ALTER COLUMN status TYPE tenant_status
@@ -177,8 +184,12 @@ def upgrade() -> None:
                 ELSE 'active'::tenant_status
             END
         """)
+        # Set new default
+        op.execute("ALTER TABLE tenants ALTER COLUMN status SET DEFAULT 'active'::tenant_status")
 
     if _column_exists(conn, "tenants", "plan"):
+        # Drop default first
+        op.execute("ALTER TABLE tenants ALTER COLUMN plan DROP DEFAULT")
         op.execute("""
             ALTER TABLE tenants
             ALTER COLUMN plan TYPE tenant_plan
@@ -187,6 +198,8 @@ def upgrade() -> None:
                 ELSE 'standard'::tenant_plan
             END
         """)
+        # Set new default
+        op.execute("ALTER TABLE tenants ALTER COLUMN plan SET DEFAULT 'standard'::tenant_plan")
 
     if _column_exists(conn, "daily_messages", "role"):
         op.execute("""
