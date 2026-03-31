@@ -90,11 +90,13 @@
 git clone https://github.com/open-ace/open-ace.git
 cd open-ace
 
-# 一键启动
-docker-compose up -d
+# 构建并启动（包含 PostgreSQL 数据库）
+docker compose up -d --build
 
-# 访问 http://localhost:5000
+# 访问 http://localhost:5001
 ```
+
+> 💡 生产环境部署请参考 [部署指南](scripts/install-central/docker-method/README.md)
 
 ### 方式二：源码安装
 
@@ -109,13 +111,14 @@ pip install -r requirements.txt
 # 3. 安装前端依赖并构建
 cd frontend && npm install && npm run build && cd ..
 
-# 4. 初始化配置
+# 4. 初始化配置和数据库
 python3 cli.py config init
+python3 scripts/init_db.py
 
 # 5. 启动服务
 python3 web.py
 
-# 访问 http://localhost:5000
+# 访问 http://localhost:5001
 ```
 
 ### 默认账号
@@ -323,11 +326,13 @@ open-ace/
 git clone https://github.com/open-ace/open-ace.git
 cd open-ace
 
-# Start with one command
-docker-compose up -d
+# Build and start (includes PostgreSQL database)
+docker compose up -d --build
 
-# Visit http://localhost:5000
+# Visit http://localhost:5001
 ```
+
+> 💡 For production deployment, see [Deployment Guide](scripts/install-central/docker-method/README.md)
 
 ### Option 2: From Source
 
@@ -342,13 +347,14 @@ pip install -r requirements.txt
 # 3. Install frontend dependencies and build
 cd frontend && npm install && npm run build && cd ..
 
-# 4. Initialize configuration
+# 4. Initialize configuration and database
 python3 cli.py config init
+python3 scripts/init_db.py
 
 # 5. Start the server
 python3 web.py
 
-# Visit http://localhost:5000
+# Visit http://localhost:5001
 ```
 
 ### Default Credentials
