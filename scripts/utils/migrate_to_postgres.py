@@ -62,6 +62,20 @@ def get_table_columns(cursor, table_name: str) -> List[str]:
     return [row["name"] for row in cursor.fetchall()]
 
 
+def get_pg_column_types(pg_cur, table_name: str) -> Dict[str, str]:
+    """Get column data types for a PostgreSQL table."""
+    pg_cur.execute(
+        """
+        SELECT column_name, data_type
+        FROM information_schema.columns
+        WHERE table_name = %s
+        ORDER BY ordinal_position
+    """,
+        (table_name,),
+    )
+    return {row[0]: row[1] for row in pg_cur.fetchall()}
+
+
 def migrate_table(
     sqlite_conn: sqlite3.Connection,
     pg_conn: Any,
@@ -88,15 +102,9 @@ def migrate_table(
     # Get columns from both SQLite and PostgreSQL
     sqlite_columns = get_table_columns(sqlite_cur, table_name)
 
-    # Get PostgreSQL columns
-    pg_cur.execute(
-        """
-        SELECT column_name FROM information_schema.columns
-        WHERE table_name = %s ORDER BY ordinal_position
-    """,
-        (table_name,),
-    )
-    pg_columns = [row[0] for row in pg_cur.fetchall()]
+    # Get PostgreSQL columns and their types
+    pg_column_types = get_pg_column_types(pg_cur, table_name)
+    pg_columns = list(pg_column_types.keys())
 
     # Find common columns
     if columns is None:
@@ -134,12 +142,17 @@ def migrate_table(
         if not rows:
             break
 
-        # Convert rows to list of tuples, cleaning NUL characters
+        # Convert rows to list of tuples, cleaning NUL characters and converting types
         data = []
         for row in rows:
             cleaned_row = []
-            for val in row:
-                if isinstance(val, str):
+            for i, val in enumerate(row):
+                col_name = columns[i]
+                col_type = pg_column_types.get(col_name, "")
+                # Convert INTEGER to BOOLEAN for PostgreSQL boolean columns
+                if col_type == "boolean" and val is not None:
+                    cleaned_row.append(bool(val))
+                elif isinstance(val, str):
                     # Remove NUL characters (0x00)
                     cleaned_row.append(val.replace("\x00", ""))
                 else:
