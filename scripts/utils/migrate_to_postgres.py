@@ -248,6 +248,51 @@ def migrate_all_tables():
     logger.info(f"\nMigration completed! Total rows migrated: {total_migrated}")
 
 
+def refresh_aggregated_tables():
+    """
+    Refresh pre-aggregated tables after migration.
+
+    These tables are derived from daily_messages and need to be rebuilt
+    after migration since they don't exist in SQLite:
+    - daily_stats: Daily statistics for trend analysis
+    - hourly_stats: Hourly statistics for heatmaps
+    - usage_summary: Summary statistics for dashboard
+    """
+    logger.info("\nRefreshing pre-aggregated tables...")
+
+    try:
+        # Import here to avoid circular imports and allow standalone execution
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        from app.repositories.daily_stats_repo import DailyStatsRepository
+        from app.services.summary_service import SummaryService
+
+        # Refresh daily_stats
+        logger.info("  Refreshing daily_stats...")
+        daily_stats_repo = DailyStatsRepository()
+        daily_stats_repo.refresh_stats()
+        logger.info("  daily_stats refreshed")
+
+        # Refresh hourly_stats
+        logger.info("  Refreshing hourly_stats...")
+        daily_stats_repo.refresh_hourly_stats()
+        logger.info("  hourly_stats refreshed")
+
+        # Refresh usage_summary
+        logger.info("  Refreshing usage_summary...")
+        summary_service = SummaryService()
+        summary_service.refresh_summary()
+        logger.info("  usage_summary refreshed")
+
+        logger.info("\n✓ All pre-aggregated tables refreshed successfully!")
+
+    except Exception as e:
+        logger.warning(f"\n⚠ Failed to refresh pre-aggregated tables: {e}")
+        logger.warning("  You may need to manually refresh them:")
+        logger.warning("  - daily_stats_repo.refresh_stats()")
+        logger.warning("  - daily_stats_repo.refresh_hourly_stats()")
+        logger.warning("  - summary_service.refresh_summary()")
+
+
 def verify_migration():
     """Verify migration by comparing row counts."""
     logger.info("\nVerifying migration...")
@@ -334,6 +379,7 @@ def main():
         verify_migration()
     else:
         migrate_all_tables()
+        refresh_aggregated_tables()
         verify_migration()
 
 
