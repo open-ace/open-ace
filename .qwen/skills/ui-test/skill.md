@@ -135,7 +135,7 @@ test_cases = [
 ## 配置
 
 在 `scripts/config.py` 中可配置：
-- `BASE_URL`: 测试目标 URL（默认：http://localhost:5001/）
+- `BASE_URL`: 测试目标 URL（默认：http://localhost:5000/）
 - `USERNAME`: 登录用户名
 - `PASSWORD`: 登录密码
 - `VIEWPORT_SIZE`: 浏览器视口大小
@@ -206,7 +206,7 @@ UI 功能测试报告
 
 ## 注意事项
 
-1. 确保目标服务已启动（如 localhost:5001）
+1. 确保目标服务已启动（如 localhost:5000）
 2. 确保 Playwright 已安装：`pip install playwright && playwright install chromium`
 3. 默认使用 HEADLESS 模式测试，测试通过后再询问是否需要可视化验证
 4. 截图默认保存在项目的 `screenshots/` 目录

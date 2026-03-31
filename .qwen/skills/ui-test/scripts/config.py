@@ -1,7 +1,7 @@
 # UI 测试配置
 
 # 目标 URL
-BASE_URL = "http://localhost:5001/"
+BASE_URL = "http://localhost:5000/"
 
 # 登录凭据
 USERNAME = "admin"

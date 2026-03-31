@@ -13,7 +13,7 @@ from playwright.async_api import async_playwright
 import os
 from datetime import datetime
 
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001/")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000/")
 USERNAME = os.environ.get("USERNAME", "admin")
 PASSWORD = os.environ.get("PASSWORD", "admin123")
 SCREENSHOT_DIR = "screenshots"

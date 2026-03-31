@@ -29,7 +29,7 @@ export default defineConfig({
   // Shared settings for all projects
   use: {
     // Base URL
-    baseURL: 'http://localhost:5001',
+    baseURL: 'http://localhost:5000',
 
     // Collect trace on failure
     trace: 'on-first-retry',
@@ -75,7 +75,7 @@ export default defineConfig({
   // Run local dev server before starting tests
   webServer: {
     command: 'cd .. && python3 web.py',
-    url: 'http://localhost:5001',
+    url: 'http://localhost:5000',
     reuseExistingServer: !process.env.CI,
     timeout: 120000,
   },

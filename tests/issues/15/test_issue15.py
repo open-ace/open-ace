@@ -13,7 +13,7 @@ async def main():
 
         # Navigate to login page
         print("Navigating to login page...")
-        await page.goto("http://localhost:5001/login")
+        await page.goto("http://localhost:5000/login")
         await page.wait_for_load_state("networkidle")
 
         # Fill in login credentials
@@ -28,7 +28,7 @@ async def main():
 
         # Navigate to home page
         print("Navigating to home page...")
-        await page.goto("http://localhost:5001/")
+        await page.goto("http://localhost:5000/")
         await page.wait_for_load_state("networkidle")
         await asyncio.sleep(5)
 

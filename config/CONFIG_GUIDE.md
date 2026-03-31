@@ -8,8 +8,8 @@
 |------|------|--------|
 | `host_name` | 主机名标识，用于区分不同机器的数据 | `localhost`, `server-01` |
 | `server.upload_auth_key` | 上传认证密钥，用于验证远程机器上传的数据 | 随机字符串 |
-| `server.server_url` | 服务器地址，远程机器需要配置此地址 | `http://192.168.1.100:5001` |
-| `server.web_port` | Web 服务端口 | `5001` |
+| `server.server_url` | 服务器地址，远程机器需要配置此地址 | `http://192.168.1.100:5000` |
+| `server.web_port` | Web 服务端口 | `5000` |
 
 ### 可选配置
 

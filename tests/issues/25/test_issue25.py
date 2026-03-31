@@ -14,7 +14,7 @@ async def test_issue25():
         context = await browser.new_context(viewport={"width": 1920, "height": 1080})
         page = await context.new_page()
 
-        await page.goto("http://localhost:5001/")
+        await page.goto("http://localhost:5000/")
         await page.wait_for_load_state("networkidle")
 
         if "login" in page.url:

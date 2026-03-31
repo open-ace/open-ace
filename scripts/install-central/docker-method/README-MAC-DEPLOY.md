@@ -73,7 +73,7 @@ chmod +x quick-install-mac.sh
 #### 3. 访问应用
 
 ```
-http://localhost:5001
+http://localhost:5000
 ```
 
 默认登录凭据：
@@ -124,8 +124,8 @@ cd ~/open-ace
   },
   "server": {
     "upload_auth_key": "your-random-key",
-    "server_url": "http://localhost:5001",
-    "web_port": 5001,
+    "server_url": "http://localhost:5000",
+    "web_port": 5000,
     "web_host": "0.0.0.0"
   },
   "workspace": {
@@ -148,7 +148,7 @@ services:
     container_name: open-ace
     restart: unless-stopped
     ports:
-      - "5001:5001"
+      - "5000:5000"
     environment:
       - FLASK_ENV=production
       - PYTHONUNBUFFERED=1
@@ -194,17 +194,17 @@ docker compose up -d
 
 A: 首次启动可能需要 1-2 分钟，请耐心等待。可以在菜单栏看到 Docker 图标。
 
-### Q: 端口 5001 被占用？
+### Q: 端口 5000 被占用？
 
 ```bash
 # 查找占用进程
-lsof -i :5001
+lsof -i :5000
 
 # 结束进程
 kill -9 <PID>
 
 # 或修改端口
-# 在 docker-compose.yml 中修改 "5001:5001" 为 "5002:5001"
+# 在 docker-compose.yml 中修改 "5000:5000" 为 "5002:5000"
 ```
 
 ### Q: 如何更新镜像？

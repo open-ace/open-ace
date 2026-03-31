@@ -12,7 +12,7 @@
 
 ```
 [ ] 1. 停止旧服务 (kill 旧进程)
-[ ] 2. 确认旧服务已结束 (lsof -i :5001)
+[ ] 2. 确认旧服务已结束 (lsof -i :5000)
 [ ] 3. 启动新服务 (python3 web.py &)
 [ ] 4. 检查服务启动时间 (ps -p PID -o lstart)
 [ ] 5. 更新 VERSION 文件为当前 commit 号

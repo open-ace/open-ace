@@ -18,7 +18,7 @@ async def test_conversation_history_icon():
         try:
             # Navigate to the app
             print("1. Navigating to login page...")
-            await page.goto("http://localhost:5001/login", timeout=30000)
+            await page.goto("http://localhost:5000/login", timeout=30000)
             await page.wait_for_load_state("networkidle")
 
             # Take screenshot of login page
@@ -40,7 +40,7 @@ async def test_conversation_history_icon():
             # Navigate to manage mode to see conversation history
             print("3. Navigating to manage mode...")
             await page.goto(
-                "http://localhost:5001/manage/analysis/conversation-history", timeout=30000
+                "http://localhost:5000/manage/analysis/conversation-history", timeout=30000
             )
             await page.wait_for_load_state("networkidle")
             await asyncio.sleep(2)

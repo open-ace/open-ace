@@ -25,7 +25,7 @@ except ImportError:
     sys.exit(1)
 
 # Configuration
-BASE_URL = "http://localhost:5001"
+BASE_URL = "http://localhost:5000"
 USERNAME = "admin"
 PASSWORD = "admin123"
 VIEWPORT_SIZE = {"width": 1400, "height": 900}

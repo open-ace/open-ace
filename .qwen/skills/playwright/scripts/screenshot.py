@@ -6,7 +6,7 @@ Usage:
     python3 screenshot.py [options]
 
 Options:
-    --url URL           Target URL (default: http://localhost:5001/)
+    --url URL           Target URL (default: http://localhost:5000/)
     --output DIR        Output directory (default: ./screenshots)
     --targets TARGETS   Comma-separated screenshot targets
     --title TITLE       Report title
@@ -21,7 +21,7 @@ from datetime import datetime
 from pathlib import Path
 
 # Default configuration
-DEFAULT_URL = "http://localhost:5001/"
+DEFAULT_URL = "http://localhost:5000/"
 DEFAULT_USERNAME = "admin"
 DEFAULT_PASSWORD = "admin123"
 VIEWPORT_SIZE = {"width": 1400, "height": 900}

@@ -7,7 +7,7 @@ from playwright.sync_api import sync_playwright, expect
 import time
 import os
 
-BASE_URL = "http://localhost:5001/"
+BASE_URL = "http://localhost:5000/"
 USERNAME = "admin"
 PASSWORD = "admin123"
 SCREENSHOT_DIR = "screenshots/issues/80"

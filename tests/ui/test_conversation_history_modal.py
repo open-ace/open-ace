@@ -16,7 +16,7 @@ import time
 from playwright.async_api import async_playwright
 
 # Test configuration
-BASE_URL = "http://localhost:5001"
+BASE_URL = "http://localhost:5000"
 USERNAME = "admin"
 PASSWORD = "admin123"
 HEADLESS = True  # Start with headless mode

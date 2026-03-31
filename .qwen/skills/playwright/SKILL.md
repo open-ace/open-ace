@@ -24,7 +24,7 @@ python3 /path/to/skill/scripts/screenshot.py --url <URL> --output <OUTPUT_DIR> -
 ```
 
 参数说明：
-- `--url`: 要截图的页面 URL（默认：http://localhost:5001/）
+- `--url`: 要截图的页面 URL（默认：http://localhost:5000/）
 - `--output`: 截图输出目录（默认：项目 screenshots/ 目录）
 - `--targets`: 截图目标，逗号分隔（如：full,datepicker,heatmap,metrics）
 
@@ -98,7 +98,7 @@ HTML 报告格式：
 
 ## 注意事项
 
-1. 确保目标服务已启动（如 localhost:5001）
+1. 确保目标服务已启动（如 localhost:5000）
 2. 截图需要认证时，脚本会自动使用已配置的 session token
 3. 截图默认保存在项目的 `screenshots/` 目录
 4. HTML 报告文件名为 `screenshot_report_<timestamp>.html`

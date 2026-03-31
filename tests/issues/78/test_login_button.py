@@ -21,7 +21,7 @@ sys.path.insert(0, PROJECT_ROOT)
 from playwright.async_api import async_playwright, expect
 
 # Configuration
-BASE_URL = "http://localhost:5001"
+BASE_URL = "http://localhost:5000"
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "issues", "78")
 HEADLESS = True
 

@@ -22,7 +22,7 @@ from playwright.async_api import async_playwright, expect
 import time
 
 # 测试配置
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000")
 USERNAME = os.environ.get("USERNAME", "testuser")
 PASSWORD = os.environ.get("PASSWORD", "testuser")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"

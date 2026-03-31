@@ -154,7 +154,7 @@ import { useAppStore } from '@/store';
 Create a `.env` file for environment-specific configuration:
 
 ```env
-VITE_API_BASE_URL=http://localhost:5001
+VITE_API_BASE_URL=http://localhost:5000
 VITE_APP_TITLE=Open ACE
 ```
 

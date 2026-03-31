@@ -6,7 +6,7 @@
 from playwright.sync_api import sync_playwright, expect, Page
 import time
 
-BASE_URL = "http://localhost:5001/"
+BASE_URL = "http://localhost:5000/"
 USERNAME = "admin"
 PASSWORD = "admin123"
 

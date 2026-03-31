@@ -16,7 +16,7 @@
 ```bash
 ./deploy-remote.sh \
     --host user@remote-host \
-    --server http://CENTRAL_SERVER:5001 \
+    --server http://CENTRAL_SERVER:5000 \
     --auth-key YOUR_AUTH_KEY \
     --hostname remote-hostname
 ```
@@ -25,7 +25,7 @@
 
 ```bash
 ./deploy.sh \
-    --server http://CENTRAL_SERVER:5001 \
+    --server http://CENTRAL_SERVER:5000 \
     --auth-key YOUR_AUTH_KEY \
     --hostname $(hostname)
 ```
@@ -50,7 +50,7 @@
 ```bash
 ./deploy-remote.sh \
     --host open-ace@ai-lab \
-    --server http://192.168.31.208:5001 \
+    --server http://192.168.31.208:5000 \
     --auth-key deploy-remote-machine-key-2026 \
     --hostname ai-lab
 ```
@@ -60,7 +60,7 @@
 ```bash
 ./deploy-remote.sh \
     --host user@server \
-    --server http://192.168.1.100:5001 \
+    --server http://192.168.1.100:5000 \
     --auth-key YOUR_KEY \
     --interval 60  # 每分钟同步
 ```

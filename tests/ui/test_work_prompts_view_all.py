@@ -6,7 +6,7 @@ Test Objective:
 Verify that the "View All" link in the Prompts tab of the right panel is clickable and navigates to /work/prompts.
 
 Test Steps:
-1. Visit http://localhost:5001/
+1. Visit http://localhost:5000/
 2. Login to the system (using default credentials)
 3. Navigate to work mode (click /work)
 4. Check the right panel's Prompts tab
@@ -31,7 +31,7 @@ from playwright.async_api import async_playwright, expect
 import time
 
 # Test Configuration
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000")
 USERNAME = os.environ.get("USERNAME", "admin")
 PASSWORD = os.environ.get("PASSWORD", "admin123")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"

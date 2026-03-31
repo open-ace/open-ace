@@ -39,7 +39,7 @@ try:
     WEB_PORT = config.WEB_PORT
     WEB_HOST = config.WEB_HOST
 except ImportError:
-    WEB_PORT = int(os.environ.get("AI_TOKEN_WEB_PORT", "5001"))
+    WEB_PORT = int(os.environ.get("AI_TOKEN_WEB_PORT", "5000"))
     WEB_HOST = os.environ.get("AI_TOKEN_WEB_HOST", "0.0.0.0")
 
 

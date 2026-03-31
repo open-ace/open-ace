@@ -150,7 +150,7 @@ pytest tests/regression/test_login.py
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `BASE_URL` | 应用服务器地址 | `http://localhost:5001` |
+| `BASE_URL` | 应用服务器地址 | `http://localhost:5000` |
 | `TEST_USERNAME` | 测试用户名 | `admin` |
 | `TEST_PASSWORD` | 测试密码 | `admin123` |
 | `HEADLESS` | 无头模式 | `true` |

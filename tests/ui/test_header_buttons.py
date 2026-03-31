@@ -9,7 +9,7 @@ This test verifies that all three header buttons are clickable and functional:
 
 from playwright.sync_api import sync_playwright
 
-BASE_URL = "http://localhost:5001"
+BASE_URL = "http://localhost:5000"
 USERNAME = "admin"
 PASSWORD = "admin123"
 VIEWPORT_SIZE = (1400, 900)

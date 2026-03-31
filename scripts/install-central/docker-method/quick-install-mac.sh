@@ -24,7 +24,7 @@ NC='\033[0m' # No Color
 
 # Default values
 DEPLOY_DIR="${DEPLOY_DIR:-$HOME/open-ace}"
-WEB_PORT="${WEB_PORT:-5001}"
+WEB_PORT="${WEB_PORT:-5000}"
 IMAGE_FILE="${IMAGE_FILE:-open-ace-arm64.tar.gz}"
 IMAGE_NAME="${IMAGE_NAME:-open-ace:arm64}"
 
@@ -226,7 +226,7 @@ services:
     container_name: open-ace
     restart: unless-stopped
     ports:
-      - "${WEB_PORT:-5001}:5001"
+      - "${WEB_PORT:-5000}:5000"
     environment:
       - FLASK_ENV=production
       - PYTHONUNBUFFERED=1
@@ -236,7 +236,7 @@ services:
       - ./config:/home/open-ace/.open-ace:ro
       - ./logs:/app/logs
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5001/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
       interval: 30s
       timeout: 10s
       retries: 3

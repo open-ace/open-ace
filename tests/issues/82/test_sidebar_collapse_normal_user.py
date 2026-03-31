@@ -27,7 +27,7 @@ async def test_sidebar_collapse_normal_user():
 
         try:
             # 访问登录页面
-            await page.goto("http://localhost:5001/login")
+            await page.goto("http://localhost:5000/login")
             await page.wait_for_load_state("networkidle")
 
             # 登录普通用户

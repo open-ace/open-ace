@@ -10,7 +10,7 @@ import os
 import sys
 
 # 配置
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000")
 SCREENSHOT_DIR = "/Users/rhuang/workspace/open-ace/screenshots/issues/79"
 
 

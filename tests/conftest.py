@@ -138,7 +138,7 @@ def sample_message_data():
 # =============================================================================
 
 # Test configuration for UI tests
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000")
 TEST_USERNAME = os.environ.get("TEST_USERNAME", "admin")
 TEST_PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"

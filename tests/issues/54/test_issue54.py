@@ -54,7 +54,7 @@ class TestIssue54:
 
                 # Step 1: Navigate to login page
                 print("\n[Step 1] Navigate to login page")
-                await page.goto("http://localhost:5001/")
+                await page.goto("http://localhost:5000/")
                 await page.wait_for_load_state("networkidle")
                 screenshots.append(take_screenshot(page, "01_login_page.png"))
                 print("  ✓ Login page loaded")

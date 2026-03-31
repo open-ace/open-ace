@@ -21,7 +21,7 @@ sys.path.insert(0, str(project_root))
 
 from playwright.sync_api import sync_playwright, expect
 
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000")
 USERNAME = os.environ.get("USERNAME", "admin")
 PASSWORD = os.environ.get("PASSWORD", "admin123")
 

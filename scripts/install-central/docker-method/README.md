@@ -12,12 +12,12 @@ docker compose up -d --build
 ```
 
 这将启动：
-- **open-ace-web**: Web 应用（端口 5001）
+- **open-ace-web**: Web 应用（端口 5000）
 - **open-ace-postgres**: PostgreSQL 数据库（内部端口 5432）
 
 ### 2. 访问应用
 
-- 地址: http://localhost:5001
+- 地址: http://localhost:5000
 - 默认账号: admin / admin123
 
 > ⚠️ 生产环境请务必修改默认密码！
@@ -114,7 +114,7 @@ Apple Silicon (M1/M2/M3/M4) 和 Intel Mac 部署请参考 [README-MAC-DEPLOY.md]
 
 ```bash
 # 查找占用进程
-lsof -i :5001
+lsof -i :5000
 
 # 或修改端口
 PORT=5002 docker compose up -d

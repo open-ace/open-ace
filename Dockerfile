@@ -95,11 +95,11 @@ ENV PYTHONUNBUFFERED=1 \
     FLASK_ENV=production
 
 # Expose port
-EXPOSE 5001
+EXPOSE 5000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5001/health')" || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')" || exit 1
 
 # Run the application
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
@@ -128,7 +128,7 @@ ENV FLASK_ENV=development \
     FLASK_DEBUG=1
 
 # Run with auto-reload
-CMD ["python", "-c", "from web import app; app.run(host='0.0.0.0', port=5001, debug=True)"]
+CMD ["python", "-c", "from web import app; app.run(host='0.0.0.0', port=5000, debug=True)"]
 
 # =============================================================================
 # Migration Stage (for running database migrations)

@@ -12,7 +12,7 @@ import time
 from playwright.async_api import async_playwright, expect
 
 # Test configuration
-BASE_URL = "http://localhost:5001"
+BASE_URL = "http://localhost:5000"
 USERNAME = "admin"
 PASSWORD = "admin123"
 TIMEOUT = 10000  # 10 seconds timeout

@@ -6,7 +6,7 @@ UI 功能自动化测试脚本
     python3 ui_test.py [options]
 
 选项:
-    --url URL           目标 URL (默认: http://localhost:5001/)
+    --url URL           目标 URL (默认: http://localhost:5000/)
     --username USER     用户名 (默认: admin)
     --password PASS     密码 (默认: admin123)
     --headless          无头模式（不显示浏览器窗口）
@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 
 # Default configuration
-DEFAULT_URL = "http://localhost:5001/"
+DEFAULT_URL = "http://localhost:5000/"
 DEFAULT_USERNAME = "admin"
 DEFAULT_PASSWORD = "admin123"
 VIEWPORT_SIZE = {"width": 1400, "height": 900}

@@ -24,7 +24,7 @@ async def test_admin_user():
         print("=" * 60)
 
         # Login
-        await page.goto("http://localhost:5001/login")
+        await page.goto("http://localhost:5000/login")
         await page.wait_for_load_state("networkidle")
         await page.fill("input#username", "admin")
         await page.fill("input#password", "admin123")
@@ -41,7 +41,7 @@ async def test_admin_user():
         print(f"Mode switcher count: {mode_switcher_count}")
 
         # Navigate to manage mode
-        await page.goto("http://localhost:5001/manage/dashboard")
+        await page.goto("http://localhost:5000/manage/dashboard")
         await page.wait_for_load_state("networkidle")
         await asyncio.sleep(2)
         print(f"After navigate to /manage/dashboard: {page.url}")
@@ -71,7 +71,7 @@ async def test_normal_user():
         print("=" * 60)
 
         # Login
-        await page.goto("http://localhost:5001/login")
+        await page.goto("http://localhost:5000/login")
         await page.wait_for_load_state("networkidle")
         await page.fill("input#username", "testuser")
         await page.fill("input#password", "testuser")
@@ -88,13 +88,13 @@ async def test_normal_user():
         print(f"Mode switcher count: {mode_switcher_count}")
 
         # Try to navigate to manage mode - should be redirected to work
-        await page.goto("http://localhost:5001/manage/dashboard")
+        await page.goto("http://localhost:5000/manage/dashboard")
         await page.wait_for_load_state("networkidle")
         await asyncio.sleep(2)
         print(f"After navigate to /manage/dashboard: {page.url}")
 
         # Try to access other manage routes
-        await page.goto("http://localhost:5001/manage/users")
+        await page.goto("http://localhost:5000/manage/users")
         await page.wait_for_load_state("networkidle")
         await asyncio.sleep(1)
         print(f"After navigate to /manage/users: {page.url}")
@@ -108,7 +108,7 @@ async def test_normal_user():
         await browser.close()
         return {
             "mode_switcher_visible": mode_switcher_count > 0,
-            "redirected_to_work": "/work" in page.url or page.url == "http://localhost:5001/",
+            "redirected_to_work": "/work" in page.url or page.url == "http://localhost:5000/",
             "final_url": page.url,
         }
 

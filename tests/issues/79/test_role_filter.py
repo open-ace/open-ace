@@ -32,7 +32,7 @@ async def test_role_filter():
         try:
             # Navigate to Messages page
             print("\n[Step 1] Navigating to Messages page...")
-            await page.goto("http://localhost:5001/messages", wait_until="networkidle")
+            await page.goto("http://localhost:5000/messages", wait_until="networkidle")
 
             # Wait for React to render
             await asyncio.sleep(3)
@@ -49,7 +49,7 @@ async def test_role_filter():
                 await page.click('button[type="submit"]')
                 await page.wait_for_url("**/", timeout=10000)
                 print("  ✓ Logged in")
-                await page.goto("http://localhost:5001/messages", wait_until="networkidle")
+                await page.goto("http://localhost:5000/messages", wait_until="networkidle")
                 await asyncio.sleep(2)
 
             await page.wait_for_selector(".messages", timeout=15000)

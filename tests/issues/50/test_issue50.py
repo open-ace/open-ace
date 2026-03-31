@@ -23,7 +23,7 @@ async def main():
 
         # Navigate to login page
         print("\n1. Navigating to login page...")
-        await page.goto("http://localhost:5001/login")
+        await page.goto("http://localhost:5000/login")
         await page.wait_for_load_state("networkidle")
 
         # Take screenshot of login page

@@ -16,7 +16,7 @@ import os
 from datetime import datetime
 
 # 配置
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001/")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000/")
 USERNAME = os.environ.get("USERNAME", "admin")
 PASSWORD = os.environ.get("PASSWORD", "admin123")
 SCREENSHOT_DIR = "screenshots"
