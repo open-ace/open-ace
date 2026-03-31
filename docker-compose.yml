@@ -1,7 +1,5 @@
 # Open ACE - AI Computing Explorer - Docker Compose Configuration
-# For production deployment with optional services
-
-version: '3.8'
+# For production deployment with PostgreSQL database
 
 services:
   # ===========================================================================
@@ -22,12 +20,11 @@ services:
       - PYTHONUNBUFFERED=1
       - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
       - UPLOAD_AUTH_KEY=${UPLOAD_AUTH_KEY:-change-me-in-production}
-      # Database URL - set to use PostgreSQL
-      - DATABASE_URL=${DATABASE_URL:-}
+      # Database URL - defaults to PostgreSQL connection
+      - DATABASE_URL=postgresql://${DB_USER:-ace}:${DB_PASSWORD:-ace-secret}@postgres:5432/${DB_NAME:-ace}
     volumes:
-      - ./data:/app/data
+      - ./config:/home/open-ace/.open-ace:ro
       - ./logs:/app/logs
-      - ./config:/app/config:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5001/health')"]
       interval: 30s
@@ -39,7 +36,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-        required: false
     logging:
       driver: "json-file"
       options:
@@ -92,7 +88,7 @@ services:
       retries: 3
 
   # ===========================================================================
-  # PostgreSQL for production database
+  # PostgreSQL Database (required for production)
   # ===========================================================================
   postgres:
     image: postgres:15-alpine
@@ -106,32 +102,16 @@ services:
       - postgres-data:/var/lib/postgresql/data
     networks:
       - open-ace-network
-    profiles:
-      - database
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-ace} -d ${DB_NAME:-ace}"]
       interval: 10s
       timeout: 5s
       retries: 5
-    ports:
-      - "${DB_PORT:-5432}:5432"
-
-  # ===========================================================================
-  # Database Migration Service
-  # ===========================================================================
-  migrate:
-    image: open-ace:latest
-    container_name: open-ace-migrate
-    environment:
-      - DATABASE_URL=postgresql://${DB_USER:-ace}:${DB_PASSWORD:-ace-secret}@postgres:5432/${DB_NAME:-ace}
-    depends_on:
-      postgres:
-        condition: service_healthy
-    networks:
-      - open-ace-network
-    profiles:
-      - database
-    command: ["python", "-m", "alembic", "upgrade", "head"]
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 # =============================================================================
 # Networks
