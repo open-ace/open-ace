@@ -1372,7 +1372,7 @@ def create_user_with_is_active(
     role: str = "user",
     daily_token_quota: int = 1000000,
     daily_request_quota: int = 1000,
-    is_active: int = 1,
+    is_active: bool = True,
     linux_account: str = None,
     must_change_password: bool = False,
 ) -> bool:
@@ -1381,7 +1381,8 @@ def create_user_with_is_active(
     cursor = conn.cursor()
 
     # Convert boolean to integer for SQLite compatibility
-    must_change_int = 1 if must_change_password else 0
+    is_active_val = is_active if is_postgresql() else (1 if is_active else 0)
+    must_change_val = must_change_password if is_postgresql() else (1 if must_change_password else 0)
 
     try:
         _execute(
@@ -1397,9 +1398,9 @@ def create_user_with_is_active(
                 role,
                 daily_token_quota,
                 daily_request_quota,
-                is_active,
+                is_active_val,
                 linux_account,
-                must_change_int,
+                must_change_val,
             ),
         )
         conn.commit()

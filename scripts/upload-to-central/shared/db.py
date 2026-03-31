@@ -1429,19 +1429,24 @@ def create_user_with_is_active(
     role: str = "user",
     daily_token_quota: int = 1000000,
     daily_request_quota: int = 1000,
-    is_active: int = 1,
+    is_active: bool = True,
     linux_account: str = None,
+    must_change_password: bool = False,
 ) -> bool:
-    """Create a new user with is_active flag."""
+    """Create a new user with is_active and must_change_password flags."""
     conn = get_connection()
     cursor = conn.cursor()
+
+    # Convert boolean to appropriate type for database
+    is_active_val = is_active if is_postgresql() else (1 if is_active else 0)
+    must_change_val = must_change_password if is_postgresql() else (1 if must_change_password else 0)
 
     try:
         _execute(
             cursor,
             """
-            INSERT INTO users (username, password_hash, email, role, daily_token_quota, daily_request_quota, is_active, linux_account)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO users (username, password_hash, email, role, daily_token_quota, daily_request_quota, is_active, linux_account, must_change_password)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
                 username,
@@ -1450,8 +1455,9 @@ def create_user_with_is_active(
                 role,
                 daily_token_quota,
                 daily_request_quota,
-                is_active,
+                is_active_val,
                 linux_account,
+                must_change_val,
             ),
         )
         conn.commit()

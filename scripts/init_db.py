@@ -40,7 +40,7 @@ def create_default_admin(
         role="admin",
         daily_token_quota=10000000,  # 10M tokens
         daily_request_quota=10000,
-        is_active=1,
+        is_active=True,
         must_change_password=True,  # Force password change on first login
     )
 
