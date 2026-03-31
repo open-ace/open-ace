@@ -5,13 +5,65 @@
 import { apiClient } from './client';
 import type { Message, MessageFilters } from '@/types';
 
+// Backend message format (matches API response)
+interface BackendMessage {
+  id: number;
+  agent_session_id: string;
+  role: string;
+  content: string;
+  tokens_used: number;
+  input_tokens: number;
+  output_tokens: number;
+  timestamp: string;
+  tool_name: string;
+  host_name: string;
+  sender_name: string;
+  sender_id: string;
+  model: string | null;
+  message_source: string;
+  message_id: string;
+  parent_id: string;
+  date: string;
+  conversation_id: string;
+  feishu_conversation_id: string | null;
+  full_entry: string | null;
+  group_subject: string | null;
+  is_group_chat: number | null;
+  created_at: string;
+  deleted_at: string | null;
+}
+
 // Backend response format
 interface BackendMessagesResponse {
-  messages: Message[];
+  messages: BackendMessage[];
   total: number;
   limit: number;
   offset: number;
   has_more: boolean;
+}
+
+/**
+ * Transform backend message to frontend message format
+ */
+function transformMessage(backendMsg: BackendMessage): Message {
+  return {
+    id: String(backendMsg.id),
+    session_id: backendMsg.agent_session_id,
+    role: backendMsg.role as 'user' | 'assistant' | 'system',
+    content: backendMsg.content,
+    tokens: backendMsg.tokens_used,
+    input_tokens: backendMsg.input_tokens,
+    output_tokens: backendMsg.output_tokens,
+    timestamp: backendMsg.timestamp,
+    tool_name: backendMsg.tool_name,
+    host: backendMsg.host_name,
+    host_name: backendMsg.host_name,
+    sender_name: backendMsg.sender_name,
+    sender_id: backendMsg.sender_id,
+    model: backendMsg.model ?? undefined,
+    message_source: backendMsg.message_source,
+    full_entry: backendMsg.full_entry ? JSON.parse(backendMsg.full_entry) : undefined,
+  };
 }
 
 // Frontend response format
@@ -87,7 +139,7 @@ export const messagesApi = {
 
     // Transform backend response to frontend format
     return {
-      data: response.messages,
+      data: response.messages.map(transformMessage),
       pagination: {
         page,
         totalPages: Math.ceil(response.total / pageSize),
