@@ -127,7 +127,7 @@ def init_config():
             # Create default config
             default_config = {
                 "host_name": "localhost",
-                "database": {"type": "sqlite", "path": str(CONFIG_DIR / "ace.db"), "url": None},
+                "database": {"type": "postgresql", "path": str(CONFIG_DIR / "ace.db"), "url": None},
                 "server": {
                     "upload_auth_key": "your-auth-key-here",
                     "server_url": f"http://localhost:{WEB_PORT}",

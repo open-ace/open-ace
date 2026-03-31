@@ -131,8 +131,8 @@ def get_database_config() -> dict:
     user_config = _load_user_config()
     db_config = user_config.get("database", {})
 
-    # Default configuration
-    default_config = {"type": "sqlite", "path": DB_PATH, "url": None}
+    # Default configuration: PostgreSQL is the default
+    default_config = {"type": "postgresql", "path": DB_PATH, "url": None}
 
     # Merge with user config
     default_config.update(db_config)
@@ -141,7 +141,7 @@ def get_database_config() -> dict:
 
 def get_database_url() -> str:
     """
-    Get database URL with priority: environment variable > config file > default SQLite.
+    Get database URL with priority: environment variable > config file > default PostgreSQL > fallback SQLite.
 
     Returns:
         str: Database URL.
@@ -152,7 +152,7 @@ def get_database_url() -> str:
 
     # Priority 2: Config file
     db_config = get_database_config()
-    db_type = db_config.get("type", "sqlite").lower()
+    db_type = db_config.get("type", "postgresql").lower()
 
     if db_type == "postgresql":
         url = db_config.get("url")
@@ -160,8 +160,10 @@ def get_database_url() -> str:
             return url
         # If type is postgresql but no url, fall back to SQLite
         print(f"Warning: database type is postgresql but no url configured, using SQLite")
+        db_path = db_config.get("path", DB_PATH)
+        return f"sqlite:///{db_path}"
 
-    # Priority 3: Default SQLite
+    # Priority 3: SQLite (explicitly configured)
     db_path = db_config.get("path", DB_PATH)
     return f"sqlite:///{db_path}"
 
