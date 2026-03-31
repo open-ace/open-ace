@@ -173,7 +173,6 @@ echo ""
 print_header "步骤 4/5: 创建部署配置"
 
 mkdir -p "$DEPLOY_DIR"/config
-mkdir -p "$DEPLOY_DIR"/data
 mkdir -p "$DEPLOY_DIR"/logs
 
 # 生成随机密钥
@@ -186,7 +185,7 @@ cat > "$DEPLOY_DIR/config/config.json" << EOF
   "host_name": "$(hostname)",
   "database": {
     "type": "sqlite",
-    "path": "/app/data/ace.db"
+    "path": "/home/open-ace/.open-ace/ace.db"
   },
   "server": {
     "upload_auth_key": "$UPLOAD_AUTH_KEY",
@@ -221,8 +220,6 @@ print_success "配置文件已创建: $DEPLOY_DIR/config/config.json"
 
 # 创建 docker-compose.yml
 cat > "$DEPLOY_DIR/docker-compose.yml" << 'EOF'
-version: '3.8'
-
 services:
   open-ace:
     image: ${IMAGE_NAME:-open-ace:arm64}
@@ -236,9 +233,8 @@ services:
       - SECRET_KEY=${SECRET_KEY}
       - UPLOAD_AUTH_KEY=${UPLOAD_AUTH_KEY}
     volumes:
-      - ./data:/app/data
+      - ./config:/home/open-ace/.open-ace:ro
       - ./logs:/app/logs
-      - ./config:/app/config:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5001/health')"]
       interval: 30s
@@ -305,7 +301,7 @@ echo "  重启服务: cd $DEPLOY_DIR && docker compose restart"
 echo "  停止服务: cd $DEPLOY_DIR && docker compose down"
 echo ""
 echo "配置文件: $DEPLOY_DIR/config/config.json"
-echo "数据目录: $DEPLOY_DIR/data"
+echo "数据库: $DEPLOY_DIR/config/ace.db (SQLite)"
 echo ""
 
 # 自动打开浏览器

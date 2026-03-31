@@ -107,7 +107,7 @@ docker images | grep open-ace
 #### 3. 创建部署目录
 
 ```bash
-mkdir -p ~/open-ace/{config,data,logs}
+mkdir -p ~/open-ace/{config,logs}
 cd ~/open-ace
 ```
 
@@ -120,7 +120,7 @@ cd ~/open-ace
   "host_name": "my-mac",
   "database": {
     "type": "sqlite",
-    "path": "/app/data/ace.db"
+    "path": "/home/open-ace/.open-ace/ace.db"
   },
   "server": {
     "upload_auth_key": "your-random-key",
@@ -142,8 +142,6 @@ cd ~/open-ace
 #### 5. 创建 docker-compose.yml
 
 ```yaml
-version: '3.8'
-
 services:
   open-ace:
     image: open-ace:latest
@@ -157,9 +155,8 @@ services:
       - SECRET_KEY=your-secret-key
       - UPLOAD_AUTH_KEY=your-upload-key
     volumes:
-      - ./data:/app/data
+      - ./config:/home/open-ace/.open-ace:ro
       - ./logs:/app/logs
-      - ./config:/app/config:ro
 ```
 
 #### 6. 启动服务
@@ -223,7 +220,7 @@ docker compose up -d
 
 ### Q: 数据存储在哪里？
 
-- 数据库：`~/open-ace/data/ace.db`
+- 数据库：`~/open-ace/config/ace.db`（SQLite 数据库存储在配置目录中）
 - 日志：`~/open-ace/logs/`
 - 配置：`~/open-ace/config/config.json`
 
