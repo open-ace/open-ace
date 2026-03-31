@@ -215,7 +215,7 @@ export const Messages: React.FC = () => {
 
       {/* Stats */}
       {totalCount != null && (
-        <div className="mb-3">
+        <div className="mb-3 messages-stats">
           <span className="text-muted">
             {t('total', language)}: {totalCount.toLocaleString()} {t('messages', language)}
           </span>
