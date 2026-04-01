@@ -41,16 +41,8 @@ def _load_user_config() -> dict:
 
 
 def _get_web_port() -> int:
-    """Get web server port with priority: config file > environment variable > default."""
-    # Priority 1: Environment variable
-    env_port = os.environ.get("AI_TOKEN_WEB_PORT")
-    if env_port:
-        try:
-            return int(env_port)
-        except ValueError:
-            pass
-
-    # Priority 2: Config file
+    """Get web server port with priority: config file > default."""
+    # Priority 1: Config file
     user_config = _load_user_config()
     server_config = user_config.get("server", {})
     config_port = server_config.get("web_port")
@@ -60,25 +52,20 @@ def _get_web_port() -> int:
         except (ValueError, TypeError):
             pass
 
-    # Priority 3: Default
+    # Priority 2: Default
     return 5000
 
 
 def _get_web_host() -> str:
-    """Get web server host with priority: config file > environment variable > default."""
-    # Priority 1: Environment variable
-    env_host = os.environ.get("AI_TOKEN_WEB_HOST")
-    if env_host:
-        return env_host
-
-    # Priority 2: Config file
+    """Get web server host with priority: config file > default."""
+    # Priority 1: Config file
     user_config = _load_user_config()
     server_config = user_config.get("server", {})
     config_host = server_config.get("web_host")
     if config_host:
         return config_host
 
-    # Priority 3: Default
+    # Priority 2: Default
     return "0.0.0.0"
 
 
