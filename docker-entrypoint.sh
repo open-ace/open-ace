@@ -22,6 +22,22 @@ if [ -n "$DATABASE_URL" ]; then
     else
         echo "Database already initialized, skipping migrations."
     fi
+
+    # Check if admin user exists, create default admin if not
+    ADMIN_EXISTS=$(python3 -c "
+import psycopg2
+conn = psycopg2.connect('$DATABASE_URL')
+cur = conn.cursor()
+cur.execute(\"SELECT 1 FROM users WHERE username = 'admin'\")
+print('yes' if cur.fetchone() else 'no')
+" 2>/dev/null || echo "no")
+
+    if [ "$ADMIN_EXISTS" = "no" ]; then
+        echo "Creating default admin user..."
+        python3 scripts/init_db.py
+    else
+        echo "Admin user already exists, skipping default admin creation."
+    fi
 fi
 
 exec gunicorn \
