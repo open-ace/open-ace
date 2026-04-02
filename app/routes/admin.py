@@ -5,7 +5,7 @@ Open ACE - Admin Routes
 API routes for admin operations.
 """
 
-import hashlib
+import bcrypt
 
 from flask import Blueprint, jsonify, request
 
@@ -21,8 +21,8 @@ usage_repo = UsageRepository()
 
 
 def hash_password(password: str) -> str:
-    """Hash a password."""
-    return hashlib.sha256(password.encode()).hexdigest()
+    """Hash a password using bcrypt."""
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
 
 
 def require_admin(token: str):
