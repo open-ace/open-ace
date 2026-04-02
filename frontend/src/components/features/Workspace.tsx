@@ -5,14 +5,16 @@
  * - Multiple tabs for different conversations
  * - Each tab has its own iframe
  * - Support for creating new tabs via URL parameter
+ * - Quota checking - disables workspace when quota exceeded
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { workspaceApi } from '@/api';
+import { requestApi, type QuotaStatusResponse } from '@/api/request';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
-import { Loading, Error } from '@/components/common';
+import { Loading, Error, Button, Card } from '@/components/common';
 import { cn } from '@/utils';
 
 interface WorkspaceTab {
@@ -25,11 +27,17 @@ interface WorkspaceTab {
 // Generate unique tab ID
 const generateTabId = () => `tab-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
+// Quota check interval (5 minutes)
+const QUOTA_CHECK_INTERVAL = 5 * 60 * 1000;
+
 export const Workspace: React.FC = () => {
   const language = useLanguage();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [config, setConfig] = useState<{ enabled: boolean; url: string } | null>(null);
+  const [quotaStatus, setQuotaStatus] = useState<QuotaStatusResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isQuotaLoading, setIsQuotaLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tabs, setTabs] = useState<WorkspaceTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>('');
@@ -50,6 +58,27 @@ export const Workspace: React.FC = () => {
 
     loadConfig();
   }, []);
+
+  // Check quota
+  const checkQuota = useCallback(async () => {
+    try {
+      const status = await requestApi.getQuotaStatus();
+      setQuotaStatus(status);
+    } catch (err) {
+      console.error('Failed to check quota:', err);
+    } finally {
+      setIsQuotaLoading(false);
+    }
+  }, []);
+
+  // Initial quota check and periodic checks
+  useEffect(() => {
+    checkQuota();
+
+    const interval = setInterval(checkQuota, QUOTA_CHECK_INTERVAL);
+
+    return () => clearInterval(interval);
+  }, [checkQuota]);
 
   // Initialize first tab when config is loaded
   useEffect(() => {
@@ -120,7 +149,12 @@ export const Workspace: React.FC = () => {
     setActiveTabId(tabId);
   }, []);
 
-  if (isLoading) {
+  // Navigate to usage page
+  const goToUsage = useCallback(() => {
+    navigate('/work/usage');
+  }, [navigate]);
+
+  if (isLoading || isQuotaLoading) {
     return <Loading size="lg" text={t('loading', language)} />;
   }
 
@@ -135,6 +169,58 @@ export const Workspace: React.FC = () => {
           <i className="bi bi-tools fs-1 text-muted" />
           <h4 className="mt-3">{t('workspaceNotConfigured', language)}</h4>
           <p className="text-muted">{t('workspaceNotConfiguredHelp', language)}</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Check if quota is exceeded
+  const isQuotaExceeded = quotaStatus?.over_quota.any ?? false;
+
+  // Render quota exceeded message
+  if (isQuotaExceeded) {
+    return (
+      <div className="workspace h-100 d-flex flex-column">
+        {/* Page Header */}
+        <div className="page-header mb-3 px-3 pt-3">
+          <h2>{t('workspace', language)}</h2>
+        </div>
+
+        {/* Quota Exceeded Warning */}
+        <div className="flex-grow-1 d-flex align-items-center justify-content-center px-3">
+          <Card className="text-center" style={{ maxWidth: '500px' }}>
+            <div className="py-4">
+              <i className="bi bi-exclamation-triangle-fill text-warning fs-1 mb-3" />
+              <h4 className="text-danger mb-3">{t('quotaExceeded', language)}</h4>
+              <p className="text-muted mb-4">
+                {quotaStatus?.over_quota.daily_request && (
+                  <span className="d-block">{t('dailyRequestQuotaExceeded', language)}</span>
+                )}
+                {quotaStatus?.over_quota.monthly_request && (
+                  <span className="d-block">{t('monthlyRequestQuotaExceeded', language)}</span>
+                )}
+                {quotaStatus?.over_quota.daily_token && (
+                  <span className="d-block">{t('dailyTokenQuotaExceeded', language)}</span>
+                )}
+                {quotaStatus?.over_quota.monthly_token && (
+                  <span className="d-block">{t('monthlyTokenQuotaExceeded', language)}</span>
+                )}
+              </p>
+              <p className="text-muted small mb-4">
+                {t('quotaLimitsHelpDesc', language)}
+              </p>
+              <div className="d-flex gap-2 justify-content-center">
+                <Button variant="outline-primary" onClick={goToUsage}>
+                  <i className="bi bi-bar-chart me-2" />
+                  {t('myUsage', language)}
+                </Button>
+                <Button variant="primary" onClick={checkQuota}>
+                  <i className="bi bi-arrow-clockwise me-2" />
+                  {t('retry', language)}
+                </Button>
+              </div>
+            </div>
+          </Card>
         </div>
       </div>
     );

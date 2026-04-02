@@ -101,6 +101,7 @@ def register_blueprints(app):
     from app.routes.governance import governance_bp
     from app.routes.messages import messages_bp
     from app.routes.pages import pages_bp
+    from app.routes.quota import quota_bp
     from app.routes.report import report_bp
     from app.routes.roi import roi_bp
     from app.routes.sso import sso_bp
@@ -125,6 +126,7 @@ def register_blueprints(app):
     app.register_blueprint(compliance_bp, url_prefix="/api")
     app.register_blueprint(alerts_bp, url_prefix="/api")
     app.register_blueprint(roi_bp, url_prefix="/api")
+    app.register_blueprint(quota_bp, url_prefix="/api")
     app.register_blueprint(pages_bp)
 
     logger.info("All blueprints registered")

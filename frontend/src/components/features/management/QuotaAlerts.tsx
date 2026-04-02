@@ -25,7 +25,7 @@ import {
   Progress,
   Badge,
 } from '@/components/common';
-import { formatTokens, formatDateTime } from '@/utils';
+import { formatTokens, formatDateTime, formatNumber } from '@/utils';
 import { alertsApi, type Alert, type NotificationPreferences } from '@/api';
 import type { QuotaUsage, UpdateQuotaRequest } from '@/api';
 
@@ -307,6 +307,14 @@ export const QuotaAlerts: React.FC = () => {
                 user.tokens_used_month,
                 user.monthly_token_quota
               );
+              const dailyRequestPercentage = getUsagePercentage(
+                user.requests_today,
+                user.daily_request_quota
+              );
+              const monthlyRequestPercentage = getUsagePercentage(
+                user.requests_month,
+                user.monthly_request_quota
+              );
 
               return (
                 <div key={user.id} className="col-md-6 col-lg-4">
@@ -326,7 +334,7 @@ export const QuotaAlerts: React.FC = () => {
                     </div>
 
                     {/* Daily Token Quota */}
-                    <div className="mb-3">
+                    <div className="mb-2">
                       <div className="d-flex justify-content-between mb-1">
                         <small>{t('dailyTokenQuota', language)}</small>
                         <small>
@@ -342,7 +350,7 @@ export const QuotaAlerts: React.FC = () => {
                     </div>
 
                     {/* Monthly Token Quota */}
-                    <div className="mb-3">
+                    <div className="mb-2">
                       <div className="d-flex justify-content-between mb-1">
                         <small>{t('monthlyTokenQuota', language)}</small>
                         <small>
@@ -357,16 +365,36 @@ export const QuotaAlerts: React.FC = () => {
                       />
                     </div>
 
-                    {/* Request Stats */}
-                    <div className="d-flex gap-3 text-muted small">
-                      <span>
-                        <i className="bi bi-arrow-repeat me-1" />
-                        {t('dailyRequests', language)}: {user.requests_today ?? 0}
-                      </span>
-                      <span>
-                        <i className="bi bi-calendar me-1" />
-                        {t('monthlyRequests', language)}: {user.requests_month ?? 0}
-                      </span>
+                    {/* Daily Request Quota */}
+                    <div className="mb-2">
+                      <div className="d-flex justify-content-between mb-1">
+                        <small>{t('dailyRequestQuota', language)}</small>
+                        <small>
+                          {formatNumber(user.requests_today ?? 0)} /{' '}
+                          {user.daily_request_quota ? formatNumber(user.daily_request_quota) : '∞'}
+                        </small>
+                      </div>
+                      <Progress
+                        value={dailyRequestPercentage}
+                        variant={getUsageVariant(dailyRequestPercentage)}
+                        size="sm"
+                      />
+                    </div>
+
+                    {/* Monthly Request Quota */}
+                    <div className="mb-2">
+                      <div className="d-flex justify-content-between mb-1">
+                        <small>{t('monthlyRequestQuota', language)}</small>
+                        <small>
+                          {formatNumber(user.requests_month ?? 0)} /{' '}
+                          {user.monthly_request_quota ? formatNumber(user.monthly_request_quota) : '∞'}
+                        </small>
+                      </div>
+                      <Progress
+                        value={monthlyRequestPercentage}
+                        variant={getUsageVariant(monthlyRequestPercentage)}
+                        size="sm"
+                      />
                     </div>
                   </Card>
                 </div>

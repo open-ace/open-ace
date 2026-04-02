@@ -112,3 +112,87 @@ def api_trend():
 
     entries = usage_service.get_trend_data(start_date, end_date, host_name=host)
     return jsonify(entries)
+
+
+# ==================== Request Statistics APIs ====================
+
+
+@usage_bp.route("/request/today")
+def api_request_today():
+    """Get today's request statistics with total and by-tool breakdown."""
+    from app.repositories.usage_repo import UsageRepository
+
+    host = request.args.get("host")
+    usage_repo = UsageRepository()
+    stats = usage_repo.get_today_request_stats(host_name=host)
+    return jsonify(stats)
+
+
+@usage_bp.route("/request/trend")
+def api_request_trend():
+    """Get request trend data aggregated by date for charts."""
+    from app.repositories.usage_repo import UsageRepository
+
+    start_date = request.args.get("start", get_days_ago(30))
+    end_date = request.args.get("end", get_today())
+    host = request.args.get("host")
+
+    usage_repo = UsageRepository()
+    entries = usage_repo.get_request_trend_data(start_date, end_date, host_name=host)
+    return jsonify(entries)
+
+
+@usage_bp.route("/request/by-tool")
+def api_request_by_tool():
+    """Get request trend data aggregated by date and tool for charts."""
+    from app.repositories.usage_repo import UsageRepository
+
+    start_date = request.args.get("start", get_days_ago(30))
+    end_date = request.args.get("end", get_today())
+    host = request.args.get("host")
+
+    usage_repo = UsageRepository()
+    entries = usage_repo.get_request_trend_by_tool(start_date, end_date, host_name=host)
+    return jsonify(entries)
+
+
+@usage_bp.route("/request/by-user")
+def api_request_by_user():
+    """Get request statistics grouped by user (sender_name) for today."""
+    from app.repositories.usage_repo import UsageRepository
+
+    date = request.args.get("date")  # Optional, defaults to today
+    host = request.args.get("host")
+
+    usage_repo = UsageRepository()
+    stats = usage_repo.get_request_stats_by_user(date_str=date, host_name=host)
+    return jsonify(stats)
+
+
+@usage_bp.route("/request/user/<user_name>/trend")
+def api_user_request_trend(user_name):
+    """Get request trend data for a specific user."""
+    from app.repositories.usage_repo import UsageRepository
+
+    start_date = request.args.get("start", get_days_ago(30))
+    end_date = request.args.get("end", get_today())
+    host = request.args.get("host")
+
+    usage_repo = UsageRepository()
+    entries = usage_repo.get_user_request_trend(user_name, start_date, end_date, host_name=host)
+    return jsonify(entries)
+
+
+@usage_bp.route("/request/monthly")
+def api_request_monthly():
+    """Get monthly request statistics grouped by user."""
+    from app.repositories.usage_repo import UsageRepository
+    from datetime import datetime
+
+    year = int(request.args.get("year", datetime.now().year))
+    month = int(request.args.get("month", datetime.now().month))
+    host = request.args.get("host")
+
+    usage_repo = UsageRepository()
+    stats = usage_repo.get_monthly_request_stats_by_user(year, month, host_name=host)
+    return jsonify(stats)

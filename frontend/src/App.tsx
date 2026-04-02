@@ -35,6 +35,8 @@ const TrendAnalysis = lazy(() => import('@/components/features/analysis/TrendAna
 const AnomalyDetection = lazy(() => import('@/components/features/analysis/AnomalyDetection').then(m => ({ default: m.AnomalyDetection })));
 const ROIAnalysis = lazy(() => import('@/components/features/analysis/ROIAnalysis').then(m => ({ default: m.ROIAnalysis })));
 const ConversationHistory = lazy(() => import('@/components/features/ConversationHistory').then(m => ({ default: m.ConversationHistory })));
+const RequestDashboard = lazy(() => import('@/components/features/management/RequestDashboard').then(m => ({ default: m.RequestDashboard })));
+const UsageOverview = lazy(() => import('@/components/work/UsageOverview').then(m => ({ default: m.UsageOverview })));
 const UserManagement = lazy(() => import('@/components/features/management/UserManagement').then(m => ({ default: m.UserManagement })));
 const AuditCenter = lazy(() => import('@/components/features/management/AuditCenter').then(m => ({ default: m.AuditCenter })));
 const QuotaAlerts = lazy(() => import('@/components/features/management/QuotaAlerts').then(m => ({ default: m.QuotaAlerts })));
@@ -146,6 +148,7 @@ const WorkRoutes: React.FC = () => {
           <Route path="/" element={<Workspace />} />
           <Route path="/sessions" element={<Sessions />} />
           <Route path="/prompts" element={<Prompts />} />
+          <Route path="/usage" element={<UsageOverview />} />
           <Route path="*" element={<Navigate to="/work" replace />} />
         </Routes>
       </Suspense>
@@ -165,6 +168,7 @@ const ManageRoutes: React.FC = () => {
           {/* Analysis */}
           <Route path="/analysis" element={<Navigate to="/manage/analysis/trend" replace />} />
           <Route path="/analysis/trend" element={<TrendAnalysis />} />
+          <Route path="/analysis/request-dashboard" element={<RequestDashboard />} />
           <Route path="/analysis/anomaly" element={<AnomalyDetection />} />
           <Route path="/analysis/roi" element={<ROIAnalysis />} />
           <Route path="/analysis/conversation-history" element={<ConversationHistory />} />

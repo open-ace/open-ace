@@ -488,3 +488,291 @@ class UsageRepository:
 
         result = self.db.fetch_one(query, tuple(params))
         return int(result.get("total_requests", 0) or 0) if result else 0
+
+    def get_request_trend_data(
+        self, start_date: str, end_date: str, host_name: Optional[str] = None
+    ) -> List[Dict]:
+        """
+        Get request count trend data aggregated by date.
+
+        Args:
+            start_date: Start date string (YYYY-MM-DD).
+            end_date: End date string (YYYY-MM-DD).
+            host_name: Optional host name filter.
+
+        Returns:
+            List[Dict]: List of request counts by date.
+        """
+        conditions = ["date >= ?", "date <= ?"]
+        params = [start_date, end_date]
+
+        if host_name:
+            conditions.append("host_name = ?")
+            params.append(host_name)
+
+        query = f"""
+            SELECT
+                date,
+                SUM(request_count) as requests
+            FROM daily_usage
+            WHERE {' AND '.join(conditions)}
+            GROUP BY date
+            ORDER BY date ASC
+        """
+
+        rows = self.db.fetch_all(query, tuple(params))
+
+        results = []
+        for row in rows:
+            results.append({
+                "date": row["date"],
+                "requests": int(row["requests"] or 0),
+            })
+
+        return results
+
+    def get_request_trend_by_tool(
+        self, start_date: str, end_date: str, host_name: Optional[str] = None
+    ) -> List[Dict]:
+        """
+        Get request count trend data aggregated by date and tool.
+
+        Args:
+            start_date: Start date string (YYYY-MM-DD).
+            end_date: End date string (YYYY-MM-DD).
+            host_name: Optional host name filter.
+
+        Returns:
+            List[Dict]: List of request counts by date and tool.
+        """
+        conditions = ["date >= ?", "date <= ?"]
+        params = [start_date, end_date]
+
+        if host_name:
+            conditions.append("host_name = ?")
+            params.append(host_name)
+
+        query = f"""
+            SELECT
+                date,
+                tool_name,
+                SUM(request_count) as requests
+            FROM daily_usage
+            WHERE {' AND '.join(conditions)}
+            GROUP BY date, tool_name
+            ORDER BY date ASC, tool_name ASC
+        """
+
+        rows = self.db.fetch_all(query, tuple(params))
+
+        results = []
+        for row in rows:
+            results.append({
+                "date": row["date"],
+                "tool": row["tool_name"],
+                "requests": int(row["requests"] or 0),
+            })
+
+        return results
+
+    def get_today_request_stats(self, host_name: Optional[str] = None) -> Dict:
+        """
+        Get today's request statistics.
+
+        Args:
+            host_name: Optional host name filter.
+
+        Returns:
+            Dict: Today's request stats with total and by-tool breakdown.
+        """
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        conditions = ["date = ?"]
+        params = [today]
+
+        if host_name:
+            conditions.append("host_name = ?")
+            params.append(host_name)
+
+        # Get total
+        total_query = f"""
+            SELECT SUM(request_count) as total_requests
+            FROM daily_usage
+            WHERE {' AND '.join(conditions)}
+        """
+        total_result = self.db.fetch_one(total_query, tuple(params))
+        total_requests = int(total_result.get("total_requests", 0) or 0) if total_result else 0
+
+        # Get by tool
+        by_tool_query = f"""
+            SELECT
+                tool_name,
+                SUM(request_count) as requests
+            FROM daily_usage
+            WHERE {' AND '.join(conditions)}
+            GROUP BY tool_name
+            ORDER BY requests DESC
+        """
+        by_tool_rows = self.db.fetch_all(by_tool_query, tuple(params))
+
+        by_tool = {}
+        for row in by_tool_rows:
+            by_tool[row["tool_name"]] = int(row["requests"] or 0)
+
+        return {
+            "date": today,
+            "total_requests": total_requests,
+            "by_tool": by_tool,
+        }
+
+    def get_request_stats_by_user(
+        self, date: Optional[str] = None, host_name: Optional[str] = None
+    ) -> List[Dict]:
+        """
+        Get request statistics grouped by user (sender_name).
+
+        This queries daily_messages table to get request counts per user.
+        A request is counted when role = 'assistant' (API response).
+
+        Args:
+            date: Optional date filter (YYYY-MM-DD). If None, uses today.
+            host_name: Optional host name filter.
+
+        Returns:
+            List[Dict]: Request stats by user.
+        """
+        if date is None:
+            date = datetime.now().strftime("%Y-%m-%d")
+
+        conditions = ["date = ?", "role = ?"]
+        params = [date, "assistant"]
+
+        if host_name:
+            conditions.append("host_name = ?")
+            params.append(host_name)
+
+        query = f"""
+            SELECT
+                sender_name,
+                tool_name,
+                COUNT(*) as requests,
+                SUM(tokens_used) as tokens
+            FROM daily_messages
+            WHERE {' AND '.join(conditions)}
+            GROUP BY sender_name, tool_name
+            ORDER BY requests DESC
+        """
+
+        rows = self.db.fetch_all(query, tuple(params))
+
+        results = []
+        for row in rows:
+            sender_name = row["sender_name"] or "unknown"
+            results.append({
+                "user": sender_name,
+                "tool": row["tool_name"],
+                "requests": int(row["requests"] or 0),
+                "tokens": int(row["tokens"] or 0),
+            })
+
+        return results
+
+    def get_user_request_trend(
+        self,
+        user_name: str,
+        start_date: str,
+        end_date: str,
+        host_name: Optional[str] = None
+    ) -> List[Dict]:
+        """
+        Get request trend for a specific user.
+
+        Args:
+            user_name: User name (sender_name).
+            start_date: Start date string (YYYY-MM-DD).
+            end_date: End date string (YYYY-MM-DD).
+            host_name: Optional host name filter.
+
+        Returns:
+            List[Dict]: Request trend by date for the user.
+        """
+        conditions = ["date >= ?", "date <= ?", "role = ?", "sender_name = ?"]
+        params = [start_date, end_date, "assistant", user_name]
+
+        if host_name:
+            conditions.append("host_name = ?")
+            params.append(host_name)
+
+        query = f"""
+            SELECT
+                date,
+                COUNT(*) as requests,
+                SUM(tokens_used) as tokens
+            FROM daily_messages
+            WHERE {' AND '.join(conditions)}
+            GROUP BY date
+            ORDER BY date ASC
+        """
+
+        rows = self.db.fetch_all(query, tuple(params))
+
+        results = []
+        for row in rows:
+            results.append({
+                "date": row["date"],
+                "requests": int(row["requests"] or 0),
+                "tokens": int(row["tokens"] or 0),
+            })
+
+        return results
+
+    def get_monthly_request_stats_by_user(
+        self, year: int, month: int, host_name: Optional[str] = None
+    ) -> List[Dict]:
+        """
+        Get monthly request statistics grouped by user.
+
+        Args:
+            year: Year.
+            month: Month (1-12).
+            host_name: Optional host name filter.
+
+        Returns:
+            List[Dict]: Monthly request stats by user.
+        """
+        start_date = f"{year}-{month:02d}-01"
+        if month == 12:
+            end_date = f"{year + 1}-01-01"
+        else:
+            end_date = f"{year}-{month + 1:02d}-01"
+
+        conditions = ["date >= ?", "date < ?", "role = ?"]
+        params = [start_date, end_date, "assistant"]
+
+        if host_name:
+            conditions.append("host_name = ?")
+            params.append(host_name)
+
+        query = f"""
+            SELECT
+                sender_name,
+                COUNT(*) as requests,
+                SUM(tokens_used) as tokens
+            FROM daily_messages
+            WHERE {' AND '.join(conditions)}
+            GROUP BY sender_name
+            ORDER BY requests DESC
+        """
+
+        rows = self.db.fetch_all(query, tuple(params))
+
+        results = []
+        for row in rows:
+            sender_name = row["sender_name"] or "unknown"
+            results.append({
+                "user": sender_name,
+                "requests": int(row["requests"] or 0),
+                "tokens": int(row["tokens"] or 0),
+            })
+
+        return results

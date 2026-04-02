@@ -280,6 +280,33 @@ const translations: Record<Language, Translations> = {
     userSegmentation: 'User Segmentation',
     toolComparison: 'Tool Comparison',
 
+    // Request Statistics
+    requestStatistics: 'Request Statistics',
+    todayRequests: "Today's Requests",
+    avgRequestsPerUser: 'Avg Requests/User',
+    peakTool: 'Peak Tool',
+    requestTrend: 'Request Trend',
+    todayByTool: 'Today by Tool',
+    requestsByUser: 'Requests by User',
+    userDetails: 'User Details',
+    requests: 'Requests',
+    percentage: 'Percentage',
+    tool: 'Tool',
+    custom: 'Custom',
+
+    // Usage Overview (Work Mode)
+    myUsage: 'My Usage',
+    daily: 'Daily',
+    monthly: 'Monthly',
+    exceeded: 'Exceeded',
+    quotaExceeded: 'Quota Exceeded',
+    dailyRequestQuotaExceeded: 'Daily request quota exceeded. ',
+    monthlyRequestQuotaExceeded: 'Monthly request quota exceeded. ',
+    dailyTokenQuotaExceeded: 'Daily token quota exceeded. ',
+    monthlyTokenQuotaExceeded: 'Monthly token quota exceeded. ',
+    quotaLimitsHelp: 'About Quota Limits',
+    quotaLimitsHelpDesc: 'Quota limits are set by your administrator. If you need higher limits, please contact your administrator.',
+
     // Sessions
     activeSessions: 'Active Sessions',
     noSessionsFound: 'No sessions found with current filters',
@@ -781,6 +808,33 @@ const translations: Record<Language, Translations> = {
     topTools: '热门工具',
     userSegmentation: '用户分层',
     toolComparison: '工具对比',
+
+    // Request Statistics
+    requestStatistics: '请求统计',
+    todayRequests: '今日请求数',
+    avgRequestsPerUser: '人均请求数',
+    peakTool: '峰值工具',
+    requestTrend: '请求趋势',
+    todayByTool: '今日按工具',
+    requestsByUser: '用户请求数',
+    userDetails: '用户详情',
+    requests: '请求数',
+    percentage: '百分比',
+    tool: '工具',
+    custom: '自定义',
+
+    // Usage Overview (Work Mode)
+    myUsage: '我的用量',
+    daily: '每日',
+    monthly: '每月',
+    exceeded: '已超限',
+    quotaExceeded: '配额已超限',
+    dailyRequestQuotaExceeded: '每日请求配额已超限。',
+    monthlyRequestQuotaExceeded: '每月请求配额已超限。',
+    dailyTokenQuotaExceeded: '每日 Token 配额已超限。',
+    monthlyTokenQuotaExceeded: '每月 Token 配额已超限。',
+    quotaLimitsHelp: '关于配额限制',
+    quotaLimitsHelpDesc: '配额限制由管理员设置。如需提高限额，请联系管理员。',
 
     // Sessions
     activeSessions: '活跃会话',
