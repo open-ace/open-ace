@@ -524,8 +524,15 @@ class UsageRepository:
 
         results = []
         for row in rows:
+            # Convert date to YYYY-MM-DD format if it's a datetime object
+            date_val = row["date"]
+            if hasattr(date_val, 'strftime'):
+                date_str = date_val.strftime("%Y-%m-%d")
+            else:
+                # Parse HTTP date format if needed
+                date_str = str(date_val).split()[0] if ' ' in str(date_val) else str(date_val)
             results.append({
-                "date": row["date"],
+                "date": date_str,
                 "requests": int(row["requests"] or 0),
             })
 
@@ -567,8 +574,15 @@ class UsageRepository:
 
         results = []
         for row in rows:
+            # Convert date to YYYY-MM-DD format if it's a datetime object
+            date_val = row["date"]
+            if hasattr(date_val, 'strftime'):
+                date_str = date_val.strftime("%Y-%m-%d")
+            else:
+                # Parse HTTP date format if needed
+                date_str = str(date_val).split()[0] if ' ' in str(date_val) else str(date_val)
             results.append({
-                "date": row["date"],
+                "date": date_str,
                 "tool": row["tool_name"],
                 "requests": int(row["requests"] or 0),
             })
@@ -718,8 +732,15 @@ class UsageRepository:
 
         results = []
         for row in rows:
+            # Convert date to YYYY-MM-DD format if it's a datetime object
+            date_val = row["date"]
+            if hasattr(date_val, 'strftime'):
+                date_str = date_val.strftime("%Y-%m-%d")
+            else:
+                # Parse HTTP date format if needed
+                date_str = str(date_val).split()[0] if ' ' in str(date_val) else str(date_val)
             results.append({
-                "date": row["date"],
+                "date": date_str,
                 "requests": int(row["requests"] or 0),
                 "tokens": int(row["tokens"] or 0),
             })

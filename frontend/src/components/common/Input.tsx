@@ -17,7 +17,7 @@ interface BaseInputProps {
 
 // Text Input
 interface TextInputProps extends BaseInputProps {
-  type?: 'text' | 'email' | 'password' | 'number' | 'url' | 'tel';
+  type?: 'text' | 'email' | 'password' | 'number' | 'url' | 'tel' | 'date';
   placeholder?: string;
   value?: string;
   onChange?: (value: string) => void;

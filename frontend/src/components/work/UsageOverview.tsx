@@ -9,12 +9,10 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { cn } from '@/utils';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import {
   Card,
-  StatCard,
   Button,
   Loading,
   Error,
@@ -48,7 +46,8 @@ export const UsageOverview: React.FC = () => {
       setQuotaStatus(status);
       setUsageData(usage);
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to fetch usage data';
+      const error = err as Error;
+      const errorMessage = error?.message || 'Failed to fetch usage data';
       setError(errorMessage);
     } finally {
       setIsLoading(false);

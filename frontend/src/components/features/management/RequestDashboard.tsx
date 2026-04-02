@@ -9,7 +9,6 @@
  */
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { cn } from '@/utils';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import {
@@ -22,9 +21,9 @@ import {
   Badge,
   TextInput,
 } from '@/components/common';
-import { LineChart, BarChart, TokenTrendChart, getToolColor } from '@/components/common/Charts';
+import { LineChart, BarChart, getToolColor } from '@/components/common/Charts';
 import { requestApi, type RequestTodayStats, type RequestTrendByToolData, type RequestStatsByUser } from '@/api/request';
-import { formatDateTime, formatNumber } from '@/utils';
+import { formatNumber } from '@/utils';
 
 // Date range presets
 const DATE_RANGE_PRESETS = [
@@ -81,7 +80,8 @@ export const RequestDashboard: React.FC = () => {
       setTrendData(trendResult);
       setUserStats(userResult);
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to fetch request statistics';
+      const error = err as Error;
+      const errorMessage = error?.message || 'Failed to fetch request statistics';
       setError(errorMessage);
     } finally {
       setIsLoading(false);

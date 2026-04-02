@@ -165,7 +165,7 @@ def api_request_by_user():
     host = request.args.get("host")
 
     usage_repo = UsageRepository()
-    stats = usage_repo.get_request_stats_by_user(date_str=date, host_name=host)
+    stats = usage_repo.get_request_stats_by_user(date=date, host_name=host)
     return jsonify(stats)
 
 
