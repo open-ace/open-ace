@@ -16,6 +16,7 @@ import signal
 import socket
 import subprocess
 import threading
+from threading import RLock
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -67,6 +68,7 @@ class WorkspaceConfig:
     idle_timeout_minutes: int = 30
     cleanup_interval_minutes: int = 5
     token_secret: str = ""
+    webui_path: str = ""  # Path to qwen-code-webui project directory
 
 
 class WebUIManager:
@@ -95,7 +97,7 @@ class WebUIManager:
         self.config = config or self._load_config()
         self._instances: Dict[int, WebUIInstance] = {}  # user_id -> instance
         self._port_allocations: Dict[int, int] = {}  # port -> user_id
-        self._lock = threading.Lock()
+        self._lock = RLock()  # Use reentrant lock to avoid deadlock
         self._cleanup_thread: Optional[threading.Thread] = None
         self._running = False
 
@@ -144,6 +146,7 @@ class WebUIManager:
                 idle_timeout_minutes=workspace.get("idle_timeout_minutes", 30),
                 cleanup_interval_minutes=workspace.get("cleanup_interval_minutes", 5),
                 token_secret=workspace.get("token_secret", ""),
+                webui_path=workspace.get("webui_path", ""),
             )
         except Exception as e:
             logger.error(f"Error loading config: {e}")
@@ -408,38 +411,79 @@ class WebUIManager:
         Returns:
             subprocess.Popen object or None if launch failed.
         """
-        # Find webui executable
-        webui_cmd = self._find_webui_executable()
+        # Find webui executable or project path
+        webui_cmd, webui_dir = self._find_webui_executable()
 
         if not webui_cmd:
             logger.error("qwen-code-webui executable not found")
             return None
 
         # Build command based on platform
-        if self._platform in ("linux", "darwin"):
-            # Linux/macOS: use sudo -u
+        if webui_dir:
+            # Running from project directory using node
+            cmd = ["node", webui_cmd, "--port", str(port)]
+            cwd = webui_dir
+        elif self._platform in ("linux", "darwin"):
+            # Linux/macOS: use sudo -u for global executable
             cmd = ["sudo", "-u", system_account, webui_cmd, "--port", str(port)]
+            cwd = None
         else:
             # Other platforms: direct execution (no user switching)
             cmd = [webui_cmd, "--port", str(port)]
+            cwd = None
 
-        logger.debug(f"Launching webui: {cmd}")
+        logger.debug(f"Launching webui: {cmd}, cwd: {cwd}")
 
         try:
+            # Don't capture stdout/stderr to avoid blocking on pipe buffer
+            # In production, consider redirecting to log files
             process = subprocess.Popen(
                 cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
                 start_new_session=True,  # Detach from parent process group
+                cwd=cwd,
             )
             return process
         except Exception as e:
             logger.error(f"Failed to launch webui process: {e}")
             return None
 
-    def _find_webui_executable(self) -> Optional[str]:
-        """Find the qwen-code-webui executable."""
-        # Check common locations
+    def _find_webui_executable(self) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Find the qwen-code-webui executable.
+
+        Returns:
+            Tuple of (executable_path, working_directory).
+            If running from project directory, executable_path is the node.js entry
+            and working_directory is the backend directory.
+            If running global executable, working_directory is None.
+        """
+        # Check webui_path from config (project directory mode)
+        if self.config.webui_path:
+            webui_backend = os.path.join(self.config.webui_path, "backend")
+            node_entry = os.path.join(webui_backend, "dist", "cli", "node.js")
+
+            if os.path.isfile(node_entry):
+                logger.info(f"Using webui from project directory: {self.config.webui_path}")
+                return node_entry, webui_backend
+
+            # Check if project needs to be built
+            if os.path.isdir(webui_backend):
+                logger.warning(f"WebUI project found but not built: {node_entry} not found")
+                # Try to build it
+                try:
+                    subprocess.run(
+                        ["npm", "run", "build"],
+                        cwd=webui_backend,
+                        capture_output=True,
+                        timeout=60,
+                    )
+                    if os.path.isfile(node_entry):
+                        logger.info(f"WebUI project built successfully")
+                        return node_entry, webui_backend
+                except Exception as e:
+                    logger.error(f"Failed to build webui project: {e}")
+
+        # Check common locations for global executable
         candidates = [
             "qwen-code-webui",
             "/usr/local/bin/qwen-code-webui",
@@ -456,7 +500,7 @@ class WebUIManager:
 
         for candidate in candidates:
             if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-                return candidate
+                return candidate, None
 
         # Try to find in PATH
         try:
@@ -467,11 +511,11 @@ class WebUIManager:
                 timeout=5,
             )
             if result.returncode == 0:
-                return result.stdout.strip()
+                return result.stdout.strip(), None
         except Exception:
             pass
 
-        return None
+        return None, None
 
     def _stop_instance_internal(self, user_id: int):
         """
