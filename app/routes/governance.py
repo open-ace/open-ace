@@ -203,24 +203,8 @@ def api_user_activity(user_id):
 # Quota Management Routes
 # ============================================================================
 
-
-@governance_bp.route("/quota/status", methods=["GET"])
-def api_quota_status():
-    """Get quota status for current user."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
-    is_auth, session_or_error = require_auth(token)
-    if not is_auth:
-        return jsonify(session_or_error), 401
-
-    user_id = session_or_error.get("user_id")
-    period = request.args.get("period", "daily")
-
-    status = quota_manager.get_user_quota_status(user_id, period)
-
-    return jsonify(status.to_dict())
+# NOTE: /quota/status route is defined in quota_bp (app/routes/quota.py)
+# to avoid duplicate route definitions and ensure consistent response format.
 
 
 @governance_bp.route("/quota/status/all", methods=["GET"])
