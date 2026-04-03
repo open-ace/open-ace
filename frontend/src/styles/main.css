@@ -2266,9 +2266,10 @@ link[rel='dns-prefetch'] {
   background: var(--bg-secondary);
 }
 
-/* Prompts and Sessions pages in Work mode */
+/* Prompts, Sessions and Usage pages in Work mode */
 .work-main .prompts,
-.work-main .sessions {
+.work-main .sessions,
+.work-main .usage-overview {
   padding: var(--spacing-md);
   overflow-y: auto;
 }
