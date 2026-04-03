@@ -19,7 +19,8 @@
     "max_instances": 30,
     "idle_timeout_minutes": 30,
     "cleanup_interval_minutes": 5,
-    "token_secret": ""
+    "token_secret": "",
+    "webui_path": ""
   },
   "tools": {
     "openclaw": {
