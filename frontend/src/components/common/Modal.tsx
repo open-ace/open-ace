@@ -75,7 +75,6 @@ export const Modal: React.FC<ModalProps> = ({
           width: '100%',
           height: '100%',
           zIndex: 10050,
-          overflow: 'auto',
         }}
         onClick={(e) => {
           if (e.target === e.currentTarget) onClose();

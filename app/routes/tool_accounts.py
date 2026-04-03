@@ -48,7 +48,8 @@ def get_user_tool_accounts(user_id: int):
     result = []
     for mapping in mappings:
         data = mapping.to_dict()
-        data["tool_type_display"] = get_tool_type_display(mapping.tool_type)
+        if mapping.tool_type:
+            data["tool_type_display"] = get_tool_type_display(mapping.tool_type)
         result.append(data)
     
     return jsonify(result)

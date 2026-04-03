@@ -6,7 +6,17 @@ import React, { useState, useEffect } from 'react';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import { Button, TextInput, Modal, Badge } from '@/components/common';
-import { toolAccountsApi, type ToolAccount, type UnmappedAccount, type ToolType } from '@/api/toolAccounts';
+import { toolAccountsApi, type ToolAccount, type UnmappedAccount } from '@/api/toolAccounts';
+
+// Hardcoded tool types (matches backend TOOL_TYPES)
+const TOOL_TYPES = [
+  { value: 'qwen', display: 'Qwen' },
+  { value: 'claude', display: 'Claude' },
+  { value: 'openclaw', display: 'Openclaw' },
+  { value: 'feishu', display: '飞书' },
+  { value: 'slack', display: 'Slack' },
+  { value: 'other', display: '其他' },
+];
 
 interface ToolAccountsEditorProps {
   userId: number;
@@ -20,7 +30,6 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({
   const language = useLanguage();
   const [toolAccounts, setToolAccounts] = useState<ToolAccount[]>([]);
   const [unmappedAccounts, setUnmappedAccounts] = useState<UnmappedAccount[]>([]);
-  const [toolTypes, setToolTypes] = useState<ToolType[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [newAccount, setNewAccount] = useState({
@@ -38,14 +47,12 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [accounts, unmapped, types] = await Promise.all([
+      const [accounts, unmapped] = await Promise.all([
         toolAccountsApi.getByUser(userId),
         toolAccountsApi.getUnmapped(),
-        toolAccountsApi.getToolTypes(),
       ]);
       setToolAccounts(accounts);
       setUnmappedAccounts(unmapped);
-      setToolTypes(types);
     } catch (err) {
       console.error('Failed to load tool accounts:', err);
     } finally {
@@ -208,7 +215,7 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({
             }
           >
             <option value="">-- Select --</option>
-            {toolTypes.map((type) => (
+            {TOOL_TYPES.map((type) => (
               <option key={type.value} value={type.value}>
                 {type.display}
               </option>
