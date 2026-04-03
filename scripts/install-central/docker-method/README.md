@@ -79,6 +79,41 @@ docker compose up -d --build
 | `DB_PASSWORD` | PostgreSQL 密码 | ace-secret |
 | `DB_NAME` | PostgreSQL 数据库名 | ace |
 
+### Workspace 多用户模式
+
+多用户模式为每个用户启动独立的 `qwen-code-webui` 进程，确保用户数据隔离。
+
+**相关环境变量：**
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `WORKSPACE_MULTI_USER_MODE` | 启用多用户模式 | false |
+| `WORKSPACE_PORT_RANGE_START` | 端口池起始端口 | 3100 |
+| `WORKSPACE_PORT_RANGE_END` | 端口池结束端口 | 3200 |
+| `WORKSPACE_MAX_INSTANCES` | 最大实例数 | 20 |
+| `WORKSPACE_IDLE_TIMEOUT` | 空闲超时(分钟) | 30 |
+
+**部署前准备：**
+
+1. 安装 `qwen-code-webui`：
+   ```bash
+   npm install -g @ivycomputing/qwen-code-webui
+   ```
+
+2. 配置 sudo（允许服务账号切换用户）：
+   ```bash
+   sudo visudo -f /etc/sudoers.d/open-ace-webui
+   ```
+   
+   添加内容：
+   ```
+   open-ace ALL=(ALL) NOPASSWD: /usr/local/bin/qwen-code-webui *
+   ```
+
+3. 确保每个用户有对应的系统账号和 `~/.qwen/` 目录
+
+**详细配置说明请参考 [部署文档](../../../docs/DEPLOYMENT.md#multi-user-workspace-deployment)**
+
 ### 数据持久化
 
 - **配置文件**: `./config/` → `/home/open-ace/.open-ace/`
