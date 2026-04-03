@@ -30,9 +30,14 @@ export const QuotaManagement: React.FC = () => {
 
   const handleOpenEdit = (user: QuotaUsage) => {
     setEditingUser(user);
+    // Convert token quotas from raw value to M (millions) for display
     setFormData({
-      daily_token_quota: user.daily_token_quota,
-      monthly_token_quota: user.monthly_token_quota,
+      daily_token_quota: user.daily_token_quota
+        ? Math.round(user.daily_token_quota / 1_000_000)
+        : undefined,
+      monthly_token_quota: user.monthly_token_quota
+        ? Math.round(user.monthly_token_quota / 1_000_000)
+        : undefined,
       daily_request_quota: user.daily_request_quota,
       monthly_request_quota: user.monthly_request_quota,
     });
@@ -48,7 +53,18 @@ export const QuotaManagement: React.FC = () => {
     if (!editingUser) return;
 
     try {
-      await updateQuota.mutateAsync({ userId: editingUser.id, data: formData });
+      // Convert token quotas from M (millions) back to raw value for saving
+      const submitData: UpdateQuotaRequest = {
+        daily_token_quota: formData.daily_token_quota
+          ? formData.daily_token_quota * 1_000_000
+          : undefined,
+        monthly_token_quota: formData.monthly_token_quota
+          ? formData.monthly_token_quota * 1_000_000
+          : undefined,
+        daily_request_quota: formData.daily_request_quota,
+        monthly_request_quota: formData.monthly_request_quota,
+      };
+      await updateQuota.mutateAsync({ userId: editingUser.id, data: submitData });
       handleCloseModal();
     } catch (err) {
       console.error('Failed to update quota:', err);
@@ -192,7 +208,7 @@ export const QuotaManagement: React.FC = () => {
               </p>
             </div>
             <div className="col-md-6">
-              <label className="form-label">{t('dailyTokenQuota', language)}</label>
+              <label className="form-label">{t('dailyTokenQuota', language)} (M)</label>
               <TextInput
                 type="number"
                 value={formData.daily_token_quota?.toString() ?? ''}
@@ -206,7 +222,7 @@ export const QuotaManagement: React.FC = () => {
               />
             </div>
             <div className="col-md-6">
-              <label className="form-label">{t('monthlyTokenQuota', language)}</label>
+              <label className="form-label">{t('monthlyTokenQuota', language)} (M)</label>
               <TextInput
                 type="number"
                 value={formData.monthly_token_quota?.toString() ?? ''}
