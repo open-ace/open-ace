@@ -206,7 +206,65 @@ DEPLOY_PATH=$HOME/open-ace
 # Systemd 服务配置
 SERVICE_PORT=5000
 SERVICE_HOST=0.0.0.0
+
+# 多用户 Workspace 模式（可选）
+WORKSPACE_MULTI_USER_MODE=false   # 启用多用户模式
+WORKSPACE_PORT_RANGE_START=3100   # 端口池起始端口
+WORKSPACE_PORT_RANGE_END=3200     # 端口池结束端口
+WORKSPACE_MAX_INSTANCES=20        # 最大实例数
+WORKSPACE_IDLE_TIMEOUT=30         # 空闲超时（分钟）
 ```
+
+### 多用户 Workspace 模式
+
+多用户模式为每个用户启动独立的 `qwen-code-webui` 进程，确保用户数据隔离。
+
+**前置要求：**
+
+1. 安装 `qwen-code-webui`：
+   ```bash
+   npm install -g @ivycomputing/qwen-code-webui
+   ```
+
+2. 确保每个用户有对应的系统账号和 `~/.qwen/` 目录
+
+**自动配置：**
+
+安装脚本在启用多用户模式时会自动：
+- 检测 `qwen-code-webui` 安装位置
+- 创建 `/etc/sudoers.d/open-ace-webui` 配置文件
+- 验证 sudoers 语法
+
+```bash
+# 交互式安装时选择启用多用户模式
+./scripts/install.sh
+
+# 或使用配置文件
+cat > install.conf << 'EOF'
+DEPLOY_USER=$USER
+DEPLOY_PATH=$HOME/open-ace
+WORKSPACE_MULTI_USER_MODE=true
+WORKSPACE_PORT_RANGE_START=3100
+WORKSPACE_PORT_RANGE_END=3200
+EOF
+
+./scripts/install.sh --config install.conf
+```
+
+**手动配置 sudoers：**
+
+如果自动配置失败，可手动配置：
+
+```bash
+sudo visudo -f /etc/sudoers.d/open-ace-webui
+```
+
+添加内容：
+```
+your-user ALL=(ALL) NOPASSWD: /usr/local/bin/qwen-code-webui *
+```
+
+**详细配置说明请参考 [部署文档](../../docs/DEPLOYMENT.md#multi-user-workspace-deployment)**
 
 ### 卸载配置文件格式
 
