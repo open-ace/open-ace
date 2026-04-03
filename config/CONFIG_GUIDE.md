@@ -47,6 +47,46 @@
 |------|------|--------|
 | `workspace.enabled` | 是否启用 Workspace 功能 | `false` |
 | `workspace.url` | Workspace 服务地址 | `http://localhost:8080` |
+| `workspace.multi_user_mode` | 是否启用多用户模式（为每个用户启动独立进程） | `false` |
+| `workspace.port_range_start` | 多用户模式下端口池起始端口 | `3100` |
+| `workspace.port_range_end` | 多用户模式下端口池结束端口 | `3200` |
+| `workspace.max_instances` | 最大同时运行的 webui 实例数 | `20` |
+| `workspace.idle_timeout_minutes` | 空闲实例自动关闭时间（分钟） | `30` |
+| `workspace.token_secret` | Token 签名密钥（建议使用强随机字符串） | `your-secret-key` |
+
+**多用户模式说明：**
+
+多用户模式下，Open ACE 会为每个用户启动独立的 `qwen-code-webui` 进程，以该用户的 `system_account` 身份运行。这确保了：
+- 每个用户只能看到自己的 qwen 项目和对话历史
+- 用户操作会以正确的身份记录到 qwen 日志中
+- 多用户环境下的数据隔离和审计追溯
+
+**单用户模式配置示例：**
+```json
+{
+  "workspace": {
+    "enabled": true,
+    "url": "http://localhost:8080",
+    "multi_user_mode": false
+  }
+}
+```
+
+**多用户模式配置示例：**
+```json
+{
+  "workspace": {
+    "enabled": true,
+    "url": "http://localhost",
+    "multi_user_mode": true,
+    "port_range_start": 3100,
+    "port_range_end": 3200,
+    "max_instances": 20,
+    "idle_timeout_minutes": 30,
+    "token_secret": "generate-a-strong-random-secret-key-here"
+  }
+}
+```
 
 #### 工具配置
 | 参数 | 说明 | 默认值 |

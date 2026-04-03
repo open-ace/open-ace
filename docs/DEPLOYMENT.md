@@ -15,6 +15,7 @@ This guide covers deploying Open ACE in various scenarios.
 - [Upgrading](#upgrading)
 - [Troubleshooting](#troubleshooting)
 - [Security Considerations](#security-considerations)
+- [Multi-User Workspace Deployment](#multi-user-workspace-deployment)
 
 ## Quick Start
 
@@ -447,3 +448,146 @@ chmod -R 755 ~/.open-ace/
 2. **HTTPS**: Use reverse proxy (nginx/Apache) with SSL
 3. **Firewall**: Restrict access to port 5000
 4. **Secrets**: Use environment variables for sensitive data
+
+## Multi-User Workspace Deployment
+
+When enabling `workspace.multi_user_mode`, Open ACE starts separate `qwen-code-webui` processes for each user with their `system_account` identity. This requires additional deployment configuration.
+
+### Prerequisites
+
+1. **qwen-code-webui installed** on the server
+2. **sudo configured** for user switching
+3. **User accounts exist** for each system_account
+
+### sudo Configuration (Required)
+
+Create sudoers file to allow Open ACE service account to run webui as other users:
+
+```bash
+# Create sudoers file
+sudo visudo -f /etc/sudoers.d/open-ace-webui
+```
+
+Add the following content:
+
+```bash
+# Allow open-ace service account to run qwen-code-webui as any user
+# Replace 'open-ace' with your actual service account name
+
+open-ace ALL=(ALL) NOPASSWD: /usr/local/bin/qwen-code-webui *
+open-ace ALL=(ALL) NOPASSWD: /usr/bin/qwen-code-webui *
+open-ace ALL=(ALL) NOPASSWD: /opt/qwen-code-webui/bin/qwen-code-webui *
+```
+
+**Security notes:**
+- Use full paths to prevent path manipulation attacks
+- The `NOPASSWD` flag is required for non-interactive service operation
+- Limit to specific executable paths, not generic `sudo` access
+
+### qwen-code-webui Installation
+
+Install `qwen-code-webui` in one of these locations:
+
+```bash
+# Method 1: npm global install (recommended)
+npm install -g @ivycomputing/qwen-code-webui
+
+# Verify installation
+which qwen-code-webui
+# Should output: /usr/local/bin/qwen-code-webui
+
+# Method 2: Manual install
+git clone https://github.com/ivycomputing/qwen-code-webui.git
+cd qwen-code-webui
+npm install && npm run build
+ln -s $(pwd)/bin/qwen-code-webui /usr/local/bin/qwen-code-webui
+```
+
+### User Account Requirements
+
+Each user with a `system_account` must have:
+
+1. **Linux account exists**:
+   ```bash
+   # Check if user exists
+   id <system_account>
+   
+   # Create if needed
+   sudo useradd -m <system_account>
+   ```
+
+2. **qwen directory accessible**:
+   ```bash
+   # Ensure user has .qwen directory
+   sudo mkdir -p /home/<system_account>/.qwen/projects
+   sudo chown -R <system_account>:<system_account> /home/<system_account>/.qwen
+   ```
+
+3. **Project directories accessible** (if applicable)
+
+### Port Range Configuration
+
+Choose a port range that doesn't conflict with other services:
+
+```json
+{
+  "workspace": {
+    "port_range_start": 3100,
+    "port_range_end": 3200
+  }
+}
+```
+
+**Recommendations:**
+- Use ports above 3000 (avoid common service ports)
+- Allocate enough ports for expected concurrent users (e.g., 100 ports for up to 100 users)
+- Verify ports are not used: `sudo netstat -tlnp | grep 3100-3200`
+
+### systemd Service Configuration
+
+When running Open ACE as a systemd service, ensure proper permissions:
+
+```ini
+[Unit]
+Description=Open ACE Web Server
+After=network.target
+
+[Service]
+Type=simple
+User=open-ace
+Group=open-ace
+WorkingDirectory=/home/open-ace/open-ace
+ExecStart=/usr/bin/python3 web.py
+Restart=always
+
+# Required for multi-user mode
+# Allow sudo execution
+AmbientCapabilities=CAP_SETUID CAP_SETGID
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Troubleshooting Multi-User Mode
+
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| "sudo: no tty present" | sudo requires password | Add NOPASSWD to sudoers |
+| "qwen-code-webui not found" | Executable not installed | Install webui in PATH |
+| "Permission denied" | User lacks permissions | Check sudoers configuration |
+| Port allocation failed | All ports in use | Increase port range or reduce max_instances |
+| Process won't start | User account missing | Create system_account user |
+
+### Checking Multi-User Status
+
+```bash
+# View running instances
+curl http://localhost:5000/api/workspace/instances
+
+# Check logs
+tail -f /home/open-ace/open-ace/logs/open-ace.log | grep WebUIManager
+```
+
+### Windows Compatibility
+
+**Windows does NOT support multi-user mode.** On Windows systems, the configuration is automatically downgraded to single-user mode (direct execution without user switching). This is a platform limitation due to Windows not having equivalent `sudo -u` functionality.
