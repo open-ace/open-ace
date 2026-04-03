@@ -100,17 +100,36 @@ docker compose up -d --build
    npm install -g @ivycomputing/qwen-code-webui
    ```
 
-2. 配置 sudo（允许服务账号切换用户）：
-   ```bash
-   sudo visudo -f /etc/sudoers.d/open-ace-webui
-   ```
-   
-   添加内容：
-   ```
-   open-ace ALL=(ALL) NOPASSWD: /usr/local/bin/qwen-code-webui *
-   ```
+2. 确保每个用户有对应的系统账号和 `~/.qwen/` 目录
 
-3. 确保每个用户有对应的系统账号和 `~/.qwen/` 目录
+**自动配置（推荐）：**
+
+安装脚本在启用多用户模式时会自动：
+- 检测 `qwen-code-webui` 安装位置
+- 创建 `/etc/sudoers.d/open-ace-webui` 配置文件
+- 验证 sudoers 语法
+- 配置防火墙开放端口池范围
+
+```bash
+# 交互式安装时选择启用多用户模式
+./install.sh
+
+# 或使用环境变量
+WORKSPACE_MULTI_USER_MODE=true ./install.sh --non-interactive
+```
+
+**手动配置 sudoers：**
+
+如果自动配置失败，可手动配置：
+
+```bash
+sudo visudo -f /etc/sudoers.d/open-ace-webui
+```
+
+添加内容：
+```
+open-ace ALL=(ALL) NOPASSWD: /usr/local/bin/qwen-code-webui *
+```
 
 **详细配置说明请参考 [部署文档](../../../docs/DEPLOYMENT.md#multi-user-workspace-deployment)**
 
