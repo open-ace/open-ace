@@ -175,7 +175,7 @@ export const Workspace: React.FC = () => {
   }
 
   // Check if quota is exceeded
-  const isQuotaExceeded = quotaStatus?.over_quota.any ?? false;
+  const isQuotaExceeded = quotaStatus?.over_quota?.any ?? false;
 
   // Render quota exceeded message
   if (isQuotaExceeded) {
