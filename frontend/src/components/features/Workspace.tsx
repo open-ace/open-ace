@@ -6,11 +6,12 @@
  * - Each tab has its own iframe
  * - Support for creating new tabs via URL parameter
  * - Quota checking - disables workspace when quota exceeded
+ * - Multi-user mode support with per-user webui instances
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { workspaceApi } from '@/api';
+import { workspaceApi, type WorkspaceConfig, type UserWebUIResponse } from '@/api';
 import { requestApi, type QuotaStatusResponse } from '@/api/request';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
@@ -21,6 +22,7 @@ interface WorkspaceTab {
   id: string;
   title: string;
   url: string;
+  token: string;
   createdAt: number;
 }
 
@@ -30,11 +32,15 @@ const generateTabId = () => `tab-${Date.now()}-${Math.random().toString(36).subs
 // Quota check interval (5 minutes)
 const QUOTA_CHECK_INTERVAL = 5 * 60 * 1000;
 
+// Activity heartbeat interval (2 minutes)
+const ACTIVITY_HEARTBEAT_INTERVAL = 2 * 60 * 1000;
+
 export const Workspace: React.FC = () => {
   const language = useLanguage();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [config, setConfig] = useState<{ enabled: boolean; url: string } | null>(null);
+  const [config, setConfig] = useState<WorkspaceConfig | null>(null);
+  const [userWebUI, setUserWebUI] = useState<UserWebUIResponse | null>(null);
   const [quotaStatus, setQuotaStatus] = useState<QuotaStatusResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isQuotaLoading, setIsQuotaLoading] = useState(true);
@@ -42,12 +48,22 @@ export const Workspace: React.FC = () => {
   const [tabs, setTabs] = useState<WorkspaceTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>('');
 
-  // Load workspace config
+  // Load workspace config and user webui URL
   useEffect(() => {
     const loadConfig = async () => {
       try {
         const workspaceConfig = await workspaceApi.getConfig();
         setConfig(workspaceConfig);
+
+        // If multi-user mode is enabled, get user-specific URL
+        if (workspaceConfig.enabled && workspaceConfig.multi_user_mode) {
+          const userWebUIResponse = await workspaceApi.getUserWebUIUrl();
+          if (userWebUIResponse.success) {
+            setUserWebUI(userWebUIResponse);
+          } else {
+            setError(userWebUIResponse.error || 'Failed to get user workspace URL');
+          }
+        }
       } catch (err) {
         const error = err as Error;
         setError(error?.message || 'Failed to load workspace config');
@@ -58,6 +74,22 @@ export const Workspace: React.FC = () => {
 
     loadConfig();
   }, []);
+
+  // Activity heartbeat for multi-user mode
+  useEffect(() => {
+    if (!config?.multi_user_mode || !userWebUI?.success) return;
+
+    const sendHeartbeat = async () => {
+      try {
+        await workspaceApi.getUserWebUIUrl();
+      } catch (err) {
+        console.error('Failed to send activity heartbeat:', err);
+      }
+    };
+
+    const interval = setInterval(sendHeartbeat, ACTIVITY_HEARTBEAT_INTERVAL);
+    return () => clearInterval(interval);
+  }, [config?.multi_user_mode, userWebUI?.success]);
 
   // Check quota
   const checkQuota = useCallback(async () => {
@@ -80,24 +112,44 @@ export const Workspace: React.FC = () => {
     return () => clearInterval(interval);
   }, [checkQuota]);
 
+  // Get the effective URL for iframe
+  const getEffectiveUrl = useCallback((): string => {
+    if (!config?.enabled) return '';
+
+    // Multi-user mode: use user-specific URL with token
+    if (config.multi_user_mode && userWebUI?.success) {
+      const baseUrl = userWebUI.url;
+      const token = userWebUI.token;
+      // Add token as URL parameter
+      const separator = baseUrl.includes('?') ? '&' : '?';
+      return `${baseUrl}${separator}token=${encodeURIComponent(token)}`;
+    }
+
+    // Single-user mode: use configured URL
+    return config.url;
+  }, [config, userWebUI]);
+
   // Initialize first tab when config is loaded
   useEffect(() => {
-    if (config?.enabled && config.url && tabs.length === 0) {
+    const effectiveUrl = getEffectiveUrl();
+    if (config?.enabled && effectiveUrl && tabs.length === 0) {
       const initialTab: WorkspaceTab = {
         id: generateTabId(),
         title: t('newSession', language),
-        url: config.url,
+        url: effectiveUrl,
+        token: userWebUI?.token || '',
         createdAt: Date.now(),
       };
       setTabs([initialTab]);
       setActiveTabId(initialTab.id);
     }
-  }, [config, tabs.length, language]);
+  }, [config, userWebUI, tabs.length, language, getEffectiveUrl]);
 
   // Handle URL parameter for creating new tab
   useEffect(() => {
     const newTab = searchParams.get('newTab');
-    if (newTab === 'true' && config?.enabled && config.url) {
+    const effectiveUrl = getEffectiveUrl();
+    if (newTab === 'true' && config?.enabled && effectiveUrl) {
       // Clear the URL parameter
       searchParams.delete('newTab');
       setSearchParams(searchParams, { replace: true });
@@ -105,22 +157,24 @@ export const Workspace: React.FC = () => {
       // Create new tab
       createNewTab();
     }
-  }, [searchParams, config]);
+  }, [searchParams, config, getEffectiveUrl]);
 
   // Create a new tab
   const createNewTab = useCallback(() => {
-    if (!config?.url) return;
+    const effectiveUrl = getEffectiveUrl();
+    if (!effectiveUrl) return;
 
     const newTab: WorkspaceTab = {
       id: generateTabId(),
       title: t('newSession', language),
-      url: config.url,
+      url: effectiveUrl,
+      token: userWebUI?.token || '',
       createdAt: Date.now(),
     };
 
     setTabs((prev) => [...prev, newTab]);
     setActiveTabId(newTab.id);
-  }, [config, language]);
+  }, [getEffectiveUrl, userWebUI, language]);
 
   // Close a tab
   const closeTab = useCallback(
@@ -162,7 +216,37 @@ export const Workspace: React.FC = () => {
     return <Error message={error} />;
   }
 
-  if (!config?.enabled || !config.url) {
+  if (!config?.enabled) {
+    return (
+      <div className="workspace">
+        <div className="text-center py-5">
+          <i className="bi bi-tools fs-1 text-muted" />
+          <h4 className="mt-3">{t('workspaceNotConfigured', language)}</h4>
+          <p className="text-muted">{t('workspaceNotConfiguredHelp', language)}</p>
+        </div>
+      </div>
+    );
+  }
+
+  // In multi-user mode, check if user webui is available
+  if (config.multi_user_mode && !userWebUI?.success) {
+    return (
+      <div className="workspace">
+        <div className="text-center py-5">
+          <i className="bi bi-exclamation-circle fs-1 text-warning" />
+          <h4 className="mt-3">{t('workspaceUnavailable', language)}</h4>
+          <p className="text-muted">{userWebUI?.error || t('workspaceUnavailableHelp', language)}</p>
+          <Button variant="primary" onClick={() => window.location.reload()}>
+            <i className="bi bi-arrow-clockwise me-2" />
+            {t('retry', language)}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  const effectiveUrl = getEffectiveUrl();
+  if (!effectiveUrl) {
     return (
       <div className="workspace">
         <div className="text-center py-5">
@@ -231,6 +315,11 @@ export const Workspace: React.FC = () => {
       {/* Page Header */}
       <div className="page-header mb-3 px-3 pt-3">
         <h2>{t('workspace', language)}</h2>
+        {config.multi_user_mode && userWebUI?.system_account && (
+          <small className="text-muted ms-2">
+            ({userWebUI.system_account})
+          </small>
+        )}
       </div>
       {/* Tab Bar */}
       {tabs.length > 0 && (

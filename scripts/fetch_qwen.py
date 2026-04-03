@@ -25,6 +25,100 @@ def get_default_sender_name(tool: str = "qwen") -> str:
     return f"{user}-{hostname}-{tool}"
 
 
+def extract_system_account_from_sender_name(sender_name: str) -> Optional[str]:
+    """
+    Extract system_account from sender_name.
+
+    Sender name format: {system_account}-{hostname}-{tool}
+    Example: alice-macbook-pro-qwen -> alice
+
+    Args:
+        sender_name: The sender name string
+
+    Returns:
+        system_account or None if not parseable
+    """
+    if not sender_name:
+        return None
+
+    # Split by '-' and take the first part as system_account
+    # But we need to handle hostname that may contain '-'
+    # Strategy: find the last '-' followed by a known tool name, then the middle part is hostname
+    known_tools = ["qwen", "claude", "openclaw"]
+
+    parts = sender_name.split("-")
+    if len(parts) < 3:
+        # Not enough parts, return first part
+        return parts[0] if parts else None
+
+    # Check if last part is a tool name
+    if parts[-1].lower() in known_tools:
+        # Format: {system_account}-{hostname}-{tool}
+        # system_account is the first part
+        return parts[0]
+
+    # Fallback: return first part
+    return parts[0]
+
+
+def find_all_qwen_project_dirs() -> list:
+    """
+    Find Qwen project directories for all users on the system.
+
+    Scans /home/*/.qwen/projects (Linux) or /Users/*/.qwen/projects (macOS)
+
+    Returns:
+        List of tuples: [(system_account, project_path), ...]
+    """
+    import platform
+
+    results = []
+    os_type = platform.system().lower()
+
+    # Determine user home directories based on OS
+    if os_type == "linux":
+        home_base = Path("/home")
+    elif os_type == "darwin":
+        home_base = Path("/Users")
+    else:
+        # Windows or other - just use current user
+        home = Path.home()
+        qwen_projects = home / ".qwen" / "projects"
+        if qwen_projects.is_dir():
+            user = getpass.getuser()
+            results.append((user, qwen_projects))
+        return results
+
+    # Scan all user directories
+    if not home_base.is_dir():
+        return results
+
+    for user_dir in home_base.iterdir():
+        if not user_dir.is_dir():
+            continue
+
+        system_account = user_dir.name
+        qwen_projects = user_dir / ".qwen" / "projects"
+
+        if qwen_projects.is_dir():
+            # Check if there are jsonl files
+            has_jsonl = False
+            for subdir in qwen_projects.iterdir():
+                if subdir.is_dir():
+                    if list(subdir.glob("*.jsonl")):
+                        has_jsonl = True
+                        break
+                    chats_dir = subdir / "chats"
+                    if chats_dir.is_dir() and list(chats_dir.glob("*.jsonl")):
+                        has_jsonl = True
+                        break
+
+            if has_jsonl:
+                results.append((system_account, qwen_projects))
+
+    return results
+
+
 # Add shared directory to path
 script_dir = os.path.dirname(os.path.abspath(__file__))
 shared_dir = os.path.join(script_dir, "shared")
@@ -182,8 +276,15 @@ def extract_content_from_entry(entry: dict) -> Optional[str]:
     return None
 
 
-def process_jsonl_file(filepath: Path, hostname: str = "localhost") -> tuple:
+def process_jsonl_file(
+    filepath: Path, hostname: str = "localhost", system_account: Optional[str] = None
+) -> tuple:
     """Process a single JSONL file and return daily token aggregates and messages.
+
+    Args:
+        filepath: Path to the JSONL file
+        hostname: Host name for this machine
+        system_account: System account (linux/mac username) for multi-user mode
 
     Returns:
         tuple: (daily_stats dict, messages list)
@@ -335,8 +436,10 @@ def process_jsonl_file(filepath: Path, hostname: str = "localhost") -> tuple:
                                     "output_tokens": output_tokens,
                                     "model": model,
                                     "timestamp": ts,
-                                    "sender_id": "qwen_user",
-                                    "sender_name": get_default_sender_name("qwen"),
+                                    "sender_id": system_account or "qwen_user",
+                                    "sender_name": f"{system_account}-{hostname}-qwen"
+                                    if system_account
+                                    else get_default_sender_name("qwen"),
                                     "agent_session_id": agent_session_id,
                                     "conversation_id": conversation_id,
                                 }
@@ -425,46 +528,32 @@ def find_qwen_project_dir() -> Optional[Path]:
     return None
 
 
-def fetch_and_save(
-    days: int = 7, project_dir: Optional[Path] = None, hostname: Optional[str] = None
-) -> bool:
+def _process_projects_dir(
+    project_dir: Path,
+    hostname: str,
+    system_account: Optional[str],
+    aggregated: dict,
+    all_messages: list,
+) -> int:
     """
-    Fetch Qwen usage and save to database.
+    Process a qwen projects directory and aggregate results.
 
     Args:
-        days: Number of days to look back
-        project_dir: Optional specific project directory
-        hostname: Optional host name to identify this machine
+        project_dir: Path to the projects directory
+        hostname: Host name
+        system_account: System account (username) for multi-user mode
+        aggregated: Aggregated daily stats dict (modified in place)
+        all_messages: List to collect messages (modified in place)
 
     Returns:
-        True if successful, False otherwise
+        Number of files processed
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    shared_dir = os.path.join(script_dir, "shared")
-    if shared_dir not in sys.path:
-        sys.path.insert(0, script_dir)
-    from shared import db, utils
-
-    if hostname is None:
-        # Try to load hostname from config
-        config = utils.load_config()
-        hostname = config.get("host_name", "localhost")
-
-    if project_dir is None:
-        project_dir = find_qwen_project_dir()
-
-    if not project_dir:
-        print("Error: Cannot find Qwen project/chats directory.")
-        return False
-
-    # Get all subdirectories with jsonl files if project_dir is a projects parent
-    # or just use the single project_dir if it directly contains jsonl files
+    # Get all subdirectories with jsonl files
     projects_to_scan = []
 
     # Check if project_dir directly contains jsonl files
     direct_files = list(project_dir.glob("*.jsonl"))
     if direct_files:
-        # project_dir is a direct project directory
         projects_to_scan = [project_dir]
     else:
         # project_dir is a parent projects directory, get all subdirectories with jsonl
@@ -482,9 +571,62 @@ def fetch_and_save(
                     subdirs_with_jsonl.append(chats_subdir)
         if subdirs_with_jsonl:
             projects_to_scan = sorted(subdirs_with_jsonl, key=lambda x: x.name.lower())
-        else:
-            print(f"Error: No .jsonl files found in {project_dir}")
-            return False
+
+    total_files = 0
+    for proj_dir in projects_to_scan:
+        jsonl_files = list(proj_dir.glob("*.jsonl"))
+        if not jsonl_files:
+            continue
+        print(f"  Scanning: {proj_dir.name} ({len(jsonl_files)} files)")
+        for f in jsonl_files:
+            total_files += 1
+            daily, messages = process_jsonl_file(f, hostname, system_account)
+            # Aggregate daily stats
+            for date, stats in daily.items():
+                for key in [
+                    "prompt_tokens",
+                    "candidates_tokens",
+                    "thoughts_tokens",
+                    "cached_tokens",
+                    "total_tokens",
+                    "request_count",
+                ]:
+                    aggregated[date][key] += stats[key]
+                aggregated[date]["models_used"].update(stats["models_used"])
+            # Collect messages for batch insert
+            all_messages.extend(messages)
+
+    return total_files
+
+
+def fetch_and_save(
+    days: int = 7,
+    project_dir: Optional[Path] = None,
+    hostname: Optional[str] = None,
+    multi_user_mode: bool = False,
+) -> bool:
+    """
+    Fetch Qwen usage and save to database.
+
+    Args:
+        days: Number of days to look back
+        project_dir: Optional specific project directory
+        hostname: Optional host name to identify this machine
+        multi_user_mode: If True, scan all users' qwen directories
+
+    Returns:
+        True if successful, False otherwise
+    """
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    shared_dir = os.path.join(script_dir, "shared")
+    if shared_dir not in sys.path:
+        sys.path.insert(0, script_dir)
+    from shared import db, utils
+
+    if hostname is None:
+        # Try to load hostname from config
+        config = utils.load_config()
+        hostname = config.get("host_name", "localhost")
 
     # Aggregate across all projects
     aggregated = defaultdict(
@@ -501,32 +643,43 @@ def fetch_and_save(
 
     # Collect all messages for batch insert
     all_messages = []
-    total_files = 0
 
-    for proj_dir in projects_to_scan:
-        jsonl_files = list(proj_dir.glob("*.jsonl"))
-        if not jsonl_files:
-            continue
-        print(f"Scanning: {proj_dir.name} ({len(jsonl_files)} files)")
-        for f in jsonl_files:
-            total_files += 1
-            daily, messages = process_jsonl_file(f, hostname)
-            # Aggregate daily stats
-            for date, stats in daily.items():
-                for key in [
-                    "prompt_tokens",
-                    "candidates_tokens",
-                    "thoughts_tokens",
-                    "cached_tokens",
-                    "total_tokens",
-                    "request_count",
-                ]:
-                    aggregated[date][key] += stats[key]
-                aggregated[date]["models_used"].update(stats["models_used"])
-            # Collect messages for batch insert
-            all_messages.extend(messages)
+    # Multi-user mode: scan all users' qwen directories
+    if multi_user_mode:
+        print("Multi-user mode: scanning all users' qwen directories...")
+        user_projects = find_all_qwen_project_dirs()
 
-    print(f"Processed {total_files} files, {len(all_messages)} messages")
+        if not user_projects:
+            print("No qwen project directories found for any user.")
+            return False
+
+        print(f"Found {len(user_projects)} users with qwen data:")
+        for system_account, proj_path in user_projects:
+            print(f"  - {system_account}: {proj_path}")
+
+        # Process each user's projects
+        total_files = 0
+        for system_account, user_project_dir in user_projects:
+            print(f"\nProcessing user: {system_account}")
+            files_processed = _process_projects_dir(
+                user_project_dir, hostname, system_account, aggregated, all_messages
+            )
+            total_files += files_processed
+
+    else:
+        # Single-user mode: use current user's qwen directory
+        if project_dir is None:
+            project_dir = find_qwen_project_dir()
+
+        if not project_dir:
+            print("Error: Cannot find Qwen project/chats directory.")
+            return False
+
+        total_files = _process_projects_dir(
+            project_dir, hostname, None, aggregated, all_messages
+        )
+
+    print(f"\nProcessed {total_files} files, {len(all_messages)} messages")
 
     # Batch insert messages
     if all_messages:
@@ -566,6 +719,11 @@ if __name__ == "__main__":
     parser.add_argument("--days", type=int, default=7, help="Number of days")
     parser.add_argument("--project", help="Specific project directory")
     parser.add_argument("--hostname", help="Host name to identify this machine")
+    parser.add_argument(
+        "--multi-user",
+        action="store_true",
+        help="Scan all users' qwen directories (requires root/admin privileges)",
+    )
     args = parser.parse_args()
 
     db.init_database()
@@ -573,5 +731,6 @@ if __name__ == "__main__":
         days=args.days,
         project_dir=Path(args.project) if args.project else None,
         hostname=args.hostname,
+        multi_user_mode=args.multi_user,
     )
     sys.exit(0 if success else 1)

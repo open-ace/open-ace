@@ -1,9 +1,8 @@
 {
   "host_name": "<HOST_NAME>",
   "database": {
-    "type": "sqlite",
-    "path": "~/.open-ace/ace.db",
-    "url": null
+    "type": "postgresql",
+    "url": "postgresql://user:password@localhost:5432/openace"
   },
   "server": {
     "upload_auth_key": "<UPLOAD_AUTH_KEY>",
@@ -13,7 +12,14 @@
   },
   "workspace": {
     "enabled": false,
-    "url": "http://localhost:8080"
+    "url": "http://localhost",
+    "multi_user_mode": false,
+    "port_range_start": 9000,
+    "port_range_end": 9999,
+    "max_instances": 30,
+    "idle_timeout_minutes": 30,
+    "cleanup_interval_minutes": 5,
+    "token_secret": ""
   },
   "tools": {
     "openclaw": {

@@ -79,7 +79,24 @@ export const UsageOverview: React.FC = () => {
     return <Error message={error} onRetry={fetchData} />;
   }
 
-  // Prepare trend chart data
+  // Prepare token trend chart data
+  const tokenTrendChartData = usageData?.usage.trend
+    ? {
+        labels: usageData.usage.trend.map((d) => d.date),
+        datasets: [
+          {
+            label: t('tokens', language),
+            data: usageData.usage.trend.map((d) => d.tokens),
+            borderColor: 'rgba(16, 185, 129, 1)',
+            backgroundColor: 'rgba(16, 185, 129, 0.2)',
+            fill: false,
+            tension: 0.2,
+          },
+        ],
+      }
+    : null;
+
+  // Prepare request trend chart data
   const trendChartData = usageData?.usage.trend
     ? {
         labels: usageData.usage.trend.map((d) => d.date),
@@ -277,7 +294,19 @@ export const UsageOverview: React.FC = () => {
         </div>
       </div>
 
-      {/* Usage Trend */}
+      {/* Token Trend Chart */}
+      {tokenTrendChartData && tokenTrendChartData.labels.length > 0 && (
+        <Card title={t('tokenTrend', language)} className="mb-4">
+          <LineChart
+            labels={tokenTrendChartData.labels}
+            datasets={tokenTrendChartData.datasets}
+            height={250}
+            unit="M"
+          />
+        </Card>
+      )}
+
+      {/* Request Trend Chart */}
       {trendChartData && trendChartData.labels.length > 0 && (
         <Card title={t('requestTrend', language)} className="mb-4">
           <LineChart

@@ -13,7 +13,7 @@ export interface AdminUser {
   is_active: boolean;
   created_at: string;
   last_login?: string;
-  linux_account?: string;
+  system_account?: string;
   daily_token_quota?: number;
   monthly_token_quota?: number;
   daily_request_quota?: number;
@@ -25,7 +25,7 @@ export interface CreateUserRequest {
   email: string;
   password: string;
   role?: 'admin' | 'user' | 'viewer';
-  linux_account?: string;
+  system_account?: string;
 }
 
 export interface UpdateUserRequest {
@@ -33,7 +33,7 @@ export interface UpdateUserRequest {
   email?: string;
   role?: 'admin' | 'user' | 'viewer';
   is_active?: boolean;
-  linux_account?: string;
+  system_account?: string;
   password?: string;
 }
 

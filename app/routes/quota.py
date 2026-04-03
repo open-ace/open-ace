@@ -7,7 +7,9 @@ Used by Work mode to check if user can continue using workspace.
 """
 
 import logging
+import time
 from datetime import datetime
+from functools import lru_cache
 
 from flask import Blueprint, g, jsonify, request
 
@@ -23,6 +25,26 @@ auth_service = AuthService()
 user_repo = UserRepository()
 usage_repo = UsageRepository()
 quota_manager = QuotaManager()
+
+# Cache for user usage data (5 minute TTL)
+_usage_cache: dict = {}
+_CACHE_TTL = 300  # 5 minutes
+
+
+def _get_cached_user_usage(user_id: int, system_account: str, start_date: str, end_date: str):
+    """Get cached user usage data."""
+    cache_key = f"{user_id}:{start_date}:{end_date}"
+    now = time.time()
+
+    if cache_key in _usage_cache:
+        cached_data, cached_time = _usage_cache[cache_key]
+        if now - cached_time < _CACHE_TTL:
+            return cached_data
+
+    # Fetch fresh data
+    request_trend = usage_repo.get_user_request_trend(system_account, start_date, end_date)
+    _usage_cache[cache_key] = (request_trend, now)
+    return request_trend
 
 
 @quota_bp.before_request
@@ -166,35 +188,27 @@ def get_quota_status():
         if not user:
             return jsonify({"error": "User not found"}), 404
 
-        # Get today's usage
+        username = user.get("username", "")
+        # Use system_account for matching sender_name if available
+        # sender_name format: {system_account}-{hostname}-{tool}
+        system_account = user.get("system_account") or username
+
+        # Get today's usage - filter by system_account prefix
         today = datetime.now().strftime("%Y-%m-%d")
-        today_stats = usage_repo.get_request_stats_by_user(date=today)
+        today_stats = usage_repo.get_request_stats_by_user(date=today, user_name=system_account)
 
         # Aggregate today's stats for this user
-        today_requests = 0
-        today_tokens = 0
-        username = user.get("username", "")
+        today_requests = sum(stat.get("requests", 0) for stat in today_stats)
+        today_tokens = sum(stat.get("tokens", 0) for stat in today_stats)
 
-        for stat in today_stats:
-            if stat.get("user") == username:
-                today_requests += stat.get("requests", 0)
-                today_tokens += stat.get("tokens", 0)
-
-        # Get monthly usage
+        # Get monthly usage - filter by system_account prefix
         now = datetime.now()
-        month_start = now.replace(day=1).strftime("%Y-%m-%d")
-        month_end = now.strftime("%Y-%m-%d")
-
         monthly_request_stats = usage_repo.get_monthly_request_stats_by_user(
-            now.year, now.month
+            now.year, now.month, user_name=system_account
         )
 
-        monthly_requests = 0
-        monthly_tokens = 0
-        for stat in monthly_request_stats:
-            if stat.get("user") == username:
-                monthly_requests += stat.get("requests", 0)
-                monthly_tokens += stat.get("tokens", 0)
+        monthly_requests = sum(stat.get("requests", 0) for stat in monthly_request_stats)
+        monthly_tokens = sum(stat.get("tokens", 0) for stat in monthly_request_stats)
 
         # Build response
         response = {
@@ -269,9 +283,18 @@ def get_my_usage():
         return jsonify(user_or_error), 401
 
     user_id = user_or_error["id"]
-    username = user_or_error.get("username", "")
 
     try:
+        # Get user info for limits and system_account
+        user = user_repo.get_user_by_id(user_id)
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+
+        username = user.get("username", "")
+        # Use system_account for matching sender_name if available
+        # sender_name format: {system_account}-{hostname}-{tool}
+        system_account = user.get("system_account") or username
+
         # Get date range from query params
         start_date = request.args.get("start")
         end_date = request.args.get("end")
@@ -284,13 +307,8 @@ def get_my_usage():
             start_date = start.strftime("%Y-%m-%d")
             end_date = end.strftime("%Y-%m-%d")
 
-        # Get user's request trend
-        request_trend = usage_repo.get_user_request_trend(
-            username, start_date, end_date
-        )
-
-        # Get user info for limits
-        user = user_repo.get_user_by_id(user_id)
+        # Get user's request trend using system_account (with caching)
+        request_trend = _get_cached_user_usage(user_id, system_account, start_date, end_date)
 
         response = {
             "user": {
@@ -298,10 +316,10 @@ def get_my_usage():
                 "username": username,
             },
             "limits": {
-                "daily_token": user.get("daily_token_quota") if user else None,
-                "monthly_token": user.get("monthly_token_quota") if user else None,
-                "daily_request": user.get("daily_request_quota") if user else None,
-                "monthly_request": user.get("monthly_request_quota") if user else None,
+                "daily_token": user.get("daily_token_quota"),
+                "monthly_token": user.get("monthly_token_quota"),
+                "daily_request": user.get("daily_request_quota"),
+                "monthly_request": user.get("monthly_request_quota"),
             },
             "usage": {
                 "trend": request_trend,

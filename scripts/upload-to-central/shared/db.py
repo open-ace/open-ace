@@ -1383,10 +1383,15 @@ def init_auth_database() -> None:
 
     conn.commit()
 
-    # Add linux_account column if not exists (migration for existing databases)
-    if not _column_exists(cursor, "users", "linux_account"):
-        print("Adding linux_account column to users table...")
-        _execute(cursor, "ALTER TABLE users ADD COLUMN linux_account TEXT")
+    # Add system_account column if not exists (migration for existing databases)
+    # First check for old linux_account column and rename it
+    if _column_exists(cursor, "users", "linux_account") and not _column_exists(cursor, "users", "system_account"):
+        print("Renaming linux_account column to system_account...")
+        _execute(cursor, "ALTER TABLE users RENAME COLUMN linux_account TO system_account")
+        conn.commit()
+    elif not _column_exists(cursor, "users", "system_account"):
+        print("Adding system_account column to users table...")
+        _execute(cursor, "ALTER TABLE users ADD COLUMN system_account TEXT")
         conn.commit()
 
     conn.close()
@@ -1430,7 +1435,7 @@ def create_user_with_is_active(
     daily_token_quota: int = 1000000,
     daily_request_quota: int = 1000,
     is_active: bool = True,
-    linux_account: str = None,
+    system_account: str = None,
     must_change_password: bool = False,
 ) -> bool:
     """Create a new user with is_active and must_change_password flags."""
@@ -1445,7 +1450,7 @@ def create_user_with_is_active(
         _execute(
             cursor,
             """
-            INSERT INTO users (username, password_hash, email, role, daily_token_quota, daily_request_quota, is_active, linux_account, must_change_password)
+            INSERT INTO users (username, password_hash, email, role, daily_token_quota, daily_request_quota, is_active, system_account, must_change_password)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
@@ -1456,7 +1461,7 @@ def create_user_with_is_active(
                 daily_token_quota,
                 daily_request_quota,
                 is_active_val,
-                linux_account,
+                system_account,
                 must_change_val,
             ),
         )
@@ -1700,7 +1705,7 @@ def update_user(user_id: int, **kwargs) -> bool:
         "daily_request_quota",
         "monthly_request_quota",
         "is_active",
-        "linux_account",
+        "system_account",
     ]
     updates = []
     params = []

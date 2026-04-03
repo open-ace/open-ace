@@ -121,7 +121,7 @@ def api_update_user(user_id):
         email=data.get("email"),
         role=data.get("role"),
         is_active=data.get("is_active"),
-        linux_account=data.get("linux_account"),
+        system_account=data.get("system_account"),
     )
 
     if success:

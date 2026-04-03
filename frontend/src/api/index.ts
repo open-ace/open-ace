@@ -44,7 +44,7 @@ export type {
 export { reportApi } from './report';
 export type { MyUsageReport, DailyUsage } from './report';
 export { workspaceApi } from './workspace';
-export type { WorkspaceConfig } from './workspace';
+export type { WorkspaceConfig, UserWebUIResponse } from './workspace';
 export { analysisApi } from './analysis';
 export type {
   KeyMetrics,

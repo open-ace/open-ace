@@ -22,6 +22,7 @@ import {
   EmptyState,
   Badge,
 } from '@/components/common';
+import { ToolAccountsEditor } from './ToolAccountsEditor';
 import type { AdminUser, CreateUserRequest, UpdateUserRequest } from '@/api';
 
 export const UserManagement: React.FC = () => {
@@ -41,7 +42,7 @@ export const UserManagement: React.FC = () => {
     password: '',
     confirm_password: '',
     role: 'user',
-    linux_account: '',
+    system_account: '',
   });
 
   const roleOptions = [
@@ -59,7 +60,7 @@ export const UserManagement: React.FC = () => {
       password: '',
       confirm_password: '',
       role: 'user',
-      linux_account: '',
+      system_account: '',
     });
     setShowModal(true);
   };
@@ -73,7 +74,7 @@ export const UserManagement: React.FC = () => {
       password: '',
       confirm_password: '',
       role: user.role,
-      linux_account: user.linux_account ?? '',
+      system_account: user.system_account ?? '',
     });
     setShowModal(true);
   };
@@ -88,7 +89,7 @@ export const UserManagement: React.FC = () => {
       password: '',
       confirm_password: '',
       role: 'user',
-      linux_account: '',
+      system_account: '',
     });
   };
 
@@ -130,7 +131,7 @@ export const UserManagement: React.FC = () => {
           username: formData.username,
           email: formData.email,
           role: formData.role,
-          linux_account: formData.linux_account,
+          system_account: formData.system_account,
         };
         await updateUser.mutateAsync({ userId: editingUser.id, data: updateData });
 
@@ -206,6 +207,7 @@ export const UserManagement: React.FC = () => {
                 <th>{t('tableUsername', language)}</th>
                 <th>{t('tableEmail', language)}</th>
                 <th>{t('linuxAccount', language)}</th>
+                <th>{t('toolAccounts', language)}</th>
                 <th>{t('tableRole', language)}</th>
                 <th>{t('tableStatus', language)}</th>
                 <th>{t('tableCreatedAt', language)}</th>
@@ -219,7 +221,13 @@ export const UserManagement: React.FC = () => {
                     <strong>{user.username}</strong>
                   </td>
                   <td>{user.email}</td>
-                  <td>{user.linux_account ?? '-'}</td>
+                  <td>{user.system_account ?? '-'}</td>
+                  <td>
+                    <ToolAccountsEditor
+                      userId={user.id}
+                      onChange={() => refetch()}
+                    />
+                  </td>
                   <td>
                     <Badge variant={getRoleBadgeVariant(user.role)}>{user.role}</Badge>
                   </td>
@@ -314,8 +322,8 @@ export const UserManagement: React.FC = () => {
             <div className="col-md-6">
               <label className="form-label">{t('linuxAccount', language)}</label>
               <TextInput
-                value={formData.linux_account ?? ''}
-                onChange={(value: string) => setFormData({ ...formData, linux_account: value })}
+                value={formData.system_account ?? ''}
+                onChange={(value: string) => setFormData({ ...formData, system_account: value })}
                 placeholder={t('enterLinuxAccount', language)}
               />
             </div>

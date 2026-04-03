@@ -148,7 +148,7 @@ class UserRepository:
         email: Optional[str] = None,
         role: Optional[str] = None,
         is_active: Optional[bool] = None,
-        linux_account: Optional[str] = None,
+        system_account: Optional[str] = None,
     ) -> bool:
         """
         Update user information.
@@ -159,7 +159,7 @@ class UserRepository:
             email: New email.
             role: New role.
             is_active: New active status.
-            linux_account: Linux account name.
+            system_account: System account name.
 
         Returns:
             bool: True if successful.
@@ -184,9 +184,9 @@ class UserRepository:
             # Convert boolean to integer for PostgreSQL compatibility
             params.append(1 if is_active else 0)
 
-        if linux_account is not None:
-            updates.append("linux_account = ?")
-            params.append(linux_account)
+        if system_account is not None:
+            updates.append("system_account = ?")
+            params.append(system_account)
 
         if not updates:
             return False

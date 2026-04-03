@@ -1061,7 +1061,15 @@ def get_workspace_config():
 
         config_path = os.path.join(CONFIG_DIR, "config.json")
 
-        workspace_config = {"enabled": False, "url": ""}
+        workspace_config = {
+            "enabled": False,
+            "url": "",
+            "multi_user_mode": False,
+            "port_range_start": 9000,
+            "port_range_end": 9999,
+            "max_instances": 30,
+            "idle_timeout_minutes": 30,
+        }
 
         if os.path.exists(config_path):
             with open(config_path, "r") as f:
@@ -1069,11 +1077,159 @@ def get_workspace_config():
                 workspace = config.get("workspace", {})
                 workspace_config["enabled"] = workspace.get("enabled", False)
                 workspace_config["url"] = workspace.get("url", "")
+                workspace_config["multi_user_mode"] = workspace.get("multi_user_mode", False)
+                workspace_config["port_range_start"] = workspace.get("port_range_start", 9000)
+                workspace_config["port_range_end"] = workspace.get("port_range_end", 9999)
+                workspace_config["max_instances"] = workspace.get("max_instances", 30)
+                workspace_config["idle_timeout_minutes"] = workspace.get("idle_timeout_minutes", 30)
 
         return jsonify(workspace_config)
     except Exception as e:
         logger.error(f"Error getting workspace config: {e}")
-        return jsonify({"enabled": False, "url": ""})
+        return jsonify({"enabled": False, "url": "", "multi_user_mode": False})
+
+
+# ==================== Multi-User WebUI ====================
+
+
+@workspace_bp.route("/user-url", methods=["GET"])
+def get_user_webui_url():
+    """Get the user-specific webui URL with authentication token.
+
+    In multi-user mode, this will start a new webui instance for the user
+    if one doesn't exist. In single-user mode, returns the configured URL.
+
+    Returns:
+        JSON with url and token fields.
+    """
+    from app.services.webui_manager import get_webui_manager
+    from app.repositories.user_repo import UserRepository
+
+    # Check if user is logged in
+    if not hasattr(g, "user") or not g.user:
+        return jsonify({"error": "Not authenticated"}), 401
+
+    user_id = g.user.get("id")
+
+    try:
+        manager = get_webui_manager()
+
+        # Get user's system_account
+        user_repo = UserRepository()
+        user = user_repo.get_user_by_id(user_id)
+
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+
+        system_account = user.get("system_account") or user.get("username")
+
+        # Get or create user's webui instance
+        url, token = manager.get_user_webui_url(user_id, system_account)
+
+        # Update activity timestamp
+        manager.update_user_activity(user_id)
+
+        return jsonify({
+            "success": True,
+            "url": url,
+            "token": token,
+            "system_account": system_account,
+            "multi_user_mode": manager.config.multi_user_mode,
+        })
+
+    except ValueError as e:
+        logger.error(f"Error getting user webui URL: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+        }), 503  # Service Unavailable (e.g., max instances reached)
+
+    except Exception as e:
+        logger.error(f"Error getting user webui URL: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+        }), 500
+
+
+@workspace_bp.route("/instances", methods=["GET"])
+def list_webui_instances():
+    """List all active webui instances (admin only)."""
+    from app.services.webui_manager import get_webui_manager
+
+    # Check if user is admin
+    if not hasattr(g, "user") or not g.user:
+        return jsonify({"error": "Not authenticated"}), 401
+
+    if g.user.get("role") != "admin":
+        return jsonify({"error": "Admin access required"}), 403
+
+    try:
+        manager = get_webui_manager()
+        instances = manager.get_all_instances()
+
+        return jsonify({
+            "success": True,
+            "instances": instances,
+            "active_count": manager.get_instance_count(),
+            "max_instances": manager.config.max_instances,
+        })
+
+    except Exception as e:
+        logger.error(f"Error listing webui instances: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@workspace_bp.route("/instances/<int:user_id>/stop", methods=["POST"])
+def stop_user_webui_instance(user_id):
+    """Stop a specific user's webui instance (admin only)."""
+    from app.services.webui_manager import get_webui_manager
+
+    # Check if user is admin
+    if not hasattr(g, "user") or not g.user:
+        return jsonify({"error": "Not authenticated"}), 401
+
+    if g.user.get("role") != "admin":
+        return jsonify({"error": "Admin access required"}), 403
+
+    try:
+        manager = get_webui_manager()
+        manager.stop_user_webui(user_id)
+
+        return jsonify({
+            "success": True,
+            "message": f"Stopped webui instance for user {user_id}",
+        })
+
+    except Exception as e:
+        logger.error(f"Error stopping webui instance: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@workspace_bp.route("/instances/stop-all", methods=["POST"])
+def stop_all_webui_instances():
+    """Stop all webui instances (admin only)."""
+    from app.services.webui_manager import get_webui_manager
+
+    # Check if user is admin
+    if not hasattr(g, "user") or not g.user:
+        return jsonify({"error": "Not authenticated"}), 401
+
+    if g.user.get("role") != "admin":
+        return jsonify({"error": "Admin access required"}), 403
+
+    try:
+        manager = get_webui_manager()
+        manager.stop_all_instances()
+
+        return jsonify({
+            "success": True,
+            "message": "All webui instances stopped",
+        })
+
+    except Exception as e:
+        logger.error(f"Error stopping all webui instances: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 # ==================== Workspace Status ====================

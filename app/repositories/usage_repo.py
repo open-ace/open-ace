@@ -640,7 +640,8 @@ class UsageRepository:
         }
 
     def get_request_stats_by_user(
-        self, date: Optional[str] = None, host_name: Optional[str] = None
+        self, date: Optional[str] = None, host_name: Optional[str] = None,
+        user_name: Optional[str] = None
     ) -> List[Dict]:
         """
         Get request statistics grouped by user (sender_name).
@@ -651,6 +652,7 @@ class UsageRepository:
         Args:
             date: Optional date filter (YYYY-MM-DD). If None, uses today.
             host_name: Optional host name filter.
+            user_name: Optional user name filter (matches sender_name prefix).
 
         Returns:
             List[Dict]: Request stats by user.
@@ -664,6 +666,12 @@ class UsageRepository:
         if host_name:
             conditions.append("host_name = ?")
             params.append(host_name)
+
+        if user_name:
+            # sender_name format is: {username}-{hostname}-{tool}
+            # Use LIKE to match username prefix
+            conditions.append("sender_name LIKE ?")
+            params.append(f"{user_name}%")
 
         query = f"""
             SELECT
@@ -702,7 +710,7 @@ class UsageRepository:
         Get request trend for a specific user.
 
         Args:
-            user_name: User name (sender_name).
+            user_name: User name (matches sender_name prefix).
             start_date: Start date string (YYYY-MM-DD).
             end_date: End date string (YYYY-MM-DD).
             host_name: Optional host name filter.
@@ -710,8 +718,10 @@ class UsageRepository:
         Returns:
             List[Dict]: Request trend by date for the user.
         """
-        conditions = ["date >= ?", "date <= ?", "role = ?", "sender_name = ?"]
-        params = [start_date, end_date, "assistant", user_name]
+        # sender_name format is: {username}-{hostname}-{tool}
+        # Use LIKE to match username prefix
+        conditions = ["date >= ?", "date <= ?", "role = ?", "sender_name LIKE ?"]
+        params = [start_date, end_date, "assistant", f"{user_name}%"]
 
         if host_name:
             conditions.append("host_name = ?")
@@ -748,7 +758,8 @@ class UsageRepository:
         return results
 
     def get_monthly_request_stats_by_user(
-        self, year: int, month: int, host_name: Optional[str] = None
+        self, year: int, month: int, host_name: Optional[str] = None,
+        user_name: Optional[str] = None
     ) -> List[Dict]:
         """
         Get monthly request statistics grouped by user.
@@ -757,6 +768,7 @@ class UsageRepository:
             year: Year.
             month: Month (1-12).
             host_name: Optional host name filter.
+            user_name: Optional user name filter (matches sender_name prefix).
 
         Returns:
             List[Dict]: Monthly request stats by user.
@@ -773,6 +785,12 @@ class UsageRepository:
         if host_name:
             conditions.append("host_name = ?")
             params.append(host_name)
+
+        if user_name:
+            # sender_name format is: {username}-{hostname}-{tool}
+            # Use LIKE to match username prefix
+            conditions.append("sender_name LIKE ?")
+            params.append(f"{user_name}%")
 
         query = f"""
             SELECT

@@ -106,6 +106,7 @@ def register_blueprints(app):
     from app.routes.roi import roi_bp
     from app.routes.sso import sso_bp
     from app.routes.tenant import tenant_bp
+    from app.routes.tool_accounts import tool_accounts_bp
     from app.routes.upload import upload_bp
     from app.routes.usage import usage_bp
     from app.routes.workspace import workspace_bp
@@ -127,6 +128,7 @@ def register_blueprints(app):
     app.register_blueprint(alerts_bp, url_prefix="/api")
     app.register_blueprint(roi_bp, url_prefix="/api")
     app.register_blueprint(quota_bp, url_prefix="/api")
+    app.register_blueprint(tool_accounts_bp, url_prefix="/api")
     app.register_blueprint(pages_bp)
 
     logger.info("All blueprints registered")
