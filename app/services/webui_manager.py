@@ -398,6 +398,17 @@ class WebUIManager:
 
         return instance
 
+    def _load_server_config(self) -> dict:
+        """Load server configuration from config.json."""
+        from app.repositories.database import CONFIG_DIR
+        config_path = os.path.join(CONFIG_DIR, "config.json")
+        try:
+            with open(config_path, "r") as f:
+                config = json.load(f)
+            return config.get("server", {})
+        except Exception:
+            return {}
+
     def _launch_webui_process(
         self, system_account: str, port: int
     ) -> Optional[subprocess.Popen]:
@@ -418,21 +429,30 @@ class WebUIManager:
             logger.error("qwen-code-webui executable not found")
             return None
 
+        # Build openace_api_url from config
+        openace_api_url = self.config.url  # e.g. "http://localhost"
+        server_config = self._load_server_config()
+        server_port = server_config.get("web_port", 5000)
+        openace_api_url = f"{openace_api_url}:{server_port}"
+
         # Build command based on platform
         if webui_dir:
             # Running from project directory using node
             cmd = ["node", webui_cmd, "--port", str(port), "--host", "0.0.0.0",
-                   "--token-secret", self.config.token_secret]
+                   "--token-secret", self.config.token_secret,
+                   "--quota-check-enabled", "--openace-api-url", openace_api_url]
             cwd = webui_dir
         elif self._platform in ("linux", "darwin"):
             # Linux/macOS: use sudo -u for global executable
             cmd = ["sudo", "-u", system_account, webui_cmd, "--port", str(port),
-                   "--host", "0.0.0.0", "--token-secret", self.config.token_secret]
+                   "--host", "0.0.0.0", "--token-secret", self.config.token_secret,
+                   "--quota-check-enabled", "--openace-api-url", openace_api_url]
             cwd = None
         else:
             # Other platforms: direct execution (no user switching)
             cmd = [webui_cmd, "--port", str(port), "--host", "0.0.0.0",
-                   "--token-secret", self.config.token_secret]
+                   "--token-secret", self.config.token_secret,
+                   "--quota-check-enabled", "--openace-api-url", openace_api_url]
             cwd = None
 
         logger.debug(f"Launching webui: {cmd}, cwd: {cwd}")

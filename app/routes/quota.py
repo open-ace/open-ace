@@ -335,3 +335,69 @@ def get_my_usage():
     except Exception as e:
         logger.error(f"Error getting usage for user {user_id}: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+@quota_bp.route("/quota/webui-check", methods=["GET"])
+def webui_quota_check():
+    """
+    Check quota using webui token (called by webui backend middleware).
+
+    This endpoint is similar to check_quota() but authenticates via webui token
+    instead of session token. The load_user before_request will set g.user=None
+    for webui tokens, but that's fine since we handle auth internally here.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    webui_token = auth_header.replace("Bearer ", "") if auth_header.startswith("Bearer ") else ""
+
+    if not webui_token:
+        return jsonify({"error": "Missing webui token"}), 401
+
+    from app.services.webui_manager import get_webui_manager
+    manager = get_webui_manager()
+    valid, user_id, error = manager.validate_token(webui_token)
+
+    if not valid:
+        return jsonify({"error": f"Invalid token: {error}"}), 401
+
+    try:
+        status = quota_manager.get_user_quota_status(user_id, period="daily")
+        user = user_repo.get_user_by_id(user_id)
+        monthly_token_quota = user.get("monthly_token_quota") if user else None
+        monthly_request_quota = user.get("monthly_request_quota") if user else None
+
+        today = datetime.now()
+        month_start = today.replace(day=1).strftime("%Y-%m-%d")
+        month_end = today.strftime("%Y-%m-%d")
+        monthly_token_usage = usage_repo.get_daily_range(month_start, month_end)
+        monthly_tokens = sum(m.get("tokens_used", 0) for m in monthly_token_usage)
+        monthly_requests = usage_repo.get_request_count_total(month_start, month_end)
+
+        over_monthly_token = monthly_token_quota is not None and monthly_tokens > monthly_token_quota
+        over_monthly_request = monthly_request_quota is not None and monthly_requests > monthly_request_quota
+
+        response = {
+            "user_id": user_id,
+            "daily": {
+                "tokens": {
+                    "used": status.tokens_used,
+                    "limit": status.token_limit,
+                    "percentage": round((status.tokens_used / status.token_limit * 100), 2) if status.token_limit and status.token_limit > 0 else 0,
+                    "over_quota": status.is_over_token_quota,
+                },
+                "requests": {
+                    "used": status.requests_used,
+                    "limit": status.request_limit,
+                    "percentage": round((status.requests_used / status.request_limit * 100), 2) if status.request_limit and status.request_limit > 0 else 0,
+                    "over_quota": status.is_over_request_quota,
+                },
+            },
+            "monthly": {
+                "tokens": {"used": monthly_tokens, "limit": monthly_token_quota, "over_quota": over_monthly_token},
+                "requests": {"used": monthly_requests, "limit": monthly_request_quota, "over_quota": over_monthly_request},
+            },
+            "can_use": not (status.is_over_token_quota or status.is_over_request_quota or over_monthly_token or over_monthly_request),
+        }
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error in webui quota check for user {user_id}: {e}")
+        return jsonify({"error": str(e)}), 500
