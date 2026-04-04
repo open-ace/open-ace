@@ -162,6 +162,9 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Remove trailing slash from OUTPUT_DIR to avoid double slashes
+OUTPUT_DIR="${OUTPUT_DIR%/}"
+
 print_header "Open ACE - 镜像导出工具"
 
 # Interactive prompt for export mode (skip if --app-only is specified)
