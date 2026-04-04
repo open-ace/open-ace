@@ -243,6 +243,36 @@ class WebUIManager:
         except OSError:
             return False
 
+    def _wait_for_service_ready(self, port: int, timeout: float = 10.0) -> bool:
+        """
+        Wait for the webui service to be ready on the given port.
+
+        Args:
+            port: Port to check.
+            timeout: Maximum time to wait in seconds.
+
+        Returns:
+            True if service is ready, False if timeout reached.
+        """
+        start_time = time.time()
+        check_interval = 0.5  # Check every 500ms
+
+        while time.time() - start_time < timeout:
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.settimeout(1.0)
+                    # Try to connect to the port
+                    s.connect(("localhost", port))
+                    # Service is ready
+                    logger.info(f"WebUI service on port {port} is ready after {time.time() - start_time:.1f}s")
+                    return True
+            except (socket.error, OSError):
+                # Service not ready yet, wait and retry
+                time.sleep(check_interval)
+
+        logger.warning(f"WebUI service on port {port} not ready after {timeout}s timeout")
+        return False
+
     def release_port(self, port: int):
         """Release a port back to the pool."""
         with self._lock:
@@ -355,6 +385,9 @@ class WebUIManager:
 
         Returns:
             WebUIInstance object.
+
+        Raises:
+            ValueError: If service fails to start within timeout.
         """
         # Allocate port
         port = self.allocate_port(user_id)
@@ -376,9 +409,27 @@ class WebUIManager:
         try:
             process = self._launch_webui_process(system_account, port)
             pid = process.pid if process else None
+
+            if process is None:
+                # Failed to launch process
+                self.release_port(port)
+                raise ValueError("Failed to launch webui process")
+
+            # Wait for service to be ready
+            if not self._wait_for_service_ready(port, timeout=10.0):
+                # Service not ready, clean up
+                try:
+                    process.terminate()
+                    process.wait(timeout=2)
+                except Exception:
+                    pass
+                self.release_port(port)
+                raise ValueError("WebUI service failed to start within timeout")
+
         except Exception as e:
             logger.error(f"Failed to start webui process: {e}")
             self.release_port(port)
+            raise
 
         instance = WebUIInstance(
             user_id=user_id,

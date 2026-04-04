@@ -51,6 +51,11 @@ const translations: Record<Language, Translations> = {
     prompts: 'Prompts',
     report: 'Report',
     workspace: 'Workspace',
+    workspaceLoading: 'Starting workspace, please wait...',
+    workspaceNotConfigured: 'Workspace not configured',
+    workspaceNotConfiguredHelp: 'Please contact administrator to configure workspace URL',
+    workspaceUnavailable: 'Workspace unavailable',
+    workspaceUnavailableHelp: 'Please log in to access your workspace',
     security: 'Security',
 
     // Mode - Dual-track system
@@ -589,6 +594,11 @@ const translations: Record<Language, Translations> = {
     prompts: '提示词',
     report: '报告',
     workspace: '工作区',
+    workspaceLoading: '正在启动工作区，请稍候...',
+    workspaceNotConfigured: '工作区未配置',
+    workspaceNotConfiguredHelp: '请联系管理员配置工作区 URL',
+    workspaceUnavailable: '工作区不可用',
+    workspaceUnavailableHelp: '请登录后访问您的工作区',
     security: '安全',
 
     // Mode - Dual-track system
@@ -1124,6 +1134,11 @@ const translations: Record<Language, Translations> = {
     prompts: 'プロンプト',
     report: 'レポート',
     workspace: 'ワークスペース',
+    workspaceLoading: 'ワークスペースを起動中です...',
+    workspaceNotConfigured: 'ワークスペースが設定されていません',
+    workspaceNotConfiguredHelp: '管理者に連絡してワークスペースURLを設定してください',
+    workspaceUnavailable: 'ワークスペースは利用できません',
+    workspaceUnavailableHelp: 'ワークスペースにアクセスするにはログインしてください',
     security: 'セキュリティ',
 
     // Mode - Dual-track system
@@ -1476,6 +1491,11 @@ const translations: Record<Language, Translations> = {
     prompts: '프롬프트',
     report: '보고서',
     workspace: '워크스페이스',
+    workspaceLoading: '워크스페이스 시작 중...',
+    workspaceNotConfigured: '워크스페이스가 구성되지 않았습니다',
+    workspaceNotConfiguredHelp: '관리자에게 워크스페이스 URL 구성을 요청하세요',
+    workspaceUnavailable: '워크스페이스를 사용할 수 없습니다',
+    workspaceUnavailableHelp: '워크스페이스에 액세스하려면 로그인하세요',
     security: '보안',
 
     // Mode - Dual-track system

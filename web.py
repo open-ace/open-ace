@@ -58,9 +58,18 @@ if __name__ == "__main__":
     if debug_mode:
         print("WARNING: Running in DEBUG mode - not recommended for production!")
 
-    # Disable reloader when stdin is not available (e.g., running in scripts or pipes)
+    # Disable reloader when stdin is not available (e.g., running in scripts, pipes, or background)
     # This prevents termios.error: (5, 'Input/output error')
-    use_reloader = debug_mode and sys.stdin.isatty()
+    # Check both isatty() and whether stdin is actually usable
+    try:
+        # Try to access stdin attributes - will fail if stdin is closed or redirected
+        if sys.stdin.isatty() and sys.stdin.fileno() >= 0:
+            use_reloader = debug_mode
+        else:
+            use_reloader = False
+    except (AttributeError, OSError, ValueError):
+        # stdin is not available (closed, redirected, or in background)
+        use_reloader = False
 
     app.run(
         host=WEB_HOST, port=WEB_PORT, debug=debug_mode, threaded=True, use_reloader=use_reloader

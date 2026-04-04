@@ -47,6 +47,7 @@ export const Workspace: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [tabs, setTabs] = useState<WorkspaceTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>('');
+  const [loadingTabs, setLoadingTabs] = useState<Set<string>>(new Set());
 
   // Load workspace config and user webui URL
   useEffect(() => {
@@ -148,6 +149,8 @@ export const Workspace: React.FC = () => {
       };
       setTabs([initialTab]);
       setActiveTabId(initialTab.id);
+      // Mark as loading
+      setLoadingTabs(new Set([initialTab.id]));
     }
   }, [config, userWebUI, tabs.length, language, getEffectiveUrl]);
 
@@ -180,6 +183,8 @@ export const Workspace: React.FC = () => {
 
     setTabs((prev) => [...prev, newTab]);
     setActiveTabId(newTab.id);
+    // Mark as loading
+    setLoadingTabs((prev) => new Set(prev).add(newTab.id));
   }, [getEffectiveUrl, userWebUI, language]);
 
   // Close a tab
@@ -207,6 +212,15 @@ export const Workspace: React.FC = () => {
   // Switch to a tab
   const switchTab = useCallback((tabId: string) => {
     setActiveTabId(tabId);
+  }, []);
+
+  // Handle iframe load complete
+  const handleIframeLoad = useCallback((tabId: string) => {
+    setLoadingTabs((prev) => {
+      const newSet = new Set(prev);
+      newSet.delete(tabId);
+      return newSet;
+    });
   }, []);
 
   // Navigate to usage page
@@ -388,12 +402,27 @@ export const Workspace: React.FC = () => {
               activeTabId === tab.id ? 'd-block' : 'd-none'
             )}
           >
+            {/* Loading overlay */}
+            {loadingTabs.has(tab.id) && (
+              <div
+                className="position-absolute top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center bg-light"
+                style={{ zIndex: 10 }}
+              >
+                <div className="text-center">
+                  <div className="spinner-border text-primary mb-3" role="status">
+                    <span className="visually-hidden">{t('loading', language)}</span>
+                  </div>
+                  <p className="text-muted">{t('workspaceLoading', language)}</p>
+                </div>
+              </div>
+            )}
             <iframe
               src={tab.url}
               title={`Workspace - ${tab.title}`}
               className="w-100 h-100"
               style={{ border: 'none' }}
               allow="clipboard-read; clipboard-write"
+              onLoad={() => handleIframeLoad(tab.id)}
             />
           </div>
         ))}
