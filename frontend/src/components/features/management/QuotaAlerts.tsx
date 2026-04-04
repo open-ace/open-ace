@@ -437,69 +437,100 @@ export const QuotaAlerts: React.FC = () => {
           }
         >
           {editingUser && (
-            <div className="row g-3">
-              <div className="col-12">
-                <p className="mb-3">
-                  <strong>{t('user', language)}:</strong> {editingUser.username}
-                </p>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleSubmitQuota();
+              }}
+            >
+              <div className="row g-3">
+                <div className="col-12">
+                  <p className="mb-3">
+                    <strong>{t('user', language)}:</strong> {editingUser.username}
+                  </p>
+                </div>
+                <div className="col-md-6">
+                  <label className="form-label">{t('dailyTokenQuota', language)} (M)</label>
+                  <TextInput
+                    type="number"
+                    value={formData.daily_token_quota?.toString() ?? ''}
+                    onChange={(value: string) =>
+                      setFormData({
+                        ...formData,
+                        daily_token_quota: value ? parseInt(value) : undefined,
+                      })
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleSubmitQuota();
+                      }
+                    }}
+                    placeholder={t('unlimited', language)}
+                  />
+                </div>
+                <div className="col-md-6">
+                  <label className="form-label">{t('monthlyTokenQuota', language)} (M)</label>
+                  <TextInput
+                    type="number"
+                    value={formData.monthly_token_quota?.toString() ?? ''}
+                    onChange={(value: string) =>
+                      setFormData({
+                        ...formData,
+                        monthly_token_quota: value ? parseInt(value) : undefined,
+                      })
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleSubmitQuota();
+                      }
+                    }}
+                    placeholder={t('unlimited', language)}
+                  />
+                </div>
+                <div className="col-md-6">
+                  <label className="form-label">{t('dailyRequestQuota', language)}</label>
+                  <TextInput
+                    type="number"
+                    value={formData.daily_request_quota?.toString() ?? ''}
+                    onChange={(value: string) =>
+                      setFormData({
+                        ...formData,
+                        daily_request_quota: value ? parseInt(value) : undefined,
+                      })
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleSubmitQuota();
+                      }
+                    }}
+                    placeholder={t('unlimited', language)}
+                  />
+                </div>
+                <div className="col-md-6">
+                  <label className="form-label">{t('monthlyRequestQuota', language)}</label>
+                  <TextInput
+                    type="number"
+                    value={formData.monthly_request_quota?.toString() ?? ''}
+                    onChange={(value: string) =>
+                      setFormData({
+                        ...formData,
+                        monthly_request_quota: value ? parseInt(value) : undefined,
+                      })
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleSubmitQuota();
+                      }
+                    }}
+                    placeholder={t('unlimited', language)}
+                  />
+                </div>
               </div>
-              <div className="col-md-6">
-                <label className="form-label">{t('dailyTokenQuota', language)} (M)</label>
-                <TextInput
-                  type="number"
-                  value={formData.daily_token_quota?.toString() ?? ''}
-                  onChange={(value: string) =>
-                    setFormData({
-                      ...formData,
-                      daily_token_quota: value ? parseInt(value) : undefined,
-                    })
-                  }
-                  placeholder={t('unlimited', language)}
-                />
-              </div>
-              <div className="col-md-6">
-                <label className="form-label">{t('monthlyTokenQuota', language)} (M)</label>
-                <TextInput
-                  type="number"
-                  value={formData.monthly_token_quota?.toString() ?? ''}
-                  onChange={(value: string) =>
-                    setFormData({
-                      ...formData,
-                      monthly_token_quota: value ? parseInt(value) : undefined,
-                    })
-                  }
-                  placeholder={t('unlimited', language)}
-                />
-              </div>
-              <div className="col-md-6">
-                <label className="form-label">{t('dailyRequestQuota', language)}</label>
-                <TextInput
-                  type="number"
-                  value={formData.daily_request_quota?.toString() ?? ''}
-                  onChange={(value: string) =>
-                    setFormData({
-                      ...formData,
-                      daily_request_quota: value ? parseInt(value) : undefined,
-                    })
-                  }
-                  placeholder={t('unlimited', language)}
-                />
-              </div>
-              <div className="col-md-6">
-                <label className="form-label">{t('monthlyRequestQuota', language)}</label>
-                <TextInput
-                  type="number"
-                  value={formData.monthly_request_quota?.toString() ?? ''}
-                  onChange={(value: string) =>
-                    setFormData({
-                      ...formData,
-                      monthly_request_quota: value ? parseInt(value) : undefined,
-                    })
-                  }
-                  placeholder={t('unlimited', language)}
-                />
-              </div>
-            </div>
+            </form>
           )}
         </Modal>
       </>

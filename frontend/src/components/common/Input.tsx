@@ -21,6 +21,7 @@ interface TextInputProps extends BaseInputProps {
   placeholder?: string;
   value?: string;
   onChange?: (value: string) => void;
+  onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
   icon?: React.ReactNode;
   iconPosition?: 'left' | 'right';
 }
@@ -33,6 +34,7 @@ export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
       placeholder,
       value,
       onChange,
+      onKeyDown,
       error,
       hint,
       required,
@@ -60,6 +62,7 @@ export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
             placeholder={placeholder}
             value={value}
             onChange={(e) => onChange?.(e.target.value)}
+            onKeyDown={onKeyDown}
             disabled={disabled}
             required={required}
           />
