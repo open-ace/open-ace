@@ -421,15 +421,18 @@ class WebUIManager:
         # Build command based on platform
         if webui_dir:
             # Running from project directory using node
-            cmd = ["node", webui_cmd, "--port", str(port), "--host", "0.0.0.0"]
+            cmd = ["node", webui_cmd, "--port", str(port), "--host", "0.0.0.0",
+                   "--token-secret", self.config.token_secret]
             cwd = webui_dir
         elif self._platform in ("linux", "darwin"):
             # Linux/macOS: use sudo -u for global executable
-            cmd = ["sudo", "-u", system_account, webui_cmd, "--port", str(port), "--host", "0.0.0.0"]
+            cmd = ["sudo", "-u", system_account, webui_cmd, "--port", str(port),
+                   "--host", "0.0.0.0", "--token-secret", self.config.token_secret]
             cwd = None
         else:
             # Other platforms: direct execution (no user switching)
-            cmd = [webui_cmd, "--port", str(port), "--host", "0.0.0.0"]
+            cmd = [webui_cmd, "--port", str(port), "--host", "0.0.0.0",
+                   "--token-secret", self.config.token_secret]
             cwd = None
 
         logger.debug(f"Launching webui: {cmd}, cwd: {cwd}")

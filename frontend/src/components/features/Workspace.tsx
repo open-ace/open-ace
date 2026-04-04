@@ -131,8 +131,14 @@ export const Workspace: React.FC = () => {
 
   // Initialize first tab when config is loaded
   useEffect(() => {
+    // Wait for both config and userWebUI (in multi-user mode) to be loaded
+    if (!config?.enabled) return;
+
+    // In multi-user mode, wait for userWebUI to be loaded
+    if (config.multi_user_mode && !userWebUI?.success) return;
+
     const effectiveUrl = getEffectiveUrl();
-    if (config?.enabled && effectiveUrl && tabs.length === 0) {
+    if (effectiveUrl && tabs.length === 0) {
       const initialTab: WorkspaceTab = {
         id: generateTabId(),
         title: t('newSession', language),
