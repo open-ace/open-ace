@@ -333,14 +333,14 @@ class TenantService:
         today_requests = sum(u.requests_made for u in usage_records)
 
         # Check limits
-        if (today_tokens + tokens) > tenant.quota.daily_token_limit:
+        if (today_tokens + tokens) >= tenant.quota.daily_token_limit:
             return {
                 "allowed": False,
                 "reason": f"Daily token quota exceeded. Used: {today_tokens}/{tenant.quota.daily_token_limit}",
                 "tenant": tenant.to_dict(),
             }
 
-        if (today_requests + requests) > tenant.quota.daily_request_limit:
+        if (today_requests + requests) >= tenant.quota.daily_request_limit:
             return {
                 "allowed": False,
                 "reason": f"Daily request quota exceeded. Used: {today_requests}/{tenant.quota.daily_request_limit}",

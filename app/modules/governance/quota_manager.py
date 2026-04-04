@@ -247,8 +247,8 @@ class QuotaManager:
             request_limit=request_limit,
             requests_used=requests_used,
             request_percentage=round(request_pct, 2),
-            is_over_token_quota=tokens_used > token_limit,
-            is_over_request_quota=requests_used > request_limit,
+            is_over_token_quota=tokens_used >= token_limit,
+            is_over_request_quota=requests_used >= request_limit,
             alerts=alerts,
         )
 
@@ -267,8 +267,8 @@ class QuotaManager:
         status = self.get_user_quota_status(user_id)
 
         # Check if would exceed after this usage
-        would_exceed_tokens = (status.tokens_used + tokens) > status.token_limit
-        would_exceed_requests = (status.requests_used + requests) > status.request_limit
+        would_exceed_tokens = (status.tokens_used + tokens) >= status.token_limit
+        would_exceed_requests = (status.requests_used + requests) >= status.request_limit
 
         if would_exceed_tokens:
             return {
@@ -598,8 +598,8 @@ class QuotaManager:
                     request_limit=request_limit,
                     requests_used=requests_used,
                     request_percentage=round(request_pct, 2),
-                    is_over_token_quota=tokens_used > token_limit,
-                    is_over_request_quota=requests_used > request_limit,
+                    is_over_token_quota=tokens_used >= token_limit,
+                    is_over_request_quota=requests_used >= request_limit,
                     alerts=alerts,
                 )
             )

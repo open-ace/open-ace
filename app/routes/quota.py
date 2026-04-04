@@ -145,7 +145,7 @@ def check_quota():
                     if monthly_token_quota and monthly_token_quota > 0
                     else 0,
                     "over_quota": monthly_token_quota is not None
-                    and monthly_tokens > monthly_token_quota,
+                    and monthly_tokens >= monthly_token_quota,
                 },
                 "requests": {
                     "used": monthly_requests,
@@ -154,7 +154,7 @@ def check_quota():
                     if monthly_request_quota and monthly_request_quota > 0
                     else 0,
                     "over_quota": monthly_request_quota is not None
-                    and monthly_requests > monthly_request_quota,
+                    and monthly_requests >= monthly_request_quota,
                 },
             },
             "can_use": not (status.is_over_token_quota or status.is_over_request_quota),
@@ -245,8 +245,8 @@ def get_quota_status():
         monthly_token_limit = user.get("monthly_token_quota")
         monthly_request_limit = user.get("monthly_request_quota")
 
-        over_daily_token = daily_token_limit and today_tokens > daily_token_limit
-        over_daily_request = daily_request_limit and today_requests > daily_request_limit
+        over_daily_token = daily_token_limit and today_tokens >= daily_token_limit
+        over_daily_request = daily_request_limit and today_requests >= daily_request_limit
         over_monthly_token = monthly_token_limit and monthly_tokens > monthly_token_limit
         over_monthly_request = monthly_request_limit and monthly_requests > monthly_request_limit
 
@@ -372,8 +372,8 @@ def webui_quota_check():
         monthly_tokens = sum(m.get("tokens_used", 0) for m in monthly_token_usage)
         monthly_requests = usage_repo.get_request_count_total(month_start, month_end)
 
-        over_monthly_token = monthly_token_quota is not None and monthly_tokens > monthly_token_quota
-        over_monthly_request = monthly_request_quota is not None and monthly_requests > monthly_request_quota
+        over_monthly_token = monthly_token_quota is not None and monthly_tokens >= monthly_token_quota
+        over_monthly_request = monthly_request_quota is not None and monthly_requests >= monthly_request_quota
 
         response = {
             "user_id": user_id,
