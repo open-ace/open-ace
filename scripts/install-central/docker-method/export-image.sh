@@ -324,19 +324,19 @@ if [ -f "$OUTPUT_FILE" ]; then
         echo "    - $img"
     done
     echo ""
+
+    # Get script directory for install.sh path
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    INSTALL_SH="$SCRIPT_DIR/install.sh"
+
     echo "部署方法:"
-    echo "  1. 拷贝文件到目标服务器:"
-    echo "     scp $OUTPUT_FILE user@server:~"
+    echo "  1. 拷贝镜像文件和 install.sh 到目标服务器同一目录:"
+    echo "     scp $OUTPUT_FILE $INSTALL_SH user@server:~/open-ace/"
     echo ""
-    echo "  2. 在目标服务器上加载镜像:"
-    if [ "$COMPRESS" = true ]; then
-        echo "     gunzip -c $OUTPUT_NAME.tar.gz | docker load"
-    else
-        echo "     docker load -i $OUTPUT_NAME.tar"
-    fi
+    echo "  2. 在目标服务器上执行安装脚本:"
+    echo "     cd ~/open-ace && ./install.sh"
     echo ""
-    echo "  3. 运行部署脚本:"
-    echo "     ./deploy.sh"
+    echo "  注意: install.sh 会自动加载镜像文件并完成部署"
     echo ""
 else
     print_error "镜像导出失败"
