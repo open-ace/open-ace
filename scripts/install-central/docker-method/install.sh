@@ -40,7 +40,7 @@ WORKSPACE_ENABLED="${WORKSPACE_ENABLED:-true}"
 WORKSPACE_URL="${WORKSPACE_URL:-http://localhost:3000}"
 WORKSPACE_PORT="${WORKSPACE_PORT:-}"
 # Multi-user workspace mode defaults
-WORKSPACE_MULTI_USER_MODE="${WORKSPACE_MULTI_USER_MODE:-false}"
+WORKSPACE_MULTI_USER_MODE="${WORKSPACE_MULTI_USER_MODE:-true}"
 WORKSPACE_PORT_RANGE_START="${WORKSPACE_PORT_RANGE_START:-3100}"
 WORKSPACE_PORT_RANGE_END="${WORKSPACE_PORT_RANGE_END:-3200}"
 WORKSPACE_MAX_INSTANCES="${WORKSPACE_MAX_INSTANCES:-20}"
@@ -137,6 +137,55 @@ prompt_yesno() {
 # ============================================================================
 # Multi-User Workspace Sudo Configuration
 # ============================================================================
+
+# Stop and disable qwen-code-webui systemd service if it exists
+# Open ACE will manage qwen-code-webui instances in multi-user mode
+stop_webui_systemd_service() {
+    local os_type=$(detect_os)
+
+    # Skip on macOS (no systemd)
+    if [[ "$os_type" == "macos" ]]; then
+        return 0
+    fi
+
+    # Check if systemd is available
+    if ! command -v systemctl &>/dev/null; then
+        return 0
+    fi
+
+    # Check if qwen-code-webui service exists
+    local service_name="qwen-code-webui"
+    # List all service unit files and check if our service exists
+    if systemctl list-unit-files --type=service 2>/dev/null | grep -q "^${service_name}.service"; then
+        print_warning "检测到已存在的 qwen-code-webui systemd 服务"
+        print_info "多用户模式下，Open ACE 会自动管理 qwen-code-webui 实例"
+        print_info "停止并禁用独立运行的 qwen-code-webui 服务..."
+
+        # Stop the service
+        if systemctl is-active --quiet "${service_name}.service" 2>/dev/null; then
+            systemctl stop "${service_name}.service"
+            if [ $? -eq 0 ]; then
+                print_success "已停止 ${service_name} 服务"
+            else
+                print_warning "停止 ${service_name} 服务失败"
+            fi
+        fi
+
+        # Disable the service
+        if systemctl is-enabled --quiet "${service_name}.service" 2>/dev/null; then
+            systemctl disable "${service_name}.service"
+            if [ $? -eq 0 ]; then
+                print_success "已禁用 ${service_name} 服务"
+            else
+                print_warning "禁用 ${service_name} 服务失败"
+            fi
+        fi
+
+        print_info "Open ACE 将在需要时自动启动 qwen-code-webui 实例"
+    fi
+
+    return 0
+}
 
 # Find qwen-code-webui executable
 find_webui_executable() {
@@ -1428,19 +1477,13 @@ show_deployment_info() {
         fi
     fi
     
-    if [ "$WORKSPACE_ENABLED" = "true" ]; then
-        echo "Workspace:"
-        echo "  URL: $WORKSPACE_URL"
-        echo "  注意: Workspace 运行在独立容器中，请确保该服务已启动"
-        echo ""
-    fi
     echo "防火墙:"
     echo "  端口 $WEB_PORT 已开放"
     if [ "$OPENCLAW_ENABLED" = "true" ] && [ -n "$OPENCLAW_PORT" ]; then
         echo "  端口 $OPENCLAW_PORT 已开放 (OpenClaw)"
     fi
-    if [ "$WORKSPACE_ENABLED" = "true" ]; then
-        echo "  Workspace 端口: 请确保 $WORKSPACE_PORT 已开放 (独立容器)"
+    if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
+        echo "  Workspace 端口范围: $WORKSPACE_PORT_RANGE_START-$WORKSPACE_PORT_RANGE_END (多用户模式)"
     fi
     echo "  如需开放其他端口，请手动配置防火墙"
     echo ""
@@ -1548,7 +1591,7 @@ if [ "$NON_INTERACTIVE" = false ]; then
         echo -e "${BLUE}=== 多用户模式配置 ===${NC}"
         echo -e "${YELLOW}多用户模式会为每个用户启动独立的 qwen-code-webui 进程${NC}"
         echo -e "${YELLOW}需要配置 sudo 和安装 qwen-code-webui，详见部署文档${NC}"
-        prompt_yesno "启用多用户模式?" "n" enable_multi_user
+        prompt_yesno "启用多用户模式?" "y" enable_multi_user
         WORKSPACE_MULTI_USER_MODE=$([ "$enable_multi_user" = "yes" ] && echo "true" || echo "false")
         if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
             prompt_input "端口池起始端口" "$WORKSPACE_PORT_RANGE_START" WORKSPACE_PORT_RANGE_START
@@ -1608,6 +1651,8 @@ fi
 
 # Configure sudoers for multi-user workspace mode
 if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
+    # Stop existing qwen-code-webui systemd service first
+    stop_webui_systemd_service
     configure_sudoers
     if [ $? -ne 0 ]; then
         print_warning "Sudoers 配置失败，多用户模式可能无法正常工作"
@@ -1617,6 +1662,23 @@ fi
 
 # Execute deployment
 create_directories
+
+# Check for existing PostgreSQL data volume BEFORE creating config files
+# This is important to preserve the old password if upgrading
+VOLUME_NAME="open-ace_postgres-data"
+EXISTING_VOLUME=$(docker volume ls -q --filter "name=$VOLUME_NAME" 2>/dev/null || true)
+OLD_DB_PASSWORD=""
+
+if [ -n "$EXISTING_VOLUME" ] && [ -f "$DEPLOY_DIR/.env" ]; then
+    # Extract old password from existing .env before we overwrite it
+    OLD_DB_PASSWORD=$(grep "^DB_PASSWORD=" "$DEPLOY_DIR/.env" 2>/dev/null | cut -d'=' -f2 || true)
+    if [ -n "$OLD_DB_PASSWORD" ]; then
+        print_info "检测到已存在的 PostgreSQL 数据卷，保存旧密码以便后续使用"
+        # Keep the old password for PostgreSQL connection
+        DB_PASSWORD="$OLD_DB_PASSWORD"
+    fi
+fi
+
 create_config
 create_docker_compose
 create_env_file

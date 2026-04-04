@@ -38,7 +38,7 @@ SERVICE_PORT=""       # Web server port (will be read from config or use default
 SERVICE_HOST="0.0.0.0" # Web server host
 
 # Multi-user workspace mode settings
-WORKSPACE_MULTI_USER_MODE="false"
+WORKSPACE_MULTI_USER_MODE="true"
 WORKSPACE_PORT_RANGE_START="3100"
 WORKSPACE_PORT_RANGE_END="3200"
 WORKSPACE_MAX_INSTANCES="20"
@@ -133,6 +133,48 @@ prompt_yesno() {
 # ============================================================================
 # Multi-User Workspace Sudo Configuration
 # ============================================================================
+
+# Stop and disable qwen-code-webui systemd service if it exists
+# Open ACE will manage qwen-code-webui instances in multi-user mode
+stop_webui_systemd_service() {
+    # Check if systemd is available
+    if ! command -v systemctl &>/dev/null; then
+        return 0
+    fi
+
+    # Check if qwen-code-webui service exists
+    local service_name="qwen-code-webui"
+    # List all service unit files and check if our service exists
+    if systemctl list-unit-files --type=service 2>/dev/null | grep -q "^${service_name}.service"; then
+        print_warning "检测到已存在的 qwen-code-webui systemd 服务"
+        print_info "多用户模式下，Open ACE 会自动管理 qwen-code-webui 实例"
+        print_info "停止并禁用独立运行的 qwen-code-webui 服务..."
+
+        # Stop the service (need sudo for system service)
+        if sudo systemctl is-active --quiet "${service_name}.service" 2>/dev/null; then
+            sudo systemctl stop "${service_name}.service"
+            if [ $? -eq 0 ]; then
+                print_success "已停止 ${service_name} 服务"
+            else
+                print_warning "停止 ${service_name} 服务失败"
+            fi
+        fi
+
+        # Disable the service (need sudo for system service)
+        if sudo systemctl is-enabled --quiet "${service_name}.service" 2>/dev/null; then
+            sudo systemctl disable "${service_name}.service"
+            if [ $? -eq 0 ]; then
+                print_success "已禁用 ${service_name} 服务"
+            else
+                print_warning "禁用 ${service_name} 服务失败"
+            fi
+        fi
+
+        print_info "Open ACE 将在需要时自动启动 qwen-code-webui 实例"
+    fi
+
+    return 0
+}
 
 # Find qwen-code-webui executable
 find_webui_executable() {
@@ -528,7 +570,7 @@ configure_local() {
     echo ""
     echo -e "${BLUE}=== Workspace 多用户模式配置 ===${NC}"
     echo -e "${YELLOW}多用户模式会为每个用户启动独立的 qwen-code-webui 进程${NC}"
-    prompt_yesno "启用多用户模式?" "n" enable_multi_user
+    prompt_yesno "启用多用户模式?" "y" enable_multi_user
     if [ "$enable_multi_user" = "yes" ]; then
         WORKSPACE_MULTI_USER_MODE="true"
         prompt_input "端口池起始端口" "$WORKSPACE_PORT_RANGE_START" WORKSPACE_PORT_RANGE_START
@@ -593,7 +635,7 @@ configure_deploy() {
     echo ""
     echo -e "${BLUE}=== Workspace 多用户模式配置 ===${NC}"
     echo -e "${YELLOW}多用户模式会为每个用户启动独立的 qwen-code-webui 进程${NC}"
-    prompt_yesno "启用多用户模式?" "n" enable_multi_user
+    prompt_yesno "启用多用户模式?" "y" enable_multi_user
     if [ "$enable_multi_user" = "yes" ]; then
         WORKSPACE_MULTI_USER_MODE="true"
         prompt_input "端口池起始端口" "$WORKSPACE_PORT_RANGE_START" WORKSPACE_PORT_RANGE_START
@@ -666,6 +708,8 @@ install_local() {
 
     # Configure sudoers for multi-user workspace mode
     if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
+        # Stop existing qwen-code-webui systemd service first
+        stop_webui_systemd_service
         configure_sudoers "$DEPLOY_USER"
         if [ $? -ne 0 ]; then
             print_warning "Sudoers 配置失败，多用户模式可能无法正常工作"
