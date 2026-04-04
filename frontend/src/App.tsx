@@ -44,6 +44,7 @@ const ComplianceMgmt = lazy(() => import('@/components/features/management/Compl
 const SecurityCenter = lazy(() => import('@/components/features/management/SecurityCenter').then(m => ({ default: m.SecurityCenter })));
 const TenantManagement = lazy(() => import('@/components/features/management/TenantManagement').then(m => ({ default: m.TenantManagement })));
 const SSOSettings = lazy(() => import('@/components/features/settings/SSOSettings').then(m => ({ default: m.SSOSettings })));
+const ProjectManagement = lazy(() => import('@/components/features/management/ProjectManagement').then(m => ({ default: m.ProjectManagement })));
 
 // Page loading fallback with skeleton
 const PageLoader: React.FC = () => {
@@ -183,6 +184,9 @@ const ManageRoutes: React.FC = () => {
           {/* Users */}
           <Route path="/users" element={<UserManagement />} />
           <Route path="/tenants" element={<TenantManagement />} />
+
+          {/* Projects */}
+          <Route path="/projects" element={<ProjectManagement />} />
 
           {/* Settings */}
           <Route path="/settings/sso" element={<SSOSettings />} />

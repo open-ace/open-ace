@@ -2,6 +2,7 @@
 """Models module for Open ACE application."""
 
 from app.models.message import DailyMessage, Message
+from app.models.project import Project, ProjectDailyStats, ProjectStats, UserProject
 from app.models.session import Session
 from app.models.tenant import QuotaConfig, Tenant, TenantSettings, TenantStatus, TenantUsage
 from app.models.usage import DailyUsage, Usage
@@ -20,4 +21,8 @@ __all__ = [
     "TenantStatus",
     "QuotaConfig",
     "TenantSettings",
+    "Project",
+    "UserProject",
+    "ProjectStats",
+    "ProjectDailyStats",
 ]

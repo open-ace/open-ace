@@ -98,9 +98,11 @@ def register_blueprints(app):
     from app.routes.auth import auth_bp
     from app.routes.compliance import compliance_bp
     from app.routes.fetch import fetch_bp
+    from app.routes.fs import fs_bp
     from app.routes.governance import governance_bp
     from app.routes.messages import messages_bp
     from app.routes.pages import pages_bp
+    from app.routes.projects import projects_bp
     from app.routes.quota import quota_bp
     from app.routes.report import report_bp
     from app.routes.roi import roi_bp
@@ -118,6 +120,7 @@ def register_blueprints(app):
     app.register_blueprint(admin_bp, url_prefix="/api")
     app.register_blueprint(upload_bp, url_prefix="/api")
     app.register_blueprint(fetch_bp, url_prefix="/api")
+    app.register_blueprint(fs_bp, url_prefix="/api")
     app.register_blueprint(report_bp, url_prefix="/api")
     app.register_blueprint(governance_bp, url_prefix="/api")
     app.register_blueprint(analytics_bp, url_prefix="/api")
@@ -129,6 +132,7 @@ def register_blueprints(app):
     app.register_blueprint(roi_bp, url_prefix="/api")
     app.register_blueprint(quota_bp, url_prefix="/api")
     app.register_blueprint(tool_accounts_bp, url_prefix="/api")
+    app.register_blueprint(projects_bp, url_prefix="/api")
     app.register_blueprint(pages_bp)
 
     logger.info("All blueprints registered")

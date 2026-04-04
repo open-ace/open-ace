@@ -33,6 +33,8 @@
     ]
   },
   "dependencies": {
+    "@headlessui/react": "^2.2.9",
+    "@heroicons/react": "^2.2.0",
     "@tanstack/react-query": "^5.62.0",
     "bootstrap": "^5.3.8",
     "bootstrap-icons": "^1.13.1",

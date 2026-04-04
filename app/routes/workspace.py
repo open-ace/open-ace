@@ -469,6 +469,24 @@ def create_session():
 
         user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
 
+        # Get project info from request or look up by path
+        project_id = data.get("project_id")
+        project_path = data.get("project_path")
+        
+        # If project_path is provided but not project_id, look up the project
+        if project_path and not project_id:
+            try:
+                from app.repositories.project_repo import ProjectRepository
+                project_repo = ProjectRepository()
+                project = project_repo.get_project_by_path(project_path)
+                if project:
+                    project_id = project.id
+                    # Auto-add user to project if not already
+                    if user_id:
+                        project_repo.add_user_project(user_id, project_id)
+            except Exception as e:
+                logger.warning(f"Failed to look up project by path: {e}")
+
         manager = SessionManager()
         session = manager.create_session(
             tool_name=tool_name,
@@ -480,6 +498,8 @@ def create_session():
             settings=data.get("settings"),
             model=data.get("model"),
             expires_in_hours=data.get("expires_in_hours"),
+            project_id=project_id,
+            project_path=project_path,
         )
 
         return jsonify({"success": True, "data": session.to_dict()}), 201

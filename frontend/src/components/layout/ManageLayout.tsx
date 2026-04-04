@@ -129,6 +129,18 @@ const navSections: NavSection[] = [
     ],
   },
   {
+    id: 'projects',
+    title: 'projects',
+    items: [
+      {
+        id: 'projects',
+        label: 'projectManagement',
+        icon: 'bi-folder',
+        path: '/manage/projects',
+      },
+    ],
+  },
+  {
     id: 'settings',
     title: 'settings',
     items: [

@@ -408,6 +408,10 @@ const translations: Record<Language, Translations> = {
     roiAnalysis: 'ROI Analysis',
     alertManagement: 'Alert Management',
     tenantManagement: 'Tenant Management',
+
+    // Projects
+    projects: 'Projects',
+    projectManagement: 'Project Management',
     auditAnalysis: 'Audit Analysis',
     ssoSettings: 'SSO Settings',
     dataRetention: 'Data Retention',
@@ -949,6 +953,10 @@ const translations: Record<Language, Translations> = {
     roiAnalysis: 'ROI 分析',
     alertManagement: '告警管理',
     tenantManagement: '租户管理',
+
+    // Projects
+    projects: '项目',
+    projectManagement: '项目管理',
     auditAnalysis: '审计分析',
     ssoSettings: 'SSO 设置',
     dataRetention: '数据保留',

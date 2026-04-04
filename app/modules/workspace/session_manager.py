@@ -104,6 +104,8 @@ class AgentSession:
     tool_name: str = ""
     host_name: str = "localhost"
     user_id: Optional[int] = None
+    project_id: Optional[int] = None  # Project association for statistics
+    project_path: Optional[str] = None  # Project path for quick reference
     status: str = SessionStatus.ACTIVE.value
     context: Dict[str, Any] = field(default_factory=dict)
     settings: Dict[str, Any] = field(default_factory=dict)
@@ -129,6 +131,8 @@ class AgentSession:
             "tool_name": self.tool_name,
             "host_name": self.host_name,
             "user_id": self.user_id,
+            "project_id": self.project_id,
+            "project_path": self.project_path,
             "status": self.status,
             "context": self.context,
             "settings": self.settings,
@@ -156,6 +160,8 @@ class AgentSession:
             tool_name=data.get("tool_name", ""),
             host_name=data.get("host_name", "localhost"),
             user_id=data.get("user_id"),
+            project_id=data.get("project_id"),
+            project_path=data.get("project_path"),
             status=data.get("status", SessionStatus.ACTIVE.value),
             context=data.get("context", {}),
             settings=data.get("settings", {}),
@@ -336,6 +342,8 @@ class SessionManager:
         settings: Optional[Dict[str, Any]] = None,
         model: Optional[str] = None,
         expires_in_hours: Optional[int] = None,
+        project_id: Optional[int] = None,
+        project_path: Optional[str] = None,
     ) -> AgentSession:
         """
         Create a new agent session.
@@ -350,6 +358,8 @@ class SessionManager:
             settings: Optional session settings.
             model: Optional model name.
             expires_in_hours: Optional expiration time in hours.
+            project_id: Optional project ID for statistics.
+            project_path: Optional project path for quick reference.
 
         Returns:
             AgentSession: The created session.
@@ -368,6 +378,8 @@ class SessionManager:
             tool_name=tool_name,
             host_name=host_name,
             user_id=user_id,
+            project_id=project_id,
+            project_path=project_path,
             status=SessionStatus.ACTIVE.value,
             context=context or {},
             settings=settings or {},
@@ -383,9 +395,9 @@ class SessionManager:
         cursor.execute(
             f"""
             INSERT INTO agent_sessions
-            (session_id, session_type, title, tool_name, host_name, user_id, status,
-             context, settings, model, expires_at, created_at, updated_at)
-            VALUES ({_params(13)})
+            (session_id, session_type, title, tool_name, host_name, user_id, project_id,
+             project_path, status, context, settings, model, expires_at, created_at, updated_at)
+            VALUES ({_params(15)})
         """,
             (
                 session.session_id,
@@ -394,6 +406,8 @@ class SessionManager:
                 session.tool_name,
                 session.host_name,
                 session.user_id,
+                session.project_id,
+                session.project_path,
                 session.status,
                 json.dumps(session.context),
                 json.dumps(session.settings),
@@ -676,7 +690,7 @@ class SessionManager:
 
     def complete_session(self, session_id: str) -> bool:
         """
-        Mark a session as completed.
+        Mark a session as completed and update project statistics.
 
         Args:
             session_id: Session ID to complete.
@@ -687,19 +701,77 @@ class SessionManager:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        now = datetime.utcnow().isoformat()
+        now = datetime.utcnow()
+        now_iso = now.isoformat()
 
+        # First, get session info for statistics update
+        cursor.execute(
+            f"""
+            SELECT user_id, project_id, project_path, created_at, total_tokens
+            FROM agent_sessions
+            WHERE session_id = {_param()}
+        """,
+            (session_id,),
+        )
+        session_row = cursor.fetchone()
+
+        # Update session status
         cursor.execute(
             f"""
             UPDATE agent_sessions
             SET status = {_param()}, completed_at = {_param()}, updated_at = {_param()}
             WHERE session_id = {_param()}
         """,
-            (SessionStatus.COMPLETED.value, now, now, session_id),
+            (SessionStatus.COMPLETED.value, now_iso, now_iso, session_id),
         )
 
         success = cursor.rowcount > 0
         conn.commit()
+
+        # Update project statistics if session has project_id and user_id
+        if success and session_row:
+            user_id = session_row[0]
+            project_id = session_row[1]
+            created_at_str = session_row[3]
+            total_tokens = session_row[4] or 0
+
+            if user_id and project_id:
+                try:
+                    # Calculate session duration in seconds
+                    duration_seconds = 0
+                    if created_at_str:
+                        try:
+                            created_at = datetime.fromisoformat(created_at_str)
+                            duration_seconds = int((now - created_at).total_seconds())
+                            # Cap at reasonable maximum (24 hours)
+                            duration_seconds = min(duration_seconds, 24 * 3600)
+                        except Exception as e:
+                            logger.warning(f"Failed to parse created_at: {e}")
+
+                    # Update user_projects statistics
+                    cursor.execute(
+                        f"""
+                        INSERT INTO user_projects (user_id, project_id, first_access_at, last_access_at,
+                                                   total_sessions, total_tokens, total_requests, total_duration_seconds)
+                        VALUES ({_params(2)}, {_param()}, {_param()}, 1, {_param()}, 1, {_param()})
+                        ON CONFLICT (user_id, project_id) DO UPDATE SET
+                            last_access_at = {_param()},
+                            total_sessions = user_projects.total_sessions + 1,
+                            total_tokens = user_projects.total_tokens + {_param()},
+                            total_requests = user_projects.total_requests + 1,
+                            total_duration_seconds = user_projects.total_duration_seconds + {_param()}
+                    """,
+                        (user_id, project_id, now_iso, now_iso, total_tokens, duration_seconds,
+                         now_iso, total_tokens, duration_seconds),
+                    )
+                    conn.commit()
+                    logger.info(
+                        f"Updated project stats for user {user_id}, project {project_id}: "
+                        f"+{duration_seconds}s, +{total_tokens} tokens"
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to update project statistics: {e}")
+
         conn.close()
 
         if success:

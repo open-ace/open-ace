@@ -173,6 +173,8 @@ class WorkspaceService:
         title: str = "",
         model: Optional[str] = None,
         context: Optional[Dict[str, Any]] = None,
+        project_id: Optional[int] = None,
+        project_path: Optional[str] = None,
     ) -> AgentSession:
         """
         Start a new agent session.
@@ -184,6 +186,8 @@ class WorkspaceService:
             title: Session title.
             model: Model to use.
             context: Initial context.
+            project_id: Project ID for statistics.
+            project_path: Project path for quick reference.
 
         Returns:
             AgentSession: The created session.
@@ -195,6 +199,8 @@ class WorkspaceService:
             title=title,
             model=model,
             context=context,
+            project_id=project_id,
+            project_path=project_path,
         )
 
         # Emit session start event
@@ -207,7 +213,7 @@ class WorkspaceService:
                 session_id=session.session_id,
                 user_id=user_id,
                 tool_name=tool_name,
-                data={"title": title, "model": model},
+                data={"title": title, "model": model, "project_id": project_id, "project_path": project_path},
             )
         )
 
