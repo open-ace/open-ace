@@ -703,23 +703,29 @@ export const QuotaAlerts: React.FC = () => {
             </>
           }
         >
-          <div className="row g-3">
-            <div className="col-12">
-              <div className="form-check form-switch">
-                <input
-                  className="form-check-input"
-                  type="checkbox"
-                  id="emailEnabled"
-                  checked={preferences.email_enabled}
-                  onChange={(e) =>
-                    setPreferences({ ...preferences, email_enabled: e.target.checked })
-                  }
-                />
-                <label className="form-check-label" htmlFor="emailEnabled">
-                  {t('emailNotifications', language)}
-                </label>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSavePreferences();
+            }}
+          >
+            <div className="row g-3">
+              <div className="col-12">
+                <div className="form-check form-switch">
+                  <input
+                    className="form-check-input"
+                    type="checkbox"
+                    id="emailEnabled"
+                    checked={preferences.email_enabled}
+                    onChange={(e) =>
+                      setPreferences({ ...preferences, email_enabled: e.target.checked })
+                    }
+                  />
+                  <label className="form-check-label" htmlFor="emailEnabled">
+                    {t('emailNotifications', language)}
+                  </label>
+                </div>
               </div>
-            </div>
             <div className="col-12">
               <div className="form-check form-switch">
                 <input
@@ -764,6 +770,7 @@ export const QuotaAlerts: React.FC = () => {
               />
             </div>
           </div>
+          </form>
         </Modal>
       </>
     );

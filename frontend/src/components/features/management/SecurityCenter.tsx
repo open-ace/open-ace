@@ -328,81 +328,88 @@ export const SecurityCenter: React.FC = () => {
             </>
           }
         >
-          <div className="row g-3">
-            <div className="col-12">
-              <label className="form-label">{t('tablePattern', language)}</label>
-              <TextInput
-                value={ruleFormData.pattern}
-                onChange={(value: string) => setRuleFormData({ ...ruleFormData, pattern: value })}
-                placeholder={t('enterPattern', language)}
-              />
-            </div>
-            <div className="col-md-4">
-              <label className="form-label">{t('tableType', language)}</label>
-              <Select
-                options={TYPE_OPTIONS}
-                value={ruleFormData.type}
-                onChange={(value) =>
-                  setRuleFormData({
-                    ...ruleFormData,
-                    type: value as CreateFilterRuleRequest['type'],
-                  })
-                }
-              />
-            </div>
-            <div className="col-md-4">
-              <label className="form-label">{t('tableSeverity', language)}</label>
-              <Select
-                options={SEVERITY_OPTIONS}
-                value={ruleFormData.severity}
-                onChange={(value) =>
-                  setRuleFormData({
-                    ...ruleFormData,
-                    severity: value as CreateFilterRuleRequest['severity'],
-                  })
-                }
-              />
-            </div>
-            <div className="col-md-4">
-              <label className="form-label">{t('tableAction', language)}</label>
-              <Select
-                options={ACTION_OPTIONS}
-                value={ruleFormData.action}
-                onChange={(value) =>
-                  setRuleFormData({
-                    ...ruleFormData,
-                    action: value as CreateFilterRuleRequest['action'],
-                  })
-                }
-              />
-            </div>
-            <div className="col-12">
-              <label className="form-label">{t('description', language)}</label>
-              <TextInput
-                value={ruleFormData.description ?? ''}
-                onChange={(value: string) =>
-                  setRuleFormData({ ...ruleFormData, description: value })
-                }
-                placeholder={t('enterDescription', language)}
-              />
-            </div>
-            <div className="col-12">
-              <div className="form-check">
-                <input
-                  className="form-check-input"
-                  type="checkbox"
-                  checked={ruleFormData.is_enabled}
-                  onChange={(e) =>
-                    setRuleFormData({ ...ruleFormData, is_enabled: e.target.checked })
-                  }
-                  id="ruleEnabled"
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSubmitRule();
+            }}
+          >
+            <div className="row g-3">
+              <div className="col-12">
+                <label className="form-label">{t('tablePattern', language)}</label>
+                <TextInput
+                  value={ruleFormData.pattern}
+                  onChange={(value: string) => setRuleFormData({ ...ruleFormData, pattern: value })}
+                  placeholder={t('enterPattern', language)}
                 />
-                <label className="form-check-label" htmlFor="ruleEnabled">
-                  {t('enabled', language)}
-                </label>
+              </div>
+              <div className="col-md-4">
+                <label className="form-label">{t('tableType', language)}</label>
+                <Select
+                  options={TYPE_OPTIONS}
+                  value={ruleFormData.type}
+                  onChange={(value) =>
+                    setRuleFormData({
+                      ...ruleFormData,
+                      type: value as CreateFilterRuleRequest['type'],
+                    })
+                  }
+                />
+              </div>
+              <div className="col-md-4">
+                <label className="form-label">{t('tableSeverity', language)}</label>
+                <Select
+                  options={SEVERITY_OPTIONS}
+                  value={ruleFormData.severity}
+                  onChange={(value) =>
+                    setRuleFormData({
+                      ...ruleFormData,
+                      severity: value as CreateFilterRuleRequest['severity'],
+                    })
+                  }
+                />
+              </div>
+              <div className="col-md-4">
+                <label className="form-label">{t('tableAction', language)}</label>
+                <Select
+                  options={ACTION_OPTIONS}
+                  value={ruleFormData.action}
+                  onChange={(value) =>
+                    setRuleFormData({
+                      ...ruleFormData,
+                      action: value as CreateFilterRuleRequest['action'],
+                    })
+                  }
+                />
+              </div>
+              <div className="col-12">
+                <label className="form-label">{t('description', language)}</label>
+                <TextInput
+                  value={ruleFormData.description ?? ''}
+                  onChange={(value: string) =>
+                    setRuleFormData({ ...ruleFormData, description: value })
+                  }
+                  placeholder={t('enterDescription', language)}
+                />
+              </div>
+              <div className="col-12">
+                <div className="form-check">
+                  <input
+                    className="form-check-input"
+                    type="checkbox"
+                    checked={ruleFormData.is_enabled}
+                    onChange={(e) =>
+                      setRuleFormData({ ...ruleFormData, is_enabled: e.target.checked })
+                    }
+                    id="ruleEnabled"
+                  />
+                  <label className="form-check-label" htmlFor="ruleEnabled">
+                    {t('enabled', language)}
+                  </label>
+                </div>
               </div>
             </div>
-          </div>
+          </form>
         </Modal>
       </>
     );

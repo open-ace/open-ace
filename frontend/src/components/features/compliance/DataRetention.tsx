@@ -334,30 +334,37 @@ export const DataRetention: React.FC = () => {
           </>
         }
       >
-        <div className="row g-3">
-          <div className="col-12">
-            <label className="form-label">{t('retentionDays', language)}</label>
-            <input
-              type="number"
-              className="form-control"
-              value={editDays}
-              onChange={(e) => setEditDays(parseInt(e.target.value) || 0)}
-              min={1}
-              max={3650}
-            />
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleSaveRule();
+          }}
+        >
+          <div className="row g-3">
+            <div className="col-12">
+              <label className="form-label">{t('retentionDays', language)}</label>
+              <input
+                type="number"
+                className="form-control"
+                value={editDays}
+                onChange={(e) => setEditDays(parseInt(e.target.value) || 0)}
+                min={1}
+                max={3650}
+              />
+            </div>
+            <div className="col-12">
+              <label className="form-label">{t('action', language)}</label>
+              <select
+                className="form-select"
+                value={editAction}
+                onChange={(e) => setEditAction(e.target.value as 'delete' | 'archive')}
+              >
+                <option value="delete">{t('delete', language)}</option>
+                <option value="archive">{t('archive', language)}</option>
+              </select>
+            </div>
           </div>
-          <div className="col-12">
-            <label className="form-label">{t('action', language)}</label>
-            <select
-              className="form-select"
-              value={editAction}
-              onChange={(e) => setEditAction(e.target.value as 'delete' | 'archive')}
-            >
-              <option value="delete">{t('delete', language)}</option>
-              <option value="archive">{t('archive', language)}</option>
-            </select>
-          </div>
-        </div>
+        </form>
       </Modal>
 
       {/* Preview Modal */}

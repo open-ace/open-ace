@@ -426,54 +426,61 @@ export const TenantManagement: React.FC = () => {
           </>
         }
       >
-        <div className="row g-3">
-          <div className="col-12">
-            <label className="form-label">{t('tenantName', language)} *</label>
-            <TextInput
-              value={formData.name}
-              onChange={(value: string) => setFormData({ ...formData, name: value })}
-              placeholder={t('enterTenantName', language)}
-            />
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleSubmit();
+          }}
+        >
+          <div className="row g-3">
+            <div className="col-12">
+              <label className="form-label">{t('tenantName', language)} *</label>
+              <TextInput
+                value={formData.name}
+                onChange={(value: string) => setFormData({ ...formData, name: value })}
+                placeholder={t('enterTenantName', language)}
+              />
+            </div>
+            <div className="col-md-6">
+              <label className="form-label">{t('slug', language)}</label>
+              <TextInput
+                value={formData.slug ?? ''}
+                onChange={(value: string) => setFormData({ ...formData, slug: value })}
+                placeholder={t('enterSlug', language)}
+              />
+            </div>
+            <div className="col-md-6">
+              <label className="form-label">{t('plan', language)}</label>
+              <Select
+                options={[
+                  { value: 'standard', label: 'Standard' },
+                  { value: 'premium', label: 'Premium' },
+                  { value: 'enterprise', label: 'Enterprise' },
+                ]}
+                value={formData.plan ?? 'standard'}
+                onChange={(value) =>
+                  setFormData({ ...formData, plan: value as 'standard' | 'premium' | 'enterprise' })
+                }
+              />
+            </div>
+            <div className="col-md-6">
+              <label className="form-label">{t('contactEmail', language)}</label>
+              <TextInput
+                value={formData.contact_email ?? ''}
+                onChange={(value: string) => setFormData({ ...formData, contact_email: value })}
+                placeholder={t('enterEmail', language)}
+              />
+            </div>
+            <div className="col-md-6">
+              <label className="form-label">{t('contactName', language)}</label>
+              <TextInput
+                value={formData.contact_name ?? ''}
+                onChange={(value: string) => setFormData({ ...formData, contact_name: value })}
+                placeholder={t('enterContactName', language)}
+              />
+            </div>
           </div>
-          <div className="col-md-6">
-            <label className="form-label">{t('slug', language)}</label>
-            <TextInput
-              value={formData.slug ?? ''}
-              onChange={(value: string) => setFormData({ ...formData, slug: value })}
-              placeholder={t('enterSlug', language)}
-            />
-          </div>
-          <div className="col-md-6">
-            <label className="form-label">{t('plan', language)}</label>
-            <Select
-              options={[
-                { value: 'standard', label: 'Standard' },
-                { value: 'premium', label: 'Premium' },
-                { value: 'enterprise', label: 'Enterprise' },
-              ]}
-              value={formData.plan ?? 'standard'}
-              onChange={(value) =>
-                setFormData({ ...formData, plan: value as 'standard' | 'premium' | 'enterprise' })
-              }
-            />
-          </div>
-          <div className="col-md-6">
-            <label className="form-label">{t('contactEmail', language)}</label>
-            <TextInput
-              value={formData.contact_email ?? ''}
-              onChange={(value: string) => setFormData({ ...formData, contact_email: value })}
-              placeholder={t('enterEmail', language)}
-            />
-          </div>
-          <div className="col-md-6">
-            <label className="form-label">{t('contactName', language)}</label>
-            <TextInput
-              value={formData.contact_name ?? ''}
-              onChange={(value: string) => setFormData({ ...formData, contact_name: value })}
-              placeholder={t('enterContactName', language)}
-            />
-          </div>
-        </div>
+        </form>
       </Modal>
 
       {/* Quota Modal */}
@@ -493,30 +500,37 @@ export const TenantManagement: React.FC = () => {
           </>
         }
       >
-        <div className="row g-3">
-          <div className="col-12">
-            <label className="form-label">{t('monthlyTokens', language)}</label>
-            <input
-              type="number"
-              className="form-control"
-              value={quotaData.monthly_tokens}
-              onChange={(e) =>
-                setQuotaData({ ...quotaData, monthly_tokens: parseInt(e.target.value) || 0 })
-              }
-            />
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleSaveQuota();
+          }}
+        >
+          <div className="row g-3">
+            <div className="col-12">
+              <label className="form-label">{t('monthlyTokens', language)}</label>
+              <input
+                type="number"
+                className="form-control"
+                value={quotaData.monthly_tokens}
+                onChange={(e) =>
+                  setQuotaData({ ...quotaData, monthly_tokens: parseInt(e.target.value) || 0 })
+                }
+              />
+            </div>
+            <div className="col-12">
+              <label className="form-label">{t('monthlyRequests', language)}</label>
+              <input
+                type="number"
+                className="form-control"
+                value={quotaData.monthly_requests}
+                onChange={(e) =>
+                  setQuotaData({ ...quotaData, monthly_requests: parseInt(e.target.value) || 0 })
+                }
+              />
+            </div>
           </div>
-          <div className="col-12">
-            <label className="form-label">{t('monthlyRequests', language)}</label>
-            <input
-              type="number"
-              className="form-control"
-              value={quotaData.monthly_requests}
-              onChange={(e) =>
-                setQuotaData({ ...quotaData, monthly_requests: parseInt(e.target.value) || 0 })
-              }
-            />
-          </div>
-        </div>
+        </form>
       </Modal>
     </div>
   );

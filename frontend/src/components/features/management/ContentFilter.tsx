@@ -256,15 +256,21 @@ export const ContentFilter: React.FC = () => {
           </>
         }
       >
-        <div className="row g-3">
-          <div className="col-12">
-            <label className="form-label">{t('tablePattern', language)}</label>
-            <TextInput
-              value={formData.pattern}
-              onChange={(value: string) => setFormData({ ...formData, pattern: value })}
-              placeholder={t('enterPattern', language)}
-            />
-          </div>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleSubmit();
+          }}
+        >
+          <div className="row g-3">
+            <div className="col-12">
+              <label className="form-label">{t('tablePattern', language)}</label>
+              <TextInput
+                value={formData.pattern}
+                onChange={(value: string) => setFormData({ ...formData, pattern: value })}
+                placeholder={t('enterPattern', language)}
+              />
+            </div>
           <div className="col-md-4">
             <label className="form-label">{t('tableType', language)}</label>
             <Select
@@ -318,6 +324,7 @@ export const ContentFilter: React.FC = () => {
             </div>
           </div>
         </div>
+        </form>
       </Modal>
     </div>
   );

@@ -68,25 +68,33 @@ export function ConfirmModal({
               leaveFrom="opacity-100 scale-100"
               leaveTo="opacity-0 scale-95"
             >
-              <Dialog.Panel className="w-full max-w-md transform overflow-hidden rounded-2xl bg-white dark:bg-slate-800 p-6 text-left align-middle shadow-xl transition-all">
-                <div className="flex items-start gap-4">
-                  <div className={`flex-shrink-0 ${styles.icon}`}>
-                    <ExclamationTriangleIcon className="h-6 w-6" />
-                  </div>
-                  <div className="flex-1">
-                    <Dialog.Title
-                      as="h3"
-                      className="text-lg font-medium leading-6 text-slate-900 dark:text-slate-100"
-                    >
-                      {title}
-                    </Dialog.Title>
-                    <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                      {message}
-                    </p>
-                  </div>
+              <Dialog.Panel
+              className="w-full max-w-md transform overflow-hidden rounded-2xl bg-white dark:bg-slate-800 p-6 text-left align-middle shadow-xl transition-all"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !isLoading) {
+                  e.preventDefault();
+                  onConfirm();
+                }
+              }}
+            >
+              <div className="flex items-start gap-4">
+                <div className={`flex-shrink-0 ${styles.icon}`}>
+                  <ExclamationTriangleIcon className="h-6 w-6" />
                 </div>
+                <div className="flex-1">
+                  <Dialog.Title
+                    as="h3"
+                    className="text-lg font-medium leading-6 text-slate-900 dark:text-slate-100"
+                  >
+                    {title}
+                  </Dialog.Title>
+                  <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                    {message}
+                  </p>
+                </div>
+              </div>
 
-                <div className="mt-6 flex justify-end gap-3">
+              <div className="mt-6 flex justify-end gap-3">
                   <button
                     type="button"
                     className="inline-flex justify-center rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"

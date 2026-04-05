@@ -195,43 +195,50 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({
           </>
         }
       >
-        <div className="mb-3">
-          <label className="form-label">{t('toolAccount', language)}</label>
-          <TextInput
-            value={newAccount.tool_account}
-            onChange={(value) =>
-              setNewAccount({ ...newAccount, tool_account: value })
-            }
-            placeholder="e.g., rhuang-MacBook.local-qwen"
-          />
-        </div>
-        <div className="mb-3">
-          <label className="form-label">{t('toolType', language)}</label>
-          <select
-            className="form-select"
-            value={newAccount.tool_type}
-            onChange={(e) =>
-              setNewAccount({ ...newAccount, tool_type: e.target.value })
-            }
-          >
-            <option value="">-- Select --</option>
-            {TOOL_TYPES.map((type) => (
-              <option key={type.value} value={type.value}>
-                {type.display}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="mb-3">
-          <label className="form-label">{t('description', language)}</label>
-          <TextInput
-            value={newAccount.description}
-            onChange={(value) =>
-              setNewAccount({ ...newAccount, description: value })
-            }
-            placeholder="Optional description"
-          />
-        </div>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleAddAccount();
+          }}
+        >
+          <div className="mb-3">
+            <label className="form-label">{t('toolAccount', language)}</label>
+            <TextInput
+              value={newAccount.tool_account}
+              onChange={(value) =>
+                setNewAccount({ ...newAccount, tool_account: value })
+              }
+              placeholder="e.g., rhuang-MacBook.local-qwen"
+            />
+          </div>
+          <div className="mb-3">
+            <label className="form-label">{t('toolType', language)}</label>
+            <select
+              className="form-select"
+              value={newAccount.tool_type}
+              onChange={(e) =>
+                setNewAccount({ ...newAccount, tool_type: e.target.value })
+              }
+            >
+              <option value="">-- Select --</option>
+              {TOOL_TYPES.map((type) => (
+                <option key={type.value} value={type.value}>
+                  {type.display}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="mb-3">
+            <label className="form-label">{t('description', language)}</label>
+            <TextInput
+              value={newAccount.description}
+              onChange={(value) =>
+                setNewAccount({ ...newAccount, description: value })
+              }
+              placeholder="Optional description"
+            />
+          </div>
+        </form>
       </Modal>
 
       {/* Unmapped accounts modal */}

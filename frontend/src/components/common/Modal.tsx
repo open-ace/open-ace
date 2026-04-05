@@ -2,7 +2,7 @@
  * Modal Component - Reusable modal dialog with animations
  */
 
-import React, { useEffect, useCallback } from 'react';
+import React, { useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '@/utils';
 import type { ModalProps } from '@/types';
@@ -23,6 +23,8 @@ export const Modal: React.FC<ModalProps> = ({
   footer,
   className,
 }) => {
+  const modalRef = useRef<HTMLDivElement>(null);
+
   // Handle escape key
   const handleEscape = useCallback(
     (e: KeyboardEvent) => {
@@ -33,17 +35,53 @@ export const Modal: React.FC<ModalProps> = ({
     [onClose]
   );
 
+  // Handle enter key for form submission
+  const handleEnter = useCallback(
+    (e: KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        // Don't submit if focus is on textarea, button, or select
+        const activeElement = document.activeElement as HTMLElement;
+        const tagName = activeElement?.tagName?.toLowerCase();
+        const isTextarea = tagName === 'textarea';
+        const isButton = tagName === 'button';
+        const isSelect = tagName === 'select';
+
+        // Allow Enter on buttons (they handle their own click)
+        if (isButton) return;
+
+        // Don't submit if in textarea (user might want newline)
+        if (isTextarea) return;
+
+        // Don't submit if in select
+        if (isSelect) return;
+
+        // Find form inside modal and submit it
+        if (modalRef.current) {
+          const form = modalRef.current.querySelector('form') as HTMLFormElement | null;
+          if (form) {
+            e.preventDefault();
+            // Use requestSubmit to properly trigger React's onSubmit handler
+            form.requestSubmit();
+          }
+        }
+      }
+    },
+    []
+  );
+
   // Add/remove event listener
   useEffect(() => {
     if (isOpen) {
       document.addEventListener('keydown', handleEscape);
+      document.addEventListener('keydown', handleEnter);
       document.body.style.overflow = 'hidden';
     }
     return () => {
       document.removeEventListener('keydown', handleEscape);
+      document.removeEventListener('keydown', handleEnter);
       document.body.style.overflow = '';
     };
-  }, [isOpen, handleEscape]);
+  }, [isOpen, handleEscape, handleEnter]);
 
   if (!isOpen) return null;
 
@@ -87,7 +125,7 @@ export const Modal: React.FC<ModalProps> = ({
             className
           )}
         >
-          <div className="modal-content animate-slide-up">
+          <div ref={modalRef} className="modal-content animate-slide-up">
             {title && (
               <div className="modal-header">
                 <h5 className="modal-title">{title}</h5>
