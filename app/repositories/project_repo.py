@@ -50,10 +50,9 @@ class ProjectRepository:
         """
         try:
             now = datetime.utcnow()
-            is_shared_int = 1 if is_shared else 0
-            is_active_int = 1
 
             if self.db.is_postgresql:
+                # PostgreSQL uses TRUE/FALSE for boolean columns
                 result = self.db.fetch_one(
                     """
                     INSERT INTO projects (path, name, description, created_by, created_at,
@@ -61,11 +60,14 @@ class ProjectRepository:
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     RETURNING id
                     """,
-                    (path, name, description, created_by, now, now, is_active_int, is_shared_int),
+                    (path, name, description, created_by, now, now, True, is_shared),
                     commit=True,
                 )
                 project_id = result["id"] if result else None
             else:
+                # SQLite uses 1/0 for boolean columns
+                is_shared_int = 1 if is_shared else 0
+                is_active_int = 1
                 cursor = self.db.execute(
                     """
                     INSERT INTO projects (path, name, description, created_by, created_at,
@@ -95,7 +97,7 @@ class ProjectRepository:
         Returns:
             Optional[Project]: Project data or None.
         """
-        query = "SELECT * FROM projects WHERE id = ? AND is_active = 1"
+        query = "SELECT * FROM projects WHERE id = ? AND is_active IS TRUE"
         result = self.db.fetch_one(query, (project_id,))
         return Project.from_dict(result) if result else None
 
@@ -109,7 +111,7 @@ class ProjectRepository:
         Returns:
             Optional[Project]: Project data or None.
         """
-        query = "SELECT * FROM projects WHERE path = ? AND is_active = 1"
+        query = "SELECT * FROM projects WHERE path = ? AND is_active IS TRUE"
         result = self.db.fetch_one(query, (path,))
         return Project.from_dict(result) if result else None
 
@@ -132,7 +134,7 @@ class ProjectRepository:
         params = []
 
         if not include_inactive:
-            conditions.append("is_active = 1")
+            conditions.append("is_active IS TRUE")
 
         if created_by:
             conditions.append("created_by = ?")
@@ -157,7 +159,7 @@ class ProjectRepository:
         query = """
             SELECT p.* FROM projects p
             INNER JOIN user_projects up ON p.id = up.project_id
-            WHERE up.user_id = ? AND p.is_active = 1
+            WHERE up.user_id = ? AND p.is_active IS TRUE
             ORDER BY up.last_access_at DESC
         """
         results = self.db.fetch_all(query, (user_id,))
@@ -196,7 +198,11 @@ class ProjectRepository:
 
             if is_shared is not None:
                 updates.append("is_shared = ?")
-                params.append(1 if is_shared else 0)
+                # PostgreSQL uses boolean, SQLite uses integer
+                if self.db.is_postgresql:
+                    params.append(is_shared)
+                else:
+                    params.append(1 if is_shared else 0)
 
             if not updates:
                 return True
@@ -226,7 +232,7 @@ class ProjectRepository:
         """
         try:
             if soft_delete:
-                query = "UPDATE projects SET is_active = 0, updated_at = ? WHERE id = ?"
+                query = "UPDATE projects SET is_active = FALSE, updated_at = ? WHERE id = ?"
                 self.db.execute(query, (datetime.utcnow(), project_id))
             else:
                 # Hard delete - remove user_projects first
@@ -449,7 +455,7 @@ class ProjectRepository:
                 MAX(up.last_access_at) as last_access
             FROM projects p
             LEFT JOIN user_projects up ON p.id = up.project_id
-            WHERE p.is_active = 1
+            WHERE p.is_active IS TRUE
             GROUP BY p.id
             ORDER BY total_tokens DESC
         """
@@ -460,6 +466,15 @@ class ProjectRepository:
             project_id = r["project_id"]
             user_stats = self.get_project_users(project_id)
 
+            def parse_datetime(value):
+                if value is None:
+                    return None
+                if isinstance(value, datetime):
+                    return value
+                if isinstance(value, str):
+                    return datetime.fromisoformat(value)
+                return None
+
             stats_list.append(ProjectStats(
                 project_id=project_id,
                 project_path=r["project_path"],
@@ -469,16 +484,8 @@ class ProjectRepository:
                 total_tokens=r.get("total_tokens", 0) or 0,
                 total_requests=r.get("total_requests", 0) or 0,
                 total_duration_seconds=r.get("total_duration_seconds", 0) or 0,
-                first_access=(
-                    datetime.fromisoformat(r["first_access"])
-                    if r.get("first_access")
-                    else None
-                ),
-                last_access=(
-                    datetime.fromisoformat(r["last_access"])
-                    if r.get("last_access")
-                    else None
-                ),
+                first_access=parse_datetime(r.get("first_access")),
+                last_access=parse_datetime(r.get("last_access")),
                 user_stats=user_stats,
             ))
 

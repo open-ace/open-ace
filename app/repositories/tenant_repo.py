@@ -119,6 +119,16 @@ class TenantRepository:
 
                 # Insert tenant_settings
                 settings_dict = tenant.settings.to_dict()
+                # PostgreSQL uses TRUE/FALSE, SQLite uses 1/0
+                if self.db.is_postgresql:
+                    content_filter_val = settings_dict.get("content_filter_enabled", True)
+                    audit_log_val = settings_dict.get("audit_log_enabled", True)
+                    sso_val = settings_dict.get("sso_enabled", False)
+                else:
+                    content_filter_val = 1 if settings_dict.get("content_filter_enabled", True) else 0
+                    audit_log_val = 1 if settings_dict.get("audit_log_enabled", True) else 0
+                    sso_val = 1 if settings_dict.get("sso_enabled", False) else 0
+                
                 cursor.execute(
                     adapt_sql(
                         """
@@ -130,11 +140,11 @@ class TenantRepository:
                     ),
                     (
                         tenant_id,
-                        1 if settings_dict.get("content_filter_enabled", True) else 0,
-                        1 if settings_dict.get("audit_log_enabled", True) else 0,
+                        content_filter_val,
+                        audit_log_val,
                         settings_dict.get("audit_log_retention_days", 90),
                         settings_dict.get("data_retention_days", 365),
-                        1 if settings_dict.get("sso_enabled", False) else 0,
+                        sso_val,
                         settings_dict.get("sso_provider"),
                     ),
                 )

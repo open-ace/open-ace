@@ -48,22 +48,22 @@ class UserRepository:
             Optional[int]: User ID if successful, None otherwise.
         """
         try:
-            # Convert boolean to integer for PostgreSQL compatibility
-            is_active_int = 1 if is_active else 0
-
             # Use RETURNING for PostgreSQL, or lastrowid for SQLite
             if self.db.is_postgresql:
+                # PostgreSQL uses TRUE/FALSE for boolean columns
                 result = self.db.fetch_one(
                     """
                     INSERT INTO users (username, email, password_hash, role, is_active, created_at)
                     VALUES (?, ?, ?, ?, ?, ?)
                     RETURNING id
                 """,
-                    (username, email, password_hash, role, is_active_int, datetime.utcnow()),
+                    (username, email, password_hash, role, is_active, datetime.utcnow()),
                     commit=True,
                 )
                 return result["id"] if result else None
             else:
+                # SQLite uses 1/0 for boolean columns
+                is_active_int = 1 if is_active else 0
                 cursor = self.db.execute(
                     """
                     INSERT INTO users (username, email, password_hash, role, is_active, created_at)
@@ -130,7 +130,7 @@ class UserRepository:
         """
         conditions = []
         if not include_inactive:
-            conditions.append("is_active = 1")
+            conditions.append("is_active IS TRUE")
         if not include_deleted:
             conditions.append("deleted_at IS NULL")
 
@@ -181,8 +181,11 @@ class UserRepository:
 
         if is_active is not None:
             updates.append("is_active = ?")
-            # Convert boolean to integer for PostgreSQL compatibility
-            params.append(1 if is_active else 0)
+            # PostgreSQL uses TRUE/FALSE, SQLite uses 1/0
+            if self.db.is_postgresql:
+                params.append(is_active)
+            else:
+                params.append(1 if is_active else 0)
 
         if system_account is not None:
             updates.append("system_account = ?")
@@ -233,6 +236,7 @@ class UserRepository:
             bool: True if successful.
         """
         query = "UPDATE users SET must_change_password = ? WHERE id = ?"
+        # must_change_password column is INTEGER in both SQLite and PostgreSQL
         must_change_int = 1 if must_change else 0
 
         try:

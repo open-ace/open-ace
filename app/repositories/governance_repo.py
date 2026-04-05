@@ -124,6 +124,8 @@ class GovernanceRepository:
                 )
                 return result["id"] if result else None
             else:
+                # SQLite uses 1/0 for boolean, PostgreSQL uses TRUE/FALSE
+                is_enabled_val = is_enabled if self.db.is_postgresql else (1 if is_enabled else 0)
                 cursor = self.db.execute(
                     """
                     INSERT INTO content_filter_rules
@@ -135,7 +137,7 @@ class GovernanceRepository:
                         rule_type,
                         severity,
                         action,
-                        1 if is_enabled else 0,
+                        is_enabled_val,
                         description,
                         datetime.utcnow().isoformat(),
                     ),
@@ -190,7 +192,9 @@ class GovernanceRepository:
             params.append(description)
         if is_enabled is not None:
             updates.append("is_enabled = ?")
-            params.append(1 if is_enabled else 0)
+            # PostgreSQL uses TRUE/FALSE, SQLite uses 1/0
+            is_enabled_val = is_enabled if self.db.is_postgresql else (1 if is_enabled else 0)
+            params.append(is_enabled_val)
 
         if not updates:
             return False
