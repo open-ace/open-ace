@@ -169,17 +169,26 @@ export const ManageLayout: React.FC<ManageLayoutProps> = ({ children }) => {
   const collapsed = useSidebarCollapsed();
   const { user } = useAuth();
 
-  // Initialize collapse state from localStorage
+  // Initialize collapse state from localStorage or default to only active section expanded
   const getInitialCollapseState = useCallback(() => {
     try {
       const saved = localStorage.getItem(COLLAPSE_STATE_KEY);
       if (saved) {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        // Validate and clean up the saved state
+        // Ensure only valid section IDs are present
+        const validState: Record<string, boolean> = {};
+        navSections.forEach((section) => {
+          if (section.id in parsed) {
+            validState[section.id] = parsed[section.id];
+          }
+        });
+        return validState;
       }
     } catch (e) {
       console.error('Failed to load nav collapse state:', e);
     }
-    // Default: all collapsed
+    // Default: all collapsed (will be expanded by useEffect based on activeSection)
     return {};
   }, []);
 
@@ -211,16 +220,25 @@ export const ManageLayout: React.FC<ManageLayoutProps> = ({ children }) => {
 
   const activeSection = getActiveSection();
 
-  // Auto-expand active section when it changes
+  // Auto-expand active section when it changes (accordion mode: only one section expanded)
   useEffect(() => {
     setCollapsedSections((prev) => {
-      // If active section is collapsed, expand it
-      if (prev[activeSection] !== false) {
-        const newState = { ...prev, [activeSection]: false };
-        localStorage.setItem(COLLAPSE_STATE_KEY, JSON.stringify(newState));
-        return newState;
+      // Check if current state already has only the active section expanded
+      const onlyActiveExpanded = navSections.every(
+        (section) => section.id === activeSection ? prev[section.id] === false : prev[section.id] !== false
+      );
+
+      if (onlyActiveExpanded) {
+        return prev; // No change needed
       }
-      return prev;
+
+      // Force only active section to be expanded, collapse all others
+      const newState: Record<string, boolean> = {};
+      navSections.forEach((section) => {
+        newState[section.id] = section.id !== activeSection;
+      });
+      localStorage.setItem(COLLAPSE_STATE_KEY, JSON.stringify(newState));
+      return newState;
     });
   }, [activeSection]);
 

@@ -263,9 +263,15 @@ const AppContent: React.FC = () => {
       {/* Report - Keep as standalone for now */}
       <Route path="/report" element={<LegacyAppContent />} />
 
-      {/* Default redirect - All users go to work mode */}
-      <Route path="/" element={<Navigate to="/work" replace />} />
-      <Route path="*" element={<Navigate to="/work" replace />} />
+      {/* Default redirect - Admin goes to manage mode, others go to work mode */}
+      <Route
+        path="/"
+        element={isAdmin ? <Navigate to="/manage/dashboard" replace /> : <Navigate to="/work" replace />}
+      />
+      <Route
+        path="*"
+        element={isAdmin ? <Navigate to="/manage/dashboard" replace /> : <Navigate to="/work" replace />}
+      />
     </Routes>
   );
 };

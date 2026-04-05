@@ -359,65 +359,55 @@ export const AlertManagement: React.FC = () => {
           </>
         }
       >
-        <div className="row g-3">
-          <div className="col-12">
-            <div className="form-check form-switch">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleSavePreferences();
+          }}
+        >
+          <div className="row g-3">
+            <div className="col-12">
+              <div className="form-check form-switch">
+                <input
+                  className="form-check-input"
+                  type="checkbox"
+                  id="emailEnabled"
+                  checked={preferences.email_enabled}
+                  onChange={(e) =>
+                    setPreferences({ ...preferences, email_enabled: e.target.checked })
+                  }
+                />
+                <label className="form-check-label" htmlFor="emailEnabled">
+                  {t('emailNotifications', language)}
+                </label>
+              </div>
+            </div>
+            <div className="col-12">
+              <div className="form-check form-switch">
+                <input
+                  className="form-check-input"
+                  type="checkbox"
+                  id="pushEnabled"
+                  checked={preferences.push_enabled}
+                  onChange={(e) => setPreferences({ ...preferences, push_enabled: e.target.checked })}
+                />
+                <label className="form-check-label" htmlFor="pushEnabled">
+                  {t('pushNotifications', language)}
+                </label>
+              </div>
+            </div>
+            <div className="col-12">
+              <label className="form-label">{t('webhookUrl', language)}</label>
               <input
-                className="form-check-input"
-                type="checkbox"
-                id="emailEnabled"
-                checked={preferences.email_enabled}
-                onChange={(e) =>
-                  setPreferences({ ...preferences, email_enabled: e.target.checked })
-                }
+                type="url"
+                className="form-control"
+                value={preferences.webhook_url ?? ''}
+                onChange={(e) => setPreferences({ ...preferences, webhook_url: e.target.value })}
+                placeholder="https://example.com/webhook"
               />
-              <label className="form-check-label" htmlFor="emailEnabled">
-                {t('emailNotifications', language)}
-              </label>
             </div>
           </div>
-          <div className="col-12">
-            <div className="form-check form-switch">
-              <input
-                className="form-check-input"
-                type="checkbox"
-                id="pushEnabled"
-                checked={preferences.push_enabled}
-                onChange={(e) => setPreferences({ ...preferences, push_enabled: e.target.checked })}
-              />
-              <label className="form-check-label" htmlFor="pushEnabled">
-                {t('pushNotifications', language)}
-              </label>
-            </div>
-          </div>
-          <div className="col-12">
-            <label className="form-label">{t('webhookUrl', language)}</label>
-            <input
-              type="url"
-              className="form-control"
-              value={preferences.webhook_url ?? ''}
-              onChange={(e) => setPreferences({ ...preferences, webhook_url: e.target.value })}
-              placeholder="https://example.com/webhook"
-            />
-          </div>
-          <div className="col-12">
-            <label className="form-label">{t('minSeverity', language)}</label>
-            <Select
-              options={[
-                { value: 'info', label: 'Info' },
-                { value: 'warning', label: 'Warning' },
-                { value: 'critical', label: 'Critical' },
-              ]}
-              value={preferences.min_severity}
-              onChange={(value) =>
-                setPreferences({
-                  ...preferences,
-                  min_severity: value as 'info' | 'warning' | 'critical',
-                })
-              }
-            />
-          </div>
-        </div>
+        </form>
       </Modal>
     </div>
   );
