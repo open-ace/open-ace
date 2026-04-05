@@ -51,3 +51,6 @@ VERSION
 # Qwen local settings (except skills)
 .qwen/*
 !.qwen/skills/
+
+# Qwen project memory (local only)
+QWEN.md
