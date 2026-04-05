@@ -2462,6 +2462,48 @@ link[rel='dns-prefetch'] {
   font-size: 0.875rem;
 }
 
+.work-status-bar .status-label {
+  font-weight: var(--font-weight-medium);
+  color: var(--text-secondary);
+}
+
+.work-status-bar .status-separator {
+  color: var(--text-muted);
+  margin: 0 var(--spacing-xs);
+}
+
+.work-status-bar .status-token-usage,
+.work-status-bar .status-request-usage {
+  gap: var(--spacing-xs);
+}
+
+.work-status-bar .status-progress {
+  width: 60px;
+  height: 4px;
+  background: var(--bg-secondary);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-left: var(--spacing-xs);
+}
+
+.work-status-bar .status-progress-bar {
+  height: 100%;
+  transition: width var(--transition-fast);
+  border-radius: 2px;
+}
+
+.work-status-bar .status-progress-bar.bg-success {
+  background: var(--color-success);
+}
+
+.work-status-bar .status-progress-bar.bg-warning {
+  background: var(--color-warning);
+}
+
+.work-status-bar .status-progress-bar.bg-danger {
+  background: var(--color-danger);
+}
+
 /* Manage Layout - Sidebar Navigation */
 .manage-layout {
   display: flex;

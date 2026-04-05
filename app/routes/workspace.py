@@ -1263,46 +1263,57 @@ def stop_all_webui_instances():
 
 @workspace_bp.route("/status", methods=["GET"])
 def get_workspace_status():
-    """Get workspace status including model, token usage, and latency."""
-    from datetime import datetime, timedelta
+    """Get workspace status including model, token usage, request usage, and quotas."""
+    from datetime import datetime
     from app.repositories.message_repo import MessageRepository
+    from app.repositories.usage_repo import UsageRepository
+    from app.repositories.user_repo import UserRepository
 
     try:
         user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
-
-        # Get today's token usage
-        message_repo = MessageRepository()
         today = datetime.now().strftime("%Y-%m-%d")
 
-        # Get user's token usage for today
+        # Get today's token usage from messages
+        message_repo = MessageRepository()
         user_tokens = message_repo.get_user_token_totals(
             start_date=today, end_date=today, host_name=None
         )
-
-        # Calculate total tokens used today
         tokens_used = sum(u.get("total_tokens", 0) for u in user_tokens) if user_tokens else 0
 
-        # Get default token limit (could be from config or user quota)
-        # For now, use a default of 100,000 tokens per day
-        tokens_limit = 100000
+        # Get today's request count from daily_usage
+        usage_repo = UsageRepository()
+        today_request_stats = usage_repo.get_today_request_stats()
+        requests_used = today_request_stats.get("total_requests", 0)
+
+        # Get user's quota settings
+        tokens_limit = 100000  # Default daily token quota
+        requests_limit = 1000  # Default daily request quota
+
+        if user_id:
+            user_repo = UserRepository()
+            user = user_repo.get_user_by_id(user_id)
+            if user:
+                # Use user's quota settings if set, otherwise use defaults
+                tokens_limit = user.get("daily_token_quota") or 100000
+                requests_limit = user.get("daily_request_quota") or 1000
 
         # Get last request time
         last_request = None
         if user_tokens:
-            # Get the most recent message timestamp
             last_request = datetime.now().isoformat()
 
-        # Default model (could be from config)
+        # Default model
         model = "GPT-4"
 
-        # Calculate average latency from recent requests
-        # For now, return a placeholder
+        # Latency placeholder
         latency = 0
 
         status = {
             "model": model,
             "tokens_used": tokens_used,
             "tokens_limit": tokens_limit,
+            "requests_used": requests_used,
+            "requests_limit": requests_limit,
             "latency": latency,
             "last_request": last_request,
             "status": "active",
@@ -1316,6 +1327,8 @@ def get_workspace_status():
                 "model": "GPT-4",
                 "tokens_used": 0,
                 "tokens_limit": 100000,
+                "requests_used": 0,
+                "requests_limit": 1000,
                 "latency": 0,
                 "last_request": None,
                 "status": "error",

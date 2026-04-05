@@ -3,7 +3,8 @@
  *
  * Features:
  * - Display current model info
- * - Token usage display
+ * - Today's token usage and quota
+ * - Today's request usage and quota
  * - Response latency
  */
 
@@ -11,12 +12,13 @@ import React, { useState, useEffect } from 'react';
 import { cn } from '@/utils';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
-import { formatTokens } from '@/utils';
 
 interface StatusBarProps {
   model?: string;
   tokensUsed?: number;
   tokensLimit?: number;
+  requestsUsed?: number;
+  requestsLimit?: number;
   latency?: number;
 }
 
@@ -24,6 +26,8 @@ interface WorkspaceStatus {
   model: string;
   tokens_used: number;
   tokens_limit: number;
+  requests_used: number;
+  requests_limit: number;
   latency: number;
   last_request: string | null;
 }
@@ -32,6 +36,8 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   model: propModel,
   tokensUsed: propTokensUsed,
   tokensLimit: propTokensLimit,
+  requestsUsed: propRequestsUsed,
+  requestsLimit: propRequestsLimit,
   latency: propLatency,
 }) => {
   const language = useLanguage();
@@ -45,7 +51,9 @@ export const StatusBar: React.FC<StatusBarProps> = ({
       setStatus({
         model: propModel ?? 'GPT-4',
         tokens_used: propTokensUsed ?? 0,
-        tokens_limit: propTokensLimit ?? 10000,
+        tokens_limit: propTokensLimit ?? 100000,
+        requests_used: propRequestsUsed ?? 0,
+        requests_limit: propRequestsLimit ?? 1000,
         latency: propLatency ?? 0,
         last_request: null,
       });
@@ -67,7 +75,9 @@ export const StatusBar: React.FC<StatusBarProps> = ({
         setStatus({
           model: 'GPT-4',
           tokens_used: 0,
-          tokens_limit: 10000,
+          tokens_limit: 100000,
+          requests_used: 0,
+          requests_limit: 1000,
           latency: 0,
           last_request: null,
         });
@@ -81,17 +91,20 @@ export const StatusBar: React.FC<StatusBarProps> = ({
     // Refresh every 30 seconds
     const interval = setInterval(fetchStatus, 30000);
     return () => clearInterval(interval);
-  }, [propModel, propTokensUsed, propTokensLimit, propLatency]);
+  }, [propModel, propTokensUsed, propTokensLimit, propRequestsUsed, propRequestsLimit, propLatency]);
 
-  // Calculate token usage percentage
+  // Calculate usage percentages
   const tokenPercentage = status
     ? Math.min(100, (status.tokens_used / status.tokens_limit) * 100)
     : 0;
+  const requestPercentage = status
+    ? Math.min(100, (status.requests_used / status.requests_limit) * 100)
+    : 0;
 
-  // Determine progress bar color
-  const getProgressVariant = () => {
-    if (tokenPercentage >= 90) return 'danger';
-    if (tokenPercentage >= 70) return 'warning';
+  // Determine progress bar color based on percentage
+  const getProgressVariant = (percentage: number) => {
+    if (percentage >= 90) return 'danger';
+    if (percentage >= 70) return 'warning';
     return 'success';
   };
 
@@ -99,6 +112,11 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   const formatLatency = (ms: number) => {
     if (ms < 1000) return `${ms}ms`;
     return `${(ms / 1000).toFixed(1)}s`;
+  };
+
+  // Format number with commas
+  const formatNumber = (num: number) => {
+    return num.toLocaleString();
   };
 
   return (
@@ -111,15 +129,30 @@ export const StatusBar: React.FC<StatusBarProps> = ({
       </div>
 
       <div className="status-center">
-        <span className="status-item status-token-usage" title={t('tokenUsage', language)}>
+        <span className="status-item status-token-usage" title={t('todayTokenUsage', language)}>
           <i className="bi bi-lightning" />
+          <span className="status-label">Token:</span>
           <span className="status-tokens">
-            {formatTokens(status?.tokens_used ?? 0)} / {formatTokens(status?.tokens_limit ?? 10000)}
+            {formatNumber(status?.tokens_used ?? 0)} / {formatNumber(status?.tokens_limit ?? 100000)}
           </span>
           <div className="status-progress">
             <div
-              className={cn('status-progress-bar', `bg-${getProgressVariant()}`)}
+              className={cn('status-progress-bar', `bg-${getProgressVariant(tokenPercentage)}`)}
               style={{ width: `${tokenPercentage}%` }}
+            />
+          </div>
+        </span>
+        <span className="status-separator">|</span>
+        <span className="status-item status-request-usage" title={t('todayRequestUsage', language)}>
+          <i className="bi bi-arrow-repeat" />
+          <span className="status-label">Request:</span>
+          <span className="status-requests">
+            {formatNumber(status?.requests_used ?? 0)} / {formatNumber(status?.requests_limit ?? 1000)}
+          </span>
+          <div className="status-progress">
+            <div
+              className={cn('status-progress-bar', `bg-${getProgressVariant(requestPercentage)}`)}
+              style={{ width: `${requestPercentage}%` }}
             />
           </div>
         </span>
