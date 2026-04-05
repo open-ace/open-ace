@@ -574,6 +574,27 @@ class SessionManager:
             (tokens_used, now, session_id),
         )
 
+        # Update user_projects last_access_at
+        try:
+            cursor.execute(
+                f"""
+                SELECT user_id, project_id FROM agent_sessions
+                WHERE session_id = {_param()}
+            """,
+                (session_id,),
+            )
+            row = cursor.fetchone()
+            if row and row[0] and row[1]:
+                cursor.execute(
+                    f"""
+                    UPDATE user_projects SET last_access_at = {_param()}
+                    WHERE user_id = {_param()} AND project_id = {_param()}
+                """,
+                    (now, row[0], row[1]),
+                )
+        except Exception as e:
+            logger.warning(f"Failed to update last_access_at: {e}")
+
         conn.commit()
         conn.close()
 
@@ -640,6 +661,27 @@ class SessionManager:
             """,
                 (len(messages), total_tokens, now, session_id),
             )
+
+            # Update user_projects last_access_at
+            try:
+                cursor.execute(
+                    f"""
+                    SELECT user_id, project_id FROM agent_sessions
+                    WHERE session_id = {_param()}
+                """,
+                    (session_id,),
+                )
+                row = cursor.fetchone()
+                if row and row[0] and row[1]:
+                    cursor.execute(
+                        f"""
+                        UPDATE user_projects SET last_access_at = {_param()}
+                        WHERE user_id = {_param()} AND project_id = {_param()}
+                    """,
+                        (now, row[0], row[1]),
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to update last_access_at: {e}")
 
             conn.commit()
             logger.debug(f"Added {len(messages)} messages to session {session_id} in batch")
