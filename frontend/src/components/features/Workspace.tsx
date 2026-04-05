@@ -117,13 +117,18 @@ export const Workspace: React.FC = () => {
   const getEffectiveUrl = useCallback((): string => {
     if (!config?.enabled) return '';
 
-    // Multi-user mode: use user-specific URL with token
+    // Multi-user mode: use user-specific URL with token and openace_url
     if (config.multi_user_mode && userWebUI?.success) {
       const baseUrl = userWebUI.url;
       const token = userWebUI.token;
-      // Add token as URL parameter
+      const openaceUrl = userWebUI.openace_url;
+      // Add token and openace_url as URL parameters
       const separator = baseUrl.includes('?') ? '&' : '?';
-      return `${baseUrl}${separator}token=${encodeURIComponent(token)}`;
+      let url = `${baseUrl}${separator}token=${encodeURIComponent(token)}`;
+      if (openaceUrl) {
+        url = `${url}&openace_url=${encodeURIComponent(openaceUrl)}`;
+      }
+      return url;
     }
 
     // Single-user mode: use configured URL

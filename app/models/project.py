@@ -41,18 +41,23 @@ class Project:
     @classmethod
     def from_dict(cls, data: dict) -> "Project":
         """Create from dictionary."""
+        def parse_datetime(value):
+            if value is None:
+                return None
+            if isinstance(value, datetime):
+                return value
+            if isinstance(value, str):
+                return datetime.fromisoformat(value)
+            return None
+
         return cls(
             id=data.get("id"),
             path=data.get("path", ""),
             name=data.get("name"),
             description=data.get("description"),
             created_by=data.get("created_by"),
-            created_at=(
-                datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None
-            ),
-            updated_at=(
-                datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else None
-            ),
+            created_at=parse_datetime(data.get("created_at")),
+            updated_at=parse_datetime(data.get("updated_at")),
             is_active=data.get("is_active", True),
             is_shared=data.get("is_shared", False),
         )
@@ -102,20 +107,21 @@ class UserProject:
     @classmethod
     def from_dict(cls, data: dict) -> "UserProject":
         """Create from dictionary."""
+        def parse_datetime(value):
+            if value is None:
+                return None
+            if isinstance(value, datetime):
+                return value
+            if isinstance(value, str):
+                return datetime.fromisoformat(value)
+            return None
+
         return cls(
             id=data.get("id"),
             user_id=data.get("user_id", 0),
             project_id=data.get("project_id", 0),
-            first_access_at=(
-                datetime.fromisoformat(data["first_access_at"])
-                if data.get("first_access_at")
-                else None
-            ),
-            last_access_at=(
-                datetime.fromisoformat(data["last_access_at"])
-                if data.get("last_access_at")
-                else None
-            ),
+            first_access_at=parse_datetime(data.get("first_access_at")),
+            last_access_at=parse_datetime(data.get("last_access_at")),
             total_sessions=data.get("total_sessions", 0),
             total_tokens=data.get("total_tokens", 0),
             total_requests=data.get("total_requests", 0),

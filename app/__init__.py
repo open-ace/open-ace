@@ -73,6 +73,35 @@ def create_app(config=None):
 def register_error_handlers(app):
     """Register error handlers for the application."""
 
+    @app.after_request
+    def add_cors_headers(response):
+        """Add CORS headers for iframe integration with qwen-code-webui."""
+        # Allow requests from any origin for API routes (needed for iframe integration)
+        if request.path.startswith("/api/"):
+            origin = request.headers.get("Origin", "")
+            # In multi-user mode, webui instances run on different ports
+            # Allow localhost and 127.0.0.1 origins
+            if origin and (origin.startswith("http://localhost:") or origin.startswith("http://127.0.0.1:")):
+                response.headers["Access-Control-Allow-Origin"] = origin
+                response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+                response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+                response.headers["Access-Control-Allow-Credentials"] = "true"
+        return response
+
+    # Handle OPTIONS preflight requests for CORS
+    @app.route("/api/<path:path>", methods=["OPTIONS"])
+    def handle_options(path):
+        """Handle CORS preflight requests."""
+        origin = request.headers.get("Origin", "")
+        if origin and (origin.startswith("http://localhost:") or origin.startswith("http://127.0.0.1:")):
+            response = jsonify({"status": "ok"})
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            return response
+        return jsonify({"status": "ok"}), 200
+
     @app.errorhandler(HTTPException)
     def handle_http_exception(e):
         """Handle all HTTP exceptions and return JSON for API routes."""

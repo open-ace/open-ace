@@ -1149,12 +1149,18 @@ def get_user_webui_url():
         # Update activity timestamp
         manager.update_user_activity(user_id)
 
+        # Build Open-ACE API URL for iframe integration
+        # This is needed so qwen-code-webui can call Open-ACE APIs
+        from flask import request as flask_request
+        openace_url = flask_request.host_url.rstrip('/')
+
         return jsonify({
             "success": True,
             "url": url,
             "token": token,
             "system_account": system_account,
             "multi_user_mode": manager.config.multi_user_mode,
+            "openace_url": openace_url,
         })
 
     except ValueError as e:

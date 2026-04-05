@@ -21,6 +21,7 @@ export interface UserWebUIResponse {
   token: string;
   system_account: string;
   multi_user_mode: boolean;
+  openace_url?: string;
   error?: string;
 }
 
