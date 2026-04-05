@@ -60,16 +60,20 @@ if __name__ == "__main__":
 
     # Disable reloader when stdin is not available (e.g., running in scripts, pipes, or background)
     # This prevents termios.error: (5, 'Input/output error')
-    # Check both isatty() and whether stdin is actually usable
-    try:
-        # Try to access stdin attributes - will fail if stdin is closed or redirected
-        if sys.stdin.isatty() and sys.stdin.fileno() >= 0:
-            use_reloader = debug_mode
-        else:
+    # Reloader is problematic in many environments, so we disable it by default
+    # unless explicitly running in an interactive terminal with TTY support
+    use_reloader = False
+    if debug_mode:
+        try:
+            # Check if we have a proper TTY that supports termios operations
+            import termios
+            if sys.stdin.isatty() and sys.stdin.fileno() >= 0:
+                # Try to get terminal attributes - will fail if TTY is not fully functional
+                termios.tcgetattr(sys.stdin.fileno())
+                use_reloader = True
+        except (AttributeError, OSError, ValueError, termios.error):
+            # stdin is not available or termios not supported
             use_reloader = False
-    except (AttributeError, OSError, ValueError):
-        # stdin is not available (closed, redirected, or in background)
-        use_reloader = False
 
     app.run(
         host=WEB_HOST, port=WEB_PORT, debug=debug_mode, threaded=True, use_reloader=use_reloader

@@ -153,6 +153,33 @@ class AuthService:
         """
         return self.user_repo.get_session_by_token(token)
 
+    def validate_session(self, token: str) -> Tuple[bool, Optional[Dict]]:
+        """
+        Validate a session token and return session data.
+
+        Args:
+            token: Session token.
+
+        Returns:
+            Tuple[bool, Optional[Dict]]: (Is valid, Session data or error dict).
+        """
+        if not token:
+            return False, {"error": "Authentication required"}
+
+        session = self.get_session(token)
+        if not session:
+            return False, {"error": "Invalid or expired session"}
+
+        # Check if session is expired
+        expires_at = session.get("expires_at")
+        if expires_at:
+            if isinstance(expires_at, str):
+                expires_at = datetime.fromisoformat(expires_at)
+            if expires_at < datetime.utcnow():
+                return False, {"error": "Session expired"}
+
+        return True, session
+
     def get_user_profile(self, user_id: int) -> Optional[Dict]:
         """
         Get user profile.

@@ -295,6 +295,7 @@ def start_service(dev_mode: bool = False):
             [sys.executable, str(work_dir / "web.py")],
             stdout=log,
             stderr=log,
+            stdin=subprocess.DEVNULL,  # Disconnect stdin to avoid termios errors
             cwd=work_dir,
             env=env,
         )

@@ -275,7 +275,7 @@ class SSOManager:
 
         # Load from database
         row = self.db.fetch_one(
-            "SELECT * FROM sso_providers WHERE name = ? AND is_active = 1", (name,)
+            "SELECT * FROM sso_providers WHERE name = ? AND is_active IS TRUE", (name,)
         )
 
         if not row:
@@ -338,7 +338,7 @@ class SSOManager:
         try:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("UPDATE sso_providers SET is_active = 0 WHERE name = ?", (name,))
+                cursor.execute("UPDATE sso_providers SET is_active = FALSE WHERE name = ?", (name,))
                 conn.commit()
 
             if name in self._providers:
@@ -355,7 +355,7 @@ class SSOManager:
         try:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("UPDATE sso_providers SET is_active = 1 WHERE name = ?", (name,))
+                cursor.execute("UPDATE sso_providers SET is_active = TRUE WHERE name = ?", (name,))
                 conn.commit()
 
             return True
