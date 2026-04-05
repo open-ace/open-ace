@@ -405,6 +405,10 @@ const translations: Record<Language, Translations> = {
     loginError: 'Invalid username or password',
     adminOnly: 'Admin only',
 
+    // Fullscreen
+    enterFullscreen: 'Enter Fullscreen',
+    exitFullscreen: 'Exit Fullscreen',
+
     // Theme
     lightTheme: 'Light',
     darkTheme: 'Dark',
@@ -980,6 +984,10 @@ const translations: Record<Language, Translations> = {
     password: '密码',
     loginError: '用户名或密码错误',
     adminOnly: '仅管理员可用',
+
+    // Fullscreen
+    enterFullscreen: '进入全屏',
+    exitFullscreen: '退出全屏',
 
     // Theme
     lightTheme: '浅色',

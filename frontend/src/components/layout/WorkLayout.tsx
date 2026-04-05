@@ -6,12 +6,17 @@
  * - Center: Main content (AI conversation)
  * - Right: Assist panel (prompts, tools, docs)
  * - Bottom: Status bar
+ *
+ * Features:
+ * - Fullscreen mode: collapses left and right panels
+ * - ESC key to exit fullscreen
+ * - Preserves panel state when entering/exiting fullscreen
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { cn } from '@/utils';
-import { useLanguage } from '@/store';
+import { useLanguage, useAppStore, useWorkspaceFullscreen } from '@/store';
 import { t } from '@/i18n';
 import { ModeSwitcher } from '@/components/common';
 import { Header } from './Header';
@@ -42,6 +47,15 @@ export const WorkLayout: React.FC<WorkLayoutProps> = ({ children }) => {
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
   const [leftPanelCollapsed, setLeftPanelCollapsed] = useState(false);
 
+  // Fullscreen state from global store
+  const workspaceFullscreen = useWorkspaceFullscreen();
+  const {
+    exitWorkspaceFullscreen,
+    toggleWorkspaceFullscreen,
+    previousLeftPanelCollapsed,
+    previousRightPanelCollapsed,
+  } = useAppStore();
+
   // Get active nav item from path
   const getActiveNavItem = () => {
     const path = location.pathname;
@@ -58,8 +72,38 @@ export const WorkLayout: React.FC<WorkLayoutProps> = ({ children }) => {
     navigate(item.path);
   };
 
+  // Handle fullscreen toggle
+  const handleFullscreenToggle = useCallback(() => {
+    toggleWorkspaceFullscreen(leftPanelCollapsed, rightPanelCollapsed);
+  }, [toggleWorkspaceFullscreen, leftPanelCollapsed, rightPanelCollapsed]);
+
+  // Handle ESC key to exit fullscreen
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && workspaceFullscreen) {
+        exitWorkspaceFullscreen();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [workspaceFullscreen, exitWorkspaceFullscreen]);
+
+  // Update local panel state when fullscreen mode changes
+  useEffect(() => {
+    if (workspaceFullscreen) {
+      // Entering fullscreen: collapse both panels
+      setLeftPanelCollapsed(true);
+      setRightPanelCollapsed(true);
+    } else {
+      // Exiting fullscreen: restore previous state
+      setLeftPanelCollapsed(previousLeftPanelCollapsed);
+      setRightPanelCollapsed(previousRightPanelCollapsed);
+    }
+  }, [workspaceFullscreen, previousLeftPanelCollapsed, previousRightPanelCollapsed]);
+
   return (
-    <div className="work-layout">
+    <div className={cn('work-layout', workspaceFullscreen && 'fullscreen-mode')}>
       {/* Header */}
       <header className="work-header">
         <div className="header-left">
@@ -74,6 +118,14 @@ export const WorkLayout: React.FC<WorkLayoutProps> = ({ children }) => {
           <ModeSwitcher className="header-mode-switcher" />
         </div>
         <Header compact />
+        {/* Fullscreen toggle button */}
+        <button
+          className="fullscreen-toggle-btn"
+          onClick={handleFullscreenToggle}
+          title={workspaceFullscreen ? t('exitFullscreen', language) : t('enterFullscreen', language)}
+        >
+          <i className={cn('bi', workspaceFullscreen ? 'bi-fullscreen-exit' : 'bi-fullscreen')} />
+        </button>
       </header>
 
       <div className="work-body">

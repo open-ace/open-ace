@@ -13,7 +13,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { workspaceApi, type WorkspaceConfig, type UserWebUIResponse } from '@/api';
 import { requestApi, type QuotaStatusResponse } from '@/api/request';
-import { useLanguage } from '@/store';
+import { useLanguage, useAppStore } from '@/store';
 import { t } from '@/i18n';
 import { Error, Button, Card } from '@/components/common';
 import { cn } from '@/utils';
@@ -97,6 +97,19 @@ export const Workspace: React.FC = () => {
     const interval = setInterval(sendHeartbeat, ACTIVITY_HEARTBEAT_INTERVAL);
     return () => clearInterval(interval);
   }, [config?.multi_user_mode, userWebUI?.success]);
+
+  // Listen for fullscreen request from iframe (when user selects project and enters chat)
+  useEffect(() => {
+    const handleIframeMessage = (event: MessageEvent) => {
+      // Validate message type for fullscreen request
+      if (event.data?.type === 'openace-enter-chat') {
+        useAppStore.getState().enterWorkspaceFullscreen(false, false);
+      }
+    };
+
+    window.addEventListener('message', handleIframeMessage);
+    return () => window.removeEventListener('message', handleIframeMessage);
+  }, []);
 
   // Check quota
   const checkQuota = useCallback(async () => {

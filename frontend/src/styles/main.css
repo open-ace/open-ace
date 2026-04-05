@@ -1955,6 +1955,52 @@ link[rel='dns-prefetch'] {
   overflow: hidden;
 }
 
+/* Work Layout Fullscreen Mode */
+.work-layout.fullscreen-mode .work-left-panel,
+.work-layout.fullscreen-mode .work-right-panel {
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+  border: none;
+}
+
+.work-layout.fullscreen-mode .work-left-panel .panel-header,
+.work-layout.fullscreen-mode .work-right-panel .panel-header,
+.work-layout.fullscreen-mode .work-nav,
+.work-layout.fullscreen-mode .session-list,
+.work-layout.fullscreen-mode .assist-panel-content {
+  display: none;
+}
+
+.work-layout.fullscreen-mode .work-main {
+  flex: 1;
+  width: 100%;
+}
+
+/* Fullscreen toggle button */
+.fullscreen-toggle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-sm);
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: var(--border-radius);
+  transition: all var(--transition-fast);
+  font-size: var(--font-size-lg);
+}
+
+.fullscreen-toggle-btn:hover {
+  background: var(--bg-tertiary);
+  color: var(--color-primary);
+}
+
+.work-layout.fullscreen-mode .fullscreen-toggle-btn {
+  color: var(--color-primary);
+}
+
 /* Work Left Panel - Session List */
 .work-left-panel {
   width: 260px;

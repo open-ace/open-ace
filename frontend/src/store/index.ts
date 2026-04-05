@@ -18,6 +18,11 @@ interface AppState {
   sidebarCollapsed: boolean;
   appMode: AppMode;
 
+  // Workspace fullscreen state
+  workspaceFullscreen: boolean;
+  previousLeftPanelCollapsed: boolean;
+  previousRightPanelCollapsed: boolean;
+
   // Actions
   setUser: (user: User | null) => void;
   setAuthenticated: (isAuthenticated: boolean) => void;
@@ -28,6 +33,11 @@ interface AppState {
   setSidebarCollapsed: (collapsed: boolean) => void;
   setAppMode: (mode: AppMode) => void;
   logout: () => void;
+
+  // Workspace fullscreen actions
+  enterWorkspaceFullscreen: (leftCollapsed: boolean, rightCollapsed: boolean) => void;
+  exitWorkspaceFullscreen: () => void;
+  toggleWorkspaceFullscreen: (leftCollapsed: boolean, rightCollapsed: boolean) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -41,6 +51,11 @@ export const useAppStore = create<AppState>()(
       language: 'en',
       sidebarCollapsed: false,
       appMode: 'work',
+
+      // Workspace fullscreen state
+      workspaceFullscreen: false,
+      previousLeftPanelCollapsed: false,
+      previousRightPanelCollapsed: false,
 
       // Actions
       setUser: (user) => set({ user }),
@@ -61,6 +76,27 @@ export const useAppStore = create<AppState>()(
           user: null,
           isAuthenticated: false,
           authLoading: false,
+        }),
+
+      // Workspace fullscreen actions
+      enterWorkspaceFullscreen: (leftCollapsed, rightCollapsed) =>
+        set({
+          workspaceFullscreen: true,
+          previousLeftPanelCollapsed: leftCollapsed,
+          previousRightPanelCollapsed: rightCollapsed,
+        }),
+      exitWorkspaceFullscreen: () => set({ workspaceFullscreen: false }),
+      toggleWorkspaceFullscreen: (leftCollapsed, rightCollapsed) =>
+        set((state) => {
+          if (state.workspaceFullscreen) {
+            return { workspaceFullscreen: false };
+          } else {
+            return {
+              workspaceFullscreen: true,
+              previousLeftPanelCollapsed: leftCollapsed,
+              previousRightPanelCollapsed: rightCollapsed,
+            };
+          }
         }),
     }),
     {
@@ -83,3 +119,9 @@ export const useTheme = () => useAppStore((state) => state.theme);
 export const useLanguage = () => useAppStore((state) => state.language);
 export const useSidebarCollapsed = () => useAppStore((state) => state.sidebarCollapsed);
 export const useAppMode = () => useAppStore((state) => state.appMode);
+export const useWorkspaceFullscreen = () => useAppStore((state) => state.workspaceFullscreen);
+export const usePreviousPanelState = () =>
+  useAppStore((state) => ({
+    left: state.previousLeftPanelCollapsed,
+    right: state.previousRightPanelCollapsed,
+  }));
