@@ -96,7 +96,9 @@ const translations: Record<Language, Translations> = {
     dashboardFilterQwen: 'Qwen',
 
     // Tokens
+    token: 'Token',
     tokens: 'tokens',
+    request: 'Request',
     inputTokens: 'Input Tokens',
     outputTokens: 'Output Tokens',
 
@@ -672,7 +674,9 @@ const translations: Record<Language, Translations> = {
     dashboardFilterQwen: 'Qwen',
 
     // Tokens
+    token: 'Token',
     tokens: 'tokens',
+    request: '请求',
     inputTokens: '输入 Tokens',
     outputTokens: '输出 Tokens',
 
@@ -1245,7 +1249,9 @@ const translations: Record<Language, Translations> = {
     dashboardFilterQwen: 'Qwen',
 
     // Tokens
+    token: 'トークン',
     tokens: 'tokens',
+    request: 'リクエスト',
     inputTokens: '入力トークン',
     outputTokens: '出力トークン',
 
@@ -1612,7 +1618,9 @@ const translations: Record<Language, Translations> = {
     dashboardFilterQwen: 'Qwen',
 
     // Tokens
+    token: '토큰',
     tokens: 'tokens',
+    request: '요청',
     inputTokens: '입력 토큰',
     outputTokens: '출력 토큰',
 

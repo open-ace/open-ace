@@ -1263,9 +1263,8 @@ def stop_all_webui_instances():
 
 @workspace_bp.route("/status", methods=["GET"])
 def get_workspace_status():
-    """Get workspace status including model, token usage, request usage, and quotas."""
+    """Get workspace status including today's token and request usage for current user."""
     from datetime import datetime
-    from app.repositories.message_repo import MessageRepository
     from app.repositories.usage_repo import UsageRepository
     from app.repositories.user_repo import UserRepository
 
@@ -1273,50 +1272,38 @@ def get_workspace_status():
         user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
         today = datetime.now().strftime("%Y-%m-%d")
 
-        # Get today's token usage from messages
-        message_repo = MessageRepository()
-        user_tokens = message_repo.get_user_token_totals(
-            start_date=today, end_date=today, host_name=None
-        )
-        tokens_used = sum(u.get("total_tokens", 0) for u in user_tokens) if user_tokens else 0
-
-        # Get today's request count from daily_usage
-        usage_repo = UsageRepository()
-        today_request_stats = usage_repo.get_today_request_stats()
-        requests_used = today_request_stats.get("total_requests", 0)
-
-        # Get user's quota settings
-        tokens_limit = 100000  # Default daily token quota
-        requests_limit = 1000  # Default daily request quota
+        # Default quota limits
+        tokens_limit = 100000
+        requests_limit = 1000
+        tokens_used = 0
+        requests_used = 0
 
         if user_id:
             user_repo = UserRepository()
             user = user_repo.get_user_by_id(user_id)
+
             if user:
-                # Use user's quota settings if set, otherwise use defaults
+                # Get user's quota settings
                 tokens_limit = user.get("daily_token_quota") or 100000
                 requests_limit = user.get("daily_request_quota") or 1000
 
-        # Get last request time
-        last_request = None
-        if user_tokens:
-            last_request = datetime.now().isoformat()
+                # Get user's system_account for filtering (sender_name format: {system_account}-{hostname}-{tool})
+                username = user.get("username", "")
+                system_account = user.get("system_account") or username
 
-        # Default model
-        model = "GPT-4"
+                # Get today's usage for this user (same logic as /api/quota/status)
+                usage_repo = UsageRepository()
+                today_stats = usage_repo.get_request_stats_by_user(date=today, user_name=system_account)
 
-        # Latency placeholder
-        latency = 0
+                # Aggregate today's stats for this user
+                requests_used = sum(stat.get("requests", 0) for stat in today_stats)
+                tokens_used = sum(stat.get("tokens", 0) for stat in today_stats)
 
         status = {
-            "model": model,
             "tokens_used": tokens_used,
             "tokens_limit": tokens_limit,
             "requests_used": requests_used,
             "requests_limit": requests_limit,
-            "latency": latency,
-            "last_request": last_request,
-            "status": "active",
         }
 
         return jsonify(status)
@@ -1324,13 +1311,9 @@ def get_workspace_status():
         logger.error(f"Error getting workspace status: {e}")
         return jsonify(
             {
-                "model": "GPT-4",
                 "tokens_used": 0,
                 "tokens_limit": 100000,
                 "requests_used": 0,
                 "requests_limit": 1000,
-                "latency": 0,
-                "last_request": None,
-                "status": "error",
             }
         )

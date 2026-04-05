@@ -2452,6 +2452,11 @@ link[rel='dns-prefetch'] {
   gap: var(--spacing-md);
 }
 
+.work-status-bar .status-center {
+  justify-content: center;
+  flex: 1;
+}
+
 .work-status-bar .status-item {
   display: flex;
   align-items: center;
