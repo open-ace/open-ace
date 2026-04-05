@@ -15,7 +15,7 @@ import { workspaceApi, type WorkspaceConfig, type UserWebUIResponse } from '@/ap
 import { requestApi, type QuotaStatusResponse } from '@/api/request';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
-import { Loading, Error, Button, Card } from '@/components/common';
+import { Error, Button, Card } from '@/components/common';
 import { cn } from '@/utils';
 
 interface WorkspaceTab {
@@ -44,6 +44,7 @@ export const Workspace: React.FC = () => {
   const [quotaStatus, setQuotaStatus] = useState<QuotaStatusResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isQuotaLoading, setIsQuotaLoading] = useState(true);
+  const [loadingStage, setLoadingStage] = useState<string>('initializing'); // Track loading progress
   const [error, setError] = useState<string | null>(null);
   const [tabs, setTabs] = useState<WorkspaceTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>('');
@@ -53,17 +54,22 @@ export const Workspace: React.FC = () => {
   useEffect(() => {
     const loadConfig = async () => {
       try {
+        setLoadingStage('loadingConfig');
         const workspaceConfig = await workspaceApi.getConfig();
         setConfig(workspaceConfig);
 
         // If multi-user mode is enabled, get user-specific URL
         if (workspaceConfig.enabled && workspaceConfig.multi_user_mode) {
+          setLoadingStage('startingWorkspace');
           const userWebUIResponse = await workspaceApi.getUserWebUIUrl();
           if (userWebUIResponse.success) {
             setUserWebUI(userWebUIResponse);
+            setLoadingStage('ready');
           } else {
             setError(userWebUIResponse.error || 'Failed to get user workspace URL');
           }
+        } else {
+          setLoadingStage('ready');
         }
       } catch (err) {
         const error = err as Error;
@@ -234,7 +240,52 @@ export const Workspace: React.FC = () => {
   }, [navigate]);
 
   if (isLoading || isQuotaLoading) {
-    return <Loading size="lg" text={t('loading', language)} />;
+    // Get loading message based on stage
+    const getLoadingMessage = (): string => {
+      switch (loadingStage) {
+        case 'loadingConfig':
+          return t('loadingWorkspaceConfig', language) || 'Loading workspace configuration...';
+        case 'startingWorkspace':
+          return t('startingWorkspaceInstance', language) || 'Starting your workspace instance...';
+        case 'ready':
+          return t('workspaceReady', language) || 'Workspace ready!';
+        default:
+          return t('loading', language);
+      }
+    };
+
+    // Show progress indicator for workspace startup
+    const showProgress = loadingStage === 'startingWorkspace';
+
+    return (
+      <div className="workspace-loading d-flex align-items-center justify-content-center h-100">
+        <div className="text-center">
+          <div className="spinner-border text-primary mb-3" role="status">
+            <span className="visually-hidden">{t('loading', language)}</span>
+          </div>
+          <h5 className="mb-2">{getLoadingMessage()}</h5>
+          {showProgress && (
+            <p className="text-muted small mb-3">
+              {t('workspaceStartupNote', language) || 'This may take a few seconds on first visit'}
+            </p>
+          )}
+          <div className="progress-steps mt-3">
+            <div className={`progress-step ${loadingStage === 'loadingConfig' || loadingStage === 'startingWorkspace' || loadingStage === 'ready' ? 'active' : ''}`}>
+              <i className="bi bi-check-circle-fill" />
+              <span>{t('loadingConfig', language) || 'Load config'}</span>
+            </div>
+            <div className={`progress-step ${loadingStage === 'startingWorkspace' || loadingStage === 'ready' ? 'active' : ''}`}>
+              <i className={`bi ${loadingStage === 'startingWorkspace' ? 'bi-arrow-repeat spin' : 'bi-check-circle-fill'}`} />
+              <span>{t('startingInstance', language) || 'Start instance'}</span>
+            </div>
+            <div className={`progress-step ${loadingStage === 'ready' ? 'active' : ''}`}>
+              <i className="bi bi-check-circle-fill" />
+              <span>{t('ready', language) || 'Ready'}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (error) {
@@ -463,6 +514,48 @@ export const Workspace: React.FC = () => {
         }
         .workspace-tabs::-webkit-scrollbar-track {
           background: transparent;
+        }
+        /* Loading progress steps */
+        .workspace-loading {
+          padding: 20px;
+        }
+        .progress-steps {
+          display: flex;
+          justify-content: center;
+          gap: 20px;
+        }
+        .progress-step {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 8px 16px;
+          border-radius: 8px;
+          background: rgba(0, 0, 0, 0.05);
+          opacity: 0.5;
+          transition: opacity 0.3s ease, background-color 0.3s ease;
+        }
+        .progress-step.active {
+          opacity: 1;
+          background: rgba(13, 110, 253, 0.1);
+        }
+        .progress-step i {
+          font-size: 1.2rem;
+        }
+        .progress-step.active i.bi-check-circle-fill {
+          color: #28a745;
+        }
+        .progress-step.active i.bi-arrow-repeat {
+          color: #0d6efd;
+        }
+        .progress-step span {
+          font-size: 0.85rem;
+        }
+        .spin {
+          animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
         }
       `}</style>
     </div>

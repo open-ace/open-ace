@@ -6,11 +6,14 @@ API routes for authentication operations.
 """
 
 import bcrypt
+import logging
 
 from flask import Blueprint, jsonify, make_response, request
 
 from app.repositories.user_repo import UserRepository
 from app.services.auth_service import AuthService
+
+logger = logging.getLogger(__name__)
 
 auth_bp = Blueprint("auth", __name__)
 auth_service = AuthService()
@@ -52,6 +55,23 @@ def api_login():
             samesite="Lax",
             max_age=24 * 60 * 60,  # 24 hours
         )
+
+        # Pre-start webui instance for user (in multi-user mode)
+        try:
+            from app.services.webui_manager import get_webui_manager
+
+            manager = get_webui_manager()
+            if manager.config.enabled and manager.config.multi_user_mode:
+                user_id = user.get("id")
+                # Get user's system_account
+                user_data = user_repo.get_user_by_id(user_id)
+                system_account = user_data.get("system_account") or user_data.get("username")
+                if user_id and system_account:
+                    logger.info(f"Pre-starting webui for user {user_id} ({system_account}) on login")
+                    manager.prestart_user_instance_async(user_id, system_account)
+        except Exception as e:
+            logger.warning(f"Failed to pre-start webui on login: {e}")
+
         return response
 
     return jsonify({"error": token_or_error}), 401

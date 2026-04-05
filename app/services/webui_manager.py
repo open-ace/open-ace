@@ -674,6 +674,41 @@ class WebUIManager:
             if user_id in self._instances:
                 self._instances[user_id].update_activity()
 
+    def prestart_user_instance_async(self, user_id: int, system_account: str):
+        """
+        Pre-start a webui instance for a user in background thread.
+
+        This is called during login to start the instance early,
+        so it's ready when the user navigates to /work.
+
+        Args:
+            user_id: User ID.
+            system_account: User's system account name.
+        """
+        if not self.config.multi_user_mode:
+            return  # No pre-start needed in single-user mode
+
+        # Check if already has an instance
+        with self._lock:
+            if user_id in self._instances:
+                instance = self._instances[user_id]
+                if instance.is_alive():
+                    logger.info(f"User {user_id} already has active instance, skipping pre-start")
+                    return
+
+        # Start in background thread
+        def start_in_background():
+            try:
+                logger.info(f"Pre-starting webui instance for user {user_id} ({system_account})")
+                url, token = self.get_user_webui_url(user_id, system_account)
+                logger.info(f"Pre-started webui for user {user_id}: {url}")
+            except Exception as e:
+                logger.error(f"Failed to pre-start webui for user {user_id}: {e}")
+
+        thread = threading.Thread(target=start_in_background, daemon=True)
+        thread.start()
+        logger.info(f"Started background thread to pre-start webui for user {user_id}")
+
 
 # Global manager instance
 _manager: Optional[WebUIManager] = None
