@@ -272,6 +272,21 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
     return () => container.removeEventListener('keydown', handleKeyDown);
   }, [handleKeyDown]);
 
+  // Auto-focus on mount to enable keyboard navigation without clicking
+  useEffect(() => {
+    const container = sessionListRef.current;
+    if (!container || collapsed || flatSessionList.length === 0) {
+      return;
+    }
+    // Use setTimeout to ensure the component is fully rendered
+    const timer = setTimeout(() => {
+      container.focus();
+      // Set initial focus to first item
+      setFocusedIndex(0);
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [collapsed, flatSessionList.length]);
+
   // Reset focused index when search query changes
   useEffect(() => {
     setFocusedIndex(-1);
