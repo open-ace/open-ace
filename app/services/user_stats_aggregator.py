@@ -55,22 +55,25 @@ class UserDailyStatsAggregator:
         for user in users:
             user_id = user.get("id")
             username = user.get("username")
+            system_account = user.get("system_account")
             if user_id and username:
-                records = self.aggregate_user(user_id, username, days)
+                records = self.aggregate_user(user_id, username, days, system_account)
                 total_records += records
                 logger.debug(f"Aggregated {records} records for user {username}")
         
         logger.info(f"Aggregation completed: {total_records} total records")
         return total_records
 
-    def aggregate_user(self, user_id: int, username: str, days: int = 30) -> int:
+    def aggregate_user(self, user_id: int, username: str, days: int = 30, system_account: Optional[str] = None) -> int:
         """
         Aggregate usage data for a specific user.
         
         Args:
             user_id: User ID.
-            username: Username (for sender_name matching).
+            username: Username (for logging).
             days: Number of days to aggregate.
+            system_account: System account name for sender_name matching.
+                           If not provided, falls back to username.
             
         Returns:
             Number of records created/updated.
@@ -81,6 +84,10 @@ class UserDailyStatsAggregator:
         start_str = start_date.strftime("%Y-%m-%d")
         end_str = end_date.strftime("%Y-%m-%d")
         
+        # Use system_account for sender_name matching if available
+        # sender_name format: {system_account}-{hostname}-{tool}
+        sender_prefix = system_account or username
+        
         try:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
@@ -88,12 +95,14 @@ class UserDailyStatsAggregator:
                 # PostgreSQL: use INSERT ... ON CONFLICT DO UPDATE
                 cursor.execute("""
                     INSERT INTO user_daily_stats 
-                    (user_id, date, requests, tokens, updated_at)
+                    (user_id, date, requests, tokens, input_tokens, output_tokens, updated_at)
                     SELECT 
                         %s as user_id,
                         dm.date::date,
                         COUNT(*) as requests,
                         COALESCE(SUM(dm.tokens_used), 0) as tokens,
+                        COALESCE(SUM(dm.input_tokens), 0) as input_tokens,
+                        COALESCE(SUM(dm.output_tokens), 0) as output_tokens,
                         CURRENT_TIMESTAMP
                     FROM daily_messages dm
                     WHERE dm.date >= %s AND dm.date <= %s
@@ -103,13 +112,15 @@ class UserDailyStatsAggregator:
                     ON CONFLICT (user_id, date) DO UPDATE SET
                         requests = EXCLUDED.requests,
                         tokens = EXCLUDED.tokens,
+                        input_tokens = EXCLUDED.input_tokens,
+                        output_tokens = EXCLUDED.output_tokens,
                         updated_at = CURRENT_TIMESTAMP
-                """, (user_id, start_str, end_str, f"{username}%"))
+                """, (user_id, start_str, end_str, f"{sender_prefix}%"))
                 
                 conn.commit()
                 records_updated = cursor.rowcount
                 
-                logger.debug(f"Aggregated {records_updated} records for user {username}")
+                logger.debug(f"Aggregated {records_updated} records for user {username} (sender_prefix: {sender_prefix})")
                 return records_updated
                 
         except Exception as e:
