@@ -579,7 +579,7 @@ export const Workspace: React.FC = () => {
                   </span>
                   <div className="tab-actions d-flex align-items-center">
                     <button
-                      className="btn btn-sm btn-link p-0 px-1 text-muted"
+                      className="btn btn-sm btn-link p-0 text-muted tab-action-btn"
                       onClick={(e) => {
                         e.stopPropagation();
                         handleRenameTab(tab.id, e);
@@ -587,16 +587,16 @@ export const Workspace: React.FC = () => {
                       title={t('renameSession', language)}
                       tabIndex={-1}
                     >
-                      <i className="bi bi-pencil" style={{ fontSize: '0.85rem' }} />
+                      <i className="bi bi-pencil" />
                     </button>
                     {tabs.length > 1 && (
                       <button
-                        className="btn btn-sm btn-link p-0 px-1 text-muted"
+                        className="btn btn-sm btn-link p-0 text-muted tab-action-btn"
                         onClick={(e) => closeTab(tab.id, e)}
                         title={t('close', language)}
                         tabIndex={-1}
                       >
-                        <i className="bi bi-x" style={{ fontSize: '0.9rem' }} />
+                        <i className="bi bi-x" />
                       </button>
                     )}
                   </div>
@@ -750,6 +750,18 @@ export const Workspace: React.FC = () => {
         .workspace-tab:hover .tab-actions,
         .workspace-tab.active .tab-actions {
           opacity: 1;
+        }
+        /* Tab action buttons - compact size */
+        .tab-action-btn {
+          line-height: 1;
+          min-width: 20px;
+          height: 20px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .tab-action-btn i {
+          font-size: 0.8rem;
         }
         /* Tab resize handle */
         .tab-resize-handle {
