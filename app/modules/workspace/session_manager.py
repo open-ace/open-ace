@@ -231,7 +231,7 @@ class SessionManager:
                 from psycopg2.extras import RealDictCursor
 
                 url = get_database_url()
-                conn = psycopg2.connect(url)
+                conn = psycopg2.connect(url, cursor_factory=RealDictCursor)
                 return conn
             except ImportError:
                 raise ImportError(

@@ -374,9 +374,7 @@ class UserRepository:
         query = f"UPDATE users SET {', '.join(updates)} WHERE id = ?"
 
         try:
-            with self.db.connection() as conn:
-                cursor = conn.cursor()
-                cursor = self.db.execute(query, tuple(params))
+            cursor = self.db.execute(query, tuple(params))
             return cursor.rowcount > 0
         except Exception as e:
             logger.error(f"Error updating user quota: {e}")

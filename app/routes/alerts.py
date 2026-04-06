@@ -21,10 +21,34 @@ from app.modules.governance.alert_notifier import (
     NotificationPreference,
     get_alert_notifier,
 )
+from app.services.auth_service import AuthService
 
 logger = logging.getLogger(__name__)
 
 alerts_bp = Blueprint("alerts", __name__)
+auth_service = AuthService()
+
+
+@alerts_bp.before_request
+def load_user():
+    """Load the current user from session token before each request."""
+    token = request.cookies.get("session_token") or request.headers.get(
+        "Authorization", ""
+    ).replace("Bearer ", "")
+
+    if token:
+        session = auth_service.get_session(token)
+        if session:
+            g.user = {
+                "id": session.get("user_id"),
+                "username": session.get("username"),
+                "email": session.get("email"),
+                "role": session.get("role"),
+            }
+        else:
+            g.user = None
+    else:
+        g.user = None
 
 
 # ==================== REST API ====================
