@@ -303,6 +303,12 @@ def init_database() -> None:
         _execute(cursor, "ALTER TABLE daily_messages ADD COLUMN conversation_id TEXT")
         conn.commit()
 
+    # Check if project_path column exists in daily_messages, add it if not (for old databases)
+    if not _column_exists(cursor, "daily_messages", "project_path"):
+        print("Adding project_path column to existing daily_messages table...")
+        _execute(cursor, "ALTER TABLE daily_messages ADD COLUMN project_path TEXT")
+        conn.commit()
+
     conn.commit()
 
     # Create indexes for daily_messages table to improve query performance
@@ -318,6 +324,9 @@ def init_database() -> None:
         # New composite indexes for better coverage
         ("idx_messages_conversation", "daily_messages", "date, conversation_id, agent_session_id"),
         ("idx_messages_date_sender_id", "daily_messages", "date, sender_id"),
+        # Index for project_path (session restore feature)
+        ("idx_messages_project_path", "daily_messages", "project_path"),
+        ("idx_messages_agent_session_project", "daily_messages", "agent_session_id, project_path"),
     ]
 
     for index_name, table_name, columns in indexes_to_create:

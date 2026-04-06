@@ -11,6 +11,7 @@ import {
   useDeleteSession,
   useCompleteSession,
   useSession,
+  useRestoreSession,
 } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
@@ -74,6 +75,7 @@ export const Sessions: React.FC = () => {
   // Mutations
   const deleteMutation = useDeleteSession();
   const completeMutation = useCompleteSession();
+  const restoreMutation = useRestoreSession();
 
   const sessions = data?.data?.sessions ?? [];
 
@@ -162,6 +164,10 @@ export const Sessions: React.FC = () => {
   const handleSessionClick = (sessionId: string) => {
     setSelectedSessionId(sessionId);
     setShowDetailModal(true);
+  };
+
+  const handleRestore = async (sessionId: string) => {
+    await restoreMutation.mutateAsync(sessionId);
   };
 
   const handleCloseModal = () => {
@@ -307,8 +313,10 @@ export const Sessions: React.FC = () => {
                 onClick={() => handleSessionClick(session.session_id)}
                 onDelete={handleDelete}
                 onComplete={handleComplete}
+                onRestore={handleRestore}
                 isDeleting={deleteMutation.isPending}
                 isCompleting={completeMutation.isPending}
+                isRestoring={restoreMutation.isPending}
               />
             ))}
           </div>
@@ -389,8 +397,10 @@ interface SessionCardProps {
   onClick: () => void;
   onDelete: (sessionId: string) => void;
   onComplete: (sessionId: string) => void;
+  onRestore: (sessionId: string) => void;
   isDeleting: boolean;
   isCompleting: boolean;
+  isRestoring: boolean;
 }
 
 const SessionCard: React.FC<SessionCardProps> = ({
@@ -400,8 +410,10 @@ const SessionCard: React.FC<SessionCardProps> = ({
   onClick,
   onDelete,
   onComplete,
+  onRestore,
   isDeleting,
   isCompleting,
+  isRestoring,
 }) => {
   return (
     <div
@@ -453,6 +465,17 @@ const SessionCard: React.FC<SessionCardProps> = ({
 
           {/* Actions */}
           <div className="d-flex flex-column gap-2 ms-4" onClick={(e) => e.stopPropagation()}>
+            {/* Restore to Workspace button - always show for completed sessions */}
+            <span title={t('restoreToWorkspace', language) ?? 'Restore to Workspace'}>
+              <Button
+                variant="outline-primary"
+                size="sm"
+                onClick={() => onRestore(session.session_id)}
+                loading={isRestoring}
+              >
+                <i className="bi bi-box-arrow-in-right" />
+              </Button>
+            </span>
             {session.status === 'active' && (
               <span title={t('complete', language) ?? 'Complete'}>
                 <Button

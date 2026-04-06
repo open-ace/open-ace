@@ -873,6 +873,22 @@ def process_jsonl_file(
     Returns:
         tuple: (daily_stats dict, messages list)
     """
+    # Extract agent_name from filepath
+    # Format: ~/.openclaw/agents/{agent_name}/sessions/{sessionId}.jsonl
+    agent_name = None
+    parts = filepath.parts
+    try:
+        # Find ".openclaw" and "agents" in the path
+        if ".openclaw" in parts and "agents" in parts:
+            openclaw_idx = parts.index(".openclaw")
+            agents_idx = parts.index("agents")
+            if agents_idx == openclaw_idx + 1:
+                # Next part after "agents" is agent_name
+                if len(parts) > agents_idx + 1:
+                    agent_name = parts[agents_idx + 1]
+    except (ValueError, IndexError):
+        pass  # If path parsing fails, agent_name remains None
+
     daily = defaultdict(
         lambda: {
             "input_tokens": 0,
@@ -1090,6 +1106,7 @@ def process_jsonl_file(
                                     "is_group_chat": is_group_chat,
                                     "agent_session_id": agent_session_id,
                                     "conversation_id": current_conversation_id,
+                                    "project_path": agent_name,  # For openclaw, store agent_name in project_path
                                 }
                             )
 
@@ -1160,6 +1177,7 @@ def process_jsonl_file(
                                     "is_group_chat": None,
                                     "agent_session_id": agent_session_id,
                                     "conversation_id": current_conversation_id,
+                                    "project_path": agent_name,  # For openclaw, store agent_name in project_path
                                 }
                             )
                             # Store error sender for future messages (assistant can inherit from error)

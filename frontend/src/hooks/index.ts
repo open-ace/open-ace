@@ -56,6 +56,7 @@ export {
   useDeleteSession,
   useCompleteSession,
   useRenameSession,
+  useRestoreSession,
 } from './useSessions';
 export { useGlobalFetch } from './useFetch';
 

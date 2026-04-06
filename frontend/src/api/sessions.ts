@@ -156,4 +156,32 @@ export const sessionsApi = {
     }>(`/api/workspace/sessions/${sessionId}/rename`, { name: newName });
     return response;
   },
+
+  /**
+   * Restore a historical session to workspace
+   */
+  async restoreSession(
+    sessionId: string
+  ): Promise<{
+    success: boolean;
+    data?: {
+      session_id: string;
+      encoded_project_name: string;
+      tool_name: string;
+      url: string;
+    };
+    error?: string;
+  }> {
+    const response = await apiClient.post<{
+      success: boolean;
+      data?: {
+        session_id: string;
+        encoded_project_name: string;
+        tool_name: string;
+        url: string;
+      };
+      error?: string;
+    }>(`/api/workspace/sessions/${sessionId}/restore`, {});
+    return response;
+  },
 };

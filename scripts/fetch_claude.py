@@ -191,6 +191,25 @@ def process_jsonl_file(filepath: Path, hostname: str = "localhost") -> tuple:
     Returns:
         tuple: (daily_stats dict, messages list)
     """
+    # Extract project_path from filepath
+    # Format: ~/.claude/projects/{encodedProjectName}/{sessionId}.jsonl
+    project_path = None
+    parts = filepath.parts
+    try:
+        # Find ".claude" and "projects" in the path
+        if ".claude" in parts and "projects" in parts:
+            claude_idx = parts.index(".claude")
+            projects_idx = parts.index("projects")
+            if projects_idx == claude_idx + 1:
+                # Next part after "projects" is encodedProjectName
+                if len(parts) > projects_idx + 1:
+                    encoded_name = parts[projects_idx + 1]
+                    # Store the encoded name as project_path identifier
+                    # For claude, this is the encoded project path
+                    project_path = encoded_name
+    except (ValueError, IndexError):
+        pass  # If path parsing fails, project_path remains None
+
     daily = defaultdict(
         lambda: {
             "input_tokens": 0,
@@ -345,6 +364,7 @@ def process_jsonl_file(filepath: Path, hostname: str = "localhost") -> tuple:
                                     "sender_name": get_default_sender_name("claude"),
                                     "agent_session_id": agent_session_id,
                                     "conversation_id": conversation_id,
+                                    "project_path": project_path,
                                 }
                             )
 

@@ -685,6 +685,90 @@ def delete_session(session_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@workspace_bp.route("/sessions/<session_id>/restore", methods=["POST"])
+def restore_session(session_id):
+    """Restore a historical session from daily_messages to workspace.
+
+    The JSONL file already exists at the original location.
+    We just need to return the correct URL with sessionId and encodedProjectName
+    so qwen-code-webui can load the history from its local file.
+
+    Returns:
+        - sessionId: The session ID (same as input for daily_messages sessions)
+        - encodedProjectName: The encoded project name for qwen-code-webui
+        - tool_name: The tool name
+        - url: The workspace URL to access this session
+    """
+    try:
+        from scripts.shared.db import get_connection, _execute, _placeholder
+
+        # Get session info from daily_messages
+        conn = get_connection()
+        cursor = conn.cursor()
+        p = _placeholder()
+
+        session_query = f"""
+            SELECT
+                agent_session_id as session_id,
+                tool_name,
+                project_path
+            FROM daily_messages
+            WHERE agent_session_id = {p}
+            LIMIT 1
+        """
+        _execute(cursor, session_query, [session_id])
+        session_data = cursor.fetchone()
+
+        if not session_data:
+            conn.close()
+            return jsonify({"success": False, "error": "Session not found"}), 404
+
+        # Convert to dict if needed
+        if not isinstance(session_data, dict):
+            session_data = dict(session_data)
+
+        conn.close()
+
+        tool_name = session_data["tool_name"]
+        project_path = session_data.get("project_path")
+
+        # Generate encodedProjectName based on tool
+        if tool_name in ["qwen", "claude"]:
+            # project_path is already the encoded project name (e.g., "-Users-rhuang-workspace-open-ace")
+            # It was extracted from the JSONL file path during fetch
+            encoded_project_name = project_path
+        elif tool_name == "openclaw":
+            # project_path is the agent_name (e.g., "main")
+            encoded_project_name = project_path
+        else:
+            # Unknown tool, use project_path as-is
+            encoded_project_name = project_path
+
+        if not encoded_project_name:
+            return jsonify({
+                "success": False,
+                "error": "Project path not found. Cannot restore session without project information."
+            }), 404
+
+        # Build workspace URL with sessionId and encodedProjectName
+        workspace_url = f"/work/workspace?sessionId={session_id}&encodedProjectName={encoded_project_name}"
+
+        logger.info(f"Restored session {session_id} (tool={tool_name}, project={encoded_project_name})")
+
+        return jsonify({
+            "success": True,
+            "data": {
+                "session_id": session_id,
+                "encoded_project_name": encoded_project_name,
+                "tool_name": tool_name,
+                "url": workspace_url,
+            }
+        })
+    except Exception as e:
+        logger.error(f"Error restoring session: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @workspace_bp.route("/sessions/<session_id>/rename", methods=["POST"])
 def rename_session(session_id):
     """Rename a session.

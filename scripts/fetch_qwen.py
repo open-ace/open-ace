@@ -289,6 +289,26 @@ def process_jsonl_file(
     Returns:
         tuple: (daily_stats dict, messages list)
     """
+    # Extract project_path from filepath
+    # Format: ~/.qwen/projects/{encodedProjectName}/chats/{sessionId}.jsonl
+    # or: ~/.qwen/projects/{encodedProjectName}/{sessionId}.jsonl
+    project_path = None
+    parts = filepath.parts
+    try:
+        # Find ".qwen" and "projects" in the path
+        if ".qwen" in parts and "projects" in parts:
+            qwen_idx = parts.index(".qwen")
+            projects_idx = parts.index("projects")
+            if projects_idx == qwen_idx + 1:
+                # Next part after "projects" is encodedProjectName
+                if len(parts) > projects_idx + 1:
+                    encoded_name = parts[projects_idx + 1]
+                    # Store the encoded name as project_path identifier
+                    # For qwen-code, this is the encoded project path
+                    project_path = encoded_name
+    except (ValueError, IndexError):
+        pass  # If path parsing fails, project_path remains None
+
     daily = defaultdict(
         lambda: {
             "prompt_tokens": 0,
@@ -442,6 +462,7 @@ def process_jsonl_file(
                                     else get_default_sender_name("qwen"),
                                     "agent_session_id": agent_session_id,
                                     "conversation_id": conversation_id,
+                                    "project_path": project_path,
                                 }
                             )
 
