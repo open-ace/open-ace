@@ -112,25 +112,36 @@ describe('formatRelativeTime', () => {
     expect(formatRelativeTime(date)).toBe('just now');
   });
 
-  it('should return minutes ago', () => {
+  it('should return minutes ago in short format', () => {
     const date = new Date('2024-03-15T11:55:00');
-    expect(formatRelativeTime(date)).toBe('5 minutes ago');
+    expect(formatRelativeTime(date)).toBe('5 min ago');
   });
 
-  it('should return hours ago', () => {
+  it('should return hours ago in short format', () => {
     const date = new Date('2024-03-15T10:00:00');
-    expect(formatRelativeTime(date)).toBe('2 hours ago');
+    expect(formatRelativeTime(date)).toBe('2 hr ago');
   });
 
-  it('should return days ago', () => {
+  it('should return days ago in short format', () => {
     const date = new Date('2024-03-13T12:00:00');
-    expect(formatRelativeTime(date)).toBe('2 days ago');
+    expect(formatRelativeTime(date)).toBe('2 day ago');
   });
 
   it('should return formatted date for older dates', () => {
     const date = new Date('2024-03-01T12:00:00');
     const result = formatRelativeTime(date);
     expect(result).toMatch(/2024/);
+  });
+
+  it('should support custom translations', () => {
+    const date = new Date('2024-03-15T11:55:00');
+    expect(formatRelativeTime(date, { minAgo: '分钟前' })).toBe('5 分钟前');
+  });
+
+  it('should support Chinese translations', () => {
+    const date = new Date('2024-03-15T11:55:00');
+    const cnTranslations = { justNow: '刚刚', minAgo: '分钟前', hourAgo: '小时前', dayAgo: '天前' };
+    expect(formatRelativeTime(date, cnTranslations)).toBe('5 分钟前');
   });
 });
 

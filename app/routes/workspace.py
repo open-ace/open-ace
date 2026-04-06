@@ -335,6 +335,20 @@ def list_sessions():
                     models_map = {m["session_id"]: m["model"] for m in models_data}
                     for s in sessions:
                         s["model"] = models_map.get(s["session_id"])
+
+                    # Get request_count for each session (session_stats doesn't have request_count)
+                    # Request = API calls = assistant + toolResult messages
+                    request_query = adapt_sql(f"""
+                        SELECT agent_session_id as session_id,
+                               SUM(CASE WHEN role IN ('assistant', 'toolResult') THEN 1 ELSE 0 END) as request_count
+                        FROM daily_messages
+                        WHERE agent_session_id IN ({', '.join(['?' for _ in session_ids])})
+                        GROUP BY agent_session_id
+                    """)
+                    requests_data = db.fetch_all(request_query, tuple(session_ids))
+                    requests_map = {r["session_id"]: r["request_count"] for r in requests_data}
+                    for s in sessions:
+                        s["request_count"] = requests_map.get(s["session_id"], 0)
             else:
                 # Fallback to original query if materialized view doesn't exist
                 conditions = ["agent_session_id IS NOT NULL"]
@@ -369,6 +383,7 @@ def list_sessions():
                         MAX(sender_id) as sender_id,
                         MAX(date) as date,
                         COUNT(*) as message_count,
+                        SUM(CASE WHEN role IN ('assistant', 'toolResult') THEN 1 ELSE 0 END) as request_count,
                         SUM(tokens_used) as total_tokens,
                         SUM(input_tokens) as total_input_tokens,
                         SUM(output_tokens) as total_output_tokens,
@@ -416,6 +431,7 @@ def list_sessions():
                     MAX(sender_id) as sender_id,
                     MAX(date) as date,
                     COUNT(*) as message_count,
+                    SUM(CASE WHEN role IN ('assistant', 'toolResult') THEN 1 ELSE 0 END) as request_count,
                     SUM(tokens_used) as total_tokens,
                     SUM(input_tokens) as total_input_tokens,
                     SUM(output_tokens) as total_output_tokens,
@@ -450,6 +466,7 @@ def list_sessions():
                     "total_input_tokens": s["total_input_tokens"] or 0,
                     "total_output_tokens": s["total_output_tokens"] or 0,
                     "message_count": s["message_count"] or 0,
+                    "request_count": s.get("request_count") or 0,
                     "model": s.get("model"),
                     "tags": [],
                     "created_at": s["created_at"],

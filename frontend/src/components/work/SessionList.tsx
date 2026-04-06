@@ -31,6 +31,7 @@ interface GroupedSessions {
     time: string;
     tokens: number;
     messages: number;
+    requests: number;
   }>;
   yesterday: Array<{
     id: string;
@@ -39,6 +40,7 @@ interface GroupedSessions {
     time: string;
     tokens: number;
     messages: number;
+    requests: number;
   }>;
   thisWeek: Array<{
     id: string;
@@ -47,6 +49,7 @@ interface GroupedSessions {
     time: string;
     tokens: number;
     messages: number;
+    requests: number;
   }>;
   earlier: Array<{
     id: string;
@@ -55,6 +58,7 @@ interface GroupedSessions {
     time: string;
     tokens: number;
     messages: number;
+    requests: number;
   }>;
 }
 
@@ -118,9 +122,15 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
         id: session.session_id,
         title: session.title ?? `Session ${session.session_id.slice(0, 8)}`,
         tool: session.tool_name ?? 'unknown',
-        time: formatRelativeTime(session.updated_at ?? session.created_at ?? ''),
+        time: formatRelativeTime(session.updated_at ?? session.created_at ?? '', {
+          justNow: t('justNow', language),
+          minAgo: t('minAgo', language),
+          hourAgo: t('hourAgo', language),
+          dayAgo: t('dayAgo', language),
+        }),
         tokens: session.total_tokens ?? 0,
         messages: session.message_count ?? 0,
+        requests: session.request_count ?? 0,
       };
 
       if (sessionDate >= today) {
@@ -307,6 +317,7 @@ interface SessionGroupProps {
     time: string;
     tokens: number;
     messages: number;
+    requests: number;
   }>;
   onSessionClick: (sessionId: string) => void;
   selectedSessionId: string | null;
@@ -328,13 +339,13 @@ const SessionGroup: React.FC<SessionGroupProps> = ({
               className={`session-item w-100 p-2 ${selectedSessionId === session.id ? 'selected' : ''}`}
               onClick={() => onSessionClick(session.id)}
             >
-              <span className="session-title text-truncate">
-                {session.title.split(' - ')[1] ?? session.title}
+              <span className="session-id text-truncate">
+                {session.id.slice(0, 4)}
               </span>
               <span className="session-time text-muted">{session.time}</span>
-              <span className="session-messages text-muted">
-                <i className="bi bi-chat-dots" />
-                <span className="ms-1">{session.messages}</span>
+              <span className="session-requests text-muted">
+                <i className="bi bi-arrow-up-circle" />
+                <span className="ms-1">{session.requests} req</span>
               </span>
             </button>
           </li>

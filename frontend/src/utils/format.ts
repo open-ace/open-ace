@@ -89,9 +89,14 @@ export function formatDateTime(date: string | Date | null): string {
 }
 
 /**
- * Format a relative time (e.g., "2 hours ago")
+ * Format a relative time (e.g., "2 hr ago")
+ * @param date - Date to format
+ * @param translations - Optional translations object with keys: justNow, minAgo, hourAgo, dayAgo
  */
-export function formatRelativeTime(date: string | Date): string {
+export function formatRelativeTime(
+  date: string | Date,
+  translations?: { justNow?: string; minAgo?: string; hourAgo?: string; dayAgo?: string }
+): string {
   const d = typeof date === 'string' ? new Date(date) : date;
   const now = new Date();
   const diffMs = now.getTime() - d.getTime();
@@ -100,14 +105,16 @@ export function formatRelativeTime(date: string | Date): string {
   const diffHour = Math.floor(diffMin / 60);
   const diffDay = Math.floor(diffHour / 24);
 
+  const t = translations || {};
+
   if (diffSec < 60) {
-    return 'just now';
+    return t.justNow || 'just now';
   } else if (diffMin < 60) {
-    return `${diffMin} minute${diffMin > 1 ? 's' : ''} ago`;
+    return `${diffMin} ${t.minAgo || 'min ago'}`;
   } else if (diffHour < 24) {
-    return `${diffHour} hour${diffHour > 1 ? 's' : ''} ago`;
+    return `${diffHour} ${t.hourAgo || 'hr ago'}`;
   } else if (diffDay < 7) {
-    return `${diffDay} day${diffDay > 1 ? 's' : ''} ago`;
+    return `${diffDay} ${t.dayAgo || 'day ago'}`;
   } else {
     return formatDate(d);
   }

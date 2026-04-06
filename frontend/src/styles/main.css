@@ -2282,6 +2282,18 @@ link[rel='dns-prefetch'] {
   white-space: nowrap;
 }
 
+.session-item .session-id {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .session-item .session-time {
   white-space: nowrap;
   font-size: var(--font-size-xs);
@@ -2304,6 +2316,25 @@ link[rel='dns-prefetch'] {
 }
 
 .session-item .session-messages i {
+  font-size: var(--font-size-xs);
+  display: inline-block;
+  width: 16px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.session-item .session-requests {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  font-size: var(--font-size-xs);
+  text-decoration: none;
+  gap: 4px;
+  min-width: 60px;
+  padding-left: var(--spacing-sm);
+}
+
+.session-item .session-requests i {
   font-size: var(--font-size-xs);
   display: inline-block;
   width: 16px;

@@ -20,6 +20,7 @@ export interface AgentSession {
   total_input_tokens: number;
   total_output_tokens: number;
   message_count: number;
+  request_count: number;
   model: string | null;
   tags: string[];
   created_at: string | null;
