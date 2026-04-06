@@ -1020,6 +1020,14 @@ def save_messages_batch(messages: List[Dict], batch_size: int = 1000) -> int:
     finally:
         conn.close()
 
+    # Refresh daily_stats for affected dates if messages were saved
+    if saved > 0:
+        try:
+            _refresh_daily_stats_for_messages(messages)
+        except Exception as e:
+            # Log but don't fail the save operation
+            print(f"Warning: Failed to refresh daily_stats: {e}")
+
     return saved
 
 
@@ -3918,3 +3926,134 @@ def get_conversation_details(session_id: str) -> Dict:
         "sender_name": first_msg.get("sender_name") or first_msg.get("sender_id") or "Unknown",
         "conversation_id": first_msg.get("conversation_id"),
     }
+
+
+def _refresh_daily_stats_for_messages(messages: List[Dict]) -> None:
+    """
+    Refresh daily_stats and hourly_stats for affected dates after saving messages.
+
+    This ensures the pre-aggregated tables stay in sync with daily_messages.
+
+    Args:
+        messages: List of messages that were saved (to extract affected dates)
+    """
+    from datetime import datetime
+
+    # Get unique dates from messages
+    dates = set(msg.get("date") for msg in messages if msg.get("date"))
+    if not dates:
+        return
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    now = datetime.utcnow().isoformat()
+
+    try:
+        for date in dates:
+            # Refresh daily_stats for this date
+            if is_postgresql():
+                # Delete existing stats for this date
+                _execute(cursor, "DELETE FROM daily_stats WHERE date = %s", (date,))
+
+                # Insert new aggregated stats
+                _execute(
+                    cursor,
+                    """
+                    INSERT INTO daily_stats
+                    (date, tool_name, host_name, sender_name, total_tokens, total_input_tokens,
+                     total_output_tokens, message_count, updated_at)
+                    SELECT
+                        date,
+                        tool_name,
+                        host_name,
+                        sender_name,
+                        SUM(tokens_used) as total_tokens,
+                        SUM(input_tokens) as total_input_tokens,
+                        SUM(output_tokens) as total_output_tokens,
+                        COUNT(*) as message_count,
+                        %s
+                    FROM daily_messages
+                    WHERE date = %s
+                    GROUP BY date, tool_name, host_name, sender_name
+                """,
+                    (now, date),
+                )
+
+                # Delete and refresh hourly_stats
+                _execute(cursor, "DELETE FROM hourly_stats WHERE date = %s", (date,))
+                _execute(
+                    cursor,
+                    """
+                    INSERT INTO hourly_stats
+                    (date, hour, tool_name, host_name, total_tokens, total_input_tokens,
+                     total_output_tokens, message_count, updated_at)
+                    SELECT
+                        date,
+                        MOD(EXTRACT(HOUR FROM timestamp::timestamp)::INTEGER + 8, 24) as hour,
+                        tool_name,
+                        host_name,
+                        SUM(tokens_used) as total_tokens,
+                        SUM(input_tokens) as total_input_tokens,
+                        SUM(output_tokens) as total_output_tokens,
+                        COUNT(*) as message_count,
+                        %s
+                    FROM daily_messages
+                    WHERE date = %s AND timestamp IS NOT NULL
+                    GROUP BY date, MOD(EXTRACT(HOUR FROM timestamp::timestamp)::INTEGER + 8, 24), tool_name, host_name
+                """,
+                    (now, date),
+                )
+            else:
+                # SQLite: use INSERT OR REPLACE
+                _execute(
+                    cursor,
+                    """
+                    INSERT OR REPLACE INTO daily_stats
+                    (date, tool_name, host_name, sender_name, total_tokens, total_input_tokens,
+                     total_output_tokens, message_count, updated_at)
+                    SELECT
+                        date,
+                        tool_name,
+                        host_name,
+                        sender_name,
+                        SUM(tokens_used) as total_tokens,
+                        SUM(input_tokens) as total_input_tokens,
+                        SUM(output_tokens) as total_output_tokens,
+                        COUNT(*) as message_count,
+                        ?
+                    FROM daily_messages
+                    WHERE date = ?
+                    GROUP BY date, tool_name, host_name, sender_name
+                """,
+                    (now, date),
+                )
+
+                _execute(
+                    cursor,
+                    """
+                    INSERT OR REPLACE INTO hourly_stats
+                    (date, hour, tool_name, host_name, total_tokens, total_input_tokens,
+                     total_output_tokens, message_count, updated_at)
+                    SELECT
+                        date,
+                        (CAST(strftime('%H', timestamp) AS INTEGER) + 8) % 24 as hour,
+                        tool_name,
+                        host_name,
+                        SUM(tokens_used) as total_tokens,
+                        SUM(input_tokens) as total_input_tokens,
+                        SUM(output_tokens) as total_output_tokens,
+                        COUNT(*) as message_count,
+                        ?
+                    FROM daily_messages
+                    WHERE date = ? AND timestamp IS NOT NULL
+                    GROUP BY date, (CAST(strftime('%H', timestamp) AS INTEGER) + 8) % 24, tool_name, host_name
+                """,
+                    (now, date),
+                )
+
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()

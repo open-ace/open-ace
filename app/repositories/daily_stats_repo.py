@@ -482,14 +482,36 @@ class DailyStatsRepository:
         Check if daily_stats needs to be refreshed.
 
         Returns:
-            bool: True if stats are empty or stale.
+            bool: True if stats are empty or stale (missing recent data).
         """
-        # Simple check: just verify daily_stats has data
-        # Data freshness is ensured by upload triggers
+        # Check if daily_stats is empty
         query = "SELECT COUNT(*) as count FROM daily_stats"
         result = self.db.fetch_one(query)
+        if not result or result["count"] == 0:
+            return True
 
-        return not result or result["count"] == 0
+        # Check if daily_stats has today's data
+        # Compare max date in daily_stats vs max date in daily_messages
+        from datetime import datetime
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        stats_max_date_query = "SELECT MAX(date) as max_date FROM daily_stats"
+        stats_result = self.db.fetch_one(stats_max_date_query)
+        stats_max_date = stats_result.get("max_date") if stats_result else None
+
+        messages_max_date_query = "SELECT MAX(date) as max_date FROM daily_messages"
+        messages_result = self.db.fetch_one(messages_max_date_query)
+        messages_max_date = messages_result.get("max_date") if messages_result else None
+
+        # If daily_messages has newer data than daily_stats, need refresh
+        if messages_max_date and stats_max_date:
+            if messages_max_date > stats_max_date:
+                logger.info(
+                    f"daily_stats stale: messages max date {messages_max_date} > stats max date {stats_max_date}"
+                )
+                return True
+
+        return False
 
     def refresh_hourly_stats(self, date: Optional[str] = None) -> bool:
         """
