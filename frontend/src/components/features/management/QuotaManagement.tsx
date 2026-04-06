@@ -71,7 +71,9 @@ export const QuotaManagement: React.FC = () => {
       handleCloseModal();
     } catch (err) {
       console.error('Failed to update quota:', err);
-      const errorMessage = err instanceof Error ? (err as Error).message : t('error', language);
+      const errorMessage = err && typeof err === 'object' && 'message' in err 
+        ? String((err as { message: string }).message) 
+        : t('error', language);
       toast.error(t('error', language), errorMessage);
     }
   };
