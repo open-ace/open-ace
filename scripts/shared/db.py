@@ -4057,3 +4057,11 @@ def _refresh_daily_stats_for_messages(messages: List[Dict]) -> None:
         raise e
     finally:
         conn.close()
+
+    # Also refresh user_daily_stats for affected dates
+    try:
+        from scripts.shared.user_stats_helper import _refresh_user_daily_stats_for_dates
+        _refresh_user_daily_stats_for_dates(dates)
+    except Exception as e:
+        # Log but don't fail the save operation
+        print(f"Warning: Failed to refresh user_daily_stats: {e}")
