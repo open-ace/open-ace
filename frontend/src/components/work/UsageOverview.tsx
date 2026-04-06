@@ -6,9 +6,11 @@
  * - Daily and monthly request quota and usage
  * - Usage trend chart
  * - Quota warnings
+ * - Optimized loading with skeleton screens
+ * - Lazy chart loading for better performance
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import {
@@ -32,6 +34,12 @@ export const UsageOverview: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Chart refs for lazy loading
+  const tokenChartRef = useRef<HTMLDivElement>(null);
+  const requestChartRef = useRef<HTMLDivElement>(null);
+  const [loadTokenChart, setLoadTokenChart] = useState(false);
+  const [loadRequestChart, setLoadRequestChart] = useState(false);
+
   // Fetch data
   const fetchData = useCallback(async () => {
     setIsLoading(true);
@@ -51,12 +59,49 @@ export const UsageOverview: React.FC = () => {
       setError(errorMessage);
     } finally {
       setIsLoading(false);
+      // Charts can start loading after data is fetched
+      setTimeout(() => {
+        setLoadTokenChart(true);
+        setLoadRequestChart(true);
+      }, 100);
     }
   }, []);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Lazy load charts using Intersection Observer
+  useEffect(() => {
+    const observerOptions = {
+      root: null,
+      rootMargin: '100px',
+      threshold: 0.1,
+    };
+
+    const observerCallback: IntersectionObserverCallback = (entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          if (entry.target === tokenChartRef.current) {
+            setLoadTokenChart(true);
+          } else if (entry.target === requestChartRef.current) {
+            setLoadRequestChart(true);
+          }
+        }
+      });
+    };
+
+    const observer = new IntersectionObserver(observerCallback, observerOptions);
+
+    if (tokenChartRef.current) {
+      observer.observe(tokenChartRef.current);
+    }
+    if (requestChartRef.current) {
+      observer.observe(requestChartRef.current);
+    }
+
+    return () => observer.disconnect();
+  }, []);
 
   // Calculate usage percentage
   const getPercentage = (used: number, limit: number | null): number => {
@@ -72,7 +117,54 @@ export const UsageOverview: React.FC = () => {
   };
 
   if (isLoading) {
-    return <Loading size="lg" text={t('loading', language)} />;
+    return (
+      <div className="usage-overview">
+        {/* Skeleton Loading State */}
+        <div className="d-flex justify-content-between align-items-center mb-4">
+          <div className="skeleton-title" style={{ width: '200px', height: '32px', background: '#e0e0e0', borderRadius: '4px' }} />
+          <div className="skeleton-button" style={{ width: '100px', height: '36px', background: '#e0e0e0', borderRadius: '4px' }} />
+        </div>
+        
+        {/* Skeleton Cards */}
+        <h5 className="mb-3" style={{ visibility: 'hidden' }}>{t('daily', language)}</h5>
+        <div className="row g-3 mb-4">
+          <div className="col-md-6">
+            <Card>
+              <div style={{ width: '120px', height: '20px', background: '#e0e0e0', borderRadius: '4px', marginBottom: '12px' }} />
+              <div style={{ width: '100%', height: '8px', background: '#f0f0f0', borderRadius: '4px' }} />
+            </Card>
+          </div>
+          <div className="col-md-6">
+            <Card>
+              <div style={{ width: '120px', height: '20px', background: '#e0e0e0', borderRadius: '4px', marginBottom: '12px' }} />
+              <div style={{ width: '100%', height: '8px', background: '#f0f0f0', borderRadius: '4px' }} />
+            </Card>
+          </div>
+        </div>
+        
+        <h5 className="mb-3" style={{ visibility: 'hidden' }}>{t('monthly', language)}</h5>
+        <div className="row g-3 mb-4">
+          <div className="col-md-6">
+            <Card>
+              <div style={{ width: '120px', height: '20px', background: '#e0e0e0', borderRadius: '4px', marginBottom: '12px' }} />
+              <div style={{ width: '100%', height: '8px', background: '#f0f0f0', borderRadius: '4px' }} />
+            </Card>
+          </div>
+          <div className="col-md-6">
+            <Card>
+              <div style={{ width: '120px', height: '20px', background: '#e0e0e0', borderRadius: '4px', marginBottom: '12px' }} />
+              <div style={{ width: '100%', height: '8px', background: '#f0f0f0', borderRadius: '4px' }} />
+            </Card>
+          </div>
+        </div>
+        
+        {/* Skeleton Charts */}
+        <Card className="mb-4">
+          <div style={{ width: '150px', height: '24px', background: '#e0e0e0', borderRadius: '4px', marginBottom: '16px' }} />
+          <div style={{ width: '100%', height: '250px', background: '#f5f5f5', borderRadius: '4px' }} />
+        </Card>
+      </div>
+    );
   }
 
   if (error) {
@@ -297,23 +389,39 @@ export const UsageOverview: React.FC = () => {
       {/* Token Trend Chart */}
       {tokenTrendChartData && tokenTrendChartData.labels.length > 0 && (
         <Card title={t('tokenTrend', language)} className="mb-4">
-          <LineChart
-            labels={tokenTrendChartData.labels}
-            datasets={tokenTrendChartData.datasets}
-            height={250}
-            unit="M"
-          />
+          <div ref={tokenChartRef}>
+            {loadTokenChart ? (
+              <LineChart
+                labels={tokenTrendChartData.labels}
+                datasets={tokenTrendChartData.datasets}
+                height={250}
+                unit="M"
+              />
+            ) : (
+              <div style={{ width: '100%', height: '250px', background: '#f5f5f5', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Loading size="sm" />
+              </div>
+            )}
+          </div>
         </Card>
       )}
 
       {/* Request Trend Chart */}
       {trendChartData && trendChartData.labels.length > 0 && (
         <Card title={t('requestTrend', language)} className="mb-4">
-          <LineChart
-            labels={trendChartData.labels}
-            datasets={trendChartData.datasets}
-            height={250}
-          />
+          <div ref={requestChartRef}>
+            {loadRequestChart ? (
+              <LineChart
+                labels={trendChartData.labels}
+                datasets={trendChartData.datasets}
+                height={250}
+              />
+            ) : (
+              <div style={{ width: '100%', height: '250px', background: '#f5f5f5', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Loading size="sm" />
+              </div>
+            )}
+          </div>
         </Card>
       )}
 

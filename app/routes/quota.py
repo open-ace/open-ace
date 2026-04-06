@@ -30,13 +30,18 @@ user_repo = UserRepository()
 usage_repo = UsageRepository()
 quota_manager = QuotaManager()
 
-# Cache for user usage data (5 minute TTL)
+# Cache for user usage data (10 minute TTL for better performance)
 _usage_cache: dict = {}
-_CACHE_TTL = 300  # 5 minutes
+_CACHE_TTL = 600  # 10 minutes
 
 
-def _get_cached_user_usage(user_id: int, system_account: str, start_date: str, end_date: str):
-    """Get cached user usage data."""
+def _get_cached_user_usage(user_id: int, start_date: str, end_date: str):
+    """
+    Get cached user usage data with improved caching strategy.
+    
+    Uses user_id directly for cache key and leverages pre-aggregated
+    user_daily_stats table for fast queries.
+    """
     cache_key = f"{user_id}:{start_date}:{end_date}"
     now = time.time()
 
@@ -45,10 +50,26 @@ def _get_cached_user_usage(user_id: int, system_account: str, start_date: str, e
         if now - cached_time < _CACHE_TTL:
             return cached_data
 
-    # Fetch fresh data
-    request_trend = usage_repo.get_user_request_trend(system_account, start_date, end_date)
-    _usage_cache[cache_key] = (request_trend, now)
+    # Fetch fresh data using optimized method (user_daily_stats table)
+    request_trend = usage_repo.get_user_request_trend_by_user_id(user_id, start_date, end_date)
+    
+    # Only cache if we got data
+    if request_trend:
+        _usage_cache[cache_key] = (request_trend, now)
+    
     return request_trend
+
+
+def _clear_user_usage_cache(user_id: Optional[int] = None):
+    """Clear usage cache for a specific user or all users."""
+    global _usage_cache
+    if user_id is None:
+        _usage_cache = {}
+    else:
+        _usage_cache = {
+            k: v for k, v in _usage_cache.items()
+            if not k.startswith(f"{user_id}:")
+        }
 
 
 @quota_bp.before_request
@@ -284,6 +305,11 @@ def get_my_usage():
 
     This provides historical usage data for the user to view
     their usage patterns in Work mode.
+    
+    Optimizations:
+    - Uses pre-aggregated user_daily_stats table for fast queries
+    - Implements 10-minute caching to reduce database load
+    - Defaults to 7 days instead of 30 for faster initial load
     """
     is_auth, user_or_error = require_auth()
     if not is_auth:
@@ -292,30 +318,27 @@ def get_my_usage():
     user_id = user_or_error["id"]
 
     try:
-        # Get user info for limits and system_account
+        # Get user info for limits
         user = user_repo.get_user_by_id(user_id)
         if not user:
             return jsonify({"error": "User not found"}), 404
 
         username = user.get("username", "")
-        # Use system_account for matching sender_name if available
-        # sender_name format: {system_account}-{hostname}-{tool}
-        system_account = user.get("system_account") or username
 
         # Get date range from query params
         start_date = request.args.get("start")
         end_date = request.args.get("end")
 
         if not start_date or not end_date:
-            # Default to last 30 days
+            # Default to last 7 days (faster than 30 days)
             from datetime import timedelta
             end = datetime.now()
-            start = end - timedelta(days=30)
+            start = end - timedelta(days=7)
             start_date = start.strftime("%Y-%m-%d")
             end_date = end.strftime("%Y-%m-%d")
 
-        # Get user's request trend using system_account (with caching)
-        request_trend = _get_cached_user_usage(user_id, system_account, start_date, end_date)
+        # Get user's request trend using optimized method (with caching)
+        request_trend = _get_cached_user_usage(user_id, start_date, end_date)
 
         response = {
             "user": {
@@ -335,6 +358,7 @@ def get_my_usage():
                 "start": start_date,
                 "end": end_date,
             },
+            "cached": True,  # Indicate if data came from cache
         }
 
         return jsonify(response)

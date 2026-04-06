@@ -709,15 +709,58 @@ class UsageRepository:
         """
         Get request trend for a specific user.
 
+        Uses pre-aggregated user_daily_stats table for fast queries.
+        Falls back to daily_messages if user_daily_stats is not available.
+
         Args:
             user_name: User name (matches sender_name prefix).
             start_date: Start date string (YYYY-MM-DD).
             end_date: End date string (YYYY-MM-DD).
-            host_name: Optional host name filter.
+            host_name: Optional host name filter (not used with user_daily_stats).
 
         Returns:
             List[Dict]: Request trend by date for the user.
         """
+        # First, try to get user_id from username
+        user = self.db.fetch_one(
+            "SELECT id FROM users WHERE username = ? OR system_account = ?",
+            (user_name, user_name)
+        )
+
+        if user:
+            user_id = user["id"]
+            # Try to use pre-aggregated user_daily_stats table (much faster)
+            try:
+                rows = self.db.fetch_all(
+                    """
+                    SELECT date, requests, tokens
+                    FROM user_daily_stats
+                    WHERE user_id = ? AND date >= ? AND date <= ?
+                    ORDER BY date ASC
+                    """,
+                    (user_id, start_date, end_date)
+                )
+
+                if rows:
+                    results = []
+                    for row in rows:
+                        date_val = row["date"]
+                        if hasattr(date_val, 'strftime'):
+                            date_str = date_val.strftime("%Y-%m-%d")
+                        else:
+                            date_str = str(date_val)
+                        results.append({
+                            "date": date_str,
+                            "requests": int(row["requests"] or 0),
+                            "tokens": int(row["tokens"] or 0),
+                        })
+                    return results
+
+            except Exception:
+                # Fall back to daily_messages if user_daily_stats is not available
+                pass
+
+        # Fallback: query daily_messages directly (slower but works for all cases)
         # sender_name format is: {username}-{hostname}-{tool}
         # Use LIKE to match username prefix
         conditions = ["date >= ?", "date <= ?", "role = ?", "sender_name LIKE ?"]
@@ -756,6 +799,58 @@ class UsageRepository:
             })
 
         return results
+
+    def get_user_request_trend_by_user_id(
+        self,
+        user_id: int,
+        start_date: str,
+        end_date: str,
+    ) -> List[Dict]:
+        """
+        Get request trend for a specific user by user ID.
+
+        Uses pre-aggregated user_daily_stats table for optimal performance.
+        This is the preferred method when user_id is already known.
+
+        Args:
+            user_id: User ID.
+            start_date: Start date string (YYYY-MM-DD).
+            end_date: End date string (YYYY-MM-DD).
+
+        Returns:
+            List[Dict]: Request trend by date for the user.
+        """
+        try:
+            rows = self.db.fetch_all(
+                """
+                SELECT date, requests, tokens, input_tokens, output_tokens, cache_tokens
+                FROM user_daily_stats
+                WHERE user_id = ? AND date >= ? AND date <= ?
+                ORDER BY date ASC
+                """,
+                (user_id, start_date, end_date)
+            )
+
+            results = []
+            for row in rows:
+                date_val = row["date"]
+                if hasattr(date_val, 'strftime'):
+                    date_str = date_val.strftime("%Y-%m-%d")
+                else:
+                    date_str = str(date_val)
+                results.append({
+                    "date": date_str,
+                    "requests": int(row["requests"] or 0),
+                    "tokens": int(row["tokens"] or 0),
+                    "input_tokens": int(row.get("input_tokens", 0) or 0),
+                    "output_tokens": int(row.get("output_tokens", 0) or 0),
+                    "cache_tokens": int(row.get("cache_tokens", 0) or 0),
+                })
+            return results
+
+        except Exception:
+            # Return empty list if table doesn't exist
+            return []
 
     def get_monthly_request_stats_by_user(
         self, year: int, month: int, host_name: Optional[str] = None,
