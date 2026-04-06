@@ -13,9 +13,10 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { workspaceApi, type WorkspaceConfig, type UserWebUIResponse } from '@/api';
 import { requestApi, type QuotaStatusResponse } from '@/api/request';
+import { sessionsApi } from '@/api/sessions';
 import { useLanguage, useAppStore, useWorkspaceFullscreen } from '@/store';
 import { t } from '@/i18n';
-import { Error, Button, Card } from '@/components/common';
+import { Error, Button, Card, useToast, Modal } from '@/components/common';
 import { cn } from '@/utils';
 
 interface WorkspaceTab {
@@ -37,6 +38,7 @@ const ACTIVITY_HEARTBEAT_INTERVAL = 2 * 60 * 1000;
 
 export const Workspace: React.FC = () => {
   const language = useLanguage();
+  const toast = useToast();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [config, setConfig] = useState<WorkspaceConfig | null>(null);
@@ -49,10 +51,14 @@ export const Workspace: React.FC = () => {
   const [tabs, setTabs] = useState<WorkspaceTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>('');
   const [loadingTabs, setLoadingTabs] = useState<Set<string>>(new Set());
+  const [renameTabId, setRenameTabId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [showRenameModal, setShowRenameModal] = useState(false);
+  const [isRenaming, setIsRenaming] = useState(false);
 
   // Fullscreen state from global store
   const workspaceFullscreen = useWorkspaceFullscreen();
-  const { toggleWorkspaceFullscreen } = useAppStore();
+  const { toggleWorkspaceFullscreen, exitWorkspaceFullscreen } = useAppStore();
 
   // Load workspace config and user webui URL
   useEffect(() => {
@@ -135,6 +141,15 @@ export const Workspace: React.FC = () => {
 
     return () => clearInterval(interval);
   }, [checkQuota]);
+
+  // Auto exit fullscreen when quota exceeded
+  useEffect(() => {
+    if (quotaStatus?.over_quota?.any && workspaceFullscreen) {
+      exitWorkspaceFullscreen();
+      // Show a toast notification to inform user
+      toast.warning(t('exitedFullscreenDueToQuotaTitle', language), t('exitedFullscreenDueToQuotaDesc', language));
+    }
+  }, [quotaStatus?.over_quota?.any, workspaceFullscreen, exitWorkspaceFullscreen, language, toast]);
 
   // Get the effective URL for iframe
   const getEffectiveUrl = useCallback((): string => {
@@ -240,6 +255,69 @@ export const Workspace: React.FC = () => {
   // Switch to a tab
   const switchTab = useCallback((tabId: string) => {
     setActiveTabId(tabId);
+  }, []);
+
+  // Rename a tab
+  const handleRenameTab = useCallback((tabId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const tab = tabs.find((t) => t.id === tabId);
+    if (tab) {
+      setRenameTabId(tabId);
+      setRenameValue(tab.title);
+      setShowRenameModal(true);
+    }
+  }, [tabs]);
+
+  const handleSaveRename = useCallback(async () => {
+    if (!renameTabId || !renameValue.trim()) return;
+
+    setIsRenaming(true);
+    try {
+      // Extract session ID from tab URL if it contains one
+      // Tab URL format: http://.../c/{session_id}?...
+      const tab = tabs.find((t) => t.id === renameTabId);
+      if (!tab) return;
+
+      // Try to extract session ID from URL
+      const urlParts = tab.url.split('/c/');
+      let sessionId: string | null = null;
+      if (urlParts.length > 1) {
+        sessionId = urlParts[1].split('?')[0].split('#')[0];
+      }
+
+      if (sessionId) {
+        // Call backend API to rename session
+        const response = await sessionsApi.renameSession(sessionId, renameValue.trim());
+        if (!response.success) {
+          toast.error(response.error || t('error', language));
+          setIsRenaming(false);
+          return;
+        }
+      }
+
+      // Update tab title locally
+      setTabs((prev) =>
+        prev.map((tab) =>
+          tab.id === renameTabId ? { ...tab, title: renameValue.trim() } : tab
+        )
+      );
+
+      toast.success(t('sessionRenamed', language));
+      setShowRenameModal(false);
+      setRenameTabId(null);
+      setRenameValue('');
+    } catch (error) {
+      console.error('Failed to rename session:', error);
+      toast.error((error as Error).message || t('error', language));
+    } finally {
+      setIsRenaming(false);
+    }
+  }, [renameTabId, renameValue, tabs, language, toast]);
+
+  const handleCancelRename = useCallback(() => {
+    setShowRenameModal(false);
+    setRenameTabId(null);
+    setRenameValue('');
   }, []);
 
   // Handle iframe load complete
@@ -451,16 +529,28 @@ export const Workspace: React.FC = () => {
               >
                 <i className="bi bi-chat-dots me-2 text-muted" />
                 <span className="text-truncate flex-grow-1 small">{tab.title}</span>
-                {tabs.length > 1 && (
+                <div className="d-flex align-items-center ms-2">
                   <button
-                    className="btn btn-sm btn-link p-0 ms-2 text-muted"
-                    onClick={(e) => closeTab(tab.id, e)}
-                    title={t('close', language)}
-                    style={{ lineHeight: 1 }}
+                    className="btn btn-sm btn-link p-0 me-1 text-muted rename-tab-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleRenameTab(tab.id, e);
+                    }}
+                    title={t('renameSession', language)}
                   >
-                    <i className="bi bi-x" />
+                    <i className="bi bi-pencil" />
                   </button>
-                )}
+                  {tabs.length > 1 && (
+                    <button
+                      className="btn btn-sm btn-link p-0 ms-1 text-muted"
+                      onClick={(e) => closeTab(tab.id, e)}
+                      title={t('close', language)}
+                      style={{ lineHeight: 1 }}
+                    >
+                      <i className="bi bi-x" />
+                    </button>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -524,6 +614,47 @@ export const Workspace: React.FC = () => {
         ))}
       </div>
 
+      {/* Rename Modal */}
+      <Modal
+        isOpen={showRenameModal}
+        onClose={handleCancelRename}
+        title={t('renameSession', language)}
+        size="sm"
+      >
+        <div className="mb-3">
+          <label htmlFor="rename-tab-input" className="form-label">
+            {t('enterNewSessionName', language)}
+          </label>
+          <input
+            id="rename-tab-input"
+            type="text"
+            className="form-control"
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                handleSaveRename();
+              } else if (e.key === 'Escape') {
+                handleCancelRename();
+              }
+            }}
+            autoFocus
+          />
+        </div>
+        <div className="d-flex justify-content-end gap-2">
+          <button className="btn btn-secondary" onClick={handleCancelRename}>
+            {t('cancel', language)}
+          </button>
+          <button
+            className="btn btn-primary"
+            onClick={handleSaveRename}
+            disabled={!renameValue.trim() || isRenaming}
+          >
+            {isRenaming ? t('loading', language) : t('save', language)}
+          </button>
+        </div>
+      </Modal>
+
       {/* Styles */}
       <style>{`
         .workspace-tab {
@@ -554,6 +685,15 @@ export const Workspace: React.FC = () => {
         }
         .workspace-tabs::-webkit-scrollbar-track {
           background: transparent;
+        }
+        /* Rename button - show on hover or active */
+        .rename-tab-btn {
+          opacity: 0;
+          transition: opacity 0.15s ease;
+        }
+        .workspace-tab:hover .rename-tab-btn,
+        .workspace-tab.active .rename-tab-btn {
+          opacity: 1;
         }
         /* Loading progress steps */
         .workspace-loading {
