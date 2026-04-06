@@ -150,6 +150,8 @@ const WorkRoutes: React.FC = () => {
           <Route path="/sessions" element={<Sessions />} />
           <Route path="/prompts" element={<Prompts />} />
           <Route path="/usage" element={<UsageOverview />} />
+          {/* Explicit /workspace route for session restore */}
+          <Route path="/workspace" element={<Workspace />} />
           <Route path="*" element={<Navigate to="/work" replace />} />
         </Routes>
       </Suspense>

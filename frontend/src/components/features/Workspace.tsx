@@ -199,12 +199,16 @@ export const Workspace: React.FC = () => {
     // In multi-user mode, wait for userWebUI to be loaded
     if (config.multi_user_mode && !userWebUI?.success) return;
 
-    // Check for restoreSession parameter and encodedProjectName
-    const restoreSessionId = searchParams.get('restoreSession');
+    // Check for session restore parameters
+    // API returns: /work/workspace?sessionId=xxx&encodedProjectName=yyy
+    // Also support legacy: /work/workspace?restoreSession=xxx
+    const sessionId = searchParams.get('sessionId');
+    const restoreSession = searchParams.get('restoreSession');
     const encodedProjectName = searchParams.get('encodedProjectName');
-    const effectiveUrl = getEffectiveUrl(restoreSessionId || undefined, encodedProjectName || undefined);
-
-    if (effectiveUrl && tabs.length === 0) {
+    const restoreSessionId = sessionId || restoreSession;
+    
+    if (restoreSessionId && tabs.length === 0) {
+      const effectiveUrl = getEffectiveUrl(restoreSessionId, encodedProjectName || undefined);
       const initialTab: WorkspaceTab = {
         id: generateTabId(),
         title: restoreSessionId ? t('restoredSession', language) : t('newSession', language),
@@ -217,12 +221,11 @@ export const Workspace: React.FC = () => {
       // Mark as loading
       setLoadingTabs(new Set([initialTab.id]));
 
-      // Clear the restoreSession and encodedProjectName parameters after using it
-      if (restoreSessionId || encodedProjectName) {
-        searchParams.delete('restoreSession');
-        searchParams.delete('encodedProjectName');
-        setSearchParams(searchParams, { replace: true });
-      }
+      // Clear the restore parameters after using it
+      searchParams.delete('sessionId');
+      searchParams.delete('restoreSession');
+      searchParams.delete('encodedProjectName');
+      setSearchParams(searchParams, { replace: true });
     }
   }, [config, userWebUI, tabs.length, language, getEffectiveUrl, searchParams, setSearchParams]);
 

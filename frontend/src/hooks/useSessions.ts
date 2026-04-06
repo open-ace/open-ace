@@ -3,7 +3,6 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
 import { sessionsApi } from '@/api';
 import type { SessionFilters, AgentSession } from '@/api/sessions';
 
@@ -79,7 +78,6 @@ export function useRenameSession() {
 
 export function useRestoreSession() {
   const queryClient = useQueryClient();
-  const navigate = useNavigate();
 
   return useMutation({
     mutationFn: (sessionId: string) => sessionsApi.restoreSession(sessionId),
@@ -88,7 +86,8 @@ export function useRestoreSession() {
         // Navigate to workspace with the restored session
         // The backend returns the full URL with all parameters
         console.log('Restoring session:', data.data);
-        navigate(data.data.url);
+        // Use window.location.href for a full page reload to ensure URL parameters are processed
+        window.location.href = data.data.url;
       } else if (data.error) {
         console.error('Restore failed:', data.error);
       }

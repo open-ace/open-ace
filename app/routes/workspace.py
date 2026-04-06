@@ -774,8 +774,8 @@ def restore_session(session_id):
                 "error": "Project path not found. Cannot restore session without project information."
             }), 404
 
-        # Build workspace URL with sessionId and encodedProjectName
-        workspace_url = f"/work/workspace?sessionId={session_id}&encodedProjectName={encoded_project_name}"
+        # Build workspace URL with sessionId, encodedProjectName, and toolName
+        workspace_url = f"/work/workspace?sessionId={session_id}&encodedProjectName={encoded_project_name}&toolName={tool_name}"
 
         logger.info(f"Restored session {session_id} (tool={tool_name}, project={encoded_project_name})")
 
