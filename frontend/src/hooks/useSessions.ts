@@ -87,9 +87,15 @@ export function useRestoreSession() {
       if (data.success && data.data) {
         // Navigate to workspace with the restored session
         // The backend returns the full URL with all parameters
+        console.log('Restoring session:', data.data);
         navigate(data.data.url);
+      } else if (data.error) {
+        console.error('Restore failed:', data.error);
       }
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
+    },
+    onError: (error) => {
+      console.error('Restore mutation error:', error);
     },
   });
 }
