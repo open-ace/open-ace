@@ -205,6 +205,28 @@ export const UsageOverview: React.FC = () => {
       }
     : null;
 
+  // Calculate token trend statistics
+  const tokenTrendStats = usageData?.usage.trend
+    ? (() => {
+        const tokens = usageData.usage.trend.map((d) => d.tokens);
+        const sum = tokens.reduce((a, b) => a + b, 0);
+        const avg = tokens.length > 0 ? Math.round(sum / tokens.length) : 0;
+        const max = tokens.length > 0 ? Math.max(...tokens) : 0;
+        return { average: avg, maximum: max };
+      })()
+    : { average: 0, maximum: 0 };
+
+  // Calculate request trend statistics
+  const requestTrendStats = usageData?.usage.trend
+    ? (() => {
+        const requests = usageData.usage.trend.map((d) => d.requests);
+        const sum = requests.reduce((a, b) => a + b, 0);
+        const avg = requests.length > 0 ? Math.round(sum / requests.length) : 0;
+        const max = requests.length > 0 ? Math.max(...requests) : 0;
+        return { average: avg, maximum: max };
+      })()
+    : { average: 0, maximum: 0 };
+
   return (
     <div className="usage-overview">
       {/* Header */}
@@ -403,6 +425,17 @@ export const UsageOverview: React.FC = () => {
               </div>
             )}
           </div>
+          {/* Token Trend Statistics */}
+          <div className="d-flex justify-content-center gap-4 mt-3 pt-2 border-top">
+            <div className="text-center">
+              <span className="text-muted small">{t('average', language)}:</span>
+              <span className="fw-medium ms-2">{formatTokens(tokenTrendStats.average)}</span>
+            </div>
+            <div className="text-center">
+              <span className="text-muted small">{t('maximum', language)}:</span>
+              <span className="fw-medium ms-2 text-success">{formatTokens(tokenTrendStats.maximum)}</span>
+            </div>
+          </div>
         </Card>
       )}
 
@@ -421,6 +454,17 @@ export const UsageOverview: React.FC = () => {
                 <Loading size="sm" />
               </div>
             )}
+          </div>
+          {/* Request Trend Statistics */}
+          <div className="d-flex justify-content-center gap-4 mt-3 pt-2 border-top">
+            <div className="text-center">
+              <span className="text-muted small">{t('average', language)}:</span>
+              <span className="fw-medium ms-2">{formatNumber(requestTrendStats.average)}</span>
+            </div>
+            <div className="text-center">
+              <span className="text-muted small">{t('maximum', language)}:</span>
+              <span className="fw-medium ms-2 text-primary">{formatNumber(requestTrendStats.maximum)}</span>
+            </div>
           </div>
         </Card>
       )}

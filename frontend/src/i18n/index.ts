@@ -401,6 +401,8 @@ const translations: Record<Language, Translations> = {
     // Stats
     days_tracked: 'Days',
     avg: 'Avg',
+    average: 'Average',
+    maximum: 'Maximum',
     date_range: 'Date Range',
     columns: 'Columns',
     actions: 'Actions',
@@ -997,6 +999,8 @@ const translations: Record<Language, Translations> = {
     // Stats
     days_tracked: '天数',
     avg: '平均',
+    average: '平均值',
+    maximum: '最高值',
     date_range: '日期范围',
     columns: '列',
     actions: '操作',
@@ -1548,6 +1552,8 @@ const translations: Record<Language, Translations> = {
     // Stats
     days_tracked: '日数',
     avg: '平均',
+    average: '平均値',
+    maximum: '最大値',
     date_range: '日付範囲',
     columns: '列',
     actions: 'アクション',
@@ -1923,6 +1929,8 @@ const translations: Record<Language, Translations> = {
     // Stats
     days_tracked: '일수',
     avg: '평균',
+    average: '평균값',
+    maximum: '최대값',
     date_range: '날짜 범위',
     columns: '열',
     actions: '작업',

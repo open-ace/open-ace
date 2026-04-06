@@ -10,6 +10,7 @@ import logging
 import time
 from datetime import datetime
 from functools import lru_cache
+from typing import Optional
 
 from flask import Blueprint, g, jsonify, request
 
