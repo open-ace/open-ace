@@ -17,6 +17,10 @@ from app.repositories.user_repo import UserRepository
 
 logger = logging.getLogger(__name__)
 
+# Token quotas are stored in M (millions) units
+# Convert to actual tokens when comparing with usage
+TOKEN_QUOTA_MULTIPLIER = 1_000_000
+
 
 class AlertType(Enum):
     """Types of quota alerts."""
@@ -213,8 +217,8 @@ class QuotaManager:
         user = self.user_repo.get_user_by_id(user_id)
         username = user.get("username", "") if user else ""
 
-        # Get quota limits from user
-        token_limit = user.get("daily_token_quota") if user else None
+        # Get quota limits from user (stored in M units, convert to actual tokens)
+        token_limit = user.get("daily_token_quota") * TOKEN_QUOTA_MULTIPLIER if user and user.get("daily_token_quota") else None
         request_limit = user.get("daily_request_quota") if user else None
 
         # Default limits if not set
@@ -575,7 +579,7 @@ class QuotaManager:
                 continue
 
             username = user.get("username", "")
-            token_limit = user.get("daily_token_quota") or 1000000
+            token_limit = (user.get("daily_token_quota") or 1) * TOKEN_QUOTA_MULTIPLIER  # Convert M units to actual tokens
             request_limit = user.get("daily_request_quota") or 1000
 
             usage = usage_lookup.get(user_id, {"tokens": 0, "requests": 0})

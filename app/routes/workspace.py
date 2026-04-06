@@ -23,6 +23,10 @@ from app.services.auth_service import AuthService
 
 logger = logging.getLogger(__name__)
 
+# Token quotas are stored in M (millions) units
+# Convert to actual tokens when comparing with usage
+TOKEN_QUOTA_MULTIPLIER = 1_000_000
+
 workspace_bp = Blueprint("workspace", __name__)
 auth_service = AuthService()
 
@@ -1401,8 +1405,8 @@ def get_workspace_status():
             user = user_repo.get_user_by_id(user_id)
 
             if user:
-                # Get user's quota settings
-                tokens_limit = user.get("daily_token_quota") or 100000
+                # Get user's quota settings (stored in M units, convert to actual tokens)
+                tokens_limit = (user.get("daily_token_quota") or 1) * TOKEN_QUOTA_MULTIPLIER
                 requests_limit = user.get("daily_request_quota") or 1000
 
                 # Get user's system_account for filtering (sender_name format: {system_account}-{hostname}-{tool})

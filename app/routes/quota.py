@@ -20,6 +20,10 @@ from app.services.auth_service import AuthService
 
 logger = logging.getLogger(__name__)
 
+# Token quotas are stored in M (millions) units
+# Convert to actual tokens when comparing with usage
+TOKEN_QUOTA_MULTIPLIER = 1_000_000
+
 quota_bp = Blueprint("quota", __name__)
 auth_service = AuthService()
 user_repo = UserRepository()
@@ -140,12 +144,12 @@ def check_quota():
             "monthly": {
                 "tokens": {
                     "used": monthly_tokens,
-                    "limit": monthly_token_quota,
-                    "percentage": round((monthly_tokens / monthly_token_quota * 100), 2)
+                    "limit": monthly_token_quota * TOKEN_QUOTA_MULTIPLIER if monthly_token_quota else None,
+                    "percentage": round((monthly_tokens / (monthly_token_quota * TOKEN_QUOTA_MULTIPLIER) * 100), 2)
                     if monthly_token_quota and monthly_token_quota > 0
                     else 0,
                     "over_quota": monthly_token_quota is not None
-                    and monthly_tokens >= monthly_token_quota,
+                    and monthly_tokens >= monthly_token_quota * TOKEN_QUOTA_MULTIPLIER,
                 },
                 "requests": {
                     "used": monthly_requests,
@@ -230,7 +234,7 @@ def get_quota_status():
             "monthly": {
                 "tokens": {
                     "used": monthly_tokens,
-                    "limit": user.get("monthly_token_quota"),
+                    "limit": user.get("monthly_token_quota") * TOKEN_QUOTA_MULTIPLIER if user.get("monthly_token_quota") else None,
                 },
                 "requests": {
                     "used": monthly_requests,
@@ -245,9 +249,9 @@ def get_quota_status():
         monthly_token_limit = user.get("monthly_token_quota")
         monthly_request_limit = user.get("monthly_request_quota")
 
-        over_daily_token = daily_token_limit and today_tokens >= daily_token_limit
+        over_daily_token = daily_token_limit and today_tokens >= daily_token_limit * TOKEN_QUOTA_MULTIPLIER
         over_daily_request = daily_request_limit and today_requests >= daily_request_limit
-        over_monthly_token = monthly_token_limit and monthly_tokens > monthly_token_limit
+        over_monthly_token = monthly_token_limit and monthly_tokens > monthly_token_limit * TOKEN_QUOTA_MULTIPLIER
         over_monthly_request = monthly_request_limit and monthly_requests > monthly_request_limit
 
         response["over_quota"] = {
@@ -316,8 +320,8 @@ def get_my_usage():
                 "username": username,
             },
             "limits": {
-                "daily_token": user.get("daily_token_quota"),
-                "monthly_token": user.get("monthly_token_quota"),
+                "daily_token": user.get("daily_token_quota") * TOKEN_QUOTA_MULTIPLIER if user.get("daily_token_quota") else None,
+                "monthly_token": user.get("monthly_token_quota") * TOKEN_QUOTA_MULTIPLIER if user.get("monthly_token_quota") else None,
                 "daily_request": user.get("daily_request_quota"),
                 "monthly_request": user.get("monthly_request_quota"),
             },
@@ -372,7 +376,7 @@ def webui_quota_check():
         monthly_tokens = sum(m.get("tokens_used", 0) for m in monthly_token_usage)
         monthly_requests = usage_repo.get_request_count_total(month_start, month_end)
 
-        over_monthly_token = monthly_token_quota is not None and monthly_tokens >= monthly_token_quota
+        over_monthly_token = monthly_token_quota is not None and monthly_tokens >= monthly_token_quota * TOKEN_QUOTA_MULTIPLIER
         over_monthly_request = monthly_request_quota is not None and monthly_requests >= monthly_request_quota
 
         response = {
@@ -392,7 +396,7 @@ def webui_quota_check():
                 },
             },
             "monthly": {
-                "tokens": {"used": monthly_tokens, "limit": monthly_token_quota, "over_quota": over_monthly_token},
+                "tokens": {"used": monthly_tokens, "limit": monthly_token_quota * TOKEN_QUOTA_MULTIPLIER if monthly_token_quota else None, "over_quota": over_monthly_token},
                 "requests": {"used": monthly_requests, "limit": monthly_request_quota, "over_quota": over_monthly_request},
             },
             "can_use": not (status.is_over_token_quota or status.is_over_request_quota or over_monthly_token or over_monthly_request),

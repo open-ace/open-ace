@@ -133,14 +133,10 @@ export const QuotaAlerts: React.FC = () => {
   // --- Quota Handlers ---
   const handleOpenEdit = (user: QuotaUsage) => {
     setEditingUser(user);
-    // Convert token quotas from raw value to M (millions) for display
+    // Token quotas are stored in M (millions) units directly
     setFormData({
-      daily_token_quota: user.daily_token_quota
-        ? Math.round(user.daily_token_quota / 1_000_000)
-        : undefined,
-      monthly_token_quota: user.monthly_token_quota
-        ? Math.round(user.monthly_token_quota / 1_000_000)
-        : undefined,
+      daily_token_quota: user.daily_token_quota || undefined,
+      monthly_token_quota: user.monthly_token_quota || undefined,
       daily_request_quota: user.daily_request_quota,
       monthly_request_quota: user.monthly_request_quota,
     });
@@ -156,14 +152,10 @@ export const QuotaAlerts: React.FC = () => {
     if (!editingUser) return;
 
     try {
-      // Convert token quotas from M (millions) back to raw value for saving
+      // Token quotas are stored in M (millions) units directly
       const submitData: UpdateQuotaRequest = {
-        daily_token_quota: formData.daily_token_quota
-          ? formData.daily_token_quota * 1_000_000
-          : undefined,
-        monthly_token_quota: formData.monthly_token_quota
-          ? formData.monthly_token_quota * 1_000_000
-          : undefined,
+        daily_token_quota: formData.daily_token_quota || undefined,
+        monthly_token_quota: formData.monthly_token_quota || undefined,
         daily_request_quota: formData.daily_request_quota,
         monthly_request_quota: formData.monthly_request_quota,
       };
