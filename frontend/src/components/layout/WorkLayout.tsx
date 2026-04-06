@@ -13,7 +13,7 @@
  * - Preserves panel state when entering/exiting fullscreen
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { cn } from '@/utils';
 import { useLanguage, useAppStore, useWorkspaceFullscreen } from '@/store';
@@ -51,7 +51,6 @@ export const WorkLayout: React.FC<WorkLayoutProps> = ({ children }) => {
   const workspaceFullscreen = useWorkspaceFullscreen();
   const {
     exitWorkspaceFullscreen,
-    toggleWorkspaceFullscreen,
     previousLeftPanelCollapsed,
     previousRightPanelCollapsed,
   } = useAppStore();
@@ -71,11 +70,6 @@ export const WorkLayout: React.FC<WorkLayoutProps> = ({ children }) => {
   const handleNavClick = (item: NavItem) => {
     navigate(item.path);
   };
-
-  // Handle fullscreen toggle
-  const handleFullscreenToggle = useCallback(() => {
-    toggleWorkspaceFullscreen(leftPanelCollapsed, rightPanelCollapsed);
-  }, [toggleWorkspaceFullscreen, leftPanelCollapsed, rightPanelCollapsed]);
 
   // Handle ESC key to exit fullscreen
   useEffect(() => {
@@ -104,8 +98,8 @@ export const WorkLayout: React.FC<WorkLayoutProps> = ({ children }) => {
 
   return (
     <div className={cn('work-layout', workspaceFullscreen && 'fullscreen-mode')}>
-      {/* Header */}
-      <header className="work-header">
+      {/* Header - Hidden in fullscreen */}
+      <header className={cn('work-header', workspaceFullscreen && 'd-none')}>
         <div className="header-left">
           <div className="logo">
             <img
@@ -118,14 +112,6 @@ export const WorkLayout: React.FC<WorkLayoutProps> = ({ children }) => {
           <ModeSwitcher className="header-mode-switcher" />
         </div>
         <Header compact />
-        {/* Fullscreen toggle button */}
-        <button
-          className="fullscreen-toggle-btn"
-          onClick={handleFullscreenToggle}
-          title={workspaceFullscreen ? t('exitFullscreen', language) : t('enterFullscreen', language)}
-        >
-          <i className={cn('bi', workspaceFullscreen ? 'bi-fullscreen-exit' : 'bi-fullscreen')} />
-        </button>
       </header>
 
       <div className="work-body">

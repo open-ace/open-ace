@@ -13,7 +13,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { workspaceApi, type WorkspaceConfig, type UserWebUIResponse } from '@/api';
 import { requestApi, type QuotaStatusResponse } from '@/api/request';
-import { useLanguage, useAppStore } from '@/store';
+import { useLanguage, useAppStore, useWorkspaceFullscreen } from '@/store';
 import { t } from '@/i18n';
 import { Error, Button, Card } from '@/components/common';
 import { cn } from '@/utils';
@@ -49,6 +49,10 @@ export const Workspace: React.FC = () => {
   const [tabs, setTabs] = useState<WorkspaceTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>('');
   const [loadingTabs, setLoadingTabs] = useState<Set<string>>(new Set());
+
+  // Fullscreen state from global store
+  const workspaceFullscreen = useWorkspaceFullscreen();
+  const { toggleWorkspaceFullscreen } = useAppStore();
 
   // Load workspace config and user webui URL
   useEffect(() => {
@@ -400,20 +404,31 @@ export const Workspace: React.FC = () => {
   }
 
   return (
-    <div className="workspace h-100 d-flex flex-column">
-      {/* Page Header */}
-      <div className="page-header mb-3 px-3 pt-3">
-        <h2>{t('workspace', language)}</h2>
-        {config.multi_user_mode && userWebUI?.system_account && (
-          <small className="text-muted ms-2">
-            ({userWebUI.system_account})
-          </small>
-        )}
+    <div className={cn('workspace h-100 d-flex flex-column', workspaceFullscreen && 'fullscreen-mode')}>
+      {/* Page Header - Hidden in fullscreen */}
+      <div className={cn('page-header mb-3 px-3 pt-3 d-flex align-items-center', workspaceFullscreen && 'd-none')}>
+        <div className="d-flex align-items-center flex-grow-1">
+          <h2>{t('workspace', language)}</h2>
+          {config.multi_user_mode && userWebUI?.system_account && (
+            <small className="text-muted ms-2">
+              ({userWebUI.system_account})
+            </small>
+          )}
+        </div>
+        {/* Fullscreen toggle button */}
+        <button
+          className="btn btn-sm btn-outline-secondary fullscreen-toggle-btn"
+          onClick={() => toggleWorkspaceFullscreen(false, false)}
+          title={workspaceFullscreen ? t('exitFullscreen', language) : t('enterFullscreen', language)}
+        >
+          <i className={cn('bi me-1', workspaceFullscreen ? 'bi-fullscreen-exit' : 'bi-fullscreen')} />
+          {workspaceFullscreen ? t('exitFullscreen', language) : t('enterFullscreen', language)}
+        </button>
       </div>
       {/* Tab Bar */}
       {tabs.length > 0 && (
         <div
-          className="workspace-tabs d-flex align-items-center border-bottom bg-light"
+          className={cn('workspace-tabs d-flex align-items-center border-bottom', workspaceFullscreen ? 'bg-white fullscreen-tabs' : 'bg-light')}
           style={{ minHeight: '40px' }}
         >
           {/* Tabs */}
@@ -458,6 +473,18 @@ export const Workspace: React.FC = () => {
           >
             <i className="bi bi-plus-lg" />
           </button>
+
+          {/* Exit Fullscreen Button - Only show in fullscreen mode */}
+          {workspaceFullscreen && (
+            <button
+              className="btn btn-sm btn-outline-secondary px-3 py-1 mx-2"
+              onClick={() => toggleWorkspaceFullscreen(false, false)}
+              title={t('exitFullscreen', language)}
+            >
+              <i className="bi bi-fullscreen-exit me-1" />
+              {t('exitFullscreen', language)}
+            </button>
+          )}
         </div>
       )}
 
