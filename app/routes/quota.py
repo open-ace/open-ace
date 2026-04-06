@@ -215,6 +215,9 @@ def get_quota_status():
         monthly_tokens = sum(stat.get("tokens", 0) for stat in monthly_request_stats)
 
         # Build response
+        # Token quotas are stored in M units, convert to actual tokens for display
+        daily_token_quota = user.get("daily_token_quota")
+        monthly_token_quota = user.get("monthly_token_quota")
         response = {
             "user": {
                 "id": user_id,
@@ -224,7 +227,7 @@ def get_quota_status():
             "daily": {
                 "tokens": {
                     "used": today_tokens,
-                    "limit": user.get("daily_token_quota"),
+                    "limit": daily_token_quota * TOKEN_QUOTA_MULTIPLIER if daily_token_quota else None,
                 },
                 "requests": {
                     "used": today_requests,
@@ -234,7 +237,7 @@ def get_quota_status():
             "monthly": {
                 "tokens": {
                     "used": monthly_tokens,
-                    "limit": user.get("monthly_token_quota") * TOKEN_QUOTA_MULTIPLIER if user.get("monthly_token_quota") else None,
+                    "limit": monthly_token_quota * TOKEN_QUOTA_MULTIPLIER if monthly_token_quota else None,
                 },
                 "requests": {
                     "used": monthly_requests,
