@@ -116,6 +116,17 @@ def upgrade() -> None:
     if _constraint_exists(conn, "tenants", "chk_tenants_plan"):
         op.execute("ALTER TABLE tenants DROP CONSTRAINT chk_tenants_plan")
 
+    # Drop partial indexes that use role field (must be recreated after ENUM conversion)
+    # These indexes prevent ALTER COLUMN due to IMMUTABLE function requirement
+    indexes_to_drop = [
+        "idx_messages_session_list_covering",
+        "idx_messages_usage_trend_covering",
+        "idx_messages_user_date_role_covering",
+    ]
+    for idx_name in indexes_to_drop:
+        if _index_exists(conn, "daily_messages", idx_name):
+            op.execute(f"DROP INDEX {idx_name}")
+
     # Create ENUM types
     op.execute("""
         DO $$ BEGIN
@@ -202,14 +213,25 @@ def upgrade() -> None:
         op.execute("ALTER TABLE tenants ALTER COLUMN plan SET DEFAULT 'standard'::tenant_plan")
 
     if _column_exists(conn, "daily_messages", "role"):
-        op.execute("""
-            ALTER TABLE daily_messages
-            ALTER COLUMN role TYPE message_role
-            USING CASE
-                WHEN role IN ('user', 'assistant', 'system') THEN role::message_role
-                ELSE 'user'::message_role
-            END
-        """)
+        # Skip if role is already message_role
+        result = conn.execute(
+            sa.text(
+                """
+                SELECT data_type FROM information_schema.columns
+                WHERE table_name = 'daily_messages' AND column_name = 'role'
+                """
+            )
+        )
+        data_type = result.fetchone()
+        if not data_type or data_type[0] != 'message_role':
+            op.execute("""
+                ALTER TABLE daily_messages
+                ALTER COLUMN role TYPE message_role
+                USING CASE
+                    WHEN role IN ('user', 'assistant', 'system') THEN role::message_role
+                    ELSE 'user'::message_role
+                END
+            """)
 
     if _column_exists(conn, "audit_logs", "severity"):
         # Drop default first
@@ -281,6 +303,32 @@ def upgrade() -> None:
     # ============================================
     # 3. Create partial indexes
     # ============================================
+    # Recreate indexes on daily_messages.role that were dropped earlier
+    # Now that role is converted to message_role ENUM
+    if not _index_exists(conn, "daily_messages", "idx_messages_user_date_role_covering"):
+        op.execute("""
+            CREATE INDEX idx_messages_user_date_role_covering ON daily_messages 
+            USING btree (user_id, date, role) 
+            INCLUDE (tokens_used) 
+            WHERE ((user_id IS NOT NULL) AND (role = 'assistant'::message_role))
+        """)
+
+    if not _index_exists(conn, "daily_messages", "idx_messages_session_list_covering"):
+        op.execute("""
+            CREATE INDEX idx_messages_session_list_covering ON daily_messages 
+            USING btree (agent_session_id, tool_name, host_name, sender_name) 
+            INCLUDE (timestamp, tokens_used, input_tokens, output_tokens, sender_id, date) 
+            WHERE (agent_session_id IS NOT NULL)
+        """)
+
+    if not _index_exists(conn, "daily_messages", "idx_messages_usage_trend_covering"):
+        op.execute("""
+            CREATE INDEX idx_messages_usage_trend_covering ON daily_messages 
+            USING btree (date, role, sender_name) 
+            INCLUDE (tokens_used) 
+            WHERE (role = 'assistant'::message_role)
+        """)
+
     # Active users only
     if not _index_exists(conn, "users", "idx_users_active_partial"):
         op.execute("""
@@ -417,6 +465,19 @@ def downgrade() -> None:
         # SQLite: Drop indexes
         _downgrade_sqlite_indexes(conn)
         return
+
+    # ============================================
+    # Drop partial indexes that use role field
+    # ============================================
+    # Must drop before converting role from ENUM back to TEXT
+    indexes_to_drop = [
+        "idx_messages_session_list_covering",
+        "idx_messages_usage_trend_covering",
+        "idx_messages_user_date_role_covering",
+    ]
+    for idx_name in indexes_to_drop:
+        if _index_exists(conn, "daily_messages", idx_name):
+            op.execute(f"DROP INDEX {idx_name}")
 
     # ============================================
     # 6. Remove comments
@@ -588,6 +649,34 @@ def downgrade() -> None:
     op.execute("DROP TYPE IF EXISTS tenant_plan")
     op.execute("DROP TYPE IF EXISTS tenant_status")
     op.execute("DROP TYPE IF EXISTS user_role")
+
+    # ============================================
+    # Recreate partial indexes with TEXT type
+    # ============================================
+    # Recreate indexes that were dropped at the beginning
+    if not _index_exists(conn, "daily_messages", "idx_messages_user_date_role_covering"):
+        op.execute("""
+            CREATE INDEX idx_messages_user_date_role_covering ON daily_messages 
+            USING btree (user_id, date, role) 
+            INCLUDE (tokens_used) 
+            WHERE ((user_id IS NOT NULL) AND (role = 'assistant'))
+        """)
+
+    if not _index_exists(conn, "daily_messages", "idx_messages_session_list_covering"):
+        op.execute("""
+            CREATE INDEX idx_messages_session_list_covering ON daily_messages 
+            USING btree (agent_session_id, tool_name, host_name, sender_name) 
+            INCLUDE (timestamp, tokens_used, input_tokens, output_tokens, sender_id, date) 
+            WHERE (agent_session_id IS NOT NULL)
+        """)
+
+    if not _index_exists(conn, "daily_messages", "idx_messages_usage_trend_covering"):
+        op.execute("""
+            CREATE INDEX idx_messages_usage_trend_covering ON daily_messages 
+            USING btree (date, role, sender_name) 
+            INCLUDE (tokens_used) 
+            WHERE (role = 'assistant')
+        """)
 
 
 def _downgrade_sqlite_indexes(conn) -> None:
