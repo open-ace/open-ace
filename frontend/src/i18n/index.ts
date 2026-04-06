@@ -177,6 +177,8 @@ const translations: Record<Language, Translations> = {
     unlimited: 'Unlimited',
     dailyRequestQuota: 'Daily Request Quota',
     monthlyRequestQuota: 'Monthly Request Quota',
+    quotaUpdated: 'Quota Updated',
+    quotaUpdatedDesc: 'User quota settings have been saved successfully.',
 
     // Audit Log
     allActions: 'All Actions',
@@ -764,6 +766,8 @@ const translations: Record<Language, Translations> = {
     unlimited: '无限制',
     dailyRequestQuota: '每日请求配额',
     monthlyRequestQuota: '每月请求配额',
+    quotaUpdated: '配额已更新',
+    quotaUpdatedDesc: '用户配额设置已成功保存。',
 
     // Audit Log
     allActions: '所有操作',

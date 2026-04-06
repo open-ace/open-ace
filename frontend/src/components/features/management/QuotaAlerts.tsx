@@ -24,6 +24,7 @@ import {
   EmptyState,
   Progress,
   Badge,
+  useToast,
 } from '@/components/common';
 import { formatTokens, formatDateTime, formatNumber } from '@/utils';
 import { alertsApi, type Alert, type NotificationPreferences } from '@/api';
@@ -53,6 +54,7 @@ type TabType = 'quota' | 'alerts';
 
 export const QuotaAlerts: React.FC = () => {
   const language = useLanguage();
+  const toast = useToast();
   const [activeTab, setActiveTab] = useState<TabType>('quota');
 
   // --- Quota State ---
@@ -166,9 +168,12 @@ export const QuotaAlerts: React.FC = () => {
         monthly_request_quota: formData.monthly_request_quota,
       };
       await updateQuota.mutateAsync({ userId: editingUser.id, data: submitData });
+      toast.success(t('quotaUpdated', language), t('quotaUpdatedDesc', language));
       handleCloseQuotaModal();
     } catch (err) {
       console.error('Failed to update quota:', err);
+      const errorMessage = err instanceof Error ? (err as Error).message : t('error', language);
+      toast.error(t('error', language), errorMessage);
     }
   };
 

@@ -15,12 +15,14 @@ import {
   Error,
   EmptyState,
   Progress,
+  useToast,
 } from '@/components/common';
 import { formatTokens } from '@/utils';
 import type { QuotaUsage, UpdateQuotaRequest } from '@/api';
 
 export const QuotaManagement: React.FC = () => {
   const language = useLanguage();
+  const toast = useToast();
   const { data: quotaData, isLoading, isFetching, isError, error, refetch } = useQuotaUsage();
   const updateQuota = useUpdateQuota();
 
@@ -65,9 +67,12 @@ export const QuotaManagement: React.FC = () => {
         monthly_request_quota: formData.monthly_request_quota,
       };
       await updateQuota.mutateAsync({ userId: editingUser.id, data: submitData });
+      toast.success(t('quotaUpdated', language), t('quotaUpdatedDesc', language));
       handleCloseModal();
     } catch (err) {
       console.error('Failed to update quota:', err);
+      const errorMessage = err instanceof Error ? (err as Error).message : t('error', language);
+      toast.error(t('error', language), errorMessage);
     }
   };
 
