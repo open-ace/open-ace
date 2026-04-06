@@ -55,6 +55,8 @@ export const Workspace: React.FC = () => {
   const [renameValue, setRenameValue] = useState('');
   const [showRenameModal, setShowRenameModal] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
+  const [tabWidths, setTabWidths] = useState<Record<string, number>>({});
+  const [resizingTabId, setResizingTabId] = useState<string | null>(null);
 
   // Fullscreen state from global store
   const workspaceFullscreen = useWorkspaceFullscreen();
@@ -320,6 +322,48 @@ export const Workspace: React.FC = () => {
     setRenameValue('');
   }, []);
 
+  // Handle tab resize
+  const handleResizeStart = useCallback((tabId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setResizingTabId(tabId);
+  }, []);
+
+  const handleResizeMove = useCallback((e: MouseEvent) => {
+    if (!resizingTabId) return;
+
+    const tabElement = document.querySelector(`[data-tab-id="${resizingTabId}"]`) as HTMLElement;
+    if (!tabElement) return;
+
+    const rect = tabElement.getBoundingClientRect();
+    const newWidth = e.clientX - rect.left;
+
+    // Constrain width between 100px and 400px
+    const constrainedWidth = Math.max(100, Math.min(400, newWidth));
+
+    setTabWidths((prev) => ({
+      ...prev,
+      [resizingTabId]: constrainedWidth,
+    }));
+  }, [resizingTabId]);
+
+  const handleResizeEnd = useCallback(() => {
+    setResizingTabId(null);
+  }, []);
+
+  // Add global mouse move/up listeners for resizing
+  useEffect(() => {
+    if (resizingTabId) {
+      document.addEventListener('mousemove', handleResizeMove);
+      document.addEventListener('mouseup', handleResizeEnd);
+      return () => {
+        document.removeEventListener('mousemove', handleResizeMove);
+        document.removeEventListener('mouseup', handleResizeEnd);
+      };
+    }
+    return undefined;
+  }, [resizingTabId, handleResizeMove, handleResizeEnd]);
+
   // Handle iframe load complete
   const handleIframeLoad = useCallback((tabId: string) => {
     setLoadingTabs((prev) => {
@@ -511,48 +555,60 @@ export const Workspace: React.FC = () => {
         >
           {/* Tabs */}
           <div className="d-flex flex-grow-1" style={{ overflowX: 'auto', overflowY: 'hidden' }}>
-            {tabs.map((tab) => (
-              <div
-                key={tab.id}
-                className={cn(
-                  'workspace-tab d-flex align-items-center px-3 py-2 cursor-pointer',
-                  'border-end position-relative',
-                  activeTabId === tab.id && 'active bg-white'
-                )}
-                onClick={() => switchTab(tab.id)}
-                style={{
-                  minWidth: '120px',
-                  maxWidth: '200px',
-                  flexShrink: 0,
-                  userSelect: 'none',
-                }}
-              >
-                <i className="bi bi-chat-dots me-2 text-muted" />
-                <span className="text-truncate flex-grow-1 small">{tab.title}</span>
-                <div className="d-flex align-items-center ms-2">
-                  <button
-                    className="btn btn-sm btn-link p-0 me-1 text-muted rename-tab-btn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleRenameTab(tab.id, e);
-                    }}
-                    title={t('renameSession', language)}
-                  >
-                    <i className="bi bi-pencil" />
-                  </button>
-                  {tabs.length > 1 && (
-                    <button
-                      className="btn btn-sm btn-link p-0 ms-1 text-muted"
-                      onClick={(e) => closeTab(tab.id, e)}
-                      title={t('close', language)}
-                      style={{ lineHeight: 1 }}
-                    >
-                      <i className="bi bi-x" />
-                    </button>
+            {tabs.map((tab) => {
+              const tabWidth = tabWidths[tab.id] || 180;
+              return (
+                <div
+                  key={tab.id}
+                  data-tab-id={tab.id}
+                  className={cn(
+                    'workspace-tab d-flex align-items-center px-2 py-2 cursor-pointer',
+                    'border-end position-relative',
+                    activeTabId === tab.id && 'active bg-white'
                   )}
+                  onClick={() => switchTab(tab.id)}
+                  style={{
+                    width: `${tabWidth}px`,
+                    flexShrink: 0,
+                    userSelect: 'none',
+                  }}
+                >
+                  <i className="bi bi-chat-dots me-2 text-muted flex-shrink-0" />
+                  <span className="text-truncate small flex-grow-1" style={{ minWidth: 0 }}>
+                    {tab.title}
+                  </span>
+                  <div className="tab-actions d-flex align-items-center" style={{ opacity: 0, transition: 'opacity 0.15s ease' }}>
+                    <button
+                      className="btn btn-sm btn-link p-0 px-1 text-muted rename-tab-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleRenameTab(tab.id, e);
+                      }}
+                      title={t('renameSession', language)}
+                      tabIndex={-1}
+                    >
+                      <i className="bi bi-pencil" style={{ fontSize: '0.85rem' }} />
+                    </button>
+                    {tabs.length > 1 && (
+                      <button
+                        className="btn btn-sm btn-link p-0 px-1 text-muted"
+                        onClick={(e) => closeTab(tab.id, e)}
+                        title={t('close', language)}
+                        tabIndex={-1}
+                      >
+                        <i className="bi bi-x" style={{ fontSize: '0.9rem' }} />
+                      </button>
+                    )}
+                  </div>
+                  {/* Resize handle */}
+                  <div
+                    className="tab-resize-handle"
+                    onMouseDown={(e) => handleResizeStart(tab.id, e)}
+                    title="Drag to resize"
+                  />
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           {/* New Tab Button */}
@@ -686,14 +742,30 @@ export const Workspace: React.FC = () => {
         .workspace-tabs::-webkit-scrollbar-track {
           background: transparent;
         }
-        /* Rename button - show on hover or active */
-        .rename-tab-btn {
+        /* Tab actions - show on hover or active */
+        .workspace-tab:hover .tab-actions,
+        .workspace-tab.active .tab-actions {
+          opacity: 1;
+        }
+        /* Tab resize handle */
+        .tab-resize-handle {
+          position: absolute;
+          right: 0;
+          top: 0;
+          bottom: 0;
+          width: 8px;
+          cursor: col-resize;
           opacity: 0;
           transition: opacity 0.15s ease;
+          border-right: 2px solid transparent;
         }
-        .workspace-tab:hover .rename-tab-btn,
-        .workspace-tab.active .rename-tab-btn {
+        .workspace-tab:hover .tab-resize-handle,
+        .workspace-tab.active .tab-resize-handle {
+          opacity: 0.5;
+        }
+        .tab-resize-handle:hover {
           opacity: 1;
+          border-right-color: var(--primary, #0d6efd);
         }
         /* Loading progress steps */
         .workspace-loading {
