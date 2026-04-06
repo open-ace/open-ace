@@ -577,9 +577,9 @@ export const Workspace: React.FC = () => {
                   <span className="text-truncate small flex-grow-1" style={{ minWidth: 0 }}>
                     {tab.title}
                   </span>
-                  <div className="tab-actions d-flex align-items-center" style={{ opacity: 0, transition: 'opacity 0.15s ease' }}>
+                  <div className="tab-actions d-flex align-items-center">
                     <button
-                      className="btn btn-sm btn-link p-0 px-1 text-muted rename-tab-btn"
+                      className="btn btn-sm btn-link p-0 px-1 text-muted"
                       onClick={(e) => {
                         e.stopPropagation();
                         handleRenameTab(tab.id, e);
@@ -743,6 +743,10 @@ export const Workspace: React.FC = () => {
           background: transparent;
         }
         /* Tab actions - show on hover or active */
+        .tab-actions {
+          opacity: 0;
+          transition: opacity 0.15s ease;
+        }
         .workspace-tab:hover .tab-actions,
         .workspace-tab.active .tab-actions {
           opacity: 1;
