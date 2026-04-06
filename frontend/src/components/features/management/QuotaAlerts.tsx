@@ -27,6 +27,15 @@ import {
   useToast,
 } from '@/components/common';
 import { formatTokens, formatDateTime, formatNumber } from '@/utils';
+
+// Token quotas are stored in M (millions) units
+const TOKEN_QUOTA_MULTIPLIER = 1_000_000;
+
+// Format quota value (stored in M units) to display string
+const formatQuotaTokens = (quota: number | undefined | null): string => {
+  if (!quota) return '∞';
+  return formatTokens(quota * TOKEN_QUOTA_MULTIPLIER);
+};
 import { alertsApi, type Alert, type NotificationPreferences } from '@/api';
 import type { QuotaUsage, UpdateQuotaRequest } from '@/api';
 
@@ -354,7 +363,7 @@ export const QuotaAlerts: React.FC = () => {
                         <small>{t('dailyTokenQuota', language)}</small>
                         <small>
                           {formatTokens(user.tokens_used_today ?? 0)} /{' '}
-                          {user.daily_token_quota ? formatTokens(user.daily_token_quota) : '∞'}
+                          {formatQuotaTokens(user.daily_token_quota)}
                         </small>
                       </div>
                       <Progress
@@ -370,7 +379,7 @@ export const QuotaAlerts: React.FC = () => {
                         <small>{t('monthlyTokenQuota', language)}</small>
                         <small>
                           {formatTokens(user.tokens_used_month ?? 0)} /{' '}
-                          {user.monthly_token_quota ? formatTokens(user.monthly_token_quota) : '∞'}
+                          {formatQuotaTokens(user.monthly_token_quota)}
                         </small>
                       </div>
                       <Progress
