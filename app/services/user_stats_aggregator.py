@@ -85,60 +85,26 @@ class UserDailyStatsAggregator:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
                 
-                # Check database type
-                is_postgresql = conn.dialect.name == "postgresql"
-                
-                if is_postgresql:
-                    # PostgreSQL: use INSERT ... ON CONFLICT DO UPDATE
-                    cursor.execute("""
-                        INSERT INTO user_daily_stats 
-                        (user_id, date, requests, tokens, input_tokens, output_tokens, cache_tokens, updated_at)
-                        SELECT 
-                            %s as user_id,
-                            dm.date,
-                            COUNT(*) FILTER (WHERE dm.role = 'assistant') as requests,
-                            COALESCE(SUM(dm.tokens_used), 0) as tokens,
-                            COALESCE(SUM(CASE WHEN dm.role = 'user' THEN dm.tokens_used ELSE 0 END), 0) as input_tokens,
-                            COALESCE(SUM(CASE WHEN dm.role = 'assistant' THEN dm.tokens_used ELSE 0 END), 0) as output_tokens,
-                            0 as cache_tokens,
-                            CURRENT_TIMESTAMP
-                        FROM daily_messages dm
-                        WHERE dm.date >= %s AND dm.date <= %s
-                          AND dm.sender_name LIKE %s
-                          AND dm.role IS NOT NULL
-                        GROUP BY dm.date
-                        ON CONFLICT (user_id, date) DO UPDATE SET
-                            requests = EXCLUDED.requests,
-                            tokens = EXCLUDED.tokens,
-                            input_tokens = EXCLUDED.input_tokens,
-                            output_tokens = EXCLUDED.output_tokens,
-                            cache_tokens = EXCLUDED.cache_tokens,
-                            updated_at = CURRENT_TIMESTAMP
-                    """, (user_id, start_str, end_str, f"{username}%"))
-                else:
-                    # SQLite: use INSERT OR REPLACE
-                    # First, get aggregated data
-                    cursor.execute("""
-                        SELECT 
-                            dm.date,
-                            COUNT(*) as requests,
-                            COALESCE(SUM(dm.tokens_used), 0) as tokens
-                        FROM daily_messages dm
-                        WHERE dm.date >= ? AND dm.date <= ?
-                          AND dm.sender_name LIKE ?
-                          AND dm.role = 'assistant'
-                        GROUP BY dm.date
-                    """, (start_str, end_str, f"{username}%"))
-                    
-                    rows = cursor.fetchall()
-                    
-                    # Insert or update each row
-                    for row in rows:
-                        cursor.execute("""
-                            INSERT OR REPLACE INTO user_daily_stats 
-                            (user_id, date, requests, tokens, updated_at)
-                            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-                        """, (user_id, row[0], row[1], row[2]))
+                # PostgreSQL: use INSERT ... ON CONFLICT DO UPDATE
+                cursor.execute("""
+                    INSERT INTO user_daily_stats 
+                    (user_id, date, requests, tokens, updated_at)
+                    SELECT 
+                        %s as user_id,
+                        dm.date::date,
+                        COUNT(*) as requests,
+                        COALESCE(SUM(dm.tokens_used), 0) as tokens,
+                        CURRENT_TIMESTAMP
+                    FROM daily_messages dm
+                    WHERE dm.date >= %s AND dm.date <= %s
+                      AND dm.sender_name LIKE %s
+                      AND dm.role = 'assistant'
+                    GROUP BY dm.date::date
+                    ON CONFLICT (user_id, date) DO UPDATE SET
+                        requests = EXCLUDED.requests,
+                        tokens = EXCLUDED.tokens,
+                        updated_at = CURRENT_TIMESTAMP
+                """, (user_id, start_str, end_str, f"{username}%"))
                 
                 conn.commit()
                 records_updated = cursor.rowcount
