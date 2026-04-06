@@ -6,9 +6,10 @@
  * - Group by date (Today, Yesterday, This Week, Earlier)
  * - Search and filter
  * - Click to open session in main area
+ * - Keyboard navigation (↑↓ arrows, Enter, Page Up/Down)
  */
 
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
@@ -17,6 +18,7 @@ import { Loading, EmptyState, Modal, Badge } from '@/components/common';
 import { formatRelativeTime, formatDateTime, formatTokens } from '@/utils';
 import type { AgentSession, SessionMessage } from '@/api/sessions';
 import type { Language } from '@/i18n';
+import { cn } from '@/utils';
 
 interface SessionListProps {
   collapsed?: boolean;
@@ -67,6 +69,10 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
   const [showDetailModal, setShowDetailModal] = useState(false);
   const sessionListRef = useRef<HTMLDivElement>(null);
   const selectedRef = useRef<HTMLButtonElement>(null);
+  
+  // Keyboard navigation state
+  const [focusedIndex, setFocusedIndex] = useState<number>(-1);
+  const itemRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
 
   // Fetch sessions
   const {
@@ -137,6 +143,29 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
     return groups;
   }, [filteredSessions, language]);
 
+  // Flatten sessions for keyboard navigation (preserving order)
+  const flatSessionList = useMemo(() => {
+    return [
+      ...groupedSessions.today,
+      ...groupedSessions.yesterday,
+      ...groupedSessions.thisWeek,
+      ...groupedSessions.earlier,
+    ];
+  }, [groupedSessions]);
+
+  // Calculate global index for each session in a group
+  const getGlobalIndex = useCallback((groupName: string, localIndex: number): number => {
+    const groupOrder = ['today', 'yesterday', 'thisWeek', 'earlier'];
+    let globalIndex = 0;
+    for (const group of groupOrder) {
+      if (group === groupName) {
+        return globalIndex + localIndex;
+      }
+      globalIndex += groupedSessions[group as keyof GroupedSessions].length;
+    }
+    return globalIndex;
+  }, [groupedSessions]);
+
   // Scroll selected session into view (only within the session list container)
   useEffect(() => {
     if (selectedRef.current && sessionListRef.current) {
@@ -145,17 +174,108 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
     }
   }, [selectedSessionId]);
 
-  const handleSessionClick = (sessionId: string) => {
+  const handleSessionClick = useCallback((sessionId: string) => {
     setSelectedSessionId(sessionId);
     setShowDetailModal(true);
     if (onSelectSession) {
       onSelectSession(sessionId);
     }
-  };
+  }, [onSelectSession]);
 
-  const handleCloseModal = () => {
+  const handleCloseModal = useCallback(() => {
     setShowDetailModal(false);
-  };
+  }, []);
+
+  // Keyboard navigation handler
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    // Only handle navigation when modal is closed and there are sessions
+    if (showDetailModal || flatSessionList.length === 0) return;
+
+    const totalItems = flatSessionList.length;
+
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault();
+        setFocusedIndex((prev) => {
+          const next = prev < totalItems - 1 ? prev + 1 : 0;
+          // Scroll into view
+          const item = itemRefs.current.get(next);
+          if (item) {
+            item.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          }
+          return next;
+        });
+        break;
+
+      case 'ArrowUp':
+        e.preventDefault();
+        setFocusedIndex((prev) => {
+          const next = prev > 0 ? prev - 1 : totalItems - 1;
+          // Scroll into view
+          const item = itemRefs.current.get(next);
+          if (item) {
+            item.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          }
+          return next;
+        });
+        break;
+
+      case 'Enter':
+        e.preventDefault();
+        if (focusedIndex >= 0 && focusedIndex < totalItems) {
+          const session = flatSessionList[focusedIndex];
+          handleSessionClick(session.id);
+        }
+        break;
+
+      case 'PageDown':
+        e.preventDefault();
+        setFocusedIndex((prev) => {
+          // Move down by 5 items or to the end
+          const pageSize = 5;
+          const next = Math.min(prev + pageSize, totalItems - 1);
+          const item = itemRefs.current.get(next);
+          if (item) {
+            item.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          }
+          return next;
+        });
+        break;
+
+      case 'PageUp':
+        e.preventDefault();
+        setFocusedIndex((prev) => {
+          // Move up by 5 items or to the start
+          const pageSize = 5;
+          const next = Math.max(prev - pageSize, 0);
+          const item = itemRefs.current.get(next);
+          if (item) {
+            item.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          }
+          return next;
+        });
+        break;
+
+      case 'Escape':
+        // Clear focus
+        setFocusedIndex(-1);
+        break;
+    }
+  }, [flatSessionList, showDetailModal, focusedIndex, handleSessionClick]);
+
+  // Register keyboard event listener
+  useEffect(() => {
+    const container = sessionListRef.current;
+    if (!container) return;
+
+    container.addEventListener('keydown', handleKeyDown);
+    return () => container.removeEventListener('keydown', handleKeyDown);
+  }, [handleKeyDown]);
+
+  // Reset focused index when search query changes
+  useEffect(() => {
+    setFocusedIndex(-1);
+  }, [searchQuery]);
 
   const handleNewSession = () => {
     // Check if we're already on the workspace page (conversation mode)
@@ -197,7 +317,7 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
   }
 
   return (
-    <div className="session-list" ref={sessionListRef}>
+    <div className="session-list" ref={sessionListRef} tabIndex={0}>
       {/* Search */}
       <div className="session-search mb-2">
         <div className="input-group input-group-sm">
@@ -231,9 +351,13 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
           {groupedSessions.today.length > 0 && (
             <SessionGroup
               title={t('today', language)}
+              groupName="today"
               sessions={groupedSessions.today}
               onSessionClick={handleSessionClick}
               selectedSessionId={selectedSessionId}
+              focusedIndex={focusedIndex}
+              getGlobalIndex={getGlobalIndex}
+              itemRefs={itemRefs}
             />
           )}
 
@@ -241,9 +365,13 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
           {groupedSessions.yesterday.length > 0 && (
             <SessionGroup
               title={t('yesterday', language)}
+              groupName="yesterday"
               sessions={groupedSessions.yesterday}
               onSessionClick={handleSessionClick}
               selectedSessionId={selectedSessionId}
+              focusedIndex={focusedIndex}
+              getGlobalIndex={getGlobalIndex}
+              itemRefs={itemRefs}
             />
           )}
 
@@ -251,9 +379,13 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
           {groupedSessions.thisWeek.length > 0 && (
             <SessionGroup
               title={t('thisWeek', language)}
+              groupName="thisWeek"
               sessions={groupedSessions.thisWeek}
               onSessionClick={handleSessionClick}
               selectedSessionId={selectedSessionId}
+              focusedIndex={focusedIndex}
+              getGlobalIndex={getGlobalIndex}
+              itemRefs={itemRefs}
             />
           )}
 
@@ -261,9 +393,13 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
           {groupedSessions.earlier.length > 0 && (
             <SessionGroup
               title={t('earlier', language)}
+              groupName="earlier"
               sessions={groupedSessions.earlier}
               onSessionClick={handleSessionClick}
               selectedSessionId={selectedSessionId}
+              focusedIndex={focusedIndex}
+              getGlobalIndex={getGlobalIndex}
+              itemRefs={itemRefs}
             />
           )}
 
@@ -292,6 +428,16 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
           <div className="text-muted">{t('noData', language)}</div>
         )}
       </Modal>
+
+      {/* Keyboard Navigation Hint */}
+      {flatSessionList.length > 0 && (
+        <div className="keyboard-hint mt-2 pt-2 border-top">
+          <small className="text-muted d-flex align-items-center justify-content-center gap-2">
+            <span><kbd>↑</kbd> <kbd>↓</kbd> {t('navigate', language) || 'Navigate'}</span>
+            <span><kbd>Enter</kbd> {t('select', language) || 'Select'}</span>
+          </small>
+        </div>
+      )}
     </div>
   );
 };
@@ -301,6 +447,7 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
  */
 interface SessionGroupProps {
   title: string;
+  groupName: string;
   sessions: Array<{
     id: string;
     title: string;
@@ -311,35 +458,60 @@ interface SessionGroupProps {
   }>;
   onSessionClick: (sessionId: string) => void;
   selectedSessionId: string | null;
+  focusedIndex: number;
+  getGlobalIndex: (groupName: string, localIndex: number) => number;
+  itemRefs: React.MutableRefObject<Map<number, HTMLButtonElement>>;
 }
 
 const SessionGroup: React.FC<SessionGroupProps> = ({
   title,
+  groupName,
   sessions,
   onSessionClick,
   selectedSessionId,
+  focusedIndex,
+  getGlobalIndex,
+  itemRefs,
 }) => {
   return (
     <div className="session-group mb-3">
       <div className="session-group-title text-muted small mb-1">{title}</div>
       <ul className="session-group-items list-unstyled">
-        {sessions.map((session) => (
-          <li key={session.id}>
-            <button
-              className={`session-item w-100 p-2 ${selectedSessionId === session.id ? 'selected' : ''}`}
-              onClick={() => onSessionClick(session.id)}
-            >
-              <span className="session-title text-truncate">
-                {session.title.split(' - ')[1] ?? session.title}
-              </span>
-              <span className="session-time text-muted">{session.time}</span>
-              <span className="session-messages text-muted">
-                <i className="bi bi-chat-dots" />
-                <span className="ms-1">{session.messages}</span>
-              </span>
-            </button>
-          </li>
-        ))}
+        {sessions.map((session, localIndex) => {
+          const globalIndex = getGlobalIndex(groupName, localIndex);
+          const isFocused = focusedIndex === globalIndex;
+          const isSelected = selectedSessionId === session.id;
+
+          return (
+            <li key={session.id}>
+              <button
+                ref={(el) => {
+                  if (el) {
+                    itemRefs.current.set(globalIndex, el);
+                  } else {
+                    itemRefs.current.delete(globalIndex);
+                  }
+                }}
+                className={cn(
+                  'session-item w-100 p-2',
+                  isSelected && 'selected',
+                  isFocused && 'keyboard-focused'
+                )}
+                onClick={() => onSessionClick(session.id)}
+                tabIndex={isFocused ? 0 : -1}
+              >
+                <span className="session-title text-truncate">
+                  {session.title.split(' - ')[1] ?? session.title}
+                </span>
+                <span className="session-time text-muted">{session.time}</span>
+                <span className="session-messages text-muted">
+                  <i className="bi bi-chat-dots" />
+                  <span className="ms-1">{session.messages}</span>
+                </span>
+              </button>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

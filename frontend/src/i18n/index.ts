@@ -41,6 +41,8 @@ const translations: Record<Language, Translations> = {
     role: 'Role',
     selectRole: 'Select Role',
     searchMessages: 'Search messages...',
+    navigate: 'Navigate',
+    select: 'Select',
 
     // Navigation
     dashboard: 'Dashboard',
@@ -623,6 +625,8 @@ const translations: Record<Language, Translations> = {
     role: '角色',
     selectRole: '选择角色',
     searchMessages: '搜索消息...',
+    navigate: '导航',
+    select: '选择',
 
     // Navigation
     dashboard: '仪表盘',
