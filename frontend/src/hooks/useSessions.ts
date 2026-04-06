@@ -63,3 +63,15 @@ export function useCompleteSession() {
     },
   });
 }
+
+export function useRenameSession() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ sessionId, newName }: { sessionId: string; newName: string }) =>
+      sessionsApi.renameSession(sessionId, newName),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
+    },
+  });
+}

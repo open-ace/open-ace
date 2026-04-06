@@ -685,6 +685,40 @@ def delete_session(session_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@workspace_bp.route("/sessions/<session_id>/rename", methods=["POST"])
+def rename_session(session_id):
+    """Rename a session.
+
+    Request body:
+        - name: New session name (required)
+    """
+    try:
+        data = request.get_json()
+        if not data or not data.get("name"):
+            return jsonify({"success": False, "error": "Session name is required"}), 400
+
+        new_name = data["name"].strip()
+        if not new_name:
+            return jsonify({"success": False, "error": "Session name cannot be empty"}), 400
+
+        manager = SessionManager()
+        session = manager.get_session(session_id)
+
+        if not session:
+            return jsonify({"success": False, "error": "Session not found"}), 404
+
+        session.title = new_name
+        success = manager.update_session(session)
+
+        if not success:
+            return jsonify({"success": False, "error": "Failed to update session"}), 500
+
+        return jsonify({"success": True, "data": {"session_id": session_id, "title": new_name}})
+    except Exception as e:
+        logger.error(f"Error renaming session: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @workspace_bp.route("/sessions/stats", methods=["GET"])
 def get_session_stats():
     """Get session statistics."""

@@ -141,4 +141,19 @@ export const sessionsApi = {
     );
     return response;
   },
+
+  /**
+   * Rename a session
+   */
+  async renameSession(
+    sessionId: string,
+    newName: string
+  ): Promise<{ success: boolean; data?: { session_id: string; title: string }; error?: string }> {
+    const response = await apiClient.post<{
+      success: boolean;
+      data?: { session_id: string; title: string };
+      error?: string;
+    }>(`/api/workspace/sessions/${sessionId}/rename`, { name: newName });
+    return response;
+  },
 };

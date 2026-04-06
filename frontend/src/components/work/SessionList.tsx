@@ -12,8 +12,8 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
-import { useSessions, useSession } from '@/hooks';
-import { Loading, EmptyState, Modal, Badge } from '@/components/common';
+import { useSessions, useSession, useRenameSession } from '@/hooks';
+import { Loading, EmptyState, Modal, Badge, useToast } from '@/components/common';
 import { formatRelativeTime, formatDateTime, formatTokens } from '@/utils';
 import type { AgentSession, SessionMessage } from '@/api/sessions';
 import type { Language } from '@/i18n';
@@ -60,13 +60,20 @@ interface GroupedSessions {
 
 export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onSelectSession }) => {
   const language = useLanguage();
+  const toast = useToast();
   const navigate = useNavigate();
   const location = useLocation();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
+  const [showRenameModal, setShowRenameModal] = useState(false);
+  const [renameSessionId, setRenameSessionId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
   const sessionListRef = useRef<HTMLDivElement>(null);
   const selectedRef = useRef<HTMLButtonElement>(null);
+
+  // Rename mutation
+  const renameMutation = useRenameSession();
 
   // Fetch sessions
   const {
@@ -157,6 +164,40 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
     setShowDetailModal(false);
   };
 
+  const handleRenameClick = (sessionId: string, currentTitle: string) => {
+    setRenameSessionId(sessionId);
+    setRenameValue(currentTitle);
+    setShowRenameModal(true);
+  };
+
+  const handleSaveRename = () => {
+    if (!renameSessionId || !renameValue.trim()) return;
+
+    renameMutation.mutate(
+      { sessionId: renameSessionId, newName: renameValue.trim() },
+      {
+        onSuccess: () => {
+          toast.success(t('sessionRenamed', language));
+          setShowRenameModal(false);
+          setRenameSessionId(null);
+          setRenameValue('');
+        },
+        onError: (error: Error) => {
+          toast.error(error.message || t('error', language));
+          setShowRenameModal(false);
+          setRenameSessionId(null);
+          setRenameValue('');
+        },
+      }
+    );
+  };
+
+  const handleCancelRename = () => {
+    setShowRenameModal(false);
+    setRenameSessionId(null);
+    setRenameValue('');
+  };
+
   const handleNewSession = () => {
     // Check if we're already on the workspace page (conversation mode)
     const isWorkspacePage = location.pathname === '/work' || location.pathname === '/work/';
@@ -227,13 +268,14 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
         <div className="text-danger small">{t('error', language)}</div>
       ) : (
         <div className="session-groups">
-          {/* Today */}
           {groupedSessions.today.length > 0 && (
             <SessionGroup
               title={t('today', language)}
               sessions={groupedSessions.today}
               onSessionClick={handleSessionClick}
+              onRenameClick={handleRenameClick}
               selectedSessionId={selectedSessionId}
+              language={language}
             />
           )}
 
@@ -243,7 +285,9 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
               title={t('yesterday', language)}
               sessions={groupedSessions.yesterday}
               onSessionClick={handleSessionClick}
+              onRenameClick={handleRenameClick}
               selectedSessionId={selectedSessionId}
+              language={language}
             />
           )}
 
@@ -253,7 +297,9 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
               title={t('thisWeek', language)}
               sessions={groupedSessions.thisWeek}
               onSessionClick={handleSessionClick}
+              onRenameClick={handleRenameClick}
               selectedSessionId={selectedSessionId}
+              language={language}
             />
           )}
 
@@ -263,7 +309,9 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
               title={t('earlier', language)}
               sessions={groupedSessions.earlier}
               onSessionClick={handleSessionClick}
+              onRenameClick={handleRenameClick}
               selectedSessionId={selectedSessionId}
+              language={language}
             />
           )}
 
@@ -292,6 +340,47 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
           <div className="text-muted">{t('noData', language)}</div>
         )}
       </Modal>
+
+      {/* Rename Modal */}
+      <Modal
+        isOpen={showRenameModal}
+        onClose={handleCancelRename}
+        title={t('renameSession', language)}
+        size="sm"
+      >
+        <div className="mb-3">
+          <label htmlFor="rename-input" className="form-label">
+            {t('enterNewSessionName', language)}
+          </label>
+          <input
+            id="rename-input"
+            type="text"
+            className="form-control"
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                handleSaveRename();
+              } else if (e.key === 'Escape') {
+                handleCancelRename();
+              }
+            }}
+            autoFocus
+          />
+        </div>
+        <div className="d-flex justify-content-end gap-2">
+          <button className="btn btn-secondary" onClick={handleCancelRename}>
+            {t('cancel', language)}
+          </button>
+          <button
+            className="btn btn-primary"
+            onClick={handleSaveRename}
+            disabled={!renameValue.trim() || renameMutation.isPending}
+          >
+            {renameMutation.isPending ? t('loading', language) : t('save', language)}
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 };
@@ -310,14 +399,18 @@ interface SessionGroupProps {
     messages: number;
   }>;
   onSessionClick: (sessionId: string) => void;
+  onRenameClick: (sessionId: string, title: string) => void;
   selectedSessionId: string | null;
+  language: Language;
 }
 
 const SessionGroup: React.FC<SessionGroupProps> = ({
   title,
   sessions,
   onSessionClick,
+  onRenameClick,
   selectedSessionId,
+  language,
 }) => {
   return (
     <div className="session-group mb-3">
@@ -325,19 +418,28 @@ const SessionGroup: React.FC<SessionGroupProps> = ({
       <ul className="session-group-items list-unstyled">
         {sessions.map((session) => (
           <li key={session.id}>
-            <button
-              className={`session-item w-100 p-2 ${selectedSessionId === session.id ? 'selected' : ''}`}
-              onClick={() => onSessionClick(session.id)}
-            >
-              <span className="session-title text-truncate">
-                {session.title.split(' - ')[1] ?? session.title}
-              </span>
-              <span className="session-time text-muted">{session.time}</span>
-              <span className="session-messages text-muted">
-                <i className="bi bi-chat-dots" />
-                <span className="ms-1">{session.messages}</span>
-              </span>
-            </button>
+            <div className="d-flex align-items-center">
+              <button
+                className={`session-item w-100 p-2 flex-grow-1 ${selectedSessionId === session.id ? 'selected' : ''}`}
+                onClick={() => onSessionClick(session.id)}
+              >
+                <span className="session-title text-truncate">
+                  {session.title.split(' - ')[1] ?? session.title}
+                </span>
+                <span className="session-time text-muted">{session.time}</span>
+                <span className="session-messages text-muted">
+                  <i className="bi bi-chat-dots" />
+                  <span className="ms-1">{session.messages}</span>
+                </span>
+              </button>
+              <button
+                className="btn btn-sm btn-link text-muted px-2"
+                onClick={() => onRenameClick(session.id, session.title)}
+                title={t('renameSession', language)}
+              >
+                <i className="bi bi-pencil" />
+              </button>
+            </div>
           </li>
         ))}
       </ul>

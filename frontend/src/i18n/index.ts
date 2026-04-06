@@ -284,6 +284,9 @@ const translations: Record<Language, Translations> = {
     anomalyList: 'Anomaly List',
     newSession: 'New Session',
     sessionDetails: 'Session Details',
+    renameSession: 'Rename Session',
+    enterNewSessionName: 'Enter new session name...',
+    sessionRenamed: 'Session renamed successfully',
     today: 'Today',
     yesterday: 'Yesterday',
     thisWeek: 'This Week',
@@ -331,6 +334,8 @@ const translations: Record<Language, Translations> = {
     monthlyTokenQuotaExceeded: 'Monthly token quota exceeded. ',
     quotaLimitsHelp: 'About Quota Limits',
     quotaLimitsHelpDesc: 'Quota limits are set by your administrator. If you need higher limits, please contact your administrator.',
+    exitedFullscreenDueToQuotaTitle: 'Exited Fullscreen',
+    exitedFullscreenDueToQuotaDesc: 'You have been exited from fullscreen mode because your quota limit was reached.',
 
     // Sessions
     activeSessions: 'Active Sessions',
@@ -865,6 +870,9 @@ const translations: Record<Language, Translations> = {
     anomalyList: '异常列表',
     newSession: '新建会话',
     sessionDetails: '会话详情',
+    renameSession: '重命名会话',
+    enterNewSessionName: '输入新的会话名称...',
+    sessionRenamed: '会话重命名成功',
     today: '今天',
     yesterday: '昨天',
     thisWeek: '本周',
@@ -912,6 +920,8 @@ const translations: Record<Language, Translations> = {
     monthlyTokenQuotaExceeded: '每月 Token 配额已超限。',
     quotaLimitsHelp: '关于配额限制',
     quotaLimitsHelpDesc: '配额限制由管理员设置。如需提高限额，请联系管理员。',
+    exitedFullscreenDueToQuotaTitle: '已退出全屏',
+    exitedFullscreenDueToQuotaDesc: '由于配额已超限，已自动退出全屏模式。',
 
     // Sessions
     activeSessions: '活跃会话',
