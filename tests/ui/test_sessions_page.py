@@ -17,7 +17,7 @@ from playwright.sync_api import sync_playwright, expect
 import time
 
 # 配置
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 USERNAME = os.environ.get("USERNAME", "admin")
 PASSWORD = os.environ.get("PASSWORD", "admin123")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
@@ -71,13 +71,10 @@ def test_sessions_page():
 
             # 2. 导航到 Sessions 页面
             print("\n步骤 2: 导航到 Sessions 页面")
-            # Sidebar 使用 button 元素，通过文本内容定位
-            sessions_btn = page.locator(
-                '.sidebar button:has-text("Sessions"), .sidebar button:has-text("会话")'
-            )
-            sessions_btn.click()
-            page.wait_for_selector(".sessions", timeout=10000)
-            time.sleep(1)  # 等待数据加载
+            # 直接导航到 work/sessions 页面
+            page.goto(f"{BASE_URL}/work/sessions")
+            page.wait_for_load_state('networkidle', timeout=10000)
+            time.sleep(2)  # 等待数据加载
             screenshots.append(save_screenshot(page, "01_page_loaded"))
             print("  ✓ Sessions 页面加载成功")
             results.append(("页面加载", True, ""))

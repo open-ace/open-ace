@@ -321,6 +321,20 @@ def list_sessions():
                     LIMIT ? OFFSET ?
                 """)
                 sessions = db.fetch_all(sessions_query, tuple(params + [limit, offset]))
+
+                # Get model for each session from daily_messages (session_stats doesn't have model)
+                if sessions:
+                    session_ids = [s["session_id"] for s in sessions]
+                    model_query = adapt_sql(f"""
+                        SELECT agent_session_id as session_id, MAX(model) as model
+                        FROM daily_messages
+                        WHERE agent_session_id IN ({', '.join(['?' for _ in session_ids])})
+                        GROUP BY agent_session_id
+                    """)
+                    models_data = db.fetch_all(model_query, tuple(session_ids))
+                    models_map = {m["session_id"]: m["model"] for m in models_data}
+                    for s in sessions:
+                        s["model"] = models_map.get(s["session_id"])
             else:
                 # Fallback to original query if materialized view doesn't exist
                 conditions = ["agent_session_id IS NOT NULL"]
@@ -359,7 +373,8 @@ def list_sessions():
                         SUM(input_tokens) as total_input_tokens,
                         SUM(output_tokens) as total_output_tokens,
                         MIN(timestamp) as created_at,
-                        MAX(timestamp) as updated_at
+                        MAX(timestamp) as updated_at,
+                        MAX(model) as model
                     FROM daily_messages
                     WHERE {where_clause}
                     GROUP BY agent_session_id, tool_name, host_name, sender_name
@@ -406,7 +421,8 @@ def list_sessions():
                     SUM(output_tokens) as total_output_tokens,
                     MIN(timestamp) as created_at,
                     MAX(timestamp) as updated_at,
-                    MAX(project_path) as project_path
+                    MAX(project_path) as project_path,
+                    MAX(model) as model
                 FROM daily_messages
                 WHERE {where_clause}
                 GROUP BY agent_session_id, tool_name, host_name, sender_name
@@ -434,7 +450,7 @@ def list_sessions():
                     "total_input_tokens": s["total_input_tokens"] or 0,
                     "total_output_tokens": s["total_output_tokens"] or 0,
                     "message_count": s["message_count"] or 0,
-                    "model": None,
+                    "model": s.get("model"),
                     "tags": [],
                     "created_at": s["created_at"],
                     "updated_at": s["updated_at"],
@@ -549,7 +565,8 @@ def get_session(session_id):
                 SUM(input_tokens) as total_input_tokens,
                 SUM(output_tokens) as total_output_tokens,
                 MIN(timestamp) as created_at,
-                MAX(timestamp) as updated_at
+                MAX(timestamp) as updated_at,
+                MAX(model) as model
             FROM daily_messages
             WHERE agent_session_id = {p}
             GROUP BY agent_session_id, tool_name, host_name, sender_name
@@ -615,7 +632,7 @@ def get_session(session_id):
             "total_input_tokens": session_data["total_input_tokens"] or 0,
             "total_output_tokens": session_data["total_output_tokens"] or 0,
             "message_count": session_data["message_count"] or 0,
-            "model": None,
+            "model": session_data.get("model"),
             "tags": [],
             "created_at": session_data["created_at"],
             "updated_at": session_data["updated_at"],

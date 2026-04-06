@@ -353,6 +353,47 @@ interface SessionDetailContentProps {
 }
 
 const SessionDetailContent: React.FC<SessionDetailContentProps> = ({ session, language }) => {
+  // Filter state: default to show user and assistant messages
+  const [showUser, setShowUser] = useState(true);
+  const [showAssistant, setShowAssistant] = useState(true);
+  const [showSystem, setShowSystem] = useState(false);
+  const [searchText, setSearchText] = useState('');
+
+  // Filter messages based on role and search text
+  const filteredMessages = useMemo(() => {
+    if (!session.messages) return [];
+
+    return session.messages.filter((msg: SessionMessage) => {
+      // Role filter
+      const roleMatch =
+        (showUser && msg.role === 'user') ||
+        (showAssistant && msg.role === 'assistant') ||
+        (showSystem && msg.role === 'system');
+
+      // Search filter (case-insensitive)
+      const searchMatch =
+        !searchText || msg.content.toLowerCase().includes(searchText.toLowerCase());
+
+      return roleMatch && searchMatch;
+    });
+  }, [session.messages, showUser, showAssistant, showSystem, searchText]);
+
+  // Highlight search text in content
+  const highlightText = (text: string, search: string) => {
+    if (!search) return text;
+    const lowerText = text.toLowerCase();
+    const lowerSearch = search.toLowerCase();
+    const index = lowerText.indexOf(lowerSearch);
+    if (index === -1) return text;
+    return (
+      text.slice(0, index) +
+      '<mark>' +
+      text.slice(index, index + search.length) +
+      '</mark>' +
+      text.slice(index + search.length)
+    );
+  };
+
   return (
     <div className="session-detail-content">
       {/* Session Meta Info */}
@@ -377,7 +418,7 @@ const SessionDetailContent: React.FC<SessionDetailContentProps> = ({ session, la
             </Badge>
           </div>
           <div className="col-md-6">
-            <small className="text-muted d-block">{t('totalMessages', language)}</small>
+            <small className="text-muted d-block">{t('totalRequests', language)}</small>
             <span>{session.message_count}</span>
           </div>
           <div className="col-md-6">
@@ -395,11 +436,62 @@ const SessionDetailContent: React.FC<SessionDetailContentProps> = ({ session, la
         </div>
       </div>
 
+      {/* Filter and Search */}
+      <div className="mb-3">
+        {/* Role filters */}
+        <div className="d-flex gap-2 mb-2">
+          <button
+            type="button"
+            className={`btn btn-sm ${showUser ? 'btn-primary' : 'btn-outline-primary'}`}
+            onClick={() => setShowUser(!showUser)}
+          >
+            {t('user', language) ?? 'User'}
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm ${showAssistant ? 'btn-success' : 'btn-outline-success'}`}
+            onClick={() => setShowAssistant(!showAssistant)}
+          >
+            {t('assistant', language) ?? 'Assistant'}
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm ${showSystem ? 'btn-secondary' : 'btn-outline-secondary'}`}
+            onClick={() => setShowSystem(!showSystem)}
+          >
+            {t('system', language) ?? 'System'}
+          </button>
+        </div>
+        {/* Search input */}
+        <div className="input-group input-group-sm">
+          <input
+            type="text"
+            className="form-control"
+            placeholder={t('searchMessages', language) ?? 'Search messages...'}
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+          />
+          {searchText && (
+            <button
+              type="button"
+              className="btn btn-outline-secondary"
+              onClick={() => setSearchText('')}
+            >
+              <i className="bi bi-x-lg"></i>
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* Messages */}
-      <h6 className="mb-2">{t('messages', language)}</h6>
+      <h6 className="mb-2">
+        {t('messages', language)}
+        {filteredMessages.length !== session.message_count &&
+          ` (${filteredMessages.length}/${session.message_count})`}
+      </h6>
       <div className="messages-container" style={{ maxHeight: '400px', overflowY: 'auto' }}>
-        {session.messages && session.messages.length > 0 ? (
-          session.messages.map((msg: SessionMessage, idx: number) => (
+        {filteredMessages.length > 0 ? (
+          filteredMessages.map((msg: SessionMessage, idx: number) => (
             <div
               key={msg.id ?? idx}
               className={`message-item p-2 mb-2 rounded ${msg.role === 'user' ? 'bg-light' : 'bg-white border'}`}
@@ -424,14 +516,15 @@ const SessionDetailContent: React.FC<SessionDetailContentProps> = ({ session, la
               <div
                 className="message-content"
                 style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
-              >
-                {msg.content}
-              </div>
+                dangerouslySetInnerHTML={{ __html: highlightText(msg.content, searchText) }}
+              />
             </div>
           ))
         ) : (
           <div className="text-muted text-center py-3">
-            {t('noMessages', language) ?? 'No messages in this session'}
+            {searchText || !(showUser || showAssistant || showSystem)
+              ? (t('noMatchingMessages', language) ?? 'No matching messages')
+              : (t('noMessages', language) ?? 'No messages in this session')}
           </div>
         )}
       </div>
