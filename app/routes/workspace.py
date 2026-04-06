@@ -311,20 +311,13 @@ def list_sessions():
                 total_pages = (total + limit - 1) // limit if total > 0 else 1
 
                 # Get paginated sessions from materialized view
-                # Join with daily_messages to get project_path
+                # Note: session_stats already includes project_path column
                 offset = (page - 1) * limit
                 sessions_query = adapt_sql(f"""
-                    SELECT 
-                        ss.*,
-                        dm.project_path
-                    FROM session_stats ss
-                    LEFT JOIN (
-                        SELECT DISTINCT ON (agent_session_id) agent_session_id, project_path
-                        FROM daily_messages
-                        WHERE project_path IS NOT NULL
-                    ) dm ON ss.session_id = dm.agent_session_id
+                    SELECT *
+                    FROM session_stats
                     WHERE {where_clause}
-                    ORDER BY ss.updated_at DESC
+                    ORDER BY updated_at DESC
                     LIMIT ? OFFSET ?
                 """)
                 sessions = db.fetch_all(sessions_query, tuple(params + [limit, offset]))
