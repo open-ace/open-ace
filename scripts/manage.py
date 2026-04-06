@@ -313,19 +313,62 @@ def start_service(dev_mode: bool = False):
         print(f"Check log: {log_file}")
 
 
+def stop_webui_processes():
+    """Stop all qwen-code-webui processes."""
+    stopped_pids = []
+    
+    # Method 1: Find by process name
+    result = run_command("pgrep -f 'qwen-code-webui'", capture=True, check=False)
+    if result and result.stdout.strip():
+        pids = result.stdout.strip().split("\n")
+        for pid in pids:
+            if pid:
+                run_command(f"kill -9 {pid}", check=False)
+                stopped_pids.append(pid)
+    
+    # Method 2: Find by node processes running webui backend
+    result = run_command("pgrep -f 'node.*webui.*backend'", capture=True, check=False)
+    if result and result.stdout.strip():
+        pids = result.stdout.strip().split("\n")
+        for pid in pids:
+            if pid and pid not in stopped_pids:
+                run_command(f"kill -9 {pid}", check=False)
+                stopped_pids.append(pid)
+    
+    # Method 3: Find by node processes with qwen-code-webui in command line
+    result = run_command("pgrep -f 'node.*cli.*node\\.js'", capture=True, check=False)
+    if result and result.stdout.strip():
+        pids = result.stdout.strip().split("\n")
+        for pid in pids:
+            if pid and pid not in stopped_pids:
+                run_command(f"kill -9 {pid}", check=False)
+                stopped_pids.append(pid)
+    
+    return stopped_pids
+
+
 def stop_service():
-    """Stop local web server."""
+    """Stop local web server and all webui processes."""
     print_header("Stopping Web Server")
 
     # Find and kill process on web port
     result = run_command(f"lsof -ti :{WEB_PORT}", capture=True, check=False)
+    web_pids = []
     if result and result.stdout.strip():
-        pids = result.stdout.strip().split("\n")
-        for pid in pids:
+        web_pids = result.stdout.strip().split("\n")
+        for pid in web_pids:
             run_command(f"kill -9 {pid}", check=False)
-        print_success(f"Web server stopped (killed PIDs: {', '.join(pids)})")
+        print_success(f"Web server stopped (killed PIDs: {', '.join(web_pids)})")
     else:
         print("Web server is not running")
+
+    # Stop all qwen-code-webui processes
+    print("\nStopping webui processes...")
+    webui_pids = stop_webui_processes()
+    if webui_pids:
+        print_success(f"Webui processes stopped (killed PIDs: {', '.join(webui_pids)})")
+    else:
+        print("No webui processes found")
 
 
 def status_service():
