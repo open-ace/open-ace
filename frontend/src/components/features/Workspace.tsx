@@ -154,7 +154,7 @@ export const Workspace: React.FC = () => {
   }, [quotaStatus?.over_quota?.any, workspaceFullscreen, exitWorkspaceFullscreen, language, toast]);
 
   // Get the effective URL for iframe
-  const getEffectiveUrl = useCallback((restoreSessionId?: string, encodedProjectName?: string): string => {
+  const getEffectiveUrl = useCallback((restoreSessionId?: string, encodedProjectName?: string, toolName?: string): string => {
     if (!config?.enabled) return '';
 
     // Multi-user mode: use user-specific URL with token and openace_url
@@ -168,12 +168,15 @@ export const Workspace: React.FC = () => {
       if (openaceUrl) {
         url = `${url}&openace_url=${encodeURIComponent(openaceUrl)}`;
       }
-      // Add sessionId and encodedProjectName if restoring a session
+      // Add sessionId, encodedProjectName, and toolName if restoring a session
       if (restoreSessionId) {
         url = `${url}&sessionId=${encodeURIComponent(restoreSessionId)}`;
       }
       if (encodedProjectName) {
         url = `${url}&encodedProjectName=${encodeURIComponent(encodedProjectName)}`;
+      }
+      if (toolName) {
+        url = `${url}&toolName=${encodeURIComponent(toolName)}`;
       }
       return url;
     }
@@ -188,6 +191,10 @@ export const Workspace: React.FC = () => {
       const separator = url.includes('?') ? '&' : '?';
       url = `${url}${separator}encodedProjectName=${encodeURIComponent(encodedProjectName)}`;
     }
+    if (toolName) {
+      const separator = url.includes('?') ? '&' : '?';
+      url = `${url}${separator}toolName=${encodeURIComponent(toolName)}`;
+    }
     return url;
   }, [config, userWebUI]);
 
@@ -200,15 +207,16 @@ export const Workspace: React.FC = () => {
     if (config.multi_user_mode && !userWebUI?.success) return;
 
     // Check for session restore parameters
-    // API returns: /work/workspace?sessionId=xxx&encodedProjectName=yyy
+    // API returns: /work/workspace?sessionId=xxx&encodedProjectName=yyy&toolName=zzz
     // Also support legacy: /work/workspace?restoreSession=xxx
     const sessionId = searchParams.get('sessionId');
     const restoreSession = searchParams.get('restoreSession');
     const encodedProjectName = searchParams.get('encodedProjectName');
+    const toolName = searchParams.get('toolName');
     const restoreSessionId = sessionId || restoreSession;
-    
+
     if (restoreSessionId && tabs.length === 0) {
-      const effectiveUrl = getEffectiveUrl(restoreSessionId, encodedProjectName || undefined);
+      const effectiveUrl = getEffectiveUrl(restoreSessionId, encodedProjectName || undefined, toolName || undefined);
       const initialTab: WorkspaceTab = {
         id: generateTabId(),
         title: restoreSessionId ? t('restoredSession', language) : t('newSession', language),
@@ -225,6 +233,7 @@ export const Workspace: React.FC = () => {
       searchParams.delete('sessionId');
       searchParams.delete('restoreSession');
       searchParams.delete('encodedProjectName');
+      searchParams.delete('toolName');
       setSearchParams(searchParams, { replace: true });
     }
   }, [config, userWebUI, tabs.length, language, getEffectiveUrl, searchParams, setSearchParams]);
