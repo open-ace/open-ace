@@ -663,9 +663,14 @@ export const Workspace: React.FC = () => {
 
   // Keyboard shortcut for switching tabs (Cmd/Ctrl + Shift + 1-9)
   // Using Shift+modifier to avoid conflict with browser's native tab switching shortcuts
-  // MUST be before any early returns to maintain hooks order consistency
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't handle if quota exceeded or loading
+      if (isQuotaExceeded || isLoading || isQuotaLoading) return;
+      
+      // Don't handle if no tabs
+      if (tabs.length === 0) return;
+
       // Check if the key is a digit (1-9)
       if (e.key >= '1' && e.key <= '9') {
         // Check modifier key: Cmd on Mac, Ctrl on Windows/Linux
@@ -710,18 +715,12 @@ export const Workspace: React.FC = () => {
       }
     };
 
-    // Only add listener when there are tabs and workspace is not in quota exceeded state
-    if (tabs.length > 0 && !isQuotaExceeded && !isLoading && !isQuotaLoading) {
-      console.log('[Keyboard Shortcut] Listener registered. Tabs:', tabs.length);
-      window.addEventListener('keydown', handleKeyDown);
-      return () => {
-        console.log('[Keyboard Shortcut] Listener removed');
-        window.removeEventListener('keydown', handleKeyDown);
-      };
-    }
-
-    return undefined;
-  }, [tabs, activeTabId, switchTab, isQuotaExceeded, isLoading, isQuotaLoading]);
+    // Always listen for keyboard events
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [tabs.length, activeTabId, switchTab, isQuotaExceeded, isLoading, isQuotaLoading]);
 
   if (isLoading || isQuotaLoading) {
     // Get loading message based on stage
