@@ -2568,7 +2568,7 @@ link[rel='dns-prefetch'] {
 
 .work-status-bar .status-label {
   font-weight: var(--font-weight-medium);
-  color: var(--text-secondary);
+  color: var(--text-muted);
 }
 
 .work-status-bar .status-separator {

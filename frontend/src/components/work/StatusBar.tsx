@@ -7,7 +7,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { cn } from '@/utils';
+import { cn, formatTokens } from '@/utils';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 
@@ -105,7 +105,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
           <i className="bi bi-bar-chart" />
           <span className="status-label">{t('token', language)}:</span>
           <span className="status-tokens">
-            {formatNumber(status?.tokens_used ?? 0)} / {formatNumber(status?.tokens_limit ?? 100000)}
+            {formatTokens(status?.tokens_used ?? 0)} / {formatTokens(status?.tokens_limit ?? 100000)}
           </span>
           <div className="status-progress">
             <div
