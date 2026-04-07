@@ -9,7 +9,7 @@
  * - Multi-user mode support with per-user webui instances
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { workspaceApi, type WorkspaceConfig, type UserWebUIResponse } from '@/api';
 import { requestApi, type QuotaStatusResponse } from '@/api/request';
@@ -57,6 +57,9 @@ export const Workspace: React.FC = () => {
   const [isRenaming, setIsRenaming] = useState(false);
   const [tabWidths, setTabWidths] = useState<Record<string, number>>({});
   const [resizingTabId, setResizingTabId] = useState<string | null>(null);
+
+  // Refs for iframe elements (to send focus messages)
+  const iframeRefs = useRef<Map<string, HTMLIFrameElement>>(new Map());
 
   // Fullscreen state from global store
   const workspaceFullscreen = useWorkspaceFullscreen();
@@ -307,6 +310,15 @@ export const Workspace: React.FC = () => {
   // Switch to a tab
   const switchTab = useCallback((tabId: string) => {
     setActiveTabId(tabId);
+
+    // Send focus message to iframe after tab switch
+    // Use setTimeout to ensure the iframe is visible before sending message
+    setTimeout(() => {
+      const iframe = iframeRefs.current.get(tabId);
+      if (iframe?.contentWindow) {
+        iframe.contentWindow.postMessage({ type: 'openace-focus-input' }, '*');
+      }
+    }, 100);
   }, []);
 
   // Rename a tab
@@ -713,6 +725,13 @@ export const Workspace: React.FC = () => {
               </div>
             )}
             <iframe
+              ref={(el) => {
+                if (el) {
+                  iframeRefs.current.set(tab.id, el);
+                } else {
+                  iframeRefs.current.delete(tab.id);
+                }
+              }}
               src={tab.url}
               title={`Workspace - ${tab.title}`}
               className="w-100 h-100"
@@ -836,6 +855,16 @@ export const Workspace: React.FC = () => {
         .tab-resize-handle:hover {
           opacity: 1;
           border-right-color: var(--primary, #0d6efd);
+        }
+        /* New tab button - matches tab style */
+        .workspace-new-tab-btn {
+          transition: background-color 0.15s ease;
+        }
+        .workspace-new-tab-btn:hover {
+          background-color: rgba(0, 0, 0, 0.05) !important;
+        }
+        .workspace-new-tab-btn i {
+          font-size: 1rem;
         }
         /* Loading progress steps */
         .workspace-loading {
