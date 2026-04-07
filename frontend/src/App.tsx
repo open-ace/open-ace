@@ -12,7 +12,7 @@
  */
 
 import React, { useEffect, Suspense, lazy } from 'react';
-import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Layout, WorkLayout, ManageLayout } from '@/components/layout';
 import { Login } from '@/components/features/Login';
@@ -143,19 +143,23 @@ const LegacyAppContent: React.FC = () => {
 // Work Mode Routes
 const WorkRoutes: React.FC = () => {
   return (
-    <WorkLayout>
-      <Suspense fallback={<PageLoader />}>
-        <Routes>
-          <Route path="/" element={<Workspace />} />
-          <Route path="/sessions" element={<Sessions />} />
-          <Route path="/prompts" element={<Prompts />} />
-          <Route path="/usage" element={<UsageOverview />} />
+    <Suspense fallback={<PageLoader />}>
+      <Routes>
+        <Route path="/" element={
+          <WorkLayout>
+            <Outlet />
+          </WorkLayout>
+        }>
+          <Route index element={<Workspace />} />
+          <Route path="sessions" element={<Sessions />} />
+          <Route path="prompts" element={<Prompts />} />
+          <Route path="usage" element={<UsageOverview />} />
           {/* Explicit /workspace route for session restore */}
-          <Route path="/workspace" element={<Workspace />} />
+          <Route path="workspace" element={<Workspace />} />
           <Route path="*" element={<Navigate to="/work" replace />} />
-        </Routes>
-      </Suspense>
-    </WorkLayout>
+        </Route>
+      </Routes>
+    </Suspense>
   );
 };
 

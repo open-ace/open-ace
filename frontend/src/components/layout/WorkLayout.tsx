@@ -14,7 +14,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Outlet, useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { cn } from '@/utils';
 import { useLanguage, useAppStore, useWorkspaceFullscreen } from '@/store';
 import { t } from '@/i18n';
@@ -150,7 +150,7 @@ export const WorkLayout: React.FC<WorkLayoutProps> = ({ children }) => {
         </aside>
 
         {/* Main Content */}
-        <main className="work-main">{children ?? <Outlet />}</main>
+        <main className="work-main">{children}</main>
 
         {/* Right Panel - Assist Panel */}
         <aside className={cn('work-right-panel', rightPanelCollapsed && 'collapsed')}>

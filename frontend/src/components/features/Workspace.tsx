@@ -23,7 +23,10 @@ import {
   useEnableTabNotifications,
   useWorkspaceTabs,
   useWorkspaceActiveTabId,
-  useWorkspaceTabsActions,
+  useSetWorkspaceActiveTabId,
+  useAddWorkspaceTab,
+  useUpdateWorkspaceTab,
+  useRemoveWorkspaceTab,
   type WorkspaceTab as StoreWorkspaceTab,
 } from '@/store';
 import { t } from '@/i18n';
@@ -90,14 +93,12 @@ export const Workspace: React.FC = () => {
   // Workspace tabs state from store (Issue #65)
   const storedTabs = useWorkspaceTabs();
   const storedActiveTabId = useWorkspaceActiveTabId();
-  const {
-    // setTabs: setStoredTabs, // Not currently used
-    setActiveTabId: setStoredActiveTabId,
-    addTab: addStoredTab,
-    updateTab: updateStoredTab,
-    removeTab: removeStoredTab,
-    // clearTabs: clearStoredTabs, // Not currently used
-  } = useWorkspaceTabsActions();
+
+  // Use stable action selectors (fixes infinite loop)
+  const setStoredActiveTabId = useSetWorkspaceActiveTabId();
+  const addStoredTab = useAddWorkspaceTab();
+  const updateStoredTab = useUpdateWorkspaceTab();
+  const removeStoredTab = useRemoveWorkspaceTab();
 
   // Load workspace config and user webui URL
   useEffect(() => {

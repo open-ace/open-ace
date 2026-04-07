@@ -221,6 +221,16 @@ export const usePreviousPanelState = () =>
 // Workspace tabs selectors (Issue #65)
 export const useWorkspaceTabs = () => useAppStore((state) => state.workspaceTabs);
 export const useWorkspaceActiveTabId = () => useAppStore((state) => state.workspaceActiveTabId);
+
+// Separate action selectors for stable references (fixes infinite loop)
+export const useSetWorkspaceTabs = () => useAppStore((state) => state.setWorkspaceTabs);
+export const useSetWorkspaceActiveTabId = () => useAppStore((state) => state.setWorkspaceActiveTabId);
+export const useAddWorkspaceTab = () => useAppStore((state) => state.addWorkspaceTab);
+export const useUpdateWorkspaceTab = () => useAppStore((state) => state.updateWorkspaceTab);
+export const useRemoveWorkspaceTab = () => useAppStore((state) => state.removeWorkspaceTab);
+export const useClearWorkspaceTabs = () => useAppStore((state) => state.clearWorkspaceTabs);
+
+// Legacy selector - DEPRECATED: Use individual action selectors instead for stable references
 export const useWorkspaceTabsActions = () =>
   useAppStore((state) => ({
     setTabs: state.setWorkspaceTabs,

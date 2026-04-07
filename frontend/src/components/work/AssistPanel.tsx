@@ -191,7 +191,6 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
   return (
     <div className="assist-panel">
       <SimpleTabs tabs={tabs} defaultTab={activeTab} onTabChange={setActiveTab} />
-      <toast.ToastContainer />
     </div>
   );
 };
