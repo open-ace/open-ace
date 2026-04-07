@@ -7,6 +7,8 @@
  * - Support for creating new tabs via URL parameter
  * - Quota checking - disables workspace when quota exceeded
  * - Multi-user mode support with per-user webui instances
+ * - Workspace state persistence (Issue #65): Tabs state is saved to localStorage
+ *   and restored when returning to workspace after navigating away
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -14,19 +16,28 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import { workspaceApi, type WorkspaceConfig, type UserWebUIResponse } from '@/api';
 import { requestApi, type QuotaStatusResponse } from '@/api/request';
 import { sessionsApi } from '@/api/sessions';
-import { useLanguage, useAppStore, useWorkspaceFullscreen, useEnableTabNotifications } from '@/store';
+import {
+  useLanguage,
+  useAppStore,
+  useWorkspaceFullscreen,
+  useEnableTabNotifications,
+  useWorkspaceTabs,
+  useWorkspaceActiveTabId,
+  useWorkspaceTabsActions,
+  type WorkspaceTab as StoreWorkspaceTab,
+} from '@/store';
 import { t } from '@/i18n';
 import { Error, Button, Card, useToast, Modal } from '@/components/common';
 import { cn } from '@/utils';
 
-interface WorkspaceTab {
-  id: string;
-  title: string;
-  url: string;
-  token: string;
-  createdAt: number;
-  waitingForUser: boolean;
-  waitingType: 'permission' | 'plan' | 'input' | null;
+/**
+ * Extended WorkspaceTab for local use (includes URL which is generated at runtime)
+ * The base WorkspaceTab from store is persisted to localStorage without URL
+ * URL is regenerated when restoring tabs based on sessionId, encodedProjectName, toolName
+ */
+interface WorkspaceTab extends StoreWorkspaceTab {
+  url: string;       // Runtime-generated URL for iframe
+  token: string;     // Token for authentication (runtime)
 }
 
 // Generate unique tab ID
@@ -50,6 +61,8 @@ export const Workspace: React.FC = () => {
   const [isQuotaLoading, setIsQuotaLoading] = useState(true);
   const [loadingStage, setLoadingStage] = useState<string>('initializing'); // Track loading progress
   const [error, setError] = useState<string | null>(null);
+
+  // Local state for tabs with runtime-generated URL (extended from store state)
   const [tabs, setTabs] = useState<WorkspaceTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>('');
   const [loadingTabs, setLoadingTabs] = useState<Set<string>>(new Set());
@@ -59,6 +72,9 @@ export const Workspace: React.FC = () => {
   const [isRenaming, setIsRenaming] = useState(false);
   const [tabWidths, setTabWidths] = useState<Record<string, number>>({});
   const [resizingTabId, setResizingTabId] = useState<string | null>(null);
+
+  // Flag to track if tabs have been initialized (Issue #65)
+  const [tabsInitialized, setTabsInitialized] = useState(false);
 
   // Tab notifications setting
   const enableTabNotifications = useEnableTabNotifications();
@@ -70,6 +86,18 @@ export const Workspace: React.FC = () => {
   // Fullscreen state from global store
   const workspaceFullscreen = useWorkspaceFullscreen();
   const { toggleWorkspaceFullscreen, exitWorkspaceFullscreen } = useAppStore();
+
+  // Workspace tabs state from store (Issue #65)
+  const storedTabs = useWorkspaceTabs();
+  const storedActiveTabId = useWorkspaceActiveTabId();
+  const {
+    // setTabs: setStoredTabs, // Not currently used
+    setActiveTabId: setStoredActiveTabId,
+    addTab: addStoredTab,
+    updateTab: updateStoredTab,
+    removeTab: removeStoredTab,
+    // clearTabs: clearStoredTabs, // Not currently used
+  } = useWorkspaceTabsActions();
 
   // Load workspace config and user webui URL
   useEffect(() => {
@@ -120,11 +148,35 @@ export const Workspace: React.FC = () => {
   }, [config?.multi_user_mode, userWebUI?.success]);
 
   // Listen for fullscreen request from iframe (when user selects project and enters chat)
+  // Also listen for session ID update from iframe (Issue #65)
   useEffect(() => {
     const handleIframeMessage = (event: MessageEvent) => {
       // Validate message type for fullscreen request
       if (event.data?.type === 'openace-enter-chat') {
         useAppStore.getState().enterWorkspaceFullscreen(false, false);
+      }
+
+      // Listen for session ID update from qwen-code-webui iframe (Issue #65)
+      // This allows the iframe to inform the workspace about its current session
+      if (event.data?.type === 'qwen-code-session-update') {
+        const { sessionId, encodedProjectName, toolName, title } = event.data;
+        // Update the current active tab with session info
+        if (sessionId && activeTabId) {
+          updateStoredTab(activeTabId, {
+            sessionId,
+            encodedProjectName,
+            toolName,
+            title: title || t('session', language),
+          });
+          // Also update local tabs state
+          setTabs((prev) =>
+            prev.map((tab) =>
+              tab.id === activeTabId
+                ? { ...tab, sessionId, encodedProjectName, toolName, title: title || t('session', language) }
+                : tab
+            )
+          );
+        }
       }
 
       // Listen for tab notification from qwen-code-webui iframe
@@ -221,7 +273,7 @@ export const Workspace: React.FC = () => {
     return url;
   }, [config, userWebUI, language]);
 
-  // Initialize first tab when config is loaded
+  // Initialize tabs when config is loaded (Issue #65: Restore from store if available)
   useEffect(() => {
     // Wait for both config and userWebUI (in multi-user mode) to be loaded
     if (!config?.enabled) return;
@@ -229,51 +281,150 @@ export const Workspace: React.FC = () => {
     // In multi-user mode, wait for userWebUI to be loaded
     if (config.multi_user_mode && !userWebUI?.success) return;
 
-    // Skip if tabs already exist
-    if (tabs.length > 0) return;
+    // Skip if tabs already initialized
+    if (tabsInitialized) return;
 
-    // Check for session restore parameters
+    // Check for session restore parameters from URL
     // API returns: /work/workspace?sessionId=xxx&encodedProjectName=yyy&toolName=zzz
     // Also support legacy: /work/workspace?restoreSession=xxx
-    const sessionId = searchParams.get('sessionId');
+    const urlSessionId = searchParams.get('sessionId');
     const restoreSession = searchParams.get('restoreSession');
-    const encodedProjectName = searchParams.get('encodedProjectName');
-    const toolName = searchParams.get('toolName');
-    const restoreSessionId = sessionId || restoreSession;
+    const urlEncodedProjectName = searchParams.get('encodedProjectName');
+    const urlToolName = searchParams.get('toolName');
+    const restoreSessionId = urlSessionId || restoreSession;
 
-    // Create initial tab (with or without restore session)
-    const effectiveUrl = getEffectiveUrl(restoreSessionId || undefined, encodedProjectName || undefined, toolName || undefined);
-    if (!effectiveUrl) return;
+    // Determine if we should restore from store or create new
+    // Priority: URL restore params > Store saved state > New session
+    let initialTabs: WorkspaceTab[] = [];
+    let initialActiveTabId = '';
 
-    const initialTab: WorkspaceTab = {
-      id: generateTabId(),
-      title: restoreSessionId ? t('restoredSession', language) : t('newSession', language),
-      url: effectiveUrl,
-      token: userWebUI?.token || '',
-      createdAt: Date.now(),
-      waitingForUser: false,
-      waitingType: null,
-    };
-    setTabs([initialTab]);
-    setActiveTabId(initialTab.id);
-    // Mark as loading
-    setLoadingTabs(new Set([initialTab.id]));
-
-    // Clear the restore parameters after using it
     if (restoreSessionId) {
-      searchParams.delete('sessionId');
-      searchParams.delete('restoreSession');
-      searchParams.delete('encodedProjectName');
-      searchParams.delete('toolName');
-      setSearchParams(searchParams, { replace: true });
+      // Case 1: URL restore params - create a single tab with the restore session
+      const effectiveUrl = getEffectiveUrl(
+        restoreSessionId,
+        urlEncodedProjectName || undefined,
+        urlToolName || undefined
+      );
+      if (effectiveUrl) {
+        const tab: WorkspaceTab = {
+          id: generateTabId(),
+          title: t('restoredSession', language),
+          url: effectiveUrl,
+          token: userWebUI?.token || '',
+          sessionId: restoreSessionId,
+          encodedProjectName: urlEncodedProjectName || undefined,
+          toolName: urlToolName || undefined,
+          createdAt: Date.now(),
+          waitingForUser: false,
+          waitingType: null,
+        };
+        initialTabs = [tab];
+        initialActiveTabId = tab.id;
+
+        // Save to store (this replaces any previous stored tabs)
+        addStoredTab({
+          id: tab.id,
+          title: tab.title,
+          sessionId: tab.sessionId,
+          encodedProjectName: tab.encodedProjectName,
+          toolName: tab.toolName,
+          createdAt: tab.createdAt,
+          waitingForUser: tab.waitingForUser,
+          waitingType: tab.waitingType,
+        });
+
+        // Clear the restore parameters after using it
+        searchParams.delete('sessionId');
+        searchParams.delete('restoreSession');
+        searchParams.delete('encodedProjectName');
+        searchParams.delete('toolName');
+        setSearchParams(searchParams, { replace: true });
+      }
+    } else if (storedTabs.length > 0) {
+      // Case 2: Restore from store - regenerate URLs for each tab
+      initialTabs = storedTabs.map((storedTab) => {
+        // Regenerate URL based on sessionId if available
+        const effectiveUrl = storedTab.sessionId
+          ? getEffectiveUrl(
+              storedTab.sessionId,
+              storedTab.encodedProjectName,
+              storedTab.toolName
+            )
+          : getEffectiveUrl();
+
+        return {
+          ...storedTab,
+          url: effectiveUrl || '',
+          token: userWebUI?.token || '',
+        };
+      });
+
+      // Use stored active tab ID if it exists in the restored tabs
+      initialActiveTabId = storedTabs.find(t => t.id === storedActiveTabId)
+        ? storedActiveTabId
+        : (initialTabs.length > 0 ? initialTabs[0].id : '');
+
+      console.log('[Issue #65] Restored workspace tabs from store:', {
+        tabsCount: initialTabs.length,
+        activeTabId: initialActiveTabId,
+      });
+    } else {
+      // Case 3: No stored state and no URL params - create a new session tab
+      const effectiveUrl = getEffectiveUrl();
+      if (effectiveUrl) {
+        const tab: WorkspaceTab = {
+          id: generateTabId(),
+          title: t('newSession', language),
+          url: effectiveUrl,
+          token: userWebUI?.token || '',
+          createdAt: Date.now(),
+          waitingForUser: false,
+          waitingType: null,
+        };
+        initialTabs = [tab];
+        initialActiveTabId = tab.id;
+
+        // Save new tab to store
+        addStoredTab({
+          id: tab.id,
+          title: tab.title,
+          sessionId: tab.sessionId,
+          encodedProjectName: tab.encodedProjectName,
+          toolName: tab.toolName,
+          createdAt: tab.createdAt,
+          waitingForUser: tab.waitingForUser,
+          waitingType: tab.waitingType,
+        });
+      }
     }
-  }, [config, userWebUI, tabs.length, language, getEffectiveUrl, searchParams, setSearchParams]);
+
+    if (initialTabs.length > 0) {
+      setTabs(initialTabs);
+      setActiveTabId(initialActiveTabId);
+      setStoredActiveTabId(initialActiveTabId);
+      // Mark as loading
+      setLoadingTabs(new Set(initialTabs.map(t => t.id)));
+      setTabsInitialized(true);
+    }
+  }, [
+    config,
+    userWebUI,
+    tabsInitialized,
+    storedTabs,
+    storedActiveTabId,
+    language,
+    getEffectiveUrl,
+    searchParams,
+    setSearchParams,
+    addStoredTab,
+    setStoredActiveTabId,
+  ]);
 
   // Handle URL parameter for creating new tab
   useEffect(() => {
     const newTab = searchParams.get('newTab');
     const effectiveUrl = getEffectiveUrl();
-    if (newTab === 'true' && config?.enabled && effectiveUrl) {
+    if (newTab === 'true' && config?.enabled && effectiveUrl && tabsInitialized) {
       // Clear the URL parameter
       searchParams.delete('newTab');
       setSearchParams(searchParams, { replace: true });
@@ -281,7 +432,7 @@ export const Workspace: React.FC = () => {
       // Create new tab
       createNewTab();
     }
-  }, [searchParams, config, getEffectiveUrl]);
+  }, [searchParams, config, getEffectiveUrl, tabsInitialized]);
 
   // Create a new tab
   const createNewTab = useCallback((restoreSessionId?: string) => {
@@ -298,17 +449,33 @@ export const Workspace: React.FC = () => {
       waitingType: null,
     };
 
+    // Update local state
     setTabs((prev) => [...prev, newTab]);
     setActiveTabId(newTab.id);
+
+    // Update store (Issue #65)
+    addStoredTab({
+      id: newTab.id,
+      title: newTab.title,
+      sessionId: newTab.sessionId,
+      encodedProjectName: newTab.encodedProjectName,
+      toolName: newTab.toolName,
+      createdAt: newTab.createdAt,
+      waitingForUser: newTab.waitingForUser,
+      waitingType: newTab.waitingType,
+    });
+    setStoredActiveTabId(newTab.id);
+
     // Mark as loading
     setLoadingTabs((prev) => new Set(prev).add(newTab.id));
-  }, [getEffectiveUrl, userWebUI, language]);
+  }, [getEffectiveUrl, userWebUI, language, addStoredTab, setStoredActiveTabId]);
 
   // Close a tab
   const closeTab = useCallback(
     (tabId: string, e: React.MouseEvent) => {
       e.stopPropagation();
 
+      // Update local state
       setTabs((prev) => {
         const newTabs = prev.filter((tab) => tab.id !== tabId);
 
@@ -322,12 +489,16 @@ export const Workspace: React.FC = () => {
 
         return newTabs;
       });
+
+      // Update store (Issue #65)
+      removeStoredTab(tabId);
     },
-    [activeTabId]
+    [activeTabId, removeStoredTab]
   );
 
   // Set waiting state for active tab
   const setActiveTabWaitingState = useCallback((isWaiting: boolean, waitingType: 'permission' | 'plan' | 'input' | null) => {
+    // Update local state
     setTabs((prev) =>
       prev.map((tab) =>
         tab.id === activeTabId
@@ -335,11 +506,19 @@ export const Workspace: React.FC = () => {
           : tab
       )
     );
-  }, [activeTabId]);
+
+    // Update store (Issue #65)
+    updateStoredTab(activeTabId, {
+      waitingForUser: isWaiting,
+      waitingType,
+    });
+  }, [activeTabId, updateStoredTab]);
 
   // Switch to a tab
   const switchTab = useCallback((tabId: string) => {
     setActiveTabId(tabId);
+    // Update store (Issue #65)
+    setStoredActiveTabId(tabId);
 
     // Send focus message to iframe after tab switch
     // Use setTimeout to ensure the iframe is visible before sending message
@@ -351,7 +530,7 @@ export const Workspace: React.FC = () => {
         iframe.contentWindow.postMessage({ type: 'openace-tab-activated' }, '*');
       }
     }, 100);
-  }, []);
+  }, [setStoredActiveTabId]);
 
   // Rename a tab
   const handleRenameTab = useCallback((tabId: string, e: React.MouseEvent) => {
@@ -371,14 +550,17 @@ export const Workspace: React.FC = () => {
     try {
       // Extract session ID from tab URL if it contains one
       // Tab URL format: http://.../c/{session_id}?...
+      // Or from stored tab data
       const tab = tabs.find((t) => t.id === renameTabId);
       if (!tab) return;
 
-      // Try to extract session ID from URL
-      const urlParts = tab.url.split('/c/');
-      let sessionId: string | null = null;
-      if (urlParts.length > 1) {
-        sessionId = urlParts[1].split('?')[0].split('#')[0];
+      // Try to extract session ID from URL or from stored sessionId
+      let sessionId: string | null = tab.sessionId || null;
+      if (!sessionId) {
+        const urlParts = tab.url.split('/c/');
+        if (urlParts.length > 1) {
+          sessionId = urlParts[1].split('?')[0].split('#')[0];
+        }
       }
 
       if (sessionId) {
@@ -398,6 +580,9 @@ export const Workspace: React.FC = () => {
         )
       );
 
+      // Update store (Issue #65)
+      updateStoredTab(renameTabId, { title: renameValue.trim() });
+
       toast.success(t('sessionRenamed', language));
       setShowRenameModal(false);
       setRenameTabId(null);
@@ -408,7 +593,7 @@ export const Workspace: React.FC = () => {
     } finally {
       setIsRenaming(false);
     }
-  }, [renameTabId, renameValue, tabs, language, toast]);
+  }, [renameTabId, renameValue, tabs, language, toast, updateStoredTab]);
 
   const handleCancelRename = useCallback(() => {
     setShowRenameModal(false);

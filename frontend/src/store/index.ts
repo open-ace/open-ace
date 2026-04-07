@@ -6,6 +6,22 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { User, Theme, Language, AppMode } from '@/types';
 
+/**
+ * WorkspaceTab - Represents a tab in the workspace with session state
+ * This is persisted to localStorage so workspace state can be restored
+ * after navigating away and returning.
+ */
+export interface WorkspaceTab {
+  id: string;
+  title: string;
+  sessionId?: string;        // Session ID from qwen-code-webui (extracted from URL or backend)
+  encodedProjectName?: string; // Encoded project path for session restoration
+  toolName?: string;         // Tool name for session restoration
+  createdAt: number;
+  waitingForUser: boolean;
+  waitingType: 'permission' | 'plan' | 'input' | null;
+}
+
 interface AppState {
   // Auth state
   user: User | null;
@@ -22,6 +38,10 @@ interface AppState {
   workspaceFullscreen: boolean;
   previousLeftPanelCollapsed: boolean;
   previousRightPanelCollapsed: boolean;
+
+  // Workspace tabs state (Issue #65: Persist workspace state)
+  workspaceTabs: WorkspaceTab[];
+  workspaceActiveTabId: string;
 
   // Tab notification settings
   enableTabNotifications: boolean;
@@ -41,6 +61,14 @@ interface AppState {
   enterWorkspaceFullscreen: (leftCollapsed: boolean, rightCollapsed: boolean) => void;
   exitWorkspaceFullscreen: () => void;
   toggleWorkspaceFullscreen: (leftCollapsed: boolean, rightCollapsed: boolean) => void;
+
+  // Workspace tabs actions (Issue #65)
+  setWorkspaceTabs: (tabs: WorkspaceTab[]) => void;
+  setWorkspaceActiveTabId: (tabId: string) => void;
+  addWorkspaceTab: (tab: WorkspaceTab) => void;
+  updateWorkspaceTab: (tabId: string, updates: Partial<WorkspaceTab>) => void;
+  removeWorkspaceTab: (tabId: string) => void;
+  clearWorkspaceTabs: () => void;
 
   // Tab notification actions
   setEnableTabNotifications: (enabled: boolean) => void;
@@ -64,6 +92,10 @@ export const useAppStore = create<AppState>()(
       previousLeftPanelCollapsed: false,
       previousRightPanelCollapsed: false,
 
+      // Workspace tabs state (Issue #65)
+      workspaceTabs: [],
+      workspaceActiveTabId: '',
+
       // Tab notification settings
       enableTabNotifications: true,
 
@@ -86,6 +118,9 @@ export const useAppStore = create<AppState>()(
           user: null,
           isAuthenticated: false,
           authLoading: false,
+          // Clear workspace tabs on logout
+          workspaceTabs: [],
+          workspaceActiveTabId: '',
         }),
 
       // Workspace fullscreen actions
@@ -109,6 +144,43 @@ export const useAppStore = create<AppState>()(
           }
         }),
 
+      // Workspace tabs actions (Issue #65)
+      setWorkspaceTabs: (tabs) => set({ workspaceTabs: tabs }),
+      setWorkspaceActiveTabId: (tabId) => set({ workspaceActiveTabId: tabId }),
+      addWorkspaceTab: (tab) =>
+        set((state) => ({
+          workspaceTabs: [...state.workspaceTabs, tab],
+          workspaceActiveTabId: tab.id,
+        })),
+      updateWorkspaceTab: (tabId, updates) =>
+        set((state) => ({
+          workspaceTabs: state.workspaceTabs.map((tab) =>
+            tab.id === tabId ? { ...tab, ...updates } : tab
+          ),
+        })),
+      removeWorkspaceTab: (tabId) =>
+        set((state) => {
+          const newTabs = state.workspaceTabs.filter((tab) => tab.id !== tabId);
+          // If removing active tab, switch to another tab
+          let newActiveTabId = state.workspaceActiveTabId;
+          if (state.workspaceActiveTabId === tabId && newTabs.length > 0) {
+            const removedIndex = state.workspaceTabs.findIndex((tab) => tab.id === tabId);
+            const newActiveIndex = Math.min(removedIndex, newTabs.length - 1);
+            newActiveTabId = newTabs[newActiveIndex].id;
+          } else if (newTabs.length === 0) {
+            newActiveTabId = '';
+          }
+          return {
+            workspaceTabs: newTabs,
+            workspaceActiveTabId: newActiveTabId,
+          };
+        }),
+      clearWorkspaceTabs: () =>
+        set({
+          workspaceTabs: [],
+          workspaceActiveTabId: '',
+        }),
+
       // Tab notification actions
       setEnableTabNotifications: (enabled) => set({ enableTabNotifications: enabled }),
       toggleTabNotifications: () =>
@@ -122,6 +194,9 @@ export const useAppStore = create<AppState>()(
         sidebarCollapsed: state.sidebarCollapsed,
         appMode: state.appMode,
         enableTabNotifications: state.enableTabNotifications,
+        // Issue #65: Persist workspace tabs state
+        workspaceTabs: state.workspaceTabs,
+        workspaceActiveTabId: state.workspaceActiveTabId,
       }),
     }
   )
@@ -141,4 +216,17 @@ export const usePreviousPanelState = () =>
   useAppStore((state) => ({
     left: state.previousLeftPanelCollapsed,
     right: state.previousRightPanelCollapsed,
+  }));
+
+// Workspace tabs selectors (Issue #65)
+export const useWorkspaceTabs = () => useAppStore((state) => state.workspaceTabs);
+export const useWorkspaceActiveTabId = () => useAppStore((state) => state.workspaceActiveTabId);
+export const useWorkspaceTabsActions = () =>
+  useAppStore((state) => ({
+    setTabs: state.setWorkspaceTabs,
+    setActiveTabId: state.setWorkspaceActiveTabId,
+    addTab: state.addWorkspaceTab,
+    updateTab: state.updateWorkspaceTab,
+    removeTab: state.removeWorkspaceTab,
+    clearTabs: state.clearWorkspaceTabs,
   }));
