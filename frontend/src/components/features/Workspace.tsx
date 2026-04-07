@@ -570,6 +570,41 @@ export const Workspace: React.FC = () => {
   // Check if quota is exceeded
   const isQuotaExceeded = quotaStatus?.over_quota?.any ?? false;
 
+  // Keyboard shortcut for switching tabs (Cmd/Ctrl + 1-9)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Check if the key is a digit (1-9)
+      if (e.key >= '1' && e.key <= '9') {
+        // Check modifier key: Cmd on Mac, Ctrl on Windows/Linux
+        const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+        const modifierPressed = isMac ? e.metaKey : e.ctrlKey;
+
+        if (modifierPressed) {
+          e.preventDefault();
+
+          // Calculate tab index (1 -> index 0, 2 -> index 1, etc.)
+          const tabIndex = parseInt(e.key) - 1;
+
+          // Only switch if the tab exists
+          if (tabIndex < tabs.length) {
+            const targetTab = tabs[tabIndex];
+            if (targetTab && targetTab.id !== activeTabId) {
+              switchTab(targetTab.id);
+            }
+          }
+        }
+      }
+    };
+
+    // Only add listener when there are tabs and workspace is not in quota exceeded state
+    if (tabs.length > 0 && !isQuotaExceeded) {
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
+    }
+
+    return undefined;
+  }, [tabs, activeTabId, switchTab, isQuotaExceeded]);
+
   // Render quota exceeded message
   if (isQuotaExceeded) {
     return (
