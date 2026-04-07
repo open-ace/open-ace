@@ -25,6 +25,8 @@ interface WorkspaceTab {
   url: string;
   token: string;
   createdAt: number;
+  waitingForUser: boolean;
+  waitingType: 'permission' | 'plan' | 'input' | null;
 }
 
 // Generate unique tab ID
@@ -119,6 +121,13 @@ export const Workspace: React.FC = () => {
       // Validate message type for fullscreen request
       if (event.data?.type === 'openace-enter-chat') {
         useAppStore.getState().enterWorkspaceFullscreen(false, false);
+      }
+      
+      // Listen for tab notification from qwen-code-webui iframe
+      if (event.data?.type === 'qwen-code-tab-notification') {
+        const { isWaiting, waitingType } = event.data;
+        // Update the active tab's waiting state
+        setActiveTabWaitingState(isWaiting, waitingType);
       }
     };
 
