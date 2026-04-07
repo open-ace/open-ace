@@ -77,10 +77,23 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
     data: sessionsData,
     isLoading,
     error,
+    refetch,
   } = useSessions({
     page: 1,
     pageSize: 50,
   });
+
+  // Auto refresh session list every 1 minute (Issue #64)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      // Only refresh if not already loading and modal is not open
+      if (!isLoading && !showDetailModal) {
+        refetch();
+      }
+    }, 60000); // 1 minute = 60000ms
+
+    return () => clearInterval(interval);
+  }, [isLoading, showDetailModal, refetch]);
 
   // Fetch selected session details with messages
   const { data: sessionDetail, isLoading: isLoadingDetail } = useSession(
@@ -290,7 +303,7 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
       <Modal
         isOpen={showDetailModal}
         onClose={handleCloseModal}
-        title={sessionDetail?.data?.title ?? t('sessionDetails', language) ?? 'Session Details'}
+        title={`${sessionDetail?.data?.session_id?.slice(0, 8) ?? 'Session'} - ${sessionDetail?.data?.title ?? t('sessionDetails', language)}`}  // Issue #69: Show Session ID in title
         size="lg"
       >
         {isLoadingDetail ? (
@@ -329,6 +342,8 @@ const SessionGroup: React.FC<SessionGroupProps> = ({
   onSessionClick,
   selectedSessionId,
 }) => {
+  const language = useLanguage();
+  
   return (
     <div className="session-group mb-3">
       <div className="session-group-title text-muted small mb-1">{title}</div>
@@ -338,6 +353,7 @@ const SessionGroup: React.FC<SessionGroupProps> = ({
             <button
               className={`session-item w-100 p-2 ${selectedSessionId === session.id ? 'selected' : ''}`}
               onClick={() => onSessionClick(session.id)}
+              title={session.title}  // Issue #66: Show session name on hover
             >
               <span className="session-id text-truncate">
                 {session.id.slice(0, 4)}
@@ -345,7 +361,7 @@ const SessionGroup: React.FC<SessionGroupProps> = ({
               <span className="session-time text-muted">{session.time}</span>
               <span className="session-requests text-muted">
                 <i className="bi bi-arrow-up-circle" />
-                <span className="ms-1">{session.requests} req</span>
+                <span className="ms-1">{session.requests} {t('request', language)}</span>  {/* Issue #66: i18n for "req" */}
               </span>
             </button>
           </li>
@@ -410,11 +426,12 @@ const SessionDetailContent: React.FC<SessionDetailContentProps> = ({ session, la
       {/* Session Meta Info */}
       <div className="session-meta mb-3 p-3 bg-light rounded">
         <div className="row g-3">
-          <div className="col-md-6">
+          {/* Row 1: Tool, Status, Requests/Messages */}
+          <div className="col-md-4">
             <small className="text-muted d-block">{t('tableTool', language)}</small>
             <span>{session.tool_name}</span>
           </div>
-          <div className="col-md-6">
+          <div className="col-md-4">
             <small className="text-muted d-block">{t('status', language) ?? 'Status'}</small>
             <Badge
               variant={
@@ -428,19 +445,25 @@ const SessionDetailContent: React.FC<SessionDetailContentProps> = ({ session, la
               {session.status}
             </Badge>
           </div>
-          <div className="col-md-6">
-            <small className="text-muted d-block">{t('totalRequests', language)}</small>
-            <span>{session.message_count}</span>
+          <div className="col-md-4">
+            <small className="text-muted d-block">{t('requests', language)}</small>
+            <span>{session.request_count ?? 0} / {session.message_count ?? 0}</span>  {/* Issue #69: Show requests/messages */}
           </div>
-          <div className="col-md-6">
+          {/* Row 2: Total Tokens, Created, Updated */}
+          <div className="col-md-4">
             <small className="text-muted d-block">{t('totalTokens', language)}</small>
             <span>{formatTokens(session.total_tokens)}</span>
           </div>
-          <div className="col-md-6">
+          <div className="col-md-4">
             <small className="text-muted d-block">{t('created', language) ?? 'Created'}</small>
             <span>{session.created_at ? formatDateTime(session.created_at) : '-'}</span>
           </div>
-          <div className="col-md-6">
+          <div className="col-md-4">
+            <small className="text-muted d-block">{t('lastActive', language) ?? 'Last Active'}</small>  {/* Issue #69: Add end/updated time */}
+            <span>{session.updated_at ? formatDateTime(session.updated_at) : '-'}</span>
+          </div>
+          {/* Row 3: Model */}
+          <div className="col-md-4">
             <small className="text-muted d-block">{t('model', language) ?? 'Model'}</small>
             <span>{session.model ?? '-'}</span>
           </div>
