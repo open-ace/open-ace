@@ -168,6 +168,8 @@ export const Workspace: React.FC = () => {
       if (openaceUrl) {
         url = `${url}&openace_url=${encodeURIComponent(openaceUrl)}`;
       }
+      // Add lang parameter for language sync
+      url = `${url}&lang=${encodeURIComponent(language)}`;
       // Add sessionId, encodedProjectName, and toolName if restoring a session
       if (restoreSessionId) {
         url = `${url}&sessionId=${encodeURIComponent(restoreSessionId)}`;
@@ -183,6 +185,9 @@ export const Workspace: React.FC = () => {
 
     // Single-user mode: use configured URL
     let url = config.url;
+    // Add lang parameter for language sync
+    const langSeparator = url.includes('?') ? '&' : '?';
+    url = `${url}${langSeparator}lang=${encodeURIComponent(language)}`;
     if (restoreSessionId) {
       const separator = url.includes('?') ? '&' : '?';
       url = `${url}${separator}sessionId=${encodeURIComponent(restoreSessionId)}`;
@@ -196,7 +201,7 @@ export const Workspace: React.FC = () => {
       url = `${url}${separator}toolName=${encodeURIComponent(toolName)}`;
     }
     return url;
-  }, [config, userWebUI]);
+  }, [config, userWebUI, language]);
 
   // Initialize first tab when config is loaded
   useEffect(() => {
@@ -205,6 +210,9 @@ export const Workspace: React.FC = () => {
 
     // In multi-user mode, wait for userWebUI to be loaded
     if (config.multi_user_mode && !userWebUI?.success) return;
+
+    // Skip if tabs already exist
+    if (tabs.length > 0) return;
 
     // Check for session restore parameters
     // API returns: /work/workspace?sessionId=xxx&encodedProjectName=yyy&toolName=zzz
@@ -215,21 +223,24 @@ export const Workspace: React.FC = () => {
     const toolName = searchParams.get('toolName');
     const restoreSessionId = sessionId || restoreSession;
 
-    if (restoreSessionId && tabs.length === 0) {
-      const effectiveUrl = getEffectiveUrl(restoreSessionId, encodedProjectName || undefined, toolName || undefined);
-      const initialTab: WorkspaceTab = {
-        id: generateTabId(),
-        title: restoreSessionId ? t('restoredSession', language) : t('newSession', language),
-        url: effectiveUrl,
-        token: userWebUI?.token || '',
-        createdAt: Date.now(),
-      };
-      setTabs([initialTab]);
-      setActiveTabId(initialTab.id);
-      // Mark as loading
-      setLoadingTabs(new Set([initialTab.id]));
+    // Create initial tab (with or without restore session)
+    const effectiveUrl = getEffectiveUrl(restoreSessionId || undefined, encodedProjectName || undefined, toolName || undefined);
+    if (!effectiveUrl) return;
 
-      // Clear the restore parameters after using it
+    const initialTab: WorkspaceTab = {
+      id: generateTabId(),
+      title: restoreSessionId ? t('restoredSession', language) : t('newSession', language),
+      url: effectiveUrl,
+      token: userWebUI?.token || '',
+      createdAt: Date.now(),
+    };
+    setTabs([initialTab]);
+    setActiveTabId(initialTab.id);
+    // Mark as loading
+    setLoadingTabs(new Set([initialTab.id]));
+
+    // Clear the restore parameters after using it
+    if (restoreSessionId) {
       searchParams.delete('sessionId');
       searchParams.delete('restoreSession');
       searchParams.delete('encodedProjectName');
@@ -648,16 +659,20 @@ export const Workspace: React.FC = () => {
                 </div>
               );
             })}
+            
+            {/* New Tab Button - placed right after the last tab */}
+            <button
+              className="btn btn-sm btn-link px-3 py-2 text-muted workspace-new-tab-btn"
+              onClick={() => createNewTab()}
+              title={t('newSession', language)}
+              style={{
+                flexShrink: 0,
+                borderLeft: '1px solid rgba(0,0,0,0.1)',
+              }}
+            >
+              <i className="bi bi-plus-lg" />
+            </button>
           </div>
-
-          {/* New Tab Button */}
-          <button
-            className="btn btn-sm btn-link px-3 py-2 text-muted"
-            onClick={() => createNewTab()}
-            title={t('newSession', language)}
-          >
-            <i className="bi bi-plus-lg" />
-          </button>
 
           {/* Exit Fullscreen Button - Only show in fullscreen mode */}
           {workspaceFullscreen && (
