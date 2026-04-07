@@ -675,6 +675,17 @@ export const Workspace: React.FC = () => {
         // Require Shift + modifier to avoid browser conflicts
         if (modifierPressed && e.shiftKey) {
           e.preventDefault();
+          
+          console.log('[Keyboard Shortcut] Detected:', {
+            key: e.key,
+            isMac,
+            metaKey: e.metaKey,
+            ctrlKey: e.ctrlKey,
+            shiftKey: e.shiftKey,
+            tabIndex: parseInt(e.key) - 1,
+            tabsLength: tabs.length,
+            activeTabId
+          });
 
           // Calculate tab index (1 -> index 0, 2 -> index 1, etc.)
           const tabIndex = parseInt(e.key) - 1;
@@ -683,8 +694,17 @@ export const Workspace: React.FC = () => {
           if (tabIndex < tabs.length) {
             const targetTab = tabs[tabIndex];
             if (targetTab && targetTab.id !== activeTabId) {
+              console.log('[Keyboard Shortcut] Switching to tab:', targetTab.id);
               switchTab(targetTab.id);
+            } else {
+              console.log('[Keyboard Shortcut] Tab switch skipped:', {
+                targetTabId: targetTab?.id,
+                activeTabId,
+                reason: targetTab?.id === activeTabId ? 'Already active' : 'Tab not found'
+              });
             }
+          } else {
+            console.log('[Keyboard Shortcut] Tab index out of range:', { tabIndex, tabsLength: tabs.length });
           }
         }
       }
@@ -692,8 +712,12 @@ export const Workspace: React.FC = () => {
 
     // Only add listener when there are tabs and workspace is not in quota exceeded state
     if (tabs.length > 0 && !isQuotaExceeded && !isLoading && !isQuotaLoading) {
+      console.log('[Keyboard Shortcut] Listener registered. Tabs:', tabs.length);
       window.addEventListener('keydown', handleKeyDown);
-      return () => window.removeEventListener('keydown', handleKeyDown);
+      return () => {
+        console.log('[Keyboard Shortcut] Listener removed');
+        window.removeEventListener('keydown', handleKeyDown);
+      };
     }
 
     return undefined;
