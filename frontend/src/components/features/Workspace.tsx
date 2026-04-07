@@ -14,7 +14,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import { workspaceApi, type WorkspaceConfig, type UserWebUIResponse } from '@/api';
 import { requestApi, type QuotaStatusResponse } from '@/api/request';
 import { sessionsApi } from '@/api/sessions';
-import { useLanguage, useAppStore, useWorkspaceFullscreen } from '@/store';
+import { useLanguage, useAppStore, useWorkspaceFullscreen, useEnableTabNotifications } from '@/store';
 import { t } from '@/i18n';
 import { Error, Button, Card, useToast, Modal } from '@/components/common';
 import { cn } from '@/utils';
@@ -59,6 +59,10 @@ export const Workspace: React.FC = () => {
   const [isRenaming, setIsRenaming] = useState(false);
   const [tabWidths, setTabWidths] = useState<Record<string, number>>({});
   const [resizingTabId, setResizingTabId] = useState<string | null>(null);
+
+  // Tab notifications setting
+  const enableTabNotifications = useEnableTabNotifications();
+  const { toggleTabNotifications } = useAppStore();
 
   // Refs for iframe elements (to send focus messages)
   const iframeRefs = useRef<Map<string, HTMLIFrameElement>>(new Map());
@@ -122,18 +126,20 @@ export const Workspace: React.FC = () => {
       if (event.data?.type === 'openace-enter-chat') {
         useAppStore.getState().enterWorkspaceFullscreen(false, false);
       }
-      
+
       // Listen for tab notification from qwen-code-webui iframe
       if (event.data?.type === 'qwen-code-tab-notification') {
         const { isWaiting, waitingType } = event.data;
-        // Update the active tab's waiting state
-        setActiveTabWaitingState(isWaiting, waitingType);
+        // Only update if tab notifications are enabled
+        if (enableTabNotifications) {
+          setActiveTabWaitingState(isWaiting, waitingType);
+        }
       }
     };
 
     window.addEventListener('message', handleIframeMessage);
     return () => window.removeEventListener('message', handleIframeMessage);
-  }, []);
+  }, [enableTabNotifications]);
 
   // Check quota
   const checkQuota = useCallback(async () => {
@@ -245,6 +251,8 @@ export const Workspace: React.FC = () => {
       url: effectiveUrl,
       token: userWebUI?.token || '',
       createdAt: Date.now(),
+      waitingForUser: false,
+      waitingType: null,
     };
     setTabs([initialTab]);
     setActiveTabId(initialTab.id);
@@ -286,6 +294,8 @@ export const Workspace: React.FC = () => {
       url: effectiveUrl,
       token: userWebUI?.token || '',
       createdAt: Date.now(),
+      waitingForUser: false,
+      waitingType: null,
     };
 
     setTabs((prev) => [...prev, newTab]);
@@ -316,6 +326,17 @@ export const Workspace: React.FC = () => {
     [activeTabId]
   );
 
+  // Set waiting state for active tab
+  const setActiveTabWaitingState = useCallback((isWaiting: boolean, waitingType: 'permission' | 'plan' | 'input' | null) => {
+    setTabs((prev) =>
+      prev.map((tab) =>
+        tab.id === activeTabId
+          ? { ...tab, waitingForUser: isWaiting, waitingType }
+          : tab
+      )
+    );
+  }, [activeTabId]);
+
   // Switch to a tab
   const switchTab = useCallback((tabId: string) => {
     setActiveTabId(tabId);
@@ -326,6 +347,8 @@ export const Workspace: React.FC = () => {
       const iframe = iframeRefs.current.get(tabId);
       if (iframe?.contentWindow) {
         iframe.contentWindow.postMessage({ type: 'openace-focus-input' }, '*');
+        // Also send tab-activated to clear notification
+        iframe.contentWindow.postMessage({ type: 'openace-tab-activated' }, '*');
       }
     }, 100);
   }, []);
@@ -608,15 +631,33 @@ export const Workspace: React.FC = () => {
             </small>
           )}
         </div>
-        {/* Fullscreen toggle button */}
-        <button
-          className="btn btn-sm btn-outline-secondary fullscreen-toggle-btn"
-          onClick={() => toggleWorkspaceFullscreen(false, false)}
-          title={workspaceFullscreen ? t('exitFullscreen', language) : t('enterFullscreen', language)}
-        >
-          <i className={cn('bi me-1', workspaceFullscreen ? 'bi-fullscreen-exit' : 'bi-fullscreen')} />
-          {workspaceFullscreen ? t('exitFullscreen', language) : t('enterFullscreen', language)}
-        </button>
+        <div className="d-flex align-items-center gap-2">
+          {/* Tab notifications toggle */}
+          <button
+            className={cn(
+              'btn btn-sm',
+              enableTabNotifications 
+                ? 'btn-outline-primary' 
+                : 'btn-outline-secondary'
+            )}
+            onClick={toggleTabNotifications}
+            title={enableTabNotifications ? t('disableTabNotifications', language) || 'Disable tab notifications' : t('enableTabNotifications', language) || 'Enable tab notifications'}
+          >
+            <i className={cn('bi me-1', enableTabNotifications ? 'bi-bell-fill' : 'bi-bell-slash')} />
+            <span className="d-none d-sm-inline">
+              {enableTabNotifications ? t('tabNotificationsOn', language) || 'Notifications On' : t('tabNotificationsOff', language) || 'Off'}
+            </span>
+          </button>
+          {/* Fullscreen toggle button */}
+          <button
+            className="btn btn-sm btn-outline-secondary fullscreen-toggle-btn"
+            onClick={() => toggleWorkspaceFullscreen(false, false)}
+            title={workspaceFullscreen ? t('exitFullscreen', language) : t('enterFullscreen', language)}
+          >
+            <i className={cn('bi me-1', workspaceFullscreen ? 'bi-fullscreen-exit' : 'bi-fullscreen')} />
+            {workspaceFullscreen ? t('exitFullscreen', language) : t('enterFullscreen', language)}
+          </button>
+        </div>
       </div>
       {/* Tab Bar */}
       {tabs.length > 0 && (
@@ -644,10 +685,39 @@ export const Workspace: React.FC = () => {
                     userSelect: 'none',
                   }}
                 >
-                  <i className="bi bi-chat-dots me-2 text-muted flex-shrink-0" />
-                  <span className="text-truncate small flex-grow-1" style={{ minWidth: 0 }}>
+                  <i className={cn(
+                    'bi me-2 flex-shrink-0',
+                    tab.waitingForUser ? 'bi-bell-fill text-warning' : 'bi-chat-dots text-muted'
+                  )} />
+                  <span className={cn(
+                    'text-truncate small flex-grow-1',
+                    tab.waitingForUser && 'fw-semibold'
+                  )} style={{ minWidth: 0 }}>
                     {tab.title}
                   </span>
+                  {/* Waiting indicator badge */}
+                  {tab.waitingForUser && activeTabId !== tab.id && (
+                    <span className={cn(
+                      'waiting-badge badge',
+                      tab.waitingType === 'permission' && 'bg-danger',
+                      tab.waitingType === 'plan' && 'bg-warning',
+                      tab.waitingType === 'input' && 'bg-info'
+                    )} style={{ 
+                      fontSize: '0.65rem', 
+                      padding: '0.2rem 0.4rem', 
+                      marginLeft: '0.25rem',
+                      borderRadius: '50%',
+                      minWidth: '1.2rem',
+                      height: '1.2rem',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}>
+                      {tab.waitingType === 'permission' && '!'}
+                      {tab.waitingType === 'plan' && '⏳'}
+                      {tab.waitingType === 'input' && '●'}
+                    </span>
+                  )}
                   <div className="tab-actions d-flex align-items-center">
                     <button
                       className="btn btn-sm btn-link p-0 text-muted tab-action-btn"

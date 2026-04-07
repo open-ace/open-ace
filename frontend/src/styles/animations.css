@@ -651,3 +651,36 @@
     animation: none;
   }
 }
+
+/* ===== Tab Notification Badge Animation ===== */
+
+@keyframes notificationPulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 0.8;
+  }
+}
+
+@keyframes notificationBounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  25% {
+    transform: translateY(-2px);
+  }
+  75% {
+    transform: translateY(-2px);
+  }
+}
+
+.waiting-badge {
+  animation: notificationPulse 1.5s ease-in-out infinite;
+}
+
+.waiting-badge.danger {
+  animation: notificationPulse 0.8s ease-in-out infinite, notificationBounce 1s ease-in-out infinite;
+}
