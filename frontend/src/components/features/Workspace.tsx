@@ -661,7 +661,8 @@ export const Workspace: React.FC = () => {
   // Check if quota is exceeded (computed before early returns to avoid hooks order violation)
   const isQuotaExceeded = quotaStatus?.over_quota?.any ?? false;
 
-  // Keyboard shortcut for switching tabs (Cmd/Ctrl + 1-9)
+  // Keyboard shortcut for switching tabs (Cmd/Ctrl + Shift + 1-9)
+  // Using Shift+modifier to avoid conflict with browser's native tab switching shortcuts
   // MUST be before any early returns to maintain hooks order consistency
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -671,7 +672,8 @@ export const Workspace: React.FC = () => {
         const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
         const modifierPressed = isMac ? e.metaKey : e.ctrlKey;
 
-        if (modifierPressed) {
+        // Require Shift + modifier to avoid browser conflicts
+        if (modifierPressed && e.shiftKey) {
           e.preventDefault();
 
           // Calculate tab index (1 -> index 0, 2 -> index 1, etc.)

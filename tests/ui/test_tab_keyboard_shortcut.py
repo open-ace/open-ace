@@ -147,17 +147,17 @@ async def test_tab_keyboard_shortcut():
             print(f"   Active tab before tests: {active_tab_id_before[:20] if active_tab_id_before else 'N/A'}...")
             test_results.append(("Initial Tab State", "PASS", f"Tab 1 active"))
 
-            # Step 6: Test keyboard shortcut Cmd+2 (switch to tab 2)
-            print("\n[Step 6] Testing keyboard shortcut Meta+2 (Cmd+2)...")
+            # Step 6: Test keyboard shortcut Cmd+Shift+2 (switch to tab 2)
+            print("\n[Step 6] Testing keyboard shortcut Meta+Shift+2 (Cmd+Shift+2)...")
 
             # First, ensure we're on tab 1
             if active_tab_id_before != tab_ids[0]:
                 await tabs[0].click()
                 await page.wait_for_timeout(500)
 
-            # Press Meta+2 (Cmd+2 on Mac, Ctrl+2 on Windows/Linux)
+            # Press Meta+Shift+2 (Cmd+Shift+2 on Mac, Ctrl+Shift+2 on Windows/Linux)
             # Note: In Playwright, Meta key is used for Mac's Cmd key
-            await page.keyboard.press("Meta+2")
+            await page.keyboard.press("Meta+Shift+2")
             await page.wait_for_timeout(1000)
 
             # Check if tab switched
@@ -165,17 +165,17 @@ async def test_tab_keyboard_shortcut():
             active_tab_id_after_cmd2 = await active_tab_after_cmd2.evaluate("el => el.getAttribute('data-tab-id')") if active_tab_after_cmd2 else ""
 
             if active_tab_id_after_cmd2 == tab_ids[1]:
-                print("   ✓ Cmd+2 switched to tab 2 successfully!")
-                test_results.append(("Cmd+2 Shortcut", "PASS", "Switched to tab 2"))
+                print("   ✓ Cmd+Shift+2 switched to tab 2 successfully!")
+                test_results.append(("Cmd+Shift+2 Shortcut", "PASS", "Switched to tab 2"))
             else:
-                print(f"   ✗ Cmd+2 did not switch to tab 2 (active: {active_tab_id_after_cmd2[:20]})")
-                test_results.append(("Cmd+2 Shortcut", "FAIL", f"Expected tab 2"))
+                print(f"   ✗ Cmd+Shift+2 did not switch to tab 2 (active: {active_tab_id_after_cmd2[:20]})")
+                test_results.append(("Cmd+Shift+2 Shortcut", "FAIL", f"Expected tab 2"))
 
-            await page.screenshot(path=f"{SCREENSHOT_DIR}/03_after_cmd2_{timestamp}.png")
+            await page.screenshot(path=f"{SCREENSHOT_DIR}/03_after_cmd_shift2_{timestamp}.png")
 
-            # Step 7: Test keyboard shortcut Cmd+3 (switch to tab 3)
-            print("\n[Step 7] Testing keyboard shortcut Meta+3 (Cmd+3)...")
-            await page.keyboard.press("Meta+3")
+            # Step 7: Test keyboard shortcut Cmd+Shift+3 (switch to tab 3)
+            print("\n[Step 7] Testing keyboard shortcut Meta+Shift+3 (Cmd+Shift+3)...")
+            await page.keyboard.press("Meta+Shift+3")
             await page.wait_for_timeout(1000)
 
             # Check if tab switched
@@ -183,17 +183,17 @@ async def test_tab_keyboard_shortcut():
             active_tab_id_after_cmd3 = await active_tab_after_cmd3.evaluate("el => el.getAttribute('data-tab-id')") if active_tab_after_cmd3 else ""
 
             if active_tab_id_after_cmd3 == tab_ids[2]:
-                print("   ✓ Cmd+3 switched to tab 3 successfully!")
-                test_results.append(("Cmd+3 Shortcut", "PASS", "Switched to tab 3"))
+                print("   ✓ Cmd+Shift+3 switched to tab 3 successfully!")
+                test_results.append(("Cmd+Shift+3 Shortcut", "PASS", "Switched to tab 3"))
             else:
-                print(f"   ✗ Cmd+3 did not switch to tab 3 (active: {active_tab_id_after_cmd3[:20]})")
-                test_results.append(("Cmd+3 Shortcut", "FAIL", f"Expected tab 3"))
+                print(f"   ✗ Cmd+Shift+3 did not switch to tab 3 (active: {active_tab_id_after_cmd3[:20]})")
+                test_results.append(("Cmd+Shift+3 Shortcut", "FAIL", f"Expected tab 3"))
 
-            await page.screenshot(path=f"{SCREENSHOT_DIR}/04_after_cmd3_{timestamp}.png")
+            await page.screenshot(path=f"{SCREENSHOT_DIR}/04_after_cmd_shift3_{timestamp}.png")
 
-            # Step 8: Test keyboard shortcut Cmd+1 (switch back to tab 1)
-            print("\n[Step 8] Testing keyboard shortcut Meta+1 (Cmd+1)...")
-            await page.keyboard.press("Meta+1")
+            # Step 8: Test keyboard shortcut Cmd+Shift+1 (switch back to tab 1)
+            print("\n[Step 8] Testing keyboard shortcut Meta+Shift+1 (Cmd+Shift+1)...")
+            await page.keyboard.press("Meta+Shift+1")
             await page.wait_for_timeout(1000)
 
             # Check if tab switched
@@ -201,18 +201,18 @@ async def test_tab_keyboard_shortcut():
             active_tab_id_after_cmd1 = await active_tab_after_cmd1.evaluate("el => el.getAttribute('data-tab-id')") if active_tab_after_cmd1 else ""
 
             if active_tab_id_after_cmd1 == tab_ids[0]:
-                print("   ✓ Cmd+1 switched to tab 1 successfully!")
-                test_results.append(("Cmd+1 Shortcut", "PASS", "Switched to tab 1"))
+                print("   ✓ Cmd+Shift+1 switched to tab 1 successfully!")
+                test_results.append(("Cmd+Shift+1 Shortcut", "PASS", "Switched to tab 1"))
             else:
-                print(f"   ✗ Cmd+1 did not switch to tab 1 (active: {active_tab_id_after_cmd1[:20]})")
-                test_results.append(("Cmd+1 Shortcut", "FAIL", f"Expected tab 1"))
+                print(f"   ✗ Cmd+Shift+1 did not switch to tab 1 (active: {active_tab_id_after_cmd1[:20]})")
+                test_results.append(("Cmd+Shift+1 Shortcut", "FAIL", f"Expected tab 1"))
 
-            await page.screenshot(path=f"{SCREENSHOT_DIR}/05_after_cmd1_{timestamp}.png")
+            await page.screenshot(path=f"{SCREENSHOT_DIR}/05_after_cmd_shift1_{timestamp}.png")
 
-            # Step 9: Test invalid shortcut (Cmd+9 when only 3 tabs exist)
-            print("\n[Step 9] Testing Cmd+9 with only 3 tabs (should not switch)...")
+            # Step 9: Test invalid shortcut (Cmd+Shift+9 when only 3 tabs exist)
+            print("\n[Step 9] Testing Cmd+Shift+9 with only 3 tabs (should not switch)...")
             current_active_id = active_tab_id_after_cmd1
-            await page.keyboard.press("Meta+9")
+            await page.keyboard.press("Meta+Shift+9")
             await page.wait_for_timeout(1000)
 
             # Check that tab did NOT switch (should still be on tab 1)
@@ -220,13 +220,13 @@ async def test_tab_keyboard_shortcut():
             active_tab_id_after_cmd9 = await active_tab_after_cmd9.evaluate("el => el.getAttribute('data-tab-id')") if active_tab_after_cmd9 else ""
 
             if active_tab_id_after_cmd9 == current_active_id:
-                print("   ✓ Cmd+9 correctly ignored (only 3 tabs exist)")
-                test_results.append(("Cmd+9 Ignored", "PASS", "Correctly ignored"))
+                print("   ✓ Cmd+Shift+9 correctly ignored (only 3 tabs exist)")
+                test_results.append(("Cmd+Shift+9 Ignored", "PASS", "Correctly ignored"))
             else:
-                print(f"   ⚠ Cmd+9 switched tab unexpectedly (from {current_active_id[:20]} to {active_tab_id_after_cmd9[:20]})")
-                test_results.append(("Cmd+9 Ignored", "WARN", "Unexpected behavior"))
+                print(f"   ⚠ Cmd+Shift+9 switched tab unexpectedly (from {current_active_id[:20]} to {active_tab_id_after_cmd9[:20]})")
+                test_results.append(("Cmd+Shift+9 Ignored", "WARN", "Unexpected behavior"))
 
-            await page.screenshot(path=f"{SCREENSHOT_DIR}/06_after_cmd9_{timestamp}.png")
+            await page.screenshot(path=f"{SCREENSHOT_DIR}/06_after_cmd_shift9_{timestamp}.png")
 
             # Print summary
             print("\n" + "=" * 60)
