@@ -31,6 +31,7 @@ export { TextInput, Textarea, Checkbox, RadioGroup, Switch } from './Input';
 export { Avatar, AvatarGroup } from './Avatar';
 export { Dropdown, SplitButton } from './Dropdown';
 export { Divider } from './Divider';
+export { SessionDetailContent } from './SessionDetailContent';
 
 // Mode Switcher - Dual-track system
 export { ModeSwitcher } from './ModeSwitcher';

@@ -150,6 +150,7 @@ export const Workspace: React.FC = () => {
 
   // Listen for fullscreen request from iframe (when user selects project and enters chat)
   // Also listen for session ID update from iframe (Issue #65)
+  // Also listen for tab switch request from iframe (Issue #68)
   useEffect(() => {
     const handleIframeMessage = (event: MessageEvent) => {
       // Validate message type for fullscreen request
@@ -162,21 +163,24 @@ export const Workspace: React.FC = () => {
       if (event.data?.type === 'qwen-code-session-update') {
         const { sessionId, encodedProjectName, toolName, title } = event.data;
         // Update the current active tab with session info
-        if (sessionId && activeTabId) {
-          updateStoredTab(activeTabId, {
-            sessionId,
-            encodedProjectName,
-            toolName,
-            title: title || t('session', language),
-          });
-          // Also update local tabs state
-          setTabs((prev) =>
-            prev.map((tab) =>
-              tab.id === activeTabId
-                ? { ...tab, sessionId, encodedProjectName, toolName, title: title || t('session', language) }
-                : tab
-            )
-          );
+        if (sessionId) {
+          const currentActiveTabId = useAppStore.getState().workspaceActiveTabId;
+          if (currentActiveTabId) {
+            useAppStore.getState().updateWorkspaceTab(currentActiveTabId, {
+              sessionId,
+              encodedProjectName,
+              toolName,
+              title: title || t('session', language),
+            });
+            // Also update local tabs state
+            setTabs((prev) =>
+              prev.map((tab) =>
+                tab.id === currentActiveTabId
+                  ? { ...tab, sessionId, encodedProjectName, toolName, title: title || t('session', language) }
+                  : tab
+              )
+            );
+          }
         }
       }
 
@@ -185,14 +189,57 @@ export const Workspace: React.FC = () => {
         const { isWaiting, waitingType } = event.data;
         // Only update if tab notifications are enabled
         if (enableTabNotifications) {
-          setActiveTabWaitingState(isWaiting, waitingType);
+          // Update local state directly
+          const currentActiveTabId = useAppStore.getState().workspaceActiveTabId;
+          if (currentActiveTabId) {
+            setTabs((prev) =>
+              prev.map((tab) =>
+                tab.id === currentActiveTabId
+                  ? { ...tab, waitingForUser: isWaiting, waitingType }
+                  : tab
+              )
+            );
+            // Update store
+            useAppStore.getState().updateWorkspaceTab(currentActiveTabId, {
+              waitingForUser: isWaiting,
+              waitingType,
+            });
+          }
         }
+      }
+
+      // Listen for tab switch request from qwen-code-webui iframe (Issue #68)
+      // When user presses Cmd/Ctrl+Shift+1-9 inside iframe, it sends this message
+      if (event.data?.type === 'qwen-code-tab-switch-request') {
+        const { tabIndex } = event.data;
+        // Get current tabs and active tab from state
+        setTabs((currentTabs) => {
+          if (tabIndex >= 0 && tabIndex < currentTabs.length) {
+            const targetTab = currentTabs[tabIndex];
+            const currentActiveTabId = useAppStore.getState().workspaceActiveTabId;
+            if (targetTab && targetTab.id !== currentActiveTabId) {
+              // Switch to the target tab
+              setActiveTabId(targetTab.id);
+              useAppStore.getState().setWorkspaceActiveTabId(targetTab.id);
+
+              // Send focus message to iframe after tab switch
+              setTimeout(() => {
+                const iframe = iframeRefs.current.get(targetTab.id);
+                if (iframe?.contentWindow) {
+                  iframe.contentWindow.postMessage({ type: 'openace-focus-input' }, '*');
+                  iframe.contentWindow.postMessage({ type: 'openace-tab-activated' }, '*');
+                }
+              }, 100);
+            }
+          }
+          return currentTabs; // Don't modify tabs, just use it for checking
+        });
       }
     };
 
     window.addEventListener('message', handleIframeMessage);
     return () => window.removeEventListener('message', handleIframeMessage);
-  }, [enableTabNotifications]);
+  }, [enableTabNotifications, language]);
 
   // Check quota
   const checkQuota = useCallback(async () => {
@@ -496,24 +543,6 @@ export const Workspace: React.FC = () => {
     },
     [activeTabId, removeStoredTab]
   );
-
-  // Set waiting state for active tab
-  const setActiveTabWaitingState = useCallback((isWaiting: boolean, waitingType: 'permission' | 'plan' | 'input' | null) => {
-    // Update local state
-    setTabs((prev) =>
-      prev.map((tab) =>
-        tab.id === activeTabId
-          ? { ...tab, waitingForUser: isWaiting, waitingType }
-          : tab
-      )
-    );
-
-    // Update store (Issue #65)
-    updateStoredTab(activeTabId, {
-      waitingForUser: isWaiting,
-      waitingType,
-    });
-  }, [activeTabId, updateStoredTab]);
 
   // Switch to a tab
   const switchTab = useCallback((tabId: string) => {

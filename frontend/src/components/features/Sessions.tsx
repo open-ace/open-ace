@@ -24,10 +24,11 @@ import {
   EmptyState,
   Badge,
   Modal,
+  SessionDetailContent,
 } from '@/components/common';
 import type { BadgeVariant } from '@/components/common';
 import { formatDateTime, formatTokens } from '@/utils';
-import type { AgentSession, SessionFilters, SessionMessage } from '@/api/sessions';
+import type { AgentSession, SessionFilters } from '@/api/sessions';
 
 const ITEMS_PER_PAGE = 20;
 
@@ -372,7 +373,20 @@ export const Sessions: React.FC = () => {
       <Modal
         isOpen={showDetailModal}
         onClose={handleCloseModal}
-        title={sessionDetail?.data?.title ?? t('sessionDetails', language) ?? 'Session Details'}
+        title={
+          (() => {
+            const sessionIdShort = sessionDetail?.data?.session_id?.slice(0, 8) ?? '';
+            const sessionTitle = sessionDetail?.data?.title ?? '';
+            // Check if title is meaningful (not just a default pattern like "qwen - 994f805a")
+            const isDefaultTitle = sessionTitle.includes(sessionIdShort) ||
+                                   sessionTitle.match(/^[a-z]+ - [a-f0-9]{8}$/i);
+            // Format: "994f805a（会话名字）" or just "994f805a"
+            if (sessionTitle && !isDefaultTitle) {
+              return `${sessionIdShort}（${sessionTitle}）`;
+            }
+            return sessionIdShort || (t('sessionDetails', language) ?? 'Session Details');
+          })()
+        }
         size="lg"
       >
         {isLoadingDetail ? (
@@ -515,194 +529,6 @@ const SessionCard: React.FC<SessionCardProps> = ({
             </span>
           )}
         </div>
-      </div>
-    </div>
-  );
-};
-
-/**
- * Session Detail Content Component (for Modal)
- */
-interface SessionDetailContentProps {
-  session: AgentSession;
-  language: Language;
-}
-
-const SessionDetailContent: React.FC<SessionDetailContentProps> = ({ session, language }) => {
-  // Filter state: default to show user and assistant messages
-  const [showUser, setShowUser] = useState(true);
-  const [showAssistant, setShowAssistant] = useState(true);
-  const [showSystem, setShowSystem] = useState(false);
-  const [searchText, setSearchText] = useState('');
-
-  // Filter messages based on role and search text
-  const filteredMessages = useMemo(() => {
-    if (!session.messages) return [];
-
-    return session.messages.filter((msg: SessionMessage) => {
-      // Role filter
-      const roleMatch =
-        (showUser && msg.role === 'user') ||
-        (showAssistant && msg.role === 'assistant') ||
-        (showSystem && msg.role === 'system');
-
-      // Search filter (case-insensitive)
-      const searchMatch =
-        !searchText || msg.content.toLowerCase().includes(searchText.toLowerCase());
-
-      return roleMatch && searchMatch;
-    });
-  }, [session.messages, showUser, showAssistant, showSystem, searchText]);
-
-  // Highlight search text in content
-  const highlightText = (text: string, search: string) => {
-    if (!search) return text;
-    const lowerText = text.toLowerCase();
-    const lowerSearch = search.toLowerCase();
-    const index = lowerText.indexOf(lowerSearch);
-    if (index === -1) return text;
-    return (
-      text.slice(0, index) +
-      '<mark>' +
-      text.slice(index, index + search.length) +
-      '</mark>' +
-      text.slice(index + search.length)
-    );
-  };
-
-  return (
-    <div className="session-detail-content">
-      {/* Session Meta Info */}
-      <div className="session-meta mb-3 p-3 bg-light rounded">
-        <div className="row g-3">
-          <div className="col-md-6">
-            <small className="text-muted d-block">{t('tableTool', language)}</small>
-            <span>{session.tool_name}</span>
-          </div>
-          <div className="col-md-6">
-            <small className="text-muted d-block">{t('status', language) ?? 'Status'}</small>
-            <Badge
-              variant={
-                session.status === 'active'
-                  ? 'success'
-                  : session.status === 'completed'
-                    ? 'secondary'
-                    : 'warning'
-              }
-            >
-              {session.status}
-            </Badge>
-          </div>
-          <div className="col-md-6">
-            <small className="text-muted d-block">{t('totalRequests', language)}</small>
-            <span>{session.message_count}</span>
-          </div>
-          <div className="col-md-6">
-            <small className="text-muted d-block">{t('totalTokens', language)}</small>
-            <span>{formatTokens(session.total_tokens)}</span>
-          </div>
-          <div className="col-md-6">
-            <small className="text-muted d-block">{t('created', language) ?? 'Created'}</small>
-            <span>{session.created_at ? formatDateTime(session.created_at) : '-'}</span>
-          </div>
-          <div className="col-md-6">
-            <small className="text-muted d-block">{t('model', language) ?? 'Model'}</small>
-            <span>{session.model ?? '-'}</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Filter and Search */}
-      <div className="mb-3">
-        {/* Role filters */}
-        <div className="d-flex gap-2 mb-2">
-          <button
-            type="button"
-            className={`btn btn-sm ${showUser ? 'btn-primary' : 'btn-outline-primary'}`}
-            onClick={() => setShowUser(!showUser)}
-          >
-            {t('user', language) ?? 'User'}
-          </button>
-          <button
-            type="button"
-            className={`btn btn-sm ${showAssistant ? 'btn-success' : 'btn-outline-success'}`}
-            onClick={() => setShowAssistant(!showAssistant)}
-          >
-            {t('assistant', language) ?? 'Assistant'}
-          </button>
-          <button
-            type="button"
-            className={`btn btn-sm ${showSystem ? 'btn-secondary' : 'btn-outline-secondary'}`}
-            onClick={() => setShowSystem(!showSystem)}
-          >
-            {t('system', language) ?? 'System'}
-          </button>
-        </div>
-        {/* Search input */}
-        <div className="input-group input-group-sm">
-          <input
-            type="text"
-            className="form-control"
-            placeholder={t('searchMessages', language) ?? 'Search messages...'}
-            value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
-          />
-          {searchText && (
-            <button
-              type="button"
-              className="btn btn-outline-secondary"
-              onClick={() => setSearchText('')}
-            >
-              <i className="bi bi-x-lg"></i>
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Messages */}
-      <h6 className="mb-2">
-        {t('messages', language)}
-        {filteredMessages.length !== session.message_count &&
-          ` (${filteredMessages.length}/${session.message_count})`}
-      </h6>
-      <div className="messages-container" style={{ maxHeight: '400px', overflowY: 'auto' }}>
-        {filteredMessages.length > 0 ? (
-          filteredMessages.map((msg: SessionMessage, idx: number) => (
-            <div
-              key={msg.id ?? idx}
-              className={`message-item p-2 mb-2 rounded ${msg.role === 'user' ? 'bg-light' : 'bg-white border'}`}
-            >
-              <div className="d-flex justify-content-between align-items-center mb-1">
-                <Badge
-                  variant={
-                    msg.role === 'user'
-                      ? 'primary'
-                      : msg.role === 'assistant'
-                        ? 'success'
-                        : 'secondary'
-                  }
-                >
-                  {msg.role}
-                </Badge>
-                <small className="text-muted">
-                  {msg.timestamp ? formatDateTime(msg.timestamp) : ''}
-                  {msg.tokens_used > 0 && ` • ${formatTokens(msg.tokens_used)} tokens`}
-                </small>
-              </div>
-              <div
-                className="message-content"
-                style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
-                dangerouslySetInnerHTML={{ __html: highlightText(msg.content, searchText) }}
-              />
-            </div>
-          ))
-        ) : (
-          <div className="text-muted text-center py-3">
-            {searchText || !(showUser || showAssistant || showSystem)
-              ? (t('noMatchingMessages', language) ?? 'No matching messages')
-              : (t('noMessages', language) ?? 'No messages in this session')}
-          </div>
-        )}
       </div>
     </div>
   );
