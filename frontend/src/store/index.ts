@@ -23,6 +23,9 @@ interface AppState {
   previousLeftPanelCollapsed: boolean;
   previousRightPanelCollapsed: boolean;
 
+  // Tab notification settings
+  enableTabNotifications: boolean;
+
   // Actions
   setUser: (user: User | null) => void;
   setAuthenticated: (isAuthenticated: boolean) => void;
@@ -38,6 +41,10 @@ interface AppState {
   enterWorkspaceFullscreen: (leftCollapsed: boolean, rightCollapsed: boolean) => void;
   exitWorkspaceFullscreen: () => void;
   toggleWorkspaceFullscreen: (leftCollapsed: boolean, rightCollapsed: boolean) => void;
+
+  // Tab notification actions
+  setEnableTabNotifications: (enabled: boolean) => void;
+  toggleTabNotifications: () => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -56,6 +63,9 @@ export const useAppStore = create<AppState>()(
       workspaceFullscreen: false,
       previousLeftPanelCollapsed: false,
       previousRightPanelCollapsed: false,
+
+      // Tab notification settings
+      enableTabNotifications: true,
 
       // Actions
       setUser: (user) => set({ user }),
@@ -98,6 +108,11 @@ export const useAppStore = create<AppState>()(
             };
           }
         }),
+
+      // Tab notification actions
+      setEnableTabNotifications: (enabled) => set({ enableTabNotifications: enabled }),
+      toggleTabNotifications: () =>
+        set((state) => ({ enableTabNotifications: !state.enableTabNotifications })),
     }),
     {
       name: 'open-ace-store',
@@ -106,6 +121,7 @@ export const useAppStore = create<AppState>()(
         language: state.language,
         sidebarCollapsed: state.sidebarCollapsed,
         appMode: state.appMode,
+        enableTabNotifications: state.enableTabNotifications,
       }),
     }
   )
@@ -120,6 +136,7 @@ export const useLanguage = () => useAppStore((state) => state.language);
 export const useSidebarCollapsed = () => useAppStore((state) => state.sidebarCollapsed);
 export const useAppMode = () => useAppStore((state) => state.appMode);
 export const useWorkspaceFullscreen = () => useAppStore((state) => state.workspaceFullscreen);
+export const useEnableTabNotifications = () => useAppStore((state) => state.enableTabNotifications);
 export const usePreviousPanelState = () =>
   useAppStore((state) => ({
     left: state.previousLeftPanelCollapsed,
