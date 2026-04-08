@@ -209,28 +209,38 @@ export const Workspace: React.FC = () => {
       }
 
       // Listen for tab switch request from qwen-code-webui iframe (Issue #68)
-      // When user presses Cmd/Ctrl+Shift+1-9 inside iframe, it sends this message
+      // When user presses Cmd/Ctrl+ArrowLeft/ArrowRight inside iframe, it sends this message
       if (event.data?.type === 'qwen-code-tab-switch-request') {
-        const { tabIndex } = event.data;
+        const { direction } = event.data; // "prev" or "next"
         // Get current tabs and active tab from state
         setTabs((currentTabs) => {
-          if (tabIndex >= 0 && tabIndex < currentTabs.length) {
-            const targetTab = currentTabs[tabIndex];
-            const currentActiveTabId = useAppStore.getState().workspaceActiveTabId;
-            if (targetTab && targetTab.id !== currentActiveTabId) {
-              // Switch to the target tab
-              setActiveTabId(targetTab.id);
-              useAppStore.getState().setWorkspaceActiveTabId(targetTab.id);
+          if (currentTabs.length <= 1) return currentTabs;
+          
+          const currentActiveTabId = useAppStore.getState().workspaceActiveTabId;
+          const currentIndex = currentTabs.findIndex(tab => tab.id === currentActiveTabId);
+          
+          // Calculate new index
+          let newIndex: number;
+          if (direction === 'prev') {
+            newIndex = currentIndex <= 0 ? currentTabs.length - 1 : currentIndex - 1;
+          } else {
+            newIndex = currentIndex >= currentTabs.length - 1 ? 0 : currentIndex + 1;
+          }
+          
+          const targetTab = currentTabs[newIndex];
+          if (targetTab && targetTab.id !== currentActiveTabId) {
+            // Switch to the target tab
+            setActiveTabId(targetTab.id);
+            useAppStore.getState().setWorkspaceActiveTabId(targetTab.id);
 
-              // Send focus message to iframe after tab switch
-              setTimeout(() => {
-                const iframe = iframeRefs.current.get(targetTab.id);
-                if (iframe?.contentWindow) {
-                  iframe.contentWindow.postMessage({ type: 'openace-focus-input' }, '*');
-                  iframe.contentWindow.postMessage({ type: 'openace-tab-activated' }, '*');
-                }
-              }, 100);
-            }
+            // Send focus message to iframe after tab switch
+            setTimeout(() => {
+              const iframe = iframeRefs.current.get(targetTab.id);
+              if (iframe?.contentWindow) {
+                iframe.contentWindow.postMessage({ type: 'openace-focus-input' }, '*');
+                iframe.contentWindow.postMessage({ type: 'openace-tab-activated' }, '*');
+              }
+            }, 100);
           }
           return currentTabs; // Don't modify tabs, just use it for checking
         });
@@ -690,56 +700,52 @@ export const Workspace: React.FC = () => {
   // Check if quota is exceeded (computed before early returns to avoid hooks order violation)
   const isQuotaExceeded = quotaStatus?.over_quota?.any ?? false;
 
-  // Keyboard shortcut for switching tabs (Cmd/Ctrl + Shift + 1-9)
-  // Using Shift+modifier to avoid conflict with browser's native tab switching shortcuts
+  // Keyboard shortcut for switching tabs (Cmd/Ctrl + Shift + ,/.)
+  // Shift+, (<) = previous tab, Shift+. (>) = next tab
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Don't handle if quota exceeded or loading
       if (isQuotaExceeded || isLoading || isQuotaLoading) return;
-      
-      // Don't handle if no tabs
-      if (tabs.length === 0) return;
 
-      // Check if the key is a digit (1-9)
-      if (e.key >= '1' && e.key <= '9') {
-        // Check modifier key: Cmd on Mac, Ctrl on Windows/Linux
-        const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-        const modifierPressed = isMac ? e.metaKey : e.ctrlKey;
+      // Don't handle if no tabs or only one tab
+      if (tabs.length <= 1) return;
 
-        // Require Shift + modifier to avoid browser conflicts
-        if (modifierPressed && e.shiftKey) {
-          e.preventDefault();
-          
-          console.log('[Keyboard Shortcut] Detected:', {
-            key: e.key,
-            isMac,
-            metaKey: e.metaKey,
-            ctrlKey: e.ctrlKey,
-            shiftKey: e.shiftKey,
-            tabIndex: parseInt(e.key) - 1,
-            tabsLength: tabs.length,
-            activeTabId
-          });
+      // Check modifier keys: Cmd+Shift on Mac, Ctrl+Shift on Windows/Linux
+      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+      const modifierPressed = isMac ? (e.metaKey && e.shiftKey) : (e.ctrlKey && e.shiftKey);
 
-          // Calculate tab index (1 -> index 0, 2 -> index 1, etc.)
-          const tabIndex = parseInt(e.key) - 1;
+      // Handle Shift+, (< previous tab) and Shift+. (> next tab)
+      if (modifierPressed && (e.key === ',' || e.key === '.')) {
+        e.preventDefault();
 
-          // Only switch if the tab exists
-          if (tabIndex < tabs.length) {
-            const targetTab = tabs[tabIndex];
-            if (targetTab && targetTab.id !== activeTabId) {
-              console.log('[Keyboard Shortcut] Switching to tab:', targetTab.id);
-              switchTab(targetTab.id);
-            } else {
-              console.log('[Keyboard Shortcut] Tab switch skipped:', {
-                targetTabId: targetTab?.id,
-                activeTabId,
-                reason: targetTab?.id === activeTabId ? 'Already active' : 'Tab not found'
-              });
-            }
-          } else {
-            console.log('[Keyboard Shortcut] Tab index out of range:', { tabIndex, tabsLength: tabs.length });
-          }
+        console.log('[Keyboard Shortcut] Detected:', {
+          key: e.key,
+          isMac,
+          metaKey: e.metaKey,
+          ctrlKey: e.ctrlKey,
+          shiftKey: e.shiftKey,
+          direction: e.key === ',' ? 'prev' : 'next',
+          tabsLength: tabs.length,
+          activeTabId
+        });
+
+        // Find current active tab index
+        const currentIndex = tabs.findIndex(tab => tab.id === activeTabId);
+
+        // Calculate new index
+        let newIndex: number;
+        if (e.key === ',') {
+          // Previous tab (wrap around to last if at first)
+          newIndex = currentIndex <= 0 ? tabs.length - 1 : currentIndex - 1;
+        } else {
+          // Next tab (wrap around to first if at last)
+          newIndex = currentIndex >= tabs.length - 1 ? 0 : currentIndex + 1;
+        }
+
+        const targetTab = tabs[newIndex];
+        if (targetTab) {
+          console.log('[Keyboard Shortcut] Switching to tab:', targetTab.id);
+          switchTab(targetTab.id);
         }
       }
     };

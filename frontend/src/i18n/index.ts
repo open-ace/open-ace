@@ -329,8 +329,10 @@ const translations: Record<Language, Translations> = {
     requestsByUser: 'Requests by User',
     userDetails: 'User Details',
     requests: 'Requests',
+    requestsMessages: 'Requests / Messages',
     percentage: 'Percentage',
     tool: 'Tool',
+    model: 'Model',
     custom: 'Custom',
 
     // Usage Overview (Work Mode)
@@ -928,8 +930,10 @@ const translations: Record<Language, Translations> = {
     requestsByUser: '用户请求数',
     userDetails: '用户详情',
     requests: '请求数',
+    requestsMessages: '请求数 / 总消息数',
     percentage: '百分比',
     tool: '工具',
+    model: '模型',
     custom: '自定义',
 
     // Usage Overview (Work Mode)
