@@ -161,7 +161,7 @@ export const Workspace: React.FC = () => {
       // Listen for session ID update from qwen-code-webui iframe (Issue #65)
       // This allows the iframe to inform the workspace about its current session
       if (event.data?.type === 'qwen-code-session-update') {
-        const { sessionId, encodedProjectName, toolName, title } = event.data;
+        const { sessionId, encodedProjectName, toolName, title, settings } = event.data;
         // Update the current active tab with session info
         if (sessionId) {
           const currentActiveTabId = useAppStore.getState().workspaceActiveTabId;
@@ -171,12 +171,13 @@ export const Workspace: React.FC = () => {
               encodedProjectName,
               toolName,
               title: title || t('session', language),
+              settings, // Save settings for tab restoration (Issue #70)
             });
             // Also update local tabs state
             setTabs((prev) =>
               prev.map((tab) =>
                 tab.id === currentActiveTabId
-                  ? { ...tab, sessionId, encodedProjectName, toolName, title: title || t('session', language) }
+                  ? { ...tab, sessionId, encodedProjectName, toolName, title: title || t('session', language), settings }
                   : tab
               )
             );
@@ -282,8 +283,20 @@ export const Workspace: React.FC = () => {
   }, [quotaStatus?.over_quota?.any, workspaceFullscreen, exitWorkspaceFullscreen, language, toast]);
 
   // Get the effective URL for iframe
-  const getEffectiveUrl = useCallback((restoreSessionId?: string, encodedProjectName?: string, toolName?: string): string => {
+  const getEffectiveUrl = useCallback((
+    restoreSessionId?: string,
+    encodedProjectName?: string,
+    toolName?: string,
+    settings?: { model?: string; useWebUI?: boolean; permissionMode?: string }
+  ): string => {
     if (!config?.enabled) return '';
+
+    // Helper to append parameter to URL
+    const appendParam = (url: string, key: string, value: string | undefined) => {
+      if (value === undefined) return url;
+      const separator = url.includes('?') ? '&' : '?';
+      return `${url}${separator}${key}=${encodeURIComponent(value)}`;
+    };
 
     // Multi-user mode: use user-specific URL with token and openace_url
     if (config.multi_user_mode && userWebUI?.success) {
@@ -308,6 +321,16 @@ export const Workspace: React.FC = () => {
       if (toolName) {
         url = `${url}&toolName=${encodeURIComponent(toolName)}`;
       }
+      // Add settings parameters (Issue #70)
+      if (settings?.model) {
+        url = `${url}&model=${encodeURIComponent(settings.model)}`;
+      }
+      if (settings?.useWebUI !== undefined) {
+        url = `${url}&useWebUI=${settings.useWebUI}`;
+      }
+      if (settings?.permissionMode) {
+        url = `${url}&permissionMode=${encodeURIComponent(settings.permissionMode)}`;
+      }
       return url;
     }
 
@@ -317,16 +340,23 @@ export const Workspace: React.FC = () => {
     const langSeparator = url.includes('?') ? '&' : '?';
     url = `${url}${langSeparator}lang=${encodeURIComponent(language)}`;
     if (restoreSessionId) {
-      const separator = url.includes('?') ? '&' : '?';
-      url = `${url}${separator}sessionId=${encodeURIComponent(restoreSessionId)}`;
+      url = appendParam(url, 'sessionId', restoreSessionId);
     }
     if (encodedProjectName) {
-      const separator = url.includes('?') ? '&' : '?';
-      url = `${url}${separator}encodedProjectName=${encodeURIComponent(encodedProjectName)}`;
+      url = appendParam(url, 'encodedProjectName', encodedProjectName);
     }
     if (toolName) {
-      const separator = url.includes('?') ? '&' : '?';
-      url = `${url}${separator}toolName=${encodeURIComponent(toolName)}`;
+      url = appendParam(url, 'toolName', toolName);
+    }
+    // Add settings parameters (Issue #70)
+    if (settings?.model) {
+      url = appendParam(url, 'model', settings.model);
+    }
+    if (settings?.useWebUI !== undefined) {
+      url = `${url}&useWebUI=${settings.useWebUI}`;
+    }
+    if (settings?.permissionMode) {
+      url = appendParam(url, 'permissionMode', settings.permissionMode);
     }
     return url;
   }, [config, userWebUI, language]);
@@ -349,6 +379,10 @@ export const Workspace: React.FC = () => {
     const restoreSession = searchParams.get('restoreSession');
     const urlEncodedProjectName = searchParams.get('encodedProjectName');
     const urlToolName = searchParams.get('toolName');
+    // Settings from URL (Issue #70)
+    const urlModel = searchParams.get('model');
+    const urlUseWebUI = searchParams.get('useWebUI');
+    const urlPermissionMode = searchParams.get('permissionMode');
     const restoreSessionId = urlSessionId || restoreSession;
 
     // Determine if we should restore from store or create new
@@ -358,10 +392,21 @@ export const Workspace: React.FC = () => {
 
     if (restoreSessionId) {
       // Case 1: URL restore params - create a single tab with the restore session
+      // Build settings from URL params
+      const urlSettings: { model?: string; useWebUI?: boolean; permissionMode?: string } | undefined = 
+        (urlModel || urlUseWebUI !== null || urlPermissionMode)
+          ? {
+              model: urlModel || undefined,
+              useWebUI: urlUseWebUI === 'true' ? true : urlUseWebUI === 'false' ? false : undefined,
+              permissionMode: urlPermissionMode || undefined,
+            }
+          : undefined;
+
       const effectiveUrl = getEffectiveUrl(
         restoreSessionId,
         urlEncodedProjectName || undefined,
-        urlToolName || undefined
+        urlToolName || undefined,
+        urlSettings
       );
       if (effectiveUrl) {
         const tab: WorkspaceTab = {
@@ -372,6 +417,7 @@ export const Workspace: React.FC = () => {
           sessionId: restoreSessionId,
           encodedProjectName: urlEncodedProjectName || undefined,
           toolName: urlToolName || undefined,
+          settings: urlSettings,
           createdAt: Date.now(),
           waitingForUser: false,
           waitingType: null,
@@ -386,6 +432,7 @@ export const Workspace: React.FC = () => {
           sessionId: tab.sessionId,
           encodedProjectName: tab.encodedProjectName,
           toolName: tab.toolName,
+          settings: tab.settings,
           createdAt: tab.createdAt,
           waitingForUser: tab.waitingForUser,
           waitingType: tab.waitingType,
@@ -402,11 +449,13 @@ export const Workspace: React.FC = () => {
       // Case 2: Restore from store - regenerate URLs for each tab
       initialTabs = storedTabs.map((storedTab) => {
         // Regenerate URL based on sessionId if available
+        // Include settings in URL for restoration (Issue #70)
         const effectiveUrl = storedTab.sessionId
           ? getEffectiveUrl(
               storedTab.sessionId,
               storedTab.encodedProjectName,
-              storedTab.toolName
+              storedTab.toolName,
+              storedTab.settings
             )
           : getEffectiveUrl();
 

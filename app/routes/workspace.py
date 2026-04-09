@@ -16,7 +16,7 @@ from flask import Blueprint, g, jsonify, request
 
 from app.modules.workspace.collaboration import CollaborationManager, SharePermission
 from app.modules.workspace.prompt_library import PromptCategory, PromptLibrary, PromptTemplate
-from app.modules.workspace.session_manager import SessionManager, SessionType
+from app.modules.workspace.session_manager import SessionManager, SessionType, _param
 from app.modules.workspace.state_sync import get_state_sync_manager
 from app.modules.workspace.tool_connector import get_tool_connector
 from app.services.auth_service import AuthService
@@ -559,6 +559,27 @@ def get_session(session_id):
         session = manager.get_session(session_id, include_messages=include_messages)
 
         if session:
+            # Calculate request_count from messages if available
+            if include_messages and session.messages:
+                session.request_count = sum(
+                    1 for m in session.messages if m.role in ('assistant', 'toolResult')
+                )
+            else:
+                # Query request_count from session_messages table
+                conn = manager._get_connection()
+                cursor = conn.cursor()
+                cursor.execute(
+                    f"""
+                    SELECT COUNT(*) as request_count
+                    FROM session_messages
+                    WHERE session_id = {_param()}
+                    AND role IN ('assistant', 'toolResult')
+                    """,
+                    (session_id,)
+                )
+                row = cursor.fetchone()
+                session.request_count = row['request_count'] if row else 0
+                conn.close()
             return jsonify({"success": True, "data": session.to_dict()})
 
         # If not found in agent_sessions, try to get from daily_messages
@@ -578,6 +599,7 @@ def get_session(session_id):
                 MAX(sender_id) as sender_id,
                 MAX(date) as date,
                 COUNT(*) as message_count,
+                SUM(CASE WHEN role IN ('assistant', 'toolResult') THEN 1 ELSE 0 END) as request_count,
                 SUM(tokens_used) as total_tokens,
                 SUM(input_tokens) as total_input_tokens,
                 SUM(output_tokens) as total_output_tokens,
@@ -649,6 +671,7 @@ def get_session(session_id):
             "total_input_tokens": session_data["total_input_tokens"] or 0,
             "total_output_tokens": session_data["total_output_tokens"] or 0,
             "message_count": session_data["message_count"] or 0,
+            "request_count": session_data["request_count"] or 0,
             "model": session_data.get("model"),
             "tags": [],
             "created_at": session_data["created_at"],

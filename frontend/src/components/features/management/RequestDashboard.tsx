@@ -21,7 +21,8 @@ import {
   Badge,
   TextInput,
 } from '@/components/common';
-import { LineChart, BarChart, getToolColor } from '@/components/common/Charts';
+import { LazyLineChart, LazyBarChart } from '@/components/common/LazyCharts';
+import { getToolColor } from '@/components/common/Charts';
 import { requestApi, type RequestTodayStats, type RequestTrendByToolData, type RequestStatsByUser } from '@/api/request';
 import { formatNumber } from '@/utils';
 
@@ -262,7 +263,7 @@ export const RequestDashboard: React.FC = () => {
         <div className="col-lg-8">
           <Card title={t('requestTrend', language)}>
             {trendData.length > 0 ? (
-              <LineChart
+              <LazyLineChart
                 labels={trendChartData.labels}
                 datasets={trendChartData.datasets}
                 height={300}
@@ -319,7 +320,7 @@ export const RequestDashboard: React.FC = () => {
         <div className="col-lg-6">
           <Card title={t('requestsByUser', language)}>
             {aggregatedUserStats.length > 0 ? (
-              <BarChart
+              <LazyBarChart
                 labels={userChartData.labels}
                 datasets={userChartData.datasets}
                 height={300}

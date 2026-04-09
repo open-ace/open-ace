@@ -138,6 +138,7 @@ class ApiClient {
           headers: requestHeaders,
           body: body ? JSON.stringify(body) : undefined,
           signal: combinedSignal,
+          credentials: 'include',
         });
 
         clearTimeout(timeoutId);

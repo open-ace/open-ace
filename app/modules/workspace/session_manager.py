@@ -113,6 +113,7 @@ class AgentSession:
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     message_count: int = 0
+    request_count: int = 0  # Number of API requests (assistant/toolResult messages)
     model: Optional[str] = None
     tags: List[str] = field(default_factory=list)
     created_at: Optional[datetime] = None
@@ -140,6 +141,7 @@ class AgentSession:
             "total_input_tokens": self.total_input_tokens,
             "total_output_tokens": self.total_output_tokens,
             "message_count": self.message_count,
+            "request_count": self.request_count,
             "model": self.model,
             "tags": self.tags,
             "created_at": self.created_at.isoformat() if self.created_at else None,
@@ -1131,7 +1133,10 @@ class SessionManager:
         def get_value(key: str):
             if isinstance(row, dict):
                 return row.get(key)
-            return row[key]
+            try:
+                return row[key]
+            except (KeyError, IndexError):
+                return None
 
         return AgentSession(
             id=get_value("id"),
@@ -1148,6 +1153,7 @@ class SessionManager:
             total_input_tokens=get_value("total_input_tokens") or 0,
             total_output_tokens=get_value("total_output_tokens") or 0,
             message_count=get_value("message_count") or 0,
+            request_count=get_value("request_count") or 0,
             model=get_value("model"),
             tags=json.loads(get_value("tags")) if get_value("tags") else [],
             created_at=(

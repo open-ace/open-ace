@@ -20,6 +20,12 @@ export interface WorkspaceTab {
   createdAt: number;
   waitingForUser: boolean;
   waitingType: 'permission' | 'plan' | 'input' | null;
+  // Settings for tab restoration (Issue #70)
+  settings?: {
+    model?: string;          // Selected model ID
+    useWebUI?: boolean;      // Use WebUI components toggle
+    permissionMode?: string; // Permission mode: default, plan, auto-edit, yolo
+  };
 }
 
 interface AppState {

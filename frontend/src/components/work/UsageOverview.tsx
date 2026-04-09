@@ -21,7 +21,7 @@ import {
   Progress,
   Badge,
 } from '@/components/common';
-import { LineChart } from '@/components/common/Charts';
+import { LazyLineChart } from '@/components/common/LazyCharts';
 import { requestApi, type QuotaStatusResponse, type UserUsageResponse } from '@/api/request';
 import { formatNumber, formatTokens } from '@/utils';
 
@@ -413,7 +413,7 @@ export const UsageOverview: React.FC = () => {
         <Card title={t('tokenTrend', language)} className="mb-4">
           <div ref={tokenChartRef}>
             {loadTokenChart ? (
-              <LineChart
+              <LazyLineChart
                 labels={tokenTrendChartData.labels}
                 datasets={tokenTrendChartData.datasets}
                 height={250}
@@ -444,7 +444,7 @@ export const UsageOverview: React.FC = () => {
         <Card title={t('requestTrend', language)} className="mb-4">
           <div ref={requestChartRef}>
             {loadRequestChart ? (
-              <LineChart
+              <LazyLineChart
                 labels={trendChartData.labels}
                 datasets={trendChartData.datasets}
                 height={250}

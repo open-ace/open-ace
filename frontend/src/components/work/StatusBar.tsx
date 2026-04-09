@@ -52,7 +52,9 @@ export const StatusBar: React.FC<StatusBarProps> = ({
     const fetchStatus = async () => {
       setLoading(true);
       try {
-        const response = await fetch('/api/workspace/status');
+        const response = await fetch('/api/workspace/status', {
+          credentials: 'include',
+        });
         if (response.ok) {
           const data = await response.json();
           setStatus(data);
