@@ -1018,7 +1018,7 @@ export const Workspace: React.FC = () => {
                 >
                   <i className={cn(
                     'bi me-2 flex-shrink-0',
-                    tab.waitingForUser ? 'bi-bell-fill text-warning' : 'bi-chat-dots text-muted'
+                    tab.waitingForUser ? 'bi-bell-fill text-info' : 'bi-chat-dots text-muted'
                   )} />
                   <span className={cn(
                     'text-truncate small flex-grow-1',
@@ -1029,10 +1029,7 @@ export const Workspace: React.FC = () => {
                   {/* Waiting indicator badge */}
                   {tab.waitingForUser && activeTabId !== tab.id && (
                     <span className={cn(
-                      'waiting-badge badge',
-                      tab.waitingType === 'permission' && 'bg-danger',
-                      tab.waitingType === 'plan' && 'bg-warning',
-                      tab.waitingType === 'input' && 'bg-info'
+                      'waiting-badge badge bg-info'
                     )} style={{ 
                       fontSize: '0.65rem', 
                       padding: '0.2rem 0.4rem', 
@@ -1044,9 +1041,7 @@ export const Workspace: React.FC = () => {
                       alignItems: 'center',
                       justifyContent: 'center'
                     }}>
-                      {tab.waitingType === 'permission' && '!'}
-                      {tab.waitingType === 'plan' && '⏳'}
-                      {tab.waitingType === 'input' && '●'}
+                      ●
                     </span>
                   )}
                   <div className="tab-actions d-flex align-items-center">
