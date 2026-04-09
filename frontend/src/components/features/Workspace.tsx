@@ -188,20 +188,35 @@ export const Workspace: React.FC = () => {
       // Listen for tab notification from qwen-code-webui iframe
       if (event.data?.type === 'qwen-code-tab-notification') {
         const { isWaiting, waitingType } = event.data;
+        
         // Only update if tab notifications are enabled
         if (enableTabNotifications) {
-          // Update local state directly
-          const currentActiveTabId = useAppStore.getState().workspaceActiveTabId;
-          if (currentActiveTabId) {
+          // Find the tab that sent this message by matching event.source to iframe contentWindow
+          let sourceTabId: string | null = null;
+          if (event.source) {
+            for (const [tabId, iframe] of iframeRefs.current.entries()) {
+              if (iframe.contentWindow === event.source) {
+                sourceTabId = tabId;
+                break;
+              }
+            }
+          }
+
+          // If we couldn't find the source, use currentActiveTabId as fallback
+          if (!sourceTabId) {
+            sourceTabId = useAppStore.getState().workspaceActiveTabId;
+          }
+
+          if (sourceTabId) {
             setTabs((prev) =>
               prev.map((tab) =>
-                tab.id === currentActiveTabId
+                tab.id === sourceTabId
                   ? { ...tab, waitingForUser: isWaiting, waitingType }
                   : tab
               )
             );
             // Update store
-            useAppStore.getState().updateWorkspaceTab(currentActiveTabId, {
+            useAppStore.getState().updateWorkspaceTab(sourceTabId, {
               waitingForUser: isWaiting,
               waitingType,
             });
