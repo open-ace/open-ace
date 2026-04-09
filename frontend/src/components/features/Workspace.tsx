@@ -778,17 +778,19 @@ export const Workspace: React.FC = () => {
       const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
       const modifierPressed = isMac ? (e.metaKey && e.shiftKey) : (e.ctrlKey && e.shiftKey);
 
-      // Handle Shift+, (< previous tab) and Shift+. (> next tab)
-      if (modifierPressed && (e.key === ',' || e.key === '.')) {
+      // Handle Comma key (previous tab) and Period key (next tab)
+      // Use e.code instead of e.key to support non-English input methods
+      if (modifierPressed && (e.code === 'Comma' || e.code === 'Period')) {
         e.preventDefault();
 
         console.log('[Keyboard Shortcut] Detected:', {
           key: e.key,
+          code: e.code,
           isMac,
           metaKey: e.metaKey,
           ctrlKey: e.ctrlKey,
           shiftKey: e.shiftKey,
-          direction: e.key === ',' ? 'prev' : 'next',
+          direction: e.code === 'Comma' ? 'prev' : 'next',
           tabsLength: tabs.length,
           activeTabId
         });
@@ -798,7 +800,7 @@ export const Workspace: React.FC = () => {
 
         // Calculate new index
         let newIndex: number;
-        if (e.key === ',') {
+        if (e.code === 'Comma') {
           // Previous tab (wrap around to last if at first)
           newIndex = currentIndex <= 0 ? tabs.length - 1 : currentIndex - 1;
         } else {
