@@ -166,18 +166,23 @@ export const Workspace: React.FC = () => {
         if (sessionId) {
           const currentActiveTabId = useAppStore.getState().workspaceActiveTabId;
           if (currentActiveTabId) {
-            useAppStore.getState().updateWorkspaceTab(currentActiveTabId, {
+            // Only update title if it's explicitly provided (not undefined)
+            // Otherwise keep the existing title (e.g., "New Session")
+            const updateData: Partial<StoreWorkspaceTab> = {
               sessionId,
               encodedProjectName,
               toolName,
-              title: title || t('session', language),
               settings, // Save settings for tab restoration (Issue #70)
-            });
+            };
+            if (title) {
+              updateData.title = title;
+            }
+            useAppStore.getState().updateWorkspaceTab(currentActiveTabId, updateData);
             // Also update local tabs state
             setTabs((prev) =>
               prev.map((tab) =>
                 tab.id === currentActiveTabId
-                  ? { ...tab, sessionId, encodedProjectName, toolName, title: title || t('session', language), settings }
+                  ? { ...tab, sessionId, encodedProjectName, toolName, title: title || tab.title, settings }
                   : tab
               )
             );
@@ -656,7 +661,10 @@ export const Workspace: React.FC = () => {
       // Tab URL format: http://.../c/{session_id}?...
       // Or from stored tab data
       const tab = tabs.find((t) => t.id === renameTabId);
-      if (!tab) return;
+      if (!tab) {
+        setIsRenaming(false);
+        return;
+      }
 
       // Try to extract session ID from URL or from stored sessionId
       let sessionId: string | null = tab.sessionId || null;
@@ -667,17 +675,22 @@ export const Workspace: React.FC = () => {
         }
       }
 
+      // If sessionId exists, try to rename in backend
+      // If session doesn't exist in backend, just update locally
       if (sessionId) {
-        // Call backend API to rename session
-        const response = await sessionsApi.renameSession(sessionId, renameValue.trim());
-        if (!response.success) {
-          toast.error(response.error || t('error', language));
-          setIsRenaming(false);
-          return;
+        try {
+          const response = await sessionsApi.renameSession(sessionId, renameValue.trim());
+          if (!response.success) {
+            // If session not found in backend, just update locally (session may not have started yet)
+            console.log('Session not found in backend, updating locally only:', response.error);
+          }
+        } catch (apiError) {
+          // API call failed (e.g., session doesn't exist), proceed with local update
+          console.log('Rename API failed, updating locally:', apiError);
         }
       }
 
-      // Update tab title locally
+      // Always update tab title locally (regardless of backend result)
       setTabs((prev) =>
         prev.map((tab) =>
           tab.id === renameTabId ? { ...tab, title: renameValue.trim() } : tab
