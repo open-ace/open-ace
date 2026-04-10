@@ -429,6 +429,12 @@ const translations: Record<Language, Translations> = {
     enterFullscreen: 'Enter Fullscreen',
     exitFullscreen: 'Exit Fullscreen',
 
+    // Tab notifications
+    enableTabNotifications: 'Enable tab notifications',
+    disableTabNotifications: 'Disable tab notifications',
+    tabNotificationsOn: 'Notifications On',
+    tabNotificationsOff: 'Off',
+
     // Theme
     lightTheme: 'Light',
     darkTheme: 'Dark',
@@ -1028,6 +1034,12 @@ const translations: Record<Language, Translations> = {
     // Fullscreen
     enterFullscreen: '进入全屏',
     exitFullscreen: '退出全屏',
+
+    // Tab notifications
+    enableTabNotifications: '启用标签页通知',
+    disableTabNotifications: '禁用标签页通知',
+    tabNotificationsOn: '通知已启用',
+    tabNotificationsOff: '已关闭',
 
     // Theme
     lightTheme: '浅色',

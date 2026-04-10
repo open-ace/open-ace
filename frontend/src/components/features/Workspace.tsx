@@ -1121,6 +1121,22 @@ export const Workspace: React.FC = () => {
             </button>
           </div>
 
+          {/* Tab notifications toggle - Show in fullscreen mode */}
+          {workspaceFullscreen && (
+            <button
+              className={cn(
+                'btn btn-sm px-3 py-1 mx-2',
+                enableTabNotifications
+                  ? 'btn-outline-primary'
+                  : 'btn-outline-secondary'
+              )}
+              onClick={toggleTabNotifications}
+              title={enableTabNotifications ? t('disableTabNotifications', language) : t('enableTabNotifications', language)}
+            >
+              <i className={cn('bi me-1', enableTabNotifications ? 'bi-bell-fill' : 'bi-bell-slash')} />
+              {enableTabNotifications ? t('tabNotificationsOn', language) : t('tabNotificationsOff', language)}
+            </button>
+          )}
           {/* Exit Fullscreen Button - Only show in fullscreen mode */}
           {workspaceFullscreen && (
             <button
