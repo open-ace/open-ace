@@ -101,10 +101,13 @@ INCLUDE_ITEMS=(
     "cli.py"
     "web.py"
     "README.md"
+    "CHANGELOG.md"
     "requirements.txt"
     "VERSION"
-    "install.conf.sample"
     "alembic.ini"
+    "docker-compose.yml"
+    "Dockerfile"
+    "docker-entrypoint.sh"
     "config"
     "contrib"
     "cron"
@@ -112,13 +115,7 @@ INCLUDE_ITEMS=(
     "static"
     "app"
     "migrations"
-)
-
-# Documentation files (optional)
-DOC_ITEMS=(
-    "FEISHU_GROUP_CONFIG.md"
-    "FEISHU_USER_CONFIG.md"
-    "REMOTE_DEPLOY.md"
+    "docs"
 )
 
 # Files to exclude from scripts directory
@@ -247,14 +244,6 @@ for item in "${INCLUDE_ITEMS[@]}"; do
     fi
 done
 
-# Copy documentation files
-for item in "${DOC_ITEMS[@]}"; do
-    src="$PROJECT_DIR/$item"
-    if [ -e "$src" ]; then
-        cp "$src" "$PACKAGE_DIR/"
-        echo "  ✓ Included: $item"
-    fi
-done
 
 # Write VERSION file with git commit info (for deployed environments without .git)
 VERSION_FILE_CONTENT=$(get_git_version_for_file)
