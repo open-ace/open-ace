@@ -184,39 +184,15 @@ fi
 
 if [ "$SKIP_DOWNLOAD" = false ] && [ -f "$PROJECT_DIR/requirements.txt" ]; then
     echo -e "${YELLOW}Downloading Python dependencies...${NC}"
-    
-    # Download pure Python packages (platform independent)
-    pip3 download -r "$PROJECT_DIR/requirements.txt" -d "$VENDOR_DIR" \
-        --platform any --only-binary=:all: 2>/dev/null || true
 
-    # Download for Linux aarch64
-    pip3 download -r "$PROJECT_DIR/requirements.txt" -d "$VENDOR_DIR" \
-        --platform manylinux2014_aarch64 --platform manylinux_2_17_aarch64 \
-        --only-binary=:all: 2>/dev/null || true
-
-    # Download for Linux x86_64
-    pip3 download -r "$PROJECT_DIR/requirements.txt" -d "$VENDOR_DIR" \
-        --platform manylinux2014_x86_64 --platform manylinux_2_17_x86_64 \
-        --only-binary=:all: 2>/dev/null || true
-
-    # Download for macOS arm64 (Apple Silicon)
-    pip3 download -r "$PROJECT_DIR/requirements.txt" -d "$VENDOR_DIR" \
-        --platform macosx_11_0_arm64 \
-        --only-binary=:all: 2>/dev/null || true
-
-    # Download for macOS x86_64 (Intel)
-    pip3 download -r "$PROJECT_DIR/requirements.txt" -d "$VENDOR_DIR" \
-        --platform macosx_10_9_x86_64 \
-        --only-binary=:all: 2>/dev/null || true
-
-    # Fallback: download any missing packages
-    pip3 download -r "$PROJECT_DIR/requirements.txt" -d "$VENDOR_DIR" --prefer-binary 2>/dev/null || \
-        pip download -r "$PROJECT_DIR/requirements.txt" -d "$VENDOR_DIR" --prefer-binary 2>/dev/null || \
+    # Download dependencies with prefer-binary for reliable installation
+    pip3 download -r "$PROJECT_DIR/requirements.txt" -d "$VENDOR_DIR" --prefer-binary || \
+        pip download -r "$PROJECT_DIR/requirements.txt" -d "$VENDOR_DIR" --prefer-binary || \
         echo -e "${YELLOW}Warning: Failed to download some dependencies. Install will require network.${NC}"
 
     # Count downloaded packages
     pkg_count=$(ls -1 "$VENDOR_DIR"/*.whl 2>/dev/null | wc -l | tr -d ' ')
-    echo "  ✓ Downloaded $pkg_count packages to vendor/ (multi-platform)"
+    echo "  ✓ Downloaded $pkg_count packages to vendor/"
     
     # Cache the vendor directory for future use
     echo -e "${YELLOW}Caching vendor directory for future packages...${NC}"
