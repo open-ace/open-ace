@@ -21,7 +21,7 @@ NC='\033[0m' # No Color
 
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 DIST_DIR="$PROJECT_DIR/dist"
 
 # Force re-download dependencies
@@ -153,7 +153,7 @@ HASH_FILE="$CACHED_VENDOR_DIR/.requirements_hash"
 
 # Calculate requirements.txt hash
 if [ -f "$PROJECT_DIR/requirements.txt" ]; then
-    REQUIREMENTS_HASH=$(shasum -a 256 "$PROJECT_DIR/requirements.txt" | cut -d' ' -f1)
+    REQUIREMENTS_HASH=$(sha256sum "$PROJECT_DIR/requirements.txt" 2>/dev/null | cut -d' ' -f1 || shasum -a 256 "$PROJECT_DIR/requirements.txt" | cut -d' ' -f1)
 fi
 
 # Check if we can use cached vendor directory
@@ -294,7 +294,7 @@ cd "$PROJECT_DIR"
 rm -rf "$TEMP_DIR"
 
 # Calculate checksum
-CHECKSUM=$(shasum -a 256 "$DIST_DIR/$ARCHIVE_NAME" | cut -d' ' -f1)
+CHECKSUM=$(sha256sum "$DIST_DIR/$ARCHIVE_NAME" 2>/dev/null | cut -d' ' -f1 || shasum -a 256 "$DIST_DIR/$ARCHIVE_NAME" | cut -d' ' -f1)
 
 echo ""
 echo -e "${GREEN}========================================${NC}"
