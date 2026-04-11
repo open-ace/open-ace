@@ -804,6 +804,7 @@ with open('$config_file', 'w') as f:
 # Update config.json with workspace settings
 update_config_workspace() {
     local config_file="$1"
+    local webui_path="$2"
 
     if [ ! -f "$config_file" ]; then
         print_warning "Config file not found: $config_file"
@@ -833,6 +834,7 @@ config['workspace']['port_range_start'] = int('$WORKSPACE_PORT_RANGE_START')
 config['workspace']['port_range_end'] = int('$WORKSPACE_PORT_RANGE_END')
 config['workspace']['max_instances'] = int('$WORKSPACE_MAX_INSTANCES')
 config['workspace']['idle_timeout_minutes'] = int('$WORKSPACE_IDLE_TIMEOUT')
+config['workspace']['webui_path'] = '$webui_path'
 
 with open('$config_file', 'w') as f:
     json.dump(config, f, indent=2)
@@ -1249,6 +1251,13 @@ install_systemd_service() {
         return 1
     fi
 
+    # If multi-user workspace mode is enabled, allow sudo (set NoNewPrivileges=false)
+    # This is needed for the service to run qwen-code-webui as other users via sudo
+    if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
+        print_info "Multi-user workspace enabled, allowing sudo in service..."
+        sed -i 's/NoNewPrivileges=true/NoNewPrivileges=false/' "$service_file"
+    fi
+
     # Reload systemd daemon
     print_info "Reloading systemd daemon..."
     systemctl daemon-reload
@@ -1317,6 +1326,13 @@ install_systemd_service_remote() {
         -e "s|__PORT__|$port|g" \
         -e "s|__HOST__|$host|g" \
         "$service_template")
+
+    # If multi-user workspace mode is enabled, allow sudo (set NoNewPrivileges=false)
+    # This is needed for the service to run qwen-code-webui as other users via sudo
+    if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
+        print_info "Multi-user workspace enabled, allowing sudo in service..."
+        service_content=$(echo "$service_content" | sed 's/NoNewPrivileges=true/NoNewPrivileges=false/')
+    fi
 
     # Create service file on remote
     print_info "Creating systemd service on remote machine..."
@@ -1779,8 +1795,9 @@ do_fresh_install() {
             else
                 print_warning "Please edit the config file with your database settings."
             fi
-            # Update workspace configuration
-            update_config_workspace "$config_dir/config.json"
+            # Update workspace configuration with webui path
+            local webui_path=$(find_webui_executable 2>/dev/null)
+            update_config_workspace "$config_dir/config.json" "$webui_path"
         fi
     fi
 
@@ -2105,7 +2122,8 @@ with open('$config_dir/config.json', 'w') as f:
 
     # Update workspace configuration (for both new and upgrade modes)
     if [ -f "$config_dir/config.json" ]; then
-        update_config_workspace "$config_dir/config.json"
+        local webui_path=$(find_webui_executable 2>/dev/null)
+        update_config_workspace "$config_dir/config.json" "$webui_path"
     fi
 
     # Install Python dependencies
