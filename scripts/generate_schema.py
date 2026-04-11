@@ -475,7 +475,27 @@ def main():
     # Run pg_dump to get the schema
     print("Running pg_dump...")
     import subprocess
-    result = subprocess.run(['pg_dump', '-d', 'ace', '--schema-only'], capture_output=True, text=True)
+    from urllib.parse import urlparse
+    
+    # Get database URL from config
+    sys.path.insert(0, str(project_root / "scripts"))
+    from shared import config
+    
+    db_url = config.get_database_url()
+    
+    # Parse database URL to get database name
+    # Format: postgresql://user:pass@host:port/dbname or sqlite:///path/to/db
+    if db_url.startswith("postgresql://"):
+        parsed = urlparse(db_url)
+        db_name = parsed.path.lstrip("/")
+        if not db_name:
+            print("Error: Could not parse database name from URL")
+            return 1
+    else:
+        print("Error: generate_schema.py only supports PostgreSQL databases")
+        return 1
+    
+    result = subprocess.run(['pg_dump', '-d', db_name, '--schema-only'], capture_output=True, text=True)
     if result.returncode != 0:
         print(f"Error: pg_dump failed: {result.stderr}")
         return 1
