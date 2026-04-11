@@ -310,10 +310,17 @@ if [ -d "$FRONTEND_DIR" ]; then
                 echo -e "${RED}Error: Node.js version $NODE_VERSION is too old${NC}"
                 echo -e "${RED}Vite 6.x requires Node.js 18 or higher${NC}"
                 echo -e "${YELLOW}Please upgrade Node.js:${NC}"
+                echo ""
+                echo -e "${YELLOW}For Rocky Linux/CentOS/RHEL (if yum install fails due to conflicts):${NC}"
+                echo -e "${YELLOW}  sudo yum remove -y nodejs npm${NC}"
                 echo -e "${YELLOW}  curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -${NC}"
                 echo -e "${YELLOW}  sudo yum install -y nodejs${NC}"
-                echo -e "${YELLOW}Or use nvm:${NC}"
+                echo ""
+                echo -e "${YELLOW}Or use nvm (recommended for multiple Node.js versions):${NC}"
+                echo -e "${YELLOW}  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash${NC}"
+                echo -e "${YELLOW}  source ~/.bashrc${NC}"
                 echo -e "${YELLOW}  nvm install 20${NC}"
+                echo -e "${YELLOW}  nvm use 20${NC}"
                 exit 1
             fi
             echo -e "${GREEN}Node.js version: v$NODE_VERSION (OK, requires 18+)${NC}"
