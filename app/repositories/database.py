@@ -229,7 +229,7 @@ def get_postgresql_connection() -> Any:
     except ImportError:
         raise ImportError(
             "psycopg2 is required for PostgreSQL. " "Install it with: pip install psycopg2-binary"
-        )
+        ) from None
 
 
 def release_postgresql_connection(conn: Any) -> None:

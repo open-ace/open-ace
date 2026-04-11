@@ -148,7 +148,7 @@ class PromptLibrary:
                 raise ImportError(
                     "psycopg2 is required for PostgreSQL. "
                     "Install it with: pip install psycopg2-binary"
-                )
+                ) from None
         else:
             conn = sqlite3.connect(self.db_path)
             conn.row_factory = sqlite3.Row
