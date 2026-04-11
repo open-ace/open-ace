@@ -638,6 +638,19 @@ configure_postgresql() {
 setup_postgresql() {
     print_header "Database Setup"
 
+    # Check if database configuration is already set from config file
+    # If DB_PASSWORD is set and DB_INSTALL_METHOD is specified, use those values
+    if [ -n "$DB_PASSWORD" ] && [ -n "$DB_INSTALL_METHOD" ]; then
+        print_info "Using database configuration from config file"
+        print_success "Database host: $DB_HOST"
+        print_success "Database port: $DB_PORT"
+        print_success "Database name: $DB_NAME"
+        print_success "Database user: $DB_USER"
+        print_info "Database password: <configured>"
+        print_info "Install method: $DB_INSTALL_METHOD"
+        return 0
+    fi
+
     # Check for existing PostgreSQL
     local has_systemd=false
     local has_process=false
@@ -652,6 +665,18 @@ setup_postgresql() {
     fi
 
     check_postgresql_docker && has_docker=true
+
+    # If DB_PASSWORD is set (from config file), skip interactive prompts
+    if [ -n "$DB_PASSWORD" ]; then
+        print_success "PostgreSQL is already running"
+        DB_INSTALL_METHOD="existing"
+        print_info "Using database configuration from config file"
+        print_success "Database host: $DB_HOST"
+        print_success "Database port: $DB_PORT"
+        print_success "Database name: $DB_NAME"
+        print_success "Database user: $DB_USER"
+        return 0
+    fi
 
     if $has_systemd || $has_process || $has_docker; then
         print_success "PostgreSQL is already running"
@@ -675,31 +700,36 @@ setup_postgresql() {
     # No PostgreSQL running - need to install
     print_info "No PostgreSQL instance found running"
 
-    # Check if Docker is available
-    local docker_available=false
-    check_docker_available && docker_available=true
-
-    if $docker_available; then
-        print_info "Docker is available. Choose installation method:"
-        echo "  1) Install as binary service (Recommended for production)"
-        echo "  2) Install as Docker container"
-        echo ""
-        prompt_input "Enter choice" "1" pg_method
-
-        case $pg_method in
-            1)
-                DB_INSTALL_METHOD="binary"
-                ;;
-            2)
-                DB_INSTALL_METHOD="docker"
-                ;;
-            *)
-                DB_INSTALL_METHOD="binary"
-                ;;
-        esac
+    # If DB_INSTALL_METHOD is set from config file, use it
+    if [ -n "$DB_INSTALL_METHOD" ] && [ "$DB_INSTALL_METHOD" != "existing" ]; then
+        print_info "Using install method from config file: $DB_INSTALL_METHOD"
     else
-        print_info "Docker not available. Installing as binary service."
-        DB_INSTALL_METHOD="binary"
+        # Check if Docker is available
+        local docker_available=false
+        check_docker_available && docker_available=true
+
+        if $docker_available; then
+            print_info "Docker is available. Choose installation method:"
+            echo "  1) Install as binary service (Recommended for production)"
+            echo "  2) Install as Docker container"
+            echo ""
+            prompt_input "Enter choice" "1" pg_method
+
+            case $pg_method in
+                1)
+                    DB_INSTALL_METHOD="binary"
+                    ;;
+                2)
+                    DB_INSTALL_METHOD="docker"
+                    ;;
+                *)
+                    DB_INSTALL_METHOD="binary"
+                    ;;
+            esac
+        else
+            print_info "Docker not available. Installing as binary service."
+            DB_INSTALL_METHOD="binary"
+        fi
     fi
 
     # Install PostgreSQL
@@ -2038,12 +2068,24 @@ show_help() {
     echo "  SERVICE_PORT=5000                # Web server port"
     echo "  SERVICE_HOST=0.0.0.0             # Web server host"
     echo ""
+    echo "  # Database configuration (optional - auto-detected if not specified)"
+    echo "  DB_HOST=localhost                 # Database host"
+    echo "  DB_PORT=5432                      # Database port"
+    echo "  DB_NAME=openace                   # Database name"
+    echo "  DB_USER=openace                   # Database user"
+    echo "  DB_PASSWORD=yourpassword          # Database password (required for existing DB)"
+    echo "  DB_INSTALL_METHOD=existing        # 'existing', 'binary', or 'docker'"
+    echo ""
     echo "  # Multi-user workspace mode (optional)"
     echo "  WORKSPACE_MULTI_USER_MODE=true   # Enable multi-user mode"
     echo "  WORKSPACE_PORT_RANGE_START=3100  # Port pool start"
     echo "  WORKSPACE_PORT_RANGE_END=3200    # Port pool end"
     echo "  WORKSPACE_MAX_INSTANCES=20       # Max concurrent instances"
     echo "  WORKSPACE_IDLE_TIMEOUT=30        # Idle timeout (minutes)"
+    echo ""
+    echo "Database Configuration:"
+    echo "  If DB_HOST and DB_PASSWORD are set, the installer will use existing database."
+    echo "  If DB_INSTALL_METHOD is 'binary' or 'docker', will install new PostgreSQL."
     echo ""
     echo "Multi-User Workspace Mode:"
     echo "  Requires qwen-code-webui installed:"
