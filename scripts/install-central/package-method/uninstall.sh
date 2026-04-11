@@ -36,6 +36,33 @@ DEPLOY_PATH="$HOME/open-ace"
 REMOVE_CONFIG=false
 REMOVE_DATA=false
 
+# Auto-detect installation from systemd service file
+detect_existing_installation() {
+    local service_file="/etc/systemd/system/open-ace.service"
+
+    if [ -f "$service_file" ]; then
+        print_info "Found existing systemd service: $service_file"
+
+        # Extract WorkingDirectory from service file
+        local working_dir=$(grep "^WorkingDirectory=" "$service_file" | cut -d= -f2)
+        if [ -n "$working_dir" ]; then
+            DEPLOY_PATH="$working_dir"
+            print_info "Detected installation path: $DEPLOY_PATH"
+        fi
+
+        # Extract User from service file
+        local service_user=$(grep "^User=" "$service_file" | cut -d= -f2)
+        if [ -n "$service_user" ]; then
+            DEPLOY_USER="$service_user"
+            print_info "Detected service user: $DEPLOY_USER"
+        fi
+
+        return 0
+    fi
+
+    return 1
+}
+
 # ============================================================================
 # Helper Functions
 # ============================================================================
@@ -577,6 +604,10 @@ print_header "Open ACE - Uninstaller"
 if [ -n "$CONFIG_FILE" ]; then
     parse_config_file
 else
+    # Auto-detect from systemd service if no config file
+    if [ "$EUID" -eq 0 ]; then
+        detect_existing_installation
+    fi
     interactive_config
 fi
 
