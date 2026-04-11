@@ -31,7 +31,12 @@ def _table_exists(cursor, table_name: str) -> bool:
             "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = %s)",
             (table_name,),
         )
-        return cursor.fetchone()[0]
+        result = cursor.fetchone()
+        # Handle both dict-like (RealDictRow) and tuple results
+        if isinstance(result, dict):
+            return result.get("exists", False)
+        else:
+            return result[0] if result else False
     else:
         _execute(
             cursor, "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,)
@@ -50,9 +55,9 @@ def _column_exists(cursor, table_name: str, column_name: str) -> bool:
         result = cursor.fetchone()
         # Handle both dict-like (RealDictRow) and tuple results
         if isinstance(result, dict):
-            return result["exists"]
+            return result.get("exists", False)
         else:
-            return result[0]
+            return result[0] if result else False
     else:
         _execute(
             cursor,
@@ -70,7 +75,12 @@ def _index_exists(cursor, table_name: str, index_name: str) -> bool:
             "SELECT EXISTS (SELECT FROM pg_indexes WHERE tablename = %s AND indexname = %s)",
             (table_name, index_name),
         )
-        return cursor.fetchone()[0]
+        result = cursor.fetchone()
+        # Handle both dict-like (RealDictRow) and tuple results
+        if isinstance(result, dict):
+            return result.get("exists", False)
+        else:
+            return result[0] if result else False
     else:
         _execute(
             cursor,
