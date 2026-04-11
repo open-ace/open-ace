@@ -21,11 +21,6 @@ project_root = os.path.dirname(os.path.abspath(__file__))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-# Initialize database before starting the app
-from scripts.shared.db import init_database
-
-init_database()
-
 # Create the Flask application using the factory
 from app import create_app
 

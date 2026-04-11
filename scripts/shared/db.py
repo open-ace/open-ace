@@ -184,7 +184,40 @@ def _column_exists(cursor, table_name: str, column_name: str) -> bool:
 
 
 def init_database() -> None:
-    """Initialize the database with the required schema."""
+    """Verify database schema exists.
+    
+    For PostgreSQL: Only verifies tables exist (schema created by schema.sql).
+    For SQLite: Creates tables if needed (for local development/testing).
+    """
+    if is_postgresql():
+        # PostgreSQL: Just verify tables exist
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Check core tables
+        core_tables = ["daily_messages", "daily_usage", "users", "sessions"]
+        missing_tables = []
+        
+        for table in core_tables:
+            cursor.execute(f"""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_schema = 'public' AND table_name = '{table}'
+                )
+            """)
+            if not cursor.fetchone()[0]:
+                missing_tables.append(table)
+        
+        conn.close()
+        
+        if missing_tables:
+            print(f"Warning: Missing database tables: {missing_tables}")
+            print("Please run schema.sql or 'alembic upgrade head' to create the schema")
+        else:
+            print("Database schema verified")
+        return
+    
+    # SQLite: Create tables if needed (for local development)
     if not is_postgresql():
         ensure_db_dir()
 

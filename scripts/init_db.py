@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Initialize Database
+Initialize Database Admin User
 
-This script initializes the database with all required tables
-and creates a default admin user.
+This script creates a default admin user.
+Database schema is created by schema.sql during installation.
 """
 
 import os
@@ -56,16 +56,12 @@ def create_default_admin(
 
 
 def main():
-    """Main function to initialize database."""
-    print("Initializing Database...")
-
-    # Initialize all database tables (including auth tables)
-    db.init_database()
+    """Main function to create default admin user."""
+    print("Creating default admin user...")
 
     # Create default admin user
     create_default_admin()
 
-    print("\nDatabase initialization complete!")
     print("\nDefault admin credentials:")
     print("  Username: admin")
     print("  Password: admin123")

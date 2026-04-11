@@ -1706,28 +1706,105 @@ do_fresh_install() {
         fi
     fi
 
-    # Run database migrations with Alembic
-    print_info "Running database migrations..."
-    if [ -f "$target_path/alembic.ini" ] && [ -d "$target_path/migrations" ]; then
+    # Initialize database schema
+    print_info "Initializing database schema..."
+    
+    # Determine database type and execute appropriate schema
+    local db_type="postgresql"
+    if [ -f "$config_dir/config.json" ]; then
+        db_type=$(python3 -c "import json; c=json.load(open('$config_dir/config.json')); print(c.get('database', {}).get('type', 'postgresql'))")
+    fi
+    
+    local schema_file=""
+    if [ "$db_type" = "postgresql" ]; then
+        schema_file="$target_path/schema/schema-postgres.sql"
+    else
+        schema_file="$target_path/schema/schema-sqlite.sql"
+    fi
+    
+    if [ -f "$schema_file" ]; then
+        print_info "Executing schema: $schema_file"
         if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ]; then
+            # Running as root, execute as install_user
             cd "$target_path"
-            if su - "$install_user" -c "cd '$target_path' && python3 -m alembic upgrade head"; then
-                print_success "Database migrations completed"
+            if [ "$db_type" = "postgresql" ]; then
+                # Get database connection info from config
+                local db_url=$(python3 -c "import json; c=json.load(open('$config_dir/config.json')); print(c.get('database', {}).get('url', ''))")
+                if [ -n "$db_url" ]; then
+                    # Parse database URL
+                    local db_host=$(echo "$db_url" | sed -n 's/.*@([^:]*):.*/\1/p')
+                    local db_port=$(echo "$db_url" | sed -n 's/.*:([0-9]*)\/.*/\1/p')
+                    local db_name=$(echo "$db_url" | sed -n 's/.*\/([^?]*).*/\1/p')
+                    local db_user=$(echo "$db_url" | sed -n 's/.*\/\/([^:@]*):.*/\1/p')
+                    local db_pass=$(echo "$db_url" | sed -n 's/.*:\/\/[^:]*:([^@]*)@.*/\1/p')
+                    
+                    if su - "$install_user" -c "cd '$target_path' && PGPASSWORD='$db_pass' psql -h '$db_host' -p '$db_port' -U '$db_user' -d '$db_name' -f '$schema_file'"; then
+                        print_success "Database schema created"
+                    else
+                        print_warning "Failed to execute schema. You may need to run it manually."
+                    fi
+                else
+                    print_warning "Database URL not found in config, skipping schema execution"
+                fi
             else
-                print_warning "Failed to run migrations. You may need to run 'alembic upgrade head' manually."
+                # SQLite - execute directly
+                if su - "$install_user" -c "cd '$target_path' && python3 -c \"import sqlite3; c=sqlite3.connect('$config_dir/openace.db'); c.executescript(open('$schema_file').read())\""; then
+                    print_success "Database schema created"
+                else
+                    print_warning "Failed to execute SQLite schema"
+                fi
             fi
             cd - > /dev/null
         else
+            # Running as target user
             cd "$target_path"
-            if python3 -m alembic upgrade head; then
-                print_success "Database migrations completed"
+            if [ "$db_type" = "postgresql" ]; then
+                local db_url=$(python3 -c "import json; c=json.load(open('$config_dir/config.json')); print(c.get('database', {}).get('url', ''))")
+                if [ -n "$db_url" ]; then
+                    local db_host=$(echo "$db_url" | sed -n 's/.*@([^:]*):.*/\1/p')
+                    local db_port=$(echo "$db_url" | sed -n 's/.*:([0-9]*)\/.*/\1/p')
+                    local db_name=$(echo "$db_url" | sed -n 's/.*\/([^?]*).*/\1/p')
+                    local db_user=$(echo "$db_url" | sed -n 's/.*\/\/([^:@]*):.*/\1/p')
+                    local db_pass=$(echo "$db_url" | sed -n 's/.*:\/\/[^:]*:([^@]*)@.*/\1/p')
+                    
+                    if PGPASSWORD="$db_pass" psql -h "$db_host" -p "$db_port" -U "$db_user" -d "$db_name" -f "$schema_file"; then
+                        print_success "Database schema created"
+                    else
+                        print_warning "Failed to execute schema"
+                    fi
+                fi
             else
-                print_warning "Failed to run migrations. You may need to run 'alembic upgrade head' manually."
+                python3 -c "import sqlite3; c=sqlite3.connect('$config_dir/openace.db'); c.executescript(open('$schema_file').read())"
+                print_success "Database schema created"
             fi
             cd - > /dev/null
         fi
     else
-        print_warning "Alembic not found, skipping migrations"
+        print_warning "Schema file not found: $schema_file"
+    fi
+    
+    # Mark alembic version as head (skip running migrations)
+    print_info "Marking database version..."
+    if [ -f "$target_path/alembic.ini" ] && [ -d "$target_path/migrations" ]; then
+        if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ]; then
+            cd "$target_path"
+            if su - "$install_user" -c "cd '$target_path' && python3 -m alembic stamp head"; then
+                print_success "Database version marked as current"
+            else
+                print_warning "Failed to stamp database version. You may need to run 'alembic stamp head' manually."
+            fi
+            cd - > /dev/null
+        else
+            cd "$target_path"
+            if python3 -m alembic stamp head; then
+                print_success "Database version marked as current"
+            else
+                print_warning "Failed to stamp database version"
+            fi
+            cd - > /dev/null
+        fi
+    else
+        print_warning "Alembic not found, skipping version stamp"
     fi
 
     # Create default admin user
