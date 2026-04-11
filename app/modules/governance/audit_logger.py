@@ -11,7 +11,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from app.repositories.database import Database, adapt_boolean_value, adapt_sql
 
@@ -81,7 +81,7 @@ class AuditLog:
     severity: str = "info"
     resource_type: str = ""
     resource_id: Optional[str] = None
-    details: Dict[str, Any] = field(default_factory=dict)
+    details: dict[str, Any] = field(default_factory=dict)
     ip_address: Optional[str] = None
     user_agent: Optional[str] = None
     session_id: Optional[str] = None
@@ -161,7 +161,7 @@ class AuditLogger:
         severity: str = "info",
         resource_type: str = "",
         resource_id: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None,
+        details: Optional[dict[str, Any]] = None,
         ip_address: Optional[str] = None,
         user_agent: Optional[str] = None,
         session_id: Optional[str] = None,
@@ -261,7 +261,7 @@ class AuditLogger:
         success: Optional[bool] = None,
         limit: int = 100,
         offset: int = 0,
-    ) -> List[AuditLog]:
+    ) -> list[AuditLog]:
         """
         Query audit logs with filters.
 
@@ -373,7 +373,7 @@ class AuditLogger:
 
         return result["count"] if result else 0
 
-    def get_user_activity(self, user_id: int, days: int = 30) -> Dict[str, Any]:
+    def get_user_activity(self, user_id: int, days: int = 30) -> dict[str, Any]:
         """
         Get activity summary for a user.
 
@@ -389,7 +389,7 @@ class AuditLogger:
         logs = self.query(user_id=user_id, start_time=start_time, limit=1000)
 
         # Group by action
-        action_counts: Dict[str, int] = {}
+        action_counts: dict[str, int] = {}
         for log in logs:
             action_counts[log.action] = action_counts.get(log.action, 0) + 1
 

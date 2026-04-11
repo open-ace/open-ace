@@ -13,21 +13,20 @@ Supports WebSocket push, email, and webhook notifications.
 import asyncio
 import json
 import logging
-import os
 import sqlite3
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set, Union
+from typing import Any, Callable, Optional, Union
 
 from app.repositories.database import (
     DB_PATH,
-    is_postgresql,
-    get_database_url,
-    adapt_sql,
-    adapt_boolean_value,
     adapt_boolean_condition,
+    adapt_boolean_value,
+    adapt_sql,
+    get_database_url,
+    is_postgresql,
 )
 
 logger = logging.getLogger(__name__)
@@ -62,7 +61,7 @@ class Alert:
     user_id: Optional[int] = None
     username: Optional[str] = None
     tool_name: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     created_at: datetime = field(default_factory=datetime.utcnow)
     read: bool = False
     action_url: Optional[str] = None
@@ -95,7 +94,7 @@ class NotificationPreference:
     email_enabled: bool = True
     push_enabled: bool = True
     webhook_url: Optional[str] = None
-    alert_types: List[str] = field(default_factory=lambda: ["quota", "system", "security"])
+    alert_types: list[str] = field(default_factory=lambda: ["quota", "system", "security"])
     min_severity: str = "warning"  # info, warning, critical
 
 
@@ -110,11 +109,11 @@ class AlertNotifier:
             db_path: Optional custom database path.
         """
         self.db_path = db_path or str(DB_PATH)
-        self._subscribers: List[Callable] = []
-        self._websocket_clients: Dict[str, Any] = {}  # client_id -> websocket
-        self._user_clients: Dict[int, Set[str]] = {}  # user_id -> set of client_ids
-        self._email_config: Dict[str, Any] = {}
-        self._webhooks: Dict[str, str] = {}
+        self._subscribers: list[Callable] = []
+        self._websocket_clients: dict[str, Any] = {}  # client_id -> websocket
+        self._user_clients: dict[int, set[str]] = {}  # user_id -> set of client_ids
+        self._email_config: dict[str, Any] = {}
+        self._webhooks: dict[str, str] = {}
         self._ensure_tables()
 
     def _get_connection(self) -> Union[sqlite3.Connection, Any]:
@@ -266,7 +265,7 @@ class AlertNotifier:
         user_id: Optional[int] = None,
         username: Optional[str] = None,
         tool_name: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: Optional[dict[str, Any]] = None,
         action_url: Optional[str] = None,
         action_text: Optional[str] = None,
     ) -> Alert:
@@ -398,7 +397,7 @@ class AlertNotifier:
         unread_only: bool = False,
         limit: int = 50,
         offset: int = 0,
-    ) -> List[Alert]:
+    ) -> list[Alert]:
         """
         Get alerts with filters.
 
@@ -492,7 +491,7 @@ class AlertNotifier:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        cursor.execute(adapt_sql(f"UPDATE alerts SET read = ? WHERE alert_id = ?"), (adapt_boolean_value(True), alert_id))
+        cursor.execute(adapt_sql("UPDATE alerts SET read = ? WHERE alert_id = ?"), (adapt_boolean_value(True), alert_id))
 
         success = cursor.rowcount > 0
         conn.commit()

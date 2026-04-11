@@ -10,9 +10,14 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
-from app.repositories.database import Database, adapt_boolean_value, adapt_sql, adapt_boolean_condition
+from app.repositories.database import (
+    Database,
+    adapt_boolean_condition,
+    adapt_boolean_value,
+    adapt_sql,
+)
 from app.repositories.user_repo import UserRepository
 
 logger = logging.getLogger(__name__)
@@ -99,7 +104,7 @@ class QuotaStatus:
     # Status
     is_over_token_quota: bool = False
     is_over_request_quota: bool = False
-    alerts: List[QuotaAlert] = field(default_factory=list)
+    alerts: list[QuotaAlert] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -141,7 +146,7 @@ class QuotaManager:
         self,
         db: Optional[Database] = None,
         user_repo: Optional[UserRepository] = None,
-        thresholds: Optional[List[float]] = None,
+        thresholds: Optional[list[float]] = None,
     ):
         """
         Initialize quota manager.
@@ -256,7 +261,7 @@ class QuotaManager:
             alerts=alerts,
         )
 
-    def check_quota(self, user_id: int, tokens: int = 0, requests: int = 1) -> Dict[str, Any]:
+    def check_quota(self, user_id: int, tokens: int = 0, requests: int = 1) -> dict[str, Any]:
         """
         Check if user has quota available.
 
@@ -415,7 +420,7 @@ class QuotaManager:
 
         return start, end
 
-    def _get_usage_in_range(self, user_id: int, start_date: str, end_date: str) -> Dict[str, int]:
+    def _get_usage_in_range(self, user_id: int, start_date: str, end_date: str) -> dict[str, int]:
         """Get total usage in a date range."""
         result = self.db.fetch_one(
             """
@@ -433,7 +438,7 @@ class QuotaManager:
             "requests": result["requests"] if result else 0,
         }
 
-    def _get_recent_alerts(self, user_id: int, limit: int = 10) -> List[QuotaAlert]:
+    def _get_recent_alerts(self, user_id: int, limit: int = 10) -> list[QuotaAlert]:
         """Get recent alerts for a user."""
         rows = self.db.fetch_all(
             """
@@ -497,7 +502,7 @@ class QuotaManager:
             logger.error(f"Failed to acknowledge alert: {e}")
             return False
 
-    def get_all_quota_statuses(self) -> List[QuotaStatus]:
+    def get_all_quota_statuses(self) -> list[QuotaStatus]:
         """Get quota status for all users with optimized batch queries."""
         users = self.user_repo.get_all_users(include_inactive=False)
 
@@ -614,7 +619,7 @@ class QuotaManager:
 
     def get_all_alerts(
         self, unacknowledged_only: bool = False, limit: int = 100
-    ) -> List[QuotaAlert]:
+    ) -> list[QuotaAlert]:
         """Get all quota alerts."""
         if unacknowledged_only:
             rows = self.db.fetch_all(

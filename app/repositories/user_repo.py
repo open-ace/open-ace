@@ -7,7 +7,7 @@ Repository for user data access operations.
 
 import logging
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Optional
 
 from app.repositories.database import Database, adapt_boolean_value, adapt_sql
 
@@ -76,7 +76,7 @@ class UserRepository:
             logger.error(f"Error creating user: {e}")
             return None
 
-    def get_user_by_id(self, user_id: int) -> Optional[Dict]:
+    def get_user_by_id(self, user_id: int) -> Optional[dict]:
         """
         Get user by ID.
 
@@ -89,7 +89,7 @@ class UserRepository:
         query = "SELECT * FROM users WHERE id = ?"
         return self.db.fetch_one(query, (user_id,))
 
-    def get_user_by_username(self, username: str) -> Optional[Dict]:
+    def get_user_by_username(self, username: str) -> Optional[dict]:
         """
         Get user by username.
 
@@ -102,7 +102,7 @@ class UserRepository:
         query = "SELECT * FROM users WHERE username = ?"
         return self.db.fetch_one(query, (username,))
 
-    def get_user_by_email(self, email: str) -> Optional[Dict]:
+    def get_user_by_email(self, email: str) -> Optional[dict]:
         """
         Get user by email.
 
@@ -117,7 +117,7 @@ class UserRepository:
 
     def get_all_users(
         self, include_inactive: bool = True, include_deleted: bool = False
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Get all users.
 
@@ -408,7 +408,7 @@ class UserRepository:
             logger.error(f"Error creating session: {e}")
             return False
 
-    def get_session_by_token(self, token: str) -> Optional[Dict]:
+    def get_session_by_token(self, token: str) -> Optional[dict]:
         """
         Get session by token with user information.
 

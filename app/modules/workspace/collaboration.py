@@ -8,15 +8,19 @@ Supports session sharing, team workspaces, and collaborative annotations.
 
 import json
 import logging
-import os
 import sqlite3
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional, Union
 
-from app.repositories.database import DB_PATH, is_postgresql, get_database_url, adapt_boolean_condition
+from app.repositories.database import (
+    DB_PATH,
+    adapt_boolean_condition,
+    get_database_url,
+    is_postgresql,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,8 +70,8 @@ class Team:
     name: str = ""
     description: str = ""
     owner_id: Optional[int] = None
-    members: List[TeamMember] = field(default_factory=list)
-    settings: Dict[str, Any] = field(default_factory=dict)
+    members: list[TeamMember] = field(default_factory=list)
+    settings: dict[str, Any] = field(default_factory=dict)
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -169,7 +173,7 @@ class Annotation:
     username: str = ""
     content: str = ""
     annotation_type: str = "comment"  # comment, highlight, question
-    position: Dict[str, Any] = field(default_factory=dict)
+    position: dict[str, Any] = field(default_factory=dict)
     parent_id: Optional[int] = None  # For threaded comments
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -202,7 +206,7 @@ class KnowledgeEntry:
     title: str = ""
     content: str = ""
     category: str = "general"
-    tags: List[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
     author_id: Optional[int] = None
     author_name: str = ""
     is_published: bool = False
@@ -399,7 +403,7 @@ class CollaborationManager:
         name: str,
         owner_id: int,
         description: str = "",
-        settings: Optional[Dict[str, Any]] = None,
+        settings: Optional[dict[str, Any]] = None,
     ) -> Team:
         """
         Create a new team.
@@ -573,7 +577,7 @@ class CollaborationManager:
             logger.info(f"Removed member {user_id} from team {team_id}")
         return success
 
-    def list_user_teams(self, user_id: int) -> List[Team]:
+    def list_user_teams(self, user_id: int) -> list[Team]:
         """
         List all teams a user belongs to.
 
@@ -707,7 +711,7 @@ class CollaborationManager:
             return self._row_to_shared_session(row)
         return None
 
-    def get_session_shares(self, session_id: str) -> List[SharedSession]:
+    def get_session_shares(self, session_id: str) -> list[SharedSession]:
         """
         Get all shares for a session.
 
@@ -726,7 +730,7 @@ class CollaborationManager:
 
         return [self._row_to_shared_session(row) for row in rows]
 
-    def get_user_shared_sessions(self, user_id: int) -> List[SharedSession]:
+    def get_user_shared_sessions(self, user_id: int) -> list[SharedSession]:
         """
         Get sessions shared with a user.
 
@@ -826,7 +830,7 @@ class CollaborationManager:
         content: str,
         message_id: Optional[str] = None,
         annotation_type: str = "comment",
-        position: Optional[Dict[str, Any]] = None,
+        position: Optional[dict[str, Any]] = None,
         parent_id: Optional[int] = None,
     ) -> Annotation:
         """
@@ -894,7 +898,7 @@ class CollaborationManager:
             updated_at=now,
         )
 
-    def get_session_annotations(self, session_id: str) -> List[Annotation]:
+    def get_session_annotations(self, session_id: str) -> list[Annotation]:
         """
         Get all annotations for a session.
 
@@ -959,7 +963,7 @@ class CollaborationManager:
         author_name: str,
         team_id: Optional[str] = None,
         category: str = "general",
-        tags: Optional[List[str]] = None,
+        tags: Optional[list[str]] = None,
         is_published: bool = False,
     ) -> KnowledgeEntry:
         """
@@ -1055,7 +1059,7 @@ class CollaborationManager:
         published_only: bool = True,
         page: int = 1,
         limit: int = 20,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         List knowledge entries.
 

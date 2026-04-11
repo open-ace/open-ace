@@ -9,8 +9,8 @@ Supports both SQLite (default) and PostgreSQL databases with connection pooling.
 import logging
 import os
 import sqlite3
-from contextlib import contextmanager
-from typing import Any, Dict, List, Optional, Union
+from contextlib import contextmanager, suppress
+from typing import Any, Optional, Union
 
 logger = logging.getLogger(__name__)
 
@@ -204,8 +204,8 @@ def get_postgresql_connection() -> Any:
 
     try:
         import psycopg2
-        from psycopg2.extras import RealDictCursor
         from psycopg2 import pool
+        from psycopg2.extras import RealDictCursor
 
         url = get_database_url()
 
@@ -252,15 +252,11 @@ def release_postgresql_connection(conn: Any) -> None:
             _pg_pool.putconn(conn)
         except Exception as e:
             logger.warning(f"Failed to return connection to pool: {e}")
-            try:
+            with suppress(Exception):
                 conn.close()
-            except Exception:
-                pass
     else:
-        try:
+        with suppress(Exception):
             conn.close()
-        except Exception:
-            pass
 
 
 @contextmanager
@@ -358,7 +354,7 @@ class Database:
 
     def fetch_one(
         self, query: str, params: tuple = (), commit: bool = False
-    ) -> Optional[Dict[str, Any]]:
+    ) -> Optional[dict[str, Any]]:
         """
         Execute a query and return a single row.
 
@@ -393,7 +389,7 @@ class Database:
                 return row
             return dict(row)
 
-    def fetch_all(self, query: str, params: tuple = ()) -> List[Dict[str, Any]]:
+    def fetch_all(self, query: str, params: tuple = ()) -> list[dict[str, Any]]:
         """
         Execute a query and return all rows.
 
@@ -420,7 +416,7 @@ class Database:
                 return rows
             return [dict(row) for row in rows]
 
-    def executemany(self, query: str, params_list: List[tuple]) -> Any:
+    def executemany(self, query: str, params_list: list[tuple]) -> Any:
         """
         Execute a query with multiple parameter sets.
 

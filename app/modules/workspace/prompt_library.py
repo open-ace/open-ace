@@ -8,14 +8,19 @@ Users can create, organize, and share prompt templates.
 
 import json
 import logging
-import os
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional, Union
 
-from app.repositories.database import DB_PATH, is_postgresql, get_database_url, adapt_sql, adapt_boolean_condition
+from app.repositories.database import (
+    DB_PATH,
+    adapt_boolean_condition,
+    adapt_sql,
+    get_database_url,
+    is_postgresql,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +46,8 @@ class PromptTemplate:
     description: str = ""
     category: str = PromptCategory.GENERAL.value
     content: str = ""
-    variables: List[Dict[str, str]] = field(default_factory=list)
-    tags: List[str] = field(default_factory=list)
+    variables: list[dict[str, str]] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
     author_id: Optional[int] = None
     author_name: str = ""
     is_public: bool = False
@@ -104,7 +109,7 @@ class PromptTemplate:
             result = result.replace(f"{{{var_name}}}", str(value))
         return result
 
-    def validate_variables(self, **kwargs) -> List[str]:
+    def validate_variables(self, **kwargs) -> list[str]:
         """Validate that all required variables are provided."""
         missing = []
         for var in self.variables:
@@ -384,10 +389,10 @@ class PromptLibrary:
         user_id: Optional[int] = None,
         include_public: bool = True,
         search: Optional[str] = None,
-        tags: Optional[List[str]] = None,
+        tags: Optional[list[str]] = None,
         page: int = 1,
         limit: int = 20,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         List prompt templates with filters.
 
@@ -499,7 +504,7 @@ class PromptLibrary:
 
         return success
 
-    def get_featured_templates(self, limit: int = 10) -> List[PromptTemplate]:
+    def get_featured_templates(self, limit: int = 10) -> list[PromptTemplate]:
         """
         Get featured templates.
 
@@ -529,7 +534,7 @@ class PromptLibrary:
 
         return [self._row_to_template(row) for row in rows]
 
-    def get_categories(self) -> List[Dict[str, Any]]:
+    def get_categories(self) -> list[dict[str, Any]]:
         """
         Get all categories with template counts.
 
@@ -554,7 +559,7 @@ class PromptLibrary:
 
         return [{"category": row["category"], "count": row["count"]} for row in rows]
 
-    def get_popular_tags(self, limit: int = 20) -> List[Dict[str, Any]]:
+    def get_popular_tags(self, limit: int = 20) -> list[dict[str, Any]]:
         """
         Get popular tags with usage counts.
 
@@ -578,7 +583,7 @@ class PromptLibrary:
         conn.close()
 
         # Count tag occurrences
-        tag_counts: Dict[str, int] = {}
+        tag_counts: dict[str, int] = {}
         for row in rows:
             try:
                 tags = json.loads(row["tags"])
