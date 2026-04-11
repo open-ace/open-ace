@@ -818,6 +818,8 @@ update_config_workspace() {
     if command -v python3 &>/dev/null; then
         python3 << EOF
 import json
+import socket
+
 with open('$config_file', 'r') as f:
     config = json.load(f)
 
@@ -835,6 +837,28 @@ config['workspace']['port_range_end'] = int('$WORKSPACE_PORT_RANGE_END')
 config['workspace']['max_instances'] = int('$WORKSPACE_MAX_INSTANCES')
 config['workspace']['idle_timeout_minutes'] = int('$WORKSPACE_IDLE_TIMEOUT')
 config['workspace']['webui_path'] = '$webui_path'
+
+# Set workspace URL - get server IP address
+try:
+    # Get local IP using hostname command
+    import subprocess
+    result = subprocess.run(['hostname', '-I'], capture_output=True, text=True)
+    ips = result.stdout.strip().split()
+    if ips:
+        # Use first non-localhost IP
+        for ip in ips:
+            if not ip.startswith('127.') and not ip.startswith('169.254'):
+                config['workspace']['url'] = 'http://' + ip
+                break
+        else:
+            # All IPs are localhost/link-local, use first one
+            config['workspace']['url'] = 'http://' + ips[0]
+    else:
+        # Fallback to hostname
+        config['workspace']['url'] = 'http://' + socket.gethostname()
+except:
+    # Fallback to hostname
+    config['workspace']['url'] = 'http://' + socket.gethostname()
 
 with open('$config_file', 'w') as f:
     json.dump(config, f, indent=2)
@@ -864,6 +888,7 @@ WORKSPACE_PORT_RANGE_START="3100"
 WORKSPACE_PORT_RANGE_END="3200"
 WORKSPACE_MAX_INSTANCES="20"
 WORKSPACE_IDLE_TIMEOUT="30"
+WORKSPACE_URL=""      # Workspace URL (will be set based on host_name or server_url)
 
 # Data directories to preserve during upgrade
 DATA_DIRS=(
