@@ -264,6 +264,398 @@ init_deploy_user() {
     fi
 }
 
+# ============================================================================
+# PostgreSQL Detection and Installation
+# ============================================================================
+
+# Database settings
+DB_TYPE="postgresql"
+DB_HOST="localhost"
+DB_PORT="5432"
+DB_NAME="openace"
+DB_USER="openace"
+DB_PASSWORD=""
+DB_INSTALL_METHOD=""  # "binary", "docker", or "existing"
+
+# Check if PostgreSQL is running as systemd service
+check_postgresql_systemd() {
+    local service_names=("postgresql" "postgres" "postgresql@14-main" "postgresql@15-main" "postgresql@16-main")
+
+    for service in "${service_names[@]}"; do
+        if systemctl is-active --quiet "$service" 2>/dev/null; then
+            print_success "Found PostgreSQL systemd service: $service"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Check if PostgreSQL process is running (without systemd)
+check_postgresql_process() {
+    if pgrep -x "postgres" >/dev/null 2>&1; then
+        print_success "Found PostgreSQL process running"
+        return 0
+    fi
+    return 1
+}
+
+# Check if PostgreSQL is running in Docker container
+check_postgresql_docker() {
+    if ! command -v docker &>/dev/null; then
+        return 1
+    fi
+
+    # Check for running PostgreSQL containers
+    local containers=$(docker ps --filter "ancestor=postgres" --filter "ancestor=postgresql" --format "{{.Names}}" 2>/dev/null)
+    if [ -n "$containers" ]; then
+        print_success "Found PostgreSQL Docker container: $containers"
+        return 0
+    fi
+
+    # Also check for containers with postgres in name
+    containers=$(docker ps --filter "name=postgres" --format "{{.Names}}" 2>/dev/null)
+    if [ -n "$containers" ]; then
+        print_success "Found PostgreSQL Docker container: $containers"
+        return 0
+    fi
+
+    return 1
+}
+
+# Check if Docker is available and running
+check_docker_available() {
+    if ! command -v docker &>/dev/null; then
+        return 1
+    fi
+
+    # Check if Docker daemon is running
+    if docker info >/dev/null 2>&1; then
+        return 0
+    fi
+
+    return 1
+}
+
+# Check if PostgreSQL is installed (binary) but not running
+check_postgresql_installed() {
+    # Check for postgres command
+    if command -v postgres &>/dev/null; then
+        return 0
+    fi
+
+    # Check common installation paths
+    local paths=(
+        "/usr/bin/postgres"
+        "/usr/lib/postgresql/*/bin/postgres"
+        "/usr/pgsql-*/bin/postgres"
+    )
+
+    for path_pattern in "${paths[@]}"; do
+        if ls $path_pattern >/dev/null 2>&1; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+# Get PostgreSQL port from running instance
+get_postgresql_port() {
+    # Try to get port from postgres process
+    local port=$(ss -tlnp | grep postgres | grep -oP ':\K\d+' | head -1)
+    if [ -n "$port" ]; then
+        echo "$port"
+        return
+    fi
+
+    # Try Docker
+    if command -v docker &>/dev/null; then
+        port=$(docker ps --filter "ancestor=postgres" --format "{{.Ports}}" 2>/dev/null | grep -oP '0\.0\.0\.0:\K\d+' | head -1)
+        if [ -n "$port" ]; then
+            echo "$port"
+            return
+        fi
+    fi
+
+    # Default port
+    echo "5432"
+}
+
+# Install PostgreSQL as binary service
+install_postgresql_binary() {
+    print_info "Installing PostgreSQL (binary)..."
+
+    if [ "$EUID" -ne 0 ]; then
+        print_error "Root privileges required to install PostgreSQL"
+        return 1
+    fi
+
+    # Detect OS and install
+    if command -v apt-get &>/dev/null; then
+        print_info "Using apt to install PostgreSQL..."
+        apt-get update -qq
+        apt-get install -y postgresql postgresql-contrib
+    elif command -v yum &>/dev/null; then
+        print_info "Using yum to install PostgreSQL..."
+        yum install -y postgresql-server postgresql-contrib
+        # Initialize database on RHEL/CentOS
+        postgresql-setup initdb 2>/dev/null || postgresql-setup --initdb 2>/dev/null || true
+        systemctl start postgresql
+        systemctl enable postgresql
+    elif command -v dnf &>/dev/null; then
+        print_info "Using dnf to install PostgreSQL..."
+        dnf install -y postgresql-server postgresql-contrib
+        postgresql-setup --initdb 2>/dev/null || postgresql-setup initdb 2>/dev/null || true
+        systemctl start postgresql
+        systemctl enable postgresql
+    else
+        print_error "Unsupported package manager. Please install PostgreSQL manually."
+        return 1
+    fi
+
+    # Start service if not running
+    if systemctl is-active --quiet postgresql 2>/dev/null; then
+        print_success "PostgreSQL service started"
+    else
+        systemctl start postgresql 2>/dev/null || systemctl start postgres 2>/dev/null || {
+            print_error "Failed to start PostgreSQL service"
+            return 1
+        }
+    fi
+
+    print_success "PostgreSQL installed successfully"
+    return 0
+}
+
+# Install PostgreSQL as Docker container
+install_postgresql_docker() {
+    print_info "Installing PostgreSQL (Docker)..."
+
+    if [ "$EUID" -ne 0 ]; then
+        print_error "Root privileges required to install PostgreSQL with Docker"
+        return 1
+    fi
+
+    # Check if Docker is available
+    if ! check_docker_available; then
+        print_error "Docker is not available or not running"
+        return 1
+    fi
+
+    # Create data directory for PostgreSQL
+    local pg_data_dir="/var/lib/openace-postgres"
+    mkdir -p "$pg_data_dir"
+
+    # Generate a random password
+    local pg_password=$(openssl rand -base64 12 2>/dev/null || date +%s | sha256sum | base64 | head -c 12)
+
+    # Run PostgreSQL container
+    docker run -d \
+        --name openace-postgres \
+        -e POSTGRES_USER="$DB_USER" \
+        -e POSTGRES_PASSWORD="$pg_password" \
+        -e POSTGRES_DB="$DB_NAME" \
+        -p "$DB_PORT":5432 \
+        -v "$pg_data_dir":/var/lib/postgresql/data \
+        --restart unless-stopped \
+        postgres:16
+
+    if [ $? -eq 0 ]; then
+        DB_PASSWORD="$pg_password"
+        print_success "PostgreSQL Docker container started"
+        print_info "Container name: openace-postgres"
+        print_info "Data directory: $pg_data_dir"
+        print_info "Database user: $DB_USER"
+        print_info "Database password: $pg_password"
+        print_warning "Please save the password for future reference!"
+        return 0
+    else
+        print_error "Failed to start PostgreSQL Docker container"
+        return 1
+    fi
+}
+
+# Create database user and database
+configure_postgresql() {
+    print_info "Configuring PostgreSQL database..."
+
+    # Generate password if not set
+    if [ -z "$DB_PASSWORD" ]; then
+        DB_PASSWORD=$(openssl rand -base64 12 2>/dev/null || date +%s | sha256sum | base64 | head -c 12)
+    fi
+
+    # Create user and database
+    if [ "$DB_INSTALL_METHOD" = "docker" ]; then
+        # For Docker, user and database are created automatically via environment variables
+        print_info "Database already created by Docker container"
+    else
+        # For binary installation, need to create user and database manually
+        print_info "Creating database user and database..."
+
+        # Check if user already exists
+        local user_exists=$(su - postgres -c "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname='$DB_USER'\"" 2>/dev/null)
+
+        if [ "$user_exists" = "1" ]; then
+            print_info "Database user '$DB_USER' already exists"
+        else
+            su - postgres -c "psql -c \"CREATE USER $DB_USER WITH PASSWORD '$DB_PASSWORD';\"" 2>/dev/null && \
+                print_success "Created database user: $DB_USER" || \
+                print_warning "Failed to create user (may already exist)"
+        fi
+
+        # Check if database exists
+        local db_exists=$(su - postgres -c "psql -lqt | cut -d \| -f 1 | grep -qw $DB_NAME" 2>/dev/null && echo "1")
+
+        if [ "$db_exists" = "1" ]; then
+            print_info "Database '$DB_NAME' already exists"
+        else
+            su - postgres -c "psql -c \"CREATE DATABASE $DB_NAME OWNER $DB_USER;\"" 2>/dev/null && \
+                print_success "Created database: $DB_NAME" || \
+                print_warning "Failed to create database (may already exist)"
+        fi
+
+        # Grant privileges
+        su - postgres -c "psql -c \"GRANT ALL PRIVILEGES ON DATABASE $DB_NAME TO $DB_USER;\"" 2>/dev/null
+    fi
+
+    print_success "PostgreSQL configured"
+    print_info "Database URL: postgresql://$DB_USER:****@$DB_HOST:$DB_PORT/$DB_NAME"
+}
+
+# Setup PostgreSQL - detect existing or install new
+setup_postgresql() {
+    print_header "Database Setup"
+
+    # Check for existing PostgreSQL
+    local has_systemd=false
+    local has_process=false
+    local has_docker=false
+
+    if command -v systemctl &>/dev/null; then
+        check_postgresql_systemd && has_systemd=true
+    fi
+
+    if ! $has_systemd; then
+        check_postgresql_process && has_process=true
+    fi
+
+    check_postgresql_docker && has_docker=true
+
+    if $has_systemd || $has_process || $has_docker; then
+        print_success "PostgreSQL is already running"
+        DB_INSTALL_METHOD="existing"
+
+        # Ask for connection details
+        local detected_port=$(get_postgresql_port)
+        prompt_input "Database host" "$DB_HOST" DB_HOST
+        prompt_input "Database port" "$detected_port" DB_PORT
+        prompt_input "Database name" "$DB_NAME" DB_NAME
+        prompt_input "Database user" "$DB_USER" DB_USER
+        prompt_input "Database password" "" DB_PASSWORD
+
+        if [ -z "$DB_PASSWORD" ]; then
+            print_warning "No password provided. Connection may fail."
+        fi
+
+        return 0
+    fi
+
+    # No PostgreSQL running - need to install
+    print_info "No PostgreSQL instance found running"
+
+    # Check if Docker is available
+    local docker_available=false
+    check_docker_available && docker_available=true
+
+    if $docker_available; then
+        print_info "Docker is available. Choose installation method:"
+        echo "  1) Install as binary service (Recommended for production)"
+        echo "  2) Install as Docker container"
+        echo ""
+        prompt_input "Enter choice" "1" pg_method
+
+        case $pg_method in
+            1)
+                DB_INSTALL_METHOD="binary"
+                ;;
+            2)
+                DB_INSTALL_METHOD="docker"
+                ;;
+            *)
+                DB_INSTALL_METHOD="binary"
+                ;;
+        esac
+    else
+        print_info "Docker not available. Installing as binary service."
+        DB_INSTALL_METHOD="binary"
+    fi
+
+    # Install PostgreSQL
+    case $DB_INSTALL_METHOD in
+        binary)
+            if install_postgresql_binary; then
+                configure_postgresql
+            else
+                print_error "Failed to install PostgreSQL"
+                print_info "Please install PostgreSQL manually and configure config.json"
+                return 1
+            fi
+            ;;
+        docker)
+            if install_postgresql_docker; then
+                print_success "PostgreSQL Docker container created user and database"
+            else
+                print_error "Failed to install PostgreSQL"
+                print_info "Please install PostgreSQL manually and configure config.json"
+                return 1
+            fi
+            ;;
+    esac
+
+    return 0
+}
+
+# Update config.json with database settings
+update_config_database() {
+    local config_file="$1"
+
+    if [ ! -f "$config_file" ]; then
+        print_warning "Config file not found: $config_file"
+        return 1
+    fi
+
+    # Build database URL
+    local db_url="postgresql://$DB_USER:$DB_PASSWORD@$DB_HOST:$DB_PORT/$DB_NAME"
+
+    # Update config.json
+    print_info "Updating database configuration in $config_file..."
+
+    # Use Python to update JSON (more reliable than sed for JSON)
+    if command -v python3 &>/dev/null; then
+        python3 -c "
+import json
+with open('$config_file', 'r') as f:
+    config = json.load(f)
+config['database'] = {
+    'type': '$DB_TYPE',
+    'url': '$db_url'
+}
+with open('$config_file', 'w') as f:
+    json.dump(config, f, indent=2)
+" 2>/dev/null && print_success "Database configuration updated" || {
+            # Fallback: use sed
+            sed -i "s|postgresql://.*|$db_url|g" "$config_file" 2>/dev/null || true
+            print_warning "Used fallback method to update config"
+        }
+    else
+        # Fallback: use sed
+        sed -i "s|postgresql://.*|$db_url|g" "$config_file" 2>/dev/null || true
+        print_warning "Used sed to update config (may not work for all formats)"
+    fi
+
+    return 0
+}
+
 # Systemd service settings
 SERVICE_PORT=""       # Web server port (will be read from config or use default)
 SERVICE_HOST="0.0.0.0" # Web server host
@@ -602,7 +994,10 @@ install_systemd_service() {
         print_info "Logs: journalctl -u open-ace -f"
         print_info "Web interface: http://localhost:$port"
     else
-        print_error "Service failed to start. Check logs with: journalctl -u open-ace -n 50"
+        print_error "Service failed to start"
+        print_info "Showing last 20 lines of logs:"
+        journalctl -u open-ace -n 20 --no-pager
+        print_info "For full logs: journalctl -u open-ace -n 50"
         return 1
     fi
 
@@ -794,6 +1189,9 @@ configure_local() {
     prompt_input "Deployment user" "$DEPLOY_USER" DEPLOY_USER
     prompt_input "Deployment path" "$DEPLOY_PATH" DEPLOY_PATH
 
+    # Remove trailing slash from path to avoid double slashes
+    DEPLOY_PATH="${DEPLOY_PATH%/}"
+
     # Ask about systemd service
     echo ""
     prompt_yesno "Install as systemd service?" "y" install_service
@@ -940,6 +1338,9 @@ install_local() {
             config_dir="/home/$DEPLOY_USER/.open-ace"
         fi
     fi
+
+    # Setup PostgreSQL (detect or install)
+    setup_postgresql
 
     # Check if already installed (must have web.py to be considered valid installation)
     if [ -d "$target_path" ] && [ -f "$target_path/web.py" ]; then
@@ -1109,7 +1510,12 @@ do_fresh_install() {
         if [ -f "$target_path/config/config.json.sample" ]; then
             cp "$target_path/config/config.json.sample" "$config_dir/config.json"
             print_info "Created config file: $config_dir/config.json"
-            print_warning "Please edit the config file with your settings."
+            # Update database configuration if PostgreSQL was set up
+            if [ -n "$DB_PASSWORD" ] && [ "$DB_INSTALL_METHOD" != "" ]; then
+                update_config_database "$config_dir/config.json"
+            else
+                print_warning "Please edit the config file with your database settings."
+            fi
         fi
     fi
 
