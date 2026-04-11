@@ -248,6 +248,7 @@ INCLUDE_ITEMS=(
     "app"
     "migrations"
     "docs"
+    "schema"
 )
 
 # Files to exclude from scripts directory
@@ -265,6 +266,22 @@ STATIC_EXCLUDES=(
     "node_modules"
     "*.log"
 )
+
+# ============================================
+# Generate database schema
+# ============================================
+echo -e "${YELLOW}Generating database schema...${NC}"
+if [ -f "$PROJECT_DIR/scripts/generate_schema.py" ]; then
+    cd "$PROJECT_DIR"
+    python3 scripts/generate_schema.py
+    if [ -f "$PROJECT_DIR/schema/schema-postgres.sql" ] && [ -f "$PROJECT_DIR/schema/schema-sqlite.sql" ]; then
+        echo -e "${GREEN}Database schema generated successfully${NC}"
+    else
+        echo -e "${YELLOW}Warning: Schema generation may have failed. Check schema directory.${NC}"
+    fi
+else
+    echo -e "${YELLOW}Warning: generate_schema.py not found, skipping schema generation${NC}"
+fi
 
 # ============================================
 # Build frontend (React app)

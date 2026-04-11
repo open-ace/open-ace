@@ -4,6 +4,19 @@
 
 repos:
   # =============================================================================
+  # Local Hooks
+  # =============================================================================
+  - repo: local
+    hooks:
+      # Check if schema.sql needs to be regenerated when migrations change
+      - id: check-schema-sync
+        name: Check schema.sql sync
+        entry: scripts/hooks/check_schema_sync.sh
+        language: script
+        files: ^migrations/versions/.*\.py$
+        pass_filenames: false
+
+  # =============================================================================
   # Code Formatting
   # =============================================================================
   - repo: https://github.com/psf/black
