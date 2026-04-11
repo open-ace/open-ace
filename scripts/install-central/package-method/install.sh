@@ -23,10 +23,13 @@ NC='\033[0m' # No Color
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # SOURCE_DIR should be the package root (where cli.py, web.py, etc. are located)
-# Possible locations based on install method:
-# - From package-method: SCRIPT_DIR = scripts/install-central/package-method, go up 2 levels to package root
-# - From install.sh at root: SCRIPT_DIR = scripts/install-central/package-method, go up 2 levels
-SOURCE_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# Package structure: package_root/scripts/install-central/package-method/install.sh
+# So we need to go up 3 levels from SCRIPT_DIR to reach package_root
+# SCRIPT_DIR = scripts/install-central/package-method
+# LEVEL 1 up = scripts/install-central
+# LEVEL 2 up = scripts
+# LEVEL 3 up = package_root (where web.py, cli.py are)
+SOURCE_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
 # Validate SOURCE_DIR - must contain web.py or cli.py
 validate_source_dir() {
