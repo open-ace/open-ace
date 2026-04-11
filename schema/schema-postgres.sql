@@ -1247,5 +1247,3 @@ CREATE UNIQUE INDEX uq_user_projects_user_project ON user_projects USING btree (
 
 ALTER TABLE ONLY user_daily_stats
     ADD CONSTRAINT fk_user_daily_stats_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
-
-\unrestrict N0DKYUgWpT3CRv63q7zOo8vjxAaI2M9mJ9qI9sMFjnIWTwpel83DCpvTQH5JLTm

@@ -41,6 +41,7 @@ def clean_postgres_schema(input_sql):
         'OWNER TO',
         'OWNER',
         '\\restrict',
+        '\\unrestrict',
         'Dumped from database',
         'Dumped by pg_dump',
     ]
