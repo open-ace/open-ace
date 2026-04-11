@@ -23,8 +23,22 @@ NC='\033[0m' # No Color
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # SOURCE_DIR should be the package root (where cli.py, web.py, etc. are located)
-# For package-method: SCRIPT_DIR = package-method, parent = install-central, grandparent = package root
+# Possible locations based on install method:
+# - From package-method: SCRIPT_DIR = scripts/install-central/package-method, go up 2 levels to package root
+# - From install.sh at root: SCRIPT_DIR = scripts/install-central/package-method, go up 2 levels
 SOURCE_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+# Validate SOURCE_DIR - must contain web.py or cli.py
+validate_source_dir() {
+    if [ ! -f "$SOURCE_DIR/web.py" ] && [ ! -f "$SOURCE_DIR/cli.py" ]; then
+        print_error "SOURCE_DIR is invalid: $SOURCE_DIR"
+        print_error "Expected to find web.py or cli.py in package root"
+        print_info "Please ensure you're running install.sh from a valid Open ACE package"
+        print_info "Current SCRIPT_DIR: $SCRIPT_DIR"
+        exit 1
+    fi
+    print_info "Source directory validated: $SOURCE_DIR"
+}
 
 # Default values
 CONFIG_FILE=""
@@ -719,6 +733,9 @@ parse_config_file() {
     # Source the config file (it should be a shell script with variable assignments)
     source "$CONFIG_FILE"
 
+    # Validate source directory
+    validate_source_dir
+
     # Determine install mode based on DEPLOY_HOST
     if [ -z "$DEPLOY_HOST" ]; then
         INSTALL_MODE="local"
@@ -900,11 +917,14 @@ configure_deploy() {
 install_local() {
     print_header "Installing on Local Machine"
 
+    # Validate source directory first
+    validate_source_dir
+
     local target_path="$DEPLOY_PATH"
     local config_dir="$HOME/.open-ace"
 
-    # Check if already installed
-    if [ -d "$target_path" ]; then
+    # Check if already installed (must have web.py to be considered valid installation)
+    if [ -d "$target_path" ] && [ -f "$target_path/web.py" ]; then
         print_warning "Existing installation found at: $target_path"
         prompt_yesno "Upgrade existing installation?" "y" upgrade
 
@@ -914,6 +934,11 @@ install_local() {
             print_info "Installation cancelled."
             exit 0
         fi
+    elif [ -d "$target_path" ]; then
+        # Directory exists but no valid installation
+        print_warning "Directory exists at: $target_path but no valid installation found"
+        print_info "Will perform fresh installation (existing directory contents will be preserved/merged)"
+        do_fresh_install "$target_path" "$config_dir" "$DEPLOY_USER"
     else
         do_fresh_install "$target_path" "$config_dir" "$DEPLOY_USER"
     fi
@@ -962,6 +987,9 @@ install_local() {
 install_deploy() {
     print_header "Deploying to Remote Machine"
 
+    # Validate source directory first
+    validate_source_dir
+
     local remote="$DEPLOY_USER@$DEPLOY_HOST"
     local target_path="$DEPLOY_PATH"
 
@@ -976,8 +1004,8 @@ install_deploy() {
     fi
     print_success "SSH connection OK"
 
-    # Check if already installed
-    if ssh "$remote" "[ -d '$target_path' ]"; then
+    # Check if already installed (must have web.py to be considered valid installation)
+    if ssh "$remote" "[ -d '$target_path' ] && [ -f '$target_path/web.py' ]"; then
         print_warning "Existing installation found at: $target_path"
         prompt_yesno "Upgrade existing installation?" "y" upgrade
 
@@ -987,6 +1015,11 @@ install_deploy() {
             print_info "Installation cancelled."
             exit 0
         fi
+    elif ssh "$remote" "[ -d '$target_path' ]"; then
+        # Directory exists but no valid installation
+        print_warning "Directory exists at: $target_path but no valid installation found"
+        print_info "Will perform fresh installation (existing directory contents will be preserved/merged)"
+        do_fresh_install_remote "$remote" "$target_path"
     else
         do_fresh_install_remote "$remote" "$target_path"
     fi
