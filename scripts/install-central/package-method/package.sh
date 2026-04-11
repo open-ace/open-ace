@@ -302,31 +302,22 @@ FRONTEND_DIR="$PROJECT_DIR/frontend"
 if [ -d "$FRONTEND_DIR" ]; then
     # Check if npm is available, install if not
     if ! command -v npm &> /dev/null; then
-        echo -e "${BLUE}npm not found, attempting to install Node.js...${NC}"
+        echo -e "${BLUE}npm not found, installing Node.js 20.x via NodeSource...${NC}"
         if [ "$EUID" -eq 0 ]; then
             # Running as root, can install
-            if command -v dnf &> /dev/null; then
-                echo -e "${BLUE}Installing Node.js via dnf...${NC}"
-                dnf install -y nodejs npm || {
-                    echo -e "${YELLOW}dnf install failed, trying nodesource...${NC}"
-                    curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+            # Use NodeSource to get latest Node.js 20.x (not system packages which may be outdated)
+            if command -v dnf &> /dev/null || command -v yum &> /dev/null; then
+                # Rocky Linux/CentOS/RHEL - use NodeSource RPM repo
+                curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+                if command -v dnf &> /dev/null; then
                     dnf install -y nodejs
-                }
-            elif command -v yum &> /dev/null; then
-                echo -e "${BLUE}Installing Node.js via yum...${NC}"
-                yum install -y nodejs npm || {
-                    echo -e "${YELLOW}yum install failed, trying nodesource...${NC}"
-                    curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+                else
                     yum install -y nodejs
-                }
+                fi
             elif command -v apt-get &> /dev/null; then
-                echo -e "${BLUE}Installing Node.js via apt...${NC}"
-                apt-get update
-                apt-get install -y nodejs npm || {
-                    echo -e "${YELLOW}apt install failed, trying nodesource...${NC}"
-                    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-                    apt-get install -y nodejs
-                }
+                # Debian/Ubuntu - use NodeSource deb repo
+                curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+                apt-get install -y nodejs
             elif [[ "$OSTYPE" == "darwin"* ]]; then
                 echo -e "${YELLOW}On macOS, please install Node.js manually:${NC}"
                 echo -e "${YELLOW}  brew install node${NC}"
@@ -338,15 +329,10 @@ if [ -d "$FRONTEND_DIR" ]; then
             fi
         else
             echo -e "${YELLOW}Not running as root, cannot install Node.js automatically${NC}"
-            echo -e "${YELLOW}Please run with sudo or install Node.js manually:${NC}"
-            if command -v dnf &> /dev/null || command -v yum &> /dev/null; then
-                echo -e "${YELLOW}  sudo yum install -y nodejs npm${NC}"
-                echo -e "${YELLOW}Or:${NC}"
-                echo -e "${YELLOW}  curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -${NC}"
-                echo -e "${YELLOW}  sudo yum install -y nodejs${NC}"
-            elif command -v apt-get &> /dev/null; then
-                echo -e "${YELLOW}  sudo apt-get install -y nodejs npm${NC}"
-            fi
+            echo -e "${YELLOW}Please run with sudo or install Node.js 20.x manually:${NC}"
+            echo -e "${YELLOW}Recommended method (NodeSource):${NC}"
+            echo -e "${YELLOW}  curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -${NC}"
+            echo -e "${YELLOW}  sudo yum install -y nodejs${NC}"
             exit 1
         fi
     fi
