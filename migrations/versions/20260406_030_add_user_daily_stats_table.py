@@ -1,7 +1,7 @@
 """Add user_daily_stats table for optimized usage queries
 
-Revision ID: 024_add_user_daily_stats_table
-Revises: 028_project_path
+Revision ID: 030_add_user_daily_stats_table
+Revises: 029_boolean_fields
 Create Date: 2026-04-06
 
 This migration adds a pre-aggregated table for fast user usage trend queries.
@@ -20,8 +20,8 @@ from alembic import op
 import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
-revision: str = "024_add_user_daily_stats_table"
-down_revision: Union[str, None] = "028_project_path"
+revision: str = "030_add_user_daily_stats_table"
+down_revision: Union[str, None] = "029_boolean_fields"
 branch_labels: Union[str, None] = None
 depends_on: Union[str, None] = None
 

@@ -830,6 +830,70 @@ CREATE SEQUENCE web_user_auth_sessions_id_seq
     CACHE 1;
 
 ALTER SEQUENCE web_user_auth_sessions_id_seq OWNED BY web_user_auth_sessions.id;
+ALTER TABLE ONLY agent_sessions ALTER COLUMN id SET DEFAULT nextval('agent_sessions_id_seq'::regclass);
+
+ALTER TABLE ONLY alerts ALTER COLUMN id SET DEFAULT nextval('alerts_id_seq'::regclass);
+
+ALTER TABLE ONLY annotations ALTER COLUMN id SET DEFAULT nextval('annotations_id_seq'::regclass);
+
+ALTER TABLE ONLY audit_logs ALTER COLUMN id SET DEFAULT nextval('audit_logs_id_seq'::regclass);
+
+ALTER TABLE ONLY content_filter_rules ALTER COLUMN id SET DEFAULT nextval('content_filter_rules_id_seq'::regclass);
+
+ALTER TABLE ONLY daily_messages ALTER COLUMN id SET DEFAULT nextval('daily_messages_id_seq'::regclass);
+
+ALTER TABLE ONLY daily_usage ALTER COLUMN id SET DEFAULT nextval('daily_usage_id_seq'::regclass);
+
+ALTER TABLE ONLY knowledge_base ALTER COLUMN id SET DEFAULT nextval('knowledge_base_id_seq'::regclass);
+
+ALTER TABLE ONLY projects ALTER COLUMN id SET DEFAULT nextval('projects_id_seq'::regclass);
+
+ALTER TABLE ONLY prompt_templates ALTER COLUMN id SET DEFAULT nextval('prompt_templates_id_seq'::regclass);
+
+ALTER TABLE ONLY quota_alerts ALTER COLUMN id SET DEFAULT nextval('quota_alerts_new_id_seq'::regclass);
+
+ALTER TABLE ONLY quota_usage ALTER COLUMN id SET DEFAULT nextval('quota_usage_new_id_seq'::regclass);
+
+ALTER TABLE ONLY retention_history ALTER COLUMN id SET DEFAULT nextval('retention_history_id_seq'::regclass);
+
+ALTER TABLE ONLY security_settings ALTER COLUMN id SET DEFAULT nextval('security_settings_id_seq'::regclass);
+
+ALTER TABLE ONLY session_messages ALTER COLUMN id SET DEFAULT nextval('session_messages_id_seq'::regclass);
+
+ALTER TABLE ONLY sessions ALTER COLUMN id SET DEFAULT nextval('sessions_new_id_seq1'::regclass);
+
+ALTER TABLE ONLY shared_sessions ALTER COLUMN id SET DEFAULT nextval('shared_sessions_id_seq'::regclass);
+
+ALTER TABLE ONLY sso_identities ALTER COLUMN id SET DEFAULT nextval('sso_identities_id_seq'::regclass);
+
+ALTER TABLE ONLY sso_providers ALTER COLUMN id SET DEFAULT nextval('sso_providers_id_seq'::regclass);
+
+ALTER TABLE ONLY sso_sessions ALTER COLUMN id SET DEFAULT nextval('sso_sessions_id_seq'::regclass);
+
+ALTER TABLE ONLY sync_events ALTER COLUMN id SET DEFAULT nextval('sync_events_id_seq'::regclass);
+
+ALTER TABLE ONLY team_members ALTER COLUMN id SET DEFAULT nextval('team_members_id_seq'::regclass);
+
+ALTER TABLE ONLY teams ALTER COLUMN id SET DEFAULT nextval('teams_id_seq'::regclass);
+
+ALTER TABLE ONLY tenant_quotas ALTER COLUMN id SET DEFAULT nextval('tenant_quotas_id_seq'::regclass);
+
+ALTER TABLE ONLY tenant_settings ALTER COLUMN id SET DEFAULT nextval('tenant_settings_id_seq'::regclass);
+
+ALTER TABLE ONLY tenant_usage ALTER COLUMN id SET DEFAULT nextval('tenant_usage_new_id_seq'::regclass);
+
+ALTER TABLE ONLY tenants ALTER COLUMN id SET DEFAULT nextval('tenants_id_seq'::regclass);
+
+ALTER TABLE ONLY user_daily_stats ALTER COLUMN id SET DEFAULT nextval('user_daily_stats_id_seq'::regclass);
+
+ALTER TABLE ONLY user_projects ALTER COLUMN id SET DEFAULT nextval('user_projects_id_seq'::regclass);
+
+ALTER TABLE ONLY user_tool_accounts ALTER COLUMN id SET DEFAULT nextval('user_tool_accounts_id_seq'::regclass);
+
+ALTER TABLE ONLY users ALTER COLUMN id SET DEFAULT nextval('users_id_seq'::regclass);
+
+ALTER TABLE ONLY web_user_auth_sessions ALTER COLUMN id SET DEFAULT nextval('web_user_auth_sessions_id_seq'::regclass);
+
 ALTER TABLE ONLY agent_sessions
     ADD CONSTRAINT agent_sessions_pkey PRIMARY KEY (id);
 

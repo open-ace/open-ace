@@ -1,10 +1,12 @@
 -- Open-ACE Database Schema for SQLite
 -- Auto-generated from PostgreSQL schema
 -- DO NOT EDIT MANUALLY
---
--- Note: SQLite uses INTEGER (0/1) for boolean fields due to type affinity.
--- These fields are semantically boolean: is_admin, is_active, is_published, etc.
--- When writing SQL, use 1 for TRUE, 0 for FALSE.
+
+-- Open-ACE Database Schema for PostgreSQL
+-- Auto-generated from pg_dump
+-- DO NOT EDIT MANUALLY
+
+-- Setup session
 
 CREATE TABLE agent_sessions (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,7 +48,7 @@ CREATE TABLE alerts (
  tool_name text,
  metadata text,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- read integer DEFAULT 0,  -- boolean: read status (0=unread, 1=read)
+ read INTEGER DEFAULT false,
  action_url text,
  action_text text
 );
@@ -85,7 +87,7 @@ CREATE TABLE audit_logs (
  ip_address text,
  user_agent text,
  session_id text,
- success integer DEFAULT 1,  -- boolean: operation success (0=failed, 1=success)
+ success INTEGER DEFAULT true,
  error_message text
 );
 
@@ -202,7 +204,7 @@ CREATE TABLE knowledge_base (
  tags text,
  author_id integer,
  author_name text,
- is_published integer DEFAULT 0,  -- boolean: publication status
+ is_published INTEGER DEFAULT false,
  view_count integer DEFAULT 0,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -213,8 +215,8 @@ CREATE TABLE knowledge_base (
 ALTER SEQUENCE knowledge_base_id_seq OWNED BY knowledge_base.id;
 CREATE TABLE notification_preferences (
  user_id INTEGER PRIMARY KEY AUTOINCREMENT,
- email_enabled integer DEFAULT 1,  -- boolean: email notification enabled
- push_enabled integer DEFAULT 1,  -- boolean: push notification enabled
+ email_enabled INTEGER DEFAULT true,
+ push_enabled INTEGER DEFAULT true,
  webhook_url text,
  alert_types text,
  min_severity text DEFAULT 'warning'
@@ -246,8 +248,8 @@ CREATE TABLE prompt_templates (
  tags text,
  author_id integer,
  author_name text,
- is_public integer DEFAULT 0,  -- boolean: public visibility
- is_featured integer DEFAULT 0,  -- boolean: featured status
+ is_public INTEGER DEFAULT false,
+ is_featured INTEGER DEFAULT false,
  use_count integer DEFAULT 0,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -268,7 +270,7 @@ CREATE TABLE quota_alerts (
  percentage real NOT NULL,
  message text,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- acknowledged integer DEFAULT 0,  -- boolean: acknowledgment status
+ acknowledged INTEGER DEFAULT false,
  acknowledged_at TIMESTAMP,
  acknowledged_by integer
 );
@@ -352,8 +354,8 @@ CREATE TABLE shared_sessions (
  target_id integer,
  target_name text,
  expires_at TIMESTAMP,
- allow_comments integer DEFAULT 1,  -- boolean: allow comments
- allow_copy integer DEFAULT 1,  -- boolean: allow copy
+ allow_comments INTEGER DEFAULT true,
+ allow_copy INTEGER DEFAULT true,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  access_count integer DEFAULT 0,
  last_accessed TIMESTAMP
@@ -381,7 +383,7 @@ CREATE TABLE sso_providers (
  provider_type text NOT NULL,
  config text NOT NULL,
  tenant_id integer,
- is_active integer DEFAULT 1,  -- boolean: provider active status
+ is_active INTEGER DEFAULT true,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -584,7 +586,7 @@ CREATE TABLE users (
  username character varying NOT NULL,
  password_hash character varying NOT NULL,
  email character varying,
- is_admin integer DEFAULT 0,  -- boolean: admin status
+ is_admin INTEGER DEFAULT false,
  is_active INTEGER DEFAULT true,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  last_login TIMESTAMP,
@@ -596,7 +598,7 @@ CREATE TABLE users (
  deleted_at TIMESTAMP,
  system_account text,
  tenant_id integer,
- must_change_password integer DEFAULT 0,  -- boolean: password change required
+ must_change_password INTEGER DEFAULT false,
  CONSTRAINT chk_users_role CHECK (((role) = ANY ((ARRAY['admin' varying, 'manager' varying, 'user' varying])[])))
 );
 
@@ -614,6 +616,86 @@ CREATE TABLE web_user_auth_sessions (
 
 
 ALTER SEQUENCE web_user_auth_sessions_id_seq OWNED BY web_user_auth_sessions.id;
+ALTER TABLE ONLY agent_sessions ALTER COLUMN id SET DEFAULT nextval('agent_sessions_id_seq'::regclass);
+
+ALTER TABLE ONLY alerts ALTER COLUMN id SET DEFAULT nextval('alerts_id_seq'::regclass);
+
+
+ALTER TABLE ONLY annotations ALTER COLUMN id SET DEFAULT nextval('annotations_id_seq'::regclass);
+
+ALTER TABLE ONLY audit_logs ALTER COLUMN id SET DEFAULT nextval('audit_logs_id_seq'::regclass);
+
+
+ALTER TABLE ONLY content_filter_rules ALTER COLUMN id SET DEFAULT nextval('content_filter_rules_id_seq'::regclass);
+
+ALTER TABLE ONLY daily_messages ALTER COLUMN id SET DEFAULT nextval('daily_messages_id_seq'::regclass);
+
+
+ALTER TABLE ONLY daily_usage ALTER COLUMN id SET DEFAULT nextval('daily_usage_id_seq'::regclass);
+
+ALTER TABLE ONLY knowledge_base ALTER COLUMN id SET DEFAULT nextval('knowledge_base_id_seq'::regclass);
+
+
+ALTER TABLE ONLY projects ALTER COLUMN id SET DEFAULT nextval('projects_id_seq'::regclass);
+
+ALTER TABLE ONLY prompt_templates ALTER COLUMN id SET DEFAULT nextval('prompt_templates_id_seq'::regclass);
+
+
+ALTER TABLE ONLY quota_alerts ALTER COLUMN id SET DEFAULT nextval('quota_alerts_new_id_seq'::regclass);
+
+ALTER TABLE ONLY quota_usage ALTER COLUMN id SET DEFAULT nextval('quota_usage_new_id_seq'::regclass);
+
+
+ALTER TABLE ONLY retention_history ALTER COLUMN id SET DEFAULT nextval('retention_history_id_seq'::regclass);
+
+ALTER TABLE ONLY security_settings ALTER COLUMN id SET DEFAULT nextval('security_settings_id_seq'::regclass);
+
+
+ALTER TABLE ONLY session_messages ALTER COLUMN id SET DEFAULT nextval('session_messages_id_seq'::regclass);
+
+ALTER TABLE ONLY sessions ALTER COLUMN id SET DEFAULT nextval('sessions_new_id_seq1'::regclass);
+
+
+ALTER TABLE ONLY shared_sessions ALTER COLUMN id SET DEFAULT nextval('shared_sessions_id_seq'::regclass);
+
+ALTER TABLE ONLY sso_identities ALTER COLUMN id SET DEFAULT nextval('sso_identities_id_seq'::regclass);
+
+
+ALTER TABLE ONLY sso_providers ALTER COLUMN id SET DEFAULT nextval('sso_providers_id_seq'::regclass);
+
+ALTER TABLE ONLY sso_sessions ALTER COLUMN id SET DEFAULT nextval('sso_sessions_id_seq'::regclass);
+
+
+ALTER TABLE ONLY sync_events ALTER COLUMN id SET DEFAULT nextval('sync_events_id_seq'::regclass);
+
+ALTER TABLE ONLY team_members ALTER COLUMN id SET DEFAULT nextval('team_members_id_seq'::regclass);
+
+
+ALTER TABLE ONLY teams ALTER COLUMN id SET DEFAULT nextval('teams_id_seq'::regclass);
+
+ALTER TABLE ONLY tenant_quotas ALTER COLUMN id SET DEFAULT nextval('tenant_quotas_id_seq'::regclass);
+
+
+ALTER TABLE ONLY tenant_settings ALTER COLUMN id SET DEFAULT nextval('tenant_settings_id_seq'::regclass);
+
+ALTER TABLE ONLY tenant_usage ALTER COLUMN id SET DEFAULT nextval('tenant_usage_new_id_seq'::regclass);
+
+
+ALTER TABLE ONLY tenants ALTER COLUMN id SET DEFAULT nextval('tenants_id_seq'::regclass);
+
+ALTER TABLE ONLY user_daily_stats ALTER COLUMN id SET DEFAULT nextval('user_daily_stats_id_seq'::regclass);
+
+
+ALTER TABLE ONLY user_projects ALTER COLUMN id SET DEFAULT nextval('user_projects_id_seq'::regclass);
+
+ALTER TABLE ONLY user_tool_accounts ALTER COLUMN id SET DEFAULT nextval('user_tool_accounts_id_seq'::regclass);
+
+
+ALTER TABLE ONLY users ALTER COLUMN id SET DEFAULT nextval('users_id_seq'::regclass);
+
+ALTER TABLE ONLY web_user_auth_sessions ALTER COLUMN id SET DEFAULT nextval('web_user_auth_sessions_id_seq'::regclass);
+
+
 ALTER TABLE ONLY agent_sessions
     ADD CONSTRAINT agent_sessions_pkey PRIMARY KEY (id);
 

@@ -205,6 +205,14 @@ def clean_postgres_schema(input_sql):
                 i += 1
                 continue
             
+            # Check if this line is ALTER TABLE SET DEFAULT (single-line format)
+            # e.g., ALTER TABLE ONLY public.users ALTER COLUMN id SET DEFAULT nextval(...)
+            if re.search(r'ALTER COLUMN.*SET DEFAULT', line):
+                output_lines.append(line.replace('public.', ''))
+                output_lines.append("")
+                i += 1
+                continue
+
             # Look ahead to see if this is ADD PRIMARY KEY, ADD FOREIGN KEY, ADD CONSTRAINT
             # These are multi-line statements like:
             # ALTER TABLE ONLY public.users
@@ -224,10 +232,21 @@ def clean_postgres_schema(input_sql):
                     if i < len(lines):
                         output_lines.append(lines[i].replace('public.', ''))
                     output_lines.append("")
-            else:
-                # Skip other ALTER TABLE
-                while i < len(lines) and not lines[i].rstrip().endswith(';'):
+                elif re.search(r'ALTER COLUMN.*SET DEFAULT', next_line):
+                    # Keep ALTER TABLE SET DEFAULT for id columns (sequence defaults)
+                    output_lines.append(line.replace('public.', ''))
                     i += 1
+                    while i < len(lines) and not lines[i].rstrip().endswith(';'):
+                        if not re.search(r'OWNER', lines[i]):
+                            output_lines.append(lines[i].replace('public.', ''))
+                        i += 1
+                    if i < len(lines):
+                        output_lines.append(lines[i].replace('public.', ''))
+                    output_lines.append("")
+                else:
+                    # Skip other ALTER TABLE
+                    while i < len(lines) and not lines[i].rstrip().endswith(';'):
+                        i += 1
             i += 1
             continue
         
@@ -453,15 +472,14 @@ def main():
     project_root = get_project_root()
     schema_dir = project_root / "schema"
     
-    # Read the raw PostgreSQL dump
-    raw_file = schema_dir / "schema-postgres.sql"
-    if not raw_file.exists():
-        print(f"Error: {raw_file} not found. Run pg_dump first:")
-        print("  pg_dump -d <database> --schema-only > schema/schema-postgres.sql")
+    # Run pg_dump to get the schema
+    print("Running pg_dump...")
+    import subprocess
+    result = subprocess.run(['pg_dump', '-d', 'ace', '--schema-only'], capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"Error: pg_dump failed: {result.stderr}")
         return 1
-    
-    print("Reading PostgreSQL schema dump...")
-    raw_sql = raw_file.read_text()
+    raw_sql = result.stdout
     
     print("Cleaning PostgreSQL schema...")
     clean_sql = clean_postgres_schema(raw_sql)
