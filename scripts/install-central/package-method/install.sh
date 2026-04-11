@@ -30,8 +30,220 @@ INSTALL_MODE=""  # "local" or "deploy"
 
 # Deployment settings (for both local and deploy modes)
 DEPLOY_HOST=""        # Empty for local mode, required for deploy mode
-DEPLOY_USER="${USER}"
-DEPLOY_PATH="$HOME/open-ace"
+DEPLOY_USER=""        # Will be set after checking for openace user
+DEPLOY_PATH=""        # Will be set based on DEPLOY_USER
+
+# ============================================================================
+# User Detection and Creation
+# ============================================================================
+
+# Check if openace user exists on the system
+check_openace_user_exists() {
+    if id "openace" &>/dev/null; then
+        return 0  # User exists
+    else
+        return 1  # User does not exist
+    fi
+}
+
+# Check if openace user exists on remote system
+check_openace_user_exists_remote() {
+    local remote="$1"
+    if ssh "$remote" "id openace &>/dev/null"; then
+        return 0  # User exists
+    else
+        return 1  # User does not exist
+    fi
+}
+
+# Create openace user on local system
+create_openace_user() {
+    print_info "Creating openace system user..."
+
+    # Check if running as root
+    if [ "$EUID" -ne 0 ]; then
+        print_warning "Root privileges required to create openace user"
+        print_info "Please run: sudo $0"
+        return 1
+    fi
+
+    # Detect OS and create user accordingly
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        # macOS
+        # Check if the user already exists in local directory
+        if dscl . list /Users | grep -q "^openace"; then
+            print_success "openace user already exists"
+            return 0
+        fi
+
+        # Create user on macOS
+        local last_uid=$(dscl . list /Users UniqueID | sort -nr | head -1 | awk '{print $2}')
+        local new_uid=$((last_uid + 1))
+
+        # Create the user
+        dscl . -create /Users/openace
+        dscl . -create /Users/openace UserShell /bin/bash
+        dscl . -create /Users/openace RealName "Open ACE Service"
+        dscl . -create /Users/openace UniqueID "$new_uid"
+        dscl . -create /Users/openace PrimaryGroupID 20  # Staff group
+
+        # Create home directory
+        createhomedir -c -u openace > /dev/null 2>&1 || true
+
+        print_success "Created openace user (UID: $new_uid)"
+        print_info "Home directory: /Users/openace"
+
+    elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        # Linux
+        if command -v useradd &>/dev/null; then
+            # Create system user with home directory
+            useradd -r -m -s /bin/bash openace || {
+                # If -r fails (some systems don't support it), try without
+                useradd -m -s /bin/bash openace
+            }
+            print_success "Created openace system user"
+            print_info "Home directory: /home/openace"
+        elif command -v adduser &>/dev/null; then
+            # Debian-style adduser
+            adduser --system --home /home/openace --shell /bin/bash openace || {
+                # If --system fails, try regular adduser
+                adduser --disabled-password --gecos "Open ACE Service" openace
+            }
+            print_success "Created openace system user"
+        else
+            print_error "Cannot create user: useradd/adduser not found"
+            return 1
+        fi
+    else
+        print_error "Unsupported OS: $OSTYPE"
+        print_info "Please create the openace user manually"
+        return 1
+    fi
+
+    return 0
+}
+
+# Create openace user on remote system
+create_openace_user_remote() {
+    local remote="$1"
+
+    print_info "Creating openace system user on remote..."
+
+    # Detect remote OS and create user
+    local os_type=$(ssh "$remote" "echo \$OSTYPE")
+
+    ssh "$remote" "
+        # Check if already exists
+        if id openace &>/dev/null; then
+            echo 'User openace already exists'
+            exit 0
+        fi
+
+        # Check for sudo
+        if ! sudo -n true 2>/dev/null; then
+            echo 'SUDO_REQUIRED'
+            exit 1
+        fi
+
+        # Create user based on OS
+        if command -v useradd &>/dev/null; then
+            sudo useradd -r -m -s /bin/bash openace 2>/dev/null || \
+            sudo useradd -m -s /bin/bash openace
+            echo 'USER_CREATED'
+        elif command -v adduser &>/dev/null; then
+            sudo adduser --system --home /home/openace --shell /bin/bash openace 2>/dev/null || \
+            sudo adduser --disabled-password --gecos 'Open ACE Service' openace
+            echo 'USER_CREATED'
+        else
+            echo 'USERADD_NOT_FOUND'
+            exit 1
+        fi
+    "
+
+    local result=$(ssh "$remote" "
+        if id openace &>/dev/null; then
+            echo 'USER_EXISTS'
+        elif sudo -n true 2>/dev/null; then
+            echo 'SUDO_OK'
+        else
+            echo 'SUDO_REQUIRED'
+        fi
+    ")
+
+    case "$result" in
+        USER_EXISTS)
+            print_success "openace user exists on remote"
+            return 0
+            ;;
+        SUDO_OK)
+            # Try to create again
+            ssh "$remote" "
+                if ! id openace &>/dev/null && sudo -n true; then
+                    if command -v useradd &>/dev/null; then
+                        sudo useradd -r -m -s /bin/bash openace 2>/dev/null || sudo useradd -m -s /bin/bash openace
+                    elif command -v adduser &>/dev/null; then
+                        sudo adduser --system --home /home/openace --shell /bin/bash openace 2>/dev/null || sudo adduser --disabled-password --gecos 'Open ACE Service' openace
+                    fi
+                fi
+            "
+            if ssh "$remote" "id openace &>/dev/null"; then
+                print_success "Created openace user on remote"
+                return 0
+            else
+                print_error "Failed to create openace user on remote"
+                return 1
+            fi
+            ;;
+        SUDO_REQUIRED)
+            print_warning "Sudo required on remote to create openace user"
+            print_info "Please run on remote: sudo useradd -r -m -s /bin/bash openace"
+            return 1
+            ;;
+    esac
+}
+
+# Initialize deployment user based on openace user availability
+init_deploy_user() {
+    local is_local="$1"  # "true" for local, "false" for remote
+
+    # Determine default home directory based on OS
+    local openace_home
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        openace_home="/Users/openace"
+    else
+        openace_home="/home/openace"
+    fi
+
+    if [ "$is_local" = "true" ]; then
+        # Local installation
+        if check_openace_user_exists; then
+            DEPLOY_USER="openace"
+            DEPLOY_PATH="$openace_home"
+            print_info "Found openace user, using as deployment user"
+        else
+            # Check if running as root - can create user
+            if [ "$EUID" -eq 0 ]; then
+                print_info "Running as root, will create openace user"
+                if create_openace_user; then
+                    DEPLOY_USER="openace"
+                    DEPLOY_PATH="$openace_home"
+                else
+                    print_warning "Failed to create openace user, using current user"
+                    DEPLOY_USER="${USER}"
+                    DEPLOY_PATH="$HOME/open-ace"
+                fi
+            else
+                # Not root, use current user as default
+                DEPLOY_USER="${USER}"
+                DEPLOY_PATH="$HOME/open-ace"
+            fi
+        fi
+    else
+        # Remote deployment - will check later during SSH connection
+        DEPLOY_USER="openace"
+        DEPLOY_PATH="/home/openace"  # Most servers run Linux
+    fi
+}
 
 # Systemd service settings
 SERVICE_PORT=""       # Web server port (will be read from config or use default)
@@ -305,7 +517,7 @@ install_systemd_service() {
     local port="${3:-5000}"
     local host="${4:-0.0.0.0}"
 
-    local service_template="$SOURCE_DIR/scripts/open-ace.service"
+    local service_template="$SOURCE_DIR/../open-ace.service"
     local service_file="/etc/systemd/system/open-ace.service"
 
     if [ ! -f "$service_template" ]; then
@@ -535,10 +747,14 @@ interactive_config() {
     case $mode_choice in
         1)
             INSTALL_MODE="local"
+            # Initialize deployment user based on openace user availability
+            init_deploy_user "true"
             configure_local
             ;;
         2)
             INSTALL_MODE="deploy"
+            # Initialize deployment user (remote will be checked later)
+            init_deploy_user "false"
             configure_deploy
             ;;
         *)

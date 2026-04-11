@@ -24,6 +24,139 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 DIST_DIR="$PROJECT_DIR/dist"
 
+# Check and install required dependencies
+check_and_install_deps() {
+    local missing_deps=()
+    local has_pip=false
+
+    # Check for pip (pip3 or pip)
+    if command -v pip3 &>/dev/null; then
+        has_pip=true
+    elif command -v pip &>/dev/null; then
+        has_pip=true
+    fi
+
+    if [ "$has_pip" = false ]; then
+        missing_deps+=("pip")
+    fi
+
+    # Check for tar
+    if ! command -v tar &>/dev/null; then
+        missing_deps+=("tar")
+    fi
+
+    # If no missing dependencies, return
+    if [ ${#missing_deps[@]} -eq 0 ]; then
+        return 0
+    fi
+
+    echo -e "${YELLOW}Missing required dependencies: ${missing_deps[*]}${NC}"
+    echo -e "${YELLOW}Attempting to install missing dependencies...${NC}"
+
+    # Detect OS and install accordingly
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        # macOS - use Homebrew
+        if ! command -v brew &>/dev/null; then
+            echo -e "${RED}Homebrew not found. Please install Homebrew first:${NC}"
+            echo "  /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+            exit 1
+        fi
+
+        for dep in "${missing_deps[@]}"; do
+            case $dep in
+                pip)
+                    echo -e "${YELLOW}Installing Python (includes pip)...${NC}"
+                    brew install python
+                    ;;
+                tar)
+                    echo -e "${YELLOW}Installing gnu-tar...${NC}"
+                    brew install gnu-tar
+                    # Add gnu-tar to PATH if needed
+                    if ! command -v tar &>/dev/null; then
+                        export PATH="/opt/homebrew/opt/gnu-tar/libexec/gnubin:/usr/local/opt/gnu-tar/libexec/gnubin:$PATH"
+                    fi
+                    ;;
+            esac
+        done
+    elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        # Linux - use apt, yum, or dnf
+        if command -v apt-get &>/dev/null; then
+            echo -e "${YELLOW}Detected apt-based system${NC}"
+            sudo apt-get update -qq
+            for dep in "${missing_deps[@]}"; do
+                case $dep in
+                    pip)
+                        echo -e "${YELLOW}Installing python3-pip...${NC}"
+                        sudo apt-get install -y python3-pip python3-venv
+                        ;;
+                    tar)
+                        echo -e "${YELLOW}Installing tar...${NC}"
+                        sudo apt-get install -y tar
+                        ;;
+                esac
+            done
+        elif command -v yum &>/dev/null; then
+            echo -e "${YELLOW}Detected yum-based system${NC}"
+            for dep in "${missing_deps[@]}"; do
+                case $dep in
+                    pip)
+                        echo -e "${YELLOW}Installing python3-pip...${NC}"
+                        sudo yum install -y python3-pip
+                        ;;
+                    tar)
+                        echo -e "${YELLOW}Installing tar...${NC}"
+                        sudo yum install -y tar
+                        ;;
+                esac
+            done
+        elif command -v dnf &>/dev/null; then
+            echo -e "${YELLOW}Detected dnf-based system${NC}"
+            for dep in "${missing_deps[@]}"; do
+                case $dep in
+                    pip)
+                        echo -e "${YELLOW}Installing python3-pip...${NC}"
+                        sudo dnf install -y python3-pip
+                        ;;
+                    tar)
+                        echo -e "${YELLOW}Installing tar...${NC}"
+                        sudo dnf install -y tar
+                        ;;
+                esac
+            done
+        else
+            echo -e "${RED}Unsupported Linux distribution. Please install manually:${NC}"
+            echo "  pip:  pip3 or pip command"
+            echo "  tar:  tar command"
+            exit 1
+        fi
+    else
+        echo -e "${RED}Unsupported OS: $OSTYPE${NC}"
+        echo "Please install manually:"
+        echo "  pip:  pip3 or pip command"
+        echo "  tar:  tar command"
+        exit 1
+    fi
+
+    # Verify installation
+    local still_missing=()
+    if ! command -v pip3 &>/dev/null && ! command -v pip &>/dev/null; then
+        still_missing+=("pip")
+    fi
+    if ! command -v tar &>/dev/null; then
+        still_missing+=("tar")
+    fi
+
+    if [ ${#still_missing[@]} -gt 0 ]; then
+        echo -e "${RED}Failed to install: ${still_missing[*]}${NC}"
+        exit 1
+    fi
+
+    echo -e "${GREEN}All dependencies installed successfully!${NC}"
+}
+
+# Run dependency check
+check_and_install_deps
+
 # Force re-download dependencies
 FORCE_DOWNLOAD=false
 
