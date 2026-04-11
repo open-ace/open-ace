@@ -37,9 +37,8 @@ def clean_postgres_schema(input_sql):
     
     # Simple skip patterns - just check if line contains these
     skip_contains = [
-        'Owner:',
-        'OWNER TO',
-        'OWNER',
+        '; Owner:',           # Comment line with Owner
+        'OWNER TO',           # ALTER TABLE/SEQUENCE xxx OWNER TO yyy
         '\\restrict',
         '\\unrestrict',
         'Dumped from database',
