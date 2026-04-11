@@ -35,30 +35,21 @@ def clean_postgres_schema(input_sql):
     output_lines.append("SET client_encoding = 'UTF8';")
     output_lines.append("")
     
-    skip_patterns = [
-        r'\\restrict',
-        r'Dumped from database',
-        r'Dumped by pg_dump',
-        r'SET statement_timeout',
-        r'SET lock_timeout',
-        r'SET idle_in_transaction_session_timeout',
-        r'SET standard_conforming_strings',
-        r'SELECT pg_catalog.set_config',
-        r'SET check_function_bodies',
-        r'SET xmloption',
-        r'SET client_min_messages',
-        r'SET row_security',
-        r'SET default_tablespace',
-        r'SET default_table_access_method',
-        r'ALTER TABLE.*OWNER TO',
-        r'ALTER SEQUENCE.*OWNER TO',
-        r'ALTER SEQUENCE.*OWNED BY',
-        r'GRANT ALL',
-        r'REVOKE ALL',
-        r'COMMENT ON',
-        r'^-- Name:',
-        r'^-- Schema:',
-        r'^-- Owner:',
+    # Simple skip patterns - just check if line contains these
+    skip_contains = [
+        'Owner:',
+        'OWNER TO',
+        'OWNER',
+        '\\restrict',
+        'Dumped from database',
+        'Dumped by pg_dump',
+    ]
+    
+    # Lines to skip if they start with certain patterns
+    skip_start_patterns = [
+        '-- Name:',
+        '-- Type:',
+        '-- Schema:',
     ]
     
     # Tables to include (skip alembic_version as it's managed by alembic stamp)
@@ -70,12 +61,19 @@ def clean_postgres_schema(input_sql):
     while i < len(lines):
         line = lines[i]
         
-        # Skip unwanted lines
+        # Skip lines containing certain strings
         skip = False
-        for pattern in skip_patterns:
-            if re.search(pattern, line):
+        for pattern in skip_contains:
+            if pattern in line:
                 skip = True
                 break
+        
+        # Skip lines starting with certain patterns
+        if not skip:
+            for pattern in skip_start_patterns:
+                if line.strip().startswith(pattern):
+                    skip = True
+                    break
         
         if skip:
             i += 1
@@ -149,6 +147,10 @@ def clean_postgres_schema(input_sql):
             output_lines.append(line.replace('public.', ''))
             i += 1
             while i < len(lines) and not lines[i].rstrip().endswith(';'):
+                # Skip comment lines with Owner
+                if re.search(r'; Owner:', lines[i]):
+                    i += 1
+                    continue
                 output_lines.append(lines[i].replace('public.', ''))
                 i += 1
             if i < len(lines):
