@@ -62,7 +62,7 @@ CREATE TABLE alerts (
     tool_name text,
     metadata text,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
-    read integer DEFAULT 0,
+    read boolean DEFAULT false,
     action_url text,
     action_text text
 );
@@ -113,7 +113,7 @@ CREATE TABLE audit_logs (
     ip_address text,
     user_agent text,
     session_id text,
-    success integer DEFAULT 1,
+    success boolean DEFAULT true,
     error_message text
 );
 
@@ -252,7 +252,7 @@ CREATE TABLE knowledge_base (
     tags text,
     author_id integer,
     author_name text,
-    is_published integer DEFAULT 0,
+    is_published boolean DEFAULT false,
     view_count integer DEFAULT 0,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
@@ -269,8 +269,8 @@ CREATE SEQUENCE knowledge_base_id_seq
 ALTER SEQUENCE knowledge_base_id_seq OWNED BY knowledge_base.id;
 CREATE TABLE notification_preferences (
     user_id integer NOT NULL,
-    email_enabled integer DEFAULT 1,
-    push_enabled integer DEFAULT 1,
+    email_enabled boolean DEFAULT true,
+    push_enabled boolean DEFAULT true,
     webhook_url text,
     alert_types text,
     min_severity text DEFAULT 'warning'::text
@@ -307,8 +307,8 @@ CREATE TABLE prompt_templates (
     tags text,
     author_id integer,
     author_name text,
-    is_public integer DEFAULT 0,
-    is_featured integer DEFAULT 0,
+    is_public boolean DEFAULT false,
+    is_featured boolean DEFAULT false,
     use_count integer DEFAULT 0,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
@@ -335,7 +335,7 @@ CREATE TABLE quota_alerts (
     percentage real NOT NULL,
     message text,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
-    acknowledged integer DEFAULT 0,
+    acknowledged boolean DEFAULT false,
     acknowledged_at timestamp without time zone,
     acknowledged_by integer
 );
@@ -473,8 +473,8 @@ CREATE TABLE shared_sessions (
     target_id integer,
     target_name text,
     expires_at timestamp without time zone,
-    allow_comments integer DEFAULT 1,
-    allow_copy integer DEFAULT 1,
+    allow_comments boolean DEFAULT true,
+    allow_copy boolean DEFAULT true,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     access_count integer DEFAULT 0,
     last_accessed timestamp without time zone
@@ -514,7 +514,7 @@ CREATE TABLE sso_providers (
     provider_type text NOT NULL,
     config text NOT NULL,
     tenant_id integer,
-    is_active integer DEFAULT 1,
+    is_active boolean DEFAULT true,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
 );
@@ -788,7 +788,7 @@ CREATE TABLE users (
     username character varying NOT NULL,
     password_hash character varying NOT NULL,
     email character varying,
-    is_admin integer DEFAULT 0,
+    is_admin boolean DEFAULT false,
     is_active boolean DEFAULT true,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     last_login timestamp without time zone,
@@ -800,7 +800,7 @@ CREATE TABLE users (
     deleted_at timestamp without time zone,
     system_account text,
     tenant_id integer,
-    must_change_password integer DEFAULT 0,
+    must_change_password boolean DEFAULT false,
     CONSTRAINT chk_users_role CHECK (((role)::text = ANY ((ARRAY['admin'::character varying, 'manager'::character varying, 'user'::character varying])::text[])))
 );
 

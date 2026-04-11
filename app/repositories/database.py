@@ -123,6 +123,43 @@ def adapt_sql(query: str) -> str:
     return query
 
 
+def adapt_boolean_value(value: bool) -> Union[bool, int]:
+    """
+    Convert boolean value for database compatibility.
+
+    PostgreSQL uses TRUE/FALSE for boolean columns.
+    SQLite uses 1/0 for boolean columns (INTEGER type affinity).
+
+    Args:
+        value: Boolean value to convert.
+
+    Returns:
+        Union[bool, int]: Boolean for PostgreSQL, integer for SQLite.
+    """
+    if is_postgresql():
+        return value
+    return 1 if value else 0
+
+
+def adapt_boolean_condition(column: str, value: bool) -> str:
+    """
+    Generate boolean condition for SQL query.
+
+    PostgreSQL uses IS TRUE/FALSE for boolean comparisons.
+    SQLite uses = 1/0 for boolean comparisons.
+
+    Args:
+        column: Column name.
+        value: Boolean value to compare.
+
+    Returns:
+        str: SQL condition string.
+    """
+    if is_postgresql():
+        return f"{column} IS {'TRUE' if value else 'FALSE'}"
+    return f"{column} = {1 if value else 0}"
+
+
 def ensure_db_dir() -> None:
     """Ensure the database directory exists (for SQLite)."""
     os.makedirs(CONFIG_DIR, exist_ok=True)

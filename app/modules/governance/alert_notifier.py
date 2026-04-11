@@ -21,7 +21,14 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Set, Union
 
-from app.repositories.database import DB_PATH, is_postgresql, get_database_url, adapt_sql
+from app.repositories.database import (
+    DB_PATH,
+    is_postgresql,
+    get_database_url,
+    adapt_sql,
+    adapt_boolean_value,
+    adapt_boolean_condition,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -425,7 +432,7 @@ class AlertNotifier:
             params.append(severity)
 
         if unread_only:
-            conditions.append("read = 0")
+            conditions.append(adapt_boolean_condition("read", False))
 
         where_clause = " AND ".join(conditions) if conditions else "1=1"
 
@@ -461,11 +468,11 @@ class AlertNotifier:
 
         if user_id is not None:
             cursor.execute(
-                adapt_sql("SELECT COUNT(*) as count FROM alerts WHERE user_id = ? AND read = 0"),
+                adapt_sql(f"SELECT COUNT(*) as count FROM alerts WHERE user_id = ? AND {adapt_boolean_condition('read', False)}"),
                 (user_id,),
             )
         else:
-            cursor.execute("SELECT COUNT(*) as count FROM alerts WHERE read = 0")
+            cursor.execute(f"SELECT COUNT(*) as count FROM alerts WHERE {adapt_boolean_condition('read', False)}")
 
         count = cursor.fetchone()["count"]
         conn.close()
@@ -485,7 +492,7 @@ class AlertNotifier:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        cursor.execute(adapt_sql("UPDATE alerts SET read = 1 WHERE alert_id = ?"), (alert_id,))
+        cursor.execute(adapt_sql(f"UPDATE alerts SET read = ? WHERE alert_id = ?"), (adapt_boolean_value(True), alert_id))
 
         success = cursor.rowcount > 0
         conn.commit()
@@ -508,10 +515,11 @@ class AlertNotifier:
 
         if user_id is not None:
             cursor.execute(
-                adapt_sql("UPDATE alerts SET read = 1 WHERE user_id = ? AND read = 0"), (user_id,)
+                adapt_sql(f"UPDATE alerts SET read = ? WHERE user_id = ? AND {adapt_boolean_condition('read', False)}"),
+                (adapt_boolean_value(True), user_id),
             )
         else:
-            cursor.execute("UPDATE alerts SET read = 1 WHERE read = 0")
+            cursor.execute(f"UPDATE alerts SET read = ? WHERE {adapt_boolean_condition('read', False)}", (adapt_boolean_value(True),))
 
         count = cursor.rowcount
         conn.commit()
@@ -553,7 +561,7 @@ class AlertNotifier:
         cursor = conn.cursor()
 
         cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
-        cursor.execute(adapt_sql("DELETE FROM alerts WHERE created_at < ? AND read = 1"), (cutoff,))
+        cursor.execute(adapt_sql(f"DELETE FROM alerts WHERE created_at < ? AND {adapt_boolean_condition('read', True)}"), (cutoff,))
 
         count = cursor.rowcount
         conn.commit()

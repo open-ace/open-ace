@@ -1668,6 +1668,26 @@ do_fresh_install() {
         chown -R "$install_user:$(id -gn "$install_user")" "$config_dir"
     fi
 
+    # Install system psycopg2 package first (avoids segfault from psycopg2-binary)
+    # See Issue #38: psycopg2-binary 2.9.11 causes segfault on some Linux systems
+    if [ "$DB_INSTALL_METHOD" != "sqlite" ]; then
+        print_info "Checking for psycopg2 system package..."
+        if ! python3 -c "import psycopg2" 2>/dev/null; then
+            print_info "Installing system package python3-psycopg2..."
+            if command -v dnf &>/dev/null; then
+                dnf install -y python3-psycopg2 || print_warning "Failed to install python3-psycopg2 with dnf"
+            elif command -v yum &>/dev/null; then
+                yum install -y python3-psycopg2 || print_warning "Failed to install python3-psycopg2 with yum"
+            elif command -v apt-get &>/dev/null; then
+                apt-get install -y python3-psycopg2 || print_warning "Failed to install python3-psycopg2 with apt-get"
+            else
+                print_warning "Could not install python3-psycopg2 automatically. Please install it manually."
+            fi
+        else
+            print_success "psycopg2 already available"
+        fi
+    fi
+
     # Install Python dependencies
     print_info "Installing Python dependencies..."
     if [ -f "$target_path/requirements.txt" ]; then
@@ -1688,22 +1708,27 @@ do_fresh_install() {
             exit 1
         fi
         
+        # Create temp requirements excluding psycopg2-binary (use system package instead)
+        TEMP_REQ=$(mktemp)
+        grep -v "psycopg2-binary" "$target_path/requirements.txt" > "$TEMP_REQ" || true
+
         # Install dependencies (prefer vendor directory for offline install)
         if [ -d "$target_path/vendor" ] && [ "$(ls -A "$target_path/vendor" 2>/dev/null)" ]; then
             print_info "Installing from vendor directory (offline mode)..."
             if command -v pip3 &>/dev/null; then
-                run_pip_as_user "$install_user" pip3 install --user --no-index --find-links="$target_path/vendor" -r "$target_path/requirements.txt" && print_success "Dependencies installed from vendor"
+                run_pip_as_user "$install_user" pip3 install --user --no-index --find-links="$target_path/vendor" -r "$TEMP_REQ" && print_success "Dependencies installed from vendor"
             elif command -v pip &>/dev/null; then
-                run_pip_as_user "$install_user" pip install --user --no-index --find-links="$target_path/vendor" -r "$target_path/requirements.txt" && print_success "Dependencies installed from vendor"
+                run_pip_as_user "$install_user" pip install --user --no-index --find-links="$target_path/vendor" -r "$TEMP_REQ" && print_success "Dependencies installed from vendor"
             fi
         else
             # Install from network
             if command -v pip3 &>/dev/null; then
-                run_pip_as_user "$install_user" pip3 install --user -r "$target_path/requirements.txt" && print_success "Dependencies installed with pip3"
+                run_pip_as_user "$install_user" pip3 install --user -r "$TEMP_REQ" && print_success "Dependencies installed with pip3"
             elif command -v pip &>/dev/null; then
-                run_pip_as_user "$install_user" pip install --user -r "$target_path/requirements.txt" && print_success "Dependencies installed with pip"
+                run_pip_as_user "$install_user" pip install --user -r "$TEMP_REQ" && print_success "Dependencies installed with pip"
             fi
         fi
+        rm -f "$TEMP_REQ"
     fi
 
     # Initialize database schema

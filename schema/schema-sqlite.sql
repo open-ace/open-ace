@@ -1,12 +1,10 @@
 -- Open-ACE Database Schema for SQLite
 -- Auto-generated from PostgreSQL schema
 -- DO NOT EDIT MANUALLY
-
--- Open-ACE Database Schema for PostgreSQL
--- Auto-generated from pg_dump
--- DO NOT EDIT MANUALLY
-
--- Setup session
+--
+-- Note: SQLite uses INTEGER (0/1) for boolean fields due to type affinity.
+-- These fields are semantically boolean: is_admin, is_active, is_published, etc.
+-- When writing SQL, use 1 for TRUE, 0 for FALSE.
 
 CREATE TABLE agent_sessions (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,7 +46,7 @@ CREATE TABLE alerts (
  tool_name text,
  metadata text,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- read integer DEFAULT 0,
+ read integer DEFAULT 0,  -- boolean: read status (0=unread, 1=read)
  action_url text,
  action_text text
 );
@@ -87,7 +85,7 @@ CREATE TABLE audit_logs (
  ip_address text,
  user_agent text,
  session_id text,
- success integer DEFAULT 1,
+ success integer DEFAULT 1,  -- boolean: operation success (0=failed, 1=success)
  error_message text
 );
 
@@ -204,7 +202,7 @@ CREATE TABLE knowledge_base (
  tags text,
  author_id integer,
  author_name text,
- is_published integer DEFAULT 0,
+ is_published integer DEFAULT 0,  -- boolean: publication status
  view_count integer DEFAULT 0,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -215,8 +213,8 @@ CREATE TABLE knowledge_base (
 ALTER SEQUENCE knowledge_base_id_seq OWNED BY knowledge_base.id;
 CREATE TABLE notification_preferences (
  user_id INTEGER PRIMARY KEY AUTOINCREMENT,
- email_enabled integer DEFAULT 1,
- push_enabled integer DEFAULT 1,
+ email_enabled integer DEFAULT 1,  -- boolean: email notification enabled
+ push_enabled integer DEFAULT 1,  -- boolean: push notification enabled
  webhook_url text,
  alert_types text,
  min_severity text DEFAULT 'warning'
@@ -248,8 +246,8 @@ CREATE TABLE prompt_templates (
  tags text,
  author_id integer,
  author_name text,
- is_public integer DEFAULT 0,
- is_featured integer DEFAULT 0,
+ is_public integer DEFAULT 0,  -- boolean: public visibility
+ is_featured integer DEFAULT 0,  -- boolean: featured status
  use_count integer DEFAULT 0,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -270,7 +268,7 @@ CREATE TABLE quota_alerts (
  percentage real NOT NULL,
  message text,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- acknowledged integer DEFAULT 0,
+ acknowledged integer DEFAULT 0,  -- boolean: acknowledgment status
  acknowledged_at TIMESTAMP,
  acknowledged_by integer
 );
@@ -354,8 +352,8 @@ CREATE TABLE shared_sessions (
  target_id integer,
  target_name text,
  expires_at TIMESTAMP,
- allow_comments integer DEFAULT 1,
- allow_copy integer DEFAULT 1,
+ allow_comments integer DEFAULT 1,  -- boolean: allow comments
+ allow_copy integer DEFAULT 1,  -- boolean: allow copy
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  access_count integer DEFAULT 0,
  last_accessed TIMESTAMP
@@ -383,7 +381,7 @@ CREATE TABLE sso_providers (
  provider_type text NOT NULL,
  config text NOT NULL,
  tenant_id integer,
- is_active integer DEFAULT 1,
+ is_active integer DEFAULT 1,  -- boolean: provider active status
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -586,7 +584,7 @@ CREATE TABLE users (
  username character varying NOT NULL,
  password_hash character varying NOT NULL,
  email character varying,
- is_admin integer DEFAULT 0,
+ is_admin integer DEFAULT 0,  -- boolean: admin status
  is_active INTEGER DEFAULT true,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  last_login TIMESTAMP,
@@ -598,7 +596,7 @@ CREATE TABLE users (
  deleted_at TIMESTAMP,
  system_account text,
  tenant_id integer,
- must_change_password integer DEFAULT 0,
+ must_change_password integer DEFAULT 0,  -- boolean: password change required
  CONSTRAINT chk_users_role CHECK (((role) = ANY ((ARRAY['admin' varying, 'manager' varying, 'user' varying])[])))
 );
 

@@ -15,7 +15,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
-from app.repositories.database import DB_PATH, is_postgresql, get_database_url, adapt_sql
+from app.repositories.database import DB_PATH, is_postgresql, get_database_url, adapt_sql, adapt_boolean_condition
 
 logger = logging.getLogger(__name__)
 
@@ -411,13 +411,13 @@ class PromptLibrary:
         params = []
 
         if user_id is not None and include_public:
-            conditions.append("(author_id = ? OR is_public = 1)")
+            conditions.append(f"(author_id = ? OR {adapt_boolean_condition('is_public', True)})")
             params.append(user_id)
         elif user_id is not None:
             conditions.append("author_id = ?")
             params.append(user_id)
         elif include_public:
-            conditions.append("is_public = 1")
+            conditions.append(adapt_boolean_condition("is_public", True))
 
         if category:
             conditions.append("category = ?")
@@ -514,9 +514,9 @@ class PromptLibrary:
 
         cursor.execute(
             adapt_sql(
-                """
+                f"""
             SELECT * FROM prompt_templates
-            WHERE is_featured = 1 AND is_public = 1
+            WHERE {adapt_boolean_condition('is_featured', True)} AND {adapt_boolean_condition('is_public', True)}
             ORDER BY use_count DESC
             LIMIT ?
         """
@@ -540,10 +540,10 @@ class PromptLibrary:
         cursor = conn.cursor()
 
         cursor.execute(
-            """
+            f"""
             SELECT category, COUNT(*) as count
             FROM prompt_templates
-            WHERE is_public = 1
+            WHERE {adapt_boolean_condition('is_public', True)}
             GROUP BY category
             ORDER BY count DESC
         """
@@ -568,9 +568,9 @@ class PromptLibrary:
         cursor = conn.cursor()
 
         cursor.execute(
-            """
+            f"""
             SELECT tags FROM prompt_templates
-            WHERE is_public = 1 AND tags IS NOT NULL
+            WHERE {adapt_boolean_condition('is_public', True)} AND tags IS NOT NULL
         """
         )
 

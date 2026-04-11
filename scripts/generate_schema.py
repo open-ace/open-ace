@@ -15,6 +15,62 @@ import re
 from pathlib import Path
 
 
+# Boolean field detection patterns
+BOOLEAN_FIELD_PATTERNS = [
+    r'^is_',           # is_admin, is_active, is_published, is_public, is_featured
+    r'_enabled$',      # email_enabled, push_enabled, content_filter_enabled
+    r'^allow_',        # allow_comments, allow_copy
+    r'^must_',         # must_change_password
+    r'^can_',          # can_edit, can_delete (future)
+    r'^has_',          # has_permission, has_access (future)
+]
+BOOLEAN_SPECIAL_WORDS = [
+    'read', 'success', 'acknowledged', 'verified', 'confirmed',
+    'approved', 'rejected', 'completed', 'active'
+]
+
+# Counter field patterns (should NOT be converted to boolean)
+COUNT_FIELD_PATTERNS = [
+    r'_count$',        # view_count, use_count, message_count
+    r'_used$',         # tokens_used, requests_used
+    r'_made$',         # requests_made
+    r'_limit$',        # daily_token_limit
+    r'_quota$',        # monthly_token_quota
+    r'^total_',        # total_tokens, total_requests, total_sessions
+    r'_tokens$',       # input_tokens, output_tokens, cache_tokens
+    r'_users$',        # active_users, new_users
+    r'_seconds$',      # duration_seconds
+    r'_requests$',     # total_requests
+]
+
+
+def is_boolean_field(column_name: str) -> bool:
+    """
+    Check if a column is likely a boolean field based on naming patterns.
+    
+    Args:
+        column_name: Column name to check.
+        
+    Returns:
+        bool: True if column appears to be boolean.
+    """
+    # Check if it's a counter field (should NOT be boolean)
+    for pattern in COUNT_FIELD_PATTERNS:
+        if re.search(pattern, column_name):
+            return False
+    
+    # Check boolean patterns
+    for pattern in BOOLEAN_FIELD_PATTERNS:
+        if re.search(pattern, column_name):
+            return True
+    
+    # Check special words
+    if column_name in BOOLEAN_SPECIAL_WORDS:
+        return True
+    
+    return False
+
+
 def get_project_root():
     """Get the project root directory."""
     script_dir = Path(__file__).parent
@@ -115,8 +171,23 @@ def clean_postgres_schema(input_sql):
             output_lines.append(line.replace('public.', ''))
             i += 1
             while i < len(lines) and not lines[i].rstrip().endswith(';'):
-                if not re.search(r'ALTER TABLE.*OWNER', lines[i]):
-                    output_lines.append(lines[i].replace('public.', ''))
+                col_line = lines[i].replace('public.', '')
+                if not re.search(r'ALTER TABLE.*OWNER', col_line):
+                    # Convert integer DEFAULT 0/1 to boolean for boolean fields
+                    # Match pattern: column_name integer DEFAULT 0, or column_name integer DEFAULT 1,
+                    col_match = re.match(r'^\s+(\w+)\s+integer\s+DEFAULT\s+(0|1)', col_line)
+                    if col_match:
+                        col_name = col_match.group(1)
+                        default_val = col_match.group(2)
+                        if is_boolean_field(col_name):
+                            # Convert to boolean
+                            bool_default = 'false' if default_val == '0' else 'true'
+                            col_line = re.sub(
+                                r'integer\s+DEFAULT\s+[01]',
+                                f'boolean DEFAULT {bool_default}',
+                                col_line
+                            )
+                    output_lines.append(col_line)
                 i += 1
             if i < len(lines):
                 output_lines.append(lines[i].replace('public.', ''))

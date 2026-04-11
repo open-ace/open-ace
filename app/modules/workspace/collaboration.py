@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
-from app.repositories.database import DB_PATH, is_postgresql, get_database_url
+from app.repositories.database import DB_PATH, is_postgresql, get_database_url, adapt_boolean_condition
 
 logger = logging.getLogger(__name__)
 
@@ -1084,7 +1084,7 @@ class CollaborationManager:
             params.append(category)
 
         if published_only:
-            conditions.append("is_published = 1")
+            conditions.append(adapt_boolean_condition("is_published", True))
 
         where_clause = " AND ".join(conditions) if conditions else "1=1"
 

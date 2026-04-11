@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from app.repositories.database import Database
+from app.repositories.database import Database, adapt_boolean_value, adapt_sql, adapt_boolean_condition
 from app.repositories.user_repo import UserRepository
 
 logger = logging.getLogger(__name__)
@@ -480,14 +480,16 @@ class QuotaManager:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    """
+                    adapt_sql(
+                        """
                     UPDATE quota_alerts
-                    SET acknowledged = 1,
+                    SET acknowledged = ?,
                         acknowledged_at = ?,
                         acknowledged_by = ?
                     WHERE id = ?
-                """,
-                    (datetime.utcnow(), acknowledged_by, alert_id),
+                """
+                    ),
+                    (adapt_boolean_value(True), datetime.utcnow(), acknowledged_by, alert_id),
                 )
                 conn.commit()
                 return cursor.rowcount > 0
@@ -616,12 +618,14 @@ class QuotaManager:
         """Get all quota alerts."""
         if unacknowledged_only:
             rows = self.db.fetch_all(
-                """
+                adapt_sql(
+                    f"""
                 SELECT * FROM quota_alerts
-                WHERE acknowledged = 0
+                WHERE {adapt_boolean_condition('acknowledged', False)}
                 ORDER BY created_at DESC
                 LIMIT ?
-            """,
+            """
+                ),
                 (limit,),
             )
         else:
@@ -671,10 +675,12 @@ class QuotaManager:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    """
+                    adapt_sql(
+                        f"""
                     DELETE FROM quota_alerts
-                    WHERE acknowledged = 1 AND created_at < ?
-                """,
+                    WHERE {adapt_boolean_condition('acknowledged', True)} AND created_at < ?
+                """
+                    ),
                     (cutoff,),
                 )
                 deleted = cursor.rowcount

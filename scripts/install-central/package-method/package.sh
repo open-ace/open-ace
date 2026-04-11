@@ -371,15 +371,24 @@ fi
 if [ "$SKIP_DOWNLOAD" = false ] && [ -f "$PROJECT_DIR/requirements.txt" ]; then
     echo -e "${YELLOW}Downloading Python dependencies...${NC}"
 
+    # Create a temporary requirements file excluding psycopg2-binary
+    # psycopg2-binary causes segfault on some Linux systems (see Issue #38)
+    # Users should install system package python3-psycopg2 instead
+    TEMP_REQ=$(mktemp)
+    grep -v "psycopg2-binary" "$PROJECT_DIR/requirements.txt" > "$TEMP_REQ" || true
+
     # Download dependencies with prefer-binary for reliable installation
-    pip3 download -r "$PROJECT_DIR/requirements.txt" -d "$VENDOR_DIR" --prefer-binary || \
-        pip download -r "$PROJECT_DIR/requirements.txt" -d "$VENDOR_DIR" --prefer-binary || \
+    pip3 download -r "$TEMP_REQ" -d "$VENDOR_DIR" --prefer-binary || \
+        pip download -r "$TEMP_REQ" -d "$VENDOR_DIR" --prefer-binary || \
         echo -e "${YELLOW}Warning: Failed to download some dependencies. Install will require network.${NC}"
+
+    rm -f "$TEMP_REQ"
 
     # Count downloaded packages
     pkg_count=$(ls -1 "$VENDOR_DIR"/*.whl 2>/dev/null | wc -l | tr -d ' ')
     echo "  ✓ Downloaded $pkg_count packages to vendor/"
-    
+    echo -e "${YELLOW}Note: psycopg2-binary excluded. Install will use system package python3-psycopg2.${NC}"
+
     # Cache the vendor directory for future use
     echo -e "${YELLOW}Caching vendor directory for future packages...${NC}"
     mkdir -p "$CACHED_VENDOR_DIR"

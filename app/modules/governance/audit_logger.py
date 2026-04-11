@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from app.repositories.database import Database
+from app.repositories.database import Database, adapt_boolean_value, adapt_sql
 
 logger = logging.getLogger(__name__)
 
@@ -194,13 +194,15 @@ class AuditLogger:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    """
+                    adapt_sql(
+                        """
                     INSERT INTO audit_logs
                     (timestamp, user_id, username, action, severity, resource_type,
                      resource_id, details, ip_address, user_agent, session_id,
                      success, error_message)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
+                """
+                    ),
                     (
                         datetime.utcnow(),
                         user_id,
@@ -213,7 +215,7 @@ class AuditLogger:
                         ip_address,
                         user_agent,
                         session_id,
-                        1 if success else 0,
+                        adapt_boolean_value(success),
                         error_message,
                     ),
                 )
@@ -311,7 +313,7 @@ class AuditLogger:
 
         if success is not None:
             conditions.append("success = ?")
-            params.append(1 if success else 0)
+            params.append(adapt_boolean_value(success))
 
         where_clause = " AND ".join(conditions) if conditions else "1=1"
 

@@ -16,6 +16,14 @@ repos:
         files: ^migrations/versions/.*\.py$
         pass_filenames: false
 
+      # Validate PostgreSQL schema for boolean field consistency
+      - id: validate-schema
+        name: Validate PostgreSQL schema boolean fields
+        entry: python3 scripts/validate_schema.py
+        language: system
+        files: ^schema/schema-postgres\.sql$
+        pass_filenames: false
+
   # =============================================================================
   # Code Formatting
   # =============================================================================

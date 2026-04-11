@@ -9,7 +9,7 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from app.repositories.database import Database
+from app.repositories.database import Database, adapt_boolean_value, adapt_sql
 
 logger = logging.getLogger(__name__)
 
@@ -215,10 +215,13 @@ class UserRepository:
         Returns:
             bool: True if successful.
         """
-        query = "UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?"
+        query = adapt_sql(
+            "UPDATE users SET password_hash = ?, must_change_password = ? WHERE id = ?"
+        )
+        must_change_val = adapt_boolean_value(False)
 
         try:
-            cursor = self.db.execute(query, (password_hash, user_id))
+            cursor = self.db.execute(query, (password_hash, must_change_val, user_id))
             return cursor.rowcount > 0
         except Exception as e:
             logger.error(f"Error updating password: {e}")
@@ -235,12 +238,11 @@ class UserRepository:
         Returns:
             bool: True if successful.
         """
-        query = "UPDATE users SET must_change_password = ? WHERE id = ?"
-        # must_change_password column is INTEGER in both SQLite and PostgreSQL
-        must_change_int = 1 if must_change else 0
+        query = adapt_sql("UPDATE users SET must_change_password = ? WHERE id = ?")
+        must_change_val = adapt_boolean_value(must_change)
 
         try:
-            cursor = self.db.execute(query, (must_change_int, user_id))
+            cursor = self.db.execute(query, (must_change_val, user_id))
             return cursor.rowcount > 0
         except Exception as e:
             logger.error(f"Error setting must_change_password: {e}")
