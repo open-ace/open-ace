@@ -302,6 +302,23 @@ FRONTEND_DIR="$PROJECT_DIR/frontend"
 if [ -d "$FRONTEND_DIR" ]; then
     # Check if npm is available
     if command -v npm &> /dev/null; then
+        # Check Node.js version (Vite 6.x requires Node.js 18+)
+        NODE_VERSION=$(node --version 2>/dev/null | sed 's/v//')
+        if [ -n "$NODE_VERSION" ]; then
+            NODE_MAJOR=$(echo "$NODE_VERSION" | cut -d. -f1)
+            if [ "$NODE_MAJOR" -lt 18 ]; then
+                echo -e "${RED}Error: Node.js version $NODE_VERSION is too old${NC}"
+                echo -e "${RED}Vite 6.x requires Node.js 18 or higher${NC}"
+                echo -e "${YELLOW}Please upgrade Node.js:${NC}"
+                echo -e "${YELLOW}  curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -${NC}"
+                echo -e "${YELLOW}  sudo yum install -y nodejs${NC}"
+                echo -e "${YELLOW}Or use nvm:${NC}"
+                echo -e "${YELLOW}  nvm install 20${NC}"
+                exit 1
+            fi
+            echo -e "${GREEN}Node.js version: v$NODE_VERSION (OK, requires 18+)${NC}"
+        fi
+
         cd "$FRONTEND_DIR"
 
         # Install dependencies if node_modules doesn't exist or package.json changed
