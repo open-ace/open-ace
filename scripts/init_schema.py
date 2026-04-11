@@ -20,10 +20,64 @@ from scripts.shared.db import (
     get_connection,
     is_postgresql,
     _execute,
-    _column_exists,
-    _index_exists,
-    _table_exists,
 )
+
+
+def _table_exists(cursor, table_name: str) -> bool:
+    """Check if a table exists."""
+    if is_postgresql():
+        _execute(
+            cursor,
+            "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = %s)",
+            (table_name,),
+        )
+        return cursor.fetchone()[0]
+    else:
+        _execute(
+            cursor, "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,)
+        )
+        return cursor.fetchone() is not None
+
+
+def _column_exists(cursor, table_name: str, column_name: str) -> bool:
+    """Check if a column exists in a table."""
+    if is_postgresql():
+        _execute(
+            cursor,
+            "SELECT EXISTS (SELECT FROM information_schema.columns WHERE table_name = %s AND column_name = %s)",
+            (table_name, column_name),
+        )
+        result = cursor.fetchone()
+        # Handle both dict-like (RealDictRow) and tuple results
+        if isinstance(result, dict):
+            return result["exists"]
+        else:
+            return result[0]
+    else:
+        _execute(
+            cursor,
+            "SELECT name FROM pragma_table_info(?) WHERE name=?",
+            (table_name, column_name),
+        )
+        return cursor.fetchone() is not None
+
+
+def _index_exists(cursor, table_name: str, index_name: str) -> bool:
+    """Check if an index exists on a table."""
+    if is_postgresql():
+        _execute(
+            cursor,
+            "SELECT EXISTS (SELECT FROM pg_indexes WHERE tablename = %s AND indexname = %s)",
+            (table_name, index_name),
+        )
+        return cursor.fetchone()[0]
+    else:
+        _execute(
+            cursor,
+            "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name=? AND name=?",
+            (table_name, index_name),
+        )
+        return cursor.fetchone() is not None
 
 
 def init_schema():
