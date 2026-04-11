@@ -411,6 +411,74 @@ get_postgresql_port() {
 }
 
 # Install PostgreSQL as binary service
+# Configure pg_hba.conf for password authentication
+# Changes peer/ident authentication to md5 for local connections
+configure_pg_hba_conf() {
+    print_info "Configuring PostgreSQL authentication..."
+
+    # Find pg_hba.conf location
+    local pg_hba_conf=""
+
+    # Common locations for pg_hba.conf
+    local possible_locations=(
+        "/var/lib/pgsql/data/pg_hba.conf"       # RHEL/CentOS/Fedora default
+        "/var/lib/postgresql/data/pg_hba.conf"  # Debian/Ubuntu default
+        "/etc/postgresql/*/main/pg_hba.conf"    # Debian/Ubuntu alternative
+        "/usr/local/var/lib/postgresql/pg_hba.conf"  # macOS Homebrew
+    )
+
+    for loc in "${possible_locations[@]}"; do
+        # Handle wildcard paths
+        if [[ "$loc" == *"*"* ]]; then
+            # Find the first matching file
+            pg_hba_conf=$(ls $loc 2>/dev/null | head -1)
+        else
+            if [ -f "$loc" ]; then
+                pg_hba_conf="$loc"
+            fi
+        fi
+        if [ -n "$pg_hba_conf" ] && [ -f "$pg_hba_conf" ]; then
+            break
+        fi
+    done
+
+    # Try to get location from PostgreSQL itself
+    if [ -z "$pg_hba_conf" ]; then
+        pg_hba_conf=$(su - postgres -c "psql -t -P format=unaligned -c 'SHOW hba_file'" 2>/dev/null)
+    fi
+
+    if [ -z "$pg_hba_conf" ] || [ ! -f "$pg_hba_conf" ]; then
+        print_warning "Could not find pg_hba.conf, skipping authentication configuration"
+        print_info "You may need to manually configure PostgreSQL authentication"
+        return 0
+    fi
+
+    print_info "Found pg_hba.conf at: $pg_hba_conf"
+
+    # Backup original file
+    cp "$pg_hba_conf" "${pg_hba_conf}.bak" 2>/dev/null
+
+    # Change peer/ident to md5 for local connections
+    # Simple replacement: change authentication method at end of lines
+    # For local socket connections (peer -> md5)
+    sed -i 's/peer$/md5/' "$pg_hba_conf"
+    # For localhost TCP connections (ident -> md5)
+    sed -i 's/ident$/md5/' "$pg_hba_conf"
+
+    # Reload PostgreSQL to apply changes
+    if systemctl is-active --quiet postgresql 2>/dev/null; then
+        systemctl reload postgresql 2>/dev/null || systemctl restart postgresql 2>/dev/null
+        print_success "PostgreSQL authentication configured (reloaded)"
+    elif systemctl is-active --quiet postgres 2>/dev/null; then
+        systemctl reload postgres 2>/dev/null || systemctl restart postgres 2>/dev/null
+        print_success "PostgreSQL authentication configured (reloaded)"
+    else
+        print_warning "PostgreSQL not running, will apply changes on next start"
+    fi
+
+    return 0
+}
+
 install_postgresql_binary() {
     print_info "Installing PostgreSQL (binary)..."
 
@@ -451,6 +519,9 @@ install_postgresql_binary() {
             return 1
         }
     fi
+
+    # Configure pg_hba.conf for password authentication
+    configure_pg_hba_conf
 
     print_success "PostgreSQL installed successfully"
     return 0
