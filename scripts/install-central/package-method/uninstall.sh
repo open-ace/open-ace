@@ -363,7 +363,34 @@ uninstall_local() {
     print_header "Uninstalling from Local Machine"
 
     local target_path="$DEPLOY_PATH"
-    local config_dir="$HOME/.open-ace"
+
+    # Infer DEPLOY_USER from DEPLOY_PATH if running as root
+    # Example: DEPLOY_PATH=/home/openace -> DEPLOY_USER=openace
+    if [ "$EUID" -eq 0 ] && [ -n "$DEPLOY_PATH" ]; then
+        # Extract user from path like /home/openace or /home/openace/open-ace
+        local path_user=$(echo "$DEPLOY_PATH" | sed -n 's|^/home/\([^/]*\).*|\1|p')
+        if [ -n "$path_user" ] && [ "$path_user" != "root" ]; then
+            DEPLOY_USER="$path_user"
+        fi
+    fi
+
+    # Determine config directory based on deploy user
+    # Same logic as install.sh: use DEPLOY_USER's home directory
+    local config_dir
+    if [ -n "$DEPLOY_USER" ] && [ "$DEPLOY_USER" != "root" ]; then
+        # Use deploy user's home directory
+        if [ -d "/Users/$DEPLOY_USER" ]; then
+            config_dir="/Users/$DEPLOY_USER/.open-ace"
+        else
+            config_dir="/home/$DEPLOY_USER/.open-ace"
+        fi
+    elif [ "$EUID" -eq 0 ]; then
+        # Running as root without specific deploy user
+        config_dir="/root/.open-ace"
+    else
+        # Running as regular user
+        config_dir="$HOME/.open-ace"
+    fi
 
     # Remove systemd service first
     print_info "Removing systemd service..."
