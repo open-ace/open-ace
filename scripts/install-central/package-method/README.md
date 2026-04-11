@@ -26,6 +26,9 @@
 
 # 强制重新下载依赖
 ./package.sh --force-download
+
+# 从 PostgreSQL 数据库生成 schema.sql（需要数据库连接）
+./package.sh --generate-schema
 ```
 
 ### 输出
@@ -42,7 +45,24 @@ dist/open-ace-{commit_hash}-{date}.tar.gz
 |------|------|
 | `--version, -v` | 指定版本号 |
 | `--force-download, -f` | 强制重新下载 Python 依赖 |
+| `--generate-schema, -g` | 从 PostgreSQL 生成 schema.sql（需要 DATABASE_URL） |
 | `--help, -h` | 显示帮助信息 |
+
+### Schema 生成
+
+默认情况下，`package.sh` 使用已有的 `schema/schema-postgres.sql` 和 `schema/schema-sqlite.sql` 文件。
+
+如需重新生成 schema（通常在开发环境）：
+
+```bash
+# 设置数据库连接
+export DATABASE_URL='postgresql://user:pass@host:port/dbname'
+
+# 运行打包并生成 schema
+./package.sh --generate-schema
+```
+
+**注意：** 生产环境打包通常不需要 `--generate-schema`，schema 文件应该已经存在于代码库中。
 
 ### 特性
 
@@ -74,11 +94,21 @@ cd open-ace-*
 ### 使用配置文件安装
 
 ```bash
-# 创建配置文件
+# 创建配置文件（PostgreSQL）
 cat > install.conf << 'EOF'
-# 本地安装配置
-DEPLOY_USER=$USER
-DEPLOY_PATH=$HOME/open-ace
+# 安装配置
+DEPLOY_USER=openace
+DEPLOY_PATH=/home/openace
+
+# PostgreSQL 数据库配置
+DB_TYPE=postgresql
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=openace
+DB_USER=openace
+DB_PASSWORD=openace123
+
+# 服务配置
 SERVICE_PORT=5000
 SERVICE_HOST=0.0.0.0
 EOF
@@ -86,6 +116,43 @@ EOF
 # 使用配置文件安装
 ./scripts/install.sh --config install.conf
 ```
+
+### SQLite 数据库
+
+```bash
+# SQLite 配置（用于开发/测试）
+cat > install.conf << 'EOF'
+DEPLOY_USER=$USER
+DEPLOY_PATH=$HOME/open-ace
+DB_TYPE=sqlite
+SERVICE_PORT=5000
+EOF
+
+./scripts/install.sh --config install.conf
+```
+
+### 数据库初始化
+
+安装脚本会自动：
+
+1. **PostgreSQL**: 执行 `schema/schema-postgres.sql` 创建表结构，然后使用 `alembic stamp head` 标记版本
+2. **SQLite**: 执行 `schema/schema-sqlite.sql` 创建表结构
+
+**注意：** PostgreSQL 需要预先创建数据库用户和数据库：
+
+```bash
+# PostgreSQL 预配置（以 postgres 用户执行）
+sudo -u postgres psql -c "CREATE USER openace WITH PASSWORD 'openace123';"
+sudo -u postgres psql -c "CREATE DATABASE openace OWNER openace;"
+```
+
+### psycopg2 安装
+
+安装脚本会自动处理 psycopg2 依赖：
+
+- **Rocky Linux/CentOS**: 使用系统包 `python3-psycopg2`（避免 pip 版本的段错误问题）
+- **Ubuntu/Debian**: 使用系统包 `python3-psycopg2`
+- **其他系统**: 从 pip 安装
 
 ### 远程部署
 
@@ -202,6 +269,14 @@ DEPLOY_HOST=              # 留空 = 本地安装
 # 用户和路径
 DEPLOY_USER=$USER
 DEPLOY_PATH=$HOME/open-ace
+
+# 数据库配置
+DB_TYPE=postgresql        # postgresql 或 sqlite
+DB_HOST=localhost         # PostgreSQL 主机
+DB_PORT=5432              # PostgreSQL 端口
+DB_NAME=openace           # PostgreSQL 数据库名
+DB_USER=openace           # PostgreSQL 用户名
+DB_PASSWORD=openace123    # PostgreSQL 密码
 
 # Systemd 服务配置
 SERVICE_PORT=5000
