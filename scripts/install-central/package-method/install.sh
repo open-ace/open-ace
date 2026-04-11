@@ -924,7 +924,22 @@ install_local() {
     validate_source_dir
 
     local target_path="$DEPLOY_PATH"
-    local config_dir="$HOME/.open-ace"
+    # Config directory should be in the install user's home, not current user's home
+    local config_dir
+    if [ "$DEPLOY_USER" = "root" ]; then
+        config_dir="/root/.open-ace"
+    elif [ "$DEPLOY_USER" = "${USER}" ] && [ "$EUID" -ne 0 ]; then
+        # Running as non-root, and deploying to current user
+        config_dir="$HOME/.open-ace"
+    else
+        # Deploying to a different user (e.g., openace)
+        # Determine user's home directory based on OS
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            config_dir="/Users/$DEPLOY_USER/.open-ace"
+        else
+            config_dir="/home/$DEPLOY_USER/.open-ace"
+        fi
+    fi
 
     # Check if already installed (must have web.py to be considered valid installation)
     if [ -d "$target_path" ] && [ -f "$target_path/web.py" ]; then
@@ -1146,13 +1161,26 @@ do_fresh_install() {
     # Create default admin user
     print_info "Creating default admin user..."
     if [ -f "$target_path/scripts/init_db.py" ]; then
-        cd "$target_path"
-        if python3 scripts/init_db.py; then
-            print_success "Default admin user created"
+        # Run init_db.py as the install user to ensure it can access installed packages
+        if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ]; then
+            # Running as root, but need to run as install_user to access their pip packages
+            cd "$target_path"
+            if su - "$install_user" -c "cd '$target_path' && python3 scripts/init_db.py"; then
+                print_success "Default admin user created"
+            else
+                print_warning "Failed to create default admin user. You may need to run scripts/init_db.py manually."
+            fi
+            cd - > /dev/null
         else
-            print_warning "Failed to create default admin user. You may need to run scripts/init_db.py manually."
+            # Running as the target user already
+            cd "$target_path"
+            if python3 scripts/init_db.py; then
+                print_success "Default admin user created"
+            else
+                print_warning "Failed to create default admin user. You may need to run scripts/init_db.py manually."
+            fi
+            cd - > /dev/null
         fi
-        cd - > /dev/null
     else
         print_warning "init_db.py not found, skipping default user creation"
     fi
@@ -1251,13 +1279,26 @@ do_upgrade() {
     # Create default admin user (if not exists)
     print_info "Ensuring default admin user exists..."
     if [ -f "$target_path/scripts/init_db.py" ]; then
-        cd "$target_path"
-        if python3 scripts/init_db.py; then
-            print_success "Default admin user ready"
+        # Run init_db.py as the install user to ensure it can access installed packages
+        if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ]; then
+            # Running as root, but need to run as install_user to access their pip packages
+            cd "$target_path"
+            if su - "$install_user" -c "cd '$target_path' && python3 scripts/init_db.py"; then
+                print_success "Default admin user ready"
+            else
+                print_warning "Failed to create default admin user. You may need to run scripts/init_db.py manually."
+            fi
+            cd - > /dev/null
         else
-            print_warning "Failed to create default admin user. You may need to run scripts/init_db.py manually."
+            # Running as the target user already
+            cd "$target_path"
+            if python3 scripts/init_db.py; then
+                print_success "Default admin user ready"
+            else
+                print_warning "Failed to create default admin user. You may need to run scripts/init_db.py manually."
+            fi
+            cd - > /dev/null
         fi
-        cd - > /dev/null
     else
         print_warning "init_db.py not found, skipping default user creation"
     fi
