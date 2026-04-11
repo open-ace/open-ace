@@ -80,12 +80,30 @@ def register_error_handlers(app):
         if request.path.startswith("/api/"):
             origin = request.headers.get("Origin", "")
             # In multi-user mode, webui instances run on different ports
-            # Allow localhost and 127.0.0.1 origins
-            if origin and (origin.startswith("http://localhost:") or origin.startswith("http://127.0.0.1:")):
-                response.headers["Access-Control-Allow-Origin"] = origin
-                response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-                response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-                response.headers["Access-Control-Allow-Credentials"] = "true"
+            # Allow localhost, 127.0.0.1, and workspace URL origins (any IP on port range)
+            if origin:
+                # Parse origin to check if it's from a valid webui port
+                import re
+                from urllib.parse import urlparse
+                
+                try:
+                    parsed = urlparse(origin)
+                    # Allow if:
+                    # 1. localhost or 127.0.0.1
+                    # 2. Same host as server but different port (workspace webui instances)
+                    if parsed.hostname in ("localhost", "127.0.0.1"):
+                        response.headers["Access-Control-Allow-Origin"] = origin
+                        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+                        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+                        response.headers["Access-Control-Allow-Credentials"] = "true"
+                    # Also allow any origin that matches workspace port range (3100-3200)
+                    elif parsed.port and 3100 <= parsed.port <= 3200:
+                        response.headers["Access-Control-Allow-Origin"] = origin
+                        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+                        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+                        response.headers["Access-Control-Allow-Credentials"] = "true"
+                except:
+                    pass
         return response
 
     # Handle OPTIONS preflight requests for CORS
@@ -93,13 +111,23 @@ def register_error_handlers(app):
     def handle_options(path):
         """Handle CORS preflight requests."""
         origin = request.headers.get("Origin", "")
-        if origin and (origin.startswith("http://localhost:") or origin.startswith("http://127.0.0.1:")):
-            response = jsonify({"status": "ok"})
-            response.headers["Access-Control-Allow-Origin"] = origin
-            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-            response.headers["Access-Control-Allow-Credentials"] = "true"
-            return response
+        if origin:
+            import re
+            from urllib.parse import urlparse
+            
+            try:
+                parsed = urlparse(origin)
+                # Allow localhost, 127.0.0.1, or any origin from workspace port range
+                if parsed.hostname in ("localhost", "127.0.0.1") or \
+                   (parsed.port and 3100 <= parsed.port <= 3200):
+                    response = jsonify({"status": "ok"})
+                    response.headers["Access-Control-Allow-Origin"] = origin
+                    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+                    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+                    response.headers["Access-Control-Allow-Credentials"] = "true"
+                    return response
+            except:
+                pass
         return jsonify({"status": "ok"}), 200
 
     @app.errorhandler(HTTPException)
