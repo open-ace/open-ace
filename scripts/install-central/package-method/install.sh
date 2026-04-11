@@ -976,7 +976,7 @@ install_webui() {
     fi
 
     # Install qwen-code-webui globally
-    if npm install -g @ivycomputing/qwen-code-webui; then
+    if npm install -g qwen-code-webui; then
         print_success "qwen-code-webui installed successfully"
         return 0
     else
@@ -1013,7 +1013,7 @@ find_webui_executable() {
     print_warning "qwen-code-webui not found"
     if command -v npm &>/dev/null; then
         print_info "npm is available, installing qwen-code-webui..."
-        if npm install -g @ivycomputing/qwen-code-webui; then
+        if npm install -g qwen-code-webui; then
             print_success "qwen-code-webui installed successfully"
             # Try to find again after installation
             if command -v qwen-code-webui &>/dev/null; then
@@ -1071,7 +1071,7 @@ configure_sudoers() {
     if [ -z "$webui_path" ]; then
         print_warning "未找到 qwen-code-webui 可执行文件"
         print_info "请先安装 qwen-code-webui:"
-        print_info "  npm install -g @ivycomputing/qwen-code-webui"
+        print_info "  npm install -g qwen-code-webui"
         print_info ""
         print_info "安装完成后，手动配置 sudoers:"
         print_info "  sudo visudo -f /etc/sudoers.d/open-ace-webui"
@@ -2364,7 +2364,7 @@ show_help() {
     echo ""
     echo "Multi-User Workspace Mode:"
     echo "  Requires qwen-code-webui installed:"
-    echo "    npm install -g @ivycomputing/qwen-code-webui"
+    echo "    npm install -g qwen-code-webui"
     echo ""
     echo "  The installer will auto-configure sudoers for user switching."
     echo "  Each user needs a system account and ~/.qwen/ directory."
