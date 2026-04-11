@@ -801,6 +801,57 @@ with open('$config_file', 'w') as f:
     return 0
 }
 
+# Update config.json with workspace settings
+update_config_workspace() {
+    local config_file="$1"
+
+    if [ ! -f "$config_file" ]; then
+        print_warning "Config file not found: $config_file"
+        return 1
+    fi
+
+    print_info "Updating workspace configuration in $config_file..."
+
+    # Use Python to update JSON
+    # Convert bash "true"/"false" to Python True/False
+    if command -v python3 &>/dev/null; then
+        python3 << EOF
+import json
+with open('$config_file', 'r') as f:
+    config = json.load(f)
+
+if 'workspace' not in config:
+    config['workspace'] = {}
+
+# Convert bash string to Python bool
+def bash_to_bool(val):
+    return val.lower() == 'true'
+
+config['workspace']['enabled'] = bash_to_bool('$WORKSPACE_MULTI_USER_MODE')
+config['workspace']['multi_user_mode'] = bash_to_bool('$WORKSPACE_MULTI_USER_MODE')
+config['workspace']['port_range_start'] = int('$WORKSPACE_PORT_RANGE_START')
+config['workspace']['port_range_end'] = int('$WORKSPACE_PORT_RANGE_END')
+config['workspace']['max_instances'] = int('$WORKSPACE_MAX_INSTANCES')
+config['workspace']['idle_timeout_minutes'] = int('$WORKSPACE_IDLE_TIMEOUT')
+
+with open('$config_file', 'w') as f:
+    json.dump(config, f, indent=2)
+print("Workspace configuration updated")
+EOF
+        if [ $? -eq 0 ]; then
+            print_success "Workspace configuration updated"
+        else
+            print_warning "Failed to update workspace configuration"
+            return 1
+        fi
+    else
+        print_warning "Python3 not available, cannot update workspace config"
+        return 1
+    fi
+
+    return 0
+}
+
 # Systemd service settings
 SERVICE_PORT=""       # Web server port (will be read from config or use default)
 SERVICE_HOST="0.0.0.0" # Web server host
@@ -1728,6 +1779,8 @@ do_fresh_install() {
             else
                 print_warning "Please edit the config file with your database settings."
             fi
+            # Update workspace configuration
+            update_config_workspace "$config_dir/config.json"
         fi
     fi
 
@@ -2048,6 +2101,11 @@ with open('$config_dir/config.json', 'w') as f:
         if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ] && [ -f "$config_dir/config.json" ]; then
             chown "$install_user:$(id -gn "$install_user")" "$config_dir/config.json"
         fi
+    fi
+
+    # Update workspace configuration (for both new and upgrade modes)
+    if [ -f "$config_dir/config.json" ]; then
+        update_config_workspace "$config_dir/config.json"
     fi
 
     # Install Python dependencies
