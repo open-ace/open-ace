@@ -691,7 +691,10 @@ setup_postgresql() {
         prompt_input "Database password" "" DB_PASSWORD
 
         if [ -z "$DB_PASSWORD" ]; then
-            print_warning "No password provided. Connection may fail."
+            print_warning "No password provided. Generating random password..."
+            DB_PASSWORD=$(openssl rand -hex 12 2>/dev/null || echo "$(date +%s)$$" | sha256sum | head -c 24)
+            print_info "Generated password: $DB_PASSWORD"
+            print_warning "Please save this password for future reference!"
         fi
 
         return 0
@@ -1926,7 +1929,7 @@ do_upgrade() {
     if [ ! -f "$config_dir/config.json" ]; then
         print_warning "Config file not found: $config_dir/config.json"
         # Try to restore from backup
-        if [ -d "$backup_dir" ] && [ -d "$backup_dir/.open-ace" ] && [ -f "$backup_dir/.open-ace/config.json" ]; then
+        if [ -d "$backup_dir" ] && [ -f "$backup_dir/.open-ace/config.json" ]; then
             print_info "Restoring config file from backup..."
             mkdir -p "$config_dir"
             cp "$backup_dir/.open-ace/config.json" "$config_dir/config.json"
@@ -1934,9 +1937,24 @@ do_upgrade() {
             print_info "Creating config file from sample..."
             mkdir -p "$config_dir"
             cp "$target_path/config/config.json.sample" "$config_dir/config.json"
-            # Update database settings if available in environment
-            if [ -n "$DB_TYPE" ] && [ -n "$DB_HOST" ]; then
+            # Try to get database password from existing database URL in backup or environment
+            if [ -n "$DB_TYPE" ] && [ -n "$DB_HOST" ] && [ -n "$DB_PASSWORD" ]; then
                 update_config_database "$config_dir/config.json"
+            elif [ -f "$backup_dir/.open-ace/config.json" ]; then
+                # Extract password from backup config and use it
+                local backup_db_url=$(python3 -c "import json; c=json.load(open('$backup_dir/.open-ace/config.json')); print(c.get('database', {}).get('url', ''))" 2>/dev/null)
+                if [ -n "$backup_db_url" ]; then
+                    # Update config with backup's database URL
+                    python3 -c "
+import json
+with open('$config_dir/config.json', 'r') as f:
+    config = json.load(f)
+config['database'] = {'type': 'postgresql', 'url': '$backup_db_url'}
+with open('$config_dir/config.json', 'w') as f:
+    json.dump(config, f, indent=2)
+"
+                    print_info "Restored database URL from backup"
+                fi
             fi
         else
             print_warning "Cannot create config file. Manual setup required."
