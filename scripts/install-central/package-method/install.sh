@@ -1922,21 +1922,27 @@ do_upgrade() {
         fi
         
         # Install dependencies (prefer vendor directory for offline install)
+        # Create temp requirements excluding psycopg2-binary (use system package instead)
+        TEMP_REQ=$(mktemp)
+        grep -v "psycopg2-binary" "$target_path/requirements.txt" > "$TEMP_REQ" || true
+        chmod 644 "$TEMP_REQ"  # Make readable for non-root users
+
         if [ -d "$target_path/vendor" ] && [ "$(ls -A "$target_path/vendor" 2>/dev/null)" ]; then
             print_info "Installing from vendor directory (offline mode)..."
             if command -v pip3 &>/dev/null; then
-                run_pip_as_user "$install_user" pip3 install --user --no-index --find-links="$target_path/vendor" -r "$target_path/requirements.txt" && print_success "Dependencies installed from vendor"
+                run_pip_as_user "$install_user" pip3 install --user --no-index --find-links="$target_path/vendor" -r "$TEMP_REQ" && print_success "Dependencies installed from vendor"
             elif command -v pip &>/dev/null; then
-                run_pip_as_user "$install_user" pip install --user --no-index --find-links="$target_path/vendor" -r "$target_path/requirements.txt" && print_success "Dependencies installed from vendor"
+                run_pip_as_user "$install_user" pip install --user --no-index --find-links="$target_path/vendor" -r "$TEMP_REQ" && print_success "Dependencies installed from vendor"
             fi
         else
             # Install from network
             if command -v pip3 &>/dev/null; then
-                run_pip_as_user "$install_user" pip3 install --user -r "$target_path/requirements.txt" && print_success "Dependencies installed with pip3"
+                run_pip_as_user "$install_user" pip3 install --user -r "$TEMP_REQ" && print_success "Dependencies installed with pip3"
             elif command -v pip &>/dev/null; then
-                run_pip_as_user "$install_user" pip install --user -r "$target_path/requirements.txt" && print_success "Dependencies installed with pip"
+                run_pip_as_user "$install_user" pip install --user -r "$TEMP_REQ" && print_success "Dependencies installed with pip"
             fi
         fi
+        rm -f "$TEMP_REQ"
     fi
 
     # Create default admin user (if not exists)
@@ -2009,20 +2015,24 @@ do_fresh_install_remote() {
             exit 1
         fi
         # Install dependencies (prefer vendor directory for offline install)
+        # Exclude psycopg2-binary (use system package instead)
+        TEMP_REQ=\$(mktemp)
+        grep -v 'psycopg2-binary' requirements.txt > \$TEMP_REQ || true
         if [ -d 'vendor' ] && [ \"\$(ls -A vendor 2>/dev/null)\" ]; then
             echo 'Installing from vendor directory (offline mode)...'
             if command -v pip3 >/dev/null 2>&1; then
-                pip3 install --user --no-index --find-links=vendor -r requirements.txt
+                pip3 install --user --no-index --find-links=vendor -r \$TEMP_REQ
             elif command -v pip >/dev/null 2>&1; then
-                pip install --user --no-index --find-links=vendor -r requirements.txt
+                pip install --user --no-index --find-links=vendor -r \$TEMP_REQ
             fi
         else
             if command -v pip3 >/dev/null 2>&1; then
-                pip3 install --user -r requirements.txt
+                pip3 install --user -r \$TEMP_REQ
             elif command -v pip >/dev/null 2>&1; then
-                pip install --user -r requirements.txt
+                pip install --user -r \$TEMP_REQ
             fi
         fi
+        rm -f \$TEMP_REQ
     " || {
         print_error "Failed to install dependencies on remote."
         print_info "Please ensure pip is installed on the remote machine."
@@ -2091,20 +2101,24 @@ do_upgrade_remote() {
             exit 1
         fi
         # Install dependencies (prefer vendor directory for offline install)
+        # Exclude psycopg2-binary (use system package instead)
+        TEMP_REQ=\$(mktemp)
+        grep -v 'psycopg2-binary' requirements.txt > \$TEMP_REQ || true
         if [ -d 'vendor' ] && [ \"\$(ls -A vendor 2>/dev/null)\" ]; then
             echo 'Installing from vendor directory (offline mode)...'
             if command -v pip3 >/dev/null 2>&1; then
-                pip3 install --user --no-index --find-links=vendor -r requirements.txt
+                pip3 install --user --no-index --find-links=vendor -r \$TEMP_REQ
             elif command -v pip >/dev/null 2>&1; then
-                pip install --user --no-index --find-links=vendor -r requirements.txt
+                pip install --user --no-index --find-links=vendor -r \$TEMP_REQ
             fi
         else
             if command -v pip3 >/dev/null 2>&1; then
-                pip3 install --user -r requirements.txt
+                pip3 install --user -r \$TEMP_REQ
             elif command -v pip >/dev/null 2>&1; then
-                pip install --user -r requirements.txt
+                pip install --user -r \$TEMP_REQ
             fi
         fi
+        rm -f \$TEMP_REQ
     " || {
         print_error "Failed to install dependencies on remote."
         print_info "Please ensure pip is installed on the remote machine."
