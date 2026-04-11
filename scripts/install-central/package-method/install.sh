@@ -1647,7 +1647,9 @@ do_fresh_install() {
     if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ]; then
         print_info "Setting ownership to $install_user..."
         chown -R "$install_user:$(id -gn "$install_user")" "$target_path"
-        chown -R "$install_user:$(id -gn "$install_user")" "$config_dir"
+        if [ -d "$config_dir" ]; then
+            chown -R "$install_user:$(id -gn "$install_user")" "$config_dir"
+        fi
     fi
 
     # Install system psycopg2 package first (avoids segfault from psycopg2-binary)
@@ -1893,7 +1895,9 @@ do_upgrade() {
     if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ]; then
         print_info "Setting ownership to $install_user..."
         chown -R "$install_user:$(id -gn "$install_user")" "$target_path"
-        chown -R "$install_user:$(id -gn "$install_user")" "$config_dir"
+        if [ -d "$config_dir" ]; then
+            chown -R "$install_user:$(id -gn "$install_user")" "$config_dir"
+        fi
     fi
 
     # Install Python dependencies
