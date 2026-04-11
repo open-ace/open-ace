@@ -1010,11 +1010,11 @@ find_webui_executable() {
     fi
 
     # Not found, check if npm is available
-    print_warning "qwen-code-webui not found"
+    print_warning "qwen-code-webui not found" >&2
     if command -v npm &>/dev/null; then
-        print_info "npm is available, installing qwen-code-webui..."
+        print_info "npm is available, installing qwen-code-webui..." >&2
         if npm install -g qwen-code-webui; then
-            print_success "qwen-code-webui installed successfully"
+            print_success "qwen-code-webui installed successfully" >&2
             # Try to find again after installation
             if command -v qwen-code-webui &>/dev/null; then
                 which qwen-code-webui
@@ -1028,12 +1028,12 @@ find_webui_executable() {
                 fi
             done
         else
-            print_error "Failed to install qwen-code-webui via npm"
+            print_error "Failed to install qwen-code-webui via npm" >&2
             return 1
         fi
     else
         # npm not available, need to install Node.js first
-        print_info "npm not available, installing Node.js 20.x via NodeSource..."
+        print_info "npm not available, installing Node.js 20.x via NodeSource..." >&2
         if install_webui; then
             # Try to find again after installation
             if command -v qwen-code-webui &>/dev/null; then
