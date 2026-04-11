@@ -1711,6 +1711,7 @@ do_fresh_install() {
         # Create temp requirements excluding psycopg2-binary (use system package instead)
         TEMP_REQ=$(mktemp)
         grep -v "psycopg2-binary" "$target_path/requirements.txt" > "$TEMP_REQ" || true
+        chmod 644 "$TEMP_REQ"  # Make readable for non-root users
 
         # Install dependencies (prefer vendor directory for offline install)
         if [ -d "$target_path/vendor" ] && [ "$(ls -A "$target_path/vendor" 2>/dev/null)" ]; then
@@ -1756,12 +1757,12 @@ do_fresh_install() {
                 # Get database connection info from config
                 local db_url=$(python3 -c "import json; c=json.load(open('$config_dir/config.json')); print(c.get('database', {}).get('url', ''))")
                 if [ -n "$db_url" ]; then
-                    # Parse database URL
-                    local db_host=$(echo "$db_url" | sed -n 's/.*@([^:]*):.*/\1/p')
-                    local db_port=$(echo "$db_url" | sed -n 's/.*:([0-9]*)\/.*/\1/p')
-                    local db_name=$(echo "$db_url" | sed -n 's/.*\/([^?]*).*/\1/p')
-                    local db_user=$(echo "$db_url" | sed -n 's/.*\/\/([^:@]*):.*/\1/p')
-                    local db_pass=$(echo "$db_url" | sed -n 's/.*:\/\/[^:]*:([^@]*)@.*/\1/p')
+                    # Parse database URL (use BRE syntax for compatibility)
+                    local db_host=$(echo "$db_url" | sed -n 's/.*@\([^:]*\):.*/\1/p')
+                    local db_port=$(echo "$db_url" | sed -n 's/.*:\([0-9]*\)\/.*/\1/p')
+                    local db_name=$(echo "$db_url" | sed -n 's/.*\/\([^?]*\).*/\1/p')
+                    local db_user=$(echo "$db_url" | sed -n 's/.*\/\/\([^:@]*\):.*/\1/p')
+                    local db_pass=$(echo "$db_url" | sed -n 's/.*:\/\/[^:]*:\([^@]*\)@.*/\1/p')
                     
                     if su - "$install_user" -c "cd '$target_path' && PGPASSWORD='$db_pass' psql -h '$db_host' -p '$db_port' -U '$db_user' -d '$db_name' -f '$schema_file'"; then
                         print_success "Database schema created"
@@ -1786,11 +1787,12 @@ do_fresh_install() {
             if [ "$db_type" = "postgresql" ]; then
                 local db_url=$(python3 -c "import json; c=json.load(open('$config_dir/config.json')); print(c.get('database', {}).get('url', ''))")
                 if [ -n "$db_url" ]; then
-                    local db_host=$(echo "$db_url" | sed -n 's/.*@([^:]*):.*/\1/p')
-                    local db_port=$(echo "$db_url" | sed -n 's/.*:([0-9]*)\/.*/\1/p')
-                    local db_name=$(echo "$db_url" | sed -n 's/.*\/([^?]*).*/\1/p')
-                    local db_user=$(echo "$db_url" | sed -n 's/.*\/\/([^:@]*):.*/\1/p')
-                    local db_pass=$(echo "$db_url" | sed -n 's/.*:\/\/[^:]*:([^@]*)@.*/\1/p')
+                    # Parse database URL (use BRE syntax for compatibility)
+                    local db_host=$(echo "$db_url" | sed -n 's/.*@\([^:]*\):.*/\1/p')
+                    local db_port=$(echo "$db_url" | sed -n 's/.*:\([0-9]*\)\/.*/\1/p')
+                    local db_name=$(echo "$db_url" | sed -n 's/.*\/\([^?]*\).*/\1/p')
+                    local db_user=$(echo "$db_url" | sed -n 's/.*\/\/\([^:@]*\):.*/\1/p')
+                    local db_pass=$(echo "$db_url" | sed -n 's/.*:\/\/[^:]*:\([^@]*\)@.*/\1/p')
                     
                     if PGPASSWORD="$db_pass" psql -h "$db_host" -p "$db_port" -U "$db_user" -d "$db_name" -f "$schema_file"; then
                         print_success "Database schema created"
