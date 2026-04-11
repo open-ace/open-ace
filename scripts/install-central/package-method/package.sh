@@ -229,14 +229,13 @@ echo ""
 # Create dist directory
 mkdir -p "$DIST_DIR"
 
-# Files and directories to include
+# Files and directories to include (VERSION is created dynamically during packaging)
 INCLUDE_ITEMS=(
     "cli.py"
     "web.py"
     "README.md"
     "CHANGELOG.md"
     "requirements.txt"
-    "VERSION"
     "alembic.ini"
     "docker-compose.yml"
     "Dockerfile"

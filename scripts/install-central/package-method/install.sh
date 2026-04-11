@@ -293,8 +293,16 @@ check_postgresql_systemd() {
 # Check if PostgreSQL process is running (without systemd)
 check_postgresql_process() {
     if pgrep -x "postgres" >/dev/null 2>&1; then
-        print_success "Found PostgreSQL process running"
-        return 0
+        # Check if the process is actually listening on a port
+        if ss -tlnp 2>/dev/null | grep -q postgres; then
+            print_success "Found PostgreSQL process running and listening"
+            return 0
+        else
+            # Process exists but not listening - could be Docker container process
+            print_warning "Found PostgreSQL process but NOT listening on any port"
+            print_info "This may be a Docker container process, not host PostgreSQL"
+            return 1
+        fi
     fi
     return 1
 }
