@@ -1879,10 +1879,11 @@ do_upgrade() {
             cp "$target_path/usage.db" "$backup_dir/"
         fi
 
-        # Update files (preserve logs and data)
+        # Update files (preserve logs, data, and config)
         print_info "Updating files..."
-        # Remove old files except logs and data
-        find "$target_path" -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' -exec rm -rf {} +
+        # Remove old files except logs, data, and config directory
+        local config_basename=$(basename "$config_dir")
+        find "$target_path" -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name "$config_basename" -exec rm -rf {} +
         # Copy new files
         cp -r "$SOURCE_DIR"/* "$target_path/"
 
@@ -2062,9 +2063,9 @@ do_upgrade_remote() {
     # Backup database
     ssh "$remote" "if [ -f '$target_path/usage.db' ]; then cp '$target_path/usage.db' '$backup_dir/'; fi"
 
-    # Update files (preserve logs and data)
+    # Update files (preserve logs, data, and config)
     print_info "Updating remote files..."
-    ssh "$remote" "cd '$target_path' && find . -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' -exec rm -rf {} +"
+    ssh "$remote" "cd '$target_path' && find . -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name '.open-ace' -exec rm -rf {} +"
     scp -r "$SOURCE_DIR"/* "$remote:$target_path/"
 
     # Set permissions
