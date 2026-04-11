@@ -266,6 +266,43 @@ STATIC_EXCLUDES=(
     "*.log"
 )
 
+# ============================================
+# Build frontend (React app)
+# ============================================
+echo -e "${YELLOW}Building frontend...${NC}"
+FRONTEND_DIR="$PROJECT_DIR/frontend"
+if [ -d "$FRONTEND_DIR" ]; then
+    # Check if npm is available
+    if command -v npm &> /dev/null; then
+        cd "$FRONTEND_DIR"
+
+        # Install dependencies if node_modules doesn't exist or package.json changed
+        if [ ! -d "node_modules" ] || [ "$(find package.json -newer node_modules 2>/dev/null | head -1)" ]; then
+            echo -e "${BLUE}Installing frontend dependencies...${NC}"
+            npm install --silent 2>/dev/null || npm install
+        fi
+
+        # Build frontend
+        echo -e "${BLUE}Building frontend with Vite...${NC}"
+        npm run build 2>/dev/null || npm run build
+
+        if [ -d "$PROJECT_DIR/static/js/dist" ]; then
+            echo -e "${GREEN}Frontend built successfully${NC}"
+            echo -e "${BLUE}Output: static/js/dist/${NC}"
+        else
+            echo -e "${YELLOW}Warning: Frontend build output not found at static/js/dist${NC}"
+        fi
+
+        cd "$PROJECT_DIR"
+    else
+        echo -e "${YELLOW}Warning: npm not found, skipping frontend build${NC}"
+        echo -e "${YELLOW}The package will not include built frontend. Install npm and run 'npm run build' manually.${NC}"
+        echo -e "${YELLOW}Or install frontend on the target server after installation.${NC}"
+    fi
+else
+    echo -e "${YELLOW}Warning: Frontend directory not found at $FRONTEND_DIR${NC}"
+fi
+
 echo -e "${YELLOW}Creating package...${NC}"
 
 # Create temporary directory
