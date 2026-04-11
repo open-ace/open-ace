@@ -944,14 +944,58 @@ stop_webui_systemd_service() {
     return 0
 }
 
+# Install qwen-code-webui via npm if not found
+install_webui() {
+    print_info "Installing qwen-code-webui via npm..."
+
+    # Check if npm is available
+    if ! command -v npm &>/dev/null; then
+        print_warning "npm not found, installing Node.js via NodeSource..."
+        if [ "$EUID" -eq 0 ]; then
+            # Use NodeSource to get Node.js 20.x
+            if command -v dnf &>/dev/null || command -v yum &>/dev/null; then
+                curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+                if command -v dnf &>/dev/null; then
+                    dnf install -y nodejs
+                else
+                    yum install -y nodejs
+                fi
+            elif command -v apt-get &>/dev/null; then
+                curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+                apt-get install -y nodejs
+            else
+                print_error "Cannot install Node.js automatically on this system"
+                print_info "Please install Node.js 18+ manually"
+                return 1
+            fi
+        else
+            print_error "Not running as root, cannot install Node.js automatically"
+            print_info "Please run with sudo: curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash - && sudo yum install -y nodejs"
+            return 1
+        fi
+    fi
+
+    # Install qwen-code-webui globally
+    if npm install -g @ivycomputing/qwen-code-webui; then
+        print_success "qwen-code-webui installed successfully"
+        return 0
+    else
+        print_error "Failed to install qwen-code-webui"
+        return 1
+    fi
+}
+
 # Find qwen-code-webui executable
 find_webui_executable() {
     local candidates=(
         "/usr/local/bin/qwen-code-webui"
         "/usr/bin/qwen-code-webui"
         "/opt/qwen-code-webui/bin/qwen-code-webui"
+        "$HOME/.local/bin/qwen-code-webui"
+        "$HOME/.npm-global/bin/qwen-code-webui"
     )
 
+    # First, check if qwen-code-webui is already installed
     for candidate in "${candidates[@]}"; do
         if [ -x "$candidate" ]; then
             echo "$candidate"
@@ -963,6 +1007,47 @@ find_webui_executable() {
     if command -v qwen-code-webui &>/dev/null; then
         which qwen-code-webui
         return 0
+    fi
+
+    # Not found, check if npm is available
+    print_warning "qwen-code-webui not found"
+    if command -v npm &>/dev/null; then
+        print_info "npm is available, installing qwen-code-webui..."
+        if npm install -g @ivycomputing/qwen-code-webui; then
+            print_success "qwen-code-webui installed successfully"
+            # Try to find again after installation
+            if command -v qwen-code-webui &>/dev/null; then
+                which qwen-code-webui
+                return 0
+            fi
+            # Check common paths again
+            for candidate in "${candidates[@]}"; do
+                if [ -x "$candidate" ]; then
+                    echo "$candidate"
+                    return 0
+                fi
+            done
+        else
+            print_error "Failed to install qwen-code-webui via npm"
+            return 1
+        fi
+    else
+        # npm not available, need to install Node.js first
+        print_info "npm not available, installing Node.js 20.x via NodeSource..."
+        if install_webui; then
+            # Try to find again after installation
+            if command -v qwen-code-webui &>/dev/null; then
+                which qwen-code-webui
+                return 0
+            fi
+            # Check common paths again
+            for candidate in "${candidates[@]}"; do
+                if [ -x "$candidate" ]; then
+                    echo "$candidate"
+                    return 0
+                fi
+            done
+        fi
     fi
 
     return 1
