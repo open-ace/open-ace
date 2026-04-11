@@ -329,18 +329,18 @@ def upgrade() -> None:
             WHERE (role = 'assistant'::message_role)
         """)
 
-    # Active users only (is_active is INTEGER: 1=active, 0=inactive)
+    # Active users only (is_active is BOOLEAN in PostgreSQL)
     if not _index_exists(conn, "users", "idx_users_active_partial"):
         op.execute("""
             CREATE INDEX idx_users_active_partial ON users (username, email, role)
-            WHERE is_active = 1 AND deleted_at IS NULL
+            WHERE is_active IS TRUE AND deleted_at IS NULL
         """)
 
-    # Unacknowledged alerts (acknowledged is integer: 0=unacknowledged, 1=acknowledged)
+    # Unacknowledged alerts (acknowledged is BOOLEAN in PostgreSQL)
     if not _index_exists(conn, "quota_alerts", "idx_alerts_unacked_partial"):
         op.execute("""
             CREATE INDEX idx_alerts_unacked_partial ON quota_alerts (created_at, user_id)
-            WHERE acknowledged = 0
+            WHERE acknowledged IS FALSE
         """)
 
     # Recent audit logs - skip partial index with CURRENT_TIMESTAMP (not IMMUTABLE)
