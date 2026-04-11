@@ -1676,6 +1676,30 @@ do_fresh_install() {
         fi
     fi
 
+    # Run database migrations with Alembic
+    print_info "Running database migrations..."
+    if [ -f "$target_path/alembic.ini" ] && [ -d "$target_path/migrations" ]; then
+        if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ]; then
+            cd "$target_path"
+            if su - "$install_user" -c "cd '$target_path' && python3 -m alembic upgrade head"; then
+                print_success "Database migrations completed"
+            else
+                print_warning "Failed to run migrations. You may need to run 'alembic upgrade head' manually."
+            fi
+            cd - > /dev/null
+        else
+            cd "$target_path"
+            if python3 -m alembic upgrade head; then
+                print_success "Database migrations completed"
+            else
+                print_warning "Failed to run migrations. You may need to run 'alembic upgrade head' manually."
+            fi
+            cd - > /dev/null
+        fi
+    else
+        print_warning "Alembic not found, skipping migrations"
+    fi
+
     # Create default admin user
     print_info "Creating default admin user..."
     if [ -f "$target_path/scripts/init_db.py" ]; then

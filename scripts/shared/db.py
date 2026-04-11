@@ -1402,9 +1402,10 @@ def create_user_with_is_active(
     conn = get_connection()
     cursor = conn.cursor()
 
-    # Convert boolean to integer for SQLite compatibility
-    is_active_val = is_active if is_postgresql() else (1 if is_active else 0)
-    must_change_val = must_change_password if is_postgresql() else (1 if must_change_password else 0)
+    # Convert boolean to integer for database compatibility
+    # Both SQLite and PostgreSQL tables use INTEGER for is_active
+    is_active_val = 1 if is_active else 0
+    must_change_val = 1 if must_change_password else 0
 
     try:
         _execute(
