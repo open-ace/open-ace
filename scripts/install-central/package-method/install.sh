@@ -1676,28 +1676,54 @@ do_fresh_install() {
         fi
     fi
 
-    # Run database migrations with Alembic
-    print_info "Running database migrations..."
-    if [ -f "$target_path/alembic.ini" ] && [ -d "$target_path/migrations" ]; then
+    # Initialize database schema
+    # For fresh installation: use init_schema.py (creates latest schema directly)
+    # For upgrades: use alembic migrations
+    print_info "Initializing database schema..."
+    if [ -f "$target_path/scripts/init_schema.py" ]; then
+        # Fresh installation - use init_schema.py for direct schema creation
+        print_info "Creating database schema (fresh installation)..."
         if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ]; then
             cd "$target_path"
-            if su - "$install_user" -c "cd '$target_path' && python3 -m alembic upgrade head"; then
-                print_success "Database migrations completed"
+            if su - "$install_user" -c "cd '$target_path' && python3 scripts/init_schema.py"; then
+                print_success "Database schema created"
             else
-                print_warning "Failed to run migrations. You may need to run 'alembic upgrade head' manually."
+                print_warning "Failed to create schema. You may need to run scripts/init_schema.py manually."
             fi
             cd - > /dev/null
         else
             cd "$target_path"
-            if python3 -m alembic upgrade head; then
-                print_success "Database migrations completed"
+            if python3 scripts/init_schema.py; then
+                print_success "Database schema created"
             else
-                print_warning "Failed to run migrations. You may need to run 'alembic upgrade head' manually."
+                print_warning "Failed to create schema. You may need to run scripts/init_schema.py manually."
             fi
             cd - > /dev/null
         fi
     else
-        print_warning "Alembic not found, skipping migrations"
+        # Fallback to alembic migrations if init_schema.py not found
+        print_info "init_schema.py not found, using alembic migrations..."
+        if [ -f "$target_path/alembic.ini" ] && [ -d "$target_path/migrations" ]; then
+            if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ]; then
+                cd "$target_path"
+                if su - "$install_user" -c "cd '$target_path' && python3 -m alembic upgrade head"; then
+                    print_success "Database migrations completed"
+                else
+                    print_warning "Failed to run migrations. You may need to run 'alembic upgrade head' manually."
+                fi
+                cd - > /dev/null
+            else
+                cd "$target_path"
+                if python3 -m alembic upgrade head; then
+                    print_success "Database migrations completed"
+                else
+                    print_warning "Failed to run migrations. You may need to run 'alembic upgrade head' manually."
+                fi
+                cd - > /dev/null
+            fi
+        else
+            print_warning "Alembic not found, skipping schema initialization"
+        fi
     fi
 
     # Create default admin user

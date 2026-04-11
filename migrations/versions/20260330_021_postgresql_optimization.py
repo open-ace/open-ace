@@ -121,7 +121,7 @@ def upgrade() -> None:
     indexes_to_drop = [
         "idx_messages_session_list_covering",
         "idx_messages_usage_trend_covering",
-        "idx_messages_user_date_role_covering",
+        "idx_messages_sender_date_role_covering",
     ]
     for idx_name in indexes_to_drop:
         if _index_exists(conn, "daily_messages", idx_name):
@@ -305,12 +305,12 @@ def upgrade() -> None:
     # ============================================
     # Recreate indexes on daily_messages.role that were dropped earlier
     # Now that role is converted to message_role ENUM
-    if not _index_exists(conn, "daily_messages", "idx_messages_user_date_role_covering"):
+    if not _index_exists(conn, "daily_messages", "idx_messages_sender_date_role_covering"):
         op.execute("""
-            CREATE INDEX idx_messages_user_date_role_covering ON daily_messages 
-            USING btree (user_id, date, role) 
+            CREATE INDEX idx_messages_sender_date_role_covering ON daily_messages 
+            USING btree (sender_id, date, role) 
             INCLUDE (tokens_used) 
-            WHERE ((user_id IS NOT NULL) AND (role = 'assistant'::message_role))
+            WHERE ((sender_id IS NOT NULL) AND (role = 'assistant'::message_role))
         """)
 
     if not _index_exists(conn, "daily_messages", "idx_messages_session_list_covering"):
@@ -329,11 +329,11 @@ def upgrade() -> None:
             WHERE (role = 'assistant'::message_role)
         """)
 
-    # Active users only
+    # Active users only (is_active is INTEGER: 1=active, 0=inactive)
     if not _index_exists(conn, "users", "idx_users_active_partial"):
         op.execute("""
             CREATE INDEX idx_users_active_partial ON users (username, email, role)
-            WHERE is_active = TRUE AND deleted_at IS NULL
+            WHERE is_active = 1 AND deleted_at IS NULL
         """)
 
     # Unacknowledged alerts (acknowledged is integer: 0=unacknowledged, 1=acknowledged)
@@ -473,7 +473,7 @@ def downgrade() -> None:
     indexes_to_drop = [
         "idx_messages_session_list_covering",
         "idx_messages_usage_trend_covering",
-        "idx_messages_user_date_role_covering",
+        "idx_messages_sender_date_role_covering",
     ]
     for idx_name in indexes_to_drop:
         if _index_exists(conn, "daily_messages", idx_name):
@@ -654,12 +654,12 @@ def downgrade() -> None:
     # Recreate partial indexes with TEXT type
     # ============================================
     # Recreate indexes that were dropped at the beginning
-    if not _index_exists(conn, "daily_messages", "idx_messages_user_date_role_covering"):
+    if not _index_exists(conn, "daily_messages", "idx_messages_sender_date_role_covering"):
         op.execute("""
-            CREATE INDEX idx_messages_user_date_role_covering ON daily_messages 
-            USING btree (user_id, date, role) 
+            CREATE INDEX idx_messages_sender_date_role_covering ON daily_messages 
+            USING btree (sender_id, date, role) 
             INCLUDE (tokens_used) 
-            WHERE ((user_id IS NOT NULL) AND (role = 'assistant'))
+            WHERE ((sender_id IS NOT NULL) AND (role = 'assistant'))
         """)
 
     if not _index_exists(conn, "daily_messages", "idx_messages_session_list_covering"):
