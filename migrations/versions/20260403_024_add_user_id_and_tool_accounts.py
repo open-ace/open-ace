@@ -86,8 +86,10 @@ def upgrade():
     # Step 3: Populate user_tool_accounts from existing data
     # ===========================================
 
-    # Extract unique sender_names that match linux_account pattern
-    # Pattern: {linux_account}-{hostname}-{tool}
+    # Extract unique sender_names that match system_account/linux_account pattern
+    # Pattern: {system_account}-{hostname}-{tool}
+    # Note: Field name changed from linux_account to system_account in migration 025
+    # Use COALESCE to handle both cases (fresh install vs already renamed)
     op.execute("""
         INSERT INTO user_tool_accounts (user_id, tool_account, tool_type)
         SELECT DISTINCT
@@ -100,10 +102,10 @@ def upgrade():
                 ELSE 'other'
             END as tool_type
         FROM daily_messages dm
-        JOIN users u ON dm.sender_name LIKE u.linux_account || '-%'
+        JOIN users u ON dm.sender_name LIKE COALESCE(u.system_account, u.linux_account) || '-%'
         WHERE dm.sender_name IS NOT NULL
           AND dm.sender_name LIKE '%-%-%'
-          AND u.linux_account IS NOT NULL
+          AND COALESCE(u.system_account, u.linux_account) IS NOT NULL
           AND NOT EXISTS (
               SELECT 1 FROM user_tool_accounts uta
               WHERE uta.tool_account = dm.sender_name
