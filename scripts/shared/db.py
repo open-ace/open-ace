@@ -146,6 +146,24 @@ def _table_exists(cursor, table_name: str) -> bool:
         return cursor.fetchone() is not None
 
 
+def _index_exists(cursor, table_name: str, index_name: str) -> bool:
+    """Check if an index exists on a table."""
+    if is_postgresql():
+        _execute(
+            cursor,
+            "SELECT EXISTS (SELECT FROM pg_indexes WHERE tablename = %s AND indexname = %s)",
+            (table_name, index_name),
+        )
+        return cursor.fetchone()[0]
+    else:
+        _execute(
+            cursor,
+            "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name=? AND name=?",
+            (table_name, index_name),
+        )
+        return cursor.fetchone() is not None
+
+
 def _column_exists(cursor, table_name: str, column_name: str) -> bool:
     """Check if a column exists in a table."""
     if is_postgresql():

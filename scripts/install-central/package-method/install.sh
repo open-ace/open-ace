@@ -559,7 +559,7 @@ install_postgresql_docker() {
     mkdir -p "$pg_data_dir"
 
     # Generate a random password
-    local pg_password=$(openssl rand -base64 12 2>/dev/null || date +%s | sha256sum | base64 | head -c 12)
+    local pg_password=$(openssl rand -hex 12 2>/dev/null || echo "$(date +%s)$$" | sha256sum | head -c 24)
 
     # Run PostgreSQL container
     docker run -d \
@@ -593,7 +593,7 @@ configure_postgresql() {
 
     # Generate password if not set
     if [ -z "$DB_PASSWORD" ]; then
-        DB_PASSWORD=$(openssl rand -base64 12 2>/dev/null || date +%s | sha256sum | base64 | head -c 12)
+        DB_PASSWORD=$(openssl rand -hex 12 2>/dev/null || echo "$(date +%s)$$" | sha256sum | head -c 24)
     fi
 
     # Create user and database
