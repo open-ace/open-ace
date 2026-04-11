@@ -1041,16 +1041,16 @@ install_webui() {
     fi
 
     # Check and install qwen-code CLI (required by qwen-code-webui)
-    if ! command -v qwen-code &>/dev/null; then
+    if ! command -v qwen &>/dev/null; then
         print_info ""
         print_info "qwen-code CLI not found, installing..."
         print_info "This is required for qwen-code-webui to function"
         print_info "Package size: ~30MB, this may take 1-3 minutes"
-        if npm install -g qwen-code; then
+        if npm install -g @qwen-code/qwen-code; then
             print_success "qwen-code CLI installed successfully"
         else
             print_warning "Failed to install qwen-code CLI automatically"
-            print_info "You may need to install it manually: npm install -g qwen-code"
+            print_info "You may need to install it manually: npm install -g @qwen-code/qwen-code"
         fi
     else
         print_success "qwen-code CLI already installed"
@@ -1092,12 +1092,12 @@ find_webui_executable() {
         if npm install -g qwen-code-webui; then
             print_success "qwen-code-webui installed successfully" >&2
             # Check and install qwen-code CLI (required by qwen-code-webui)
-            if ! command -v qwen-code &>/dev/null; then
+            if ! command -v qwen &>/dev/null; then
                 print_info "" >&2
                 print_info "qwen-code CLI not found, installing..." >&2
                 print_info "This is required for qwen-code-webui to function" >&2
                 print_info "Downloading qwen-code (~30MB)..." >&2
-                npm install -g qwen-code 2>/dev/null || print_warning "Failed to install qwen-code CLI" >&2
+                npm install -g @qwen-code/qwen-code 2>/dev/null || print_warning "Failed to install qwen-code CLI" >&2
             fi
             # Try to find again after installation
             if command -v qwen-code-webui &>/dev/null; then
