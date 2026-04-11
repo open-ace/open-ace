@@ -1674,6 +1674,27 @@ do_fresh_install() {
 
     # Install Python dependencies
     print_info "Installing Python dependencies..."
+
+    # Install system psycopg2 package first (avoids segfault from psycopg2-binary)
+    # See Issue #38: psycopg2-binary 2.9.11 causes segfault on some Linux systems
+    if [ "$DB_INSTALL_METHOD" != "sqlite" ]; then
+        print_info "Checking for psycopg2 system package..."
+        if ! python3 -c "import psycopg2" 2>/dev/null; then
+            print_info "Installing system package python3-psycopg2..."
+            if command -v dnf &>/dev/null; then
+                dnf install -y python3-psycopg2 || print_warning "Failed to install python3-psycopg2 with dnf"
+            elif command -v yum &>/dev/null; then
+                yum install -y python3-psycopg2 || print_warning "Failed to install python3-psycopg2 with yum"
+            elif command -v apt-get &>/dev/null; then
+                apt-get install -y python3-psycopg2 || print_warning "Failed to install python3-psycopg2 with apt-get"
+            else
+                print_warning "Could not install python3-psycopg2 automatically. Please install it manually."
+            fi
+        else
+            print_success "psycopg2 already available"
+        fi
+    fi
+
     if [ -f "$target_path/requirements.txt" ]; then
         # Check if pip is available
         if ! command -v pip3 &>/dev/null && ! command -v pip &>/dev/null; then
@@ -1928,6 +1949,27 @@ do_upgrade() {
 
     # Install Python dependencies
     print_info "Installing Python dependencies..."
+
+    # Install system psycopg2 package first (avoids segfault from psycopg2-binary)
+    # See Issue #38: psycopg2-binary 2.9.11 causes segfault on some Linux systems
+    if [ "$DB_INSTALL_METHOD" != "sqlite" ]; then
+        print_info "Checking for psycopg2 system package..."
+        if ! python3 -c "import psycopg2" 2>/dev/null; then
+            print_info "Installing system package python3-psycopg2..."
+            if command -v dnf &>/dev/null; then
+                dnf install -y python3-psycopg2 || print_warning "Failed to install python3-psycopg2 with dnf"
+            elif command -v yum &>/dev/null; then
+                yum install -y python3-psycopg2 || print_warning "Failed to install python3-psycopg2 with yum"
+            elif command -v apt-get &>/dev/null; then
+                apt-get install -y python3-psycopg2 || print_warning "Failed to install python3-psycopg2 with apt-get"
+            else
+                print_warning "Could not install python3-psycopg2 automatically. Please install it manually."
+            fi
+        else
+            print_success "psycopg2 already available"
+        fi
+    fi
+
     if [ -f "$target_path/requirements.txt" ]; then
         # Check if pip is available
         if ! command -v pip3 &>/dev/null && ! command -v pip &>/dev/null; then
