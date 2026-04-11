@@ -102,7 +102,39 @@ def init_schema():
     id_type = "SERIAL PRIMARY KEY" if pg else "INTEGER PRIMARY KEY AUTOINCREMENT"
 
     # ============================================
-    # 1. Core tables
+    # 1. PostgreSQL-specific: Create ENUM types FIRST
+    # ============================================
+    if pg:
+        # Create ENUM types (ignore if already exist)
+        enum_types = [
+            ("message_role", ["user", "assistant", "system"]),
+            ("user_role", ["admin", "manager", "user"]),
+            ("tenant_status", ["active", "suspended", "trial", "inactive"]),
+            ("tenant_plan", ["free", "standard", "premium", "enterprise"]),
+            ("audit_severity", ["info", "warning", "error", "critical"]),
+        ]
+
+        for enum_name, values in enum_types:
+            try:
+                values_str = ", ".join(f"'{v}'" for v in values)
+                _execute(
+                    cursor,
+                    f"""
+                    DO $$ BEGIN
+                        CREATE TYPE {enum_name} AS ENUM ({values_str});
+                    EXCEPTION
+                        WHEN duplicate_object THEN NULL;
+                    END $$;
+                """,
+                )
+                print(f"Created ENUM type: {enum_name}")
+            except Exception as e:
+                print(f"Note: {enum_name} may already exist: {e}")
+
+        conn.commit()
+
+    # ============================================
+    # 2. Core tables
     # ============================================
 
     # daily_messages - AI tool message records
@@ -433,35 +465,9 @@ def init_schema():
         print("Created table: security_settings")
 
     # ============================================
-    # 2. PostgreSQL-specific: Create ENUM types
+    # 3. PostgreSQL-specific: Triggers and indexes
     # ============================================
     if pg:
-        # Create ENUM types (ignore if already exist)
-        enum_types = [
-            ("user_role", ["admin", "manager", "user"]),
-            ("tenant_status", ["active", "suspended", "trial", "inactive"]),
-            ("tenant_plan", ["free", "standard", "premium", "enterprise"]),
-            ("message_role", ["user", "assistant", "system"]),
-            ("audit_severity", ["info", "warning", "error", "critical"]),
-        ]
-
-        for enum_name, values in enum_types:
-            try:
-                values_str = ", ".join(f"'{v}'" for v in values)
-                _execute(
-                    cursor,
-                    f"""
-                    DO $$ BEGIN
-                        CREATE TYPE {enum_name} AS ENUM ({values_str});
-                    EXCEPTION
-                        WHEN duplicate_object THEN NULL;
-                    END $$;
-                """,
-                )
-                print(f"Created ENUM type: {enum_name}")
-            except Exception as e:
-                print(f"Note: {enum_name} may already exist: {e}")
-
         # Create updated_at trigger function
         _execute(
             cursor,
