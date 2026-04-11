@@ -1420,10 +1420,16 @@ def create_user_with_is_active(
     conn = get_connection()
     cursor = conn.cursor()
 
-    # Convert boolean to integer for database compatibility
-    # Both SQLite and PostgreSQL tables use INTEGER for is_active
-    is_active_val = 1 if is_active else 0
-    must_change_val = 1 if must_change_password else 0
+    # PostgreSQL uses BOOLEAN for is_active (migration 012 converted it)
+    # SQLite uses INTEGER (1/0) for boolean fields
+    if is_postgresql():
+        # PostgreSQL: use actual boolean values (psycopg2 handles conversion)
+        is_active_val = is_active
+        must_change_val = must_change_password
+    else:
+        # SQLite: use integer values
+        is_active_val = 1 if is_active else 0
+        must_change_val = 1 if must_change_password else 0
 
     try:
         _execute(
