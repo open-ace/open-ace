@@ -336,11 +336,11 @@ def upgrade() -> None:
             WHERE is_active IS TRUE AND deleted_at IS NULL
         """)
 
-    # Unacknowledged alerts (acknowledged is BOOLEAN in PostgreSQL)
+    # Unacknowledged alerts (acknowledged is INTEGER: 0=unacknowledged, 1=acknowledged)
     if not _index_exists(conn, "quota_alerts", "idx_alerts_unacked_partial"):
         op.execute("""
             CREATE INDEX idx_alerts_unacked_partial ON quota_alerts (created_at, user_id)
-            WHERE acknowledged IS FALSE
+            WHERE acknowledged = 0
         """)
 
     # Recent audit logs - skip partial index with CURRENT_TIMESTAMP (not IMMUTABLE)
