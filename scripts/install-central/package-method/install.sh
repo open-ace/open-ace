@@ -1153,6 +1153,14 @@ install_systemd_service_remote() {
     local port="${4:-5000}"
     local host="${5:-0.0.0.0}"
 
+    local service_template="$SOURCE_DIR/scripts/open-ace.service"
+
+    # Check if template exists
+    if [ ! -f "$service_template" ]; then
+        print_error "Service template not found: $service_template"
+        return 1
+    fi
+
     # Check if systemd is available on remote
     if ! ssh "$remote" "command -v systemctl &>/dev/null"; then
         print_warning "systemctl not found on remote machine. Skipping systemd service installation."
@@ -1160,49 +1168,41 @@ install_systemd_service_remote() {
         return 0
     fi
 
+    # Get user's primary group
+    local group=$(id -gn "$user")
+
+    # Generate service file content locally using sed
+    local service_content=$(sed -e "s|__USER__|$user|g" \
+        -e "s|__GROUP__|$group|g" \
+        -e "s|__INSTALL_PATH__|$target_path|g" \
+        -e "s|__PORT__|$port|g" \
+        -e "s|__HOST__|$host|g" \
+        "$service_template")
+
     # Create service file on remote
     print_info "Creating systemd service on remote machine..."
-    ssh "$remote" "
+
+    # Check sudo access and create service file
+    local ssh_result=$(ssh "$remote" "
         # Check if we have sudo access
         if ! sudo -n true 2>/dev/null; then
             echo 'SUDO_REQUIRED'
             exit 0
         fi
+    ")
 
-        # Get user's primary group
-        GROUP=\$(id -gn '$user')
+    if [ "$ssh_result" = "SUDO_REQUIRED" ]; then
+        print_warning "Remote requires sudo password. Skipping systemd service installation."
+        print_info "Please run: ssh $remote 'sudo $0 --config <config-file>'"
+        return 1
+    fi
 
-        # Create service file
-        sudo tee /etc/systemd/system/open-ace.service > /dev/null << 'EOFSERVICE'
-[Unit]
-Description=Open ACE - Web Dashboard for AI Token Usage
-Documentation=https://github.com/open-ace/open-ace
-After=network.target
+    # Pipe service content directly to remote
+    print_info "Copying service file to remote..."
+    echo "$service_content" | ssh "$remote" "sudo tee /etc/systemd/system/open-ace.service > /dev/null"
 
-[Service]
-Type=simple
-User=$user
-Group=\$GROUP
-WorkingDirectory=$target_path
-ExecStart=/usr/bin/python3 $target_path/web.py
-Restart=always
-RestartSec=10
-StandardOutput=journal
-StandardError=journal
-
-# Environment variables
-Environment=AI_TOKEN_WEB_PORT=$port
-Environment=AI_TOKEN_WEB_HOST=$host
-
-# Security settings
-NoNewPrivileges=true
-PrivateTmp=true
-
-[Install]
-WantedBy=multi-user.target
-EOFSERVICE
-
-        # Reload and enable service
+    # Reload, enable and start service
+    local result=$(ssh "$remote" "
         sudo systemctl daemon-reload
         sudo systemctl enable open-ace.service
 
@@ -1220,18 +1220,6 @@ EOFSERVICE
         else
             echo 'SERVICE_FAILED'
         fi
-    "
-
-    local result=$(ssh "$remote" "
-        if sudo -n true 2>/dev/null; then
-            if sudo systemctl is-active --quiet open-ace.service; then
-                echo 'SERVICE_STARTED'
-            else
-                echo 'SERVICE_FAILED'
-            fi
-        else
-            echo 'SUDO_REQUIRED'
-        fi
     ")
 
     case "$result" in
@@ -1240,18 +1228,12 @@ EOFSERVICE
             print_info "Service name: open-ace"
             print_info "Status: ssh $remote 'sudo systemctl status open-ace'"
             print_info "Logs: ssh $remote 'sudo journalctl -u open-ace -f'"
-            print_info "Web interface: http://$DEPLOY_HOST:$port"
+            print_info "Web interface: http://$remote:$port"
             ;;
         SERVICE_FAILED)
             print_error "Service failed to start on remote machine"
             print_info "Check logs with: ssh $remote 'sudo journalctl -u open-ace -n 50'"
             return 1
-            ;;
-        SUDO_REQUIRED)
-            print_warning "Sudo privileges required on remote machine."
-            print_info "Please run the following on the remote machine:"
-            print_info "  sudo systemctl enable open-ace"
-            print_info "  sudo systemctl start open-ace"
             ;;
     esac
 

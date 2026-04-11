@@ -17,8 +17,6 @@ StandardError=journal
 # Environment variables
 Environment=AI_TOKEN_WEB_PORT=__PORT__
 Environment=AI_TOKEN_WEB_HOST=__HOST__
-# Add user's .local/bin to PATH for pip-installed packages
-Environment="PATH=/home/__USER__/.local/bin:/usr/local/bin:/usr/bin:/bin"
 
 # Security settings
 NoNewPrivileges=true
