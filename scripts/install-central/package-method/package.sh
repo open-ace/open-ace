@@ -8,6 +8,7 @@
 #   ./package.sh                    # Use version from VERSION file
 #   ./package.sh --version 1.2.0    # Specify version
 #   ./package.sh --force-download   # Force re-download dependencies
+#   ./package.sh --generate-schema  # Generate schema.sql from pg_dump
 #   ./package.sh --help             # Show help
 #
 
@@ -182,6 +183,7 @@ get_git_version_for_file() {
 VERSION=$(get_git_version)
 
 # Parse arguments
+GENERATE_SCHEMA=false
 while [[ $# -gt 0 ]]; do
     case $1 in
         --version|-v)
@@ -192,6 +194,10 @@ while [[ $# -gt 0 ]]; do
             FORCE_DOWNLOAD=true
             shift
             ;;
+        --generate-schema|-g)
+            GENERATE_SCHEMA=true
+            shift
+            ;;
         --help|-h)
             echo "Open ACE - Package Script"
             echo ""
@@ -200,6 +206,7 @@ while [[ $# -gt 0 ]]; do
             echo "Options:"
             echo "  --version, -v VERSION   Specify version (default: from git commit)"
             echo "  --force-download, -f    Force re-download dependencies"
+            echo "  --generate-schema, -g   Generate schema.sql from pg_dump (requires PostgreSQL)"
             echo "  --help, -h              Show this help message"
             echo ""
             echo "Output:"
@@ -270,17 +277,21 @@ STATIC_EXCLUDES=(
 # ============================================
 # Generate database schema
 # ============================================
-echo -e "${YELLOW}Generating database schema...${NC}"
-if [ -f "$PROJECT_DIR/scripts/generate_schema.py" ]; then
-    cd "$PROJECT_DIR"
-    python3 scripts/generate_schema.py
-    if [ -f "$PROJECT_DIR/schema/schema-postgres.sql" ] && [ -f "$PROJECT_DIR/schema/schema-sqlite.sql" ]; then
-        echo -e "${GREEN}Database schema generated successfully${NC}"
+if [ "$GENERATE_SCHEMA" = true ]; then
+    echo -e "${YELLOW}Generating database schema...${NC}"
+    if [ -f "$PROJECT_DIR/scripts/generate_schema.py" ]; then
+        cd "$PROJECT_DIR"
+        python3 scripts/generate_schema.py
+        if [ -f "$PROJECT_DIR/schema/schema-postgres.sql" ] && [ -f "$PROJECT_DIR/schema/schema-sqlite.sql" ]; then
+            echo -e "${GREEN}Database schema generated successfully${NC}"
+        else
+            echo -e "${YELLOW}Warning: Schema generation may have failed. Check schema directory.${NC}"
+        fi
     else
-        echo -e "${YELLOW}Warning: Schema generation may have failed. Check schema directory.${NC}"
+        echo -e "${YELLOW}Warning: generate_schema.py not found, skipping schema generation${NC}"
     fi
 else
-    echo -e "${YELLOW}Warning: generate_schema.py not found, skipping schema generation${NC}"
+    echo -e "${YELLOW}Skipping schema generation (use --generate-schema to enable)${NC}"
 fi
 
 # ============================================
