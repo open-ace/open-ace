@@ -43,6 +43,7 @@ def clean_postgres_schema(input_sql):
         '\\unrestrict',
         'Dumped from database',
         'Dumped by pg_dump',
+        'set_config',         # SELECT pg_catalog.set_config('search_path', '', false)
     ]
     
     # Lines to skip if they start with certain patterns
@@ -125,16 +126,33 @@ def clean_postgres_schema(input_sql):
         
         # Handle ALTER TABLE statements
         if re.match(r'ALTER TABLE', line):
-            # Only keep ADD PRIMARY KEY, ADD FOREIGN KEY, ADD CONSTRAINT
-            if re.search(r'ADD (PRIMARY KEY|FOREIGN KEY|CONSTRAINT)', line):
-                output_lines.append(line.replace('public.', ''))
-                i += 1
+            # Check if target table is in skip_tables
+            table_match = re.search(r'ALTER TABLE(?:\s+ONLY)?(?:\s+(?:public\.)?)?(\w+)', line)
+            if table_match and table_match.group(1) in skip_tables:
                 while i < len(lines) and not lines[i].rstrip().endswith(';'):
-                    output_lines.append(lines[i].replace('public.', ''))
                     i += 1
-                if i < len(lines):
-                    output_lines.append(lines[i].replace('public.', ''))
-                output_lines.append("")
+                i += 1
+                continue
+            
+            # Look ahead to see if this is ADD PRIMARY KEY, ADD FOREIGN KEY, ADD CONSTRAINT
+            # These are multi-line statements like:
+            # ALTER TABLE ONLY public.users
+            #     ADD CONSTRAINT users_pkey PRIMARY KEY (id);
+            lookahead = i + 1
+            while lookahead < len(lines) and lines[lookahead].strip().startswith('--'):
+                lookahead += 1
+            if lookahead < len(lines):
+                next_line = lines[lookahead]
+                if re.search(r'ADD (PRIMARY KEY|FOREIGN KEY|CONSTRAINT)', next_line):
+                    output_lines.append(line.replace('public.', ''))
+                    i += 1
+                    while i < len(lines) and not lines[i].rstrip().endswith(';'):
+                        if not re.search(r'OWNER', lines[i]):
+                            output_lines.append(lines[i].replace('public.', ''))
+                        i += 1
+                    if i < len(lines):
+                        output_lines.append(lines[i].replace('public.', ''))
+                    output_lines.append("")
             else:
                 # Skip other ALTER TABLE
                 while i < len(lines) and not lines[i].rstrip().endswith(';'):

@@ -8,7 +8,6 @@
 
 -- Setup session
 
-SELECT pg_catalog.set_config('search_path', '', false);
 CREATE TABLE agent_sessions (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  session_id text NOT NULL,
@@ -617,6 +616,246 @@ CREATE TABLE web_user_auth_sessions (
 
 
 ALTER SEQUENCE web_user_auth_sessions_id_seq OWNED BY web_user_auth_sessions.id;
+ALTER TABLE ONLY agent_sessions
+    ADD CONSTRAINT agent_sessions_pkey PRIMARY KEY (id);
+
+
+ALTER TABLE ONLY agent_sessions
+    ADD CONSTRAINT agent_sessions_session_id_key UNIQUE (session_id);
+
+
+ALTER TABLE ONLY alerts
+    ADD CONSTRAINT alerts_alert_id_key UNIQUE (alert_id);
+
+
+ALTER TABLE ONLY alerts
+    ADD CONSTRAINT alerts_pkey PRIMARY KEY (id);
+
+
+ALTER TABLE ONLY annotations
+    ADD CONSTRAINT annotations_annotation_id_key UNIQUE (annotation_id);
+
+
+ALTER TABLE ONLY annotations
+    ADD CONSTRAINT annotations_pkey PRIMARY KEY (id);
+
+
+ALTER TABLE ONLY audit_logs
+    ADD CONSTRAINT audit_logs_pkey PRIMARY KEY (id);
+
+
+ALTER TABLE ONLY content_filter_rules
+    ADD CONSTRAINT content_filter_rules_pkey PRIMARY KEY (id);
+
+
+ALTER TABLE ONLY daily_messages
+    ADD CONSTRAINT daily_messages_pkey PRIMARY KEY (id);
+
+
+ALTER TABLE ONLY daily_usage
+    ADD CONSTRAINT daily_usage_pkey PRIMARY KEY (id);
+
+
+ALTER TABLE ONLY knowledge_base
+    ADD CONSTRAINT knowledge_base_entry_id_key UNIQUE (entry_id);
+
+
+ALTER TABLE ONLY knowledge_base
+    ADD CONSTRAINT knowledge_base_pkey PRIMARY KEY (id);
+
+
+ALTER TABLE ONLY notification_preferences
+    ADD CONSTRAINT notification_preferences_pkey PRIMARY KEY (user_id);
+
+
+ALTER TABLE ONLY projects
+    ADD CONSTRAINT projects_pkey PRIMARY KEY (id);
+
+
+ALTER TABLE ONLY prompt_templates
+    ADD CONSTRAINT prompt_templates_pkey PRIMARY KEY (id);
+
+
+ALTER TABLE ONLY quota_alerts
+    ADD CONSTRAINT quota_alerts_new_pkey PRIMARY KEY (id);
+
+
+ALTER TABLE ONLY quota_usage
+    ADD CONSTRAINT quota_usage_new_pkey PRIMARY KEY (id);
+
+
+ALTER TABLE ONLY retention_history
+    ADD CONSTRAINT retention_history_pkey PRIMARY KEY (id);
+
+
+ALTER TABLE ONLY security_settings
+    ADD CONSTRAINT security_settings_pkey PRIMARY KEY (id);
+
+
+ALTER TABLE ONLY security_settings
+    ADD CONSTRAINT security_settings_setting_key_key UNIQUE (setting_key);
+
+
+ALTER TABLE ONLY session_messages
+    ADD CONSTRAINT session_messages_pkey PRIMARY KEY (id);
+
+
+ALTER TABLE ONLY sessions
+    ADD CONSTRAINT sessions_new_pkey1 PRIMARY KEY (id);
+
+
+ALTER TABLE ONLY sessions
+    ADD CONSTRAINT sessions_new_token_key1 UNIQUE (token);
+
+
+ALTER TABLE ONLY shared_sessions
+    ADD CONSTRAINT shared_sessions_pkey PRIMARY KEY (id);
+
+
+ALTER TABLE ONLY shared_sessions
+    ADD CONSTRAINT shared_sessions_share_id_key UNIQUE (share_id);
+
+
+ALTER TABLE ONLY sso_identities
+    ADD CONSTRAINT sso_identities_pkey PRIMARY KEY (id);
+
+
+ALTER TABLE ONLY sso_identities
+    ADD CONSTRAINT sso_identities_provider_name_provider_user_id_key UNIQUE (provider_name, provider_user_id);
+
+
+ALTER TABLE ONLY sso_providers
+    ADD CONSTRAINT sso_providers_name_key UNIQUE (name);
+
+
+ALTER TABLE ONLY sso_providers
+    ADD CONSTRAINT sso_providers_pkey PRIMARY KEY (id);
+
+
+ALTER TABLE ONLY sso_sessions
+    ADD CONSTRAINT sso_sessions_pkey PRIMARY KEY (id);
+
+
+ALTER TABLE ONLY sso_sessions
+    ADD CONSTRAINT sso_sessions_session_token_key UNIQUE (session_token);
+
+
+ALTER TABLE ONLY sync_events
+    ADD CONSTRAINT sync_events_event_id_key UNIQUE (event_id);
+
+
+ALTER TABLE ONLY sync_events
+    ADD CONSTRAINT sync_events_pkey PRIMARY KEY (id);
+
+
+ALTER TABLE ONLY team_members
+    ADD CONSTRAINT team_members_pkey PRIMARY KEY (id);
+
+
+ALTER TABLE ONLY team_members
+    ADD CONSTRAINT team_members_team_id_user_id_key UNIQUE (team_id, user_id);
+
+
+ALTER TABLE ONLY teams
+    ADD CONSTRAINT teams_pkey PRIMARY KEY (id);
+
+
+ALTER TABLE ONLY teams
+    ADD CONSTRAINT teams_team_id_key UNIQUE (team_id);
+
+
+ALTER TABLE ONLY tenant_quotas
+    ADD CONSTRAINT tenant_quotas_pkey PRIMARY KEY (id);
+
+
+ALTER TABLE ONLY tenant_quotas
+    ADD CONSTRAINT tenant_quotas_tenant_id_key UNIQUE (tenant_id);
+
+
+ALTER TABLE ONLY tenant_settings
+    ADD CONSTRAINT tenant_settings_pkey PRIMARY KEY (id);
+
+
+ALTER TABLE ONLY tenant_settings
+    ADD CONSTRAINT tenant_settings_tenant_id_key UNIQUE (tenant_id);
+
+
+ALTER TABLE ONLY tenant_usage
+    ADD CONSTRAINT tenant_usage_new_pkey PRIMARY KEY (id);
+
+
+ALTER TABLE ONLY tenants
+    ADD CONSTRAINT tenants_pkey PRIMARY KEY (id);
+
+
+ALTER TABLE ONLY tenants
+    ADD CONSTRAINT tenants_slug_key UNIQUE (slug);
+
+
+ALTER TABLE ONLY daily_messages
+    ADD CONSTRAINT uq_daily_messages_date_tool_msg_host UNIQUE (date, tool_name, message_id, host_name);
+
+
+ALTER TABLE ONLY daily_stats
+    ADD CONSTRAINT uq_daily_stats_date_tool_host_sender UNIQUE (date, tool_name, host_name, sender_name);
+
+
+ALTER TABLE ONLY daily_usage
+    ADD CONSTRAINT uq_daily_usage_date_tool_host UNIQUE (date, tool_name, host_name);
+
+
+ALTER TABLE ONLY hourly_stats
+    ADD CONSTRAINT uq_hourly_stats_date_hour_tool_host UNIQUE (date, hour, tool_name, host_name);
+
+
+ALTER TABLE ONLY quota_usage
+    ADD CONSTRAINT uq_quota_usage_user_date_period_new UNIQUE (user_id, date, period);
+
+
+ALTER TABLE ONLY tenant_usage
+    ADD CONSTRAINT uq_tenant_usage_tenant_date_new UNIQUE (tenant_id, date);
+
+
+ALTER TABLE ONLY usage_summary
+    ADD CONSTRAINT uq_usage_summary_tool_host UNIQUE (tool_name, host_name);
+
+
+ALTER TABLE ONLY user_daily_stats
+    ADD CONSTRAINT uq_user_daily_stats_user_date UNIQUE (user_id, date);
+
+
+ALTER TABLE ONLY user_tool_accounts
+    ADD CONSTRAINT uq_user_tool_account UNIQUE (tool_account);
+
+
+ALTER TABLE ONLY user_daily_stats
+    ADD CONSTRAINT user_daily_stats_pkey PRIMARY KEY (id);
+
+
+ALTER TABLE ONLY user_projects
+    ADD CONSTRAINT user_projects_pkey PRIMARY KEY (id);
+
+
+ALTER TABLE ONLY user_tool_accounts
+    ADD CONSTRAINT user_tool_accounts_pkey PRIMARY KEY (id);
+
+
+ALTER TABLE ONLY users
+    ADD CONSTRAINT users_pkey PRIMARY KEY (id);
+
+
+ALTER TABLE ONLY users
+    ADD CONSTRAINT users_username_key UNIQUE (username);
+
+
+ALTER TABLE ONLY web_user_auth_sessions
+    ADD CONSTRAINT web_user_auth_sessions_pkey PRIMARY KEY (id);
+
+
+ALTER TABLE ONLY web_user_auth_sessions
+    ADD CONSTRAINT web_user_auth_sessions_session_token_key UNIQUE (session_token);
+
+
 CREATE INDEX idx_agent_sessions_project ON agent_sessions (project_id);
 
 
@@ -1084,4 +1323,56 @@ CREATE UNIQUE INDEX uq_user_projects_user_project ON user_projects (user_id, pro
 
 ALTER TABLE ONLY user_daily_stats
     ADD CONSTRAINT fk_user_daily_stats_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+
+
+ALTER TABLE ONLY users
+    ADD CONSTRAINT fk_users_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE SET NULL;
+
+
+ALTER TABLE ONLY quota_alerts
+    ADD CONSTRAINT quota_alerts_new_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+
+
+ALTER TABLE ONLY quota_usage
+    ADD CONSTRAINT quota_usage_new_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+
+
+ALTER TABLE ONLY session_messages
+    ADD CONSTRAINT session_messages_session_id_fkey FOREIGN KEY (session_id) REFERENCES agent_sessions(session_id);
+
+
+ALTER TABLE ONLY sessions
+    ADD CONSTRAINT sessions_new_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+
+
+ALTER TABLE ONLY sso_identities
+    ADD CONSTRAINT sso_identities_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
+
+
+ALTER TABLE ONLY sso_providers
+    ADD CONSTRAINT sso_providers_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
+
+
+ALTER TABLE ONLY sso_sessions
+    ADD CONSTRAINT sso_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
+
+
+ALTER TABLE ONLY tenant_quotas
+    ADD CONSTRAINT tenant_quotas_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
+
+
+ALTER TABLE ONLY tenant_settings
+    ADD CONSTRAINT tenant_settings_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
+
+
+ALTER TABLE ONLY tenant_usage
+    ADD CONSTRAINT tenant_usage_new_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
+
+
+ALTER TABLE ONLY user_tool_accounts
+    ADD CONSTRAINT user_tool_accounts_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+
+
+ALTER TABLE ONLY web_user_auth_sessions
+    ADD CONSTRAINT web_user_auth_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
 
