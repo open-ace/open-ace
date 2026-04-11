@@ -22,7 +22,9 @@ NC='\033[0m' # No Color
 
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SOURCE_DIR="$(dirname "$SCRIPT_DIR")"
+# SOURCE_DIR should be the package root (where cli.py, web.py, etc. are located)
+# For package-method: SCRIPT_DIR = package-method, parent = install-central, grandparent = package root
+SOURCE_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # Default values
 CONFIG_FILE=""
@@ -517,7 +519,7 @@ install_systemd_service() {
     local port="${3:-5000}"
     local host="${4:-0.0.0.0}"
 
-    local service_template="$SOURCE_DIR/../open-ace.service"
+    local service_template="$SOURCE_DIR/scripts/open-ace.service"
     local service_file="/etc/systemd/system/open-ace.service"
 
     if [ ! -f "$service_template" ]; then
