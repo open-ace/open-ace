@@ -109,6 +109,7 @@ DB_USER=openace
 DB_PASSWORD=openace123
 
 # 服务配置
+INSTALL_SERVICE=yes
 SERVICE_PORT=5000
 SERVICE_HOST=0.0.0.0
 EOF
@@ -162,11 +163,41 @@ cat > deploy.conf << 'EOF'
 DEPLOY_HOST=192.168.1.100
 DEPLOY_USER=admin
 DEPLOY_PATH=/home/admin/open-ace
+INSTALL_SERVICE=yes
 SERVICE_PORT=5000
 SERVICE_HOST=0.0.0.0
 EOF
 
 ./scripts/install.sh --config deploy.conf
+```
+
+### Systemd 服务
+
+设置 `INSTALL_SERVICE=yes` 会创建 systemd 服务，自动管理 Open ACE 进程：
+
+- 服务名：`open-ace.service`
+- 服务用户：配置中的 `DEPLOY_USER`
+- 自动启动、重启、日志记录
+
+**服务管理命令：**
+
+```bash
+# 查看状态
+systemctl status open-ace
+
+# 启动/停止/重启
+sudo systemctl start open-ace
+sudo systemctl stop open-ace
+sudo systemctl restart open-ace
+
+# 查看日志
+journalctl -u open-ace -f
+```
+
+**注意：** 如果不设置 `INSTALL_SERVICE=yes`，需要手动启动服务：
+
+```bash
+cd /home/openace && python3 web.py
 ```
 
 ### 选项
@@ -279,8 +310,9 @@ DB_USER=openace           # PostgreSQL 用户名
 DB_PASSWORD=openace123    # PostgreSQL 密码
 
 # Systemd 服务配置
-SERVICE_PORT=5000
-SERVICE_HOST=0.0.0.0
+INSTALL_SERVICE=yes       # 是否安装 systemd 服务
+SERVICE_PORT=5000         # Web 服务端口
+SERVICE_HOST=0.0.0.0      # Web 服务主机
 
 # 多用户 Workspace 模式（可选）
 WORKSPACE_MULTI_USER_MODE=false   # 启用多用户模式
