@@ -1852,6 +1852,7 @@ do_upgrade() {
     local target_path="$1"
     local config_dir="$2"
     local install_user="$3"
+    local backup_dir="/tmp/open-ace-backup-$(date +%Y%m%d%H%M%S)"
 
     print_info "Upgrading existing installation..."
 
@@ -1864,7 +1865,6 @@ do_upgrade() {
         print_info "Skipping file copy (running from installation directory)"
     else
         # Backup data files
-        local backup_dir="/tmp/open-ace-backup-$(date +%Y%m%d%H%M%S)"
         mkdir -p "$backup_dir"
 
         # Backup config directory
@@ -1898,6 +1898,31 @@ do_upgrade() {
         chown -R "$install_user:$(id -gn "$install_user")" "$target_path"
         if [ -d "$config_dir" ]; then
             chown -R "$install_user:$(id -gn "$install_user")" "$config_dir"
+        fi
+    fi
+
+    # Ensure config.json exists (upgrade may have lost it)
+    if [ ! -f "$config_dir/config.json" ]; then
+        print_warning "Config file not found: $config_dir/config.json"
+        # Try to restore from backup
+        if [ -d "$backup_dir" ] && [ -d "$backup_dir/.open-ace" ] && [ -f "$backup_dir/.open-ace/config.json" ]; then
+            print_info "Restoring config file from backup..."
+            mkdir -p "$config_dir"
+            cp "$backup_dir/.open-ace/config.json" "$config_dir/config.json"
+        elif [ -f "$target_path/config/config.json.sample" ]; then
+            print_info "Creating config file from sample..."
+            mkdir -p "$config_dir"
+            cp "$target_path/config/config.json.sample" "$config_dir/config.json"
+            # Update database settings if available in environment
+            if [ -n "$DB_TYPE" ] && [ -n "$DB_HOST" ]; then
+                update_config_database "$config_dir/config.json"
+            fi
+        else
+            print_warning "Cannot create config file. Manual setup required."
+        fi
+        # Fix ownership
+        if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ] && [ -f "$config_dir/config.json" ]; then
+            chown "$install_user:$(id -gn "$install_user")" "$config_dir/config.json"
         fi
     fi
 
