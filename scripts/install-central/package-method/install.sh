@@ -299,24 +299,45 @@ check_postgresql_process() {
     return 1
 }
 
-# Check if PostgreSQL is running in Docker container
+# Check if PostgreSQL is running in Docker container with port mapped to host
 check_postgresql_docker() {
     if ! command -v docker &>/dev/null; then
         return 1
     fi
 
-    # Check for running PostgreSQL containers
-    local containers=$(docker ps --filter "ancestor=postgres" --filter "ancestor=postgresql" --format "{{.Names}}" 2>/dev/null)
+    # Check for running PostgreSQL containers with port mapped to host
+    # Format: 0.0.0.0:5432->5432/tcp or similar
+    local containers=$(docker ps --filter "ancestor=postgres" --filter "ancestor=postgresql" --format "{{.Names}} {{.Ports}}" 2>/dev/null)
     if [ -n "$containers" ]; then
-        print_success "Found PostgreSQL Docker container: $containers"
-        return 0
+        # Check if port is mapped to host (contains 0.0.0.0: or [::]:)
+        local port_mapped=$(echo "$containers" | grep -E '0\.0\.0\.0:[0-9]+->5432|:::[0-9]+->5432|\[::\]:[0-9]+->5432')
+        if [ -n "$port_mapped" ]; then
+            local container_name=$(echo "$containers" | head -1 | awk '{print $1}')
+            print_success "Found PostgreSQL Docker container with port mapped: $container_name"
+            return 0
+        else
+            # Container exists but no port mapping
+            local container_name=$(echo "$containers" | head -1 | awk '{print $1}')
+            print_warning "Found PostgreSQL Docker container but port NOT mapped to host: $container_name"
+            print_info "Container has internal port only, cannot connect from host"
+            return 1
+        fi
     fi
 
     # Also check for containers with postgres in name
-    containers=$(docker ps --filter "name=postgres" --format "{{.Names}}" 2>/dev/null)
+    containers=$(docker ps --filter "name=postgres" --format "{{.Names}} {{.Ports}}" 2>/dev/null)
     if [ -n "$containers" ]; then
-        print_success "Found PostgreSQL Docker container: $containers"
-        return 0
+        local port_mapped=$(echo "$containers" | grep -E '0\.0\.0\.0:[0-9]+->5432|:::[0-9]+->5432|\[::\]:[0-9]+->5432')
+        if [ -n "$port_mapped" ]; then
+            local container_name=$(echo "$containers" | head -1 | awk '{print $1}')
+            print_success "Found PostgreSQL Docker container with port mapped: $container_name"
+            return 0
+        else
+            local container_name=$(echo "$containers" | head -1 | awk '{print $1}')
+            print_warning "Found PostgreSQL Docker container but port NOT mapped to host: $container_name"
+            print_info "Container has internal port only, cannot connect from host"
+            return 1
+        fi
     fi
 
     return 1
