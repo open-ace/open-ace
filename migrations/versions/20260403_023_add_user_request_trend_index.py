@@ -49,26 +49,18 @@ def _index_exists(conn, table_name: str, index_name: str) -> bool:
 def upgrade() -> None:
     """Add index for user request trend query."""
     conn = op.get_bind()
-    is_postgresql = conn.dialect.name == "postgresql"
 
     # Create index for user request trend query
     # This index optimizes queries that filter by sender_name, date range, and role
+    # Note: CONCURRENTLY is not used because alembic runs in transaction block
+    # For fresh installation, locking is not a concern
     if not _index_exists(conn, "daily_messages", "idx_messages_sender_date_role"):
-        if is_postgresql:
-            # Use CONCURRENTLY to avoid locking the table
-            op.execute(
-                """
-                CREATE INDEX CONCURRENTLY idx_messages_sender_date_role
-                ON daily_messages (sender_name, date, role)
-                """
-            )
-        else:
-            op.execute(
-                """
-                CREATE INDEX idx_messages_sender_date_role
-                ON daily_messages (sender_name, date, role)
-                """
-            )
+        op.execute(
+            """
+            CREATE INDEX idx_messages_sender_date_role
+            ON daily_messages (sender_name, date, role)
+            """
+        )
 
 
 def downgrade() -> None:
