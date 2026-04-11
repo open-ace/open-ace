@@ -300,57 +300,107 @@ fi
 echo -e "${YELLOW}Building frontend...${NC}"
 FRONTEND_DIR="$PROJECT_DIR/frontend"
 if [ -d "$FRONTEND_DIR" ]; then
-    # Check if npm is available
-    if command -v npm &> /dev/null; then
-        # Check Node.js version (Vite 6.x requires Node.js 18+)
-        NODE_VERSION=$(node --version 2>/dev/null | sed 's/v//')
-        if [ -n "$NODE_VERSION" ]; then
-            NODE_MAJOR=$(echo "$NODE_VERSION" | cut -d. -f1)
-            if [ "$NODE_MAJOR" -lt 18 ]; then
-                echo -e "${RED}Error: Node.js version $NODE_VERSION is too old${NC}"
-                echo -e "${RED}Vite 6.x requires Node.js 18 or higher${NC}"
-                echo -e "${YELLOW}Please upgrade Node.js:${NC}"
-                echo ""
-                echo -e "${YELLOW}For Rocky Linux/CentOS/RHEL (if yum install fails due to conflicts):${NC}"
-                echo -e "${YELLOW}  sudo yum remove -y nodejs npm${NC}"
-                echo -e "${YELLOW}  curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -${NC}"
-                echo -e "${YELLOW}  sudo yum install -y nodejs${NC}"
-                echo ""
-                echo -e "${YELLOW}Or use nvm (recommended for multiple Node.js versions):${NC}"
-                echo -e "${YELLOW}  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash${NC}"
-                echo -e "${YELLOW}  source ~/.bashrc${NC}"
-                echo -e "${YELLOW}  nvm install 20${NC}"
-                echo -e "${YELLOW}  nvm use 20${NC}"
+    # Check if npm is available, install if not
+    if ! command -v npm &> /dev/null; then
+        echo -e "${BLUE}npm not found, attempting to install Node.js...${NC}"
+        if [ "$EUID" -eq 0 ]; then
+            # Running as root, can install
+            if command -v dnf &> /dev/null; then
+                echo -e "${BLUE}Installing Node.js via dnf...${NC}"
+                dnf install -y nodejs npm || {
+                    echo -e "${YELLOW}dnf install failed, trying nodesource...${NC}"
+                    curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+                    dnf install -y nodejs
+                }
+            elif command -v yum &> /dev/null; then
+                echo -e "${BLUE}Installing Node.js via yum...${NC}"
+                yum install -y nodejs npm || {
+                    echo -e "${YELLOW}yum install failed, trying nodesource...${NC}"
+                    curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+                    yum install -y nodejs
+                }
+            elif command -v apt-get &> /dev/null; then
+                echo -e "${BLUE}Installing Node.js via apt...${NC}"
+                apt-get update
+                apt-get install -y nodejs npm || {
+                    echo -e "${YELLOW}apt install failed, trying nodesource...${NC}"
+                    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+                    apt-get install -y nodejs
+                }
+            elif [[ "$OSTYPE" == "darwin"* ]]; then
+                echo -e "${YELLOW}On macOS, please install Node.js manually:${NC}"
+                echo -e "${YELLOW}  brew install node${NC}"
+                exit 1
+            else
+                echo -e "${YELLOW}Cannot install Node.js automatically on this system${NC}"
+                echo -e "${YELLOW}Please install Node.js 18+ manually${NC}"
                 exit 1
             fi
-            echo -e "${GREEN}Node.js version: v$NODE_VERSION (OK, requires 18+)${NC}"
-        fi
-
-        cd "$FRONTEND_DIR"
-
-        # Install dependencies if node_modules doesn't exist or package.json changed
-        if [ ! -d "node_modules" ] || [ "$(find package.json -newer node_modules 2>/dev/null | head -1)" ]; then
-            echo -e "${BLUE}Installing frontend dependencies...${NC}"
-            npm install --silent 2>/dev/null || npm install
-        fi
-
-        # Build frontend
-        echo -e "${BLUE}Building frontend with Vite...${NC}"
-        npm run build 2>/dev/null || npm run build
-
-        if [ -d "$PROJECT_DIR/static/js/dist" ]; then
-            echo -e "${GREEN}Frontend built successfully${NC}"
-            echo -e "${BLUE}Output: static/js/dist/${NC}"
         else
-            echo -e "${YELLOW}Warning: Frontend build output not found at static/js/dist${NC}"
+            echo -e "${YELLOW}Not running as root, cannot install Node.js automatically${NC}"
+            echo -e "${YELLOW}Please run with sudo or install Node.js manually:${NC}"
+            if command -v dnf &> /dev/null || command -v yum &> /dev/null; then
+                echo -e "${YELLOW}  sudo yum install -y nodejs npm${NC}"
+                echo -e "${YELLOW}Or:${NC}"
+                echo -e "${YELLOW}  curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -${NC}"
+                echo -e "${YELLOW}  sudo yum install -y nodejs${NC}"
+            elif command -v apt-get &> /dev/null; then
+                echo -e "${YELLOW}  sudo apt-get install -y nodejs npm${NC}"
+            fi
+            exit 1
         fi
-
-        cd "$PROJECT_DIR"
-    else
-        echo -e "${YELLOW}Warning: npm not found, skipping frontend build${NC}"
-        echo -e "${YELLOW}The package will not include built frontend. Install npm and run 'npm run build' manually.${NC}"
-        echo -e "${YELLOW}Or install frontend on the target server after installation.${NC}"
     fi
+
+    # Verify npm is now available
+    if ! command -v npm &> /dev/null; then
+        echo -e "${RED}Error: npm installation failed${NC}"
+        exit 1
+    fi
+
+    # Check Node.js version (Vite 6.x requires Node.js 18+)
+    NODE_VERSION=$(node --version 2>/dev/null | sed 's/v//')
+    if [ -n "$NODE_VERSION" ]; then
+        NODE_MAJOR=$(echo "$NODE_VERSION" | cut -d. -f1)
+        if [ "$NODE_MAJOR" -lt 18 ]; then
+            echo -e "${RED}Error: Node.js version $NODE_VERSION is too old${NC}"
+            echo -e "${RED}Vite 6.x requires Node.js 18 or higher${NC}"
+            echo -e "${YELLOW}Please upgrade Node.js:${NC}"
+            echo ""
+            echo -e "${YELLOW}For Rocky Linux/CentOS/RHEL (if yum install fails due to conflicts):${NC}"
+            echo -e "${YELLOW}  sudo yum remove -y nodejs npm${NC}"
+            echo -e "${YELLOW}  curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -${NC}"
+            echo -e "${YELLOW}  sudo yum install -y nodejs${NC}"
+            echo ""
+            echo -e "${YELLOW}Or use nvm (recommended for multiple Node.js versions):${NC}"
+            echo -e "${YELLOW}  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash${NC}"
+            echo -e "${YELLOW}  source ~/.bashrc${NC}"
+            echo -e "${YELLOW}  nvm install 20${NC}"
+            echo -e "${YELLOW}  nvm use 20${NC}"
+            exit 1
+        fi
+        echo -e "${GREEN}Node.js version: v$NODE_VERSION (OK, requires 18+)${NC}"
+    fi
+
+    cd "$FRONTEND_DIR"
+
+    # Install dependencies if node_modules doesn't exist or package.json changed
+    if [ ! -d "node_modules" ] || [ "$(find package.json -newer node_modules 2>/dev/null | head -1)" ]; then
+        echo -e "${BLUE}Installing frontend dependencies...${NC}"
+        npm install --silent 2>/dev/null || npm install
+    fi
+
+    # Build frontend
+    echo -e "${BLUE}Building frontend with Vite...${NC}"
+    npm run build 2>/dev/null || npm run build
+
+    if [ -d "$PROJECT_DIR/static/js/dist" ]; then
+        echo -e "${GREEN}Frontend built successfully${NC}"
+        echo -e "${BLUE}Output: static/js/dist/${NC}"
+    else
+        echo -e "${YELLOW}Warning: Frontend build output not found at static/js/dist${NC}"
+    fi
+
+    cd "$PROJECT_DIR"
 else
     echo -e "${YELLOW}Warning: Frontend directory not found at $FRONTEND_DIR${NC}"
 fi
