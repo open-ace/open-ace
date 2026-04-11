@@ -86,11 +86,29 @@ def upgrade():
     # Step 3: Populate user_tool_accounts from existing data
     # ===========================================
 
-    # Extract unique sender_names that match system_account/linux_account pattern
-    # Pattern: {system_account}-{hostname}-{tool}
+    # Detect which column exists (linux_account or system_account)
     # Note: Field name changed from linux_account to system_account in migration 025
-    # Use COALESCE to handle both cases (fresh install vs already renamed)
-    op.execute("""
+    # But init_database() also renames it, so we need to check which one exists
+    conn = op.get_bind()
+    account_column = "system_account"  # default to new name
+
+    # Check if system_account exists
+    result = conn.execute(sa.text("""
+        SELECT column_name FROM information_schema.columns
+        WHERE table_name = 'users' AND column_name = 'system_account'
+    """))
+    if result.fetchone() is None:
+        # Check if linux_account exists (old name)
+        result = conn.execute(sa.text("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'users' AND column_name = 'linux_account'
+        """))
+        if result.fetchone() is not None:
+            account_column = "linux_account"
+
+    # Extract unique sender_names that match account pattern
+    # Pattern: {account}-{hostname}-{tool}
+    op.execute(f"""
         INSERT INTO user_tool_accounts (user_id, tool_account, tool_type)
         SELECT DISTINCT
             u.id as user_id,
@@ -102,10 +120,10 @@ def upgrade():
                 ELSE 'other'
             END as tool_type
         FROM daily_messages dm
-        JOIN users u ON dm.sender_name LIKE COALESCE(u.system_account, u.linux_account) || '-%'
+        JOIN users u ON dm.sender_name LIKE u.{account_column} || '-%'
         WHERE dm.sender_name IS NOT NULL
           AND dm.sender_name LIKE '%-%-%'
-          AND COALESCE(u.system_account, u.linux_account) IS NOT NULL
+          AND u.{account_column} IS NOT NULL
           AND NOT EXISTS (
               SELECT 1 FROM user_tool_accounts uta
               WHERE uta.tool_account = dm.sender_name
