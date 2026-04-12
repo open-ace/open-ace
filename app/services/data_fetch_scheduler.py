@@ -143,6 +143,9 @@ class DataFetchScheduler:
         # Refresh materialized views for PostgreSQL
         self._refresh_materialized_views()
 
+        # Safety net: aggregate user_daily_stats periodically
+        self._aggregate_user_stats()
+
     def _refresh_materialized_views(self):
         """Refresh materialized views for PostgreSQL performance optimization."""
         from app.repositories.database import Database, is_postgresql
@@ -161,6 +164,14 @@ class DataFetchScheduler:
                 logger.info("Refreshed session_stats materialized view")
         except Exception as e:
             logger.warning(f"Error refreshing materialized views: {e}")
+
+    def _aggregate_user_stats(self):
+        """Safety net: aggregate user_daily_stats periodically."""
+        try:
+            from app.services.user_stats_aggregator import aggregate_user_stats_background
+            aggregate_user_stats_background()
+        except Exception as e:
+            logger.warning(f"Scheduled user stats aggregation failed: {e}")
 
 
 # Global scheduler instance

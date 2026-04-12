@@ -15,7 +15,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Optional
 
-from app.repositories.database import Database
+from app.repositories.database import Database, is_postgresql
 from app.repositories.user_repo import UserRepository
 
 logger = logging.getLogger(__name__)
@@ -91,35 +91,54 @@ class UserDailyStatsAggregator:
         try:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
-                
-                # PostgreSQL: use INSERT ... ON CONFLICT DO UPDATE
-                cursor.execute("""
-                    INSERT INTO user_daily_stats 
-                    (user_id, date, requests, tokens, input_tokens, output_tokens, updated_at)
-                    SELECT 
-                        %s as user_id,
-                        dm.date::date,
-                        COUNT(*) as requests,
-                        COALESCE(SUM(dm.tokens_used), 0) as tokens,
-                        COALESCE(SUM(dm.input_tokens), 0) as input_tokens,
-                        COALESCE(SUM(dm.output_tokens), 0) as output_tokens,
-                        CURRENT_TIMESTAMP
-                    FROM daily_messages dm
-                    WHERE dm.date >= %s AND dm.date <= %s
-                      AND dm.sender_name LIKE %s
-                      AND dm.role = 'assistant'
-                    GROUP BY dm.date::date
-                    ON CONFLICT (user_id, date) DO UPDATE SET
-                        requests = EXCLUDED.requests,
-                        tokens = EXCLUDED.tokens,
-                        input_tokens = EXCLUDED.input_tokens,
-                        output_tokens = EXCLUDED.output_tokens,
-                        updated_at = CURRENT_TIMESTAMP
-                """, (user_id, start_str, end_str, f"{sender_prefix}%"))
-                
+
+                if is_postgresql():
+                    cursor.execute("""
+                        INSERT INTO user_daily_stats
+                        (user_id, date, requests, tokens, input_tokens, output_tokens, updated_at)
+                        SELECT
+                            %s as user_id,
+                            dm.date::date,
+                            COUNT(*) as requests,
+                            COALESCE(SUM(dm.tokens_used), 0) as tokens,
+                            COALESCE(SUM(dm.input_tokens), 0) as input_tokens,
+                            COALESCE(SUM(dm.output_tokens), 0) as output_tokens,
+                            CURRENT_TIMESTAMP
+                        FROM daily_messages dm
+                        WHERE dm.date >= %s AND dm.date <= %s
+                          AND dm.sender_name LIKE %s
+                          AND dm.role = 'assistant'
+                        GROUP BY dm.date::date
+                        ON CONFLICT (user_id, date) DO UPDATE SET
+                            requests = EXCLUDED.requests,
+                            tokens = EXCLUDED.tokens,
+                            input_tokens = EXCLUDED.input_tokens,
+                            output_tokens = EXCLUDED.output_tokens,
+                            updated_at = CURRENT_TIMESTAMP
+                    """, (user_id, start_str, end_str, f"{sender_prefix}%"))
+                else:
+                    now = datetime.utcnow().isoformat()
+                    cursor.execute("""
+                        INSERT OR REPLACE INTO user_daily_stats
+                        (user_id, date, requests, tokens, input_tokens, output_tokens, updated_at)
+                        SELECT
+                            ? as user_id,
+                            dm.date,
+                            COUNT(*) as requests,
+                            COALESCE(SUM(dm.tokens_used), 0) as tokens,
+                            COALESCE(SUM(dm.input_tokens), 0) as input_tokens,
+                            COALESCE(SUM(dm.output_tokens), 0) as output_tokens,
+                            ?
+                        FROM daily_messages dm
+                        WHERE dm.date >= ? AND dm.date <= ?
+                          AND dm.sender_name LIKE ?
+                          AND dm.role = 'assistant'
+                        GROUP BY dm.date
+                    """, (user_id, now, start_str, end_str, f"{sender_prefix}%"))
+
                 conn.commit()
                 records_updated = cursor.rowcount
-                
+
                 logger.debug(f"Aggregated {records_updated} records for user {username} (sender_prefix: {sender_prefix})")
                 return records_updated
                 
@@ -163,13 +182,19 @@ class UserDailyStatsAggregator:
         try:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute(
-                    "DELETE FROM user_daily_stats WHERE date < ?",
-                    (cutoff_str,)
-                )
+                if is_postgresql():
+                    cursor.execute(
+                        "DELETE FROM user_daily_stats WHERE date < %s",
+                        (cutoff_str,)
+                    )
+                else:
+                    cursor.execute(
+                        "DELETE FROM user_daily_stats WHERE date < ?",
+                        (cutoff_str,)
+                    )
                 deleted = cursor.rowcount
                 conn.commit()
-                
+
                 logger.info(f"Cleaned up {deleted} old user_daily_stats records")
                 return deleted
                 
