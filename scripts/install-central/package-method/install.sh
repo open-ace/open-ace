@@ -901,6 +901,7 @@ update_config_workspace() {
         python3 << 'EOF'
 import json
 import os
+import secrets
 
 with open(os.environ.get('_CONFIG_FILE', ''), 'r') as f:
     config = json.load(f)
@@ -919,6 +920,10 @@ config['workspace']['port_range_end'] = int(os.environ.get('_WS_PORT_END', '3200
 config['workspace']['max_instances'] = int(os.environ.get('_WS_MAX_INSTANCES', '20'))
 config['workspace']['idle_timeout_minutes'] = int(os.environ.get('_WS_IDLE_TIMEOUT', '30'))
 config['workspace']['webui_path'] = os.environ.get('_WS_WEBUI_PATH', '')
+
+# Generate token_secret if not already set (for multi-user mode security)
+if not config['workspace'].get('token_secret'):
+    config['workspace']['token_secret'] = secrets.token_hex(32)
 
 # Set workspace URL - get server IP address
 try:
@@ -1196,7 +1201,7 @@ find_webui_executable() {
         print_info "npm is available, installing qwen-code-webui..." >&2
         print_info "This may take several minutes, please wait..." >&2
         print_info "Downloading qwen-code-webui (~50MB)..." >&2
-        if npm install -g qwen-code-webui; then
+        if npm install -g qwen-code-webui >&2; then
             print_success "qwen-code-webui installed successfully" >&2
             # Check and install qwen-code CLI (required by qwen-code-webui)
             if ! command -v qwen &>/dev/null; then
@@ -1204,7 +1209,7 @@ find_webui_executable() {
                 print_info "qwen-code CLI not found, installing..." >&2
                 print_info "This is required for qwen-code-webui to function" >&2
                 print_info "Downloading qwen-code (~30MB)..." >&2
-                npm install -g @qwen-code/qwen-code 2>/dev/null || print_warning "Failed to install qwen-code CLI" >&2
+                npm install -g @qwen-code/qwen-code >&2 || print_warning "Failed to install qwen-code CLI" >&2
             fi
             # Try to find again after installation
             if command -v qwen-code-webui &>/dev/null; then
@@ -1225,7 +1230,7 @@ find_webui_executable() {
     else
         # npm not available, need to install Node.js first
         print_info "npm not available, installing Node.js 20.x via NodeSource..." >&2
-        if install_webui; then
+        if install_webui >&2; then
             # Try to find again after installation
             if command -v qwen-code-webui &>/dev/null; then
                 which qwen-code-webui
