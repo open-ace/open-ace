@@ -343,13 +343,13 @@ if [ -d "$FRONTEND_DIR" ]; then
         exit 1
     fi
 
-    # Check Node.js version (Vite 6.x requires Node.js 18+)
+    # Check Node.js version (qwen-code-webui requires Node.js 20+)
     NODE_VERSION=$(node --version 2>/dev/null | sed 's/v//')
     if [ -n "$NODE_VERSION" ]; then
         NODE_MAJOR=$(echo "$NODE_VERSION" | cut -d. -f1)
-        if [ "$NODE_MAJOR" -lt 18 ]; then
+        if [ "$NODE_MAJOR" -lt 20 ]; then
             echo -e "${RED}Error: Node.js version $NODE_VERSION is too old${NC}"
-            echo -e "${RED}Vite 6.x requires Node.js 18 or higher${NC}"
+            echo -e "${RED}qwen-code-webui requires Node.js 20 or higher${NC}"
             echo -e "${YELLOW}Please upgrade Node.js:${NC}"
             echo ""
             echo -e "${YELLOW}For Rocky Linux/CentOS/RHEL (if yum install fails due to conflicts):${NC}"
@@ -364,7 +364,7 @@ if [ -d "$FRONTEND_DIR" ]; then
             echo -e "${YELLOW}  nvm use 20${NC}"
             exit 1
         fi
-        echo -e "${GREEN}Node.js version: v$NODE_VERSION (OK, requires 18+)${NC}"
+        echo -e "${GREEN}Node.js version: v$NODE_VERSION (OK, requires 20+)${NC}"
     fi
 
     cd "$FRONTEND_DIR"

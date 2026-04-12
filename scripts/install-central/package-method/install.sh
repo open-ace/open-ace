@@ -1045,7 +1045,7 @@ install_webui() {
                 apt-get install -y nodejs
             else
                 print_error "Cannot install Node.js automatically on this system"
-                print_info "Please install Node.js 18+ manually"
+                print_info "Please install Node.js 20+ manually"
                 return 1
             fi
         else
