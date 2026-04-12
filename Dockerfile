@@ -11,8 +11,9 @@ FROM python:3.11-slim AS builder
 
 WORKDIR /app
 
-# Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Install build dependencies (using Chinese mirror)
+RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources && \
+    apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -23,8 +24,8 @@ COPY requirements.txt .
 # Create virtual environment and install dependencies
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com && \
+    pip install --no-cache-dir -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com
 
 # =============================================================================
 # Production Stage
@@ -37,7 +38,8 @@ LABEL description="AI Computing Explorer"
 LABEL version="1.0.0"
 
 # Install runtime dependencies + Node.js 20 + qwen-code-webui for multi-user workspace
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources && \
+    apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     postgresql-client \
     curl \
@@ -46,6 +48,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gnupg \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
+    && npm config set registry https://registry.npmmirror.com/ \
     && npm install -g qwen-code-webui @qwen-code/qwen-code \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /root/.npm
@@ -94,7 +97,7 @@ ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 FROM production AS development
 
 # Install development tools
-RUN pip install --no-cache-dir \
+RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com \
     pytest \
     pytest-cov \
     pytest-asyncio \
