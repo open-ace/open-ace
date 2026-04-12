@@ -15,8 +15,7 @@ COPY frontend/.npmrc* ./frontend/
 
 # Install all dependencies (including devDependencies for build tools)
 WORKDIR /app/frontend
-RUN npm ci --ignore-scripts --registry https://registry.npmmirror.com/ || \
-    npm ci --ignore-scripts
+RUN npm install --registry https://registry.npmmirror.com/
 
 # Copy frontend source
 COPY frontend/ ./
