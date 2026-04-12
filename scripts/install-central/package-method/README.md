@@ -328,18 +328,46 @@ WORKSPACE_IDLE_TIMEOUT=30         # 空闲超时（分钟）
 
 **前置要求：**
 
-1. 安装 `qwen-code-webui`：
+1. **Node.js 18+**：Vite 6.x 需要 Node.js 18 或更高版本
    ```bash
-   npm install -g @ivycomputing/qwen-code-webui
+   # 使用 NodeSource 安装 Node.js 20.x
+   curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+   yum install -y nodejs  # Rocky Linux/CentOS
+   
+   # 或 Debian/Ubuntu
+   curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+   apt-get install -y nodejs
    ```
 
-2. 确保每个用户有对应的系统账号和 `~/.qwen/` 目录
+2. **安装 qwen-code-webui 和 qwen-code CLI**：
+   ```bash
+   npm install -g qwen-code-webui
+   npm install -g @qwen-code/qwen-code
+   ```
+   
+   **注意：**
+   - 包名是 `qwen-code-webui`（不是 `@ivycomputing/qwen-code-webui`）
+   - qwen-code CLI 包名是 `@qwen-code/qwen-code`（不是 `qwen-code`）
+   - CLI 命令名是 `qwen`（不是 `qwen-code`）
+   - 安装过程可能需要几分钟，请耐心等待
+
+3. **确保每个用户有对应的系统账号和 `~/.qwen/` 目录**
+
+4. **数据库用户需要设置 system_account**：
+   ```sql
+   -- 更新用户的 system_account 为实际的系统账号名
+   UPDATE users SET system_account = 'openace' WHERE id = 1;
+   ```
 
 **自动配置：**
 
 安装脚本在启用多用户模式时会自动：
-- 检测 `qwen-code-webui` 安装位置
+- 安装 Node.js 20.x（如果未安装）
+- 安装 `qwen-code-webui` 和 `@qwen-code/qwen-code` CLI
+- 检测 `qwen-code-webui` 安装位置并写入配置
 - 创建 `/etc/sudoers.d/open-ace-webui` 配置文件
+- 设置 systemd 服务 `NoNewPrivileges=false`（允许 sudo）
+- 设置 `workspace.url` 为服务器 IP 地址
 - 验证 sudoers 语法
 
 ```bash
@@ -348,8 +376,8 @@ WORKSPACE_IDLE_TIMEOUT=30         # 空闲超时（分钟）
 
 # 或使用配置文件
 cat > install.conf << 'EOF'
-DEPLOY_USER=$USER
-DEPLOY_PATH=$HOME/open-ace
+DEPLOY_USER=openace
+DEPLOY_PATH=/home/openace
 WORKSPACE_MULTI_USER_MODE=true
 WORKSPACE_PORT_RANGE_START=3100
 WORKSPACE_PORT_RANGE_END=3200
@@ -368,8 +396,12 @@ sudo visudo -f /etc/sudoers.d/open-ace-webui
 
 添加内容：
 ```
-your-user ALL=(ALL) NOPASSWD: /usr/local/bin/qwen-code-webui *
+openace ALL=(ALL) NOPASSWD: /usr/bin/qwen-code-webui *
 ```
+
+**CORS 配置：**
+
+Open-ACE 已配置 CORS 允许来自 workspace 端口范围 (3100-3200) 的请求，iframe 内的 webui 可以正常调用 Open-ACE API。
 
 **详细配置说明请参考 [部署文档](../../docs/DEPLOYMENT.md#multi-user-workspace-deployment)**
 
