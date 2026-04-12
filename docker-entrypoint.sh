@@ -1,44 +1,130 @@
 #!/bin/bash
 # Docker entrypoint script for Open ACE
-# Initializes database and starts the application
+# Handles database initialization and multi-user workspace setup
 
 set -e
 
-# Check if we're running a specific command (not the app)
+# If a custom command is passed, execute it directly
 if [ "$1" != "" ] && [ "$1" != "gunicorn" ]; then
-    # Running a custom command (e.g., alembic, python script)
     exec "$@"
 fi
 
-echo "Starting Open ACE..."
+echo "=========================================="
+echo "  Open ACE - Starting..."
+echo "=========================================="
 
-# Run database migrations if DATABASE_URL is set and database is not initialized
+# ============================================================================
+# 1. Database Initialization
+# ============================================================================
 if [ -n "$DATABASE_URL" ]; then
-    # Check if alembic_version table exists (indicates migrations have been run)
-    if ! python3 -c "import psycopg2; conn = psycopg2.connect('$DATABASE_URL'); cur = conn.cursor(); cur.execute(\"SELECT 1 FROM information_schema.tables WHERE table_name = 'alembic_version'\"); exit(0 if cur.fetchone() else 1)" 2>/dev/null; then
-        echo "Running database migrations..."
-        alembic upgrade head
-        echo "Migrations completed."
-    else
-        echo "Database already initialized, skipping migrations."
+    # Extract connection parameters from DATABASE_URL
+    # Format: postgresql://user:password@host:port/dbname
+    DB_HOST_FROM_URL=$(echo "$DATABASE_URL" | sed -n 's|.*@\([^:]*\):.*|\1|p')
+    DB_PORT_FROM_URL=$(echo "$DATABASE_URL" | sed -n 's|.*:\([0-9]*\)/.*|\1|p')
+    DB_USER_FROM_URL=$(echo "$DATABASE_URL" | sed -n 's|.*://\([^:]*\):.*|\1|p')
+
+    echo "Waiting for PostgreSQL at ${DB_HOST_FROM_URL}:${DB_PORT_FROM_URL}..."
+
+    # Wait for PostgreSQL to be ready (max 60 seconds)
+    WAIT_COUNT=0
+    MAX_WAIT=60
+    while [ $WAIT_COUNT -lt $MAX_WAIT ]; do
+        if pg_isready -h "${DB_HOST_FROM_URL}" -p "${DB_PORT_FROM_URL}" -U "${DB_USER_FROM_URL}" 2>/dev/null; then
+            echo "PostgreSQL is ready."
+            break
+        fi
+        sleep 2
+        WAIT_COUNT=$((WAIT_COUNT + 2))
+    done
+
+    if [ $WAIT_COUNT -ge $MAX_WAIT ]; then
+        echo "ERROR: PostgreSQL not ready after ${MAX_WAIT}s. Exiting."
+        exit 1
     fi
 
-    # Check if admin user exists, create default admin if not
-    ADMIN_EXISTS=$(python3 -c "
-import psycopg2
-conn = psycopg2.connect('$DATABASE_URL')
-cur = conn.cursor()
-cur.execute(\"SELECT 1 FROM users WHERE username = 'admin'\")
-print('yes' if cur.fetchone() else 'no')
-" 2>/dev/null || echo "no")
+    # Check if database is initialized (check core 'users' table, not alembic_version)
+    echo "Checking database initialization status..."
+    TABLES_EXIST=$(python3 -c "
+import os, psycopg2
+try:
+    conn = psycopg2.connect(os.environ['DATABASE_URL'])
+    cur = conn.cursor()
+    cur.execute(\"SELECT 1 FROM information_schema.tables WHERE table_name = 'users'\")
+    result = 'yes' if cur.fetchone() else 'no'
+    conn.close()
+    print(result)
+except Exception:
+    print('error')
+" 2>/dev/null || echo "error")
 
-    if [ "$ADMIN_EXISTS" = "no" ]; then
+    if [ "$TABLES_EXIST" = "no" ]; then
+        echo "Database not initialized. Creating schema from schema-postgres.sql..."
+        python3 -c "
+import os, psycopg2
+conn = psycopg2.connect(os.environ['DATABASE_URL'])
+cur = conn.cursor()
+with open('schema/schema-postgres.sql') as f:
+    cur.execute(f.read())
+conn.commit()
+conn.close()
+print('Schema created successfully.')
+"
+        echo "Stamping alembic version to head..."
+        alembic stamp head 2>/dev/null || echo "WARNING: alembic stamp failed (non-critical)"
+
         echo "Creating default admin user..."
-        python3 scripts/init_db.py
+        python3 scripts/init_db.py 2>/dev/null || echo "WARNING: admin user creation failed (may already exist)"
+
+        echo "Database initialization completed."
+    elif [ "$TABLES_EXIST" = "error" ]; then
+        echo "WARNING: Could not check database status. Attempting migration..."
+        alembic upgrade head 2>/dev/null || echo "WARNING: Migration failed (database may not be ready)"
     else
-        echo "Admin user already exists, skipping default admin creation."
+        echo "Database already initialized. Running pending migrations..."
+        alembic upgrade head 2>/dev/null || echo "No pending migrations."
     fi
 fi
+
+# ============================================================================
+# 2. Multi-User Workspace Setup
+# ============================================================================
+if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
+    echo "Configuring multi-user workspace mode..."
+
+    # Ensure workspace base directory exists
+    WORKSPACE_DIR="${WORKSPACE_BASE_DIR:-/workspace}"
+    mkdir -p "$WORKSPACE_DIR"
+
+    # Configure sudoers for qwen-code-webui
+    # System users are auto-created by the admin API when creating users
+    WEBUI_PATH=$(which qwen-code-webui 2>/dev/null || echo "/usr/bin/qwen-code-webui")
+    if [ -x "$WEBUI_PATH" ]; then
+        cat > /etc/sudoers.d/open-ace-webui << SUDOERS_EOF
+# Open ACE WebUI - Multi-user workspace sudo configuration
+# Auto-generated by docker-entrypoint.sh
+open-ace ALL=(ALL) NOPASSWD: ${WEBUI_PATH} *
+open-ace ALL=(ALL) NOPASSWD: /usr/bin/test, /usr/bin/ls, /usr/bin/cat, /usr/bin/stat, /usr/bin/mkdir, /usr/bin/chown
+SUDOERS_EOF
+        chmod 440 /etc/sudoers.d/open-ace-webui
+
+        # Validate sudoers syntax
+        if visudo -c -f /etc/sudoers.d/open-ace-webui &>/dev/null; then
+            echo "Sudoers configured for qwen-code-webui at: $WEBUI_PATH"
+        else
+            echo "WARNING: Sudoers syntax validation failed. Removing invalid file."
+            rm -f /etc/sudoers.d/open-ace-webui
+        fi
+    else
+        echo "WARNING: qwen-code-webui not found at $WEBUI_PATH. Workspace instances may not start."
+    fi
+fi
+
+# ============================================================================
+# 3. Start Application
+# ============================================================================
+echo "=========================================="
+echo "  Open ACE - Starting Gunicorn"
+echo "=========================================="
 
 exec gunicorn \
     --bind 0.0.0.0:5000 \

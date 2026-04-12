@@ -57,15 +57,23 @@ LABEL maintainer="Open ACE Team"
 LABEL description="AI Computing Explorer"
 LABEL version="1.0.0"
 
-# Install runtime dependencies
+# Install runtime dependencies + Node.js 20 + qwen-code-webui for multi-user workspace
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
+    postgresql-client \
     curl \
-    && rm -rf /var/lib/apt/lists/*
+    sudo \
+    ca-certificates \
+    gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && npm install -g qwen-code-webui @qwen-code/qwen-code \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /root/.npm
 
 # Create non-root user for security
 RUN groupadd -r open-ace && \
-    useradd -r -g open-ace -d /home/open-ace -s /sbin/nologin -c "Open ACE user" open-ace && \
+    useradd -r -g open-ace -d /home/open-ace -s /bin/bash -c "Open ACE user" open-ace && \
     mkdir -p /home/open-ace && \
     chown -R open-ace:open-ace /home/open-ace
 
@@ -85,8 +93,8 @@ COPY --from=frontend-builder --chown=open-ace:open-ace /app/static/js/dist ./sta
 COPY --chown=open-ace:open-ace docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-# Switch to non-root user
-USER open-ace
+# NOTE: Container runs as root to support multi-user workspace mode (sudo -u <user>)
+# The entrypoint script handles privilege management and user creation.
 
 # Environment variables
 ENV PYTHONUNBUFFERED=1 \
@@ -98,7 +106,7 @@ ENV PYTHONUNBUFFERED=1 \
 EXPOSE 5000
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')" || exit 1
 
 # Run the application
@@ -109,8 +117,6 @@ ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 # =============================================================================
 FROM production AS development
 
-USER root
-
 # Install development tools
 RUN pip install --no-cache-dir \
     pytest \
@@ -120,8 +126,6 @@ RUN pip install --no-cache-dir \
     isort \
     ruff \
     mypy
-
-USER open-ace
 
 # Development environment
 ENV FLASK_ENV=development \
@@ -134,8 +138,6 @@ CMD ["python", "-c", "from web import app; app.run(host='0.0.0.0', port=5000, de
 # Migration Stage (for running database migrations)
 # =============================================================================
 FROM production AS migration
-
-USER root
 
 # Create migration entrypoint script
 RUN echo '#!/bin/bash\n\
@@ -154,7 +156,5 @@ fi\n\
 \n\
 # Start the application\n\
 exec python web.py' > /entrypoint.sh && chmod +x /entrypoint.sh
-
-USER open-ace
 
 ENTRYPOINT ["/entrypoint.sh"]

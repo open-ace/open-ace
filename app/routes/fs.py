@@ -70,14 +70,20 @@ def get_webui_user():
     return user, None, 200
 
 
+def get_workspace_base_dir() -> str:
+    """Get the workspace base directory. Configurable via WORKSPACE_BASE_DIR env var."""
+    return os.environ.get("WORKSPACE_BASE_DIR", "/home")
+
+
 def get_home_directory(user=None):
     """Get user's home directory based on system_account."""
+    base_dir = get_workspace_base_dir()
     if user:
         system_account = user.get("system_account") or user.get("username")
         if system_account:
-            # Return the system account's home directory
-            user_home = f"/home/{system_account}"
-            # Use sudo to check if directory exists (openace can't access other users' homes)
+            # Return the system account's workspace directory
+            user_home = f"{base_dir}/{system_account}"
+            # Use sudo to check if directory exists
             result = run_as_user(system_account, ["test", "-e", user_home])
             if result.returncode == 0:
                 return user_home

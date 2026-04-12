@@ -1,5 +1,13 @@
 # Open ACE - AI Computing Explorer - Docker Compose Configuration
 # For production deployment with PostgreSQL database
+#
+# Usage:
+#   docker compose up -d                          # Basic deployment
+#   docker compose --profile production up -d     # With nginx reverse proxy
+#
+# Multi-user workspace:
+#   WORKSPACE_MULTI_USER_MODE=true docker compose up -d
+#   Then create users via admin API — system users are auto-created in container
 
 services:
   # ===========================================================================
@@ -10,27 +18,35 @@ services:
       context: .
       dockerfile: Dockerfile
       target: production
-    image: open-ace:latest
+    image: ${IMAGE_NAME:-open-ace:latest}
     container_name: open-ace-web
     restart: unless-stopped
     ports:
       - "${PORT:-5000}:5000"
+      # Multi-user workspace: expose port range for qwen-code-webui instances
+      - "${WORKSPACE_PORT_RANGE_START:-3100}-${WORKSPACE_PORT_RANGE_END:-3200}:${WORKSPACE_PORT_RANGE_START:-3100}-${WORKSPACE_PORT_RANGE_END:-3200}"
     environment:
       - FLASK_ENV=production
       - PYTHONUNBUFFERED=1
       - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
       - UPLOAD_AUTH_KEY=${UPLOAD_AUTH_KEY:-change-me-in-production}
-      # Database URL - defaults to PostgreSQL connection
+      # Database
       - DATABASE_URL=postgresql://${DB_USER:-ace}:${DB_PASSWORD:-ace-secret}@postgres:5432/${DB_NAME:-ace}
+      # Multi-user Workspace
+      - WORKSPACE_MULTI_USER_MODE=${WORKSPACE_MULTI_USER_MODE:-false}
+      # Workspace base directory (users' projects stored under /workspace/<username>/)
+      - WORKSPACE_BASE_DIR=/workspace
     volumes:
       - ./config:/home/open-ace/.open-ace:ro
       - ./logs:/app/logs
+      # Workspace data: per-user project directories, persisted across restarts
+      - workspace-data:/workspace
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 30s
     networks:
       - open-ace-network
     depends_on:
@@ -66,26 +82,6 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-
-  # ===========================================================================
-  # Optional: Redis for caching (future use)
-  # ===========================================================================
-  redis:
-    image: redis:7-alpine
-    container_name: open-ace-redis
-    restart: unless-stopped
-    command: redis-server --appendonly yes
-    volumes:
-      - redis-data:/data
-    networks:
-      - open-ace-network
-    profiles:
-      - cache
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
   # ===========================================================================
   # PostgreSQL Database (required for production)
@@ -124,7 +120,7 @@ networks:
 # Volumes
 # =============================================================================
 volumes:
-  redis-data:
-    driver: local
   postgres-data:
+    driver: local
+  workspace-data:
     driver: local
