@@ -9,6 +9,7 @@ Used by project selector UI to browse directories.
 import logging
 import os
 import platform
+import subprocess
 from pathlib import Path
 
 from flask import Blueprint, jsonify, request
@@ -21,6 +22,12 @@ logger = logging.getLogger(__name__)
 fs_bp = Blueprint("fs", __name__)
 auth_service = AuthService()
 user_repo = UserRepository()
+
+
+def run_as_user(system_account: str, command: list) -> subprocess.CompletedProcess:
+    """Run a command as a specific user using sudo."""
+    sudo_cmd = ["sudo", "-u", system_account] + command
+    return subprocess.run(sudo_cmd, capture_output=True, text=True, timeout=10)
 
 
 def get_current_user():
@@ -70,7 +77,9 @@ def get_home_directory(user=None):
         if system_account:
             # Return the system account's home directory
             user_home = f"/home/{system_account}"
-            if os.path.exists(user_home):
+            # Use sudo to check if directory exists (openace can't access other users' homes)
+            result = run_as_user(system_account, ["test", "-e", user_home])
+            if result.returncode == 0:
                 return user_home
     # Fallback to process user's home
     return str(Path.home())
@@ -105,17 +114,58 @@ def is_valid_path(path: str) -> bool:
     return True
 
 
-def get_directory_info(path: str):
-    """Get information about a directory."""
+def get_directory_info(path: str, system_account: str = None):
+    """Get information about a directory, optionally as a specific user."""
     try:
-        stat = os.stat(path)
-        return {
-            "exists": True,
-            "is_dir": os.path.isdir(path),
-            "is_readable": os.access(path, os.R_OK),
-            "is_writable": os.access(path, os.W_OK),
-            "size": stat.st_size if os.path.isfile(path) else 0,
-        }
+        if system_account:
+            # Use sudo to check permissions as the specified user
+            # Check if directory exists
+            result = run_as_user(system_account, ["test", "-e", path])
+            if result.returncode != 0:
+                return {
+                    "exists": False,
+                    "is_dir": False,
+                    "is_readable": False,
+                    "is_writable": False,
+                }
+
+            # Check if it's a directory
+            result = run_as_user(system_account, ["test", "-d", path])
+            is_dir = result.returncode == 0
+
+            if not is_dir:
+                return {
+                    "exists": True,
+                    "is_dir": False,
+                    "is_readable": False,
+                    "is_writable": False,
+                }
+
+            # Check if readable
+            result = run_as_user(system_account, ["test", "-r", path])
+            is_readable = result.returncode == 0
+
+            # Check if writable
+            result = run_as_user(system_account, ["test", "-w", path])
+            is_writable = result.returncode == 0
+
+            return {
+                "exists": True,
+                "is_dir": is_dir,
+                "is_readable": is_readable,
+                "is_writable": is_writable,
+                "size": 0,
+            }
+        else:
+            # Fallback to process user's permissions
+            stat = os.stat(path)
+            return {
+                "exists": True,
+                "is_dir": os.path.isdir(path),
+                "is_readable": os.access(path, os.R_OK),
+                "is_writable": os.access(path, os.W_OK),
+                "size": stat.st_size if os.path.isfile(path) else 0,
+            }
     except Exception as e:
         logger.debug(f"Error getting directory info for {path}: {e}")
         return {
@@ -138,6 +188,9 @@ def api_browse_directory():
         if not user:
             return jsonify(error), code
 
+    # Get system_account for sudo operations
+    system_account = user.get("system_account") if user else None
+
     # Get path parameter
     path = request.args.get("path", "")
 
@@ -152,7 +205,7 @@ def api_browse_directory():
         path = os.path.abspath(path)
 
     # Check if path exists and is readable
-    dir_info = get_directory_info(path)
+    dir_info = get_directory_info(path, system_account)
     if not dir_info["exists"]:
         # Return home directory as fallback
         home = get_home_directory(user)
@@ -162,9 +215,9 @@ def api_browse_directory():
             "fallback": {
                 "currentPath": home,
                 "parentPath": str(Path(home).parent),
-                "directories": list_subdirectories(home),
+                "directories": list_subdirectories(home, system_account),
                 "homePath": home,
-                "canCreate": os.access(home, os.W_OK),
+                "canCreate": get_directory_info(home, system_account).get("is_writable", False),
             }
         })
 
@@ -175,7 +228,7 @@ def api_browse_directory():
         return jsonify({"error": "Permission denied"}), 403
 
     # List subdirectories
-    directories = list_subdirectories(path)
+    directories = list_subdirectories(path, system_account)
 
     # Get parent directory
     parent = str(Path(path).parent)
@@ -191,33 +244,66 @@ def api_browse_directory():
     })
 
 
-def list_subdirectories(path: str) -> list:
-    """List subdirectories in a path."""
+def list_subdirectories(path: str, system_account: str = None) -> list:
+    """List subdirectories in a path, optionally as a specific user."""
     directories = []
 
     try:
-        for entry in os.listdir(path):
-            full_path = os.path.join(path, entry)
+        if system_account:
+            # Use sudo to list directory as the specified user
+            result = run_as_user(system_account, ["ls", "-1", path])
+            if result.returncode != 0:
+                logger.warning(f"Permission denied accessing {path} as {system_account}")
+                return directories
 
-            # Skip hidden files/directories (except .qwen for special case)
-            if entry.startswith(".") and entry != ".qwen":
-                continue
+            entries = result.stdout.strip().split("\n") if result.stdout.strip() else []
 
-            # Only include directories
-            if os.path.isdir(full_path):
-                try:
-                    is_readable = os.access(full_path, os.R_OK)
-                    is_writable = os.access(full_path, os.W_OK)
+            for entry in entries:
+                full_path = os.path.join(path, entry)
 
-                    directories.append({
-                        "name": entry,
-                        "path": full_path,
-                        "isReadable": is_readable,
-                        "isWritable": is_writable,
-                    })
-                except Exception:
-                    # Skip directories we can't access
+                # Skip hidden files/directories (except .qwen for special case)
+                if entry.startswith(".") and entry != ".qwen":
                     continue
+
+                # Check if it's a directory
+                dir_result = run_as_user(system_account, ["test", "-d", full_path])
+                if dir_result.returncode != 0:
+                    continue
+
+                # Check permissions
+                readable_result = run_as_user(system_account, ["test", "-r", full_path])
+                writable_result = run_as_user(system_account, ["test", "-w", full_path])
+
+                directories.append({
+                    "name": entry,
+                    "path": full_path,
+                    "isReadable": readable_result.returncode == 0,
+                    "isWritable": writable_result.returncode == 0,
+                })
+        else:
+            # Fallback to process user's permissions
+            for entry in os.listdir(path):
+                full_path = os.path.join(path, entry)
+
+                # Skip hidden files/directories (except .qwen for special case)
+                if entry.startswith(".") and entry != ".qwen":
+                    continue
+
+                # Only include directories
+                if os.path.isdir(full_path):
+                    try:
+                        is_readable = os.access(full_path, os.R_OK)
+                        is_writable = os.access(full_path, os.W_OK)
+
+                        directories.append({
+                            "name": entry,
+                            "path": full_path,
+                            "isReadable": is_readable,
+                            "isWritable": is_writable,
+                        })
+                    except Exception:
+                        # Skip directories we can't access
+                        continue
 
     except PermissionError:
         logger.warning(f"Permission denied accessing {path}")
@@ -304,8 +390,9 @@ def api_get_home():
         if not user:
             return jsonify(error), code
 
+    system_account = user.get("system_account") if user else None
     home = get_home_directory(user)
-    dir_info = get_directory_info(home)
+    dir_info = get_directory_info(home, system_account)
 
     return jsonify({
         "homePath": home,
