@@ -370,9 +370,10 @@ if [ -d "$FRONTEND_DIR" ]; then
     cd "$FRONTEND_DIR"
 
     # Install dependencies if node_modules doesn't exist or package.json changed
+    # Set HUSKY=0 to skip git hooks setup (package directory is not a git repo)
     if [ ! -d "node_modules" ] || [ "$(find package.json -newer node_modules 2>/dev/null | head -1)" ]; then
         echo -e "${BLUE}Installing frontend dependencies...${NC}"
-        npm install --silent 2>/dev/null || npm install
+        HUSKY=0 npm install --silent 2>/dev/null || HUSKY=0 npm install
     fi
 
     # Build frontend
