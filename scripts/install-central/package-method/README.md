@@ -82,7 +82,7 @@ tar -xzf open-ace-*.tar.gz
 cd open-ace-*
 
 # 运行安装脚本
-./scripts/install.sh
+./scripts/install-central/package-method/install.sh
 ```
 
 安装过程中会提示：
@@ -98,7 +98,7 @@ cd open-ace-*
 cat > install.conf << 'EOF'
 # 安装配置
 DEPLOY_USER=openace
-DEPLOY_PATH=/home/openace
+DEPLOY_PATH=$HOME
 
 # PostgreSQL 数据库配置
 DB_TYPE=postgresql
@@ -115,7 +115,7 @@ SERVICE_HOST=0.0.0.0
 EOF
 
 # 使用配置文件安装
-./scripts/install.sh --config install.conf
+./scripts/install-central/package-method/install.sh --config install.conf
 ```
 
 ### SQLite 数据库
@@ -124,28 +124,20 @@ EOF
 # SQLite 配置（用于开发/测试）
 cat > install.conf << 'EOF'
 DEPLOY_USER=$USER
-DEPLOY_PATH=$HOME/open-ace
+DEPLOY_PATH=$HOME
 DB_TYPE=sqlite
 SERVICE_PORT=5000
 EOF
 
-./scripts/install.sh --config install.conf
+./scripts/install-central/package-method/install.sh --config install.conf
 ```
 
 ### 数据库初始化
 
 安装脚本会自动：
 
-1. **PostgreSQL**: 执行 `schema/schema-postgres.sql` 创建表结构，然后使用 `alembic stamp head` 标记版本
+1. **PostgreSQL**: 创建数据库用户和数据库，执行 `schema/schema-postgres.sql` 创建表结构，然后使用 `alembic stamp head` 标记版本
 2. **SQLite**: 执行 `schema/schema-sqlite.sql` 创建表结构
-
-**注意：** PostgreSQL 需要预先创建数据库用户和数据库：
-
-```bash
-# PostgreSQL 预配置（以 postgres 用户执行）
-sudo -u postgres psql -c "CREATE USER openace WITH PASSWORD 'openace123';"
-sudo -u postgres psql -c "CREATE DATABASE openace OWNER openace;"
-```
 
 ### psycopg2 安装
 
@@ -162,13 +154,13 @@ sudo -u postgres psql -c "CREATE DATABASE openace OWNER openace;"
 cat > deploy.conf << 'EOF'
 DEPLOY_HOST=192.168.1.100
 DEPLOY_USER=admin
-DEPLOY_PATH=/home/admin/open-ace
+DEPLOY_PATH=$HOME
 INSTALL_SERVICE=yes
 SERVICE_PORT=5000
 SERVICE_HOST=0.0.0.0
 EOF
 
-./scripts/install.sh --config deploy.conf
+./scripts/install-central/package-method/install.sh --config deploy.conf
 ```
 
 ### Systemd 服务
@@ -214,7 +206,7 @@ cd /home/openace && python3 web.py
 ### 交互式升级
 
 ```bash
-./scripts/install.sh
+./scripts/install-central/package-method/install.sh
 # 检测到现有安装时会提示：
 # "Existing installation found at: /path/to/open-ace"
 # "Upgrade existing installation? [Y/n]"
@@ -223,7 +215,7 @@ cd /home/openace && python3 web.py
 ### 使用配置文件升级
 
 ```bash
-./scripts/install.sh --config install.conf
+./scripts/install-central/package-method/install.sh --config install.conf
 ```
 
 ### 升级时保留的数据
@@ -231,10 +223,8 @@ cd /home/openace && python3 web.py
 升级过程中以下数据会被保留：
 
 - `~/.open-ace/config.json` - 配置文件
-- `~/.open-ace/usage.db` - 使用记录数据库
 - `~/.open-ace/feishu_users.json` - 飞书用户配置
 - `logs/` - 日志目录
-- `data/` - 数据目录
 
 ## 卸载
 
@@ -243,7 +233,7 @@ cd /home/openace && python3 web.py
 ### 交互式卸载
 
 ```bash
-./scripts/uninstall.sh
+./scripts/install-central/package-method/uninstall.sh
 ```
 
 卸载过程中会提示：
@@ -258,12 +248,12 @@ cd /home/openace && python3 web.py
 # 本地卸载配置
 cat > uninstall.conf << 'EOF'
 DEPLOY_USER=$USER
-DEPLOY_PATH=$HOME/open-ace
+DEPLOY_PATH=$HOME
 REMOVE_CONFIG=no
 REMOVE_DATA=no
 EOF
 
-./scripts/uninstall.sh --config uninstall.conf
+./scripts/install-central/package-method/uninstall.sh --config uninstall.conf
 ```
 
 ### 远程卸载
@@ -273,12 +263,12 @@ EOF
 cat > uninstall-remote.conf << 'EOF'
 DEPLOY_HOST=192.168.1.100
 DEPLOY_USER=admin
-DEPLOY_PATH=/home/admin/open-ace
+DEPLOY_PATH=$HOME
 REMOVE_CONFIG=no
 REMOVE_DATA=no
 EOF
 
-./scripts/uninstall.sh --config uninstall-remote.conf
+./scripts/install-central/package-method/uninstall.sh --config uninstall-remote.conf
 ```
 
 ### 选项
@@ -299,7 +289,7 @@ DEPLOY_HOST=              # 留空 = 本地安装
 
 # 用户和路径
 DEPLOY_USER=$USER
-DEPLOY_PATH=$HOME/open-ace
+DEPLOY_PATH=$HOME
 
 # 数据库配置
 DB_TYPE=postgresql        # postgresql 或 sqlite
@@ -315,7 +305,7 @@ SERVICE_PORT=5000         # Web 服务端口
 SERVICE_HOST=0.0.0.0      # Web 服务主机
 
 # 多用户 Workspace 模式（可选）
-WORKSPACE_MULTI_USER_MODE=false   # 启用多用户模式
+WORKSPACE_MULTI_USER_MODE=true    # 启用多用户模式
 WORKSPACE_PORT_RANGE_START=3100   # 端口池起始端口
 WORKSPACE_PORT_RANGE_END=3200     # 端口池结束端口
 WORKSPACE_MAX_INSTANCES=20        # 最大实例数
@@ -346,18 +336,11 @@ WORKSPACE_IDLE_TIMEOUT=30         # 空闲超时（分钟）
    ```
    
    **注意：**
-   - 包名是 `qwen-code-webui`（不是 `@ivycomputing/qwen-code-webui`）
    - qwen-code CLI 包名是 `@qwen-code/qwen-code`（不是 `qwen-code`）
    - CLI 命令名是 `qwen`（不是 `qwen-code`）
    - 安装过程可能需要几分钟，请耐心等待
 
 3. **确保每个用户有对应的系统账号和 `~/.qwen/` 目录**
-
-4. **数据库用户需要设置 system_account**：
-   ```sql
-   -- 更新用户的 system_account 为实际的系统账号名
-   UPDATE users SET system_account = 'openace' WHERE id = 1;
-   ```
 
 **自动配置：**
 
@@ -372,18 +355,18 @@ WORKSPACE_IDLE_TIMEOUT=30         # 空闲超时（分钟）
 
 ```bash
 # 交互式安装时选择启用多用户模式
-./scripts/install.sh
+./scripts/install-central/package-method/install.sh
 
 # 或使用配置文件
 cat > install.conf << 'EOF'
 DEPLOY_USER=openace
-DEPLOY_PATH=/home/openace
+DEPLOY_PATH=$HOME
 WORKSPACE_MULTI_USER_MODE=true
 WORKSPACE_PORT_RANGE_START=3100
 WORKSPACE_PORT_RANGE_END=3200
 EOF
 
-./scripts/install.sh --config install.conf
+./scripts/install-central/package-method/install.sh --config install.conf
 ```
 
 **手动配置 sudoers：**
@@ -413,7 +396,7 @@ DEPLOY_HOST=              # 留空 = 本地卸载
 # DEPLOY_HOST=192.168.1.100  # 设置主机 = 远程卸载
 
 DEPLOY_USER=$USER
-DEPLOY_PATH=$HOME/open-ace
+DEPLOY_PATH=$HOME
 
 # 数据删除选项
 REMOVE_CONFIG=no          # 是否删除 ~/.open-ace 配置目录
