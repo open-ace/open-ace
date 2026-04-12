@@ -63,8 +63,16 @@ def get_webui_user():
     return user, None, 200
 
 
-def get_home_directory():
-    """Get user's home directory."""
+def get_home_directory(user=None):
+    """Get user's home directory based on system_account."""
+    if user:
+        system_account = user.get("system_account") or user.get("username")
+        if system_account:
+            # Return the system account's home directory
+            user_home = f"/home/{system_account}"
+            if os.path.exists(user_home):
+                return user_home
+    # Fallback to process user's home
     return str(Path.home())
 
 
@@ -135,7 +143,7 @@ def api_browse_directory():
 
     # Handle special path values
     if not path or path.lower() == "home":
-        path = get_home_directory()
+        path = get_home_directory(user)
     else:
         # Validate and resolve path
         if not is_valid_path(path):
@@ -147,7 +155,7 @@ def api_browse_directory():
     dir_info = get_directory_info(path)
     if not dir_info["exists"]:
         # Return home directory as fallback
-        home = get_home_directory()
+        home = get_home_directory(user)
         return jsonify({
             "currentPath": path,
             "error": "Directory does not exist",
@@ -178,7 +186,7 @@ def api_browse_directory():
         "currentPath": path,
         "parentPath": parent,
         "directories": directories,
-        "homePath": get_home_directory(),
+        "homePath": get_home_directory(user),
         "canCreate": dir_info["is_writable"],
     })
 
@@ -296,7 +304,7 @@ def api_get_home():
         if not user:
             return jsonify(error), code
 
-    home = get_home_directory()
+    home = get_home_directory(user)
     dir_info = get_directory_info(home)
 
     return jsonify({
