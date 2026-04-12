@@ -818,11 +818,21 @@ update_config_workspace() {
     # Use Python to update JSON
     # Convert bash "true"/"false" to Python True/False
     if command -v python3 &>/dev/null; then
-        python3 << EOF
+        # Use environment variables to pass values safely (avoids special character issues in heredoc)
+        export _CONFIG_FILE="$config_file"
+        export _WS_ENABLED="$WORKSPACE_MULTI_USER_MODE"
+        export _WS_MULTI_USER="$WORKSPACE_MULTI_USER_MODE"
+        export _WS_PORT_START="$WORKSPACE_PORT_RANGE_START"
+        export _WS_PORT_END="$WORKSPACE_PORT_RANGE_END"
+        export _WS_MAX_INSTANCES="$WORKSPACE_MAX_INSTANCES"
+        export _WS_IDLE_TIMEOUT="$WORKSPACE_IDLE_TIMEOUT"
+        export _WS_WEBUI_PATH="$webui_path"
+        
+        python3 << 'EOF'
 import json
-import socket
+import os
 
-with open('$config_file', 'r') as f:
+with open(os.environ.get('_CONFIG_FILE', ''), 'r') as f:
     config = json.load(f)
 
 if 'workspace' not in config:
@@ -832,13 +842,13 @@ if 'workspace' not in config:
 def bash_to_bool(val):
     return val.lower() == 'true'
 
-config['workspace']['enabled'] = bash_to_bool('$WORKSPACE_MULTI_USER_MODE')
-config['workspace']['multi_user_mode'] = bash_to_bool('$WORKSPACE_MULTI_USER_MODE')
-config['workspace']['port_range_start'] = int('$WORKSPACE_PORT_RANGE_START')
-config['workspace']['port_range_end'] = int('$WORKSPACE_PORT_RANGE_END')
-config['workspace']['max_instances'] = int('$WORKSPACE_MAX_INSTANCES')
-config['workspace']['idle_timeout_minutes'] = int('$WORKSPACE_IDLE_TIMEOUT')
-config['workspace']['webui_path'] = '$webui_path'
+config['workspace']['enabled'] = bash_to_bool(os.environ.get('_WS_ENABLED', 'false'))
+config['workspace']['multi_user_mode'] = bash_to_bool(os.environ.get('_WS_MULTI_USER', 'false'))
+config['workspace']['port_range_start'] = int(os.environ.get('_WS_PORT_START', '3100'))
+config['workspace']['port_range_end'] = int(os.environ.get('_WS_PORT_END', '3200'))
+config['workspace']['max_instances'] = int(os.environ.get('_WS_MAX_INSTANCES', '20'))
+config['workspace']['idle_timeout_minutes'] = int(os.environ.get('_WS_IDLE_TIMEOUT', '30'))
+config['workspace']['webui_path'] = os.environ.get('_WS_WEBUI_PATH', '')
 
 # Set workspace URL - get server IP address
 try:
@@ -857,12 +867,12 @@ try:
             config['workspace']['url'] = 'http://' + ips[0]
     else:
         # Fallback to hostname
-        config['workspace']['url'] = 'http://' + socket.gethostname()
+        config['workspace']['url'] = 'http://localhost'
 except:
-    # Fallback to hostname
-    config['workspace']['url'] = 'http://' + socket.gethostname()
+    # Fallback to localhost
+    config['workspace']['url'] = 'http://localhost'
 
-with open('$config_file', 'w') as f:
+with open(os.environ.get('_CONFIG_FILE', ''), 'w') as f:
     json.dump(config, f, indent=2)
 print("Workspace configuration updated")
 EOF
