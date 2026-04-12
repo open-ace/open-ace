@@ -11,6 +11,7 @@ WORKDIR /app
 
 # Copy frontend package files
 COPY frontend/package*.json ./frontend/
+COPY frontend/.npmrc* ./frontend/
 
 # Install all dependencies (including devDependencies for build tools)
 WORKDIR /app/frontend
