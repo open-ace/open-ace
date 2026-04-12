@@ -1864,7 +1864,12 @@ do_fresh_install() {
                 print_warning "Please edit the config file with your database settings."
             fi
             # Update workspace configuration with webui path
-            local webui_path=$(find_webui_executable 2>/dev/null)
+            # Show installation progress if workspace mode is enabled
+            if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
+                local webui_path=$(find_webui_executable)
+            else
+                local webui_path=$(find_webui_executable 2>/dev/null)
+            fi
             update_config_workspace "$config_dir/config.json" "$webui_path"
         fi
     fi
@@ -2190,7 +2195,12 @@ with open('$config_dir/config.json', 'w') as f:
 
     # Update workspace configuration (for both new and upgrade modes)
     if [ -f "$config_dir/config.json" ]; then
-        local webui_path=$(find_webui_executable 2>/dev/null)
+        # Show installation progress if workspace mode is enabled
+        if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
+            local webui_path=$(find_webui_executable)
+        else
+            local webui_path=$(find_webui_executable 2>/dev/null)
+        fi
         update_config_workspace "$config_dir/config.json" "$webui_path"
     fi
 
