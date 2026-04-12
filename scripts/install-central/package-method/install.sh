@@ -53,6 +53,76 @@ DEPLOY_USER=""        # Will be set after checking for openace user
 DEPLOY_PATH=""        # Will be set based on DEPLOY_USER
 
 # ============================================================================
+# Python Version Check
+# ============================================================================
+
+# Check Python version (Open ACE requires Python >= 3.9)
+check_python_version() {
+    if ! command -v python3 &>/dev/null; then
+        print_error "Python 3 is not installed"
+        print_info "Open ACE requires Python 3.9 or later"
+        print_info ""
+        print_info "On CentOS/RHEL 7, you can install Python 3.9 via:"
+        print_info "  yum install rh-python39 rh-python39-python-pip"
+        print_info "  source /opt/rh/rh-python39/enable"
+        print_info ""
+        print_info "On Ubuntu/Debian:"
+        print_info "  apt install python3.9 python3.9-venv python3.9-dev"
+        exit 1
+    fi
+    
+    local python_version=$(python3 -c "import sys; print(sys.version_info.major * 100 + sys.version_info.minor)")
+    
+    if [ "$python_version" -lt 309 ]; then
+        local actual_version=$(python3 --version 2>&1 | head -1)
+        print_error "Python version too old: $actual_version"
+        print_error "Open ACE requires Python 3.9 or later"
+        print_info ""
+        print_info "On CentOS/RHEL 7, you can install Python 3.9 via Software Collections:"
+        print_info "  yum install centos-release-scl"
+        print_info "  yum install rh-python39 rh-python39-python-pip"
+        print_info "  source /opt/rh/rh-python39/enable  # Activate Python 3.9"
+        print_info "  Then run this install script again"
+        print_info ""
+        print_info "On Rocky Linux 8/9 or RHEL 8/9:"
+        print_info "  dnf install python39 python39-pip"
+        print_info "  alternatives --set python3 /usr/bin/python3.9"
+        print_info ""
+        print_info "On Ubuntu/Debian:"
+        print_info "  apt install python3.9 python3.9-venv python3.9-dev"
+        print_info "  update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.9 1"
+        exit 1
+    fi
+    
+    local actual_version=$(python3 --version 2>&1 | head -1)
+    print_success "Python version: $actual_version (OK)"
+}
+
+# Check Python version on remote system
+check_python_version_remote() {
+    local remote="$1"
+    
+    if ! ssh "$remote" "command -v python3 &>/dev/null"; then
+        print_error "Python 3 is not installed on $remote"
+        print_info "Open ACE requires Python 3.9 or later"
+        return 1
+    fi
+    
+    local python_version=$(ssh "$remote" "python3 -c \"import sys; print(sys.version_info.major * 100 + sys.version_info.minor)\"")
+    
+    if [ "$python_version" -lt 309 ]; then
+        local actual_version=$(ssh "$remote" "python3 --version 2>&1 | head -1")
+        print_error "Python version too old on $remote: $actual_version"
+        print_error "Open ACE requires Python 3.9 or later"
+        return 1
+    fi
+    
+    local actual_version=$(ssh "$remote" "python3 --version 2>&1 | head -1")
+    print_success "Python version on $remote: $actual_version (OK)"
+    return 0
+}
+
+# ============================================================================
 # User Detection and Creation
 # ============================================================================
 
@@ -1665,6 +1735,9 @@ configure_deploy() {
 install_local() {
     print_header "Installing on Local Machine"
 
+    # Check Python version first (Open ACE requires Python >= 3.9)
+    check_python_version
+
     # Validate source directory first
     validate_source_dir
 
@@ -1758,6 +1831,9 @@ install_deploy() {
 
     local remote="$DEPLOY_USER@$DEPLOY_HOST"
     local target_path="$DEPLOY_PATH"
+
+    # Check Python version on remote system (Open ACE requires Python >= 3.9)
+    check_python_version_remote "$remote" || exit 1
 
     # Test SSH connection
     print_info "Testing SSH connection..."

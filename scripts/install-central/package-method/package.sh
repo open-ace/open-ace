@@ -450,6 +450,7 @@ if [ "$SKIP_DOWNLOAD" = false ] && [ -f "$PROJECT_DIR/requirements.txt" ]; then
 
     # Download dependencies
     # Note: --prefer-binary requires pip 20.3+, check version before using
+    # Note: We target Python 3.9 minimum (Open ACE requires Python >= 3.9)
     PIP_CMD=""
     PIP_VERSION=""
     
@@ -463,12 +464,28 @@ if [ "$SKIP_DOWNLOAD" = false ] && [ -f "$PROJECT_DIR/requirements.txt" ]; then
     fi
     
     if [ -n "$PIP_CMD" ]; then
+        # Download packages compatible with Python 3.9+
+        # Use --python-version 3.9 to get compatible wheels
+        # Use --only-binary=:all: to avoid source builds that may fail on older systems
+        echo -e "${YELLOW}Downloading packages for Python 3.9+ compatibility...${NC}"
+        
         # Use --prefer-binary only if pip version >= 20
         if [ -n "$PIP_VERSION" ] && [ "$PIP_VERSION" -ge 20 ]; then
+            $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" \
+                --python-version 3.9 \
+                --only-binary=:all: \
+                --prefer-binary || \
+            $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" \
+                --python-version 3.9 \
+                --only-binary=:all: || \
+            # Fallback: download without version constraint (for packages not available for py3.9)
             $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" --prefer-binary || \
                 $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" || \
                 echo -e "${YELLOW}Warning: Failed to download some dependencies. Install will require network.${NC}"
         else
+            $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" \
+                --python-version 3.9 \
+                --only-binary=:all: || \
             $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" || \
                 echo -e "${YELLOW}Warning: Failed to download some dependencies. Install will require network.${NC}"
         fi
