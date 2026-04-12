@@ -5,7 +5,7 @@
 # Frontend Build Stage
 # =============================================================================
 # Use BUILDPLATFORM to run frontend build on host architecture (for esbuild compatibility)
-FROM --platform=$BUILDPLATFORM node:20-slim AS frontend-builder
+FROM --platform=$BUILDPLATFORM node:18-slim AS frontend-builder
 
 WORKDIR /app
 
