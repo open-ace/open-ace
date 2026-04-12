@@ -498,7 +498,7 @@ if [ "$SKIP_DOWNLOAD" = false ] && [ -f "$PROJECT_DIR/requirements.txt" ]; then
 
     # Count downloaded packages
     pkg_count=$(ls -1 "$VENDOR_DIR"/*.whl 2>/dev/null | wc -l | tr -d ' ')
-    echo "  ✓ Downloaded $pkg_count packages to vendor/"
+    echo "  [OK] Downloaded $pkg_count packages to vendor/"
     echo -e "${YELLOW}Note: psycopg2-binary excluded. Install will use system package python3-psycopg2.${NC}"
 
     # Cache the vendor directory for future use
@@ -521,9 +521,9 @@ for item in "${INCLUDE_ITEMS[@]}"; do
         else
             cp "$src" "$PACKAGE_DIR/"
         fi
-        echo "  ✓ Included: $item"
+        echo "  [OK] Included: $item"
     else
-        echo -e "  ${YELLOW}⚠ Not found: $item${NC}"
+        echo -e "  ${YELLOW}[WARN] Not found: $item${NC}"
     fi
 done
 
@@ -531,7 +531,7 @@ done
 # Write VERSION file with git commit info (for deployed environments without .git)
 VERSION_FILE_CONTENT=$(get_git_version_for_file)
 echo "$VERSION_FILE_CONTENT" > "$PACKAGE_DIR/VERSION"
-echo "  ✓ Updated: VERSION ($VERSION_FILE_CONTENT)"
+echo "  [OK] Updated: VERSION ($VERSION_FILE_CONTENT)"
 
 # Clean up unnecessary files in scripts directory
 echo ""
@@ -554,7 +554,7 @@ cd "$PROJECT_DIR"
 
 # Create logs directory (empty)
 mkdir -p "$PACKAGE_DIR/logs"
-echo "  ✓ Created: logs/"
+echo "  [OK] Created: logs/"
 
 # Remove macOS extended attributes and AppleDouble files
 echo -e "${YELLOW}Removing macOS metadata files...${NC}"

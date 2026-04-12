@@ -999,19 +999,19 @@ print_header() {
 }
 
 print_success() {
-    echo -e "${GREEN}✓ $1${NC}"
+    echo -e "${GREEN}[OK] $1${NC}"
 }
 
 print_error() {
-    echo -e "${RED}✗ $1${NC}"
+    echo -e "${RED}[FAIL] $1${NC}"
 }
 
 print_warning() {
-    echo -e "${YELLOW}⚠ $1${NC}"
+    echo -e "${YELLOW}[WARN] $1${NC}"
 }
 
 print_info() {
-    echo -e "${BLUE}ℹ $1${NC}"
+    echo -e "${BLUE}[INFO] $1${NC}"
 }
 
 prompt_input() {
@@ -1074,17 +1074,17 @@ stop_webui_systemd_service() {
     local service_name="qwen-code-webui"
     # List all service unit files and check if our service exists
     if systemctl list-unit-files --type=service 2>/dev/null | grep -q "^${service_name}.service"; then
-        print_warning "检测到已存在的 qwen-code-webui systemd 服务"
-        print_info "多用户模式下，Open ACE 会自动管理 qwen-code-webui 实例"
-        print_info "停止并禁用独立运行的 qwen-code-webui 服务..."
+        print_warning "Detected existing qwen-code-webui systemd service"
+        print_info "In multi-user mode, Open ACE automatically manages qwen-code-webui instances"
+        print_info "Stopping and disabling standalone qwen-code-webui services..."
 
         # Stop the service (need sudo for system service)
         if sudo systemctl is-active --quiet "${service_name}.service" 2>/dev/null; then
             sudo systemctl stop "${service_name}.service"
             if [ $? -eq 0 ]; then
-                print_success "已停止 ${service_name} 服务"
+                print_success "Stopped ${service_name} service"
             else
-                print_warning "停止 ${service_name} 服务失败"
+                print_warning "Failed to stop ${service_name} service"
             fi
         fi
 
@@ -1092,13 +1092,13 @@ stop_webui_systemd_service() {
         if sudo systemctl is-enabled --quiet "${service_name}.service" 2>/dev/null; then
             sudo systemctl disable "${service_name}.service"
             if [ $? -eq 0 ]; then
-                print_success "已禁用 ${service_name} 服务"
+                print_success "Disabled ${service_name} service"
             else
-                print_warning "禁用 ${service_name} 服务失败"
+                print_warning "Failed to disable ${service_name} service"
             fi
         fi
 
-        print_info "Open ACE 将在需要时自动启动 qwen-code-webui 实例"
+        print_info "Open ACE will automatically start qwen-code-webui instances when needed"
     fi
 
     return 0
@@ -1248,29 +1248,29 @@ find_webui_executable() {
 configure_sudoers() {
     local run_user="$1"
 
-    print_header "配置 Sudo 权限"
+    print_header "Configure Sudo Permissions"
 
     # Check if running as root
     if [ "$(id -u)" -ne 0 ]; then
-        print_error "需要 root 权限来配置 sudoers"
-        print_info "请使用 sudo 运行安装脚本"
+        print_error "Root privileges required to configure sudoers"
+        print_info "Please run the installation script with sudo"
         return 1
     fi
 
     # Find webui executable
     local webui_path=$(find_webui_executable)
     if [ -z "$webui_path" ]; then
-        print_warning "未找到 qwen-code-webui 可执行文件"
-        print_info "请先安装 qwen-code-webui:"
+        print_warning "qwen-code-webui executable not found"
+        print_info "Please install qwen-code-webui first:"
         print_info "  npm install -g qwen-code-webui"
         print_info ""
-        print_info "安装完成后，手动配置 sudoers:"
+        print_info "After installation, manually configure sudoers:"
         print_info "  sudo visudo -f /etc/sudoers.d/open-ace-webui"
-        print_info "  添加: $run_user ALL=(ALL) NOPASSWD: /path/to/qwen-code-webui *"
+        print_info "  Add: $run_user ALL=(ALL) NOPASSWD: /path/to/qwen-code-webui *"
         return 1
     fi
 
-    print_success "找到 qwen-code-webui: $webui_path"
+    print_success "Found qwen-code-webui: $webui_path"
 
     # Create sudoers file
     local sudoers_file="/etc/sudoers.d/open-ace-webui"
@@ -1284,10 +1284,10 @@ $run_user ALL=(ALL) NOPASSWD: $webui_path *
     # Check if sudoers file already exists
     if [ -f "$sudoers_file" ]; then
         if grep -q "$webui_path" "$sudoers_file" 2>/dev/null; then
-            print_success "Sudoers 规则已存在"
+            print_success "Sudoers rule already exists"
             return 0
         fi
-        print_info "更新现有 sudoers 文件..."
+        print_info "Updating existing sudoers file..."
     fi
 
     # Write sudoers file
@@ -1296,11 +1296,11 @@ $run_user ALL=(ALL) NOPASSWD: $webui_path *
 
     # Validate sudoers syntax
     if visudo -c -f "$sudoers_file" &>/dev/null; then
-        print_success "Sudoers 配置成功: $sudoers_file"
-        print_info "服务账号 '$run_user' 可以执行:"
+        print_success "Sudoers configured successfully: $sudoers_file"
+        print_info "Service account '$run_user' can execute:"
         print_info "  sudo -u <username> $webui_path --port <port>"
     else
-        print_error "Sudoers 语法错误，回滚..."
+        print_error "Sudoers syntax error, rolling back..."
         rm -f "$sudoers_file"
         return 1
     fi
@@ -1621,15 +1621,15 @@ configure_local() {
 
     # Ask about multi-user workspace mode
     echo ""
-    echo -e "${BLUE}=== Workspace 多用户模式配置 ===${NC}"
-    echo -e "${YELLOW}多用户模式会为每个用户启动独立的 qwen-code-webui 进程${NC}"
-    prompt_yesno "启用多用户模式?" "y" enable_multi_user
+    echo -e "${BLUE}=== Workspace Multi-user Mode Configuration ===${NC}"
+    echo -e "${YELLOW}Multi-user mode starts a separate qwen-code-webui process for each user${NC}"
+    prompt_yesno "Enable multi-user mode?" "y" enable_multi_user
     if [ "$enable_multi_user" = "yes" ]; then
         WORKSPACE_MULTI_USER_MODE="true"
-        prompt_input "端口池起始端口" "$WORKSPACE_PORT_RANGE_START" WORKSPACE_PORT_RANGE_START
-        prompt_input "端口池结束端口" "$WORKSPACE_PORT_RANGE_END" WORKSPACE_PORT_RANGE_END
-        prompt_input "最大实例数" "$WORKSPACE_MAX_INSTANCES" WORKSPACE_MAX_INSTANCES
-        prompt_input "空闲超时时间(分钟)" "$WORKSPACE_IDLE_TIMEOUT" WORKSPACE_IDLE_TIMEOUT
+        prompt_input "Port pool start" "$WORKSPACE_PORT_RANGE_START" WORKSPACE_PORT_RANGE_START
+        prompt_input "Port pool end" "$WORKSPACE_PORT_RANGE_END" WORKSPACE_PORT_RANGE_END
+        prompt_input "Max instances" "$WORKSPACE_MAX_INSTANCES" WORKSPACE_MAX_INSTANCES
+        prompt_input "Idle timeout (minutes)" "$WORKSPACE_IDLE_TIMEOUT" WORKSPACE_IDLE_TIMEOUT
     fi
 
     echo ""
@@ -1686,15 +1686,15 @@ configure_deploy() {
 
     # Ask about multi-user workspace mode
     echo ""
-    echo -e "${BLUE}=== Workspace 多用户模式配置 ===${NC}"
-    echo -e "${YELLOW}多用户模式会为每个用户启动独立的 qwen-code-webui 进程${NC}"
-    prompt_yesno "启用多用户模式?" "y" enable_multi_user
+    echo -e "${BLUE}=== Workspace Multi-user Mode Configuration ===${NC}"
+    echo -e "${YELLOW}Multi-user mode starts a separate qwen-code-webui process for each user${NC}"
+    prompt_yesno "Enable multi-user mode?" "y" enable_multi_user
     if [ "$enable_multi_user" = "yes" ]; then
         WORKSPACE_MULTI_USER_MODE="true"
-        prompt_input "端口池起始端口" "$WORKSPACE_PORT_RANGE_START" WORKSPACE_PORT_RANGE_START
-        prompt_input "端口池结束端口" "$WORKSPACE_PORT_RANGE_END" WORKSPACE_PORT_RANGE_END
-        prompt_input "最大实例数" "$WORKSPACE_MAX_INSTANCES" WORKSPACE_MAX_INSTANCES
-        prompt_input "空闲超时时间(分钟)" "$WORKSPACE_IDLE_TIMEOUT" WORKSPACE_IDLE_TIMEOUT
+        prompt_input "Port pool start" "$WORKSPACE_PORT_RANGE_START" WORKSPACE_PORT_RANGE_START
+        prompt_input "Port pool end" "$WORKSPACE_PORT_RANGE_END" WORKSPACE_PORT_RANGE_END
+        prompt_input "Max instances" "$WORKSPACE_MAX_INSTANCES" WORKSPACE_MAX_INSTANCES
+        prompt_input "Idle timeout (minutes)" "$WORKSPACE_IDLE_TIMEOUT" WORKSPACE_IDLE_TIMEOUT
     fi
 
     echo ""
@@ -1794,8 +1794,8 @@ install_local() {
         stop_webui_systemd_service
         configure_sudoers "$DEPLOY_USER"
         if [ $? -ne 0 ]; then
-            print_warning "Sudoers 配置失败，多用户模式可能无法正常工作"
-            print_info "请手动配置 /etc/sudoers.d/open-ace-webui"
+            print_warning "Sudoers configuration failed, multi-user mode may not work properly"
+            print_info "Please manually configure /etc/sudoers.d/open-ace-webui"
         fi
     fi
 
