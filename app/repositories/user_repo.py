@@ -33,6 +33,7 @@ class UserRepository:
         password_hash: str,
         role: str = "user",
         is_active: bool = True,
+        system_account: Optional[str] = None,
     ) -> Optional[int]:
         """
         Create a new user.
@@ -43,6 +44,7 @@ class UserRepository:
             password_hash: Hashed password.
             role: User role.
             is_active: Whether user is active.
+            system_account: System account name for multi-user workspace mode.
 
         Returns:
             Optional[int]: User ID if successful, None otherwise.
@@ -53,11 +55,11 @@ class UserRepository:
                 # PostgreSQL uses TRUE/FALSE for boolean columns
                 result = self.db.fetch_one(
                     """
-                    INSERT INTO users (username, email, password_hash, role, is_active, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT INTO users (username, email, password_hash, role, is_active, created_at, system_account)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     RETURNING id
                 """,
-                    (username, email, password_hash, role, is_active, datetime.utcnow()),
+                    (username, email, password_hash, role, is_active, datetime.utcnow(), system_account),
                     commit=True,
                 )
                 return result["id"] if result else None
@@ -66,10 +68,10 @@ class UserRepository:
                 is_active_int = 1 if is_active else 0
                 cursor = self.db.execute(
                     """
-                    INSERT INTO users (username, email, password_hash, role, is_active, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT INTO users (username, email, password_hash, role, is_active, created_at, system_account)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                    (username, email, password_hash, role, is_active_int, datetime.utcnow()),
+                    (username, email, password_hash, role, is_active_int, datetime.utcnow(), system_account),
                 )
                 return cursor.lastrowid
         except Exception as e:

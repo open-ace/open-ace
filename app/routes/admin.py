@@ -92,7 +92,8 @@ def api_create_user():
 
     # Create user
     password_hash = hash_password(password)
-    user_id = user_repo.create_user(username, email, password_hash, role)
+    system_account = data.get("system_account")
+    user_id = user_repo.create_user(username, email, password_hash, role, system_account=system_account)
 
     if user_id:
         return jsonify({"success": True, "user_id": user_id}), 201
