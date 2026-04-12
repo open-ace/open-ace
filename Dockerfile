@@ -11,11 +11,10 @@ WORKDIR /app
 
 # Copy frontend package files
 COPY frontend/package*.json ./frontend/
-COPY frontend/.npmrc* ./frontend/
 
 # Install all dependencies (including devDependencies for build tools)
 WORKDIR /app/frontend
-RUN npm install --registry https://registry.npmmirror.com/
+RUN npm install --force --registry https://registry.npmmirror.com/
 
 # Copy frontend source
 COPY frontend/ ./
