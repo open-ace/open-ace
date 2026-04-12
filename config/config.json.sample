@@ -45,5 +45,12 @@
   "feishu": {
     "app_id": "<FEISHU_APP_ID>",
     "app_secret": "<FEISHU_APP_SECRET>"
+  },
+  "auth": {
+    "auth_type": "openai",
+    "env": {
+      "OPENAI_API_KEY": "<YOUR_API_KEY>",
+      "OPENAI_BASE_URL": "https://api.openai.com/v1"
+    }
   }
 }

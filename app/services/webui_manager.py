@@ -69,6 +69,8 @@ class WorkspaceConfig:
     cleanup_interval_minutes: int = 5
     token_secret: str = ""
     webui_path: str = ""  # Path to qwen-code-webui project directory
+    auth_type: str = ""  # Authentication type: openai, anthropic, gemini etc.
+    auth_env: Dict[str, str] = field(default_factory=dict)  # Environment variables for auth
 
 
 class WebUIManager:
@@ -136,6 +138,7 @@ class WebUIManager:
                 config = json.load(f)
 
             workspace = config.get("workspace", {})
+            auth = config.get("auth", {})
             return WorkspaceConfig(
                 enabled=workspace.get("enabled", False),
                 url=workspace.get("url", "http://localhost"),
@@ -147,6 +150,8 @@ class WebUIManager:
                 cleanup_interval_minutes=workspace.get("cleanup_interval_minutes", 5),
                 token_secret=workspace.get("token_secret", ""),
                 webui_path=workspace.get("webui_path", ""),
+                auth_type=auth.get("auth_type", ""),
+                auth_env=auth.get("env", {}),
             )
         except Exception as e:
             logger.error(f"Error loading config: {e}")
@@ -506,6 +511,14 @@ class WebUIManager:
                    "--quota-check-enabled", "--openace-api-url", openace_api_url]
             cwd = None
 
+        # Append --auth-type if configured
+        if self.config.auth_type:
+            cmd.extend(["--auth-type", self.config.auth_type])
+
+        # Build child environment: inherit current + inject auth env vars
+        child_env = os.environ.copy()
+        child_env.update(self.config.auth_env)
+
         logger.debug(f"Launching webui: {cmd}, cwd: {cwd}")
 
         try:
@@ -515,6 +528,7 @@ class WebUIManager:
                 cmd,
                 start_new_session=True,  # Detach from parent process group
                 cwd=cwd,
+                env=child_env,
             )
             return process
         except Exception as e:
