@@ -477,6 +477,10 @@ Add the following content:
 open-ace ALL=(ALL) NOPASSWD: /usr/local/bin/qwen-code-webui *
 open-ace ALL=(ALL) NOPASSWD: /usr/bin/qwen-code-webui *
 open-ace ALL=(ALL) NOPASSWD: /opt/qwen-code-webui/bin/qwen-code-webui *
+
+# Allow open-ace to perform file system operations as other users
+# Required for directory browser and project creation in multi-user mode
+open-ace ALL=(ALL) NOPASSWD: /usr/bin/test, /usr/bin/ls, /usr/bin/cat, /usr/bin/stat, /usr/bin/mkdir
 ```
 
 **Security notes:**
