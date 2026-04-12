@@ -8,6 +8,7 @@ API routes for project management operations.
 import logging
 import os
 import platform
+import subprocess
 from datetime import datetime
 
 from flask import Blueprint, jsonify, request
@@ -22,6 +23,12 @@ projects_bp = Blueprint("projects", __name__)
 auth_service = AuthService()
 project_repo = ProjectRepository()
 user_repo = UserRepository()
+
+
+def run_as_user(system_account: str, command: list) -> subprocess.CompletedProcess:
+    """Run a command as a specific user using sudo."""
+    sudo_cmd = ["sudo", "-u", system_account] + command
+    return subprocess.run(sudo_cmd, capture_output=True, text=True, timeout=30)
 
 
 def get_current_user():
@@ -105,6 +112,7 @@ def api_create_project():
             return jsonify(error), code
 
     user_id = user.get("id")
+    system_account = user.get("system_account")  # For sudo operations
     data = request.get_json() or {}
 
     path = data.get("path")
@@ -145,14 +153,36 @@ def api_create_project():
     dir_created = False
     if create_dir:
         try:
-            if not os.path.exists(path):
-                os.makedirs(path, exist_ok=True)
-                dir_created = True
-                logger.info(f"Created project directory: {path}")
-            elif not os.path.isdir(path):
-                return jsonify({"error": "Path exists but is not a directory"}), 400
+            if system_account:
+                # Use sudo to check and create directory as the user
+                result = run_as_user(system_account, ["test", "-e", path])
+                path_exists = result.returncode == 0
+
+                if not path_exists:
+                    # Create directory using sudo mkdir -p
+                    result = run_as_user(system_account, ["mkdir", "-p", path])
+                    if result.returncode != 0:
+                        logger.error(f"Failed to create directory as {system_account}: {result.stderr}")
+                        return jsonify({"error": f"Permission denied to create directory: {result.stderr}"}), 403
+                    dir_created = True
+                    logger.info(f"Created project directory as {system_account}: {path}")
+                else:
+                    # Check if it's a directory
+                    result = run_as_user(system_account, ["test", "-d", path])
+                    if result.returncode != 0:
+                        return jsonify({"error": "Path exists but is not a directory"}), 400
+            else:
+                # Fallback to process user's permissions (for admin or no system_account)
+                if not os.path.exists(path):
+                    os.makedirs(path, exist_ok=True)
+                    dir_created = True
+                    logger.info(f"Created project directory: {path}")
+                elif not os.path.isdir(path):
+                    return jsonify({"error": "Path exists but is not a directory"}), 400
         except PermissionError:
             return jsonify({"error": "Permission denied to create directory"}), 403
+        except subprocess.TimeoutExpired:
+            return jsonify({"error": "Timeout creating directory"}), 500
         except Exception as e:
             logger.error(f"Error creating directory: {e}")
             return jsonify({"error": f"Failed to create directory: {str(e)}"}), 500
