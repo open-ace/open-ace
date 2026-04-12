@@ -460,22 +460,23 @@ configure_pg_hba_conf() {
 
     # Change peer/ident to md5 for local connections
     # BUT keep peer authentication for postgres user (needed for admin commands via su)
-    # Simple replacement: change authentication method at end of lines
-    # For localhost TCP connections (ident -> md5) - applies to all users
-    sed -i 's/ident$/md5/' "$pg_hba_conf"
-    # For local socket connections: keep peer for postgres, use md5 for others
-    # First, add a specific rule for postgres user with peer authentication
-    if ! grep -q "local.*postgres.*peer" "$pg_hba_conf" 2>/dev/null; then
-        # Insert postgres peer rule before the general local all rule
-        sed -i '/^local.*all.*all.*peer/i local   postgres        postgres                                peer' "$pg_hba_conf"
-    fi
-    # Then change general local all all peer to md5
-    sed -i 's/^local.*all.*all.*peer/local   all             all                                     md5/' "$pg_hba_conf"
-    # Also handle replication peer (keep for postgres, change general)
-    if ! grep -q "local.*replication.*postgres.*peer" "$pg_hba_conf" 2>/dev/null; then
-        sed -i '/^local.*replication.*all.*peer/i local   replication     postgres                                peer' "$pg_hba_conf"
-    fi
-    sed -i 's/^local.*replication.*all.*peer/local   replication     all                                     md5/' "$pg_hba_conf"
+    # CRITICAL: postgres user needs peer auth to create other users/databases
+    
+    # Always ensure postgres peer entry exists at the beginning of the file
+    # (must be first rule so it matches before the general "local all all" rule)
+    
+    # First, remove any existing postgres-specific entries (we'll add a fresh one)
+    sed -i '/^local[[:space:]]*postgres[[:space:]]*postgres/d' "$pg_hba_conf" 2>/dev/null
+    
+    # Add postgres peer entry at the beginning
+    { echo "local   postgres        postgres                                peer"; cat "$pg_hba_conf"; } > "${pg_hba_conf}.tmp" && mv "${pg_hba_conf}.tmp" "$pg_hba_conf"
+    print_info "Added postgres peer authentication rule at top"
+
+    # Change all "local all" entries from peer/ident to md5 (using flexible pattern)
+    sed -i -E 's/^local[[:space:]]+all[[:space:]]+all[[:space:]]+(peer|ident)[[:space:]]*$/local   all             all                                     md5/' "$pg_hba_conf" 2>/dev/null || true
+    
+    # Also change ident to md5 for host connections
+    sed -i 's/ident$/md5/' "$pg_hba_conf" 2>/dev/null || true
 
     # Reload PostgreSQL to apply changes
     if systemctl is-active --quiet postgresql 2>/dev/null; then
@@ -490,6 +491,7 @@ configure_pg_hba_conf() {
 
     return 0
 }
+
 
 install_postgresql_binary() {
     print_info "Installing PostgreSQL (binary)..."
