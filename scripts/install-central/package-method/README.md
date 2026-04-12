@@ -318,7 +318,7 @@ WORKSPACE_IDLE_TIMEOUT=30         # 空闲超时（分钟）
 
 **前置要求：**
 
-1. **Node.js 18+**：Vite 6.x 需要 Node.js 18 或更高版本
+1. **Node.js 20+**：qwen-code-webui 要求 Node.js 20 或更高版本
    ```bash
    # 使用 NodeSource 安装 Node.js 20.x
    curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
