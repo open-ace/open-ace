@@ -20,7 +20,10 @@ from shared import db
 
 
 def create_default_admin(
-    username: str = "admin", password: str = "admin123", email: str = "admin@localhost"
+    username: str = "admin",
+    password: str = "admin123",
+    email: str = "admin@localhost",
+    system_account: str = None,
 ) -> bool:
     """Create a default admin user with forced password change on first login."""
     # Hash password using bcrypt
@@ -42,6 +45,7 @@ def create_default_admin(
         daily_request_quota=10000,
         is_active=True,
         must_change_password=True,  # Force password change on first login
+        system_account=system_account,
     )
 
     if result:
@@ -59,8 +63,15 @@ def main():
     """Main function to create default admin user."""
     print("Creating default admin user...")
 
+    # Get system_account from command line argument or environment variable
+    system_account = None
+    if len(sys.argv) > 1:
+        system_account = sys.argv[1]
+    elif os.environ.get("OPENACE_SYSTEM_ACCOUNT"):
+        system_account = os.environ.get("OPENACE_SYSTEM_ACCOUNT")
+
     # Create default admin user
-    create_default_admin()
+    create_default_admin(system_account=system_account)
 
     print("\nDefault admin credentials:")
     print("  Username: admin")

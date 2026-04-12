@@ -2157,11 +2157,12 @@ do_fresh_install() {
     print_info "Creating default admin user..."
     if [ -f "$target_path/scripts/init_db.py" ]; then
         # Run init_db.py as the install user to ensure it can access installed packages
+        # Pass install_user as system_account for multi-user workspace mode
         if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ]; then
             # Running as root, but need to run as install_user to access their pip packages
             cd "$target_path"
-            if su - "$install_user" -c "cd '$target_path' && python3 scripts/init_db.py"; then
-                print_success "Default admin user created"
+            if su - "$install_user" -c "cd '$target_path' && OPENACE_SYSTEM_ACCOUNT='$install_user' python3 scripts/init_db.py"; then
+                print_success "Default admin user created (system_account=$install_user)"
             else
                 print_warning "Failed to create default admin user. You may need to run scripts/init_db.py manually."
             fi
@@ -2169,8 +2170,8 @@ do_fresh_install() {
         else
             # Running as the target user already
             cd "$target_path"
-            if python3 scripts/init_db.py; then
-                print_success "Default admin user created"
+            if OPENACE_SYSTEM_ACCOUNT="$install_user" python3 scripts/init_db.py; then
+                print_success "Default admin user created (system_account=$install_user)"
             else
                 print_warning "Failed to create default admin user. You may need to run scripts/init_db.py manually."
             fi
@@ -2356,11 +2357,12 @@ with open('$config_dir/config.json', 'w') as f:
     print_info "Ensuring default admin user exists..."
     if [ -f "$target_path/scripts/init_db.py" ]; then
         # Run init_db.py as the install user to ensure it can access installed packages
+        # Pass install_user as system_account for multi-user workspace mode
         if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ]; then
             # Running as root, but need to run as install_user to access their pip packages
             cd "$target_path"
-            if su - "$install_user" -c "cd '$target_path' && python3 scripts/init_db.py"; then
-                print_success "Default admin user ready"
+            if su - "$install_user" -c "cd '$target_path' && OPENACE_SYSTEM_ACCOUNT='$install_user' python3 scripts/init_db.py"; then
+                print_success "Default admin user ready (system_account=$install_user)"
             else
                 print_warning "Failed to create default admin user. You may need to run scripts/init_db.py manually."
             fi
@@ -2368,8 +2370,8 @@ with open('$config_dir/config.json', 'w') as f:
         else
             # Running as the target user already
             cd "$target_path"
-            if python3 scripts/init_db.py; then
-                print_success "Default admin user ready"
+            if OPENACE_SYSTEM_ACCOUNT="$install_user" python3 scripts/init_db.py; then
+                print_success "Default admin user ready (system_account=$install_user)"
             else
                 print_warning "Failed to create default admin user. You may need to run scripts/init_db.py manually."
             fi
@@ -2451,8 +2453,8 @@ do_fresh_install_remote() {
     ssh "$remote" "
         cd '$target_path'
         if [ -f 'scripts/init_db.py' ]; then
-            if python3 scripts/init_db.py; then
-                echo 'Default admin user created successfully'
+            if OPENACE_SYSTEM_ACCOUNT='$DEPLOY_USER' python3 scripts/init_db.py; then
+                echo 'Default admin user created successfully (system_account=$DEPLOY_USER)'
             else
                 echo 'Warning: Failed to create default admin user. You may need to run scripts/init_db.py manually.'
             fi
@@ -2537,8 +2539,8 @@ do_upgrade_remote() {
     ssh "$remote" "
         cd '$target_path'
         if [ -f 'scripts/init_db.py' ]; then
-            if python3 scripts/init_db.py; then
-                echo 'Default admin user ready'
+            if OPENACE_SYSTEM_ACCOUNT='$DEPLOY_USER' python3 scripts/init_db.py; then
+                echo 'Default admin user ready (system_account=$DEPLOY_USER)'
             else
                 echo 'Warning: Failed to create default admin user. You may need to run scripts/init_db.py manually.'
             fi

@@ -1376,9 +1376,9 @@ init_auth_database() {
     fi
 
     # Initialize database and create default admin user
-    if docker compose exec -T open-ace python scripts/init_db.py; then
+    if docker compose exec -T -e OPENACE_SYSTEM_ACCOUNT=openace open-ace python scripts/init_db.py; then
         print_success "数据库初始化完成"
-        print_info "默认管理员: admin / admin123"
+        print_info "默认管理员: admin / admin123 (system_account=openace)"
     else
         print_warning "数据库初始化失败，可能已存在用户"
     fi
