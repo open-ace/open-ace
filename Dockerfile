@@ -1,29 +1,8 @@
 # Open ACE - AI Computing Explorer
-# Multi-stage Docker build for production deployment
-
-# =============================================================================
-# Frontend Build Stage
-# =============================================================================
-# Use BUILDPLATFORM to run frontend build on host architecture (for esbuild compatibility)
-FROM --platform=$BUILDPLATFORM node:18-slim AS frontend-builder
-
-WORKDIR /app
-
-# Copy frontend package files
-COPY frontend/package*.json ./frontend/
-
-# Install all dependencies (including devDependencies for build tools)
-WORKDIR /app/frontend
-RUN npm install --force --registry https://registry.npmmirror.com/
-
-# Copy frontend source
-COPY frontend/ ./
-
-# Create static/js/dist directory for build output
-RUN mkdir -p /app/static/js/dist
-
-# Build frontend (outputs to ../static/js/dist relative to frontend/)
-RUN npm run build
+# Docker build for production deployment
+#
+# Frontend is pre-built on the host (npm run build) before docker build.
+# This avoids npm issues on certain architectures (e.g., ARM64 podman).
 
 # =============================================================================
 # Python Build Stage
@@ -83,11 +62,8 @@ WORKDIR /app
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Copy application code
+# Copy application code (includes pre-built frontend in static/js/dist/)
 COPY --chown=open-ace:open-ace . .
-
-# Copy frontend build output from frontend-builder
-COPY --from=frontend-builder --chown=open-ace:open-ace /app/static/js/dist ./static/js/dist
 
 # Copy and set up entrypoint script
 COPY --chown=open-ace:open-ace docker-entrypoint.sh /usr/local/bin/
