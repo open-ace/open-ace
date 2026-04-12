@@ -448,10 +448,33 @@ if [ "$SKIP_DOWNLOAD" = false ] && [ -f "$PROJECT_DIR/requirements.txt" ]; then
     TEMP_REQ=$(mktemp)
     grep -v "psycopg2-binary" "$PROJECT_DIR/requirements.txt" > "$TEMP_REQ" || true
 
-    # Download dependencies with prefer-binary for reliable installation
-    pip3 download -r "$TEMP_REQ" -d "$VENDOR_DIR" --prefer-binary || \
-        pip download -r "$TEMP_REQ" -d "$VENDOR_DIR" --prefer-binary || \
-        echo -e "${YELLOW}Warning: Failed to download some dependencies. Install will require network.${NC}"
+    # Download dependencies
+    # Note: --prefer-binary requires pip 20.3+, check version before using
+    PIP_CMD=""
+    PIP_VERSION=""
+    
+    if command -v pip3 &>/dev/null; then
+        PIP_CMD="pip3"
+        # Extract major version number (e.g., "pip 23.3.1" -> 23)
+        PIP_VERSION=$(pip3 --version 2>/dev/null | awk '{print $2}' | cut -d. -f1)
+    elif command -v pip &>/dev/null; then
+        PIP_CMD="pip"
+        PIP_VERSION=$(pip --version 2>/dev/null | awk '{print $2}' | cut -d. -f1)
+    fi
+    
+    if [ -n "$PIP_CMD" ]; then
+        # Use --prefer-binary only if pip version >= 20
+        if [ -n "$PIP_VERSION" ] && [ "$PIP_VERSION" -ge 20 ]; then
+            $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" --prefer-binary || \
+                $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" || \
+                echo -e "${YELLOW}Warning: Failed to download some dependencies. Install will require network.${NC}"
+        else
+            $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" || \
+                echo -e "${YELLOW}Warning: Failed to download some dependencies. Install will require network.${NC}"
+        fi
+    else
+        echo -e "${YELLOW}Warning: pip/pip3 not found. Install will require network.${NC}"
+    fi
 
     rm -f "$TEMP_REQ"
 
