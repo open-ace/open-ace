@@ -345,9 +345,12 @@ def api_check_path():
         }), 400
 
     path = os.path.abspath(path)
+    
+    # Get system account to check permissions as the correct user
+    system_account = user.get("system_account") if user else None
 
     # Check path status
-    dir_info = get_directory_info(path)
+    dir_info = get_directory_info(path, system_account)
 
     if dir_info["exists"]:
         if not dir_info["is_dir"]:
@@ -364,7 +367,7 @@ def api_check_path():
     else:
         # Check if parent directory is writable
         parent = str(Path(path).parent)
-        parent_info = get_directory_info(parent)
+        parent_info = get_directory_info(parent, system_account)
 
         if not parent_info["exists"]:
             return jsonify({
