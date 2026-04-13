@@ -346,6 +346,7 @@ class SessionManager:
         expires_in_hours: Optional[int] = None,
         project_id: Optional[int] = None,
         project_path: Optional[str] = None,
+        session_id: Optional[str] = None,
     ) -> AgentSession:
         """
         Create a new agent session.
@@ -362,11 +363,14 @@ class SessionManager:
             expires_in_hours: Optional expiration time in hours.
             project_id: Optional project ID for statistics.
             project_path: Optional project path for quick reference.
+            session_id: Optional session_id to use (e.g., from qwen CLI).
+                        If not provided, a new UUID will be generated.
 
         Returns:
             AgentSession: The created session.
         """
-        session_id = str(uuid.uuid4())
+        # Use provided session_id or generate a new one
+        session_id = session_id or str(uuid.uuid4())
         now = datetime.utcnow()
 
         expires_at = None
@@ -1138,6 +1142,14 @@ class SessionManager:
             except (KeyError, IndexError):
                 return None
 
+        # Helper to convert datetime values (PostgreSQL returns datetime objects)
+        def parse_datetime(value):
+            if value is None:
+                return None
+            if isinstance(value, datetime):
+                return value  # Already a datetime object (PostgreSQL)
+            return datetime.fromisoformat(value)  # String (SQLite)
+
         return AgentSession(
             id=get_value("id"),
             session_id=get_value("session_id"),
@@ -1156,20 +1168,12 @@ class SessionManager:
             request_count=get_value("request_count") or 0,
             model=get_value("model"),
             tags=json.loads(get_value("tags")) if get_value("tags") else [],
-            created_at=(
-                datetime.fromisoformat(get_value("created_at")) if get_value("created_at") else None
-            ),
-            updated_at=(
-                datetime.fromisoformat(get_value("updated_at")) if get_value("updated_at") else None
-            ),
-            completed_at=(
-                datetime.fromisoformat(get_value("completed_at"))
-                if get_value("completed_at")
-                else None
-            ),
-            expires_at=(
-                datetime.fromisoformat(get_value("expires_at")) if get_value("expires_at") else None
-            ),
+            created_at=parse_datetime(get_value("created_at")),
+            updated_at=parse_datetime(get_value("updated_at")),
+            completed_at=parse_datetime(get_value("completed_at")),
+            expires_at=parse_datetime(get_value("expires_at")),
+            project_id=get_value("project_id"),
+            project_path=get_value("project_path"),
         )
 
     def _row_to_message(self, row: Union[sqlite3.Row, Dict]) -> SessionMessage:
@@ -1181,6 +1185,14 @@ class SessionManager:
                 return row.get(key)
             return row[key]
 
+        def parse_datetime(value):
+            """Parse datetime from string or return datetime object (PostgreSQL)."""
+            if value is None:
+                return None
+            if isinstance(value, datetime):
+                return value  # PostgreSQL returns datetime objects
+            return datetime.fromisoformat(value)  # String (SQLite)
+
         return SessionMessage(
             id=get_value("id"),
             session_id=get_value("session_id"),
@@ -1188,8 +1200,6 @@ class SessionManager:
             content=get_value("content") or "",
             tokens_used=get_value("tokens_used") or 0,
             model=get_value("model"),
-            timestamp=(
-                datetime.fromisoformat(get_value("timestamp")) if get_value("timestamp") else None
-            ),
+            timestamp=parse_datetime(get_value("timestamp")),
             metadata=json.loads(get_value("metadata")) if get_value("metadata") else {},
         )

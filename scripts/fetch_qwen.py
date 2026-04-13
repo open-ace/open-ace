@@ -620,6 +620,216 @@ def _process_projects_dir(
     return total_files
 
 
+def update_agent_sessions_stats(messages: list) -> int:
+    """
+    Update agent_sessions table statistics from collected messages.
+    Also inserts messages into session_messages table for session detail view.
+
+    Groups messages by agent_session_id and updates message_count, total_tokens,
+    and model for each session.
+
+    Args:
+        messages: List of message dicts with agent_session_id and tokens_used
+
+    Returns:
+        Number of sessions updated
+    """
+    from collections import defaultdict
+    from shared.db import get_connection, _execute, _placeholder, is_postgresql
+
+    # Group messages by agent_session_id
+    session_stats = defaultdict(lambda: {
+        "message_count": 0,
+        "total_tokens": 0,
+        "request_count": 0,
+        "models": set(),
+        "messages": [],  # Store messages for session_messages table
+    })
+
+    for msg in messages:
+        session_id = msg.get("agent_session_id")
+        if not session_id:
+            continue
+
+        role = msg.get("role", "")
+        tokens = msg.get("tokens_used", 0) or 0
+        model = msg.get("model")
+
+        # Count all messages
+        session_stats[session_id]["message_count"] += 1
+        session_stats[session_id]["total_tokens"] += tokens
+
+        # Count requests (assistant messages)
+        if role == "assistant":
+            session_stats[session_id]["request_count"] += 1
+
+        # Track models
+        if model:
+            session_stats[session_id]["models"].add(model)
+
+        # Store message for session_messages insertion
+        session_stats[session_id]["messages"].append(msg)
+
+    if not session_stats:
+        return 0
+
+    # Update database
+    updated = 0
+    messages_inserted = 0
+    now = datetime.utcnow().isoformat()
+    placeholder = _placeholder()
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    try:
+        for session_id, stats in session_stats.items():
+            try:
+                # Check if session exists in agent_sessions table
+                check_session_sql = f"SELECT id, user_id FROM agent_sessions WHERE session_id = {placeholder}"
+                _execute(cursor, check_session_sql, (session_id,))
+                session_row = cursor.fetchone()
+
+                if not session_row:
+                    # Session doesn't exist - create a new record for non-Work sessions
+                    # Get info from first message
+                    first_msg = stats["messages"][0] if stats["messages"] else {}
+
+                    # Extract project_path from message
+                    project_path = first_msg.get("project_path", "")
+
+                    # Get tool_name, host_name, sender info
+                    tool_name = first_msg.get("tool_name", "qwen")
+                    host_name = first_msg.get("host_name", "localhost")
+                    sender_name = first_msg.get("sender_name", "")
+
+                    # Extract system_account from sender_name (format: {system_account}-{hostname}-{tool})
+                    system_account = sender_name.split("-")[0] if sender_name else "unknown"
+
+                    # Find user_id by system_account
+                    user_sql = f"SELECT id FROM users WHERE system_account = {placeholder} OR username = {placeholder}"
+                    _execute(cursor, user_sql, (system_account, system_account))
+                    user_row = cursor.fetchone()
+                    user_id = user_row["id"] if user_row else None
+
+                    # Create title from session_id
+                    title = f"qwen - {session_id[:8]}"
+
+                    # Insert new session record
+                    insert_sql = f"""
+                        INSERT INTO agent_sessions
+                        (session_id, session_type, title, tool_name, host_name, user_id, status, project_path,
+                         message_count, total_tokens, request_count, model, created_at, updated_at)
+                        VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder},
+                                {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder},
+                                {placeholder}, {placeholder}, {placeholder}, {placeholder})
+                    """
+                    model = sorted(stats["models"])[0] if stats["models"] else None
+                    _execute(cursor, insert_sql, (
+                        session_id, "chat", title, tool_name, host_name, user_id, "completed", project_path,
+                        stats["message_count"], stats["total_tokens"], stats["request_count"], model,
+                        now, now
+                    ))
+                    updated += 1
+                    continue
+
+                # Get the most common model
+                model = None
+                if stats["models"]:
+                    # Just pick the first one since we can't determine frequency here
+                    model = sorted(stats["models"])[0]
+
+                # Update agent_sessions table
+                # Use GREATEST to take the max value (avoid cumulative addition on repeated runs)
+                # This ensures stats are accurate based on actual JSONL file content
+                sql = f"""
+                    UPDATE agent_sessions
+                    SET message_count = GREATEST(COALESCE(message_count, 0), {placeholder}),
+                        total_tokens = GREATEST(COALESCE(total_tokens, 0), {placeholder}),
+                        request_count = GREATEST(COALESCE(request_count, 0), {placeholder}),
+                        model = COALESCE(model, {placeholder}),
+                        updated_at = {placeholder}
+                    WHERE session_id = {placeholder}
+                """
+                _execute(
+                    cursor,
+                    sql,
+                    (
+                        stats["message_count"],
+                        stats["total_tokens"],
+                        stats["request_count"],
+                        model,
+                        now,
+                        session_id,
+                    ),
+                )
+
+                # Check if any row was updated
+                if cursor.rowcount > 0:
+                    updated += 1
+
+                # Insert messages into session_messages table
+                for msg in stats["messages"]:
+                    try:
+                        msg_id = msg.get("message_id")
+                        timestamp = msg.get("timestamp")
+                        if not timestamp:
+                            timestamp = now
+
+                        # Check if message already exists (by timestamp and role to avoid duplicates)
+                        # We don't have message_id in session_messages, so use timestamp + role + session_id as unique key
+                        check_sql = f"""
+                            SELECT id FROM session_messages
+                            WHERE session_id = {placeholder}
+                            AND role = {placeholder}
+                            AND timestamp = {placeholder}
+                        """
+                        _execute(cursor, check_sql, (session_id, msg.get("role"), timestamp))
+                        existing = cursor.fetchone()
+
+                        if not existing:
+                            insert_sql = f"""
+                                INSERT INTO session_messages
+                                (session_id, role, content, tokens_used, model, timestamp, metadata)
+                                VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
+                            """
+                            metadata = {
+                                "message_id": msg_id,
+                                "project_path": msg.get("project_path"),
+                            }
+                            _execute(
+                                cursor,
+                                insert_sql,
+                                (
+                                    session_id,
+                                    msg.get("role"),
+                                    msg.get("content"),
+                                    msg.get("tokens_used", 0),
+                                    msg.get("model"),
+                                    timestamp,
+                                    json.dumps(metadata) if metadata else None,
+                                ),
+                            )
+                            messages_inserted += 1
+
+                    except Exception as e:
+                        # Ignore duplicate key and foreign key errors (session may not exist in agent_sessions)
+                        if "duplicate" not in str(e).lower() and "foreign key" not in str(e).lower() and "not present" not in str(e).lower():
+                            print(f"  Warning: Failed to insert message: {e}")
+
+            except Exception as e:
+                print(f"  Warning: Failed to update session {session_id}: {e}")
+
+        conn.commit()
+
+    finally:
+        cursor.close()
+        conn.close()
+
+    print(f"  Updated {updated} session statistics, inserted {messages_inserted} messages")
+    return updated
+
+
 def fetch_and_save(
     days: int = 7,
     project_dir: Optional[Path] = None,
@@ -707,6 +917,10 @@ def fetch_and_save(
         print("Saving messages to database...")
         saved_count = db.save_messages_batch(all_messages, batch_size=500)
         print(f"Saved {saved_count} messages")
+
+        # Update agent_sessions stats from collected messages
+        print("Updating agent_sessions statistics...")
+        update_agent_sessions_stats(all_messages)
 
     # Filter by date range
     today = datetime.now().strftime("%Y-%m-%d")

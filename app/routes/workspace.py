@@ -50,7 +50,34 @@ def load_user():
         else:
             g.user = None
     else:
-        g.user = None
+        # Check for URL token parameter (used by qwen-code-webui)
+        url_token = request.args.get("token")
+        if url_token:
+            try:
+                from app.services.webui_manager import WebUIManager
+                webui_manager = WebUIManager()
+                is_valid, user_id, error = webui_manager.validate_token(url_token)
+                if is_valid and user_id:
+                    # Get user info from database
+                    from app.repositories.user_repo import UserRepository
+                    user_repo = UserRepository()
+                    user = user_repo.get_user_by_id(user_id)
+                    if user:
+                        g.user = {
+                            "id": user_id,
+                            "username": user.get("username"),
+                            "email": user.get("email"),
+                            "role": user.get("role"),
+                        }
+                    else:
+                        g.user = None
+                else:
+                    g.user = None
+            except Exception as e:
+                logger.warning(f"Failed to validate URL token: {e}")
+                g.user = None
+        else:
+            g.user = None
 
 
 # ==================== Prompt Templates ====================
@@ -260,10 +287,10 @@ def get_featured_prompts():
 
 @workspace_bp.route("/sessions", methods=["GET"])
 def list_sessions():
-    """List agent sessions from daily_messages table.
+    """List agent sessions.
 
-    Sessions are grouped by agent_session_id (tool process session).
-    For PostgreSQL, uses session_stats materialized view for performance.
+    Priority: agent_sessions table (user-created sessions) with optional
+    enrichment from session_stats (historical message data from fetch).
     """
     try:
         from app.repositories.database import Database, is_postgresql, adapt_sql
@@ -276,8 +303,16 @@ def list_sessions():
         page = int(request.args.get("page", 1))
         limit = int(request.args.get("limit", 20))
 
-        conditions = ["session_id IS NOT NULL"]
+        # Get user_id from g.user to filter sessions
+        user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
+
+        # Query agent_sessions table (user-created sessions)
+        conditions = ["1=1"]
         params = []
+
+        if user_id:
+            conditions.append("user_id = ?")
+            params.append(user_id)
 
         if tool_name:
             conditions.append("tool_name = ?")
@@ -288,191 +323,58 @@ def list_sessions():
             params.append(host_name)
 
         if search:
-            conditions.append("(sender_name LIKE ? OR session_id LIKE ?)")
+            conditions.append("(title LIKE ? OR session_id LIKE ?)")
             params.extend([f"%{search}%", f"%{search}%"])
 
         where_clause = " AND ".join(conditions)
 
-        # Use materialized view for PostgreSQL (much faster)
-        if is_postgresql():
-            # Check if session_stats materialized view exists
-            mv_check = db.fetch_one(
-                "SELECT EXISTS (SELECT FROM pg_matviews WHERE matviewname = 'session_stats')"
-            )
-            if mv_check and mv_check.get("exists", False):
-                # Get total count from materialized view
-                count_query = adapt_sql(f"""
-                    SELECT COUNT(*) as count
-                    FROM session_stats
-                    WHERE {where_clause}
-                """)
-                result = db.fetch_one(count_query, tuple(params))
-                total = result["count"] if result else 0
-                total_pages = (total + limit - 1) // limit if total > 0 else 1
+        # Count query
+        count_query = adapt_sql(f"""
+            SELECT COUNT(*) as count
+            FROM agent_sessions
+            WHERE {where_clause}
+        """)
+        result = db.fetch_one(count_query, tuple(params))
+        total = result["count"] if result else 0
+        total_pages = (total + limit - 1) // limit if total > 0 else 1
 
-                # Get paginated sessions from materialized view
-                # Note: session_stats already includes project_path column
-                offset = (page - 1) * limit
-                sessions_query = adapt_sql(f"""
-                    SELECT *
-                    FROM session_stats
-                    WHERE {where_clause}
-                    ORDER BY updated_at DESC
-                    LIMIT ? OFFSET ?
-                """)
-                sessions = db.fetch_all(sessions_query, tuple(params + [limit, offset]))
-
-                # Get model for each session from daily_messages (session_stats doesn't have model)
-                if sessions:
-                    session_ids = [s["session_id"] for s in sessions]
-                    model_query = adapt_sql(f"""
-                        SELECT agent_session_id as session_id, MAX(model) as model
-                        FROM daily_messages
-                        WHERE agent_session_id IN ({', '.join(['?' for _ in session_ids])})
-                        GROUP BY agent_session_id
-                    """)
-                    models_data = db.fetch_all(model_query, tuple(session_ids))
-                    models_map = {m["session_id"]: m["model"] for m in models_data}
-                    for s in sessions:
-                        s["model"] = models_map.get(s["session_id"])
-
-                    # Get request_count for each session (session_stats doesn't have request_count)
-                    # Request = API calls = assistant + toolResult messages
-                    request_query = adapt_sql(f"""
-                        SELECT agent_session_id as session_id,
-                               SUM(CASE WHEN role IN ('assistant', 'toolResult') THEN 1 ELSE 0 END) as request_count
-                        FROM daily_messages
-                        WHERE agent_session_id IN ({', '.join(['?' for _ in session_ids])})
-                        GROUP BY agent_session_id
-                    """)
-                    requests_data = db.fetch_all(request_query, tuple(session_ids))
-                    requests_map = {r["session_id"]: r["request_count"] for r in requests_data}
-                    for s in sessions:
-                        s["request_count"] = requests_map.get(s["session_id"], 0)
-            else:
-                # Fallback to original query if materialized view doesn't exist
-                conditions = ["agent_session_id IS NOT NULL"]
-                params = []
-                if tool_name:
-                    conditions.append("tool_name = ?")
-                    params.append(tool_name)
-                if host_name:
-                    conditions.append("host_name = ?")
-                    params.append(host_name)
-                if search:
-                    conditions.append("(sender_name LIKE ? OR agent_session_id LIKE ?)")
-                    params.extend([f"%{search}%", f"%{search}%"])
-                where_clause = " AND ".join(conditions)
-
-                count_query = adapt_sql(f"""
-                    SELECT COUNT(DISTINCT agent_session_id) as count
-                    FROM daily_messages
-                    WHERE {where_clause}
-                """)
-                result = db.fetch_one(count_query, tuple(params))
-                total = result["count"] if result else 0
-                total_pages = (total + limit - 1) // limit if total > 0 else 1
-
-                offset = (page - 1) * limit
-                sessions_query = adapt_sql(f"""
-                    SELECT
-                        agent_session_id as session_id,
-                        tool_name,
-                        host_name,
-                        sender_name,
-                        MAX(sender_id) as sender_id,
-                        MAX(date) as date,
-                        COUNT(*) as message_count,
-                        SUM(CASE WHEN role IN ('assistant', 'toolResult') THEN 1 ELSE 0 END) as request_count,
-                        SUM(tokens_used) as total_tokens,
-                        SUM(input_tokens) as total_input_tokens,
-                        SUM(output_tokens) as total_output_tokens,
-                        MIN(timestamp) as created_at,
-                        MAX(timestamp) as updated_at,
-                        MAX(model) as model
-                    FROM daily_messages
-                    WHERE {where_clause}
-                    GROUP BY agent_session_id, tool_name, host_name, sender_name
-                    ORDER BY updated_at DESC
-                    LIMIT ? OFFSET ?
-                """)
-                sessions = db.fetch_all(sessions_query, tuple(params + [limit, offset]))
-        else:
-            # SQLite: use original query
-            conditions = ["agent_session_id IS NOT NULL"]
-            params = []
-            if tool_name:
-                conditions.append("tool_name = ?")
-                params.append(tool_name)
-            if host_name:
-                conditions.append("host_name = ?")
-                params.append(host_name)
-            if search:
-                conditions.append("(sender_name LIKE ? OR agent_session_id LIKE ?)")
-                params.extend([f"%{search}%", f"%{search}%"])
-            where_clause = " AND ".join(conditions)
-
-            count_query = f"""
-                SELECT COUNT(DISTINCT agent_session_id) as count
-                FROM daily_messages
-                WHERE {where_clause}
-            """
-            result = db.fetch_one(count_query, tuple(params))
-            total = result["count"] if result else 0
-            total_pages = (total + limit - 1) // limit if total > 0 else 1
-
-            offset = (page - 1) * limit
-            sessions_query = f"""
-                SELECT
-                    agent_session_id as session_id,
-                    tool_name,
-                    host_name,
-                    sender_name,
-                    MAX(sender_id) as sender_id,
-                    MAX(date) as date,
-                    COUNT(*) as message_count,
-                    SUM(CASE WHEN role IN ('assistant', 'toolResult') THEN 1 ELSE 0 END) as request_count,
-                    SUM(tokens_used) as total_tokens,
-                    SUM(input_tokens) as total_input_tokens,
-                    SUM(output_tokens) as total_output_tokens,
-                    MIN(timestamp) as created_at,
-                    MAX(timestamp) as updated_at,
-                    MAX(project_path) as project_path,
-                    MAX(model) as model
-                FROM daily_messages
-                WHERE {where_clause}
-                GROUP BY agent_session_id, tool_name, host_name, sender_name
-                ORDER BY updated_at DESC
-                LIMIT ? OFFSET ?
-            """
-            sessions = db.fetch_all(sessions_query, tuple(params + [limit, offset]))
+        # Get paginated sessions
+        offset = (page - 1) * limit
+        sessions_query = adapt_sql(f"""
+            SELECT *
+            FROM agent_sessions
+            WHERE {where_clause}
+            ORDER BY updated_at DESC
+            LIMIT ? OFFSET ?
+        """)
+        sessions = db.fetch_all(sessions_query, tuple(params + [limit, offset]))
 
         # Format sessions for response
         formatted_sessions = []
         for s in sessions:
             formatted_sessions.append(
                 {
-                    "id": None,
+                    "id": s.get("id"),
                     "session_id": s["session_id"],
-                    "session_type": "chat",
-                    "title": f"{s['tool_name']} - {s['session_id'][:8]}",
+                    "session_type": s.get("session_type") or "chat",
+                    "title": s.get("title") or f"{s['tool_name']} - {s['session_id'][:8]}",
                     "tool_name": s["tool_name"],
-                    "host_name": s["host_name"],
-                    "user_id": None,
-                    "status": "completed",
+                    "host_name": s.get("host_name") or "localhost",
+                    "user_id": s.get("user_id"),
+                    "status": s.get("status") or "active",
                     "context": {},
                     "settings": {},
-                    "total_tokens": s["total_tokens"] or 0,
-                    "total_input_tokens": s["total_input_tokens"] or 0,
-                    "total_output_tokens": s["total_output_tokens"] or 0,
-                    "message_count": s["message_count"] or 0,
+                    "total_tokens": s.get("total_tokens") or 0,
+                    "total_input_tokens": s.get("total_input_tokens") or 0,
+                    "total_output_tokens": s.get("total_output_tokens") or 0,
+                    "message_count": s.get("message_count") or 0,
                     "request_count": s.get("request_count") or 0,
                     "model": s.get("model"),
                     "tags": [],
                     "created_at": s["created_at"],
                     "updated_at": s["updated_at"],
-                    "completed_at": s["updated_at"],
-                    "expires_at": None,
+                    "completed_at": s.get("completed_at"),
+                    "expires_at": s.get("expires_at"),
                     "project_path": s.get("project_path"),
                     "messages": [],
                 }
@@ -512,7 +414,7 @@ def create_session():
         # Get project info from request or look up by path
         project_id = data.get("project_id")
         project_path = data.get("project_path")
-        
+
         # If project_path is provided but not project_id, look up the project
         if project_path and not project_id:
             try:
@@ -540,6 +442,7 @@ def create_session():
             expires_in_hours=data.get("expires_in_hours"),
             project_id=project_id,
             project_path=project_path,
+            session_id=data.get("session_id"),  # Allow passing session_id from client
         )
 
         return jsonify({"success": True, "data": session.to_dict()}), 201
@@ -717,6 +620,60 @@ def add_session_message(session_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@workspace_bp.route("/sessions/<session_id>/stats", methods=["POST"])
+def update_session_stats(session_id):
+    """Update session statistics (tokens, message count, etc.).
+
+    Called by qwen-code-webui to sync usage statistics for session list display.
+    """
+    from datetime import datetime
+
+    try:
+        data = request.get_json() or {}
+
+        manager = SessionManager()
+        session = manager.get_session(session_id)
+
+        if not session:
+            return jsonify({"success": False, "error": "Session not found"}), 404
+
+        # Update statistics from request data
+        updates = {}
+        if "total_tokens" in data:
+            updates["total_tokens"] = data["total_tokens"]
+        if "total_input_tokens" in data:
+            updates["total_input_tokens"] = data["total_input_tokens"]
+        if "total_output_tokens" in data:
+            updates["total_output_tokens"] = data["total_output_tokens"]
+        if "message_count" in data:
+            updates["message_count"] = data["message_count"]
+        if "request_count" in data:
+            updates["request_count"] = data["request_count"]
+        if "model" in data:
+            updates["model"] = data["model"]
+
+        if updates:
+            conn = manager._get_connection()
+            cursor = conn.cursor()
+
+            # Build UPDATE query dynamically
+            set_clauses = [f"{k} = {_param()}" for k in updates.keys()]
+            query = f"""
+                UPDATE agent_sessions
+                SET {', '.join(set_clauses)}, updated_at = {_param()}
+                WHERE session_id = {_param()}
+            """
+            params = list(updates.values()) + [datetime.utcnow().isoformat(), session_id]
+            cursor.execute(query, params)
+            conn.commit()
+            conn.close()
+
+        return jsonify({"success": True})
+    except Exception as e:
+        logger.error(f"Error updating session stats: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @workspace_bp.route("/sessions/<session_id>/complete", methods=["POST"])
 def complete_session(session_id):
     """Mark a session as completed."""
@@ -751,14 +708,14 @@ def delete_session(session_id):
 
 @workspace_bp.route("/sessions/<session_id>/restore", methods=["POST"])
 def restore_session(session_id):
-    """Restore a historical session from daily_messages to workspace.
+    """Restore a historical session from agent_sessions to workspace.
 
     The JSONL file already exists at the original location.
     We just need to return the correct URL with sessionId and encodedProjectName
     so qwen-code-webui can load the history from its local file.
 
     Returns:
-        - sessionId: The session ID (same as input for daily_messages sessions)
+        - sessionId: The session ID (same as input)
         - encodedProjectName: The encoded project name for qwen-code-webui
         - tool_name: The tool name
         - url: The workspace URL to access this session
@@ -766,18 +723,18 @@ def restore_session(session_id):
     try:
         from scripts.shared.db import get_connection, _execute, _placeholder
 
-        # Get session info from daily_messages
+        # Get session info from agent_sessions table (now contains all sessions)
         conn = get_connection()
         cursor = conn.cursor()
         p = _placeholder()
 
         session_query = f"""
             SELECT
-                agent_session_id as session_id,
+                session_id,
                 tool_name,
                 project_path
-            FROM daily_messages
-            WHERE agent_session_id = {p}
+            FROM agent_sessions
+            WHERE session_id = {p}
             LIMIT 1
         """
         _execute(cursor, session_query, [session_id])
@@ -797,10 +754,16 @@ def restore_session(session_id):
         project_path = session_data.get("project_path")
 
         # Generate encodedProjectName based on tool
-        if tool_name in ["qwen", "claude"]:
-            # project_path is already the encoded project name (e.g., "-Users-rhuang-workspace-open-ace")
-            # It was extracted from the JSONL file path during fetch
-            encoded_project_name = project_path
+        if tool_name in ["qwen", "claude", "qwen-code"]:
+            # project_path may be actual path or encoded name
+            # Need to convert actual path to encoded name if necessary
+            # Format: /home/rhuang/open-ace -> -home-rhuang-open-ace
+            if project_path and project_path.startswith("/"):
+                # Actual path, replace / with - (first / becomes leading -)
+                encoded_project_name = project_path.replace("/", "-")
+            else:
+                # Already encoded or empty
+                encoded_project_name = project_path
         elif tool_name == "openclaw":
             # project_path is the agent_name (e.g., "main")
             encoded_project_name = project_path

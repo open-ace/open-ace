@@ -56,6 +56,7 @@ export const Sessions: React.FC = () => {
   const [page, setPage] = useState(1);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Queries
   const { data, isLoading, isFetching, isError, error, refetch } = useSessions({
@@ -144,6 +145,45 @@ export const Sessions: React.FC = () => {
     setPage(1);
   };
 
+  // Refresh handler - triggers backend data fetch and then refreshes frontend
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      // Trigger backend data fetch (fetch_qwen.py)
+      const response = await fetch('/api/fetch/data', { method: 'POST' });
+      const result = await response.json();
+
+      if (result.success) {
+        // Wait for backend fetch to complete (poll status)
+        let attempts = 0;
+        const maxAttempts = 30; // 30 seconds max
+        while (attempts < maxAttempts) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          const statusResponse = await fetch('/api/fetch/status');
+          const statusResult = await statusResponse.json();
+
+          if (!statusResult.status?.is_running) {
+            break;
+          }
+          attempts++;
+        }
+
+        // Refresh frontend data
+        await refetch();
+      } else {
+        console.warn('Backend fetch already running or failed:', result.message);
+        // Still refresh frontend data
+        await refetch();
+      }
+    } catch (error) {
+      console.error('Failed to trigger backend refresh:', error);
+      // Still refresh frontend data
+      await refetch();
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   const handleDelete = async (sessionId: string) => {
     if (
       window.confirm(
@@ -189,9 +229,9 @@ export const Sessions: React.FC = () => {
           <Button
             variant="primary"
             size="sm"
-            onClick={() => refetch()}
-            loading={isFetching}
-            icon={isFetching ? undefined : <i className="bi bi-arrow-clockwise" />}
+            onClick={handleRefresh}
+            loading={isRefreshing || isFetching}
+            icon={isRefreshing || isFetching ? undefined : <i className="bi bi-arrow-clockwise" />}
           >
             {t('refresh', language)}
           </Button>

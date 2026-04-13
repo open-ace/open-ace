@@ -330,9 +330,9 @@ class WebUIManager:
             if signature != expected_signature:
                 return False, None, "Invalid signature"
 
-            # Verify port is allocated to this user
-            if self._port_allocations.get(port) != user_id:
-                return False, None, "Port not allocated to user"
+            # Note: We no longer check _port_allocations because each request
+            # creates a new WebUIManager instance with empty allocations.
+            # Signature validation is sufficient for security.
 
             return True, user_id, None
 

@@ -278,9 +278,13 @@ def api_update_project(project_id):
 @projects_bp.route("/projects/<int:project_id>", methods=["DELETE"])
 def api_delete_project(project_id):
     """Delete a project (soft delete)."""
-    user, error, code = get_current_user()
+    # Try webui token first (for iframe integration)
+    user, error, code = get_webui_user()
     if not user:
-        return jsonify(error), code
+        # Try regular session
+        user, error, code = get_current_user()
+        if not user:
+            return jsonify(error), code
 
     project = project_repo.get_project_by_id(project_id)
     if not project:
