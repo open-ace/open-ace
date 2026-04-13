@@ -500,14 +500,9 @@ class WebUIManager:
             cwd = webui_dir
         elif self._platform in ("linux", "darwin"):
             # Linux/macOS: use sudo -u for global executable
-            # Use 'sudo ... env KEY=VAL ...' to pass env vars through sudo's env_reset
-            cmd = ["sudo", "-u", system_account, "env"]
-            for key, value in self.config.auth_env.items():
-                cmd.append(f"{key}={value}")
-            cmd.append(webui_cmd)
-            cmd.extend(["--port", str(port),
-                        "--host", "0.0.0.0", "--token-secret", self.config.token_secret,
-                        "--quota-check-enabled", "--openace-api-url", openace_api_url])
+            cmd = ["sudo", "-u", system_account, webui_cmd, "--port", str(port),
+                   "--host", "0.0.0.0", "--token-secret", self.config.token_secret,
+                   "--quota-check-enabled", "--openace-api-url", openace_api_url]
             cwd = None
         else:
             # Other platforms: direct execution (no user switching)
