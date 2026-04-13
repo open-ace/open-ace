@@ -500,8 +500,8 @@ class WebUIManager:
             cwd = webui_dir
         elif self._platform in ("linux", "darwin"):
             # Linux/macOS: use sudo -u for global executable
-            # Use env to set PATH since sudo resets environment by default
-            cmd = ["sudo", "-u", system_account, webui_cmd, "--port", str(port),
+            # Use -E to preserve environment variables (needed for auth env injection)
+            cmd = ["sudo", "-E", "-u", system_account, webui_cmd, "--port", str(port),
                    "--host", "0.0.0.0", "--token-secret", self.config.token_secret,
                    "--quota-check-enabled", "--openace-api-url", openace_api_url]
             cwd = None
