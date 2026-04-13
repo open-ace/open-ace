@@ -1361,8 +1361,18 @@ configure_sudoers() {
         return 1
     fi
 
-    # Find webui executable
-    local webui_path=$(find_webui_executable)
+    # Ensure symlinks are created first (if running as root)
+    if [ "$EUID" -eq 0 ]; then
+        create_webui_symlinks
+    fi
+
+    # Use /usr/bin/qwen-code-webui as preferred path (symlink created above)
+    # Fallback to find_webui_executable if symlink doesn't exist
+    local webui_path="/usr/bin/qwen-code-webui"
+    if [ ! -x "$webui_path" ]; then
+        webui_path=$(find_webui_executable 2>/dev/null)
+    fi
+
     if [ -z "$webui_path" ]; then
         print_warning "qwen-code-webui executable not found"
         print_info "Please install qwen-code-webui first:"
@@ -1370,11 +1380,11 @@ configure_sudoers() {
         print_info ""
         print_info "After installation, manually configure sudoers:"
         print_info "  sudo visudo -f /etc/sudoers.d/open-ace-webui"
-        print_info "  Add: $run_user ALL=(ALL) NOPASSWD: /path/to/qwen-code-webui *"
+        print_info "  Add: $run_user ALL=(ALL) NOPASSWD: /usr/bin/qwen-code-webui *"
         return 1
     fi
 
-    print_success "Found qwen-code-webui: $webui_path"
+    print_success "Using qwen-code-webui path: $webui_path"
 
     # Create sudoers file
     local sudoers_file="/etc/sudoers.d/open-ace-webui"
@@ -2046,11 +2056,19 @@ do_fresh_install() {
                 print_warning "Please edit the config file with your database settings."
             fi
             # Update workspace configuration with webui path
-            # Show installation progress if workspace mode is enabled
-            if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
-                local webui_path=$(find_webui_executable)
-            else
-                local webui_path=$(find_webui_executable 2>/dev/null)
+            # First ensure symlinks are created (if running as root)
+            if [ "$EUID" -eq 0 ]; then
+                create_webui_symlinks
+            fi
+            # Use /usr/bin/qwen-code-webui as preferred path (symlink created above)
+            # Fallback to find_webui_executable if symlink doesn't exist
+            local webui_path="/usr/bin/qwen-code-webui"
+            if [ ! -x "$webui_path" ]; then
+                if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
+                    webui_path=$(find_webui_executable)
+                else
+                    webui_path=$(find_webui_executable 2>/dev/null)
+                fi
             fi
             update_config_workspace "$config_dir/config.json" "$webui_path"
         fi
@@ -2378,11 +2396,19 @@ with open('$config_dir/config.json', 'w') as f:
 
     # Update workspace configuration (for both new and upgrade modes)
     if [ -f "$config_dir/config.json" ]; then
-        # Show installation progress if workspace mode is enabled
-        if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
-            local webui_path=$(find_webui_executable)
-        else
-            local webui_path=$(find_webui_executable 2>/dev/null)
+        # First ensure symlinks are created (if running as root)
+        if [ "$EUID" -eq 0 ]; then
+            create_webui_symlinks
+        fi
+        # Use /usr/bin/qwen-code-webui as preferred path (symlink created above)
+        # Fallback to find_webui_executable if symlink doesn't exist
+        local webui_path="/usr/bin/qwen-code-webui"
+        if [ ! -x "$webui_path" ]; then
+            if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
+                webui_path=$(find_webui_executable)
+            else
+                webui_path=$(find_webui_executable 2>/dev/null)
+            fi
         fi
         update_config_workspace "$config_dir/config.json" "$webui_path"
     fi
