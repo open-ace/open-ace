@@ -1168,14 +1168,111 @@ install_webui() {
         print_success "qwen-code CLI already installed"
     fi
 
+    # Create symlinks in /usr/bin for easier access
+    create_webui_symlinks
+
+    return 0
+}
+
+# Create symlinks in /usr/bin for qwen-code-webui and qwen-code executables
+# This ensures all users can access these commands regardless of npm global install location
+create_webui_symlinks() {
+    # Check if running as root (required to write to /usr/bin)
+    if [ "$EUID" -ne 0 ]; then
+        print_warning "Not running as root, cannot create symlinks in /usr/bin"
+        print_info "Symlinks will be created by the installer if run with sudo"
+        return 0
+    fi
+
+    print_info "Creating symlinks in /usr/bin..."
+
+    # Find npm global bin directory
+    local npm_bin_dir=""
+    if command -v npm &>/dev/null; then
+        npm_bin_dir=$(npm bin -g 2>/dev/null || npm prefix -g 2>/dev/null | xargs -I{} echo "{}/bin")
+    fi
+
+    # Common npm global bin locations
+    local candidates=(
+        "$npm_bin_dir"
+        "/usr/local/bin"
+        "/usr/bin"
+        "$HOME/.npm-global/bin"
+    )
+
+    # Find actual executable locations
+    local webui_actual=""
+    local qwen_actual=""
+
+    for dir in "${candidates[@]}"; do
+        if [ -n "$dir" ] && [ -d "$dir" ]; then
+            if [ -x "$dir/qwen-code-webui" ] && [ -z "$webui_actual" ]; then
+                webui_actual="$dir/qwen-code-webui"
+            fi
+            if [ -x "$dir/qwen" ] && [ -z "$qwen_actual" ]; then
+                qwen_actual="$dir/qwen"
+            fi
+        fi
+    done
+
+    # Also check using which/command -v
+    if [ -z "$webui_actual" ] && command -v qwen-code-webui &>/dev/null; then
+        webui_actual=$(which qwen-code-webui 2>/dev/null || command -v qwen-code-webui)
+    fi
+    if [ -z "$qwen_actual" ] && command -v qwen &>/dev/null; then
+        qwen_actual=$(which qwen 2>/dev/null || command -v qwen)
+    fi
+
+    # Create symlink for qwen-code-webui
+    if [ -n "$webui_actual" ] && [ -x "$webui_actual" ]; then
+        local webui_link="/usr/bin/qwen-code-webui"
+        if [ "$webui_actual" != "$webui_link" ]; then
+            # Remove existing symlink or file if it exists
+            if [ -L "$webui_link" ] || [ -e "$webui_link" ]; then
+                rm -f "$webui_link"
+            fi
+            # Create new symlink
+            if ln -sf "$webui_actual" "$webui_link"; then
+                print_success "Created symlink: $webui_link -> $webui_actual"
+            else
+                print_warning "Failed to create symlink for qwen-code-webui"
+            fi
+        else
+            print_info "qwen-code-webui already in /usr/bin, no symlink needed"
+        fi
+    else
+        print_warning "qwen-code-webui executable not found, cannot create symlink"
+    fi
+
+    # Create symlink for qwen-code (qwen CLI)
+    if [ -n "$qwen_actual" ] && [ -x "$qwen_actual" ]; then
+        local qwen_link="/usr/bin/qwen"
+        if [ "$qwen_actual" != "$qwen_link" ]; then
+            # Remove existing symlink or file if it exists
+            if [ -L "$qwen_link" ] || [ -e "$qwen_link" ]; then
+                rm -f "$qwen_link"
+            fi
+            # Create new symlink
+            if ln -sf "$qwen_actual" "$qwen_link"; then
+                print_success "Created symlink: $qwen_link -> $qwen_actual"
+            else
+                print_warning "Failed to create symlink for qwen"
+            fi
+        else
+            print_info "qwen already in /usr/bin, no symlink needed"
+        fi
+    else
+        print_warning "qwen executable not found, cannot create symlink"
+    fi
+
     return 0
 }
 
 # Find qwen-code-webui executable
 find_webui_executable() {
     local candidates=(
-        "/usr/local/bin/qwen-code-webui"
         "/usr/bin/qwen-code-webui"
+        "/usr/local/bin/qwen-code-webui"
         "/opt/qwen-code-webui/bin/qwen-code-webui"
         "$HOME/.local/bin/qwen-code-webui"
         "$HOME/.npm-global/bin/qwen-code-webui"
@@ -1211,6 +1308,8 @@ find_webui_executable() {
                 print_info "Downloading qwen-code (~30MB)..." >&2
                 npm install -g @qwen-code/qwen-code >&2 || print_warning "Failed to install qwen-code CLI" >&2
             fi
+            # Create symlinks in /usr/bin (if running as root)
+            create_webui_symlinks >&2
             # Try to find again after installation
             if command -v qwen-code-webui &>/dev/null; then
                 which qwen-code-webui
