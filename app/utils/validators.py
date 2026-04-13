@@ -78,10 +78,12 @@ def validate_username(username: str) -> bool:
     """
     if not username:
         return False
-    if len(username) < 3 or len(username) > 50:
+    if len(username) < 2 or len(username) > 50:
         return False
-    # Allow alphanumeric, underscore, hyphen
-    pattern = r"^[a-zA-Z0-9_-]+$"
+    # Allow alphanumeric, underscore, hyphen, and Chinese characters (CJK)
+    # Chinese: \u4e00-\u9fff (CJK Unified Ideographs)
+    # Extended: \u3400-\u4dbf (CJK Unified Ideographs Extension A)
+    pattern = r"^[a-zA-Z0-9_\-\u4e00-\u9fff\u3400-\u4dbf]+$"
     return bool(re.match(pattern, username))
 
 
