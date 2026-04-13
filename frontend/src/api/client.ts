@@ -185,7 +185,19 @@ class ApiClient {
           } as ApiError;
         }
 
-        // Create API error
+        // If error is already an ApiError (thrown from inner block), preserve it
+        if (error && typeof error === 'object' && 'message' in error && 'status' in error) {
+          const apiError = error as ApiError;
+          // Check if we should retry
+          if (attempt < retries && isRetryableError(null, apiError.status)) {
+            lastError = apiError;
+            await sleep(RETRY_DELAY * (attempt + 1));
+            continue;
+          }
+          throw apiError;
+        }
+
+        // Create API error for other errors
         const apiError: ApiError = {
           message: getFriendlyErrorMessage(error),
           status: 0,
