@@ -586,13 +586,13 @@ class SessionManager:
                 (session_id,),
             )
             row = cursor.fetchone()
-            if row and row[0] and row[1]:
+            if row and row["user_id"] and row["project_id"]:
                 cursor.execute(
                     f"""
                     UPDATE user_projects SET last_access_at = {_param()}
                     WHERE user_id = {_param()} AND project_id = {_param()}
                 """,
-                    (now, row[0], row[1]),
+                    (now, row["user_id"], row["project_id"]),
                 )
         except Exception as e:
             logger.warning(f"Failed to update last_access_at: {e}")
@@ -674,13 +674,13 @@ class SessionManager:
                     (session_id,),
                 )
                 row = cursor.fetchone()
-                if row and row[0] and row[1]:
+                if row and row["user_id"] and row["project_id"]:
                     cursor.execute(
                         f"""
                         UPDATE user_projects SET last_access_at = {_param()}
                         WHERE user_id = {_param()} AND project_id = {_param()}
                     """,
-                        (now, row[0], row[1]),
+                        (now, row["user_id"], row["project_id"]),
                     )
             except Exception as e:
                 logger.warning(f"Failed to update last_access_at: {e}")
@@ -774,10 +774,10 @@ class SessionManager:
 
         # Update project statistics if session has project_id and user_id
         if success and session_row:
-            user_id = session_row[0]
-            project_id = session_row[1]
-            created_at_str = session_row[3]
-            total_tokens = session_row[4] or 0
+            user_id = session_row["user_id"]
+            project_id = session_row["project_id"]
+            created_at_str = session_row["created_at"]
+            total_tokens = session_row["total_tokens"] or 0
 
             if user_id and project_id:
                 try:

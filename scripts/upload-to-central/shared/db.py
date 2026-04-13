@@ -110,10 +110,10 @@ def _table_exists(cursor, table_name: str) -> bool:
     if is_postgresql():
         _execute(
             cursor,
-            "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = %s)",
+            "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = %s) as exists",
             (table_name,),
         )
-        return cursor.fetchone()[0]
+        return cursor.fetchone()["exists"]
     else:
         _execute(
             cursor, "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,)
@@ -1552,7 +1552,7 @@ def get_global_quota_summary(start_date: str, end_date: str) -> Dict:
         FROM users
     """,
     )
-    total_quota = cursor.fetchone()[0] or 0
+    total_quota = cursor.fetchone()["total_quota"] or 0
 
     # Get total usage within date range
     _execute(
@@ -1564,7 +1564,7 @@ def get_global_quota_summary(start_date: str, end_date: str) -> Dict:
     """,
         (start_date, end_date),
     )
-    total_used = cursor.fetchone()[0] or 0
+    total_used = cursor.fetchone()["total_used"] or 0
 
     conn.close()
 
