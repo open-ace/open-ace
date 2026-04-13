@@ -1400,10 +1400,15 @@ $run_user ALL=(ALL) NOPASSWD: /usr/bin/test, /usr/bin/ls, /usr/bin/cat, /usr/bin
     # Check if sudoers file already exists
     if [ -f "$sudoers_file" ]; then
         if grep -q "$webui_path" "$sudoers_file" 2>/dev/null; then
-            print_success "Sudoers rule already exists"
+            print_success "Sudoers rule already exists with correct path"
             return 0
         fi
-        print_info "Updating existing sudoers file..."
+        # Check for old paths that need to be updated
+        if grep -qE '/.*npm.*bin/qwen-code-webui|/usr/local/bin/qwen-code-webui' "$sudoers_file" 2>/dev/null; then
+            print_info "Found old qwen-code-webui path in sudoers, updating to /usr/bin/qwen-code-webui..."
+        else
+            print_info "Updating existing sudoers file..."
+        fi
     fi
 
     # Write sudoers file
