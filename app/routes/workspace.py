@@ -27,6 +27,27 @@ logger = logging.getLogger(__name__)
 # Convert to actual tokens when comparing with usage
 TOKEN_QUOTA_MULTIPLIER = 1_000_000
 
+
+def format_datetime(dt):
+    """Convert datetime to ISO 8601 string for proper timezone handling in frontend.
+
+    Args:
+        dt: datetime object or None
+
+    Returns:
+        ISO 8601 string with timezone info, or None
+    """
+    if dt is None:
+        return None
+    # If datetime has no timezone, assume it's UTC
+    if hasattr(dt, "isoformat"):
+        iso_str = dt.isoformat()
+        # Add timezone if not present
+        if "+" not in iso_str and "Z" not in iso_str and "-" not in iso_str[-6:]:
+            iso_str += "+00:00"
+        return iso_str
+    return dt
+
 workspace_bp = Blueprint("workspace", __name__)
 auth_service = AuthService()
 
@@ -371,10 +392,10 @@ def list_sessions():
                     "request_count": s.get("request_count") or 0,
                     "model": s.get("model"),
                     "tags": [],
-                    "created_at": s["created_at"],
-                    "updated_at": s["updated_at"],
-                    "completed_at": s.get("completed_at"),
-                    "expires_at": s.get("expires_at"),
+                    "created_at": format_datetime(s["created_at"]),
+                    "updated_at": format_datetime(s["updated_at"]),
+                    "completed_at": format_datetime(s.get("completed_at")),
+                    "expires_at": format_datetime(s.get("expires_at")),
                     "project_path": s.get("project_path"),
                     "messages": [],
                 }
@@ -577,9 +598,9 @@ def get_session(session_id):
             "request_count": session_data["request_count"] or 0,
             "model": session_data.get("model"),
             "tags": [],
-            "created_at": session_data["created_at"],
-            "updated_at": session_data["updated_at"],
-            "completed_at": session_data["updated_at"],
+            "created_at": format_datetime(session_data["created_at"]),
+            "updated_at": format_datetime(session_data["updated_at"]),
+            "completed_at": format_datetime(session_data["updated_at"]),
             "expires_at": None,
             "messages": messages,
         }
