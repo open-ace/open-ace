@@ -1395,6 +1395,10 @@ configure_sudoers() {
 
 $run_user ALL=(ALL) NOPASSWD: $webui_path *
 $run_user ALL=(ALL) NOPASSWD: /usr/bin/test, /usr/bin/ls, /usr/bin/cat, /usr/bin/stat, /usr/bin/mkdir
+
+
+# Preserve auth environment variables for qwen CLI authentication
+Defaults env_keep += \"OPENAI_API_KEY OPENAI_BASE_URL BAILIAN_CODING_PLAN_API_KEY ANTHROPIC_API_KEY ANTHROPIC_BASE_URL GEMINI_API_KEY GEMINI_BASE_URL OPENCLAW_TOKEN OPENCLAW_GATEWAY_URL\"
 "
 
     # Check if sudoers file already exists
