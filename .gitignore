@@ -36,7 +36,6 @@ node_modules/
 
 # Release
 dist/
-!static/js/dist/
 
 # Version file (auto-generated from git)
 VERSION
