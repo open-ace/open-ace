@@ -44,12 +44,17 @@ def run_fetch_scripts():
 
         results = {}
 
-        # Run fetch_qwen.py
+        # Run fetch_qwen.py with sudo and --multi-user to scan all users' qwen directories
+        # sudo is needed to read other users' .qwen directories
+        # Pass --config with current user's config path so root uses correct database
         qwen_script = os.path.join(project_root, "scripts", "fetch_qwen.py")
         if os.path.exists(qwen_script):
             try:
+                # Get config file path from current user's home directory
+                config_path = os.path.expanduser("~/.open-ace/config.json")
+
                 result = subprocess.run(
-                    ["python3", qwen_script, "--days", "1"],
+                    ["sudo", "-n", "python3", qwen_script, "--days", "1", "--multi-user", "--config", config_path],
                     capture_output=True,
                     text=True,
                     timeout=300,  # 5 minutes timeout
@@ -65,12 +70,14 @@ def run_fetch_scripts():
             except Exception as e:
                 results["qwen"] = {"success": False, "error": str(e)}
 
-        # Run fetch_claude.py if exists
+        # Run fetch_claude.py with sudo and --multi-user to scan all users' Claude directories
+        # sudo is needed to read other users' .claude directories
+        # Pass --config with current user's config path so root uses correct database
         claude_script = os.path.join(project_root, "scripts", "fetch_claude.py")
         if os.path.exists(claude_script):
             try:
                 result = subprocess.run(
-                    ["python3", claude_script, "--days", "1"],
+                    ["sudo", "-n", "python3", claude_script, "--days", "1", "--multi-user", "--config", config_path],
                     capture_output=True,
                     text=True,
                     timeout=300,
@@ -86,12 +93,14 @@ def run_fetch_scripts():
             except Exception as e:
                 results["claude"] = {"success": False, "error": str(e)}
 
-        # Run fetch_openclaw.py if exists
+        # Run fetch_openclaw.py with sudo and --multi-user to scan all users' OpenClaw directories
+        # sudo is needed to read other users' .openclaw directories
+        # Pass --config with current user's config path so root uses correct database
         openclaw_script = os.path.join(project_root, "scripts", "fetch_openclaw.py")
         if os.path.exists(openclaw_script):
             try:
                 result = subprocess.run(
-                    ["python3", openclaw_script, "--days", "1", "--mode", "messages"],
+                    ["sudo", "-n", "python3", openclaw_script, "--days", "1", "--mode", "messages", "--multi-user", "--config", config_path],
                     capture_output=True,
                     text=True,
                     timeout=300,

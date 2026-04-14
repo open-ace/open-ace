@@ -185,8 +185,13 @@ def extract_content_from_entry(entry: dict) -> Optional[str]:
     return None
 
 
-def process_jsonl_file(filepath: Path, hostname: str = "localhost") -> tuple:
+def process_jsonl_file(filepath: Path, hostname: str = "localhost", system_account: Optional[str] = None) -> tuple:
     """Process a single JSONL file and return daily token aggregates and messages.
+
+    Args:
+        filepath: Path to the JSONL file
+        hostname: Host name to identify this machine
+        system_account: System account (username) for multi-user mode
 
     Returns:
         tuple: (daily_stats dict, messages list)
@@ -361,7 +366,7 @@ def process_jsonl_file(filepath: Path, hostname: str = "localhost") -> tuple:
                                     "model": model,
                                     "timestamp": ts,
                                     "sender_id": "claude_user",
-                                    "sender_name": get_default_sender_name("claude"),
+                                    "sender_name": f"{system_account}-{hostname}-claude" if system_account else get_default_sender_name("claude"),
                                     "agent_session_id": agent_session_id,
                                     "conversation_id": conversation_id,
                                     "project_path": project_path,
@@ -400,6 +405,81 @@ def process_jsonl_file(filepath: Path, hostname: str = "localhost") -> tuple:
                 continue
 
     return dict(daily), messages
+
+
+def find_all_claude_project_dirs() -> list:
+    """
+    Find Claude project directories for all users on the system.
+
+    Scans /home/*/.claude/projects (Linux) or /Users/*/.claude/projects (macOS)
+    Also checks ~/.config/claude/projects as alternative location.
+    Handles PermissionError for directories that cannot be accessed.
+
+    Returns:
+        List of tuples: [(system_account, project_path), ...]
+    """
+    import platform
+
+    results = []
+    os_type = platform.system().lower()
+
+    # Determine user home directories based on OS
+    if os_type == "linux":
+        home_base = Path("/home")
+    elif os_type == "darwin":
+        home_base = Path("/Users")
+    else:
+        # Windows or other - just use current user
+        home = Path.home()
+        for potential_dir in [home / ".claude" / "projects", home / ".config" / "claude" / "projects"]:
+            if potential_dir.is_dir():
+                user = getpass.getuser()
+                results.append((user, potential_dir))
+                break
+        return results
+
+    # Scan all user directories
+    if not home_base.is_dir():
+        return results
+
+    for user_dir in home_base.iterdir():
+        if not user_dir.is_dir():
+            continue
+
+        system_account = user_dir.name
+
+        # Check standard locations
+        potential_dirs = [
+            user_dir / ".claude" / "projects",
+            user_dir / ".config" / "claude" / "projects",
+        ]
+
+        for claude_projects in potential_dirs:
+            try:
+                if not claude_projects.is_dir():
+                    continue
+
+                # Check if there are jsonl files
+                has_jsonl = False
+
+                # Check directly in projects directory
+                if list(claude_projects.glob("*.jsonl")):
+                    has_jsonl = True
+                else:
+                    # Check in subdirectories
+                    for subdir in claude_projects.iterdir():
+                        if subdir.is_dir() and list(subdir.glob("*.jsonl")):
+                            has_jsonl = True
+                            break
+
+                if has_jsonl:
+                    results.append((system_account, claude_projects))
+                    break  # Only add one entry per user
+            except PermissionError:
+                print(f"  Warning: Cannot access {claude_projects} (permission denied)")
+                continue
+
+    return results
 
 
 def find_claude_project_dir() -> Optional[Path]:
@@ -446,7 +526,10 @@ def find_claude_project_dir() -> Optional[Path]:
 
 
 def fetch_and_save(
-    days: int = 7, project_dir: Optional[Path] = None, hostname: Optional[str] = None
+    days: int = 7,
+    project_dir: Optional[Path] = None,
+    hostname: Optional[str] = None,
+    multi_user_mode: bool = False,
 ) -> bool:
     """
     Fetch Claude usage and save to database.
@@ -455,6 +538,7 @@ def fetch_and_save(
         days: Number of days to look back
         project_dir: Optional specific project directory
         hostname: Optional host name to identify this machine
+        multi_user_mode: If True, scan all users' Claude directories
 
     Returns:
         True if successful, False otherwise
@@ -470,31 +554,6 @@ def fetch_and_save(
         # Try to load hostname from config
         config = utils.load_config()
         hostname = config.get("host_name", "localhost")
-
-    if project_dir is None:
-        project_dir = find_claude_project_dir()
-
-    if not project_dir:
-        print("Error: Cannot find Claude project directory.")
-        return False
-
-    # Get all subdirectories with jsonl files if project_dir is a projects parent
-    # or just use the single project_dir if it directly contains jsonl files
-    projects_to_scan = []
-
-    # Check if project_dir directly contains jsonl files
-    direct_files = list(project_dir.glob("*.jsonl"))
-    if direct_files:
-        # project_dir is a direct project directory
-        projects_to_scan = [project_dir]
-    else:
-        # project_dir is a parent projects directory, get all subdirectories with jsonl
-        subdirs = [d for d in project_dir.iterdir() if d.is_dir() and list(d.glob("*.jsonl"))]
-        if subdirs:
-            projects_to_scan = sorted(subdirs, key=lambda x: x.name.lower())
-        else:
-            print(f"Error: No .jsonl files found in {project_dir}")
-            return False
 
     # Aggregate across all projects
     aggregated = defaultdict(
@@ -512,27 +571,98 @@ def fetch_and_save(
     all_messages = []
     total_files = 0
 
-    for proj_dir in projects_to_scan:
-        jsonl_files = list(proj_dir.glob("*.jsonl"))
-        if not jsonl_files:
-            continue
-        print(f"Scanning: {proj_dir.name} ({len(jsonl_files)} files)")
-        for f in jsonl_files:
-            total_files += 1
-            daily, messages = process_jsonl_file(f, hostname)
-            # Aggregate daily stats
-            for date, stats in daily.items():
-                for key in [
-                    "input_tokens",
-                    "output_tokens",
-                    "cache_read_tokens",
-                    "cache_creation_tokens",
-                    "request_count",
-                ]:
-                    aggregated[date][key] += stats[key]
-                aggregated[date]["models_used"].update(stats["models_used"])
-            # Collect messages for batch insert
-            all_messages.extend(messages)
+    # Multi-user mode: scan all users' Claude directories
+    if multi_user_mode:
+        print("Multi-user mode: scanning all users' Claude directories...")
+        user_projects = find_all_claude_project_dirs()
+
+        if not user_projects:
+            print("No Claude project directories found for any user.")
+            return True
+
+        for system_account, claude_projects in user_projects:
+            print(f"\nProcessing user: {system_account}")
+            print(f"  Scanning: {claude_projects}")
+
+            # Get all subdirectories with jsonl files
+            projects_to_scan = []
+            direct_files = list(claude_projects.glob("*.jsonl"))
+            if direct_files:
+                projects_to_scan = [claude_projects]
+            else:
+                subdirs = [d for d in claude_projects.iterdir() if d.is_dir() and list(d.glob("*.jsonl"))]
+                if subdirs:
+                    projects_to_scan = sorted(subdirs, key=lambda x: x.name.lower())
+
+            for proj_dir in projects_to_scan:
+                jsonl_files = list(proj_dir.glob("*.jsonl"))
+                if not jsonl_files:
+                    continue
+                print(f"  Scanning: {proj_dir.name} ({len(jsonl_files)} files)")
+                for f in jsonl_files:
+                    total_files += 1
+                    daily, messages = process_jsonl_file(f, hostname, system_account)
+                    # Aggregate daily stats
+                    for date, stats in daily.items():
+                        for key in [
+                            "input_tokens",
+                            "output_tokens",
+                            "cache_read_tokens",
+                            "cache_creation_tokens",
+                            "request_count",
+                        ]:
+                            aggregated[date][key] += stats[key]
+                        aggregated[date]["models_used"].update(stats["models_used"])
+                    # Collect messages for batch insert
+                    all_messages.extend(messages)
+    else:
+        # Single-user mode: use provided or found project directory
+        if project_dir is None:
+            project_dir = find_claude_project_dir()
+
+        if not project_dir:
+            print("Error: Cannot find Claude project directory.")
+            return False
+
+        # Get all subdirectories with jsonl files if project_dir is a projects parent
+        # or just use the single project_dir if it directly contains jsonl files
+        projects_to_scan = []
+
+        # Check if project_dir directly contains jsonl files
+        direct_files = list(project_dir.glob("*.jsonl"))
+        if direct_files:
+            # project_dir is a direct project directory
+            projects_to_scan = [project_dir]
+        else:
+            # project_dir is a parent projects directory, get all subdirectories with jsonl
+            subdirs = [d for d in project_dir.iterdir() if d.is_dir() and list(d.glob("*.jsonl"))]
+            if subdirs:
+                projects_to_scan = sorted(subdirs, key=lambda x: x.name.lower())
+            else:
+                print(f"Error: No .jsonl files found in {project_dir}")
+                return False
+
+        for proj_dir in projects_to_scan:
+            jsonl_files = list(proj_dir.glob("*.jsonl"))
+            if not jsonl_files:
+                continue
+            print(f"Scanning: {proj_dir.name} ({len(jsonl_files)} files)")
+            for f in jsonl_files:
+                total_files += 1
+                daily, messages = process_jsonl_file(f, hostname)
+                # Aggregate daily stats
+                for date, stats in daily.items():
+                    for key in [
+                        "input_tokens",
+                        "output_tokens",
+                        "cache_read_tokens",
+                        "cache_creation_tokens",
+                        "request_count",
+                    ]:
+                        aggregated[date][key] += stats[key]
+                    aggregated[date]["models_used"].update(stats["models_used"])
+                # Collect messages for batch insert
+                all_messages.extend(messages)
 
     print(f"Processed {total_files} files, {len(all_messages)} messages")
 
@@ -579,12 +709,36 @@ if __name__ == "__main__":
     parser.add_argument("--days", type=int, default=7, help="Number of days")
     parser.add_argument("--project", help="Specific project directory")
     parser.add_argument("--hostname", help="Host name to identify this machine")
+    parser.add_argument(
+        "--multi-user",
+        action="store_true",
+        help="Scan all users' Claude directories (requires root/admin privileges)",
+    )
+    parser.add_argument(
+        "--config",
+        help="Path to config.json file (useful when running as root via sudo)",
+    )
     args = parser.parse_args()
+
+    # If --config is specified, use it to get database URL
+    # This is needed when running via sudo, where HOME=/root
+    if args.config:
+        config_path = Path(args.config)
+        if config_path.exists():
+            # Load config and set DATABASE_URL environment variable
+            with open(config_path) as f:
+                config_data = json.load(f)
+            db_config = config_data.get("database", {})
+            db_url = db_config.get("url")
+            if db_url:
+                os.environ["DATABASE_URL"] = db_url
+                print(f"Using database from config: {db_config.get('type', 'postgresql')}")
 
     db.init_database()
     success = fetch_and_save(
         days=args.days,
         project_dir=Path(args.project) if args.project else None,
         hostname=args.hostname,
+        multi_user_mode=args.multi_user,
     )
     sys.exit(0 if success else 1)

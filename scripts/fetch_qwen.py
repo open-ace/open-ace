@@ -66,6 +66,7 @@ def find_all_qwen_project_dirs() -> list:
     Find Qwen project directories for all users on the system.
 
     Scans /home/*/.qwen/projects (Linux) or /Users/*/.qwen/projects (macOS)
+    Handles PermissionError for directories that cannot be accessed.
 
     Returns:
         List of tuples: [(system_account, project_path), ...]
@@ -100,21 +101,26 @@ def find_all_qwen_project_dirs() -> list:
         system_account = user_dir.name
         qwen_projects = user_dir / ".qwen" / "projects"
 
-        if qwen_projects.is_dir():
-            # Check if there are jsonl files
-            has_jsonl = False
-            for subdir in qwen_projects.iterdir():
-                if subdir.is_dir():
-                    if list(subdir.glob("*.jsonl")):
-                        has_jsonl = True
-                        break
-                    chats_dir = subdir / "chats"
-                    if chats_dir.is_dir() and list(chats_dir.glob("*.jsonl")):
-                        has_jsonl = True
-                        break
+        try:
+            if qwen_projects.is_dir():
+                # Check if there are jsonl files
+                has_jsonl = False
+                for subdir in qwen_projects.iterdir():
+                    if subdir.is_dir():
+                        if list(subdir.glob("*.jsonl")):
+                            has_jsonl = True
+                            break
+                        chats_dir = subdir / "chats"
+                        if chats_dir.is_dir() and list(chats_dir.glob("*.jsonl")):
+                            has_jsonl = True
+                            break
 
-            if has_jsonl:
-                results.append((system_account, qwen_projects))
+                if has_jsonl:
+                    results.append((system_account, qwen_projects))
+        except PermissionError:
+            # Skip directories we cannot access
+            print(f"  Warning: Cannot access {qwen_projects} (permission denied)")
+            continue
 
     return results
 
@@ -959,7 +965,25 @@ if __name__ == "__main__":
         action="store_true",
         help="Scan all users' qwen directories (requires root/admin privileges)",
     )
+    parser.add_argument(
+        "--config",
+        help="Path to config.json file (useful when running as root via sudo)",
+    )
     args = parser.parse_args()
+
+    # If --config is specified, use it to get database URL
+    # This is needed when running via sudo, where HOME=/root
+    if args.config:
+        config_path = Path(args.config)
+        if config_path.exists():
+            # Load config and set DATABASE_URL environment variable
+            with open(config_path) as f:
+                config_data = json.load(f)
+            db_config = config_data.get("database", {})
+            db_url = db_config.get("url")
+            if db_url:
+                os.environ["DATABASE_URL"] = db_url
+                print(f"Using database from config: {db_config.get('type', 'postgresql')}")
 
     db.init_database()
     success = fetch_and_save(

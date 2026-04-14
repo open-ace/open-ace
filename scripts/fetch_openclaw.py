@@ -470,6 +470,74 @@ async def fetch_and_save_usage(
 # ============================================================================
 
 
+def find_all_openclaw_sessions_dirs() -> list:
+    """
+    Find OpenClaw sessions directories for all users on the system.
+
+    Scans /home/*/.openclaw/agents/*/sessions (Linux) or /Users/*/.openclaw/agents/*/sessions (macOS)
+    Handles PermissionError for directories that cannot be accessed.
+
+    Returns:
+        List of tuples: [(system_account, sessions_path), ...]
+    """
+    import platform
+
+    results = []
+    os_type = platform.system().lower()
+
+    # Determine user home directories based on OS
+    if os_type == "linux":
+        home_base = Path("/home")
+    elif os_type == "darwin":
+        home_base = Path("/Users")
+    else:
+        # Windows or other - just use current user
+        home = Path.home()
+        agents_dir = home / ".openclaw" / "agents"
+        if agents_dir.is_dir():
+            for agent_dir in agents_dir.iterdir():
+                if agent_dir.is_dir():
+                    sessions_dir = agent_dir / "sessions"
+                    if sessions_dir.is_dir() and list(sessions_dir.glob("*.jsonl")):
+                        user = getpass.getuser()
+                        results.append((user, sessions_dir))
+                        break
+        return results
+
+    # Scan all user directories
+    if not home_base.is_dir():
+        return results
+
+    for user_dir in home_base.iterdir():
+        if not user_dir.is_dir():
+            continue
+
+        system_account = user_dir.name
+        agents_dir = user_dir / ".openclaw" / "agents"
+
+        try:
+            if not agents_dir.is_dir():
+                continue
+
+            # Find all agent directories
+            for agent_dir in agents_dir.iterdir():
+                if not agent_dir.is_dir():
+                    continue
+
+                sessions_dir = agent_dir / "sessions"
+                if sessions_dir.is_dir():
+                    # Check if there are jsonl files
+                    jsonl_files = list(sessions_dir.glob("*.jsonl"))
+                    if jsonl_files:
+                        results.append((system_account, sessions_dir))
+                        break  # Only add one entry per user
+        except PermissionError:
+            print(f"  Warning: Cannot access {agents_dir} (permission denied)")
+            continue
+
+    return results
+
+
 def find_openclaw_sessions_dir() -> Optional[Path]:
     """Find the OpenClaw sessions directory."""
     home = Path.home()
@@ -861,7 +929,7 @@ def extract_user_message_metadata(text: str) -> Optional[dict]:
 
 
 def process_jsonl_file(
-    filepath: Path, hostname: str = "localhost", tool_name: str = "openclaw"
+    filepath: Path, hostname: str = "localhost", tool_name: str = "openclaw", system_account: Optional[str] = None
 ) -> tuple:
     """Process a single JSONL file and return daily token aggregates and messages.
 
@@ -869,6 +937,7 @@ def process_jsonl_file(
         filepath: Path to the JSONL file
         hostname: Host name
         tool_name: Tool name (default: openclaw)
+        system_account: System account (username) for multi-user mode
 
     Returns:
         tuple: (daily_stats dict, messages list)
@@ -1072,7 +1141,7 @@ def process_jsonl_file(
                             # Set default sender for messages without sender info
                             if not sender_id and not sender_name:
                                 sender_id = "openclaw_user"
-                                sender_name = get_default_sender_name("openclaw")
+                                sender_name = f"{system_account}-{hostname}-{tool_name}" if system_account else get_default_sender_name("openclaw")
 
                             # Store assistant sender for toolResult attribution
                             if role == "assistant" and (sender_id or sender_name):
@@ -1225,6 +1294,7 @@ def fetch_and_save_messages(
     sessions_dir: Optional[Path] = None,
     hostname: Optional[str] = None,
     tool_name: str = "openclaw",
+    multi_user_mode: bool = False,
 ) -> bool:
     """
     Fetch OpenClaw messages and save to database.
@@ -1234,6 +1304,7 @@ def fetch_and_save_messages(
         sessions_dir: Optional specific sessions directory
         hostname: Optional host name to identify this machine
         tool_name: Tool name (default: openclaw)
+        multi_user_mode: If True, scan all users' OpenClaw directories
 
     Returns:
         True if successful, False otherwise
@@ -1261,23 +1332,6 @@ def fetch_and_save_messages(
         config = utils.load_config()
         hostname = config.get("host_name", "localhost")
 
-    if sessions_dir is None:
-        sessions_dir = find_openclaw_sessions_dir()
-
-    if not sessions_dir:
-        print("Error: Cannot find OpenClaw sessions directory.")
-        print("Expected location: ~/.openclaw/agents/<agent>/sessions/")
-        return False
-
-    # Get all jsonl files
-    jsonl_files = list(sessions_dir.glob("*.jsonl"))
-
-    if not jsonl_files:
-        print(f"Error: No .jsonl files found in {sessions_dir}")
-        return False
-
-    print(f"Found {len(jsonl_files)} session files in {sessions_dir}")
-
     # Aggregate across all files
     aggregated = defaultdict(
         lambda: {
@@ -1292,22 +1346,76 @@ def fetch_and_save_messages(
 
     # Collect all messages for batch insert
     all_messages = []
+    total_files = 0
 
-    for f in sorted(jsonl_files, key=lambda x: x.name):
-        daily, messages = process_jsonl_file(f, hostname, tool_name)
-        for date, stats in daily.items():
-            for key in [
-                "input_tokens",
-                "output_tokens",
-                "cache_read_tokens",
-                "cache_write_tokens",
-                "request_count",
-            ]:
-                aggregated[date][key] += stats[key]
-            aggregated[date]["models_used"].update(stats["models_used"])
-        all_messages.extend(messages)
+    # Multi-user mode: scan all users' OpenClaw directories
+    if multi_user_mode:
+        print("Multi-user mode: scanning all users' OpenClaw directories...")
+        user_sessions = find_all_openclaw_sessions_dirs()
 
-    print(f"Processed {len(jsonl_files)} files, {len(all_messages)} messages")
+        if not user_sessions:
+            print("No OpenClaw sessions directories found for any user.")
+            return True
+
+        for system_account, sessions_path in user_sessions:
+            print(f"\nProcessing user: {system_account}")
+            print(f"  Scanning: {sessions_path}")
+
+            # Get all jsonl files
+            jsonl_files = list(sessions_path.glob("*.jsonl"))
+            if not jsonl_files:
+                continue
+
+            print(f"  Found {len(jsonl_files)} session files")
+            for f in sorted(jsonl_files, key=lambda x: x.name):
+                total_files += 1
+                daily, messages = process_jsonl_file(f, hostname, tool_name, system_account)
+                for date, stats in daily.items():
+                    for key in [
+                        "input_tokens",
+                        "output_tokens",
+                        "cache_read_tokens",
+                        "cache_write_tokens",
+                        "request_count",
+                    ]:
+                        aggregated[date][key] += stats[key]
+                    aggregated[date]["models_used"].update(stats["models_used"])
+                all_messages.extend(messages)
+    else:
+        # Single-user mode: use provided or found sessions directory
+        if sessions_dir is None:
+            sessions_dir = find_openclaw_sessions_dir()
+
+        if not sessions_dir:
+            print("Error: Cannot find OpenClaw sessions directory.")
+            print("Expected location: ~/.openclaw/agents/<agent>/sessions/")
+            return False
+
+        # Get all jsonl files
+        jsonl_files = list(sessions_dir.glob("*.jsonl"))
+
+        if not jsonl_files:
+            print(f"Error: No .jsonl files found in {sessions_dir}")
+            return False
+
+        print(f"Found {len(jsonl_files)} session files in {sessions_dir}")
+
+        for f in sorted(jsonl_files, key=lambda x: x.name):
+            total_files += 1
+            daily, messages = process_jsonl_file(f, hostname, tool_name)
+            for date, stats in daily.items():
+                for key in [
+                    "input_tokens",
+                    "output_tokens",
+                    "cache_read_tokens",
+                    "cache_write_tokens",
+                    "request_count",
+                ]:
+                    aggregated[date][key] += stats[key]
+                aggregated[date]["models_used"].update(stats["models_used"])
+            all_messages.extend(messages)
+
+    print(f"Processed {total_files} files, {len(all_messages)} messages")
 
     # Batch insert messages
     if all_messages:
@@ -1374,7 +1482,30 @@ def main():
         default="both",
         help="Mode: usage (WebSocket API only), messages (session logs only), both (default)",
     )
+    parser.add_argument(
+        "--multi-user",
+        action="store_true",
+        help="Scan all users' OpenClaw directories (requires root/admin privileges)",
+    )
+    parser.add_argument(
+        "--config",
+        help="Path to config.json file (useful when running as root via sudo)",
+    )
     args = parser.parse_args()
+
+    # If --config is specified, use it to get database URL
+    # This is needed when running via sudo, where HOME=/root
+    if args.config:
+        config_path = Path(args.config)
+        if config_path.exists():
+            # Load config and set DATABASE_URL environment variable
+            with open(config_path) as f:
+                config_data = json.load(f)
+            db_config = config_data.get("database", {})
+            db_url = db_config.get("url")
+            if db_url:
+                os.environ["DATABASE_URL"] = db_url
+                print(f"Using database from config: {db_config.get('type', 'postgresql')}")
 
     # Initialize database
     db.init_database()
@@ -1401,6 +1532,7 @@ def main():
             sessions_dir=Path(args.sessions_dir) if args.sessions_dir else None,
             hostname=args.hostname,
             tool_name=args.tool,
+            multi_user_mode=args.multi_user,
         )
         success = success and messages_success
 

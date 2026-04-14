@@ -1408,8 +1408,14 @@ def stop_all_webui_instances():
 
 @workspace_bp.route("/status", methods=["GET"])
 def get_workspace_status():
-    """Get workspace status including today's token and request usage for current user."""
+    """Get workspace status including today's token and request usage for current user.
+
+    Aggregates usage from two sources:
+    1. daily_messages table - historical data from fetch (for non-workspace tools)
+    2. agent_sessions table - real-time workspace session data
+    """
     from datetime import datetime
+    from app.repositories.database import Database, is_postgresql
     from app.repositories.usage_repo import UsageRepository
     from app.repositories.user_repo import UserRepository
 
@@ -1436,13 +1442,39 @@ def get_workspace_status():
                 username = user.get("username", "")
                 system_account = user.get("system_account") or username
 
-                # Get today's usage for this user (same logic as /api/quota/status)
+                # Get today's usage from daily_messages table (historical data from fetch)
                 usage_repo = UsageRepository()
                 today_stats = usage_repo.get_request_stats_by_user(date=today, user_name=system_account)
 
-                # Aggregate today's stats for this user
+                # Aggregate today's stats from daily_messages
                 requests_used = sum(stat.get("requests", 0) for stat in today_stats)
                 tokens_used = sum(stat.get("tokens", 0) for stat in today_stats)
+
+                # Get today's workspace session usage from agent_sessions table
+                db = Database()
+                if is_postgresql():
+                    session_query = """
+                        SELECT
+                            COALESCE(SUM(total_tokens), 0) as tokens,
+                            COALESCE(SUM(request_count), 0) as requests
+                        FROM agent_sessions
+                        WHERE user_id = %s AND created_at::date = CURRENT_DATE
+                    """
+                    session_stats = db.fetch_one(session_query, (user_id,))
+                else:
+                    session_query = """
+                        SELECT
+                            COALESCE(SUM(total_tokens), 0) as tokens,
+                            COALESCE(SUM(request_count), 0) as requests
+                        FROM agent_sessions
+                        WHERE user_id = ? AND date(created_at) = date('now')
+                    """
+                    session_stats = db.fetch_one(session_query, (user_id,))
+
+                if session_stats:
+                    # Add workspace session usage to totals
+                    tokens_used += session_stats.get("tokens", 0) or 0
+                    requests_used += session_stats.get("requests", 0) or 0
 
         status = {
             "tokens_used": tokens_used,
