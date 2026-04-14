@@ -49,10 +49,11 @@ def _placeholder() -> str:
 
 def sanitize_utf8(text: Optional[str]) -> Optional[str]:
     """
-    Sanitize text to remove invalid UTF-8 surrogate characters.
+    Sanitize text to remove invalid UTF-8 surrogate characters and NUL characters.
 
     Some messages may contain invalid UTF-8 surrogate pairs (e.g., \udcdd)
-    which cannot be encoded to UTF-8. This function removes them.
+    which cannot be encoded to UTF-8. NUL characters (\\x00) are also removed
+    because PostgreSQL does not support them in string literals.
 
     Args:
         text: Input text that may contain invalid characters
@@ -62,6 +63,11 @@ def sanitize_utf8(text: Optional[str]) -> Optional[str]:
     """
     if text is None:
         return None
+
+    # Remove NUL characters first (PostgreSQL doesn't support them)
+    if '\x00' in text:
+        text = text.replace('\x00', '')
+
     try:
         # Try to encode to UTF-8 - if it works, the text is valid
         text.encode("utf-8")
