@@ -1024,13 +1024,15 @@ prompt_input() {
     local default="$2"
     local var_name="$3"
 
+    # Output directly to terminal to avoid buffering issues
     if [ -n "$default" ]; then
-        echo -ne "${BLUE}$prompt [${default}]: ${NC}"
+        printf "${BLUE}%s [%s]: ${NC}" "$prompt" "$default" > /dev/tty
     else
-        echo -ne "${BLUE}$prompt: ${NC}"
+        printf "${BLUE}%s: ${NC}" "$prompt" > /dev/tty
     fi
 
-    read -r value
+    # Read from terminal directly
+    read -r value < /dev/tty
 
     if [ -z "$value" ] && [ -n "$default" ]; then
         value="$default"
@@ -1047,8 +1049,11 @@ prompt_yesno() {
     local options="[Y/n]"
     [ "$default" = "n" ] && options="[y/N]"
 
-    echo -ne "${BLUE}$prompt ${options}: ${NC}"
-    read -r value
+    # Output directly to terminal to avoid buffering issues
+    printf "${BLUE}%s %s: ${NC}" "$prompt" "$options" > /dev/tty
+
+    # Read from terminal directly
+    read -r value < /dev/tty
 
     value=$(echo "$value" | tr '[:upper:]' '[:lower:]')
 
