@@ -351,6 +351,10 @@ class SessionManager:
         """
         Create a new agent session.
 
+        If a session with the same session_id already exists, return the existing session.
+        This handles cases where qwen-code-webui tries to create a session that was
+        already created by fetch_qwen.py or previous webui instance.
+
         Args:
             tool_name: Name of the AI tool.
             user_id: Optional user ID.
@@ -367,10 +371,17 @@ class SessionManager:
                         If not provided, a new UUID will be generated.
 
         Returns:
-            AgentSession: The created session.
+            AgentSession: The created or existing session.
         """
         # Use provided session_id or generate a new one
         session_id = session_id or str(uuid.uuid4())
+
+        # Check if session already exists
+        existing_session = self.get_session(session_id)
+        if existing_session:
+            logger.info(f"Session {session_id} already exists, returning existing session")
+            return existing_session
+
         now = datetime.utcnow()
 
         expires_at = None
