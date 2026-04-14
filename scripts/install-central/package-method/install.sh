@@ -2816,6 +2816,18 @@ print_header "Open ACE - Installer"
 if [ -n "$CONFIG_FILE" ]; then
     parse_config_file
 else
+    # Check if running in interactive terminal
+    if [ ! -t 0 ] && [ ! -t 1 ]; then
+        print_error "Not running in an interactive terminal."
+        print_info "Please use --config option for non-interactive installation."
+        print_info ""
+        print_info "Example:"
+        print_info "  $0 --config install.conf"
+        print_info ""
+        print_info "Or run with a terminal:"
+        print_info "  bash -i $0"
+        exit 1
+    fi
     interactive_config
 fi
 
