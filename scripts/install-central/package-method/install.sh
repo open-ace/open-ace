@@ -46,6 +46,7 @@ validate_source_dir() {
 # Default values
 CONFIG_FILE=""
 INSTALL_MODE=""  # "local" or "deploy"
+DO_UPGRADE="no"  # Set to "yes" when upgrade is detected and confirmed in interactive_config
 
 # Deployment settings (for both local and deploy modes)
 DEPLOY_HOST=""        # Empty for local mode, required for deploy mode
@@ -1734,10 +1735,67 @@ parse_config_file() {
 # Interactive Configuration
 # ============================================================================
 
+# Detect existing local installation and load config from it
+# Returns 0 if upgrade detected (config loaded), 1 if fresh install
+detect_and_load_local_upgrade() {
+    # Try common install paths
+    local candidate_paths=()
+
+    # Check openace user's home
+    local openace_home
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        openace_home="/Users/openace"
+    else
+        openace_home="/home/openace"
+    fi
+
+    # Add candidate paths in priority order
+    if check_openace_user_exists; then
+        candidate_paths+=("$openace_home")
+    fi
+    candidate_paths+=("$HOME/open-ace")
+
+    for target_path in "${candidate_paths[@]}"; do
+        if [ -d "$target_path" ] && [ -f "$target_path/web.py" ]; then
+            print_info "Existing installation found at: $target_path"
+            # Auto-load config from existing installation
+            DEPLOY_USER=$(stat -f "%Su" "$target_path" 2>/dev/null || stat -c "%U" "$target_path" 2>/dev/null || echo "$USER")
+            DEPLOY_PATH="$target_path"
+            INSTALL_MODE="local"
+            INSTALL_SERVICE="no"
+
+            # Read port from existing config
+            local config_file
+            if [ "$DEPLOY_USER" = "root" ]; then
+                config_file="/root/.open-ace/config.json"
+            elif [ "$DEPLOY_USER" = "${USER}" ] && [ "$EUID" -ne 0 ]; then
+                config_file="$HOME/.open-ace/config.json"
+            else
+                if [[ "$OSTYPE" == "darwin"* ]]; then
+                    config_file="/Users/$DEPLOY_USER/.open-ace/config.json"
+                else
+                    config_file="/home/$DEPLOY_USER/.open-ace/config.json"
+                fi
+            fi
+
+            if [ -f "$config_file" ]; then
+                local port=$(grep -o '"web_port"[[:space:]]*:[[:space:]]*[0-9]*' "$config_file" 2>/dev/null | grep -o '[0-9]*$')
+                if [ -n "$port" ]; then
+                    SERVICE_PORT="$port"
+                fi
+            fi
+
+            return 0
+        fi
+    done
+
+    return 1
+}
+
 interactive_config() {
     print_header "Open ACE - Installation Configuration"
 
-    # Ask for installation mode
+    # Ask for installation mode first (needed to know where to look)
     echo -e "${BLUE}Select installation mode:${NC}"
     echo "  1) Local (install on this machine)"
     echo "  2) Deploy (deploy to a remote machine via SSH)"
@@ -1749,13 +1807,66 @@ interactive_config() {
             INSTALL_MODE="local"
             # Initialize deployment user based on openace user availability
             init_deploy_user "true"
+
+            # Check for existing local installation
+            if detect_and_load_local_upgrade; then
+                echo ""
+                print_warning "Existing installation detected!"
+                print_info "  User: $DEPLOY_USER"
+                print_info "  Path: $DEPLOY_PATH"
+                if [ -n "$SERVICE_PORT" ]; then
+                    print_info "  Port: $SERVICE_PORT"
+                fi
+                echo ""
+                prompt_yesno "Upgrade existing installation?" "y" DO_UPGRADE
+                if [ "$DO_UPGRADE" = "yes" ]; then
+                    # Skip all parameter prompts, go straight to upgrade
+                    return 0
+                else
+                    # User doesn't want to upgrade, fall through to normal config
+                    print_info "Proceeding with fresh installation configuration..."
+                    DEPLOY_USER=""
+                    DEPLOY_PATH=""
+                    init_deploy_user "true"
+                fi
+            fi
+
             configure_local
             ;;
         2)
             INSTALL_MODE="deploy"
             # Initialize deployment user (remote will be checked later)
             init_deploy_user "false"
-            configure_deploy
+
+            # For remote deploy, we need host info first to check for existing install
+            echo ""
+            echo -e "${YELLOW}Configuring remote deployment...${NC}"
+            echo ""
+            prompt_input "Remote host IP" "" DEPLOY_HOST
+            if [ -z "$DEPLOY_HOST" ]; then
+                print_error "Remote host is required"
+                exit 1
+            fi
+            prompt_input "Remote user" "$DEPLOY_USER" DEPLOY_USER
+            prompt_input "Deployment path" "/home/$DEPLOY_USER/open-ace" DEPLOY_PATH
+
+            # Check for existing remote installation
+            local remote="$DEPLOY_USER@$DEPLOY_HOST"
+            if ssh -o ConnectTimeout=5 "$remote" "[ -d '$DEPLOY_PATH' ] && [ -f '$DEPLOY_PATH/web.py' ]" 2>/dev/null; then
+                print_warning "Existing installation found at: $DEPLOY_HOST:$DEPLOY_PATH"
+                prompt_yesno "Upgrade existing installation?" "y" DO_UPGRADE
+                if [ "$DO_UPGRADE" = "yes" ]; then
+                    # Skip remaining parameter prompts, go straight to upgrade
+                    INSTALL_SERVICE="no"
+                    DO_UPGRADE="yes"
+                    return 0
+                else
+                    print_info "Proceeding with fresh installation configuration..."
+                fi
+            fi
+
+            # Continue with remaining deploy config (service, workspace, etc.)
+            configure_deploy_remaining
             ;;
         *)
             print_error "Invalid choice"
@@ -1894,6 +2005,61 @@ configure_deploy() {
     INSTALL_SERVICE="$install_service"
 }
 
+# Remaining deploy configuration (after host/user/path are already set)
+# Used when upgrade was declined and we need to ask service/workspace questions
+configure_deploy_remaining() {
+    # Ask about systemd service
+    echo ""
+    prompt_yesno "Install as systemd service on remote?" "y" install_service
+    if [ "$install_service" = "yes" ]; then
+        prompt_input "Web server port" "5000" SERVICE_PORT
+        prompt_input "Web server host" "$SERVICE_HOST" SERVICE_HOST
+    fi
+
+    # Ask about multi-user workspace mode
+    echo ""
+    echo -e "${BLUE}=== Workspace Multi-user Mode Configuration ===${NC}"
+    echo -e "${YELLOW}Multi-user mode starts a separate qwen-code-webui process for each user${NC}"
+    prompt_yesno "Enable multi-user mode?" "y" enable_multi_user
+    if [ "$enable_multi_user" = "yes" ]; then
+        WORKSPACE_MULTI_USER_MODE="true"
+        prompt_input "Port pool start" "$WORKSPACE_PORT_RANGE_START" WORKSPACE_PORT_RANGE_START
+        prompt_input "Port pool end" "$WORKSPACE_PORT_RANGE_END" WORKSPACE_PORT_RANGE_END
+        prompt_input "Max instances" "$WORKSPACE_MAX_INSTANCES" WORKSPACE_MAX_INSTANCES
+        prompt_input "Idle timeout (minutes)" "$WORKSPACE_IDLE_TIMEOUT" WORKSPACE_IDLE_TIMEOUT
+    fi
+
+    echo ""
+    print_info "Configuration Summary:"
+    echo "  Mode: Deploy (via SSH)"
+    echo "  Host: $DEPLOY_HOST"
+    echo "  User: $DEPLOY_USER"
+    echo "  Path: $DEPLOY_PATH"
+    if [ "$install_service" = "yes" ]; then
+        echo "  Systemd service: Yes"
+        echo "  Web port: $SERVICE_PORT"
+        echo "  Web host: $SERVICE_HOST"
+    else
+        echo "  Systemd service: No"
+    fi
+    if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
+        echo "  Multi-user workspace: Enabled"
+        echo "    - Port range: $WORKSPACE_PORT_RANGE_START - $WORKSPACE_PORT_RANGE_END"
+        echo "    - Max instances: $WORKSPACE_MAX_INSTANCES"
+        echo "    - Idle timeout: $WORKSPACE_IDLE_TIMEOUT min"
+    fi
+    echo ""
+
+    prompt_yesno "Proceed with installation?" "y" confirm
+    if [ "$confirm" != "yes" ]; then
+        echo "Installation cancelled."
+        exit 0
+    fi
+
+    # Store service installation preference
+    INSTALL_SERVICE="$install_service"
+}
+
 # ============================================================================
 # Local Installation
 # ============================================================================
@@ -1928,8 +2094,10 @@ install_local() {
     # Setup PostgreSQL (detect or install)
     setup_postgresql
 
-    # Check if already installed (must have web.py to be considered valid installation)
-    if [ -d "$target_path" ] && [ -f "$target_path/web.py" ]; then
+    # If upgrade was already confirmed in interactive_config, skip re-checking
+    if [ "$DO_UPGRADE" = "yes" ]; then
+        do_upgrade "$target_path" "$config_dir" "$DEPLOY_USER"
+    elif [ -d "$target_path" ] && [ -f "$target_path/web.py" ]; then
         print_warning "Existing installation found at: $target_path"
         prompt_yesno "Upgrade existing installation?" "y" upgrade
 
@@ -2012,8 +2180,10 @@ install_deploy() {
     fi
     print_success "SSH connection OK"
 
-    # Check if already installed (must have web.py to be considered valid installation)
-    if ssh "$remote" "[ -d '$target_path' ] && [ -f '$target_path/web.py' ]"; then
+    # If upgrade was already confirmed in interactive_config, skip re-checking
+    if [ "$DO_UPGRADE" = "yes" ]; then
+        do_upgrade_remote "$remote" "$target_path"
+    elif ssh "$remote" "[ -d '$target_path' ] && [ -f '$target_path/web.py' ]"; then
         print_warning "Existing installation found at: $target_path"
         prompt_yesno "Upgrade existing installation?" "y" upgrade
 
