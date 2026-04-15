@@ -650,6 +650,7 @@ def update_agent_sessions_stats(messages: list) -> int:
         "request_count": 0,
         "models": set(),
         "messages": [],  # Store messages for session_messages table
+        "last_timestamp": None,  # Track the latest message timestamp
     })
 
     for msg in messages:
@@ -675,6 +676,13 @@ def update_agent_sessions_stats(messages: list) -> int:
 
         # Store message for session_messages insertion
         session_stats[session_id]["messages"].append(msg)
+
+        # Update last_timestamp to the latest message timestamp
+        timestamp = msg.get("timestamp")
+        if timestamp:
+            current_last = session_stats[session_id]["last_timestamp"]
+            if current_last is None or timestamp > current_last:
+                session_stats[session_id]["last_timestamp"] = timestamp
 
     if not session_stats:
         return 0
@@ -748,6 +756,8 @@ def update_agent_sessions_stats(messages: list) -> int:
                 # Update agent_sessions table
                 # Use GREATEST to take the max value (avoid cumulative addition on repeated runs)
                 # This ensures stats are accurate based on actual JSONL file content
+                # Use last_timestamp (from actual messages) instead of script run time for updated_at
+                session_updated_at = stats["last_timestamp"] or now
                 sql = f"""
                     UPDATE agent_sessions
                     SET message_count = GREATEST(COALESCE(message_count, 0), {placeholder}),
@@ -765,7 +775,7 @@ def update_agent_sessions_stats(messages: list) -> int:
                         stats["total_tokens"],
                         stats["request_count"],
                         model,
-                        now,
+                        session_updated_at,
                         session_id,
                     ),
                 )

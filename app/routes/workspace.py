@@ -641,60 +641,6 @@ def add_session_message(session_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
-@workspace_bp.route("/sessions/<session_id>/stats", methods=["POST"])
-def update_session_stats(session_id):
-    """Update session statistics (tokens, message count, etc.).
-
-    Called by qwen-code-webui to sync usage statistics for session list display.
-    """
-    from datetime import datetime
-
-    try:
-        data = request.get_json() or {}
-
-        manager = SessionManager()
-        session = manager.get_session(session_id)
-
-        if not session:
-            return jsonify({"success": False, "error": "Session not found"}), 404
-
-        # Update statistics from request data
-        updates = {}
-        if "total_tokens" in data:
-            updates["total_tokens"] = data["total_tokens"]
-        if "total_input_tokens" in data:
-            updates["total_input_tokens"] = data["total_input_tokens"]
-        if "total_output_tokens" in data:
-            updates["total_output_tokens"] = data["total_output_tokens"]
-        if "message_count" in data:
-            updates["message_count"] = data["message_count"]
-        if "request_count" in data:
-            updates["request_count"] = data["request_count"]
-        if "model" in data:
-            updates["model"] = data["model"]
-
-        if updates:
-            conn = manager._get_connection()
-            cursor = conn.cursor()
-
-            # Build UPDATE query dynamically
-            set_clauses = [f"{k} = {_param()}" for k in updates.keys()]
-            query = f"""
-                UPDATE agent_sessions
-                SET {', '.join(set_clauses)}, updated_at = {_param()}
-                WHERE session_id = {_param()}
-            """
-            params = list(updates.values()) + [datetime.utcnow().isoformat(), session_id]
-            cursor.execute(query, params)
-            conn.commit()
-            conn.close()
-
-        return jsonify({"success": True})
-    except Exception as e:
-        logger.error(f"Error updating session stats: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
 @workspace_bp.route("/sessions/<session_id>/complete", methods=["POST"])
 def complete_session(session_id):
     """Mark a session as completed."""
