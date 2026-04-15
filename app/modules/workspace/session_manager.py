@@ -74,7 +74,7 @@ class SessionMessage:
             "content": self.content,
             "tokens_used": self.tokens_used,
             "model": self.model,
-            "timestamp": self.timestamp.isoformat() if self.timestamp else None,
+            "timestamp": _format_dt(self.timestamp),
             "metadata": self.metadata,
         }
 
@@ -91,6 +91,16 @@ class SessionMessage:
             timestamp=datetime.fromisoformat(data["timestamp"]) if data.get("timestamp") else None,
             metadata=data.get("metadata", {}),
         )
+
+
+def _format_dt(dt):
+    """Format datetime as ISO 8601 with UTC timezone for consistent frontend display."""
+    if dt is None:
+        return None
+    iso_str = dt.isoformat()
+    if "+" not in iso_str and "Z" not in iso_str and "-" not in iso_str[-6:]:
+        iso_str += "+00:00"
+    return iso_str
 
 
 @dataclass
@@ -144,10 +154,10 @@ class AgentSession:
             "request_count": self.request_count,
             "model": self.model,
             "tags": self.tags,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
-            "expires_at": self.expires_at.isoformat() if self.expires_at else None,
+            "created_at": _format_dt(self.created_at),
+            "updated_at": _format_dt(self.updated_at),
+            "completed_at": _format_dt(self.completed_at),
+            "expires_at": _format_dt(self.expires_at),
             "messages": [m.to_dict() for m in self.messages],
         }
 
