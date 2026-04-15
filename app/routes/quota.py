@@ -121,46 +121,53 @@ def check_quota():
     user_id = user_or_error["id"]
 
     try:
-        # Get quota status from QuotaManager
-        status = quota_manager.get_user_quota_status(user_id, period="daily")
-
-        # Also get monthly stats
         user = user_repo.get_user_by_id(user_id)
-        monthly_token_quota = user.get("monthly_token_quota") if user else None
-        monthly_request_quota = user.get("monthly_request_quota") if user else None
+        if not user:
+            return jsonify({"error": "User not found"}), 404
 
-        # Calculate monthly usage
-        today = datetime.now()
-        month_start = today.replace(day=1).strftime("%Y-%m-%d")
-        month_end = today.strftime("%Y-%m-%d")
+        username = user.get("username", "")
+        system_account = user.get("system_account") or username
 
-        # Get monthly token usage from daily_messages
-        monthly_token_usage = usage_repo.get_daily_range(month_start, month_end)
-        monthly_tokens = sum(m.get("tokens_used", 0) for m in monthly_token_usage)
+        # Get today's usage from daily_messages
+        today = datetime.now().strftime("%Y-%m-%d")
+        today_stats = usage_repo.get_request_stats_by_user(date=today, user_name=system_account)
+        today_requests = sum(stat.get("requests", 0) for stat in today_stats)
+        today_tokens = sum(stat.get("tokens", 0) for stat in today_stats)
 
-        # Get monthly request usage from daily_usage
-        monthly_requests = usage_repo.get_request_count_total(month_start, month_end)
+        # Get monthly usage from daily_messages
+        now = datetime.now()
+        monthly_stats = usage_repo.get_monthly_request_stats_by_user(
+            now.year, now.month, user_name=system_account
+        )
+        monthly_requests = sum(stat.get("requests", 0) for stat in monthly_stats)
+        monthly_tokens = sum(stat.get("tokens", 0) for stat in monthly_stats)
 
-        # Build response
+        # Quota limits
+        daily_token_limit = (user.get("daily_token_quota") or 1) * TOKEN_QUOTA_MULTIPLIER
+        daily_request_limit = user.get("daily_request_quota") or 1000
+        monthly_token_quota = user.get("monthly_token_quota")
+        monthly_request_quota = user.get("monthly_request_quota")
+
+        over_daily_token = today_tokens >= daily_token_limit
+        over_daily_request = today_requests >= daily_request_limit
+        over_monthly_token = monthly_token_quota is not None and monthly_tokens >= monthly_token_quota * TOKEN_QUOTA_MULTIPLIER
+        over_monthly_request = monthly_request_quota is not None and monthly_requests >= monthly_request_quota
+
         response = {
             "user_id": user_id,
             "username": user_or_error.get("username"),
             "daily": {
                 "tokens": {
-                    "used": status.tokens_used,
-                    "limit": status.token_limit,
-                    "percentage": round((status.tokens_used / status.token_limit * 100), 2)
-                    if status.token_limit and status.token_limit > 0
-                    else 0,
-                    "over_quota": status.is_over_token_quota,
+                    "used": today_tokens,
+                    "limit": daily_token_limit,
+                    "percentage": round((today_tokens / daily_token_limit * 100), 2) if daily_token_limit else 0,
+                    "over_quota": over_daily_token,
                 },
                 "requests": {
-                    "used": status.requests_used,
-                    "limit": status.request_limit,
-                    "percentage": round((status.requests_used / status.request_limit * 100), 2)
-                    if status.request_limit and status.request_limit > 0
-                    else 0,
-                    "over_quota": status.is_over_request_quota,
+                    "used": today_requests,
+                    "limit": daily_request_limit,
+                    "percentage": round((today_requests / daily_request_limit * 100), 2) if daily_request_limit else 0,
+                    "over_quota": over_daily_request,
                 },
             },
             "monthly": {
@@ -168,23 +175,19 @@ def check_quota():
                     "used": monthly_tokens,
                     "limit": monthly_token_quota * TOKEN_QUOTA_MULTIPLIER if monthly_token_quota else None,
                     "percentage": round((monthly_tokens / (monthly_token_quota * TOKEN_QUOTA_MULTIPLIER) * 100), 2)
-                    if monthly_token_quota and monthly_token_quota > 0
-                    else 0,
-                    "over_quota": monthly_token_quota is not None
-                    and monthly_tokens >= monthly_token_quota * TOKEN_QUOTA_MULTIPLIER,
+                    if monthly_token_quota and monthly_token_quota > 0 else 0,
+                    "over_quota": over_monthly_token,
                 },
                 "requests": {
                     "used": monthly_requests,
                     "limit": monthly_request_quota,
                     "percentage": round((monthly_requests / monthly_request_quota * 100), 2)
-                    if monthly_request_quota and monthly_request_quota > 0
-                    else 0,
-                    "over_quota": monthly_request_quota is not None
-                    and monthly_requests >= monthly_request_quota,
+                    if monthly_request_quota and monthly_request_quota > 0 else 0,
+                    "over_quota": over_monthly_request,
                 },
             },
-            "can_use": not (status.is_over_token_quota or status.is_over_request_quota),
-            "alerts": [a.to_dict() for a in status.alerts] if status.alerts else [],
+            "can_use": not (over_daily_token or over_daily_request or over_monthly_token or over_monthly_request),
+            "alerts": [],
         }
 
         return jsonify(response)
@@ -392,18 +395,35 @@ def webui_quota_check():
         return jsonify({"error": f"Invalid token: {error}"}), 401
 
     try:
-        status = quota_manager.get_user_quota_status(user_id, period="daily")
         user = user_repo.get_user_by_id(user_id)
-        monthly_token_quota = user.get("monthly_token_quota") if user else None
-        monthly_request_quota = user.get("monthly_request_quota") if user else None
+        if not user:
+            return jsonify({"error": "User not found"}), 404
 
-        today = datetime.now()
-        month_start = today.replace(day=1).strftime("%Y-%m-%d")
-        month_end = today.strftime("%Y-%m-%d")
-        monthly_token_usage = usage_repo.get_daily_range(month_start, month_end)
-        monthly_tokens = sum(m.get("tokens_used", 0) for m in monthly_token_usage)
-        monthly_requests = usage_repo.get_request_count_total(month_start, month_end)
+        username = user.get("username", "")
+        system_account = user.get("system_account") or username
 
+        # Get today's usage from daily_messages
+        today = datetime.now().strftime("%Y-%m-%d")
+        today_stats = usage_repo.get_request_stats_by_user(date=today, user_name=system_account)
+        today_requests = sum(stat.get("requests", 0) for stat in today_stats)
+        today_tokens = sum(stat.get("tokens", 0) for stat in today_stats)
+
+        # Get monthly usage from daily_messages
+        now = datetime.now()
+        monthly_stats = usage_repo.get_monthly_request_stats_by_user(
+            now.year, now.month, user_name=system_account
+        )
+        monthly_requests = sum(stat.get("requests", 0) for stat in monthly_stats)
+        monthly_tokens = sum(stat.get("tokens", 0) for stat in monthly_stats)
+
+        # Quota limits
+        daily_token_limit = (user.get("daily_token_quota") or 1) * TOKEN_QUOTA_MULTIPLIER
+        daily_request_limit = user.get("daily_request_quota") or 1000
+        monthly_token_quota = user.get("monthly_token_quota")
+        monthly_request_quota = user.get("monthly_request_quota")
+
+        over_daily_token = today_tokens >= daily_token_limit
+        over_daily_request = today_requests >= daily_request_limit
         over_monthly_token = monthly_token_quota is not None and monthly_tokens >= monthly_token_quota * TOKEN_QUOTA_MULTIPLIER
         over_monthly_request = monthly_request_quota is not None and monthly_requests >= monthly_request_quota
 
@@ -411,23 +431,23 @@ def webui_quota_check():
             "user_id": user_id,
             "daily": {
                 "tokens": {
-                    "used": status.tokens_used,
-                    "limit": status.token_limit,
-                    "percentage": round((status.tokens_used / status.token_limit * 100), 2) if status.token_limit and status.token_limit > 0 else 0,
-                    "over_quota": status.is_over_token_quota,
+                    "used": today_tokens,
+                    "limit": daily_token_limit,
+                    "percentage": round((today_tokens / daily_token_limit * 100), 2) if daily_token_limit else 0,
+                    "over_quota": over_daily_token,
                 },
                 "requests": {
-                    "used": status.requests_used,
-                    "limit": status.request_limit,
-                    "percentage": round((status.requests_used / status.request_limit * 100), 2) if status.request_limit and status.request_limit > 0 else 0,
-                    "over_quota": status.is_over_request_quota,
+                    "used": today_requests,
+                    "limit": daily_request_limit,
+                    "percentage": round((today_requests / daily_request_limit * 100), 2) if daily_request_limit else 0,
+                    "over_quota": over_daily_request,
                 },
             },
             "monthly": {
                 "tokens": {"used": monthly_tokens, "limit": monthly_token_quota * TOKEN_QUOTA_MULTIPLIER if monthly_token_quota else None, "over_quota": over_monthly_token},
                 "requests": {"used": monthly_requests, "limit": monthly_request_quota, "over_quota": over_monthly_request},
             },
-            "can_use": not (status.is_over_token_quota or status.is_over_request_quota or over_monthly_token or over_monthly_request),
+            "can_use": not (over_daily_token or over_daily_request or over_monthly_token or over_monthly_request),
         }
         return jsonify(response)
     except Exception as e:
