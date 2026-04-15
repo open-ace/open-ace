@@ -2091,8 +2091,10 @@ install_local() {
         fi
     fi
 
-    # Setup PostgreSQL (detect or install)
-    setup_postgresql
+    # Setup PostgreSQL (detect or install) - skip for upgrade (DB config already exists)
+    if [ "$DO_UPGRADE" != "yes" ]; then
+        setup_postgresql
+    fi
 
     # If upgrade was already confirmed in interactive_config, skip re-checking
     if [ "$DO_UPGRADE" = "yes" ]; then
