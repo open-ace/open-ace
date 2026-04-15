@@ -220,48 +220,6 @@ class WorkspaceService:
         logger.info(f"Started session: {session.session_id} for tool: {tool_name}")
         return session
 
-    def add_message_to_session(
-        self,
-        session_id: str,
-        role: str,
-        content: str,
-        tokens_used: int = 0,
-        model: Optional[str] = None,
-    ) -> int:
-        """
-        Add a message to a session.
-
-        Args:
-            session_id: Session ID.
-            role: Message role (user, assistant, system, tool).
-            content: Message content.
-            tokens_used: Tokens used.
-            model: Model used.
-
-        Returns:
-            int: Message ID.
-        """
-        message_id = self.sessions.add_message(
-            session_id=session_id, role=role, content=content, tokens_used=tokens_used, model=model
-        )
-
-        # Emit message event
-        event_type = (
-            SyncEventType.MESSAGE_SENT if role == "user" else SyncEventType.MESSAGE_RECEIVED
-        )
-        self.sync.emit_event(
-            SyncEvent(
-                event_id=str(__import__("uuid").uuid4()),
-                event_type=event_type.value,
-                timestamp=__import__("datetime").datetime.utcnow(),
-                source="workspace",
-                session_id=session_id,
-                data={"role": role, "tokens_used": tokens_used},
-            )
-        )
-
-        return message_id
-
     def end_session(self, session_id: str) -> bool:
         """
         End a session.

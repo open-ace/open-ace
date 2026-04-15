@@ -190,21 +190,6 @@ class TestSessionManager:
         assert retrieved is not None
         assert retrieved.session_id == created.session_id
 
-    def test_add_message(self, session_manager):
-        """Test adding a message to a session."""
-        session = session_manager.create_session(tool_name="claude")
-
-        message_id = session_manager.add_message(
-            session_id=session.session_id, role="user", content="Hello!", tokens_used=10
-        )
-        assert message_id is not None
-
-        # Get session with messages
-        retrieved = session_manager.get_session(session.session_id, include_messages=True)
-        assert len(retrieved.messages) == 1
-        assert retrieved.messages[0].content == "Hello!"
-        assert retrieved.message_count == 1
-
     def test_complete_session(self, session_manager):
         """Test completing a session."""
         session = session_manager.create_session(tool_name="claude")
@@ -483,14 +468,6 @@ class TestWorkspaceIntegration:
             tool_name="claude", user_id=1, title="Integration Test"
         )
 
-        # Add messages
-        session_mgr.add_message(
-            session_id=session.session_id, role="user", content="Hello", tokens_used=5
-        )
-        session_mgr.add_message(
-            session_id=session.session_id, role="assistant", content="Hi there!", tokens_used=10
-        )
-
         # Emit sync events
         sync_mgr = StateSyncManager(db_path=temp_db)
         sync_mgr.emit_event(
@@ -507,9 +484,8 @@ class TestWorkspaceIntegration:
         session_mgr.complete_session(session.session_id)
 
         # Verify
-        retrieved = session_mgr.get_session(session.session_id, include_messages=True)
+        retrieved = session_mgr.get_session(session.session_id)
         assert retrieved.status == SessionStatus.COMPLETED.value
-        assert len(retrieved.messages) == 2
 
         events = sync_mgr.get_events(session_id=session.session_id)
         assert len(events) == 1
