@@ -34,6 +34,7 @@ const workNavItems: NavItem[] = [
   { id: 'sessions', label: 'sessions', icon: 'bi-collection', path: '/work/sessions' },
   { id: 'prompts', label: 'prompts', icon: 'bi-file-text', path: '/work/prompts' },
   { id: 'usage', label: 'myUsage', icon: 'bi-bar-chart', path: '/work/usage' },
+  { id: 'insights', label: 'insights', icon: 'bi-lightbulb', path: '/work/insights' },
 ];
 
 interface WorkLayoutProps {
@@ -62,6 +63,7 @@ export const WorkLayout: React.FC<WorkLayoutProps> = ({ children }) => {
     if (path.startsWith('/work/sessions')) return 'sessions';
     if (path.startsWith('/work/prompts')) return 'prompts';
     if (path.startsWith('/work/usage')) return 'usage';
+    if (path.startsWith('/work/insights')) return 'insights';
     return 'workspace';
   };
 

@@ -37,6 +37,7 @@ const ROIAnalysis = lazy(() => import('@/components/features/analysis/ROIAnalysi
 const ConversationHistory = lazy(() => import('@/components/features/ConversationHistory').then(m => ({ default: m.ConversationHistory })));
 const RequestDashboard = lazy(() => import('@/components/features/management/RequestDashboard').then(m => ({ default: m.RequestDashboard })));
 const UsageOverview = lazy(() => import('@/components/work/UsageOverview').then(m => ({ default: m.UsageOverview })));
+const InsightsReport = lazy(() => import('@/components/work/InsightsReport').then(m => ({ default: m.InsightsReport })));
 const UserManagement = lazy(() => import('@/components/features/management/UserManagement').then(m => ({ default: m.UserManagement })));
 const AuditCenter = lazy(() => import('@/components/features/management/AuditCenter').then(m => ({ default: m.AuditCenter })));
 const QuotaAlerts = lazy(() => import('@/components/features/management/QuotaAlerts').then(m => ({ default: m.QuotaAlerts })));
@@ -154,6 +155,7 @@ const WorkRoutes: React.FC = () => {
           <Route path="sessions" element={<Sessions />} />
           <Route path="prompts" element={<Prompts />} />
           <Route path="usage" element={<UsageOverview />} />
+          <Route path="insights" element={<InsightsReport />} />
           {/* Explicit /workspace route for session restore */}
           <Route path="workspace" element={<Workspace />} />
           <Route path="*" element={<Navigate to="/work" replace />} />

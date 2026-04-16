@@ -960,3 +960,120 @@ class MessageRepository:
             "unique_users": result.get("unique_users", 0) or 0,
             "unique_days": result.get("unique_days", 0) or 0,
         }
+
+    def get_user_messages_stats(
+        self, start_date: str, end_date: str, sender_prefix: str
+    ) -> Dict:
+        """
+        Get user message statistics summary for insights analysis.
+
+        Args:
+            start_date: Start date string (YYYY-MM-DD).
+            end_date: End date string (YYYY-MM-DD).
+            sender_prefix: Prefix to match sender_name (system_account or username).
+
+        Returns:
+            Dict: Statistics summary with total_conversations, total_messages,
+                  total_tokens, avg_messages_per_conversation.
+        """
+        query = """
+            SELECT
+                COUNT(DISTINCT COALESCE(agent_session_id, conversation_id)) as total_conversations,
+                COUNT(*) as total_messages,
+                COALESCE(SUM(tokens_used), 0) as total_tokens
+            FROM daily_messages
+            WHERE date >= ? AND date <= ?
+              AND sender_name LIKE ?
+              AND role IN ('user', 'assistant')
+        """
+        result = self.db.fetch_one(query, (start_date, end_date, f"{sender_prefix}%"))
+
+        if result:
+            total_conversations = result["total_conversations"] or 0
+            total_messages = result["total_messages"] or 0
+            total_tokens = result["total_tokens"] or 0
+            return {
+                "total_conversations": total_conversations,
+                "total_messages": total_messages,
+                "total_tokens": total_tokens,
+                "avg_messages_per_conversation": (
+                    round(total_messages / total_conversations, 1)
+                    if total_conversations > 0
+                    else 0
+                ),
+            }
+
+        return {
+            "total_conversations": 0,
+            "total_messages": 0,
+            "total_tokens": 0,
+            "avg_messages_per_conversation": 0,
+        }
+
+    def get_user_conversation_samples(
+        self,
+        start_date: str,
+        end_date: str,
+        sender_prefix: str,
+        limit: int = 5,
+    ) -> List[Dict]:
+        """
+        Get sampled conversations for insights analysis.
+
+        Returns up to `limit` conversations with their messages,
+        each message truncated to 300 characters.
+
+        Args:
+            start_date: Start date string (YYYY-MM-DD).
+            end_date: End date string (YYYY-MM-DD).
+            sender_prefix: Prefix to match sender_name.
+            limit: Maximum number of conversations to sample.
+
+        Returns:
+            List[Dict]: List of conversations, each with session_id and messages.
+        """
+        # Find distinct agent_session_ids that have user messages
+        session_query = """
+            SELECT DISTINCT COALESCE(agent_session_id, conversation_id) as session_id
+            FROM daily_messages
+            WHERE date >= ? AND date <= ?
+              AND sender_name LIKE ?
+              AND role = 'user'
+              AND COALESCE(agent_session_id, conversation_id) IS NOT NULL
+            LIMIT ?
+        """
+        sessions = self.db.fetch_all(
+            session_query, (start_date, end_date, f"{sender_prefix}%", limit)
+        )
+
+        if not sessions:
+            return []
+
+        # For each session, get messages
+        conversations = []
+        for session in sessions:
+            session_id = session["session_id"]
+            msg_query = """
+                SELECT role, LEFT(content, 300) as content
+                FROM daily_messages
+                WHERE (agent_session_id = ? OR conversation_id = ?)
+                  AND role IN ('user', 'assistant')
+                  AND content IS NOT NULL
+                  AND content != ''
+                ORDER BY timestamp ASC
+            """
+            try:
+                messages = self.db.fetch_all(msg_query, (session_id, session_id))
+            except Exception as e:
+                logger.warning(f"Skipping session {session_id} due to encoding error: {e}")
+                continue
+            if messages:
+                conversations.append({
+                    "session_id": session_id,
+                    "messages": [
+                        {"role": m["role"], "content": m["content"]}
+                        for m in messages
+                    ],
+                })
+
+        return conversations

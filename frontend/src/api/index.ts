@@ -114,3 +114,12 @@ export type {
 } from './sso';
 export { fetchApi } from './fetch';
 export type { FetchStatus, FetchResponse } from './fetch';
+export { insightsApi } from './insights';
+export type {
+  InsightSuggestion,
+  InsightsUsageSummary,
+  InsightsReport,
+  InsightsHistoryItem,
+  InsightsHistoryResponse,
+  InsightsGenerateResponse,
+} from './insights';
