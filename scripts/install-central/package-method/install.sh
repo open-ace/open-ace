@@ -1759,7 +1759,11 @@ detect_and_load_local_upgrade() {
         if [ -d "$target_path" ] && [ -f "$target_path/web.py" ]; then
             print_info "Existing installation found at: $target_path"
             # Auto-load config from existing installation
-            DEPLOY_USER=$(stat -f "%Su" "$target_path" 2>/dev/null || stat -c "%U" "$target_path" 2>/dev/null || echo "$USER")
+            if [[ "$OSTYPE" == "darwin"* ]]; then
+                DEPLOY_USER=$(stat -f "%Su" "$target_path" 2>/dev/null || echo "$USER")
+            else
+                DEPLOY_USER=$(stat -c "%U" "$target_path" 2>/dev/null || echo "$USER")
+            fi
             DEPLOY_PATH="$target_path"
             INSTALL_MODE="local"
             INSTALL_SERVICE="no"
