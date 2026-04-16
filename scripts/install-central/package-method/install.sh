@@ -2732,6 +2732,28 @@ with open('$config_dir/config.json', 'w') as f:
         print_warning "init_db.py not found, skipping default user creation"
     fi
 
+    # Run database migrations (alembic upgrade head)
+    print_info "Running database migrations..."
+    if [ -f "$target_path/alembic.ini" ] && [ -d "$target_path/migrations" ]; then
+        if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ]; then
+            if su - "$install_user" -c "cd '$target_path' && python3 -m alembic upgrade head"; then
+                print_success "Database migrations applied"
+            else
+                print_warning "Database migration failed. You may need to run 'alembic upgrade head' manually."
+            fi
+        else
+            cd "$target_path"
+            if python3 -m alembic upgrade head; then
+                print_success "Database migrations applied"
+            else
+                print_warning "Database migration failed. You may need to run 'alembic upgrade head' manually."
+            fi
+            cd - > /dev/null
+        fi
+    else
+        print_warning "Alembic not found, skipping database migrations"
+    fi
+
     print_success "Upgrade completed"
     print_info "Backup saved to: $backup_dir"
 }
@@ -2897,6 +2919,21 @@ do_upgrade_remote() {
             fi
         else
             echo 'Warning: init_db.py not found, skipping default user creation'
+        fi
+    "
+
+    # Run database migrations (alembic upgrade head)
+    print_info "Running database migrations on remote..."
+    ssh "$remote" "
+        cd '$target_path'
+        if [ -f 'alembic.ini' ] && [ -d 'migrations' ]; then
+            if python3 -m alembic upgrade head; then
+                echo 'Database migrations applied'
+            else
+                echo 'Warning: Database migration failed. You may need to run alembic upgrade head manually.'
+            fi
+        else
+            echo 'Warning: Alembic not found, skipping database migrations'
         fi
     "
 
