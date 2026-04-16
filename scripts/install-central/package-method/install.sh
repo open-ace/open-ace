@@ -2620,8 +2620,8 @@ with open('$config_dir/config.json', 'w') as f:
         fi
     fi
 
-    # Update workspace configuration (for both new and upgrade modes)
-    if [ -f "$config_dir/config.json" ]; then
+    # Update workspace configuration (only for fresh install, not upgrade)
+    if [ "$DO_UPGRADE" != "yes" ] && [ -f "$config_dir/config.json" ]; then
         # First ensure symlinks are created (if running as root)
         if [ "$EUID" -eq 0 ]; then
             create_webui_symlinks
