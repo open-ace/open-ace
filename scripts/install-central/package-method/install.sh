@@ -335,6 +335,60 @@ init_deploy_user() {
     fi
 }
 
+# Check if DEPLOY_PATH is dangerously set to user's home directory.
+# Returns 0 if safe (or user confirmed), 1 if cancelled.
+check_deploy_path_safety() {
+    local user_home
+    user_home=$(eval echo "~$DEPLOY_USER")
+
+    # Normalize both paths (remove trailing slash)
+    local norm_deploy="${DEPLOY_PATH%/}"
+    local norm_home="${user_home%/}"
+
+    if [ "$norm_deploy" != "$norm_home" ]; then
+        # Not the home directory — safe
+        return 0
+    fi
+
+    echo ""
+    echo -e "${RED}WARNING: Deployment path is set to the user's home directory: $DEPLOY_PATH${NC}"
+    echo -e "${RED}During upgrades, ALL subdirectories (except logs, data, .open-ace) will be deleted.${NC}"
+    echo -e "${RED}This may cause loss of user projects and files!${NC}"
+    echo ""
+
+    # List subdirectories in the home directory
+    echo -e "${YELLOW}Current subdirectories in $DEPLOY_PATH:${NC}"
+    local subdir_count=0
+    for d in "$DEPLOY_PATH"/*/; do
+        if [ -d "$d" ]; then
+            local dir_name=$(basename "$d")
+            echo "  - $dir_name/"
+            subdir_count=$((subdir_count + 1))
+        fi
+    done
+    if [ "$subdir_count" -eq 0 ]; then
+        echo "  (empty)"
+    fi
+    echo ""
+
+    echo -e "${YELLOW}It is recommended to use a subdirectory like: $user_home/open-ace${NC}"
+    local auto_fix_path="$user_home/open-ace"
+    prompt_yesno "Use recommended path: $auto_fix_path?" "y" use_safe_path
+    if [ "$use_safe_path" = "yes" ]; then
+        DEPLOY_PATH="$auto_fix_path"
+        print_success "Deployment path set to: $DEPLOY_PATH"
+        return 0
+    fi
+
+    prompt_yesno "Continue with home directory anyway? (NOT recommended)" "n" force_continue
+    if [ "$force_continue" = "yes" ]; then
+        print_warning "Proceeding with home directory. Use with caution!"
+        return 0
+    fi
+
+    return 1
+}
+
 # ============================================================================
 # PostgreSQL Detection and Installation
 # ============================================================================
@@ -1854,6 +1908,12 @@ interactive_config() {
             prompt_input "Remote user" "$DEPLOY_USER" DEPLOY_USER
             prompt_input "Deployment path" "/home/$DEPLOY_USER/open-ace" DEPLOY_PATH
 
+            # Safety check: warn if deploying to home directory
+            if ! check_deploy_path_safety; then
+                print_error "Deployment cancelled"
+                exit 1
+            fi
+
             # Check for existing remote installation
             local remote="$DEPLOY_USER@$DEPLOY_HOST"
             if ssh -o ConnectTimeout=5 "$remote" "[ -d '$DEPLOY_PATH' ] && [ -f '$DEPLOY_PATH/web.py' ]" 2>/dev/null; then
@@ -1889,6 +1949,12 @@ configure_local() {
 
     # Remove trailing slash from path to avoid double slashes
     DEPLOY_PATH="${DEPLOY_PATH%/}"
+
+    # Safety check: warn if deploying to home directory
+    if ! check_deploy_path_safety; then
+        print_error "Deployment cancelled"
+        exit 1
+    fi
 
     # Ask about systemd service
     echo ""
@@ -2562,7 +2628,30 @@ do_upgrade() {
         print_info "Updating files..."
         # Remove old files except logs, data, and config directory
         local config_basename=$(basename "$config_dir")
-        find "$target_path" -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name "$config_basename" -exec rm -rf {} +
+
+        # List directories that will be deleted and ask for confirmation
+        local delete_list
+        delete_list=$(find "$target_path" -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name "$config_basename" 2>/dev/null)
+        if [ -n "$delete_list" ]; then
+            echo ""
+            echo -e "${YELLOW}The following items will be deleted:${NC}"
+            echo "$delete_list" | while read -r item; do
+                echo "  - $(basename "$item")"
+            done
+            echo ""
+            local skip_delete="no"
+            prompt_yesno "Confirm deletion of the above items?" "y" confirm_delete
+            if [ "$confirm_delete" != "yes" ]; then
+                print_warning "Skipping directory cleanup, only overwriting files"
+                skip_delete="yes"
+            fi
+            if [ "$skip_delete" = "no" ]; then
+                find "$target_path" -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name "$config_basename" -exec rm -rf {} +
+            fi
+        else
+            # No files to delete (shouldn't normally happen during upgrade)
+            find "$target_path" -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name "$config_basename" -exec rm -rf {} +
+        fi
         # Copy new files
         cp -r "$SOURCE_DIR"/* "$target_path/"
 
@@ -2857,7 +2946,29 @@ do_upgrade_remote() {
 
     # Update files (preserve logs, data, and config)
     print_info "Updating remote files..."
-    ssh "$remote" "cd '$target_path' && find . -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name '.open-ace' -exec rm -rf {} +"
+
+    # List directories that will be deleted and ask for confirmation
+    local remote_delete_list
+    remote_delete_list=$(ssh "$remote" "cd '$target_path' && find . -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name '.open-ace' 2>/dev/null")
+    if [ -n "$remote_delete_list" ]; then
+        echo ""
+        echo -e "${YELLOW}The following items will be deleted on remote:${NC}"
+        echo "$remote_delete_list" | while read -r item; do
+            echo "  - $(basename "$item")"
+        done
+        echo ""
+        local remote_skip_delete="no"
+        prompt_yesno "Confirm deletion of the above remote items?" "y" confirm_remote_delete
+        if [ "$confirm_remote_delete" != "yes" ]; then
+            print_warning "Skipping remote directory cleanup, only overwriting files"
+            remote_skip_delete="yes"
+        fi
+        if [ "$remote_skip_delete" = "no" ]; then
+            ssh "$remote" "cd '$target_path' && find . -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name '.open-ace' -exec rm -rf {} +"
+        fi
+    else
+        ssh "$remote" "cd '$target_path' && find . -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name '.open-ace' -exec rm -rf {} +"
+    fi
     scp -r "$SOURCE_DIR"/* "$remote:$target_path/"
 
     # Set permissions
