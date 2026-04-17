@@ -131,6 +131,8 @@ class AgentSession:
     completed_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
     messages: List[SessionMessage] = field(default_factory=list)
+    workspace_type: str = "local"  # local or remote
+    remote_machine_id: Optional[str] = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -159,6 +161,8 @@ class AgentSession:
             "completed_at": _format_dt(self.completed_at),
             "expires_at": _format_dt(self.expires_at),
             "messages": [m.to_dict() for m in self.messages],
+            "workspace_type": self.workspace_type,
+            "remote_machine_id": self.remote_machine_id,
         }
 
     @classmethod
@@ -196,6 +200,8 @@ class AgentSession:
                 datetime.fromisoformat(data["expires_at"]) if data.get("expires_at") else None
             ),
             messages=[SessionMessage.from_dict(m) for m in data.get("messages", [])],
+            workspace_type=data.get("workspace_type", "local"),
+            remote_machine_id=data.get("remote_machine_id"),
         )
 
     def is_expired(self) -> bool:
@@ -339,6 +345,21 @@ class SessionManager:
             ON session_messages(session_id)
         """
         )
+
+        # Add remote workspace columns if not present
+        try:
+            cursor.execute(
+                "ALTER TABLE agent_sessions ADD COLUMN workspace_type TEXT DEFAULT 'local'"
+            )
+        except Exception:
+            pass  # Column already exists
+
+        try:
+            cursor.execute(
+                "ALTER TABLE agent_sessions ADD COLUMN remote_machine_id TEXT"
+            )
+        except Exception:
+            pass  # Column already exists
 
         conn.commit()
         conn.close()
@@ -577,6 +598,86 @@ class SessionManager:
         conn.close()
 
         return [self._row_to_message(row) for row in rows]
+
+    def add_message(
+        self,
+        session_id: str,
+        role: str,
+        content: str,
+        tokens_used: int = 0,
+        model: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Optional[SessionMessage]:
+        """
+        Add a message to a session.
+
+        Args:
+            session_id: Session ID.
+            role: Message role (user, assistant, system, tool).
+            content: Message content.
+            tokens_used: Tokens consumed by this message.
+            model: Optional model name.
+            metadata: Optional metadata dict.
+
+        Returns:
+            SessionMessage or None if session not found.
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # Verify session exists
+        cursor.execute(
+            f"SELECT session_id FROM agent_sessions WHERE session_id = {_param()}",
+            (session_id,),
+        )
+        if not cursor.fetchone():
+            conn.close()
+            return None
+
+        now = datetime.utcnow()
+        message = SessionMessage(
+            session_id=session_id,
+            role=role,
+            content=content,
+            tokens_used=tokens_used,
+            model=model,
+            timestamp=now,
+            metadata=metadata or {},
+        )
+
+        cursor.execute(
+            f"""
+            INSERT INTO session_messages (session_id, role, content, tokens_used, model, timestamp, metadata)
+            VALUES ({_params(7)})
+        """,
+            (
+                message.session_id,
+                message.role,
+                message.content,
+                message.tokens_used,
+                message.model,
+                message.timestamp.isoformat(),
+                json.dumps(message.metadata),
+            ),
+        )
+
+        # Update session message count and token count
+        cursor.execute(
+            f"""
+            UPDATE agent_sessions
+            SET message_count = message_count + 1,
+                total_tokens = total_tokens + {_param()},
+                updated_at = {_param()}
+            WHERE session_id = {_param()}
+        """,
+            (tokens_used, now.isoformat(), session_id),
+        )
+
+        message.id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+
+        return message
 
     def complete_session(self, session_id: str) -> bool:
         """
@@ -1016,6 +1117,8 @@ class SessionManager:
             expires_at=parse_datetime(get_value("expires_at")),
             project_id=get_value("project_id"),
             project_path=get_value("project_path"),
+            workspace_type=get_value("workspace_type") or "local",
+            remote_machine_id=get_value("remote_machine_id"),
         )
 
     def _row_to_message(self, row: Union[sqlite3.Row, Dict]) -> SessionMessage:

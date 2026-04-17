@@ -1,0 +1,786 @@
+#!/usr/bin/env python3
+"""
+Open ACE - Remote Workspace API Routes
+
+API endpoints for remote workspace management including:
+- Machine registration and management
+- Remote session creation and control
+- WebSocket agent communication
+- LLM API proxy for remote CLI tools
+- Usage reporting from remote agents
+"""
+
+import json
+import logging
+import uuid
+from datetime import datetime
+
+from flask import Blueprint, Response, g, jsonify, request, stream_with_context
+
+from app.modules.workspace.api_key_proxy import APIKeyProxyService
+from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
+from app.modules.workspace.remote_session_manager import RemoteSessionManager
+from app.services.auth_service import AuthService
+
+logger = logging.getLogger(__name__)
+
+remote_bp = Blueprint("remote", __name__)
+auth_service = AuthService()
+
+
+@remote_bp.before_request
+def load_user():
+    """Load the current user from session token before each request."""
+    # Skip auth for WebSocket upgrade and agent endpoints (they use JWT)
+    if request.path.endswith("/agent/ws"):
+        return
+    if request.path.endswith("/llm-proxy"):
+        return
+    if request.path.endswith("/usage-report"):
+        return
+    if request.path.startswith("/remote/agent/install"):
+        return
+
+    token = request.cookies.get("session_token") or request.headers.get(
+        "Authorization", ""
+    ).replace("Bearer ", "")
+
+    if token:
+        session = auth_service.get_session(token)
+        if session:
+            g.user = {
+                "id": session.get("user_id"),
+                "username": session.get("username"),
+                "email": session.get("email"),
+                "role": session.get("role"),
+            }
+        else:
+            g.user = None
+    else:
+        url_token = request.args.get("token")
+        if url_token:
+            try:
+                from app.services.webui_manager import WebUIManager
+                webui_manager = WebUIManager()
+                is_valid, user_id, error = webui_manager.validate_token(url_token)
+                if is_valid and user_id:
+                    from app.repositories.user_repo import UserRepository
+                    user_repo = UserRepository()
+                    user = user_repo.get_user_by_id(user_id)
+                    if user:
+                        g.user = {
+                            "id": user_id,
+                            "username": user.get("username"),
+                            "email": user.get("email"),
+                            "role": user.get("role"),
+                        }
+                    else:
+                        g.user = None
+                else:
+                    g.user = None
+            except Exception as e:
+                logger.warning(f"Failed to validate URL token: {e}")
+                g.user = None
+        else:
+            g.user = None
+
+
+def _require_auth():
+    """Require authentication for the current request."""
+    if not hasattr(g, "user") or not g.user:
+        return jsonify({"error": "Authentication required"}), 401
+    return None
+
+
+def _require_admin():
+    """Require admin role for the current request."""
+    auth_error = _require_auth()
+    if auth_error:
+        return auth_error
+    if g.user.get("role") != "admin":
+        return jsonify({"error": "Admin access required"}), 403
+    return None
+
+
+# ==================== Machine Management (Admin) ====================
+
+
+@remote_bp.route("/machines/register", methods=["POST"])
+def register_machine():
+    """
+    Generate a registration token for a new machine.
+    Admin only - the token is used by the agent to authenticate registration.
+    """
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+
+    data = request.get_json() or {}
+    agent_mgr = get_remote_agent_manager()
+
+    # Get tenant_id from user or request
+    tenant_id = data.get("tenant_id", 1)
+
+    token = agent_mgr.create_registration_token(
+        tenant_id=tenant_id,
+        created_by=g.user["id"],
+    )
+
+    return jsonify({
+        "success": True,
+        "registration_token": token,
+        "message": "Use this token to register a remote agent. It is valid for one use.",
+    })
+
+
+@remote_bp.route("/machines", methods=["GET"])
+def list_machines():
+    """List machines. Admin sees all, regular users see assigned machines."""
+    auth_error = _require_auth()
+    if auth_error:
+        return auth_error
+
+    agent_mgr = get_remote_agent_manager()
+
+    if g.user.get("role") == "admin":
+        machines = agent_mgr.list_machines()
+    else:
+        machines = agent_mgr.list_machines(user_id=g.user["id"])
+
+    return jsonify({
+        "success": True,
+        "machines": machines,
+    })
+
+
+@remote_bp.route("/machines/<machine_id>", methods=["GET"])
+def get_machine(machine_id):
+    """Get details and status of a specific machine."""
+    auth_error = _require_auth()
+    if auth_error:
+        return auth_error
+
+    agent_mgr = get_remote_agent_manager()
+    machine = agent_mgr.get_machine(machine_id)
+
+    if not machine:
+        return jsonify({"error": "Machine not found"}), 404
+
+    # Check access for non-admin users
+    if g.user.get("role") != "admin":
+        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
+            return jsonify({"error": "Access denied"}), 403
+
+    return jsonify({
+        "success": True,
+        "machine": machine,
+    })
+
+
+@remote_bp.route("/machines/<machine_id>", methods=["DELETE"])
+def deregister_machine(machine_id):
+    """Deregister a remote machine. Admin only."""
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+
+    agent_mgr = get_remote_agent_manager()
+    success = agent_mgr.deregister_machine(machine_id)
+
+    if success:
+        return jsonify({"success": True, "message": "Machine deregistered"})
+    return jsonify({"error": "Machine not found"}), 404
+
+
+@remote_bp.route("/machines/<machine_id>/assign", methods=["POST"])
+def assign_user(machine_id):
+    """Assign a user to a machine. Admin only."""
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+
+    data = request.get_json() or {}
+    user_id = data.get("user_id")
+    permission = data.get("permission", "use")
+
+    if not user_id:
+        return jsonify({"error": "user_id is required"}), 400
+
+    agent_mgr = get_remote_agent_manager()
+    success = agent_mgr.assign_user(
+        machine_id=machine_id,
+        user_id=user_id,
+        granted_by=g.user["id"],
+        permission=permission,
+    )
+
+    if success:
+        return jsonify({"success": True, "message": "User assigned to machine"})
+    return jsonify({"error": "Failed to assign user"}), 400
+
+
+@remote_bp.route("/machines/<machine_id>/assign/<int:user_id>", methods=["DELETE"])
+def revoke_user(machine_id, user_id):
+    """Revoke a user's access to a machine. Admin only."""
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+
+    agent_mgr = get_remote_agent_manager()
+    success = agent_mgr.revoke_user(machine_id, user_id)
+
+    if success:
+        return jsonify({"success": True, "message": "User access revoked"})
+    return jsonify({"error": "Assignment not found"}), 404
+
+
+# ==================== Session Management (User) ====================
+
+
+@remote_bp.route("/machines/available", methods=["GET"])
+def get_available_machines():
+    """Get machines available to the current user."""
+    auth_error = _require_auth()
+    if auth_error:
+        return auth_error
+
+    agent_mgr = get_remote_agent_manager()
+    machines = agent_mgr.get_available_machines(g.user["id"])
+
+    # Filter to only show online machines
+    available = [m for m in machines if m.get("connected")]
+
+    return jsonify({
+        "success": True,
+        "machines": available,
+    })
+
+
+@remote_bp.route("/sessions", methods=["POST"])
+def create_remote_session():
+    """Create a new remote session on a selected machine."""
+    auth_error = _require_auth()
+    if auth_error:
+        return auth_error
+
+    data = request.get_json() or {}
+    machine_id = data.get("machine_id")
+    project_path = data.get("project_path")
+    model = data.get("model")
+    cli_tool = data.get("cli_tool", "qwen-code-cli")
+    title = data.get("title", "")
+
+    if not machine_id:
+        return jsonify({"error": "machine_id is required"}), 400
+    if not project_path:
+        return jsonify({"error": "project_path is required"}), 400
+
+    session_mgr = RemoteSessionManager()
+    result = session_mgr.create_remote_session(
+        user_id=g.user["id"],
+        machine_id=machine_id,
+        project_path=project_path,
+        model=model,
+        cli_tool=cli_tool,
+        title=title,
+    )
+
+    if result:
+        return jsonify({"success": True, "session": result})
+    return jsonify({"error": "Failed to create remote session. Check machine availability and access."}), 400
+
+
+@remote_bp.route("/sessions/<session_id>", methods=["GET"])
+def get_remote_session(session_id):
+    """Get remote session status and output."""
+    auth_error = _require_auth()
+    if auth_error:
+        return auth_error
+
+    session_mgr = RemoteSessionManager()
+    result = session_mgr.get_session_status(session_id)
+
+    if result:
+        return jsonify({"success": True, "session": result})
+    return jsonify({"error": "Session not found"}), 404
+
+
+@remote_bp.route("/sessions/<session_id>/chat", methods=["POST"])
+def send_remote_message(session_id):
+    """Send a message to a remote session."""
+    auth_error = _require_auth()
+    if auth_error:
+        return auth_error
+
+    data = request.get_json() or {}
+    content = data.get("content", "")
+
+    if not content:
+        return jsonify({"error": "content is required"}), 400
+
+    session_mgr = RemoteSessionManager()
+    success = session_mgr.send_message(
+        session_id=session_id,
+        content=content,
+        user_id=g.user["id"],
+    )
+
+    if success:
+        return jsonify({"success": True})
+    return jsonify({"error": "Failed to send message. Session may not be active."}), 400
+
+
+@remote_bp.route("/sessions/<session_id>/stop", methods=["POST"])
+def stop_remote_session(session_id):
+    """Stop a remote session."""
+    auth_error = _require_auth()
+    if auth_error:
+        return auth_error
+
+    session_mgr = RemoteSessionManager()
+    success = session_mgr.stop_session(session_id)
+
+    if success:
+        return jsonify({"success": True})
+    return jsonify({"error": "Failed to stop session"}), 400
+
+
+@remote_bp.route("/sessions/<session_id>/pause", methods=["POST"])
+def pause_remote_session(session_id):
+    """Pause a remote session."""
+    auth_error = _require_auth()
+    if auth_error:
+        return auth_error
+
+    session_mgr = RemoteSessionManager()
+    success = session_mgr.pause_session(session_id)
+
+    if success:
+        return jsonify({"success": True})
+    return jsonify({"error": "Failed to pause session"}), 400
+
+
+@remote_bp.route("/sessions/<session_id>/resume", methods=["POST"])
+def resume_remote_session(session_id):
+    """Resume a paused remote session."""
+    auth_error = _require_auth()
+    if auth_error:
+        return auth_error
+
+    session_mgr = RemoteSessionManager()
+    success = session_mgr.resume_session(session_id)
+
+    if success:
+        return jsonify({"success": True})
+    return jsonify({"error": "Failed to resume session"}), 400
+
+
+# ==================== Agent Communication ====================
+
+
+@remote_bp.route("/agent/register", methods=["POST"])
+def agent_register():
+    """
+    Register a remote agent using a registration token.
+    Called by the agent during initial setup.
+    """
+    data = request.get_json() or {}
+    registration_token = data.get("registration_token")
+    machine_id = data.get("machine_id", str(uuid.uuid4()))
+    machine_name = data.get("machine_name")
+    hostname = data.get("hostname")
+    os_type = data.get("os_type")
+    os_version = data.get("os_version")
+    capabilities = data.get("capabilities")
+    agent_version = data.get("agent_version")
+
+    if not registration_token:
+        return jsonify({"error": "registration_token is required"}), 400
+    if not machine_name:
+        return jsonify({"error": "machine_name is required"}), 400
+
+    agent_mgr = get_remote_agent_manager()
+    result = agent_mgr.register_machine(
+        registration_token=registration_token,
+        machine_id=machine_id,
+        machine_name=machine_name,
+        hostname=hostname,
+        os_type=os_type,
+        os_version=os_version,
+        capabilities=capabilities,
+        agent_version=agent_version,
+        ip_address=request.remote_addr,
+    )
+
+    if result:
+        return jsonify({"success": True, "machine": result})
+    return jsonify({"error": "Invalid or expired registration token"}), 401
+
+
+@remote_bp.route("/agent/ws", methods=["GET"])
+def agent_websocket():
+    """
+    WebSocket endpoint for remote agent communication.
+
+    Protocol:
+    - Agent connects and sends {"type": "register", "machine_id": "...", ...}
+    - Server acknowledges and begins dispatching commands
+    - Agent sends heartbeat every 60s
+    - Agent sends session_output, session_status, usage_report messages
+    """
+    # Check if this is a WebSocket upgrade request
+    upgrade_header = request.headers.get("Upgrade", "").lower()
+    if upgrade_header != "websocket":
+        return jsonify({"error": "This endpoint requires WebSocket upgrade"}), 400
+
+    # For WebSocket, we need a WSGI-compatible approach
+    # Since Flask doesn't natively support WebSocket, we'll handle this
+    # through a simple message-based HTTP long-polling fallback
+    # or delegate to a proper WebSocket server
+    return jsonify({
+        "error": "WebSocket requires a compatible server (e.g., gevent, gunicorn with websocket worker)",
+        "fallback": "Use HTTP long-polling via /agent/message endpoint",
+    }), 501
+
+
+@remote_bp.route("/agent/message", methods=["POST"])
+def agent_message():
+    """
+    HTTP fallback for agent communication when WebSocket is not available.
+
+    Agents POST messages here (heartbeat, output, status, usage).
+    Server returns any pending commands in the response.
+    """
+    data = request.get_json() or {}
+    msg_type = data.get("type")
+
+    if not msg_type:
+        return jsonify({"error": "type is required"}), 400
+
+    agent_mgr = get_remote_agent_manager()
+    machine_id = data.get("machine_id")
+
+    if not machine_id:
+        return jsonify({"error": "machine_id is required"}), 400
+
+    if msg_type == "register":
+        # Agent re-registering on reconnect
+        agent_mgr.register_connection(machine_id, None)
+        capabilities = data.get("capabilities", {})
+        pending = agent_mgr.get_pending_commands(machine_id)
+        return jsonify({"success": True, "type": "register_ack", "pending_commands": pending})
+
+    elif msg_type == "heartbeat":
+        status = data.get("status", "idle")
+        active_sessions = data.get("active_sessions", 0)
+        agent_mgr.process_heartbeat(machine_id, status, active_sessions)
+        pending = agent_mgr.get_pending_commands(machine_id)
+        return jsonify({"success": True, "type": "heartbeat_ack", "pending_commands": pending})
+
+    elif msg_type == "session_output":
+        session_id = data.get("session_id")
+        output_data = data.get("data", "")
+        stream = data.get("stream", "stdout")
+        is_complete = data.get("is_complete", False)
+
+        if session_id:
+            session_mgr = RemoteSessionManager()
+            session_mgr.process_session_output(
+                session_id=session_id,
+                data=output_data,
+                stream=stream,
+                is_complete=is_complete,
+            )
+
+        pending = agent_mgr.get_pending_commands(machine_id)
+        return jsonify({"success": True, "pending_commands": pending})
+
+    elif msg_type == "session_status":
+        session_id = data.get("session_id")
+        status = data.get("status")
+        pid = data.get("pid")
+
+        if session_id and status:
+            session_mgr = RemoteSessionManager()
+            session_mgr.process_session_status_update(
+                session_id=session_id,
+                status=status,
+                pid=pid,
+            )
+
+        pending = agent_mgr.get_pending_commands(machine_id)
+        return jsonify({"success": True, "pending_commands": pending})
+
+    elif msg_type == "usage_report":
+        session_id = data.get("session_id")
+        tokens = data.get("tokens", {})
+        requests = data.get("requests", 1)
+
+        if session_id:
+            session_mgr = RemoteSessionManager()
+            session_mgr.process_usage_report(
+                session_id=session_id,
+                tokens=tokens,
+                requests=requests,
+            )
+
+        pending = agent_mgr.get_pending_commands(machine_id)
+        return jsonify({"success": True, "pending_commands": pending})
+
+    else:
+        return jsonify({"error": f"Unknown message type: {msg_type}"}), 400
+
+
+# ==================== LLM Proxy ====================
+
+
+@remote_bp.route("/llm-proxy", methods=["POST"])
+@remote_bp.route("/llm-proxy/<path:path>", methods=["GET", "POST", "PUT", "DELETE"])
+def llm_proxy(path=""):
+    """
+    Transparent LLM API proxy for remote CLI tools.
+
+    The remote CLI sends standard LLM API requests here with a proxy token
+    in the Authorization header. The server:
+    1. Validates the proxy token
+    2. Looks up the real API key
+    3. Checks quota
+    4. Forwards to the real LLM provider
+    5. Streams the response back
+    6. Records token usage
+    """
+    # Extract proxy token from Authorization header
+    auth_header = request.headers.get("Authorization", "")
+    proxy_token = auth_header.replace("Bearer ", "").strip()
+
+    if not proxy_token:
+        return jsonify({"error": {"message": "Missing authorization token", "type": "auth_error"}}), 401
+
+    # Validate proxy token
+    api_proxy = APIKeyProxyService()
+    token_payload = api_proxy.validate_proxy_token(proxy_token)
+
+    if not token_payload:
+        return jsonify({"error": {"message": "Invalid or expired proxy token", "type": "auth_error"}}), 401
+
+    user_id = token_payload["user_id"]
+    tenant_id = token_payload["tenant_id"]
+    provider = token_payload["provider"]
+    session_id = token_payload["session_id"]
+
+    # Check quota
+    try:
+        from app.modules.governance.quota_manager import QuotaManager
+        quota_mgr = QuotaManager()
+        quota_result = quota_mgr.check_quota(user_id)
+        if not quota_result["allowed"]:
+            return jsonify({
+                "error": {
+                    "message": f"Quota exceeded: {quota_result['reason']}",
+                    "type": "quota_exceeded",
+                }
+            }), 429
+    except Exception as e:
+        logger.warning(f"Quota check failed: {e}")
+
+    # Resolve real API key
+    key_result = api_proxy.resolve_api_key(tenant_id, provider)
+    if not key_result:
+        return jsonify({
+            "error": {
+                "message": f"No API key configured for provider '{provider}'",
+                "type": "config_error",
+            }
+        }), 500
+
+    api_key, base_url = key_result
+
+    # Determine target URL
+    if base_url:
+        target_base = base_url.rstrip("/")
+    else:
+        # Default provider URLs
+        provider_urls = {
+            "openai": "https://api.openai.com",
+            "anthropic": "https://api.anthropic.com",
+            "google": "https://generativelanguage.googleapis.com",
+        }
+        target_base = provider_urls.get(provider, "https://api.openai.com")
+
+    target_url = f"{target_base}/{path}" if path else target_base
+    # Also handle direct path in the request URL
+    if not path:
+        target_url = f"{target_base}{request.path.split('/llm-proxy')[-1]}"
+
+    # Forward the request
+    try:
+        import requests as http_requests
+
+        # Build forwarded headers
+        fwd_headers = {}
+        for key, value in request.headers:
+            if key.lower() in ("content-type", "accept", "user-agent"):
+                fwd_headers[key] = value
+
+        # Set the real API key
+        if provider == "anthropic":
+            fwd_headers["x-api-key"] = api_key
+            fwd_headers["anthropic-version"] = "2023-06-01"
+        else:
+            fwd_headers["Authorization"] = f"Bearer {api_key}"
+
+        # Check if this is a streaming request
+        body = request.get_data()
+
+        # Forward the request
+        resp = http_requests.request(
+            method=request.method,
+            url=target_url,
+            headers=fwd_headers,
+            data=body,
+            stream=True,
+            timeout=120,
+        )
+
+        # Handle streaming response
+        content_type = resp.headers.get("Content-Type", "")
+
+        def generate():
+            total_content = b""
+            for chunk in resp.iter_content(chunk_size=4096):
+                total_content += chunk
+                yield chunk
+
+            # After streaming completes, try to extract token usage
+            try:
+                _record_llm_usage(total_content, session_id, user_id, provider, content_type)
+            except Exception as e:
+                logger.error(f"Failed to record LLM usage: {e}")
+
+        # Build response headers
+        response_headers = {}
+        for key, value in resp.headers.items():
+            if key.lower() in ("content-type", "x-request-id", "openai-organization"):
+                response_headers[key] = value
+
+        if "text/event-stream" in content_type:
+            return Response(
+                stream_with_context(generate()),
+                status=resp.status_code,
+                headers=response_headers,
+                content_type=content_type,
+            )
+        else:
+            # Non-streaming response
+            content = resp.content
+            try:
+                _record_llm_usage(content, session_id, user_id, provider, content_type)
+            except Exception as e:
+                logger.error(f"Failed to record LLM usage: {e}")
+
+            return Response(
+                content,
+                status=resp.status_code,
+                headers=response_headers,
+                content_type=content_type,
+            )
+
+    except Exception as e:
+        logger.error(f"LLM proxy error: {e}")
+        return jsonify({
+            "error": {
+                "message": f"Proxy error: {str(e)}",
+                "type": "proxy_error",
+            }
+        }), 502
+
+
+def _record_llm_usage(content: bytes, session_id: str, user_id: int,
+                       provider: str, content_type: str) -> None:
+    """Extract and record token usage from LLM response."""
+    try:
+        # For non-streaming responses, parse the JSON body
+        if b"usage" in content:
+            data = json.loads(content)
+            usage = data.get("usage", {})
+            input_tokens = usage.get("prompt_tokens", 0)
+            output_tokens = usage.get("completion_tokens", 0)
+
+            if input_tokens or output_tokens:
+                from app.modules.governance.quota_manager import QuotaManager
+                quota_mgr = QuotaManager()
+                quota_mgr.record_usage(
+                    user_id=user_id,
+                    tokens=input_tokens + output_tokens,
+                    requests=1,
+                )
+
+                # Update session token counts
+                from app.modules.workspace.session_manager import SessionManager
+                sm = SessionManager()
+                session = sm.get_session(session_id)
+                if session:
+                    session.total_input_tokens += input_tokens
+                    session.total_output_tokens += output_tokens
+                    session.total_tokens += input_tokens + output_tokens
+                    session.request_count += 1
+                    sm.update_session(session)
+    except (json.JSONDecodeError, KeyError, TypeError):
+        pass  # Not all responses have usage data
+
+
+# ==================== Usage Report (from Agent) ====================
+
+
+@remote_bp.route("/usage-report", methods=["POST"])
+def usage_report():
+    """Receive usage report from a remote agent."""
+    data = request.get_json() or {}
+    session_id = data.get("session_id")
+    tokens = data.get("tokens", {})
+    requests = data.get("requests", 1)
+    machine_id = data.get("machine_id")
+
+    if not session_id:
+        return jsonify({"error": "session_id is required"}), 400
+
+    session_mgr = RemoteSessionManager()
+    session_mgr.process_usage_report(
+        session_id=session_id,
+        tokens=tokens,
+        requests=requests,
+    )
+
+    return jsonify({"success": True})
+
+
+# ==================== Machine File Browse ====================
+
+
+@remote_bp.route("/machines/<machine_id>/browse", methods=["GET"])
+def browse_remote_directory(machine_id):
+    """Browse the file system on a remote machine."""
+    auth_error = _require_auth()
+    if auth_error:
+        return auth_error
+
+    agent_mgr = get_remote_agent_manager()
+
+    # Check access
+    if g.user.get("role") != "admin":
+        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
+            return jsonify({"error": "Access denied"}), 403
+
+    path = request.args.get("path")
+
+    # Send browse command to agent and wait for response
+    # For now, return machine info with work_dir
+    machine = agent_mgr.get_machine(machine_id)
+    if not machine:
+        return jsonify({"error": "Machine not found"}), 404
+
+    return jsonify({
+        "success": True,
+        "machine": machine,
+        "message": "File browsing requires WebSocket connection for real-time response",
+    })
