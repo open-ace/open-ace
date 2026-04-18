@@ -213,7 +213,7 @@ curl -fsSL http://<server>:5001/api/remote/agent/install.sh | \
 curl -b cookies.txt -X POST \
   http://<server>:5001/api/remote/machines/<machine_id>/assign \
   -H "Content-Type: application/json" \
-  -d '{"user_id": 89, "permission": "user"}'
+  -d '{"user_id": <user_id>, "permission": "user"}'
 ```
 
 用户即可在浏览器中看到该机器并创建远程会话。
@@ -465,7 +465,7 @@ curl -b cookies.txt http://localhost:5001/api/remote/machines
 curl -b cookies.txt -X POST \
   http://localhost:5001/api/remote/machines/<machine_id>/assign \
   -H "Content-Type: application/json" \
-  -d '{"user_id": 89, "permission": "user"}'
+  -d '{"user_id": <user_id>, "permission": "user"}'
 ```
 
 权限级别：
@@ -514,11 +514,11 @@ curl -b cookies.txt -X DELETE \
 
 ## 管理界面
 
-管理员和机器管理员可以通过 Open ACE Web 界面完成大部分操作。侧边栏 **"远程工作区"** 分组下提供两个页面：
+系统管理员可以通过 Open ACE Web 管理界面完成所有操作。管理页面（`/manage/*`）仅对系统管理员开放。机器管理员通过 API 管理本机器的用户和会话。
 
-> 远程机器页面对系统管理员和被分配了机器的用户均可见。普通用户可查看自己被分配的机器，机器管理员可额外管理用户。API Key 页面仅系统管理员可见。
+> 侧边栏 **"远程工作区"** 分组下的远程机器和 API Key 页面仅系统管理员可见。机器管理员通过 API 接口执行用户管理操作（见下方 API 参考）。
 
-### 远程机器管理
+### 远程机器管理（系统管理员）
 
 **路径**：管理模式 → 远程工作区 → 远程机器（`/manage/remote/machines`）
 
@@ -535,7 +535,7 @@ curl -b cookies.txt -X DELETE \
 
 **统计卡片**：页面顶部显示总机器数、在线数、离线数。
 
-### API Key 管理
+### API Key 管理（系统管理员）
 
 **路径**：管理模式 → 远程工作区 → API 密钥（`/manage/remote/api-keys`）
 
@@ -546,6 +546,41 @@ curl -b cookies.txt -X DELETE \
 | 添加 API 密钥 | 弹窗中选择 Provider（OpenAI/Anthropic/Google）、输入 Key Name、API Key（密码输入框）、可选 Base URL |
 | 查看密钥列表 | 表格显示：Provider（彩色 Badge）、Key Name、Base URL、状态、创建时间。**Key 值始终被遮蔽** |
 | 删除 API 密钥 | 二次确认后删除 |
+
+### 机器管理员操作（API）
+
+机器管理员通过 API 接口管理本机器的用户和会话，无法访问管理界面。
+
+```bash
+# 机器管理员登录获取 token
+curl -c cookies.txt -X POST http://<server>:5001/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"<username>","password":"<password>"}'
+
+# 查看自己被分配的机器（含 current_user_permission 字段）
+curl -b cookies.txt http://<server>:5001/api/remote/machines
+
+# 查看机器已分配用户列表
+curl -b cookies.txt http://<server>:5001/api/remote/machines/<machine_id>/users
+
+# 分配用户到机器（权限被强制为 user，无法授权 admin）
+curl -b cookies.txt -X POST \
+  http://<server>:5001/api/remote/machines/<machine_id>/assign \
+  -H "Content-Type: application/json" \
+  -d '{"user_id": <user_id>, "permission": "admin"}'
+# → 实际存储的 permission 为 "user"
+
+# 撤销普通用户（不能撤销 admin 用户，返回 403）
+curl -b cookies.txt -X DELETE \
+  http://<server>:5001/api/remote/machines/<machine_id>/assign/<user_id>
+
+# 查看本机器上其他用户的会话
+curl -b cookies.txt http://<server>:5001/api/remote/sessions/<session_id>
+
+# 停止本机器上其他用户的会话
+curl -b cookies.txt -X POST \
+  http://<server>:5001/api/remote/sessions/<session_id>/stop
+```
 
 ---
 
