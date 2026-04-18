@@ -293,6 +293,24 @@ class APIKeyProxyService:
         conn.close()
         return success
 
+    def delete_api_key_by_id(self, key_id: int, tenant_id: int) -> bool:
+        """Delete an API key by its ID."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            f"""
+            DELETE FROM api_key_store
+            WHERE id = {_param()} AND tenant_id = {_param()}
+        """,
+            (key_id, tenant_id),
+        )
+
+        success = cursor.rowcount > 0
+        conn.commit()
+        conn.close()
+        return success
+
     def generate_proxy_token(self, user_id: int, session_id: str, tenant_id: int,
                              provider: str, expires_minutes: int = 5) -> str:
         """

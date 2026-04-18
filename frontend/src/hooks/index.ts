@@ -59,6 +59,17 @@ export {
   useRestoreSession,
 } from './useSessions';
 export { useGlobalFetch } from './useFetch';
+export {
+  useMachines,
+  useMachineUsers,
+  useGenerateToken,
+  useDeregisterMachine,
+  useAssignUser,
+  useRevokeUser,
+  useApiKeys,
+  useStoreApiKey,
+  useDeleteApiKey,
+} from './useRemote';
 
 // Re-export store hooks
 export {

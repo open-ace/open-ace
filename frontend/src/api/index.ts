@@ -123,3 +123,10 @@ export type {
   InsightsHistoryResponse,
   InsightsGenerateResponse,
 } from './insights';
+export { remoteApi } from './remote';
+export type {
+  RemoteMachine,
+  MachineAssignment,
+  ApiKey,
+  StoreApiKeyRequest,
+} from './remote';

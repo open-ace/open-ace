@@ -320,43 +320,64 @@ def agent_heartbeat(machine_id):
 # ============================================================
 
 def store_api_key(auth_token):
-    """Store an API key for testing."""
+    """Store an API key for testing via REST endpoint."""
     test("Store API key (encrypted)")
     try:
+        # Store a test key via REST endpoint
         r = requests.post(
-            f"{BASE_URL}/api/remote/machines/register",  # Need admin endpoint for API keys
-            json={"tenant_id": 1},
+            f"{BASE_URL}/api/remote/api-keys",
+            json={
+                "provider": "openai",
+                "key_name": "e2e-test-key",
+                "api_key": "sk-e2e-test-key-12345678",
+                "tenant_id": 1,
+            },
             cookies={"session_token": auth_token},
             timeout=10,
         )
-        # We'll test the APIKeyProxyService directly since there's no REST endpoint for it
-        from app.modules.workspace.api_key_proxy import APIKeyProxyService
-        service = APIKeyProxyService()
+        assert_eq(r.status_code, 200, "store status")
+        data = r.json()
+        assert_true(data.get("success"), "store success")
 
-        # Store a test key
-        result = service.store_api_key(
-            tenant_id=1,
-            provider="openai",
-            key_name="e2e-test-key",
-            api_key="sk-e2e-test-key-12345678",
-            created_by=1,
+        # List keys via REST endpoint
+        r2 = requests.get(
+            f"{BASE_URL}/api/remote/api-keys?tenant_id=1",
+            cookies={"session_token": auth_token},
+            timeout=10,
         )
-        assert_true(result.get("success"), "store success")
-
-        # List keys
-        keys = service.list_api_keys(tenant_id=1)
+        assert_eq(r2.status_code, 200, "list status")
+        data2 = r2.json()
+        assert_true(data2.get("success"), "list success")
+        keys = data2.get("keys", [])
         assert_true(len(keys) >= 1, "key count")
 
-        # Resolve key
+        # Verify key is masked (no plaintext)
+        for k in keys:
+            assert_true("api_key" not in k, "key should not contain plaintext")
+            assert_true("encrypted_key" not in k, "key should not contain encrypted_key")
+
+        # Resolve key via service (still needed for proxy)
+        from app.modules.workspace.api_key_proxy import APIKeyProxyService
+        service = APIKeyProxyService()
         resolved = service.resolve_api_key(tenant_id=1, provider="openai")
         assert_true(resolved is not None, "resolve result")
         api_key, base_url = resolved
         assert_eq(api_key, "sk-e2e-test-key-12345678", "resolved key")
 
-        ok(f"stored, listed ({len(keys)} keys), resolved successfully")
+        ok(f"stored via REST, listed {len(keys)} key(s), resolved successfully")
 
-        # Cleanup
-        service.delete_api_key(tenant_id=1, provider="openai", key_name="e2e-test-key")
+        # Cleanup via REST endpoint
+        key_id = keys[0]["id"]
+        r3 = requests.delete(
+            f"{BASE_URL}/api/remote/api-keys/{key_id}",
+            json={"tenant_id": 1},
+            cookies={"session_token": auth_token},
+            timeout=10,
+        )
+        assert_eq(r3.status_code, 200, "delete status")
+        assert_true(r3.json().get("success"), "delete success")
+
+        ok("API key deleted via REST endpoint")
         return True
     except Exception as e:
         fail(str(e))
@@ -810,6 +831,34 @@ def test_machine_user_assignment(auth_token, machine_id):
         return False
 
 
+def test_machine_users_list(auth_token, machine_id):
+    """Test listing users assigned to a machine."""
+    test("List machine assigned users")
+    try:
+        r = requests.get(
+            f"{BASE_URL}/api/remote/machines/{machine_id}/users",
+            cookies={"session_token": auth_token},
+            timeout=10,
+        )
+        assert_eq(r.status_code, 200, "users list status")
+        data = r.json()
+        assert_true(data.get("success"), "users list success")
+        assert_in("users", data, "users list response")
+
+        users = data["users"]
+        assert_true(len(users) >= 1, "at least 1 assigned user")
+        first = users[0]
+        assert_in("user_id", first, "user_id field")
+        assert_in("username", first, "username field")
+        assert_in("permission", first, "permission field")
+
+        ok(f"found {len(users)} assigned user(s)")
+        return True
+    except Exception as e:
+        fail(str(e))
+        return False
+
+
 # ============================================================
 # Phase 9: Available Machines
 # ============================================================
@@ -1238,6 +1287,7 @@ def main():
     test_unauthenticated_access()
     test_non_admin_registration(auth_token)
     test_machine_user_assignment(auth_token, machine_id)
+    test_machine_users_list(auth_token, machine_id)
 
     # Phase 9: Available Machines
     header("Phase 9: Available Machines")

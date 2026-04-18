@@ -234,6 +234,97 @@ def revoke_user(machine_id, user_id):
     return jsonify({"error": "Assignment not found"}), 404
 
 
+# ==================== API Key Management (Admin) ====================
+
+
+@remote_bp.route("/api-keys", methods=["GET"])
+def list_api_keys():
+    """List all encrypted API keys (without revealing actual keys). Admin only."""
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+
+    data = request.args
+    tenant_id = int(data.get("tenant_id", 1))
+
+    api_proxy = APIKeyProxyService()
+    keys = api_proxy.list_api_keys(tenant_id)
+
+    return jsonify({
+        "success": True,
+        "keys": keys,
+    })
+
+
+@remote_bp.route("/api-keys", methods=["POST"])
+def store_api_key():
+    """Store a new encrypted API key. Admin only."""
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+
+    data = request.get_json() or {}
+    provider = data.get("provider")
+    key_name = data.get("key_name")
+    api_key = data.get("api_key")
+    base_url = data.get("base_url")
+    tenant_id = int(data.get("tenant_id", 1))
+
+    if not provider or not key_name or not api_key:
+        return jsonify({"error": "provider, key_name, and api_key are required"}), 400
+
+    api_proxy = APIKeyProxyService()
+    result = api_proxy.store_api_key(
+        tenant_id=tenant_id,
+        provider=provider,
+        key_name=key_name,
+        api_key=api_key,
+        base_url=base_url,
+        created_by=g.user["id"],
+    )
+
+    if result.get("success"):
+        return jsonify({"success": True, "key": result})
+    return jsonify({"error": result.get("error", "Failed to store API key")}), 400
+
+
+@remote_bp.route("/api-keys/<int:key_id>", methods=["DELETE"])
+def delete_api_key(key_id):
+    """Delete an API key by ID. Admin only."""
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+
+    data = request.get_json() or {}
+    tenant_id = int(data.get("tenant_id", 1))
+
+    api_proxy = APIKeyProxyService()
+    success = api_proxy.delete_api_key_by_id(key_id, tenant_id)
+
+    if success:
+        return jsonify({"success": True, "message": "API key deleted"})
+    return jsonify({"error": "API key not found"}), 404
+
+
+# ==================== Machine User Assignments ====================
+
+
+@remote_bp.route("/machines/<machine_id>/users", methods=["GET"])
+def get_machine_users(machine_id):
+    """Get list of users assigned to a machine. Admin only."""
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+
+    agent_mgr = get_remote_agent_manager()
+    assignments = agent_mgr.get_machine_assignments(machine_id)
+
+    return jsonify({
+        "success": True,
+        "users": assignments,
+    })
+
+
 # ==================== Session Management (User) ====================
 
 

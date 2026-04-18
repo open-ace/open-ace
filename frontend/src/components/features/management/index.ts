@@ -7,3 +7,5 @@ export { QuotaManagement } from './QuotaManagement';
 export { AuditLog } from './AuditLog';
 export { ContentFilter } from './ContentFilter';
 export { SecuritySettings } from './SecuritySettings';
+export { RemoteMachineManagement } from './RemoteMachineManagement';
+export { APIKeyManagement } from './APIKeyManagement';

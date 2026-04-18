@@ -141,6 +141,26 @@ const navSections: NavSection[] = [
     ],
   },
   {
+    id: 'remote',
+    title: 'remoteWorkspaces',
+    items: [
+      {
+        id: 'machines',
+        label: 'remoteMachines',
+        icon: 'bi-pc-display',
+        path: '/manage/remote/machines',
+        adminOnly: true,
+      },
+      {
+        id: 'api-keys',
+        label: 'apiKeys',
+        icon: 'bi-key',
+        path: '/manage/remote/api-keys',
+        adminOnly: true,
+      },
+    ],
+  },
+  {
     id: 'settings',
     title: 'settings',
     items: [

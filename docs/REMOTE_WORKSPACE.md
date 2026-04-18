@@ -10,6 +10,7 @@
 - [服务端配置](#服务端配置)
 - [远程 Agent 安装](#远程-agent-安装)
 - [管理远程机器](#管理远程机器)
+- [管理界面](#管理界面)
 - [用户使用指南](#用户使用指南)
 - [API 参考](#api-参考)
 - [安全设计](#安全设计)
@@ -86,7 +87,7 @@ Agent 优先尝试 WebSocket 连接，失败时自动降级为 HTTP 轮询。
 
 **第一步：管理员生成注册令牌**
 
-在 Open ACE 管理界面，或通过 API：
+在 Open ACE 管理界面（管理模式 → 远程工作区 → 远程机器 → 生成注册令牌），或通过 API：
 
 ```bash
 # 管理员登录获取 session_token
@@ -121,7 +122,7 @@ curl -fsSL http://<server>:5001/api/remote/agent/install.sh | \
 
 **第三步：分配用户**
 
-管理员将机器分配给用户：
+管理员在管理界面（远程机器详情弹窗 → 分配用户），或通过 API：
 
 ```bash
 curl -b cookies.txt -X POST \
@@ -159,7 +160,7 @@ curl -b cookies.txt -X POST \
 
 ### API Key 管理
 
-通过 API 存储 LLM 提供商的 API Key（以加密形式）：
+在管理界面（管理模式 → 远程工作区 → API Keys → 添加 API Key），或通过 API：
 
 ```bash
 # 存储 OpenAI API Key
@@ -311,6 +312,8 @@ python3 agent.py
 
 ### 注册新机器
 
+在管理界面点击"生成注册令牌"按钮，或通过 API：
+
 ```bash
 # 1. 管理员登录
 curl -c cookies.txt -X POST http://localhost:5001/api/auth/login \
@@ -377,6 +380,43 @@ curl -b cookies.txt -X DELETE \
 curl -b cookies.txt -X DELETE \
   http://localhost:5001/api/remote/machines/<machine_id>
 ```
+
+---
+
+## 管理界面
+
+管理员可以通过 Open ACE Web 界面完成除远程 Agent 安装外的所有操作。侧边栏 **"远程工作区"** 分组下提供两个页面：
+
+### 远程机器管理
+
+**路径**：管理模式 → 远程工作区 → 远程机器（`/manage/remote/machines`）
+
+**功能**：
+
+| 操作 | 说明 |
+|------|------|
+| 生成注册令牌 | 点击按钮生成一次性注册 token，弹窗显示 token 值、复制按钮和安装命令 |
+| 查看机器列表 | 表格显示：名称、Hostname、OS、状态（在线/离线 Badge）、Agent 版本、最后心跳时间 |
+| 机器详情 | 弹窗显示完整信息（capabilities JSON）+ 已分配用户列表 |
+| 分配用户 | 在详情弹窗中选择用户和权限级别（use/admin），分配到机器 |
+| 撤销用户 | 在详情弹窗的用户列表中撤销某用户的机器访问权限 |
+| 注销机器 | 二次确认后注销，机器从列表消失 |
+
+**统计卡片**：页面顶部显示总机器数、在线数、离线数。
+
+### API Key 管理
+
+**路径**：管理模式 → 远程工作区 → API Keys（`/manage/remote/api-keys`）
+
+**功能**：
+
+| 操作 | 说明 |
+|------|------|
+| 添加 API Key | 弹窗中选择 Provider（OpenAI/Anthropic/Google）、输入 Key Name、API Key（密码输入框）、可选 Base URL |
+| 查看密钥列表 | 表格显示：Provider（彩色 Badge）、Key Name、Base URL、状态、创建时间。**Key 值始终被遮蔽** |
+| 删除 API Key | 二次确认后删除 |
+
+> 两个页面仅管理员可见。普通用户的侧边栏不显示这些菜单项。
 
 ---
 
@@ -482,6 +522,15 @@ curl -b cookies.txt -X POST \
 | `DELETE` | `/api/remote/machines/<id>` | 注销机器 |
 | `POST` | `/api/remote/machines/<id>/assign` | 分配用户 |
 | `DELETE` | `/api/remote/machines/<id>/assign/<uid>` | 撤销用户权限 |
+| `GET` | `/api/remote/machines/<id>/users` | 获取机器已分配用户列表 |
+
+### API Key 管理（管理员）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/api/remote/api-keys` | 列出所有 API Key（key 值被遮蔽） |
+| `POST` | `/api/remote/api-keys` | 存储新的 API Key（加密后入库） |
+| `DELETE` | `/api/remote/api-keys/<id>` | 删除指定 API Key |
 
 ### 会话管理（用户）
 

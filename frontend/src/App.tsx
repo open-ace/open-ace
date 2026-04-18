@@ -46,6 +46,8 @@ const SecurityCenter = lazy(() => import('@/components/features/management/Secur
 const TenantManagement = lazy(() => import('@/components/features/management/TenantManagement').then(m => ({ default: m.TenantManagement })));
 const SSOSettings = lazy(() => import('@/components/features/settings/SSOSettings').then(m => ({ default: m.SSOSettings })));
 const ProjectManagement = lazy(() => import('@/components/features/management/ProjectManagement').then(m => ({ default: m.ProjectManagement })));
+const RemoteMachineManagement = lazy(() => import('@/components/features/management/RemoteMachineManagement').then(m => ({ default: m.RemoteMachineManagement })));
+const APIKeyManagement = lazy(() => import('@/components/features/management/APIKeyManagement').then(m => ({ default: m.APIKeyManagement })));
 
 // Page loading fallback with skeleton
 const PageLoader: React.FC = () => {
@@ -195,6 +197,10 @@ const ManageRoutes: React.FC = () => {
 
           {/* Projects */}
           <Route path="/projects" element={<ProjectManagement />} />
+
+          {/* Remote Workspace */}
+          <Route path="/remote/machines" element={<RemoteMachineManagement />} />
+          <Route path="/remote/api-keys" element={<APIKeyManagement />} />
 
           {/* Settings */}
           <Route path="/settings/sso" element={<SSOSettings />} />

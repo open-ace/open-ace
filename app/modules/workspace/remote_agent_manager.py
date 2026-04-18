@@ -568,6 +568,39 @@ class RemoteAgentManager:
         conn.close()
         return result is not None
 
+    def get_machine_assignments(self, machine_id: str) -> List[Dict[str, Any]]:
+        """Get list of users assigned to a machine."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute(
+                f"""
+                SELECT ma.user_id, u.username, ma.permission, ma.granted_at
+                FROM machine_assignments ma
+                LEFT JOIN users u ON ma.user_id = u.id
+                WHERE ma.machine_id = {_param()}
+                ORDER BY ma.granted_at ASC
+            """,
+                (machine_id,),
+            )
+
+            rows = cursor.fetchall()
+            result = []
+            for row in rows:
+                result.append({
+                    "user_id": row["user_id"] if isinstance(row, dict) else row["user_id"],
+                    "username": row["username"] if isinstance(row, dict) else row["username"],
+                    "permission": row["permission"] if isinstance(row, dict) else row["permission"],
+                    "granted_at": row["granted_at"] if isinstance(row, dict) else row["granted_at"],
+                })
+            return result
+        except Exception as e:
+            logger.error(f"Failed to get machine assignments: {e}")
+            return []
+        finally:
+            conn.close()
+
     def _row_to_machine(self, row) -> Dict[str, Any]:
         """Convert a database row to machine dict."""
         def get_value(key: str):
