@@ -27,6 +27,7 @@ export interface RemoteMachine {
   updated_at: string | null;
   last_heartbeat: string | null;
   connected: boolean;
+  current_user_permission?: string;
 }
 
 export interface MachineAssignment {
@@ -78,7 +79,7 @@ export const remoteApi = {
     return apiClient.get(`/api/remote/machines/${machineId}/users`);
   },
 
-  assignUser(machineId: string, userId: number, permission: string = 'use'): Promise<{ success: boolean; message: string }> {
+  assignUser(machineId: string, userId: number, permission: string = 'user'): Promise<{ success: boolean; message: string }> {
     return apiClient.post(`/api/remote/machines/${machineId}/assign`, { user_id: userId, permission });
   },
 

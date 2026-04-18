@@ -1323,7 +1323,7 @@ const translations: Record<Language, Translations> = {
     remoteWorkspaces: '远程工作区',
     remoteMachines: '远程机器',
     apiKeys: 'API 密钥',
-    generateToken: '生成令牌',
+    generateToken: '生成注册令牌',
     registrationToken: '注册令牌',
     deregister: '注销',
     deregisterMachine: '注销机器',

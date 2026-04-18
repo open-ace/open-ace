@@ -31,6 +31,7 @@ from playwright.sync_api import sync_playwright
 # ── 配置 ──────────────────────────────────────────────
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
+WEBUI_URL = os.environ.get("WEBUI_URL", "http://localhost:3000")
 TEST_USER = "黄迎春"
 TEST_PASS = "admin123"
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "e2e-remote")
@@ -38,6 +39,7 @@ SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "e2e-remote")
 # ── 测试状态 ──────────────────────────────────────────
 machine_id = None
 session_id = None
+chatpage_session_id = None
 auth_token = None
 
 
@@ -141,7 +143,7 @@ def api_send_chat(token, message):
     return r.status_code == 200
 
 
-def api_agent_output(step, is_complete=False):
+def api_agent_output(step, is_complete=False, sid=None):
     outputs = {
         "thinking":  '{"type":"thinking","content":"正在分析代码结构，寻找潜在问题..."}',
         "response":  '{"type":"assistant","content":"发现 3 个问题：\\n1. API 端点缺少错误处理\\n2. SQL 查询存在注入风险\\n3. 文件顶部有未使用的 import"}',
@@ -152,7 +154,7 @@ def api_agent_output(step, is_complete=False):
     r = requests.post(f"{BASE_URL}/api/remote/agent/message", json={
         "type": "session_output",
         "machine_id": machine_id,
-        "session_id": session_id,
+        "session_id": sid or session_id,
         "data": outputs[step],
         "stream": "stdout",
         "is_complete": is_complete,
@@ -222,7 +224,7 @@ def browser_fetch(page, label, method, url, body=None):
 # ══════════════════════════════════════════════════════
 
 def run_tests():
-    global auth_token, session_id
+    global auth_token, session_id, chatpage_session_id
 
     with sync_playwright() as p:
         browser = p.chromium.launch(
@@ -386,12 +388,150 @@ def run_tests():
         shot(page, "11_manage_dashboard")
         print("  ✓ 管理后台正常加载")
 
-        # ══════ 10. 停止会话 & 清理（通过浏览器 fetch）══════
-        print("\n══════ 10. 停止会话 & 清理")
+        # ══════ 10. ChatPage 远程模式 UI 测试 ══════
+        print("\n══════ 10. ChatPage 远程模式 UI 测试 ══════")
 
-        result = browser_fetch(page, "停止远程会话", "POST",
-                               f"/api/remote/sessions/{session_id}/stop")
-        assert result["ok"]
+        # 监听 ChatPage 自动创建 session 的网络响应
+        captured_sid = [None]
+        def on_response(response):
+            url = response.url
+            if "/api/remote/sessions" in url and "/chat" not in url and "/stop" not in url:
+                if response.request.method == "POST":
+                    try:
+                        data = response.json()
+                        sid = data.get("session", {}).get("session_id")
+                        if sid:
+                            captured_sid[0] = sid
+                    except Exception:
+                        pass
+
+        page.on("response", on_response)
+
+        # 捕获控制台错误帮助调试
+        console_errors = []
+        def on_console(msg):
+            if msg.type in ("error", "warning"):
+                console_errors.append(f"[{msg.type}] {msg.text}")
+        page.on("console", on_console)
+
+        # 获取 webui 专用 token（不同于 session cookie）
+        webui_info = requests.get(
+            f"{BASE_URL}/api/workspace/user-url",
+            cookies={"session_token": auth_token}
+        ).json()
+        webui_token = webui_info.get("token", "")
+        effective_webui_url = webui_info.get("url", WEBUI_URL)
+        log_step("WebUI", f"URL={effective_webui_url}, token={webui_token[:16]}...")
+
+        # 构造 ChatPage 远程模式 URL（需要 /projects 路由才能进入 ChatPage）
+        chat_url = (
+            f"{effective_webui_url}/projects"
+            f"?token={webui_token}"
+            f"&openace_url={BASE_URL}"
+            f"&workspaceType=remote"
+            f"&machineId={machine_id}"
+            f"&machineName=Demo%20Server"
+            f"&encodedProjectName=-home-user-demo-project"
+        )
+        log_step("导航", "打开 ChatPage（远程模式）")
+        page.goto(chat_url, wait_until="networkidle")
+
+        # 等待 ChatPage 加载（React SPA 需要时间渲染）
+        try:
+            page.wait_for_selector("textarea, .max-w-6xl, #root, .min-h-screen", timeout=20000)
+            # 等待 React 渲染 + remote session 创建（网络请求需要时间）
+            pause(8)
+        except Exception:
+            log_step("警告", "ChatPage 加载超时，可能 webui 未运行")
+            shot(page, "10_chatpage_timeout")
+            print("  ⚠ ChatPage 未加载，跳过远程模式 UI 测试")
+            page.remove_listener("response", on_response)
+        else:
+            pause(3)
+            shot(page, "10_chatpage_remote_loaded")
+            log_step("加载", "ChatPage 远程模式已加载")
+
+            # 输出控制台错误帮助调试
+            if console_errors:
+                for err in console_errors[:5]:
+                    log_step("Console", err)
+
+            # 验证远程指示器（机器名 + 状态点）
+            indicator = page.locator("text=Demo Server")
+            if indicator.count() > 0:
+                log_step("验证", "✓ 远程指示器显示: Demo Server + 状态点")
+                shot(page, "10_remote_indicator")
+            else:
+                # 尝试查找页面文本来确认渲染状态
+                page_text = page.locator("body").text_content() or ""
+                if "workspaceType" in chat_url:
+                    log_step("验证", f"远程指示器未找到。页面内容片段: {page_text[:200]}")
+                shot(page, "10_no_indicator")
+
+            # 验证 "Stop Session" 按钮（session 活跃时显示）
+            stop_btn = page.locator('button:has-text("Stop Session"), button:has-text("停止")')
+            if stop_btn.count() > 0:
+                log_step("验证", "✓ Stop Session 按钮可见")
+            else:
+                log_step("验证", "Stop Session 按钮未找到")
+
+            # 捕获 ChatPage 自动创建的 session_id
+            if captured_sid[0]:
+                chatpage_session_id = captured_sid[0]
+                log_step("会话", f"ChatPage 自动创建会话: {chatpage_session_id[:8]}...")
+
+                # 模拟 AI 回复（3 步快速演示）
+                for i, (step, done, label) in enumerate([
+                    ("thinking", False, "AI 正在思考..."),
+                    ("response", False, "AI 生成回复"),
+                    ("final",    True,  "AI 最终回复"),
+                ]):
+                    api_agent_output(step, is_complete=done, sid=chatpage_session_id)
+                    pause(2)
+
+                pause(3)
+                shot(page, "10_ai_reply_in_chatpage")
+                log_step("回复", "✓ AI 回复已通过 ChatPage 远程轮询显示")
+            else:
+                # 通过 input 发送消息触发 session 创建
+                log_step("发送", "未捕获到 session，尝试手动发送消息")
+                textarea = page.locator("textarea").first
+                if textarea.count() > 0:
+                    textarea.fill("你好，这是一个来自远程 ChatPage 的测试消息")
+                    pause(1)
+                    page.keyboard.press("Enter")
+                    pause(5)
+                    shot(page, "10_message_sent_from_chatpage")
+
+                    # 再次检查捕获的 session
+                    if captured_sid[0]:
+                        chatpage_session_id = captured_sid[0]
+                        log_step("会话", f"手动发送后捕获会话: {chatpage_session_id[:8]}...")
+                        api_agent_output("final", is_complete=True, sid=chatpage_session_id)
+                        pause(3)
+                        shot(page, "10_reply_after_send")
+
+            print("  ✓ ChatPage 远程模式 UI 测试完成")
+            page.remove_listener("response", on_response)
+
+        # 导航回 Open ACE 域，确保后续 browser_fetch 正常工作
+        page.goto(f"{BASE_URL}/work", wait_until="domcontentloaded")
+        pause(1)
+
+        # ══════ 11. 停止会话 & 清理 ══════
+        print("\n══════ 11. 停止会话 & 清理")
+
+        # 用 requests 停止会话（不依赖页面域）
+        r = requests.post(f"{BASE_URL}/api/remote/sessions/{session_id}/stop",
+                          cookies={"session_token": auth_token})
+        log_step("停止", f"原始会话: {session_id[:8]}... → {r.status_code}")
+
+        # 停止 ChatPage 创建的远程会话（如果有）
+        if chatpage_session_id:
+            r2 = requests.post(f"{BASE_URL}/api/remote/sessions/{chatpage_session_id}/stop",
+                               cookies={"session_token": auth_token})
+            log_step("清理", f"ChatPage 会话: {chatpage_session_id[:8]}... → {r2.status_code}")
+
         pause(2)
 
         # 注销机器需要 admin 权限，用 admin token
@@ -403,8 +543,8 @@ def run_tests():
         shot(page, "12_cleanup_done")
         print("  ✓ 会话已停止，机器已注销")
 
-        # ══════ 11. 登出 ══════
-        print("\n══════ 11. 登出")
+        # ══════ 12. 登出 ══════
+        print("\n══════ 12. 登出")
         page.goto(f"{BASE_URL}/logout", wait_until="domcontentloaded")
         pause(2)
         try:

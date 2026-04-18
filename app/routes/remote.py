@@ -12,6 +12,7 @@ API endpoints for remote workspace management including:
 
 import json
 import logging
+import os
 import uuid
 from datetime import datetime
 
@@ -100,6 +101,40 @@ def _require_admin():
     if g.user.get("role") != "admin":
         return jsonify({"error": "Admin access required"}), 403
     return None
+
+
+def _require_machine_admin(machine_id):
+    """Check system admin or machine admin. Returns error or None."""
+    if g.user.get("role") == "admin":
+        return None
+    mgr = get_remote_agent_manager()
+    perm = mgr.get_user_permission(machine_id, g.user["id"])
+    if perm != "admin":
+        return jsonify({"error": "Machine admin permission required"}), 403
+    return None
+
+
+def _check_session_access(session_id):
+    """Check session access: owner, system admin, or machine admin. Returns (session_status, error)."""
+    session_mgr = RemoteSessionManager()
+    status = session_mgr.get_session_status(session_id)
+    if not status:
+        return None, (jsonify({"error": "Session not found"}), 404)
+    # System admin
+    if g.user.get("role") == "admin":
+        return status, None
+    # Session owner
+    session = session_mgr._session_manager.get_session(session_id)
+    if session and session.user_id == g.user["id"]:
+        return status, None
+    # Machine admin
+    mid = status.get("machine_id")
+    if mid:
+        mgr = get_remote_agent_manager()
+        perm = mgr.get_user_permission(mid, g.user["id"])
+        if perm == "admin":
+            return status, None
+    return None, (jsonify({"error": "Access denied"}), 403)
 
 
 # ==================== Machine Management (Admin) ====================
@@ -194,14 +229,21 @@ def deregister_machine(machine_id):
 
 @remote_bp.route("/machines/<machine_id>/assign", methods=["POST"])
 def assign_user(machine_id):
-    """Assign a user to a machine. Admin only."""
-    auth_error = _require_admin()
+    """Assign a user to a machine. System admin or machine admin."""
+    auth_error = _require_auth()
     if auth_error:
         return auth_error
+    admin_error = _require_machine_admin(machine_id)
+    if admin_error:
+        return admin_error
 
     data = request.get_json() or {}
     user_id = data.get("user_id")
-    permission = data.get("permission", "use")
+    permission = data.get("permission", "user")
+
+    # Machine admins can only assign 'user' permission
+    if g.user.get("role") != "admin":
+        permission = "user"
 
     if not user_id:
         return jsonify({"error": "user_id is required"}), 400
@@ -221,10 +263,20 @@ def assign_user(machine_id):
 
 @remote_bp.route("/machines/<machine_id>/assign/<int:user_id>", methods=["DELETE"])
 def revoke_user(machine_id, user_id):
-    """Revoke a user's access to a machine. Admin only."""
-    auth_error = _require_admin()
+    """Revoke a user's access to a machine. System admin or machine admin."""
+    auth_error = _require_auth()
     if auth_error:
         return auth_error
+    admin_error = _require_machine_admin(machine_id)
+    if admin_error:
+        return admin_error
+
+    # Machine admins cannot revoke other admins
+    if g.user.get("role") != "admin":
+        mgr = get_remote_agent_manager()
+        target_perm = mgr.get_user_permission(machine_id, user_id)
+        if target_perm == "admin":
+            return jsonify({"error": "Cannot revoke admin user"}), 403
 
     agent_mgr = get_remote_agent_manager()
     success = agent_mgr.revoke_user(machine_id, user_id)
@@ -311,10 +363,13 @@ def delete_api_key(key_id):
 
 @remote_bp.route("/machines/<machine_id>/users", methods=["GET"])
 def get_machine_users(machine_id):
-    """Get list of users assigned to a machine. Admin only."""
-    auth_error = _require_admin()
+    """Get list of users assigned to a machine. System admin or machine admin."""
+    auth_error = _require_auth()
     if auth_error:
         return auth_error
+    admin_error = _require_machine_admin(machine_id)
+    if admin_error:
+        return admin_error
 
     agent_mgr = get_remote_agent_manager()
     assignments = agent_mgr.get_machine_assignments(machine_id)
@@ -388,8 +443,9 @@ def get_remote_session(session_id):
     if auth_error:
         return auth_error
 
-    session_mgr = RemoteSessionManager()
-    result = session_mgr.get_session_status(session_id)
+    result, access_error = _check_session_access(session_id)
+    if access_error:
+        return access_error
 
     if result:
         return jsonify({"success": True, "session": result})
@@ -402,6 +458,10 @@ def send_remote_message(session_id):
     auth_error = _require_auth()
     if auth_error:
         return auth_error
+
+    _, access_error = _check_session_access(session_id)
+    if access_error:
+        return access_error
 
     data = request.get_json() or {}
     content = data.get("content", "")
@@ -428,6 +488,10 @@ def stop_remote_session(session_id):
     if auth_error:
         return auth_error
 
+    _, access_error = _check_session_access(session_id)
+    if access_error:
+        return access_error
+
     session_mgr = RemoteSessionManager()
     success = session_mgr.stop_session(session_id)
 
@@ -442,6 +506,10 @@ def pause_remote_session(session_id):
     auth_error = _require_auth()
     if auth_error:
         return auth_error
+
+    _, access_error = _check_session_access(session_id)
+    if access_error:
+        return access_error
 
     session_mgr = RemoteSessionManager()
     success = session_mgr.pause_session(session_id)
@@ -458,12 +526,44 @@ def resume_remote_session(session_id):
     if auth_error:
         return auth_error
 
+    _, access_error = _check_session_access(session_id)
+    if access_error:
+        return access_error
+
     session_mgr = RemoteSessionManager()
     success = session_mgr.resume_session(session_id)
 
     if success:
         return jsonify({"success": True})
     return jsonify({"error": "Failed to resume session"}), 400
+
+
+# ==================== Agent Installation ====================
+
+AGENT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "remote-agent")
+
+
+@remote_bp.route("/agent/install.sh", methods=["GET"])
+def agent_install_script():
+    """Serve the agent installation shell script."""
+    install_sh = os.path.join(AGENT_DIR, "install.sh")
+    if not os.path.isfile(install_sh):
+        return jsonify({"error": "install.sh not found"}), 404
+    return Response(open(install_sh).read(), mimetype="text/x-shellscript")
+
+
+@remote_bp.route("/agent/files/<path:filename>", methods=["GET"])
+def agent_files(filename):
+    """Serve agent source files for download during installation."""
+    filepath = os.path.join(AGENT_DIR, filename)
+    # Security: prevent path traversal
+    real_path = os.path.realpath(filepath)
+    real_agent_dir = os.path.realpath(AGENT_DIR)
+    if not real_path.startswith(real_agent_dir):
+        return jsonify({"error": "Invalid path"}), 403
+    if not os.path.isfile(real_path):
+        return jsonify({"error": f"{filename} not found"}), 404
+    return Response(open(real_path).read(), mimetype="text/plain")
 
 
 # ==================== Agent Communication ====================

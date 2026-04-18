@@ -110,7 +110,7 @@ class RemoteAgentManager:
                 id {id_type},
                 machine_id TEXT NOT NULL,
                 user_id INTEGER NOT NULL,
-                permission TEXT DEFAULT 'use',
+                permission TEXT DEFAULT 'user',
                 granted_by INTEGER,
                 granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(machine_id, user_id)
@@ -495,14 +495,18 @@ class RemoteAgentManager:
         rows = cursor.fetchall()
         conn.close()
 
-        return [self._row_to_machine(row) for row in rows]
+        machines = [self._row_to_machine(row) for row in rows]
+        if user_id:
+            for m in machines:
+                m["current_user_permission"] = self.check_user_access(m["machine_id"], user_id)
+        return machines
 
     def get_available_machines(self, user_id: int) -> List[Dict[str, Any]]:
         """Get machines available to a specific user."""
         return self.list_machines(user_id=user_id)
 
     def assign_user(self, machine_id: str, user_id: int, granted_by: int,
-                    permission: str = "use") -> bool:
+                    permission: str = "user") -> bool:
         """Assign a user to a machine."""
         conn = self._get_connection()
         cursor = conn.cursor()
@@ -552,21 +556,27 @@ class RemoteAgentManager:
         conn.close()
         return success
 
-    def check_user_access(self, machine_id: str, user_id: int) -> bool:
-        """Check if a user has access to a machine."""
+    def check_user_access(self, machine_id: str, user_id: int) -> Optional[str]:
+        """Check user access, returns permission level ('admin'/'user') or None."""
         conn = self._get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
             f"""
-            SELECT 1 FROM machine_assignments
+            SELECT permission FROM machine_assignments
             WHERE machine_id = {_param()} AND user_id = {_param()}
         """,
             (machine_id, user_id),
         )
         result = cursor.fetchone()
         conn.close()
-        return result is not None
+        if result is None:
+            return None
+        return result["permission"] if isinstance(result, dict) else result[0]
+
+    def get_user_permission(self, machine_id: str, user_id: int) -> Optional[str]:
+        """Return user's machine permission: 'admin', 'user', or None."""
+        return self.check_user_access(machine_id, user_id)
 
     def get_machine_assignments(self, machine_id: str) -> List[Dict[str, Any]]:
         """Get list of users assigned to a machine."""

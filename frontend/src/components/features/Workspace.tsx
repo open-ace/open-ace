@@ -307,7 +307,8 @@ export const Workspace: React.FC = () => {
     restoreSessionId?: string,
     encodedProjectName?: string,
     toolName?: string,
-    settings?: { model?: string; useWebUI?: boolean; permissionMode?: string }
+    settings?: { model?: string; useWebUI?: boolean; permissionMode?: string },
+    remoteParams?: { workspaceType?: 'local' | 'remote'; machineId?: string; machineName?: string }
   ): string => {
     if (!config?.enabled) return '';
 
@@ -316,6 +317,15 @@ export const Workspace: React.FC = () => {
       if (value === undefined) return url;
       const separator = url.includes('?') ? '&' : '?';
       return `${url}${separator}${key}=${encodeURIComponent(value)}`;
+    };
+
+    // Helper to append remote workspace parameters
+    const appendRemoteParams = (url: string) => {
+      if (!remoteParams?.workspaceType) return url;
+      let result = appendParam(url, 'workspaceType', remoteParams.workspaceType);
+      result = appendParam(result, 'machineId', remoteParams.machineId);
+      result = appendParam(result, 'machineName', remoteParams.machineName);
+      return result;
     };
 
     // Multi-user mode: use user-specific URL with token and openace_url
@@ -351,6 +361,8 @@ export const Workspace: React.FC = () => {
       if (settings?.permissionMode) {
         url = `${url}&permissionMode=${encodeURIComponent(settings.permissionMode)}`;
       }
+      // Remote workspace parameters
+      url = appendRemoteParams(url);
       return url;
     }
 
@@ -378,6 +390,8 @@ export const Workspace: React.FC = () => {
     if (settings?.permissionMode) {
       url = appendParam(url, 'permissionMode', settings.permissionMode);
     }
+    // Remote workspace parameters
+    url = appendRemoteParams(url);
     return url;
   }, [config, userWebUI, language]);
 
@@ -403,6 +417,10 @@ export const Workspace: React.FC = () => {
     const urlModel = searchParams.get('model');
     const urlUseWebUI = searchParams.get('useWebUI');
     const urlPermissionMode = searchParams.get('permissionMode');
+    // Remote workspace params from URL
+    const urlWorkspaceType = searchParams.get('workspaceType') as 'local' | 'remote' | null;
+    const urlMachineId = searchParams.get('machineId');
+    const urlMachineName = searchParams.get('machineName');
     const restoreSessionId = urlSessionId || restoreSession;
 
     // Determine if we should restore from store or create new
@@ -413,7 +431,7 @@ export const Workspace: React.FC = () => {
     if (restoreSessionId) {
       // Case 1: URL restore params - create a single tab with the restore session
       // Build settings from URL params
-      const urlSettings: { model?: string; useWebUI?: boolean; permissionMode?: string } | undefined = 
+      const urlSettings: { model?: string; useWebUI?: boolean; permissionMode?: string } | undefined =
         (urlModel || urlUseWebUI !== null || urlPermissionMode)
           ? {
               model: urlModel || undefined,
@@ -422,11 +440,18 @@ export const Workspace: React.FC = () => {
             }
           : undefined;
 
+      // Build remote params from URL
+      const remoteParams: { workspaceType?: 'local' | 'remote'; machineId?: string; machineName?: string } | undefined =
+        urlWorkspaceType
+          ? { workspaceType: urlWorkspaceType, machineId: urlMachineId || undefined, machineName: urlMachineName || undefined }
+          : undefined;
+
       const effectiveUrl = getEffectiveUrl(
         restoreSessionId,
         urlEncodedProjectName || undefined,
         urlToolName || undefined,
-        urlSettings
+        urlSettings,
+        remoteParams
       );
       if (effectiveUrl) {
         const tab: WorkspaceTab = {
@@ -438,6 +463,9 @@ export const Workspace: React.FC = () => {
           encodedProjectName: urlEncodedProjectName || undefined,
           toolName: urlToolName || undefined,
           settings: urlSettings,
+          workspaceType: urlWorkspaceType || undefined,
+          machineId: urlMachineId || undefined,
+          machineName: urlMachineName || undefined,
           createdAt: Date.now(),
           waitingForUser: false,
           waitingType: null,
@@ -453,6 +481,9 @@ export const Workspace: React.FC = () => {
           encodedProjectName: tab.encodedProjectName,
           toolName: tab.toolName,
           settings: tab.settings,
+          workspaceType: tab.workspaceType,
+          machineId: tab.machineId,
+          machineName: tab.machineName,
           createdAt: tab.createdAt,
           waitingForUser: tab.waitingForUser,
           waitingType: tab.waitingType,
@@ -463,21 +494,28 @@ export const Workspace: React.FC = () => {
         searchParams.delete('restoreSession');
         searchParams.delete('encodedProjectName');
         searchParams.delete('toolName');
+        searchParams.delete('workspaceType');
+        searchParams.delete('machineId');
+        searchParams.delete('machineName');
         setSearchParams(searchParams, { replace: true });
       }
     } else if (storedTabs.length > 0) {
       // Case 2: Restore from store - regenerate URLs for each tab
       initialTabs = storedTabs.map((storedTab) => {
         // Regenerate URL based on sessionId if available
-        // Include settings in URL for restoration (Issue #70)
+        // Include settings and remote params in URL for restoration
+        const remoteParams = storedTab.workspaceType
+          ? { workspaceType: storedTab.workspaceType, machineId: storedTab.machineId, machineName: storedTab.machineName }
+          : undefined;
         const effectiveUrl = storedTab.sessionId
           ? getEffectiveUrl(
               storedTab.sessionId,
               storedTab.encodedProjectName,
               storedTab.toolName,
-              storedTab.settings
+              storedTab.settings,
+              remoteParams
             )
-          : getEffectiveUrl();
+          : getEffectiveUrl(undefined, undefined, undefined, undefined, remoteParams);
 
         return {
           ...storedTab,
@@ -1054,6 +1092,11 @@ export const Workspace: React.FC = () => {
                     'text-truncate small flex-grow-1',
                     tab.waitingForUser && 'fw-semibold'
                   )} style={{ minWidth: 0 }}>
+                    {tab.workspaceType === 'remote' && (
+                      <span className="me-1" title={`Remote: ${tab.machineName || tab.machineId}`}>
+                        <i className="bi bi-cloud text-purple-500" style={{ fontSize: '0.7rem' }} />
+                      </span>
+                    )}
                     {tab.title}
                   </span>
                   {/* Waiting indicator badge */}

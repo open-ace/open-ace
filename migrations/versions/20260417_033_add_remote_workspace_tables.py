@@ -169,7 +169,7 @@ def upgrade() -> None:
                         id {id_type},
                         machine_id TEXT NOT NULL REFERENCES remote_machines(machine_id),
                         user_id INTEGER NOT NULL REFERENCES users(id),
-                        permission TEXT DEFAULT 'use',
+                        permission TEXT DEFAULT 'user',
                         granted_by INTEGER REFERENCES users(id),
                         granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         UNIQUE(machine_id, user_id)
@@ -185,7 +185,7 @@ def upgrade() -> None:
                         id {id_type},
                         machine_id TEXT NOT NULL,
                         user_id INTEGER NOT NULL,
-                        permission TEXT DEFAULT 'use',
+                        permission TEXT DEFAULT 'user',
                         granted_by INTEGER,
                         granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         UNIQUE(machine_id, user_id)

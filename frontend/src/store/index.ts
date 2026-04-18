@@ -26,6 +26,10 @@ export interface WorkspaceTab {
     useWebUI?: boolean;      // Use WebUI components toggle
     permissionMode?: string; // Permission mode: default, plan, auto-edit, yolo
   };
+  // Remote workspace fields
+  workspaceType?: 'local' | 'remote';
+  machineId?: string;        // Remote machine ID
+  machineName?: string;      // Remote machine display name
 }
 
 interface AppState {

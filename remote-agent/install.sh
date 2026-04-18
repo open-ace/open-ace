@@ -123,10 +123,10 @@ log_success "Directory created: $INSTALL_DIR"
 log_info "Downloading agent files..."
 
 AGENT_URL="${SERVER_URL}/api/remote/agent/files"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
 # If running from curl, download files; if running from source, copy
-if [[ "$0" == /* ]] && [[ -f "${SCRIPT_DIR}/agent.py" ]]; then
+if [[ -f "${SCRIPT_DIR}/agent.py" ]]; then
     # Running from source directory
     log_info "Installing from source directory..."
     for file in agent.py config.py executor.py system_info.py requirements.txt; do

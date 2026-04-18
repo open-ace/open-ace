@@ -99,15 +99,22 @@ class RemoteAgent:
         Attempt to establish a WebSocket connection and run the
         message loop. Falls back to HTTP polling if WebSocket fails.
         """
+        ws_connected = threading.Event()
+        original_on_open = None
+
         try:
             import websocket
 
             ws_url = self.config.ws_url + "/api/remote/agent/ws"
             logger.info("Connecting to %s", ws_url)
 
+            def on_open_wrapper(ws):
+                ws_connected.set()
+                self._on_ws_open(ws)
+
             ws = websocket.WebSocketApp(
                 ws_url,
-                on_open=self._on_ws_open,
+                on_open=on_open_wrapper,
                 on_message=self._on_ws_message,
                 on_error=self._on_ws_error,
                 on_close=self._on_ws_close,
@@ -122,6 +129,12 @@ class RemoteAgent:
                 ping_timeout=10,
                 skip_utf8_validation=True,
             )
+
+            # run_forever returned — if we never opened successfully,
+            # fall back to HTTP polling instead of retrying WebSocket
+            if not ws_connected.is_set():
+                logger.info("WebSocket never opened, falling back to HTTP polling")
+                self._http_poll_loop()
 
         except ImportError:
             logger.warning(

@@ -816,7 +816,7 @@ def test_machine_user_assignment(auth_token, machine_id):
     try:
         r = requests.post(
             f"{BASE_URL}/api/remote/machines/{machine_id}/assign",
-            json={"user_id": 1, "permission": "use"},
+            json={"user_id": 1, "permission": "user"},
             cookies={"session_token": auth_token},
             timeout=10,
         )
@@ -1097,7 +1097,7 @@ def test_agent_manager_direct():
         assert_true(has_access, "creator has access")
 
         # Assign another user
-        mgr.assign_user(machine_id, user_id=999, granted_by=1, permission="use")
+        mgr.assign_user(machine_id, user_id=999, granted_by=1, permission="user")
         has_999 = mgr.check_user_access(machine_id, 999)
         assert_true(has_999, "assigned user has access")
 

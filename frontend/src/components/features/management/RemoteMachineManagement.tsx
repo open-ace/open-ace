@@ -3,10 +3,10 @@
  *
  * Features:
  * - Machine list with status badges
- * - Generate registration token dialog
+ * - Generate registration token dialog (system admin only)
  * - Machine details dialog with assigned users
- * - Assign/revoke user access
- * - Deregister machine
+ * - Assign/revoke user access (system admin or machine admin)
+ * - Deregister machine (system admin only)
  */
 
 import React, { useState } from 'react';
@@ -44,6 +44,11 @@ export const RemoteMachineManagement: React.FC = () => {
 
   const machines = machinesData?.machines ?? [];
 
+  // Derive isSystemAdmin: if no machine has current_user_permission, user is system admin
+  // (backend only sets this field when querying with user_id for non-admin users)
+  const isSystemAdmin = machines.length === 0
+    || machines.every((m) => !m.current_user_permission);
+
   // Dialog states
   const [showTokenDialog, setShowTokenDialog] = useState(false);
   const [generatedToken, setGeneratedToken] = useState<string>('');
@@ -55,7 +60,7 @@ export const RemoteMachineManagement: React.FC = () => {
   const [showAssignDialog, setShowAssignDialog] = useState(false);
   const [assignMachineId, setAssignMachineId] = useState<string>('');
   const [selectedUserId, setSelectedUserId] = useState<string>('');
-  const [selectedPermission, setSelectedPermission] = useState<string>('use');
+  const [selectedPermission, setSelectedPermission] = useState<string>('user');
 
   const [showDeregisterDialog, setShowDeregisterDialog] = useState(false);
   const [deregisterTarget, setDeregisterTarget] = useState<RemoteMachine | null>(null);
@@ -85,7 +90,7 @@ export const RemoteMachineManagement: React.FC = () => {
   const handleOpenAssign = (machineId: string) => {
     setAssignMachineId(machineId);
     setSelectedUserId('');
-    setSelectedPermission('use');
+    setSelectedPermission('user');
     setShowAssignDialog(true);
   };
 
@@ -140,15 +145,22 @@ export const RemoteMachineManagement: React.FC = () => {
     return <Error message={error?.message || t('error', language)} onRetry={() => refetch()} />;
   }
 
+  // Permission options for assign dialog
+  const permissionOptions = isSystemAdmin
+    ? [{ value: 'user', label: 'User' }, { value: 'admin', label: 'Admin' }]
+    : [{ value: 'user', label: 'User' }];
+
   return (
     <div className="remote-machine-management">
       {/* Header */}
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h2>{t('remoteMachines', language)}</h2>
-        <Button variant="primary" size="sm" onClick={handleGenerateToken} loading={generateToken.isPending}>
-          <i className="bi bi-plus-lg me-1" />
-          {t('generateToken', language)}
-        </Button>
+        {isSystemAdmin && (
+          <Button variant="primary" size="sm" onClick={handleGenerateToken} loading={generateToken.isPending}>
+            <i className="bi bi-plus-lg me-1" />
+            {t('generateToken', language)}
+          </Button>
+        )}
       </div>
 
       {/* Stats Cards */}
@@ -232,13 +244,15 @@ export const RemoteMachineManagement: React.FC = () => {
                       >
                         <i className="bi bi-eye" />
                       </Button>
-                      <Button
-                        variant="outline-danger"
-                        size="sm"
-                        onClick={() => handleOpenDeregister(machine)}
-                      >
-                        <i className="bi bi-x-lg" />
-                      </Button>
+                      {isSystemAdmin && (
+                        <Button
+                          variant="outline-danger"
+                          size="sm"
+                          onClick={() => handleOpenDeregister(machine)}
+                        >
+                          <i className="bi bi-x-lg" />
+                        </Button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -294,6 +308,7 @@ export const RemoteMachineManagement: React.FC = () => {
           onRevokeUser={handleRevokeUser}
           assignPending={assignUser.isPending}
           revokePending={revokeUser.isPending}
+          canManageUsers={isSystemAdmin || selectedMachine.current_user_permission === 'admin'}
           language={language}
         />
       )}
@@ -333,10 +348,7 @@ export const RemoteMachineManagement: React.FC = () => {
         <div>
           <label className="form-label">{t('permission', language)}</label>
           <Select
-            options={[
-              { value: 'use', label: 'Use' },
-              { value: 'admin', label: 'Admin' },
-            ]}
+            options={permissionOptions}
             value={selectedPermission}
             onChange={(v) => setSelectedPermission(v)}
           />
@@ -384,6 +396,7 @@ interface MachineDetailsDialogProps {
   onRevokeUser: (machineId: string, userId: number) => void;
   assignPending: boolean;
   revokePending: boolean;
+  canManageUsers: boolean;
   language: Language;
 }
 
@@ -394,6 +407,7 @@ const MachineDetailsDialog: React.FC<MachineDetailsDialogProps> = ({
   onAssignUser,
   onRevokeUser,
   revokePending,
+  canManageUsers,
   language,
 }) => {
   const { data: usersData, refetch } = useMachineUsers(machine.machine_id);
@@ -410,10 +424,12 @@ const MachineDetailsDialog: React.FC<MachineDetailsDialogProps> = ({
           <Button variant="secondary" onClick={onClose}>
             {t('close', language)}
           </Button>
-          <Button variant="primary" onClick={() => onAssignUser(machine.machine_id)}>
-            <i className="bi bi-person-plus me-1" />
-            {t('assignUser', language)}
-          </Button>
+          {canManageUsers && (
+            <Button variant="primary" onClick={() => onAssignUser(machine.machine_id)}>
+              <i className="bi bi-person-plus me-1" />
+              {t('assignUser', language)}
+            </Button>
+          )}
         </>
       }
     >
@@ -475,50 +491,52 @@ const MachineDetailsDialog: React.FC<MachineDetailsDialogProps> = ({
         </div>
       )}
 
-      {/* Assigned Users */}
-      <div>
-        <h6 className="mb-2">{t('assignUsers', language)}</h6>
-        {assignedUsers.length === 0 ? (
-          <p className="text-muted">{t('noAssignedUsers', language)}</p>
-        ) : (
-          <table className="table table-sm table-hover">
-            <thead>
-              <tr>
-                <th>{t('tableUsername', language)}</th>
-                <th>{t('permission', language)}</th>
-                <th>{t('lastAccess', language)}</th>
-                <th>{t('tableActions', language)}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {assignedUsers.map((u) => (
-                <tr key={u.user_id}>
-                  <td>{u.username}</td>
-                  <td>
-                    <Badge variant={u.permission === 'admin' ? 'danger' : 'primary'}>
-                      {u.permission}
-                    </Badge>
-                  </td>
-                  <td>{u.granted_at ? new Date(u.granted_at).toLocaleDateString() : '-'}</td>
-                  <td>
-                    <Button
-                      variant="outline-danger"
-                      size="sm"
-                      onClick={() => {
-                        onRevokeUser(machine.machine_id, u.user_id);
-                        setTimeout(() => refetch(), 500);
-                      }}
-                      loading={revokePending}
-                    >
-                      <i className="bi bi-person-x" />
-                    </Button>
-                  </td>
+      {/* Assigned Users - only visible to admins */}
+      {canManageUsers && (
+        <div>
+          <h6 className="mb-2">{t('assignUsers', language)}</h6>
+          {assignedUsers.length === 0 ? (
+            <p className="text-muted">{t('noAssignedUsers', language)}</p>
+          ) : (
+            <table className="table table-sm table-hover">
+              <thead>
+                <tr>
+                  <th>{t('tableUsername', language)}</th>
+                  <th>{t('permission', language)}</th>
+                  <th>{t('lastAccess', language)}</th>
+                  <th>{t('tableActions', language)}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+              </thead>
+              <tbody>
+                {assignedUsers.map((u) => (
+                  <tr key={u.user_id}>
+                    <td>{u.username}</td>
+                    <td>
+                      <Badge variant={u.permission === 'admin' ? 'danger' : 'primary'}>
+                        {u.permission}
+                      </Badge>
+                    </td>
+                    <td>{u.granted_at ? new Date(u.granted_at).toLocaleDateString() : '-'}</td>
+                    <td>
+                      <Button
+                        variant="outline-danger"
+                        size="sm"
+                        onClick={() => {
+                          onRevokeUser(machine.machine_id, u.user_id);
+                          setTimeout(() => refetch(), 500);
+                        }}
+                        loading={revokePending}
+                      >
+                        <i className="bi bi-person-x" />
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
     </Modal>
   );
 };

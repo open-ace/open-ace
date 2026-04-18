@@ -162,7 +162,7 @@ def api_register_machine(admin_token, name, hostname, os_type="linux"):
     machine_ids.append(mid)
     return mid
 
-def api_assign_user(admin_token, machine_id, user_id, permission="use"):
+def api_assign_user(admin_token, machine_id, user_id, permission="user"):
     r = requests.post(f"{BASE_URL}/api/remote/machines/{machine_id}/assign",
                       json={"user_id": user_id, "permission": permission},
                       cookies={"session_token": admin_token})
