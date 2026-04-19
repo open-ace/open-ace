@@ -394,7 +394,7 @@ def get_available_machines():
     machines = agent_mgr.get_available_machines(g.user["id"])
 
     # Filter to only show online machines
-    available = [m for m in machines if m.get("connected")]
+    available = [m for m in machines if m.get("status") == "online"]
 
     return jsonify({
         "success": True,
