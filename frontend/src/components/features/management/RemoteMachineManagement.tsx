@@ -53,6 +53,7 @@ export const RemoteMachineManagement: React.FC = () => {
   const [showTokenDialog, setShowTokenDialog] = useState(false);
   const [generatedToken, setGeneratedToken] = useState<string>('');
   const [copied, setCopied] = useState(false);
+  const [copiedInstall, setCopiedInstall] = useState(false);
 
   const [selectedMachine, setSelectedMachine] = useState<RemoteMachine | null>(null);
   const [showDetailsDialog, setShowDetailsDialog] = useState(false);
@@ -80,6 +81,14 @@ export const RemoteMachineManagement: React.FC = () => {
     navigator.clipboard.writeText(generatedToken);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleCopyInstallCommand = () => {
+    const server = window.location.origin;
+    const cmd = `curl -fsSL ${server}/api/remote/agent/install.sh | bash -s -- --server ${server} --token ${generatedToken}`;
+    navigator.clipboard.writeText(cmd);
+    setCopiedInstall(true);
+    setTimeout(() => setCopiedInstall(false), 2000);
   };
 
   const handleViewDetails = (machine: RemoteMachine) => {
@@ -292,6 +301,25 @@ export const RemoteMachineManagement: React.FC = () => {
               {copied ? <i className="bi bi-check" /> : <i className="bi bi-clipboard" />}
             </Button>
           </div>
+        </div>
+
+        {/* Install Command */}
+        <div className="mt-3">
+          <p className="text-muted mb-1">
+            <strong>{t('installCommand', language)}</strong>
+          </p>
+          <div className="input-group">
+            <input
+              type="text"
+              className="form-control font-monospace"
+              value={`curl -fsSL ${window.location.origin}/api/remote/agent/install.sh | bash -s -- --server ${window.location.origin} --token ${generatedToken}`}
+              readOnly
+            />
+            <Button variant="outline-secondary" onClick={handleCopyInstallCommand}>
+              {copiedInstall ? <i className="bi bi-check" /> : <i className="bi bi-clipboard" />}
+            </Button>
+          </div>
+          <small className="text-muted">{t('installCommandDesc', language)}</small>
         </div>
       </Modal>
 
