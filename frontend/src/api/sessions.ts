@@ -27,6 +27,10 @@ export interface AgentSession {
   updated_at: string | null;
   completed_at: string | null;
   expires_at: string | null;
+  project_path?: string;
+  workspace_type?: string;
+  remote_machine_id?: string;
+  machine_name?: string;
   messages: SessionMessage[];
 }
 

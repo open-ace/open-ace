@@ -55,6 +55,34 @@ export interface StoreApiKeyRequest {
   tenant_id?: number;
 }
 
+export interface RemoteSession {
+  session_id: string;
+  machine_id: string;
+  status: string;
+  project_path: string;
+  model: string | null;
+  total_tokens: number;
+  message_count: number;
+  request_count: number;
+  output: RemoteSessionOutput[];
+  created_at: string | null;
+}
+
+export interface RemoteSessionOutput {
+  data: string;
+  stream: string;
+  is_complete: boolean;
+  timestamp: string;
+}
+
+export interface CreateRemoteSessionRequest {
+  machine_id: string;
+  project_path: string;
+  cli_tool?: string;
+  model?: string;
+  title?: string;
+}
+
 // ==================== API Methods ====================
 
 export const remoteApi = {
@@ -100,5 +128,35 @@ export const remoteApi = {
 
   deleteApiKey(keyId: number, tenantId?: number): Promise<{ success: boolean; message: string }> {
     return apiClient.delete(`/api/remote/api-keys/${keyId}`, { tenant_id: tenantId || 1 });
+  },
+
+  // Available machines (for session creation)
+  getAvailableMachines(): Promise<{ success: boolean; machines: RemoteMachine[] }> {
+    return apiClient.get('/api/remote/machines/available');
+  },
+
+  // Session management
+  createSession(data: CreateRemoteSessionRequest): Promise<{ success: boolean; session: RemoteSession }> {
+    return apiClient.post('/api/remote/sessions', data);
+  },
+
+  getSession(sessionId: string): Promise<{ success: boolean; session: RemoteSession }> {
+    return apiClient.get(`/api/remote/sessions/${sessionId}`);
+  },
+
+  sendMessage(sessionId: string, content: string): Promise<{ success: boolean }> {
+    return apiClient.post(`/api/remote/sessions/${sessionId}/chat`, { content });
+  },
+
+  stopSession(sessionId: string): Promise<{ success: boolean }> {
+    return apiClient.post(`/api/remote/sessions/${sessionId}/stop`, {});
+  },
+
+  pauseSession(sessionId: string): Promise<{ success: boolean }> {
+    return apiClient.post(`/api/remote/sessions/${sessionId}/pause`, {});
+  },
+
+  resumeSession(sessionId: string): Promise<{ success: boolean }> {
+    return apiClient.post(`/api/remote/sessions/${sessionId}/resume`, {});
   },
 };

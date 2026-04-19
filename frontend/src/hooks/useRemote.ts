@@ -1,10 +1,10 @@
 /**
- * Remote Workspace Hooks - Custom hooks for remote machine and API key management
+ * Remote Workspace Hooks - Custom hooks for remote machine, API key, and session management
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { remoteApi } from '@/api';
-import type { StoreApiKeyRequest } from '@/api';
+import type { StoreApiKeyRequest, CreateRemoteSessionRequest } from '@/api';
 
 // ==================== Machine Hooks ====================
 
@@ -99,6 +99,82 @@ export function useDeleteApiKey() {
       remoteApi.deleteApiKey(keyId, tenantId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['remote', 'api-keys'] });
+    },
+  });
+}
+
+// ==================== Available Machines Hooks ====================
+
+export function useAvailableMachines() {
+  return useQuery({
+    queryKey: ['remote', 'available-machines'],
+    queryFn: () => remoteApi.getAvailableMachines(),
+  });
+}
+
+// ==================== Session Hooks ====================
+
+export function useCreateRemoteSession() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: CreateRemoteSessionRequest) => remoteApi.createSession(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
+    },
+  });
+}
+
+export function useRemoteSession(sessionId: string | null) {
+  return useQuery({
+    queryKey: ['remote', 'sessions', sessionId],
+    queryFn: () => remoteApi.getSession(sessionId!),
+    enabled: !!sessionId,
+    refetchInterval: sessionId ? 3000 : false,
+  });
+}
+
+export function useSendMessage() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ sessionId, content }: { sessionId: string; content: string }) =>
+      remoteApi.sendMessage(sessionId, content),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['remote', 'sessions', variables.sessionId] });
+    },
+  });
+}
+
+export function useStopRemoteSession() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (sessionId: string) => remoteApi.stopSession(sessionId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
+    },
+  });
+}
+
+export function usePauseRemoteSession() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (sessionId: string) => remoteApi.pauseSession(sessionId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
+    },
+  });
+}
+
+export function useResumeRemoteSession() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (sessionId: string) => remoteApi.resumeSession(sessionId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
     },
   });
 }

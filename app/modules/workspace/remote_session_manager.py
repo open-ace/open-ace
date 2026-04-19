@@ -132,6 +132,19 @@ class RemoteSessionManager:
         session.context["cli_tool"] = cli_tool
         self._session_manager.update_session(session)
 
+        # Also update the dedicated columns (list_sessions reads from columns, not context JSON)
+        try:
+            from app.repositories.database import get_db_connection
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE agent_sessions SET workspace_type = %s, remote_machine_id = %s WHERE session_id = %s",
+                    ("remote", machine_id, session_id),
+                )
+                conn.commit()
+        except Exception as e:
+            logger.warning(f"Failed to update workspace_type column: {e}")
+
         logger.info(f"Created remote session {session_id} on machine {machine_id}")
 
         return {
@@ -263,6 +276,7 @@ class RemoteSessionManager:
             "model": session.model,
             "total_tokens": session.total_tokens,
             "message_count": session.message_count,
+            "request_count": session.request_count,
             "output": output,
             "created_at": session.created_at.isoformat() if session.created_at else None,
         }

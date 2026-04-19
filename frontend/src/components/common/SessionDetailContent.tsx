@@ -6,16 +6,19 @@
  * - Sessions page (feature page)
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { t, type Language } from '@/i18n';
 import { Badge } from './Badge';
 import type { BadgeVariant } from './Badge';
 import { formatDateTime, formatTokens } from '@/utils';
+import { useRemoteSession } from '@/hooks';
 import type { AgentSession, SessionMessage } from '@/api/sessions';
 
 interface SessionDetailContentProps {
   session: AgentSession;
   language: Language;
+  onRestore?: (sessionId: string) => void;
+  restorePending?: boolean;
 }
 
 /**
@@ -25,6 +28,8 @@ interface SessionDetailContentProps {
 export const SessionDetailContent: React.FC<SessionDetailContentProps> = ({
   session,
   language,
+  onRestore,
+  restorePending,
 }) => {
   // Filter state: default to show user and assistant messages
   const [showUser, setShowUser] = useState(true);
@@ -113,6 +118,12 @@ export const SessionDetailContent: React.FC<SessionDetailContentProps> = ({
           <div className="col-md-4">
             <small className="text-muted d-block">{t('status', language) ?? 'Status'}</small>
             <Badge variant={getStatusVariant(session.status)}>{session.status}</Badge>
+            {session.workspace_type === 'remote' && (
+              <Badge variant="info" className="ms-1">
+                <i className="bi bi-cloud-fill me-1" />
+                {session.machine_name || 'Remote'}
+              </Badge>
+            )}
           </div>
           <div className="col-md-4">
             <small className="text-muted d-block">{t('created', language) ?? 'Created'}</small>
@@ -211,6 +222,80 @@ export const SessionDetailContent: React.FC<SessionDetailContentProps> = ({
           </div>
         )}
       </div>
+
+      {/* Remote Output */}
+      {session.workspace_type === 'remote' && (
+        <RemoteOutputSection sessionId={session.session_id} language={language} />
+      )}
+
+      {/* Restore Button */}
+      {onRestore && (
+        <div className="mt-3 d-flex justify-content-end">
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={() => onRestore(session.session_id)}
+            disabled={restorePending}
+          >
+            <i className="bi bi-arrow-repeat me-1" />
+            {t('restoreSession', language)}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+/**
+ * Remote Output Section - Displays remote session output in terminal style
+ */
+const RemoteOutputSection: React.FC<{ sessionId: string; language: Language }> = ({
+  sessionId,
+  language,
+}) => {
+  const outputRef = useRef<HTMLDivElement>(null);
+  const { data: remoteData, isLoading } = useRemoteSession(sessionId);
+  const output = remoteData?.session?.output ?? [];
+
+  // Auto-scroll to bottom when new output arrives
+  useEffect(() => {
+    if (outputRef.current) {
+      outputRef.current.scrollTop = outputRef.current.scrollHeight;
+    }
+  }, [output]);
+
+  return (
+    <div className="mt-3">
+      <h6 className="mb-2">
+        <i className="bi bi-terminal me-1" />
+        {t('remoteOutput', language)}
+      </h6>
+      {isLoading ? (
+        <div className="text-muted small p-2">{t('loading', language)}</div>
+      ) : output.length === 0 ? (
+        <div className="text-muted small p-2">{t('noOutput', language)}</div>
+      ) : (
+        <div
+          ref={outputRef}
+          className="bg-dark text-light p-3 rounded"
+          style={{
+            maxHeight: '300px',
+            overflowY: 'auto',
+            fontFamily: 'monospace',
+            fontSize: '0.85rem',
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+          }}
+        >
+          {output.map((entry, idx) => (
+            <div key={idx}>
+              {entry.is_complete && (
+                <span className="text-success">[complete] </span>
+              )}
+              {entry.data}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };

@@ -590,18 +590,36 @@ export const Workspace: React.FC = () => {
     const newTab = searchParams.get('newTab');
     const effectiveUrl = getEffectiveUrl();
     if (newTab === 'true' && config?.enabled && effectiveUrl && tabsInitialized) {
-      // Clear the URL parameter
+      // Read remote params from URL
+      const remoteParams = {
+        workspaceType: searchParams.get('workspaceType') as 'local' | 'remote' | null,
+        machineId: searchParams.get('machineId'),
+        machineName: searchParams.get('machineName'),
+      };
+      const sessionId = searchParams.get('sessionId') || undefined;
+
+      // Clear the URL parameters
       searchParams.delete('newTab');
+      searchParams.delete('workspaceType');
+      searchParams.delete('machineId');
+      searchParams.delete('machineName');
+      searchParams.delete('sessionId');
       setSearchParams(searchParams, { replace: true });
 
-      // Create new tab
-      createNewTab();
+      // Create new tab with remote params
+      const rp = remoteParams.workspaceType
+        ? { workspaceType: remoteParams.workspaceType, machineId: remoteParams.machineId || undefined, machineName: remoteParams.machineName || undefined }
+        : undefined;
+      createNewTab(sessionId, rp);
     }
   }, [searchParams, config, getEffectiveUrl, tabsInitialized]);
 
   // Create a new tab
-  const createNewTab = useCallback((restoreSessionId?: string) => {
-    const effectiveUrl = getEffectiveUrl(restoreSessionId || undefined);
+  const createNewTab = useCallback((
+    restoreSessionId?: string,
+    remoteParams?: { workspaceType?: 'local' | 'remote'; machineId?: string; machineName?: string },
+  ) => {
+    const effectiveUrl = getEffectiveUrl(restoreSessionId || undefined, undefined, undefined, undefined, remoteParams);
     if (!effectiveUrl) return;
 
     const newTab: WorkspaceTab = {
@@ -612,6 +630,10 @@ export const Workspace: React.FC = () => {
       createdAt: Date.now(),
       waitingForUser: false,
       waitingType: null,
+      sessionId: restoreSessionId,
+      workspaceType: remoteParams?.workspaceType,
+      machineId: remoteParams?.machineId,
+      machineName: remoteParams?.machineName,
     };
 
     // Update local state
@@ -628,6 +650,9 @@ export const Workspace: React.FC = () => {
       createdAt: newTab.createdAt,
       waitingForUser: newTab.waitingForUser,
       waitingType: newTab.waitingType,
+      workspaceType: newTab.workspaceType,
+      machineId: newTab.machineId,
+      machineName: newTab.machineName,
     });
     setStoredActiveTabId(newTab.id);
 

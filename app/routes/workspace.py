@@ -397,9 +397,36 @@ def list_sessions():
                     "completed_at": format_datetime(s.get("completed_at")),
                     "expires_at": format_datetime(s.get("expires_at")),
                     "project_path": s.get("project_path"),
+                    "workspace_type": s.get("workspace_type") or "local",
+                    "remote_machine_id": s.get("remote_machine_id"),
                     "messages": [],
                 }
             )
+
+        # Enrich remote sessions with machine names
+        remote_machine_ids = list(set(
+            s["remote_machine_id"] for s in formatted_sessions
+            if s.get("remote_machine_id")
+        ))
+        if remote_machine_ids:
+            try:
+                from app.repositories.database import _placeholder, _params
+                p = _placeholder()
+                machine_name_map = {}
+                if is_postgresql():
+                    placeholders = ", ".join([p] * len(remote_machine_ids))
+                    machine_query = f"SELECT machine_id, machine_name FROM remote_machines WHERE machine_id IN ({placeholders})"
+                else:
+                    placeholders = ", ".join([p] * len(remote_machine_ids))
+                    machine_query = f"SELECT machine_id, machine_name FROM remote_machines WHERE machine_id IN ({placeholders})"
+                machine_rows = db.fetch_all(machine_query, tuple(remote_machine_ids))
+                for row in machine_rows:
+                    machine_name_map[row["machine_id"]] = row["machine_name"]
+                for s in formatted_sessions:
+                    if s.get("remote_machine_id") and s["remote_machine_id"] in machine_name_map:
+                        s["machine_name"] = machine_name_map[s["remote_machine_id"]]
+            except Exception as e:
+                logger.warning(f"Failed to enrich machine names: {e}")
 
         return jsonify(
             {
@@ -669,7 +696,9 @@ def restore_session(session_id):
             SELECT
                 session_id,
                 tool_name,
-                project_path
+                project_path,
+                workspace_type,
+                remote_machine_id
             FROM agent_sessions
             WHERE session_id = {p}
             LIMIT 1
@@ -689,6 +718,8 @@ def restore_session(session_id):
 
         tool_name = session_data["tool_name"]
         project_path = session_data.get("project_path")
+        workspace_type = session_data.get("workspace_type") or "local"
+        remote_machine_id = session_data.get("remote_machine_id")
 
         # Generate encodedProjectName based on tool
         if tool_name in ["qwen", "claude", "qwen-code"]:
@@ -717,16 +748,41 @@ def restore_session(session_id):
         # Build workspace URL with sessionId, encodedProjectName, and toolName
         workspace_url = f"/work/workspace?sessionId={session_id}&encodedProjectName={encoded_project_name}&toolName={tool_name}"
 
-        logger.info(f"Restored session {session_id} (tool={tool_name}, project={encoded_project_name})")
+        # Add remote parameters for remote sessions
+        machine_name = None
+        if workspace_type == "remote" and remote_machine_id:
+            # Look up machine name
+            try:
+                from app.repositories.database import Database, _placeholder
+                db = Database()
+                p2 = _placeholder()
+                machine_query = f"SELECT machine_name FROM remote_machines WHERE machine_id = {p2} LIMIT 1"
+                machine_row = db.fetch_one(machine_query, [remote_machine_id])
+                if machine_row:
+                    machine_name = machine_row["machine_name"]
+            except Exception as e:
+                logger.warning(f"Failed to look up machine name for {remote_machine_id}: {e}")
+
+            workspace_url += f"&workspaceType=remote&machineId={remote_machine_id}"
+            if machine_name:
+                workspace_url += f"&machineName={machine_name}"
+
+        logger.info(f"Restored session {session_id} (tool={tool_name}, project={encoded_project_name}, type={workspace_type})")
+
+        result = {
+            "session_id": session_id,
+            "encoded_project_name": encoded_project_name,
+            "tool_name": tool_name,
+            "url": workspace_url,
+        }
+        if workspace_type == "remote":
+            result["workspace_type"] = "remote"
+            result["remote_machine_id"] = remote_machine_id
+            result["machine_name"] = machine_name
 
         return jsonify({
             "success": True,
-            "data": {
-                "session_id": session_id,
-                "encoded_project_name": encoded_project_name,
-                "tool_name": tool_name,
-                "url": workspace_url,
-            }
+            "data": result,
         })
     except Exception as e:
         logger.error(f"Error restoring session: {e}")

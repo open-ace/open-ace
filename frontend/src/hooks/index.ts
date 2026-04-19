@@ -69,6 +69,13 @@ export {
   useApiKeys,
   useStoreApiKey,
   useDeleteApiKey,
+  useAvailableMachines,
+  useCreateRemoteSession,
+  useRemoteSession,
+  useSendMessage,
+  useStopRemoteSession,
+  usePauseRemoteSession,
+  useResumeRemoteSession,
 } from './useRemote';
 
 // Re-export store hooks

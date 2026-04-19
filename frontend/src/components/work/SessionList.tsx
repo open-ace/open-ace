@@ -9,12 +9,12 @@
  */
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
-import { useSessions, useSession } from '@/hooks';
+import { useSessions, useSession, useRestoreSession } from '@/hooks';
 import { Loading, EmptyState, Modal, SessionDetailContent } from '@/components/common';
 import { formatRelativeTime } from '@/utils';
+import { NewSessionModal } from './NewSessionModal';
 import type { AgentSession } from '@/api/sessions';
 
 interface SessionListProps {
@@ -22,52 +22,31 @@ interface SessionListProps {
   onSelectSession?: (sessionId: string) => void;
 }
 
+interface SessionItem {
+  id: string;
+  title: string;
+  tool: string;
+  time: string;
+  tokens: number;
+  messages: number;
+  requests: number;
+  workspace_type?: string;
+  machine_name?: string;
+}
+
 interface GroupedSessions {
-  today: Array<{
-    id: string;
-    title: string;
-    tool: string;
-    time: string;
-    tokens: number;
-    messages: number;
-    requests: number;
-  }>;
-  yesterday: Array<{
-    id: string;
-    title: string;
-    tool: string;
-    time: string;
-    tokens: number;
-    messages: number;
-    requests: number;
-  }>;
-  thisWeek: Array<{
-    id: string;
-    title: string;
-    tool: string;
-    time: string;
-    tokens: number;
-    messages: number;
-    requests: number;
-  }>;
-  earlier: Array<{
-    id: string;
-    title: string;
-    tool: string;
-    time: string;
-    tokens: number;
-    messages: number;
-    requests: number;
-  }>;
+  today: SessionItem[];
+  yesterday: SessionItem[];
+  thisWeek: SessionItem[];
+  earlier: SessionItem[];
 }
 
 export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onSelectSession }) => {
   const language = useLanguage();
-  const navigate = useNavigate();
-  const location = useLocation();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
+  const [showNewSessionModal, setShowNewSessionModal] = useState(false);
   const sessionListRef = useRef<HTMLDivElement>(null);
   const selectedRef = useRef<HTMLButtonElement>(null);
 
@@ -102,6 +81,7 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
   );
 
   const sessions = sessionsData?.data?.sessions ?? [];
+  const restoreSession = useRestoreSession();
 
   // Filter sessions by search query
   const filteredSessions = useMemo(() => {
@@ -130,7 +110,7 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
 
     filteredSessions.forEach((session: AgentSession) => {
       const sessionDate = new Date(session.updated_at ?? session.created_at ?? now);
-      const sessionItem = {
+      const sessionItem: SessionItem = {
         id: session.session_id,
         title: session.title ?? `Session ${session.session_id.slice(0, 8)}`,
         tool: session.tool_name ?? 'unknown',
@@ -143,6 +123,8 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
         tokens: session.total_tokens ?? 0,
         messages: session.message_count ?? 0,
         requests: session.request_count ?? 0,
+        workspace_type: session.workspace_type,
+        machine_name: session.machine_name,
       };
 
       if (sessionDate >= today) {
@@ -180,16 +162,7 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
   };
 
   const handleNewSession = () => {
-    // Check if we're already on the workspace page (conversation mode)
-    const isWorkspacePage = location.pathname === '/work' || location.pathname === '/work/';
-
-    if (isWorkspacePage) {
-      // If already on workspace page, navigate with newTab parameter to create a new tab
-      navigate('/work?newTab=true', { replace: true });
-    } else {
-      // Otherwise, navigate to workspace page
-      navigate('/work');
-    }
+    setShowNewSessionModal(true);
   };
 
   if (collapsed) {
@@ -321,11 +294,22 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
         {isLoadingDetail ? (
           <Loading size="sm" text={t('loading', language)} />
         ) : sessionDetail?.data ? (
-          <SessionDetailContent session={sessionDetail.data} language={language} />
+          <SessionDetailContent
+            session={sessionDetail.data}
+            language={language}
+            onRestore={(sid) => restoreSession.mutate(sid)}
+            restorePending={restoreSession.isPending}
+          />
         ) : (
           <div className="text-muted">{t('noData', language)}</div>
         )}
       </Modal>
+
+      {/* New Session Modal */}
+      <NewSessionModal
+        isOpen={showNewSessionModal}
+        onClose={() => setShowNewSessionModal(false)}
+      />
     </div>
   );
 };
@@ -335,15 +319,7 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
  */
 interface SessionGroupProps {
   title: string;
-  sessions: Array<{
-    id: string;
-    title: string;
-    tool: string;
-    time: string;
-    tokens: number;
-    messages: number;
-    requests: number;
-  }>;
+  sessions: SessionItem[];
   onSessionClick: (sessionId: string) => void;
   selectedSessionId: string | null;
 }
@@ -368,6 +344,10 @@ const SessionGroup: React.FC<SessionGroupProps> = ({
               title={session.title}  // Issue #66: Show session name on hover
             >
               <span className="session-id text-truncate">
+                {session.workspace_type === 'remote' && (
+                  <i className="bi bi-cloud-fill text-primary me-1"
+                     title={`Remote: ${session.machine_name || session.id.slice(0, 8)}`} />
+                )}
                 {session.id.slice(0, 4)}
               </span>
               <span className="session-time text-muted">{session.time}</span>

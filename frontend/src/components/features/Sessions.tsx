@@ -12,6 +12,9 @@ import {
   useCompleteSession,
   useSession,
   useRestoreSession,
+  useStopRemoteSession,
+  usePauseRemoteSession,
+  useResumeRemoteSession,
 } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
@@ -78,6 +81,9 @@ export const Sessions: React.FC = () => {
   const deleteMutation = useDeleteSession();
   const completeMutation = useCompleteSession();
   const restoreMutation = useRestoreSession();
+  const stopRemoteMutation = useStopRemoteSession();
+  const pauseRemoteMutation = usePauseRemoteSession();
+  const resumeRemoteMutation = useResumeRemoteSession();
 
   const sessions = data?.data?.sessions ?? [];
 
@@ -355,9 +361,13 @@ export const Sessions: React.FC = () => {
                 onDelete={handleDelete}
                 onComplete={handleComplete}
                 onRestore={handleRestore}
+                onStopRemote={(id) => stopRemoteMutation.mutate(id)}
+                onPauseRemote={(id) => pauseRemoteMutation.mutate(id)}
+                onResumeRemote={(id) => resumeRemoteMutation.mutate(id)}
                 isDeleting={deleteMutation.isPending}
                 isCompleting={completeMutation.isPending}
                 isRestoring={restoreMutation.isPending}
+                isRemoteControlPending={stopRemoteMutation.isPending || pauseRemoteMutation.isPending || resumeRemoteMutation.isPending}
               />
             ))}
           </div>
@@ -432,7 +442,12 @@ export const Sessions: React.FC = () => {
         {isLoadingDetail ? (
           <Loading size="sm" text={t('loading', language)} />
         ) : sessionDetail?.data ? (
-          <SessionDetailContent session={sessionDetail.data} language={language} />
+          <SessionDetailContent
+            session={sessionDetail.data}
+            language={language}
+            onRestore={handleRestore}
+            restorePending={restoreMutation.isPending}
+          />
         ) : (
           <div className="text-muted">{t('noData', language)}</div>
         )}
@@ -452,9 +467,13 @@ interface SessionCardProps {
   onDelete: (sessionId: string) => void;
   onComplete: (sessionId: string) => void;
   onRestore: (sessionId: string) => void;
+  onStopRemote: (sessionId: string) => void;
+  onPauseRemote: (sessionId: string) => void;
+  onResumeRemote: (sessionId: string) => void;
   isDeleting: boolean;
   isCompleting: boolean;
   isRestoring: boolean;
+  isRemoteControlPending: boolean;
 }
 
 const SessionCard: React.FC<SessionCardProps> = ({
@@ -465,10 +484,15 @@ const SessionCard: React.FC<SessionCardProps> = ({
   onDelete,
   onComplete,
   onRestore,
+  onStopRemote,
+  onPauseRemote,
+  onResumeRemote,
   isDeleting,
   isCompleting,
   isRestoring,
+  isRemoteControlPending,
 }) => {
+  const isRemote = session.workspace_type === 'remote';
   return (
     <div
       className={cn('session-item card mb-2', isSelected && 'border-primary')}
@@ -488,6 +512,12 @@ const SessionCard: React.FC<SessionCardProps> = ({
               <Badge variant={typeColors[session.session_type] ?? 'secondary'}>
                 {session.session_type}
               </Badge>
+              {isRemote && (
+                <Badge variant="info">
+                  <i className="bi bi-cloud-fill me-1" />
+                  {session.machine_name || 'Remote'}
+                </Badge>
+              )}
             </div>
 
             {/* Meta Info - Two rows for better spacing */}
@@ -530,7 +560,45 @@ const SessionCard: React.FC<SessionCardProps> = ({
                 <i className="bi bi-box-arrow-in-right" />
               </Button>
             </span>
-            {session.status === 'active' && (
+            {/* Remote session controls */}
+            {isRemote && session.status === 'active' && (
+              <>
+                <span title={t('pauseSession', language)}>
+                  <Button
+                    variant="outline-warning"
+                    size="sm"
+                    onClick={() => onPauseRemote(session.session_id)}
+                    loading={isRemoteControlPending}
+                  >
+                    <i className="bi bi-pause-fill" />
+                  </Button>
+                </span>
+                <span title={t('stopSession', language)}>
+                  <Button
+                    variant="outline-danger"
+                    size="sm"
+                    onClick={() => onStopRemote(session.session_id)}
+                    loading={isRemoteControlPending}
+                  >
+                    <i className="bi bi-stop-fill" />
+                  </Button>
+                </span>
+              </>
+            )}
+            {isRemote && session.status === 'paused' && (
+              <span title={t('resumeSession', language)}>
+                <Button
+                  variant="outline-success"
+                  size="sm"
+                  onClick={() => onResumeRemote(session.session_id)}
+                  loading={isRemoteControlPending}
+                >
+                  <i className="bi bi-play-fill" />
+                </Button>
+              </span>
+            )}
+            {/* Local session complete button */}
+            {!isRemote && session.status === 'active' && (
               <span title={t('complete', language) ?? 'Complete'}>
                 <Button
                   variant="outline-success"
