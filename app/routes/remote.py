@@ -13,6 +13,7 @@ API endpoints for remote workspace management including:
 import json
 import logging
 import os
+import time
 import uuid
 from datetime import datetime
 
@@ -60,28 +61,39 @@ def load_user():
     else:
         url_token = request.args.get("token")
         if url_token:
-            try:
-                from app.services.webui_manager import WebUIManager
-                webui_manager = WebUIManager()
-                is_valid, user_id, error = webui_manager.validate_token(url_token)
-                if is_valid and user_id:
-                    from app.repositories.user_repo import UserRepository
-                    user_repo = UserRepository()
-                    user = user_repo.get_user_by_id(user_id)
-                    if user:
-                        g.user = {
-                            "id": user_id,
-                            "username": user.get("username"),
-                            "email": user.get("email"),
-                            "role": user.get("role"),
-                        }
+            # First try as a session_token (for SSE / EventSource which can't send cookies)
+            session = auth_service.get_session(url_token)
+            if session:
+                g.user = {
+                    "id": session.get("user_id"),
+                    "username": session.get("username"),
+                    "email": session.get("email"),
+                    "role": session.get("role"),
+                }
+            else:
+                # Fall back to WebUI token validation
+                try:
+                    from app.services.webui_manager import WebUIManager
+                    webui_manager = WebUIManager()
+                    is_valid, user_id, error = webui_manager.validate_token(url_token)
+                    if is_valid and user_id:
+                        from app.repositories.user_repo import UserRepository
+                        user_repo = UserRepository()
+                        user = user_repo.get_user_by_id(user_id)
+                        if user:
+                            g.user = {
+                                "id": user_id,
+                                "username": user.get("username"),
+                                "email": user.get("email"),
+                                "role": user.get("role"),
+                            }
+                        else:
+                            g.user = None
                     else:
                         g.user = None
-                else:
+                except Exception as e:
+                    logger.warning(f"Failed to validate URL token: {e}")
                     g.user = None
-            except Exception as e:
-                logger.warning(f"Failed to validate URL token: {e}")
-                g.user = None
         else:
             g.user = None
 
@@ -415,6 +427,7 @@ def create_remote_session():
     model = data.get("model")
     cli_tool = data.get("cli_tool", "qwen-code-cli")
     title = data.get("title", "")
+    permission_mode = data.get("permission_mode")
 
     if not machine_id:
         return jsonify({"error": "machine_id is required"}), 400
@@ -429,6 +442,7 @@ def create_remote_session():
         model=model,
         cli_tool=cli_tool,
         title=title,
+        permission_mode=permission_mode,
     )
 
     if result:
@@ -465,11 +479,17 @@ def send_remote_message(session_id):
 
     data = request.get_json() or {}
     content = data.get("content", "")
+    permission_mode = data.get("permission_mode")
 
     if not content:
         return jsonify({"error": "content is required"}), 400
 
     session_mgr = RemoteSessionManager()
+
+    # If permission_mode changed, send update command to agent
+    if permission_mode:
+        session_mgr.update_permission_mode(session_id, permission_mode)
+
     success = session_mgr.send_message(
         session_id=session_id,
         content=content,
@@ -536,6 +556,106 @@ def resume_remote_session(session_id):
     if success:
         return jsonify({"success": True})
     return jsonify({"error": "Failed to resume session"}), 400
+
+
+@remote_bp.route("/sessions/<session_id>/permission", methods=["POST"])
+def send_permission_response(session_id):
+    """
+    Send a permission response (approve/deny) from the frontend to the
+    remote agent.
+
+    Expected JSON body:
+        {
+            "request_id": "...",
+            "behavior": "allow" | "deny",
+            "tool_name": "run_shell_command",
+            "message": "optional deny reason"
+        }
+    """
+    auth_error = _require_auth()
+    if auth_error:
+        return auth_error
+
+    session_info, access_error = _check_session_access(session_id)
+    if access_error:
+        return access_error
+
+    data = request.get_json() or {}
+    request_id = data.get("request_id")
+    behavior = data.get("behavior", "deny")
+    tool_name = data.get("tool_name", "")
+    message = data.get("message")
+
+    # Queue the permission_response command for the agent
+    agent_mgr = get_remote_agent_manager()
+    cmd = {
+        "type": "command",
+        "command": "permission_response",
+        "session_id": session_id,
+        "behavior": behavior,
+        "tool_name": tool_name,
+    }
+    if request_id:
+        cmd["request_id"] = request_id
+    if message:
+        cmd["message"] = message
+
+    agent_mgr.send_command(session_info.get("machine_id", ""), cmd)
+
+    return jsonify({"success": True})
+
+
+@remote_bp.route("/sessions/<session_id>/stream")
+def stream_session_output(session_id):
+    """SSE: real-time stream of remote session output, formatted as claude_json."""
+    auth_error = _require_auth()
+    if auth_error:
+        return auth_error
+
+    _, access_error = _check_session_access(session_id)
+    if access_error:
+        return access_error
+
+    agent_mgr = get_remote_agent_manager()
+
+    def generate():
+        last_index = 0
+        while True:
+            new_output = agent_mgr.get_buffered_output(
+                session_id, after_index=last_index
+            )
+            for entry in new_output:
+                data = entry.get("data", "").strip()
+                stream = entry.get("stream", "stdout")
+                if not data or stream == "stderr":
+                    last_index += 1
+                    continue
+                try:
+                    parsed = json.loads(data)
+                    if stream == "permission":
+                        # Forward permission requests with a distinct type
+                        yield f"data: {json.dumps({'type': 'permission_request', 'data': parsed})}\n\n"
+                    else:
+                        # Wrap as claude_json to match local streaming format
+                        yield f"data: {json.dumps({'type': 'claude_json', 'data': parsed})}\n\n"
+                except (json.JSONDecodeError, TypeError):
+                    pass
+                last_index += 1
+
+            # Check if session ended
+            session_mgr = RemoteSessionManager()
+            status = session_mgr.get_session_status(session_id)
+            if status and status.get("status") in ("completed", "stopped", "error"):
+                break
+            time.sleep(0.2)
+
+        yield "data: [DONE]\n\n"
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
 
 
 # ==================== Agent Installation ====================
@@ -610,28 +730,11 @@ def agent_register():
 
 @remote_bp.route("/agent/ws", methods=["GET"])
 def agent_websocket():
-    """
-    WebSocket endpoint for remote agent communication.
-
-    Protocol:
-    - Agent connects and sends {"type": "register", "machine_id": "...", ...}
-    - Server acknowledges and begins dispatching commands
-    - Agent sends heartbeat every 60s
-    - Agent sends session_output, session_status, usage_report messages
-    """
-    # Check if this is a WebSocket upgrade request
-    upgrade_header = request.headers.get("Upgrade", "").lower()
-    if upgrade_header != "websocket":
-        return jsonify({"error": "This endpoint requires WebSocket upgrade"}), 400
-
-    # For WebSocket, we need a WSGI-compatible approach
-    # Since Flask doesn't natively support WebSocket, we'll handle this
-    # through a simple message-based HTTP long-polling fallback
-    # or delegate to a proper WebSocket server
+    """Deprecated. Use HTTP polling via /api/remote/agent/message instead."""
     return jsonify({
-        "error": "WebSocket requires a compatible server (e.g., gevent, gunicorn with websocket worker)",
-        "fallback": "Use HTTP long-polling via /agent/message endpoint",
-    }), 501
+        "error": "WebSocket no longer supported",
+        "endpoint": "/api/remote/agent/message",
+    }), 410
 
 
 @remote_bp.route("/agent/message", methods=["POST"])
@@ -705,14 +808,28 @@ def agent_message():
     elif msg_type == "usage_report":
         session_id = data.get("session_id")
         tokens = data.get("tokens", {})
-        requests = data.get("requests", 1)
+        requests_count = data.get("requests", 1)
 
         if session_id:
             session_mgr = RemoteSessionManager()
             session_mgr.process_usage_report(
                 session_id=session_id,
                 tokens=tokens,
-                requests=requests,
+                requests=requests_count,
+            )
+
+        pending = agent_mgr.get_pending_commands(machine_id)
+        return jsonify({"success": True, "pending_commands": pending})
+
+    elif msg_type == "permission_request":
+        session_id = data.get("session_id")
+        control_request = data.get("control_request", {})
+
+        if session_id:
+            session_mgr = RemoteSessionManager()
+            session_mgr.process_permission_request(
+                session_id=session_id,
+                control_request=control_request,
             )
 
         pending = agent_mgr.get_pending_commands(machine_id)
@@ -798,9 +915,15 @@ def llm_proxy(path=""):
         }
         target_base = provider_urls.get(provider, "https://api.openai.com")
 
-    target_url = f"{target_base}/{path}" if path else target_base
-    # Also handle direct path in the request URL
-    if not path:
+    if path:
+        # Avoid double version prefix (e.g., base_url=.../v1 + path=v1/...)
+        path_parts = path.split("/", 1)
+        if len(path_parts) > 1 and target_base.endswith("/" + path_parts[0]):
+            target_url = f"{target_base}/{path_parts[1]}"
+        else:
+            target_url = f"{target_base}/{path}"
+    else:
+        # Handle direct path in the request URL
         target_url = f"{target_base}{request.path.split('/llm-proxy')[-1]}"
 
     # Forward the request
@@ -823,7 +946,7 @@ def llm_proxy(path=""):
         # Check if this is a streaming request
         body = request.get_data()
 
-        # Forward the request
+        # Forward the request (bypass system proxy to avoid interference)
         resp = http_requests.request(
             method=request.method,
             url=target_url,
@@ -831,6 +954,7 @@ def llm_proxy(path=""):
             data=body,
             stream=True,
             timeout=120,
+            proxies={"http": None, "https": None},
         )
 
         # Handle streaming response
