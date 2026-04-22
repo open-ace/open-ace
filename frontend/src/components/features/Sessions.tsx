@@ -44,6 +44,15 @@ const statusColors: Record<string, BadgeVariant> = {
   error: 'danger',
 };
 
+// Status icons for better visibility
+const statusIcons: Record<string, string> = {
+  active: 'bi-circle-fill',
+  paused: 'bi-pause-circle-fill',
+  completed: 'bi-check-circle-fill',
+  archived: 'bi-archive-fill',
+  error: 'bi-exclamation-circle-fill',
+};
+
 // Session type badge colors
 const typeColors: Record<string, BadgeVariant> = {
   chat: 'primary',
@@ -86,6 +95,16 @@ export const Sessions: React.FC = () => {
   const resumeRemoteMutation = useResumeRemoteSession();
 
   const sessions = data?.data?.sessions ?? [];
+
+  // Status counts for quick filter pills
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const s of sessions) {
+      const st = s.status || 'active';
+      counts[st] = (counts[st] || 0) + 1;
+    }
+    return counts;
+  }, [sessions]);
 
   // Auto-select session from URL parameter
   useEffect(() => {
@@ -303,6 +322,19 @@ export const Sessions: React.FC = () => {
               size="sm"
             />
           </div>
+          {/* Status count pills */}
+          <div className="d-flex align-items-center gap-1">
+            {Object.entries(statusCounts).map(([st, count]) => (
+              <span
+                key={st}
+                className={`badge bg-${statusColors[st] ?? 'secondary'}`}
+                style={{ fontSize: '0.7rem', cursor: 'pointer', opacity: filters.status === st ? 1 : 0.7 }}
+                onClick={() => handleFilterChange('status', filters.status === st ? '' : st)}
+              >
+                {count}
+              </span>
+            ))}
+          </div>
           {/* Type Filter */}
           <div className="d-flex align-items-center gap-1">
             <small className="text-muted">{t('type', language) ?? 'Type'}:</small>
@@ -508,7 +540,13 @@ const SessionCard: React.FC<SessionCardProps> = ({
               <h5 className="mb-0" style={{ fontSize: '1.1rem', fontWeight: 600 }}>
                 {session.title ?? session.session_id.substring(0, 8)}
               </h5>
-              <Badge variant={statusColors[session.status] ?? 'secondary'}>{session.status}</Badge>
+              <code className="text-muted ms-2" style={{ fontSize: '0.75rem' }}>
+                ID: {session.session_id.substring(0, 8)}
+              </code>
+              <Badge variant={statusColors[session.status] ?? 'secondary'}>
+                {statusIcons[session.status] && <i className={`bi ${statusIcons[session.status]} me-1`} />}
+                {session.status}
+              </Badge>
               <Badge variant={typeColors[session.session_type] ?? 'secondary'}>
                 {session.session_type}
               </Badge>

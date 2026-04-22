@@ -44,6 +44,7 @@ class SessionProcess:
         cli_tool: str,
         output_callback: Callable[[str, str, str, bool], None],
         permission_callback: Optional[Callable[[str, dict], None]] = None,
+        usage_callback: Optional[Callable[[str, Dict[str, int]], None]] = None,
         env: Optional[Dict[str, str]] = None,
         model: Optional[str] = None,
         permission_mode: Optional[str] = None,
@@ -55,6 +56,7 @@ class SessionProcess:
         self.cli_tool = cli_tool
         self.output_callback = output_callback
         self.permission_callback = permission_callback
+        self.usage_callback = usage_callback
         self.env = env
         self.model = model
         self.permission_mode = permission_mode
@@ -146,6 +148,21 @@ class SessionProcess:
                         if msg_type == "control_request" and self.permission_callback:
                             self.permission_callback(self.session_id, parsed)
                             continue
+
+                        # Handle result messages — extract token usage
+                        if msg_type == "result" and self.usage_callback:
+                            data = parsed.get("data", {})
+                            usage = data.get("usage")
+                            if not usage:
+                                msg = data.get("message", {})
+                                usage = msg.get("usage")
+                            if usage and isinstance(usage, dict):
+                                tokens = {
+                                    "input": usage.get("input_tokens", usage.get("input", 0)),
+                                    "output": usage.get("output_tokens", usage.get("output", 0)),
+                                }
+                                if tokens["input"] or tokens["output"]:
+                                    self.usage_callback(self.session_id, tokens)
                     except (json.JSONDecodeError, ValueError):
                         pass
 
@@ -353,7 +370,7 @@ class ProcessExecutor:
     and environment variable mappings.
     """
 
-    def __init__(self, server_url: str, output_callback: Optional[Callable] = None, permission_callback: Optional[Callable] = None):
+    def __init__(self, server_url: str, output_callback: Optional[Callable] = None, permission_callback: Optional[Callable] = None, usage_callback: Optional[Callable] = None):
         """
         Args:
             server_url: The Open ACE server base URL, used to build the
@@ -363,10 +380,13 @@ class ProcessExecutor:
             permission_callback: Called with (session_id, control_request_dict)
                 when the CLI outputs a control_request message (e.g. permission
                 prompt).  If None, control_requests are forwarded as regular output.
+            usage_callback: Called with (session_id, tokens_dict) when a result
+                message contains token usage data.
         """
         self.server_url = server_url
         self._output_callback = output_callback or self._default_output_callback
         self._permission_callback = permission_callback
+        self._usage_callback = usage_callback
         self._sessions: Dict[str, SessionProcess] = {}
         self._lock = threading.Lock()
 
@@ -560,6 +580,7 @@ class ProcessExecutor:
             cli_tool=cli_tool,
             output_callback=self._output_callback,
             permission_callback=self._permission_callback,
+            usage_callback=self._usage_callback,
             env=env,
             model=model,
             permission_mode=permission_mode,
@@ -760,6 +781,7 @@ class ProcessExecutor:
                 cli_tool=old_session.cli_tool,
                 output_callback=self._output_callback,
                 permission_callback=self._permission_callback,
+                usage_callback=self._usage_callback,
                 env=old_session.env,
                 model=old_session.model,
                 permission_mode=old_session.permission_mode,

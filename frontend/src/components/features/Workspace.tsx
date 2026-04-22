@@ -31,6 +31,7 @@ import {
 } from '@/store';
 import { t } from '@/i18n';
 import { Error, Button, Card, useToast, Modal } from '@/components/common';
+import { NewSessionModal } from '@/components/work/NewSessionModal';
 import { cn } from '@/utils';
 
 /**
@@ -72,6 +73,7 @@ export const Workspace: React.FC = () => {
   const [renameTabId, setRenameTabId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [showRenameModal, setShowRenameModal] = useState(false);
+  const [showNewSessionModal, setShowNewSessionModal] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
   const [tabWidths, setTabWidths] = useState<Record<string, number>>({});
   const [resizingTabId, setResizingTabId] = useState<string | null>(null);
@@ -166,7 +168,9 @@ export const Workspace: React.FC = () => {
         if (sessionId) {
           const currentActiveTabId = useAppStore.getState().workspaceActiveTabId;
           if (currentActiveTabId) {
-            // Only update title if it's explicitly provided (not undefined)
+            // Filter out generic "Conversation(xxx...)" titles from iframe
+            const isGenericTitle = title && /^Conversation\([a-f0-9]+\.\.\.\)$/i.test(title);
+            // Only update title if it's explicitly provided (not undefined) and not generic
             // Otherwise keep the existing title (e.g., "New Session")
             const updateData: Partial<StoreWorkspaceTab> = {
               sessionId,
@@ -174,15 +178,22 @@ export const Workspace: React.FC = () => {
               toolName,
               settings, // Save settings for tab restoration (Issue #70)
             };
-            if (title) {
+            if (title && !isGenericTitle) {
               updateData.title = title;
+            }
+            // Fallback: use decoded project name if title is generic Conversation(xxx...)
+            if (isGenericTitle && encodedProjectName) {
+              updateData.title = decodeURIComponent(encodedProjectName);
             }
             useAppStore.getState().updateWorkspaceTab(currentActiveTabId, updateData);
             // Also update local tabs state
+            const effectiveTitle = (title && !isGenericTitle) ? title
+              : (isGenericTitle && encodedProjectName) ? decodeURIComponent(encodedProjectName)
+              : undefined;
             setTabs((prev) =>
               prev.map((tab) =>
                 tab.id === currentActiveTabId
-                  ? { ...tab, sessionId, encodedProjectName, toolName, title: title || tab.title, settings }
+                  ? { ...tab, sessionId, encodedProjectName, toolName, title: effectiveTitle || tab.title, settings }
                   : tab
               )
             );
@@ -1178,7 +1189,7 @@ export const Workspace: React.FC = () => {
             {/* New Tab Button - placed right after the last tab */}
             <button
               className="btn btn-sm btn-link px-3 py-2 text-muted workspace-new-tab-btn"
-              onClick={() => createNewTab()}
+              onClick={() => setShowNewSessionModal(true)}
               title={t('newSession', language)}
               style={{
                 flexShrink: 0,
@@ -1428,6 +1439,23 @@ export const Workspace: React.FC = () => {
           to { transform: rotate(360deg); }
         }
       `}</style>
+      {/* New Session Modal - shared by "+" button and SessionList */}
+      <NewSessionModal
+        show={showNewSessionModal}
+        onClose={() => setShowNewSessionModal(false)}
+        onCreateLocal={() => {
+          setShowNewSessionModal(false);
+          createNewTab();
+        }}
+        onCreateRemote={(params: { machineId: string; machineName: string; sessionId: string }) => {
+          setShowNewSessionModal(false);
+          createNewTab(params.sessionId || undefined, {
+            workspaceType: 'remote',
+            machineId: params.machineId,
+            machineName: params.machineName,
+          });
+        }}
+      />
     </div>
   );
 };

@@ -38,6 +38,7 @@ class RemoteAgent:
             server_url=self.config.server_url,
             output_callback=self._on_session_output,
             permission_callback=self._on_permission_request,
+            usage_callback=self._send_usage_report,
         )
         self._capabilities = get_capabilities()
         self._running = False

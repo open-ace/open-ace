@@ -5,6 +5,10 @@
  * - Workspace type selection: Local / Remote
  * - Machine selector for remote workspaces
  * - Project path input with auto-fill from machine work_dir
+ *
+ * Supports two modes:
+ * 1. Standalone (default): navigates to /work with URL params
+ * 2. Embedded (with onCreateLocal/onCreateRemote): calls callbacks directly (used by Workspace "+")
  */
 
 import React, { useState, useMemo } from 'react';
@@ -15,14 +19,25 @@ import { t } from '@/i18n';
 import { Modal, Button, Badge, EmptyState, Loading } from '@/components/common';
 
 interface NewSessionModalProps {
-  isOpen: boolean;
+  isOpen?: boolean;
+  show?: boolean;
   onClose: () => void;
+  onCreateLocal?: () => void;
+  onCreateRemote?: (params: { machineId: string; machineName: string; sessionId: string }) => void;
 }
 
-export const NewSessionModal: React.FC<NewSessionModalProps> = ({ isOpen, onClose }) => {
+export const NewSessionModal: React.FC<NewSessionModalProps> = ({
+  isOpen,
+  show,
+  onClose,
+  onCreateLocal,
+  onCreateRemote,
+}) => {
   const language = useLanguage();
   const navigate = useNavigate();
   const location = useLocation();
+
+  const modalOpen = isOpen ?? show ?? false;
 
   const [workspaceType, setWorkspaceType] = useState<'local' | 'remote'>('local');
   const [selectedMachineId, setSelectedMachineId] = useState<string>('');
@@ -48,6 +63,10 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({ isOpen, onClos
 
   const handleCreateLocal = () => {
     onClose();
+    if (onCreateLocal) {
+      onCreateLocal();
+      return;
+    }
     const isWorkspacePage = location.pathname === '/work' || location.pathname === '/work/';
     if (isWorkspacePage) {
       navigate('/work?newTab=true', { replace: true });
@@ -68,22 +87,26 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({ isOpen, onClos
       onClose();
 
       const machineName = selectedMachine?.machine_name || selectedMachineId.slice(0, 8);
-      const sessionId = result.session?.session_id;
-      const isWorkspacePage = location.pathname === '/work' || location.pathname === '/work/';
+      const sessionId = result.session?.session_id || '';
 
-      if (isWorkspacePage) {
-        const params = new URLSearchParams({
-          newTab: 'true',
-          workspaceType: 'remote',
-          machineId: selectedMachineId,
-          machineName,
-        });
-        if (sessionId) {
-          params.set('sessionId', sessionId);
-        }
-        navigate(`/work?${params.toString()}`, { replace: true });
+      if (onCreateRemote) {
+        onCreateRemote({ machineId: selectedMachineId, machineName, sessionId });
       } else {
-        navigate('/work');
+        const isWorkspacePage = location.pathname === '/work' || location.pathname === '/work/';
+        if (isWorkspacePage) {
+          const params = new URLSearchParams({
+            newTab: 'true',
+            workspaceType: 'remote',
+            machineId: selectedMachineId,
+            machineName,
+          });
+          if (sessionId) {
+            params.set('sessionId', sessionId);
+          }
+          navigate(`/work?${params.toString()}`, { replace: true });
+        } else {
+          navigate('/work');
+        }
       }
 
       // Reset state
@@ -107,7 +130,7 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({ isOpen, onClos
 
   return (
     <Modal
-      isOpen={isOpen}
+      isOpen={modalOpen}
       onClose={onClose}
       title={t('newSession', language)}
       footer={

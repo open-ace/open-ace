@@ -344,9 +344,11 @@ const SessionGroup: React.FC<SessionGroupProps> = ({
               title={session.title}  // Issue #66: Show session name on hover
             >
               <span className="session-id text-truncate">
-                {session.workspace_type === 'remote' && (
+                {session.workspace_type === 'remote' ? (
                   <i className="bi bi-cloud-fill text-primary me-1"
                      title={`Remote: ${session.machine_name || session.id.slice(0, 8)}`} />
+                ) : (
+                  <i className="bi bi-terminal-fill text-success me-1" title="Local" />
                 )}
                 {session.id.slice(0, 4)}
               </span>

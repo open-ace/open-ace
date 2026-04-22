@@ -86,8 +86,8 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
   };
 
   const handlePromptClick = (promptId: number) => {
-    // Navigate to prompts page with the prompt selected
-    navigate(`/work/prompts?highlight=${promptId}`);
+    // Open in new window to avoid unloading the workspace iframe
+    window.open(`/work/prompts?highlight=${promptId}`, '_blank');
   };
 
   if (collapsed) {
@@ -129,7 +129,7 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
       ) : (
         <EmptyState icon="bi-file-text" title={t('noPromptsFound', language)} />
       )}
-      <button className="btn btn-link btn-sm mt-2" onClick={() => navigate('/work/prompts')}>
+      <button className="btn btn-link btn-sm mt-2" onClick={() => window.open('/work/prompts', '_blank')}>
         <i className="bi bi-arrow-right me-1" />
         {t('viewAll', language)}
       </button>
