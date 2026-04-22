@@ -11,7 +11,7 @@
  * 2. Embedded (with onCreateLocal/onCreateRemote): calls callbacks directly (used by Workspace "+")
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAvailableMachines, useCreateRemoteSession } from '@/hooks';
 import { useLanguage } from '@/store';
@@ -47,6 +47,13 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
   const createRemoteSession = useCreateRemoteSession();
 
   const machines = machinesData?.machines ?? [];
+
+  // Auto-select the only available machine
+  useEffect(() => {
+    if (machines.length === 1 && !selectedMachineId) {
+      handleMachineSelect(machines[0].machine_id);
+    }
+  }, [machines.length]);
 
   const selectedMachine = useMemo(
     () => machines.find((m) => m.machine_id === selectedMachineId),
