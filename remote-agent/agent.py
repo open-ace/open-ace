@@ -2,9 +2,9 @@
 """
 Open ACE Remote Agent - Main Daemon
 
-Connects to the Open ACE server via WebSocket (with HTTP fallback),
-handles commands (start_session, send_message, stop_session), manages
-CLI subprocesses through the executor module, and sends heartbeats.
+Connects to the Open ACE server via HTTP polling, handles commands
+(start_session, send_message, stop_session), manages CLI subprocesses
+through the executor module, and sends heartbeats.
 """
 
 import json
@@ -12,9 +12,8 @@ import logging
 import os
 import signal
 import sys
-import threading
 import time
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Dict, Optional
 
 import requests
 
@@ -29,8 +28,8 @@ class RemoteAgent:
     """
     Main remote agent daemon.
 
-    Connects to the Open ACE server, receives commands, manages CLI
-    subprocesses, and reports output and status back to the server.
+    Connects to the Open ACE server via HTTP polling, receives commands,
+    manages CLI subprocesses, and reports output and status back.
     """
 
     def __init__(self, config: Optional[AgentConfig] = None):
@@ -38,19 +37,11 @@ class RemoteAgent:
         self._executor = ProcessExecutor(
             server_url=self.config.server_url,
             output_callback=self._on_session_output,
+            permission_callback=self._on_permission_request,
         )
         self._capabilities = get_capabilities()
-        self._ws = None
-        self._ws_connected = threading.Event()
-        self._ws_lock = threading.Lock()
         self._running = False
         self._reconnect_delay = self.config.reconnect_base_delay
-        self._heartbeat_timer: Optional[threading.Timer] = None
-
-        # Thread-safe queue for messages that need to be sent when
-        # the connection is available
-        self._outbound_lock = threading.Lock()
-        self._outbound_queue: list = []
 
     # ----------------------------------------------------------------
     # Connection lifecycle
@@ -58,13 +49,12 @@ class RemoteAgent:
 
     def start(self) -> None:
         """
-        Main entry point. Runs the agent loop with reconnection logic.
+        Main entry point. Runs the HTTP polling loop with reconnection logic.
 
         Blocks until shutdown is requested via signal or unhandled error.
         """
         self._running = True
 
-        # Register signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
 
@@ -77,9 +67,9 @@ class RemoteAgent:
 
         while self._running:
             try:
-                self._connect_and_run()
+                self._http_poll_loop()
             except Exception as e:
-                logger.error("Connection error: %s", e)
+                logger.error("HTTP poll loop error: %s", e)
 
             if not self._running:
                 break
@@ -94,165 +84,73 @@ class RemoteAgent:
 
         self._shutdown()
 
-    def _connect_and_run(self) -> None:
-        """
-        Attempt to establish a WebSocket connection and run the
-        message loop. Falls back to HTTP polling if WebSocket fails.
-        """
-        ws_connected = threading.Event()
-        original_on_open = None
-
-        try:
-            import websocket
-
-            ws_url = self.config.ws_url + "/api/remote/agent/ws"
-            logger.info("Connecting to %s", ws_url)
-
-            def on_open_wrapper(ws):
-                ws_connected.set()
-                self._on_ws_open(ws)
-
-            ws = websocket.WebSocketApp(
-                ws_url,
-                on_open=on_open_wrapper,
-                on_message=self._on_ws_message,
-                on_error=self._on_ws_error,
-                on_close=self._on_ws_close,
-                header={"Authorization": f"Bearer {self.config.agent_token or ''}"},
-            )
-
-            with self._ws_lock:
-                self._ws = ws
-
-            ws.run_forever(
-                ping_interval=30,
-                ping_timeout=10,
-                skip_utf8_validation=True,
-            )
-
-            # run_forever returned — if we never opened successfully,
-            # fall back to HTTP polling instead of retrying WebSocket
-            if not ws_connected.is_set():
-                logger.info("WebSocket never opened, falling back to HTTP polling")
-                self._http_poll_loop()
-
-        except ImportError:
-            logger.warning(
-                "websocket-client not installed, using HTTP polling fallback"
-            )
-            self._http_poll_loop()
-        except Exception as e:
-            logger.error("WebSocket connection failed: %s", e)
-            logger.info("Falling back to HTTP polling")
-            self._http_poll_loop()
-
     # ----------------------------------------------------------------
-    # WebSocket handlers
-    # ----------------------------------------------------------------
-
-    def _on_ws_open(self, ws) -> None:
-        """Handle WebSocket connection established."""
-        logger.info("WebSocket connected")
-        self._ws_connected.set()
-        self._reconnect_delay = self.config.reconnect_base_delay
-
-        # Send registration message
-        self._send_ws_message({
-            "type": "register",
-            "machine_id": self.config.machine_id,
-            "capabilities": self._capabilities,
-        })
-
-        # Start heartbeat timer
-        self._schedule_heartbeat()
-
-    def _on_ws_message(self, ws, message: str) -> None:
-        """Handle an incoming WebSocket message."""
-        try:
-            data = json.loads(message)
-        except json.JSONDecodeError as e:
-            logger.warning("Invalid JSON received: %s", e)
-            return
-
-        msg_type = data.get("type")
-
-        if msg_type == "command":
-            self._handle_command(data)
-        elif msg_type == "ping":
-            self._send_ws_message({"type": "pong", "machine_id": self.config.machine_id})
-        else:
-            logger.warning("Unknown message type: %s", msg_type)
-
-    def _on_ws_error(self, ws, error) -> None:
-        """Handle WebSocket error."""
-        logger.error("WebSocket error: %s", error)
-
-    def _on_ws_close(self, ws, close_status_code, close_msg) -> None:
-        """Handle WebSocket connection closed."""
-        logger.info(
-            "WebSocket closed (code=%s, reason=%s)",
-            close_status_code,
-            close_msg,
-        )
-        self._ws_connected.clear()
-        self._cancel_heartbeat()
-
-    def _send_ws_message(self, message: Dict[str, Any]) -> bool:
-        """Send a JSON message over the WebSocket."""
-        with self._ws_lock:
-            ws = self._ws
-
-        if ws is None:
-            # Queue for HTTP fallback
-            with self._outbound_lock:
-                self._outbound_queue.append(message)
-            return False
-
-        try:
-            ws.send(json.dumps(message))
-            return True
-        except Exception as e:
-            logger.error("Failed to send WebSocket message: %s", e)
-            with self._outbound_lock:
-                self._outbound_queue.append(message)
-            return False
-
-    # ----------------------------------------------------------------
-    # HTTP fallback
+    # HTTP polling
     # ----------------------------------------------------------------
 
     def _http_poll_loop(self) -> None:
         """
-        HTTP long-polling fallback when WebSocket is not available.
+        HTTP polling loop for agent-server communication.
 
         Periodically POSTs heartbeat and queued messages to the server's
         /api/remote/agent/message endpoint.
         """
         logger.info("Starting HTTP polling mode")
+        self._reconnect_delay = self.config.reconnect_base_delay
 
         # Register via HTTP first
-        self._http_send({
+        resp = self._http_send({
             "type": "register",
             "machine_id": self.config.machine_id,
             "capabilities": self._capabilities,
         })
+        if resp and isinstance(resp, dict):
+            pending = resp.get("pending_commands", [])
+            if pending:
+                logger.info("Processing %d pending commands from server", len(pending))
+                for cmd in pending:
+                    try:
+                        self._handle_command(cmd)
+                    except Exception as e:
+                        logger.error("Error handling command: %s", e)
 
-        poll_interval = self.config.heartbeat_interval
+        heartbeat_interval = self.config.heartbeat_interval
         last_heartbeat = 0.0
+        command_poll_interval = 1  # Poll for commands every 1 second
+        last_command_poll = 0.0
 
         while self._running:
             now = time.time()
 
-            # Send heartbeat if interval has elapsed
-            if now - last_heartbeat >= poll_interval:
+            # Send full heartbeat (status update) at configured interval
+            if now - last_heartbeat >= heartbeat_interval:
                 self._send_heartbeat_via_http()
                 last_heartbeat = now
+                last_command_poll = now
+            # Fetch pending commands at shorter interval for low-latency response
+            elif now - last_command_poll >= command_poll_interval:
+                self._poll_commands_via_http()
+                last_command_poll = now
 
-            # Flush any queued outbound messages
-            self._flush_outbound_queue()
+            time.sleep(0.5)
 
-            # Brief sleep between polls
-            time.sleep(min(5.0, poll_interval / 2))
+    def _poll_commands_via_http(self) -> None:
+        """Fetch pending commands from server without sending a full heartbeat."""
+        active = self._executor.active_sessions
+        resp = self._http_send({
+            "type": "heartbeat",
+            "machine_id": self.config.machine_id,
+            "status": "busy" if active else "idle",
+            "active_sessions": len(active),
+        })
+
+        if resp and isinstance(resp, dict):
+            pending = resp.get("pending_commands", [])
+            for cmd in pending:
+                try:
+                    self._handle_command(cmd)
+                except Exception as e:
+                    logger.error("Error handling command: %s", e)
 
     def _http_send(self, message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
@@ -288,60 +186,92 @@ class RemoteAgent:
             return None
 
     def _send_heartbeat_via_http(self) -> None:
-        """Send a heartbeat via HTTP."""
+        """Send a heartbeat via HTTP and process any pending commands."""
         active = self._executor.active_sessions
-        self._http_send({
+        resp = self._http_send({
             "type": "heartbeat",
             "machine_id": self.config.machine_id,
             "status": "busy" if active else "idle",
             "active_sessions": len(active),
         })
 
-    def _flush_outbound_queue(self) -> None:
-        """Send all queued outbound messages via HTTP."""
-        with self._outbound_lock:
-            queue = self._outbound_queue[:]
-            self._outbound_queue.clear()
-
-        for msg in queue:
-            self._http_send(msg)
+        # Process pending commands from the server response
+        if resp and isinstance(resp, dict):
+            pending = resp.get("pending_commands", [])
+            for cmd in pending:
+                try:
+                    self._handle_command(cmd)
+                except Exception as e:
+                    logger.error("Error handling command: %s", e)
 
     # ----------------------------------------------------------------
-    # Heartbeat
+    # Outbound message helpers
     # ----------------------------------------------------------------
 
-    def _schedule_heartbeat(self) -> None:
-        """Schedule the next heartbeat message."""
-        self._cancel_heartbeat()
+    def _on_session_output(
+        self, session_id: str, data: str, stream: str, is_complete: bool
+    ) -> None:
+        """Callback invoked by the executor when a session produces output."""
+        self._send_session_output(session_id, data, stream, is_complete)
 
-        def heartbeat():
-            if not self._running:
-                return
-            active = self._executor.active_sessions
-            self._send_ws_message({
-                "type": "heartbeat",
-                "machine_id": self.config.machine_id,
-                "status": "busy" if active else "idle",
-                "active_sessions": len(active),
-            })
-            if self._running:
-                self._schedule_heartbeat()
+        # NOTE: We intentionally do NOT send "exited" status when the CLI
+        # process exits after a response.  The session stays "active" so
+        # the SSE stream remains open and the user can send follow-up
+        # messages.  The executor will restart the CLI process when the
+        # next message arrives.
 
-        self._heartbeat_timer = threading.Timer(
-            self.config.heartbeat_interval, heartbeat
+    def _on_permission_request(self, session_id: str, control_request: dict) -> None:
+        """Callback invoked by the executor when the CLI outputs a control_request."""
+        request_payload = control_request.get("request", {})
+        logger.info(
+            "Permission request from session %s: %s (tool=%s)",
+            session_id[:8],
+            request_payload.get("subtype"),
+            request_payload.get("tool_name"),
         )
-        self._heartbeat_timer.daemon = True
-        self._heartbeat_timer.start()
+        self._http_send({
+            "type": "permission_request",
+            "session_id": session_id,
+            "machine_id": self.config.machine_id,
+            "control_request": control_request,
+        })
 
-    def _cancel_heartbeat(self) -> None:
-        """Cancel the pending heartbeat timer."""
-        if self._heartbeat_timer is not None:
-            self._heartbeat_timer.cancel()
-            self._heartbeat_timer = None
+    def _send_session_output(
+        self, session_id: str, data: str, stream: str, is_complete: bool
+    ) -> None:
+        """Send a session_output message to the server."""
+        self._http_send({
+            "type": "session_output",
+            "session_id": session_id,
+            "data": data,
+            "stream": stream,
+            "is_complete": is_complete,
+            "machine_id": self.config.machine_id,
+        })
 
-    # ----------------------------------------------------------------
-    # Command handling
-    # ----------------------------------------------------------------
+    def _send_session_status(
+        self, session_id: str, status: str, pid: Optional[int] = None
+    ) -> None:
+        """Send a session_status message to the server."""
+        self._http_send({
+            "type": "session_status",
+            "session_id": session_id,
+            "status": status,
+            "pid": pid,
+            "machine_id": self.config.machine_id,
+        })
+
+    def _send_usage_report(
+        self, session_id: str, tokens: Dict[str, int], requests: int = 1
+    ) -> None:
+        """Send a usage_report message to the server."""
+        self._http_send({
+            "type": "usage_report",
+            "session_id": session_id,
+            "tokens": tokens,
+            "requests": requests,
+            "machine_id": self.config.machine_id,
+        })
 
     def _handle_command(self, data: Dict[str, Any]) -> None:
         """Dispatch a command from the server."""
@@ -354,6 +284,10 @@ class RemoteAgent:
             self._cmd_send_message(data)
         elif command == "stop_session":
             self._cmd_stop_session(data)
+        elif command == "permission_response":
+            self._cmd_permission_response(data)
+        elif command == "update_permission_mode":
+            self._cmd_update_permission_mode(data)
         elif command == "pause_session":
             # Forward compatibility: pause is not implemented at the
             # subprocess level; send acknowledgement
@@ -370,13 +304,15 @@ class RemoteAgent:
         cli_tool = data.get("cli_tool", "qwen-code-cli")
         proxy_token = data.get("proxy_token", "")
         model = data.get("model")
+        permission_mode = data.get("permission_mode")
 
         logger.info(
-            "Starting session %s: cli=%s path=%s model=%s",
+            "Starting session %s: cli=%s path=%s model=%s mode=%s",
             session_id[:8],
             cli_tool,
             project_path,
             model,
+            permission_mode,
         )
 
         result = self._executor.start_session(
@@ -385,6 +321,7 @@ class RemoteAgent:
             cli_tool=cli_tool,
             proxy_token=proxy_token,
             model=model,
+            permission_mode=permission_mode,
         )
 
         if result["success"]:
@@ -403,6 +340,8 @@ class RemoteAgent:
         session_id = data.get("session_id", "")
         content = data.get("content", "")
 
+        logger.info("Sending message to session %s: %s", session_id[:8], content[:80])
+
         result = self._executor.send_message(session_id, content)
         if not result["success"]:
             logger.warning(
@@ -419,70 +358,54 @@ class RemoteAgent:
         self._executor.stop_session(session_id)
         self._send_session_status(session_id, "stopped")
 
-    # ----------------------------------------------------------------
-    # Outbound message helpers
-    # ----------------------------------------------------------------
+    def _cmd_permission_response(self, data: Dict[str, Any]) -> None:
+        """Handle a permission_response command from the frontend.
 
-    def _on_session_output(
-        self, session_id: str, data: str, stream: str, is_complete: bool
-    ) -> None:
+        Sends a ``control_response`` to the CLI subprocess stdin so the
+        CLI's ControlDispatcher can resolve the pending permission request
+        and continue (or abort) the tool call.
         """
-        Callback invoked by the executor when a session produces output.
+        session_id = data.get("session_id", "")
+        behavior = data.get("behavior", "deny")
+        request_id = data.get("request_id", "")
+        tool_name = data.get("tool_name", "")
+        message = data.get("message")
 
-        Sends session_output message to the server via WebSocket or HTTP.
-        """
-        self._send_session_output(session_id, data, stream, is_complete)
+        logger.info(
+            "Permission response for session %s: %s request_id=%s tool=%s",
+            session_id[:8],
+            behavior,
+            request_id[:8] if request_id else "N/A",
+            tool_name,
+        )
 
-        # If the output stream completed and the process has exited,
-        # send a final status update
-        if is_complete:
-            info = self._executor.get_session_info(session_id)
-            if info and not info["is_running"]:
-                self._send_session_status(session_id, "exited")
+        result = self._executor.send_permission_response(
+            session_id, request_id, behavior, message
+        )
 
-    def _send_session_output(
-        self, session_id: str, data: str, stream: str, is_complete: bool
-    ) -> None:
-        """Send a session_output message to the server."""
-        message = {
-            "type": "session_output",
-            "session_id": session_id,
-            "data": data,
-            "stream": stream,
-            "is_complete": is_complete,
-            "machine_id": self.config.machine_id,
-        }
-        if not self._send_ws_message(message):
-            # WebSocket not available — send via HTTP
-            self._http_send(message)
+        if not result["success"]:
+            logger.warning(
+                "Failed to handle permission response: %s",
+                result.get("error"),
+            )
 
-    def _send_session_status(
-        self, session_id: str, status: str, pid: Optional[int] = None
-    ) -> None:
-        """Send a session_status message to the server."""
-        message = {
-            "type": "session_status",
-            "session_id": session_id,
-            "status": status,
-            "pid": pid,
-            "machine_id": self.config.machine_id,
-        }
-        if not self._send_ws_message(message):
-            self._http_send(message)
+    def _cmd_update_permission_mode(self, data: Dict[str, Any]) -> None:
+        """Handle update_permission_mode command from the frontend."""
+        session_id = data.get("session_id", "")
+        permission_mode = data.get("permission_mode", "default")
 
-    def _send_usage_report(
-        self, session_id: str, tokens: Dict[str, int], requests: int = 1
-    ) -> None:
-        """Send a usage_report message to the server."""
-        message = {
-            "type": "usage_report",
-            "session_id": session_id,
-            "tokens": tokens,
-            "requests": requests,
-            "machine_id": self.config.machine_id,
-        }
-        if not self._send_ws_message(message):
-            self._http_send(message)
+        logger.info(
+            "Updating permission mode for session %s: %s",
+            session_id[:8],
+            permission_mode,
+        )
+
+        result = self._executor.update_permission_mode(session_id, permission_mode)
+        if not result["success"]:
+            logger.warning(
+                "Failed to update permission mode: %s",
+                result.get("error"),
+            )
 
     # ----------------------------------------------------------------
     # Shutdown
@@ -496,21 +419,7 @@ class RemoteAgent:
     def _shutdown(self) -> None:
         """Clean up all resources."""
         logger.info("Shutting down agent...")
-
-        self._cancel_heartbeat()
-
-        # Stop all running CLI subprocesses
         self._executor.stop_all()
-
-        # Close WebSocket connection
-        with self._ws_lock:
-            if self._ws is not None:
-                try:
-                    self._ws.close()
-                except Exception:
-                    pass
-                self._ws = None
-
         logger.info("Agent shutdown complete")
 
 

@@ -10,6 +10,7 @@ Uses CLI adapters from cli_adapters to build per-tool command lines and
 environment variables.
 """
 
+import json
 import logging
 import os
 import shutil
@@ -17,6 +18,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -41,25 +43,31 @@ class SessionProcess:
         project_path: str,
         cli_tool: str,
         output_callback: Callable[[str, str, str, bool], None],
+        permission_callback: Optional[Callable[[str, dict], None]] = None,
+        env: Optional[Dict[str, str]] = None,
+        model: Optional[str] = None,
+        permission_mode: Optional[str] = None,
+        allowed_tools: Optional[List[str]] = None,
     ):
-        """
-        Args:
-            session_id: Unique session identifier.
-            process: The subprocess.Popen instance.
-            project_path: Working directory of the process.
-            cli_tool: Name of the CLI tool being run.
-            output_callback: Called with (session_id, data, stream, is_complete)
-                when output is received.
-        """
         self.session_id = session_id
         self.process = process
         self.project_path = project_path
         self.cli_tool = cli_tool
         self.output_callback = output_callback
+        self.permission_callback = permission_callback
+        self.env = env
+        self.model = model
+        self.permission_mode = permission_mode
+        self.allowed_tools: List[str] = list(allowed_tools) if allowed_tools else []
 
         self._stdout_thread: Optional[threading.Thread] = None
         self._stderr_thread: Optional[threading.Thread] = None
         self._stopped = threading.Event()
+        self._restart_lock = threading.Lock()  # Prevents concurrent restarts
+
+        # SDK mode initialization tracking
+        self._sdk_initialized = threading.Event()
+        self._init_request_id: Optional[str] = None
 
     @property
     def pid(self) -> Optional[int]:
@@ -91,7 +99,9 @@ class SessionProcess:
     def _read_stream(self, stream: Any, stream_name: str) -> None:
         """
         Continuously read lines from a subprocess stream and forward them
-        via the output callback.
+        via the output callback.  Detects ``control_request`` messages from
+        the CLI (e.g. permission prompts) and invokes the optional
+        ``permission_callback`` so the agent can forward them to the server.
         """
         try:
             while not self._stopped.is_set():
@@ -103,6 +113,42 @@ class SessionProcess:
                     text = line.decode("utf-8", errors="replace")
                 else:
                     text = line
+
+                text_stripped = text.strip()
+                if text_stripped and stream_name == "stdout":
+                    try:
+                        parsed = json.loads(text_stripped)
+                        msg_type = parsed.get("type")
+
+                        # Handle SDK initialization response
+                        if msg_type == "control_response" and self._init_request_id:
+                            resp = parsed.get("response", {})
+                            req_id = resp.get("request_id", "")
+                            if req_id == self._init_request_id:
+                                subtype = resp.get("subtype")
+                                if subtype == "success":
+                                    logger.info(
+                                        "SDK initialization complete for session %s",
+                                        self.session_id[:8],
+                                    )
+                                    self._sdk_initialized.set()
+                                else:
+                                    logger.error(
+                                        "SDK initialization failed for session %s: %s",
+                                        self.session_id[:8],
+                                        resp.get("error", "unknown"),
+                                    )
+                                    self._sdk_initialized.set()  # Unblock even on failure
+                                self._init_request_id = None
+                                continue
+
+                        # Handle permission/control requests from CLI
+                        if msg_type == "control_request" and self.permission_callback:
+                            self.permission_callback(self.session_id, parsed)
+                            continue
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+
                 self.output_callback(self.session_id, text, stream_name, False)
         except (OSError, ValueError) as e:
             if not self._stopped.is_set():
@@ -137,6 +183,58 @@ class SessionProcess:
         except (OSError, BrokenPipeError, AttributeError) as e:
             logger.error(
                 "Failed to write to stdin for session %s: %s", self.session_id, e
+            )
+            return False
+
+    def send_permission_response(self, request_id: str, behavior: str, message: Optional[str] = None) -> bool:
+        """
+        Write a control_response to the subprocess stdin to approve/deny
+        a pending permission request from the CLI.
+
+        Args:
+            request_id: The request_id from the original control_request.
+            behavior: "allow" or "deny".
+            message: Optional message (used for deny).
+
+        Returns:
+            True if the response was written successfully.
+        """
+        if not self.is_running:
+            logger.warning(
+                "Cannot send permission response to stopped session %s",
+                self.session_id,
+            )
+            return False
+
+        response_inner: Dict[str, Any] = {"behavior": behavior}
+        if message:
+            response_inner["message"] = message
+
+        response = {
+            "type": "control_response",
+            "response": {
+                "subtype": "success",
+                "request_id": request_id,
+                "response": response_inner,
+            },
+        }
+
+        try:
+            payload = json.dumps(response) + "\n"
+            self.process.stdin.write(payload.encode("utf-8"))
+            self.process.stdin.flush()
+            logger.info(
+                "Sent permission response for session %s, request %s: %s",
+                self.session_id[:8],
+                request_id[:8],
+                behavior,
+            )
+            return True
+        except (OSError, BrokenPipeError, AttributeError) as e:
+            logger.error(
+                "Failed to send permission response for session %s: %s",
+                self.session_id[:8],
+                e,
             )
             return False
 
@@ -180,6 +278,69 @@ class SessionProcess:
         except subprocess.TimeoutExpired:
             return None
 
+    def send_sdk_init(self) -> bool:
+        """
+        Send an initialize control_request to the CLI to activate SDK mode.
+        This must be the first message sent to the CLI process; it enables
+        the control plane (PermissionController, etc.) so that permission
+        prompts are properly handled instead of causing the CLI to hang.
+
+        Returns:
+            True if the initialize message was written successfully.
+        """
+        if not self.is_running:
+            logger.warning(
+                "Cannot send SDK init to stopped session %s", self.session_id
+            )
+            return False
+
+        init_request_id = str(uuid.uuid4())
+        self._init_request_id = init_request_id
+        self._sdk_initialized.clear()
+
+        init_msg = {
+            "type": "control_request",
+            "request_id": init_request_id,
+            "request": {
+                "subtype": "initialize",
+            },
+        }
+
+        try:
+            payload = json.dumps(init_msg) + "\n"
+            self.process.stdin.write(payload.encode("utf-8"))
+            self.process.stdin.flush()
+            logger.info(
+                "Sent SDK initialize for session %s (request_id=%s)",
+                self.session_id[:8],
+                init_request_id[:8],
+            )
+            return True
+        except (OSError, BrokenPipeError, AttributeError) as e:
+            logger.error(
+                "Failed to send SDK init for session %s: %s",
+                self.session_id[:8],
+                e,
+            )
+            self._init_request_id = None
+            return False
+
+    def wait_sdk_initialized(self, timeout: float = 15.0) -> bool:
+        """
+        Wait for the SDK initialization control_response from the CLI.
+
+        Returns:
+            True if initialized successfully within the timeout.
+        """
+        result = self._sdk_initialized.wait(timeout=timeout)
+        if not result:
+            logger.warning(
+                "SDK initialization timed out for session %s after %.1fs",
+                self.session_id[:8],
+                timeout,
+            )
+        return result
+
 
 class ProcessExecutor:
     """
@@ -192,16 +353,20 @@ class ProcessExecutor:
     and environment variable mappings.
     """
 
-    def __init__(self, server_url: str, output_callback: Optional[Callable] = None):
+    def __init__(self, server_url: str, output_callback: Optional[Callable] = None, permission_callback: Optional[Callable] = None):
         """
         Args:
             server_url: The Open ACE server base URL, used to build the
                 LLM proxy URL for subprocess env vars.
             output_callback: Called with (session_id, data, stream, is_complete)
                 when output is available.  If None, output is logged.
+            permission_callback: Called with (session_id, control_request_dict)
+                when the CLI outputs a control_request message (e.g. permission
+                prompt).  If None, control_requests are forwarded as regular output.
         """
         self.server_url = server_url
         self._output_callback = output_callback or self._default_output_callback
+        self._permission_callback = permission_callback
         self._sessions: Dict[str, SessionProcess] = {}
         self._lock = threading.Lock()
 
@@ -316,12 +481,15 @@ class ProcessExecutor:
         session_id: str,
         project_path: str,
         model: Optional[str] = None,
+        permission_mode: Optional[str] = None,
+        allowed_tools: Optional[List[str]] = None,
     ) -> List[str]:
-        """
-        Build the command line using the adapter's build_start_args().
-        """
         adapter = get_adapter(cli_tool)
-        return adapter.build_start_args(session_id, project_path, model)
+        return adapter.build_start_args(
+            session_id, project_path, model,
+            permission_mode=permission_mode,
+            allowed_tools=allowed_tools,
+        )
 
     # ------------------------------------------------------------------
     # Session lifecycle
@@ -334,20 +502,9 @@ class ProcessExecutor:
         cli_tool: str,
         proxy_token: str,
         model: Optional[str] = None,
+        permission_mode: Optional[str] = None,
+        allowed_tools: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
-        """
-        Start a CLI subprocess for a remote session.
-
-        Args:
-            session_id: Unique session identifier assigned by the server.
-            project_path: Working directory on this machine.
-            cli_tool: Name of the CLI tool to run.
-            proxy_token: Proxy token for authenticating LLM API calls.
-            model: Optional model name.
-
-        Returns:
-            Dict with 'success', 'pid', and optionally 'error'.
-        """
         with self._lock:
             if session_id in self._sessions and self._sessions[session_id].is_running:
                 return {"success": False, "error": "Session already running"}
@@ -371,7 +528,7 @@ class ProcessExecutor:
         env = self._build_env(cli_tool, proxy_token, model)
 
         # Build command using adapter
-        cmd = self._build_command(executable, cli_tool, session_id, project_path, model)
+        cmd = self._build_command(executable, cli_tool, session_id, project_path, model, permission_mode or "default", allowed_tools)
 
         logger.info(
             "Starting session %s: %s in %s (pid pending)",
@@ -402,6 +559,11 @@ class ProcessExecutor:
             project_path=project_path,
             cli_tool=cli_tool,
             output_callback=self._output_callback,
+            permission_callback=self._permission_callback,
+            env=env,
+            model=model,
+            permission_mode=permission_mode,
+            allowed_tools=allowed_tools,
         )
 
         with self._lock:
@@ -409,6 +571,20 @@ class ProcessExecutor:
 
         # Start background output reader threads
         session_proc.start_readers()
+
+        # Send SDK initialize to activate control plane (permission handling)
+        adapter = get_adapter(cli_tool)
+        if adapter.supports_stdin_input():
+            if not session_proc.send_sdk_init():
+                logger.warning(
+                    "Failed to send SDK init for session %s, continuing anyway",
+                    session_id[:8],
+                )
+            elif not session_proc.wait_sdk_initialized(timeout=15.0):
+                logger.warning(
+                    "SDK init timed out for session %s, continuing in direct mode",
+                    session_id[:8],
+                )
 
         logger.info(
             "Session %s started (pid %d): %s",
@@ -421,7 +597,13 @@ class ProcessExecutor:
 
     def send_message(self, session_id: str, content: str) -> Dict[str, Any]:
         """
-        Send a message to a running session's stdin.
+        Send a message to a running session.
+
+        For CLI tools that support stdin input, writes a stream-json formatted
+        user message to the process stdin.  If the process has exited since the
+        last message, it is automatically restarted first.
+
+        For tools that don't, runs a single-shot subprocess.
 
         Args:
             session_id: Session identifier.
@@ -436,13 +618,234 @@ class ProcessExecutor:
         if not session:
             return {"success": False, "error": "Session not found"}
 
-        if not session.is_running:
-            return {"success": False, "error": "Session process is not running"}
+        # Check if the CLI tool supports stdin input
+        adapter = get_adapter(session.cli_tool)
+        if not adapter.supports_stdin_input():
+            return self._run_single_shot(session, content, adapter)
 
-        ok = session.send_message(content)
+        if not session.is_running:
+            logger.info(
+                "Session %s process exited, restarting for new message",
+                session_id[:8],
+            )
+            restart_result = self._restart_session(session_id)
+            if not restart_result["success"]:
+                return restart_result
+
+        # Format as stream-json user message
+        message = json.dumps({
+            "type": "user",
+            "session_id": session_id,
+            "message": {
+                "role": "user",
+                "content": content,
+            },
+            "parent_tool_use_id": None,
+        }) + "\n"
+
+        with self._lock:
+            session = self._sessions.get(session_id)
+
+        ok = session.send_message(message)
         if ok:
             return {"success": True}
         return {"success": False, "error": "Failed to write to process stdin"}
+
+    def _run_single_shot(
+        self, session: "SessionProcess", content: str, adapter: BaseCLIAdapter
+    ) -> Dict[str, Any]:
+        """Run a single-shot CLI command for tools that don't support stdin."""
+        args = adapter.build_single_shot_args(content, session.project_path)
+        logger.info("Single-shot %s: %s", session.session_id[:8], " ".join(args))
+
+        try:
+            proc = subprocess.run(
+                args,
+                capture_output=True,
+                text=True,
+                cwd=session.project_path,
+                env=session.env,
+                timeout=120,
+            )
+        except subprocess.TimeoutExpired:
+            return {"success": False, "error": "Command timed out"}
+        except (OSError, subprocess.SubprocessError) as e:
+            return {"success": False, "error": f"Failed to run command: {e}"}
+
+        # Feed stdout lines to the output callback
+        if proc.stdout:
+            for line in proc.stdout.splitlines():
+                if line.strip():
+                    session.output_callback(session.session_id, line, "stdout", False)
+            session.output_callback(session.session_id, "", "stdout", True)
+
+        if proc.stderr:
+            for line in proc.stderr.splitlines():
+                if line.strip():
+                    session.output_callback(session.session_id, line, "stderr", False)
+
+        return {"success": True}
+
+    def _restart_session(self, session_id: str) -> Dict[str, Any]:
+        """
+        Restart the CLI subprocess for a session that has exited.
+
+        Uses a per-session restart lock to prevent concurrent restarts from
+        creating orphaned processes.
+
+        Args:
+            session_id: Session identifier.
+
+        Returns:
+            Dict with 'success' and optionally 'error' / 'pid'.
+        """
+        with self._lock:
+            old_session = self._sessions.get(session_id)
+
+        if not old_session:
+            return {"success": False, "error": "Session not found"}
+
+        # Per-session lock: only one restart at a time for this session
+        with old_session._restart_lock:
+            # Re-fetch after acquiring restart lock (another thread may
+            # have already restarted while we waited)
+            with self._lock:
+                current_session = self._sessions.get(session_id)
+            if current_session is not old_session:
+                # Another thread already restarted — nothing to do
+                return {"success": True, "pid": current_session.pid}
+
+            # Stop old process if still lingering
+            if old_session.is_running:
+                old_session.stop()
+
+            executable = self._find_executable(old_session.cli_tool)
+            if not executable:
+                return {
+                    "success": False,
+                    "error": f"CLI tool '{old_session.cli_tool}' not found",
+                }
+
+            cmd = self._build_command(
+                executable,
+                old_session.cli_tool,
+                session_id,
+                old_session.project_path,
+                old_session.model,
+                old_session.permission_mode,
+                old_session.allowed_tools,
+            )
+
+            logger.info(
+                "Restarting session %s: %s", session_id[:8], " ".join(cmd)
+            )
+
+            try:
+                process = subprocess.Popen(
+                    cmd,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    cwd=old_session.project_path,
+                    env=old_session.env,
+                    start_new_session=True,
+                )
+            except (OSError, subprocess.SubprocessError) as e:
+                return {"success": False, "error": f"Failed to restart CLI: {e}"}
+
+            new_session = SessionProcess(
+                session_id=session_id,
+                process=process,
+                project_path=old_session.project_path,
+                cli_tool=old_session.cli_tool,
+                output_callback=self._output_callback,
+                permission_callback=self._permission_callback,
+                env=old_session.env,
+                model=old_session.model,
+                permission_mode=old_session.permission_mode,
+                allowed_tools=old_session.allowed_tools,
+            )
+
+            with self._lock:
+                self._sessions[session_id] = new_session
+
+            new_session.start_readers()
+
+            # Re-send SDK initialize after restart to activate control plane
+            adapter = get_adapter(old_session.cli_tool)
+            if adapter.supports_stdin_input():
+                if not new_session.send_sdk_init():
+                    logger.warning(
+                        "Failed to send SDK init after restart for session %s",
+                        session_id[:8],
+                    )
+                elif not new_session.wait_sdk_initialized(timeout=15.0):
+                    logger.warning(
+                        "SDK init timed out after restart for session %s",
+                        session_id[:8],
+                    )
+
+            logger.info(
+                "Restarted session %s (pid %d)", session_id[:8], process.pid
+            )
+            return {"success": True, "pid": process.pid}
+
+    def add_allowed_tool_and_restart(
+        self, session_id: str, tool_name: str
+    ) -> Dict[str, Any]:
+        """Add a tool to the allowed list and restart the CLI process."""
+        with self._lock:
+            session = self._sessions.get(session_id)
+        if not session:
+            return {"success": False, "error": "Session not found"}
+
+        if tool_name not in session.allowed_tools:
+            session.allowed_tools.append(tool_name)
+        logger.info(
+            "Adding allowed tool %s to session %s, restarting",
+            tool_name, session_id[:8],
+        )
+        result = self._restart_session(session_id)
+        if not result["success"]:
+            return result
+
+        # Send continue message after restart
+        with self._lock:
+            session = self._sessions.get(session_id)
+        if session and session.is_running:
+            continue_msg = json.dumps({
+                "type": "user",
+                "session_id": session_id,
+                "message": {"role": "user", "content": "The user approved the tool use. Please continue."},
+                "parent_tool_use_id": None,
+            }) + "\n"
+            try:
+                session.process.stdin.write(continue_msg.encode("utf-8"))
+                session.process.stdin.flush()
+            except (OSError, BrokenPipeError) as e:
+                logger.error("Failed to send continue message: %s", e)
+                return {"success": False, "error": str(e)}
+
+        return {"success": True}
+
+    def update_permission_mode(
+        self, session_id: str, permission_mode: str
+    ) -> Dict[str, Any]:
+        """Update the permission mode and restart the CLI process if changed."""
+        with self._lock:
+            session = self._sessions.get(session_id)
+        if not session:
+            return {"success": False, "error": "Session not found"}
+
+        if session.permission_mode == permission_mode:
+            return {"success": True}  # No change needed
+
+        session.permission_mode = permission_mode
+        logger.info(
+            "Updating permission mode to %s for session %s, restarting",
+            permission_mode, session_id[:8],
+        )
+        return self._restart_session(session_id)
 
     def stop_session(self, session_id: str) -> Dict[str, Any]:
         """
@@ -463,6 +866,30 @@ class ProcessExecutor:
         session.stop()
         logger.info("Session %s stopped", session_id[:8])
         return {"success": True}
+
+    def send_permission_response(self, session_id: str, request_id: str, behavior: str, message: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Send a permission response to a CLI subprocess.
+
+        Args:
+            session_id: Session identifier.
+            request_id: The request_id from the original control_request.
+            behavior: "allow" or "deny".
+            message: Optional message (used for deny).
+
+        Returns:
+            Dict with 'success' and optionally 'error'.
+        """
+        with self._lock:
+            session = self._sessions.get(session_id)
+
+        if not session:
+            return {"success": False, "error": "Session not found"}
+
+        ok = session.send_permission_response(request_id, behavior, message)
+        if ok:
+            return {"success": True}
+        return {"success": False, "error": "Failed to write permission response to stdin"}
 
     def get_session_info(self, session_id: str) -> Optional[Dict[str, Any]]:
         """Get information about a session."""
