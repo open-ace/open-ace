@@ -628,20 +628,22 @@ export const Workspace: React.FC = () => {
   // Create a new tab
   const createNewTab = useCallback((
     restoreSessionId?: string,
-    remoteParams?: { workspaceType?: 'local' | 'remote'; machineId?: string; machineName?: string },
+    remoteParams?: { workspaceType?: 'local' | 'remote'; machineId?: string; machineName?: string; sessionId?: string },
   ) => {
-    const effectiveUrl = getEffectiveUrl(restoreSessionId || undefined, undefined, undefined, undefined, remoteParams);
+    const effectiveUrl = getEffectiveUrl(restoreSessionId || remoteParams?.sessionId || undefined, undefined, undefined, undefined, remoteParams);
     if (!effectiveUrl) return;
 
+    // Title: "Restored Session" only when restoring from session list, not new remote sessions
+    const isNewRemote = remoteParams?.workspaceType === 'remote';
     const newTab: WorkspaceTab = {
       id: generateTabId(),
-      title: restoreSessionId ? t('restoredSession', language) : t('newSession', language),
+      title: (restoreSessionId && !isNewRemote) ? t('restoredSession', language) : t('newSession', language),
       url: effectiveUrl,
       token: userWebUI?.token || '',
       createdAt: Date.now(),
       waitingForUser: false,
       waitingType: null,
-      sessionId: restoreSessionId,
+      sessionId: restoreSessionId || remoteParams?.sessionId,
       workspaceType: remoteParams?.workspaceType,
       machineId: remoteParams?.machineId,
       machineName: remoteParams?.machineName,
@@ -1449,10 +1451,11 @@ export const Workspace: React.FC = () => {
         }}
         onCreateRemote={(params: { machineId: string; machineName: string; sessionId: string }) => {
           setShowNewSessionModal(false);
-          createNewTab(params.sessionId || undefined, {
+          createNewTab(undefined, {
             workspaceType: 'remote',
             machineId: params.machineId,
             machineName: params.machineName,
+            sessionId: params.sessionId,
           });
         }}
       />
