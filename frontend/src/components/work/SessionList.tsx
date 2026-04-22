@@ -348,7 +348,7 @@ const SessionGroup: React.FC<SessionGroupProps> = ({
                   <i className="bi bi-cloud-fill text-primary me-1"
                      title={`Remote: ${session.machine_name || session.id.slice(0, 8)}`} />
                 ) : (
-                  <i className="bi bi-pc-display text-success me-1" title="Local" />
+                  <i className="bi bi-laptop text-success me-1" title="Local" />
                 )}
                 {session.id.slice(0, 4)}
               </span>
