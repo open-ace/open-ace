@@ -695,6 +695,13 @@ const translations: Record<Language, Translations> = {
     noApiKeysDescription: 'Add API keys to enable LLM proxy for remote agents.',
     keyStatus: 'Status',
 
+    // Help Documents
+    gettingStarted: 'Getting Started',
+    promptsGuide: 'Prompts Guide',
+    keyboardShortcuts: 'Keyboard Shortcuts',
+    faq: 'FAQ',
+    documentNotFound: 'Document Not Found',
+
     // Remote Session
     selectWorkspaceType: 'Select Workspace Type',
     localWorkspace: 'Local Workspace',
@@ -1397,6 +1404,13 @@ const translations: Record<Language, Translations> = {
     noApiKeys: '暂无已配置的 API 密钥',
     noApiKeysDescription: '添加 API 密钥以启用远程 Agent 的 LLM 代理功能。',
     keyStatus: '状态',
+
+    // 帮助文档
+    gettingStarted: '快速上手',
+    promptsGuide: '提示词指南',
+    keyboardShortcuts: '键盘快捷键',
+    faq: '常见问题',
+    documentNotFound: '文档未找到',
 
     // 远程会话
     selectWorkspaceType: '选择工作区类型',

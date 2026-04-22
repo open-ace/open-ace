@@ -135,6 +135,80 @@
   --z-toast: 800;
 }
 
+/* Modal Theme Styles - Override Bootstrap defaults */
+.modal-content {
+  background-color: var(--bg-primary) !important;
+  border: 1px solid var(--border-color) !important;
+  border-radius: var(--border-radius-lg) !important;
+  box-shadow: var(--shadow-xl) !important;
+}
+
+.modal-header {
+  background-color: var(--bg-secondary) !important;
+  border-bottom: 1px solid var(--border-color) !important;
+  color: var(--text-primary) !important;
+}
+
+.modal-title {
+  color: var(--text-primary) !important;
+}
+
+.modal-body {
+  background-color: var(--bg-primary) !important;
+  color: var(--text-primary) !important;
+}
+
+.modal-footer {
+  background-color: var(--bg-secondary) !important;
+  border-top: 1px solid var(--border-color) !important;
+}
+
+.btn-close {
+  filter: var(--btn-close-filter, none);
+}
+
+/* Assist Panel Theme Styles */
+.assist-panel {
+  background-color: var(--bg-secondary);
+}
+
+.assist-panel .nav-tabs .nav-link {
+  color: var(--text-secondary);
+}
+
+.assist-panel .nav-tabs .nav-link.active {
+  color: var(--color-primary);
+}
+
+.assist-docs,
+.assist-tools,
+.assist-prompts {
+  background-color: var(--bg-secondary);
+}
+
+.assist-docs .assist-item,
+.assist-tools .assist-item,
+.assist-prompts .assist-item {
+  background-color: var(--bg-tertiary);
+  border-color: var(--border-color);
+}
+
+.assist-docs .assist-item-clickable,
+.assist-tools .assist-item-clickable,
+.assist-prompts .assist-item-clickable {
+  color: var(--text-primary);
+  background-color: transparent;
+  border-color: var(--border-color-light);
+}
+
+.assist-docs .assist-item-clickable:hover,
+.assist-tools .assist-item-clickable:hover,
+.assist-prompts .assist-item-clickable:hover {
+  background-color: var(--bg-tertiary);
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
 /* Dark Theme */
 [data-theme='dark'],
 .dark-theme {
@@ -161,6 +235,9 @@
   --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.3), 0 4px 6px -4px rgb(0 0 0 / 0.3);
   --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.4), 0 8px 10px -6px rgb(0 0 0 / 0.4);
   --shadow-glow: 0 0 20px rgb(14 165 233 / 0.4);
+
+  /* Dark theme close button - invert to white */
+  --btn-close-filter: invert(1) grayscale(100%) brightness(200%);
 }
 
 /* Reset and Base Styles */

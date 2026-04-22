@@ -15,6 +15,8 @@ import { t } from '@/i18n';
 import { promptsApi } from '@/api';
 import type { PromptTemplate } from '@/api';
 import { Loading, EmptyState, SimpleTabs, useToast } from '@/components/common';
+import { DocumentViewer } from './DocumentViewer';
+import './DocumentViewer.css';
 
 interface AssistPanelProps {
   collapsed?: boolean;
@@ -27,6 +29,8 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
   const [activeTab, setActiveTab] = useState('prompts');
   const [prompts, setPrompts] = useState<PromptTemplate[]>([]);
   const [promptsLoading, setPromptsLoading] = useState(true);
+  const [docViewerOpen, setDocViewerOpen] = useState(false);
+  const [selectedDocId, setSelectedDocId] = useState<string>('');
 
   // Fetch prompts
   useEffect(() => {
@@ -50,21 +54,25 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
     { id: 'qwen', name: 'Qwen', icon: 'bi-stars', url: '/work?tool=qwen' },
   ];
 
-  // Help documents
+  // Help documents - titles in different languages
   const helpDocs = [
-    { id: 'getting-started', title: 'Getting Started', icon: 'bi-book' },
-    { id: 'prompts-guide', title: 'Prompts Guide', icon: 'bi-file-text' },
-    { id: 'keyboard-shortcuts', title: 'Keyboard Shortcuts', icon: 'bi-keyboard' },
-    { id: 'faq', title: 'FAQ', icon: 'bi-question-circle' },
+    {
+      id: 'getting-started',
+      title: language === 'zh' ? '快速上手指南' : language === 'ja' ? 'クイックスタートガイド' : language === 'ko' ? '빠른 시작 가이드' : 'Getting Started',
+      icon: 'bi-book'
+    },
+    { id: 'prompts-guide', title: language === 'zh' ? '提示词指南' : language === 'ja' ? 'プロンプトガイド' : language === 'ko' ? '프롬프트 가이드' : 'Prompts Guide', icon: 'bi-file-text' },
+    { id: 'keyboard-shortcuts', title: language === 'zh' ? '键盘快捷键' : language === 'ja' ? 'キーボードショートカット' : language === 'ko' ? '키보드 단축키' : 'Keyboard Shortcuts', icon: 'bi-keyboard' },
+    { id: 'faq', title: language === 'zh' ? '常见问题' : language === 'ja' ? 'よくある質問' : language === 'ko' ? '자주 묻는 질문' : 'FAQ', icon: 'bi-question-circle' },
   ];
 
   const handleToolClick = (url: string) => {
     navigate(url);
   };
 
-  const handleDocClick = (_docId: string, docTitle: string) => {
-    // Show toast notification (help pages coming soon)
-    toast.info(docTitle, t('comingSoon', language) || 'Coming soon...');
+  const handleDocClick = (docId: string) => {
+    setSelectedDocId(docId);
+    setDocViewerOpen(true);
   };
 
   const handleCopyPrompt = async (content: string, promptName: string) => {
@@ -155,7 +163,7 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
           <li key={doc.id}>
             <button
               className="assist-item assist-item-clickable"
-              onClick={() => handleDocClick(doc.id, doc.title)}
+              onClick={() => handleDocClick(doc.id)}
             >
               <i className={cn('bi', doc.icon, 'me-2')} />
               <span>{doc.title}</span>
@@ -191,6 +199,11 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
   return (
     <div className="assist-panel">
       <SimpleTabs tabs={tabs} defaultTab={activeTab} onTabChange={setActiveTab} />
+      <DocumentViewer
+        isOpen={docViewerOpen}
+        onClose={() => setDocViewerOpen(false)}
+        docId={selectedDocId}
+      />
     </div>
   );
 };
