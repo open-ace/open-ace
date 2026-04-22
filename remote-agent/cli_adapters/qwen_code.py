@@ -57,23 +57,42 @@ class QwenCodeAdapter(BaseCLIAdapter):
         session_id: str,
         project_path: str,
         model: Optional[str] = None,
+        permission_mode: Optional[str] = None,
+        allowed_tools: Optional[List[str]] = None,
     ) -> List[str]:
-        """
-        Build command-line arguments to start qwen-code.
-
-        Uses --print for non-interactive (piped) mode and --output-format
-        stream-json for machine-parseable output. The CLI is launched with
-        its working directory set to project_path (handled by the caller).
-        """
         args = [
             self.EXECUTABLE,
-            "--print",
+            "--auth-type", "openai",
+            "--input-format", "stream-json",
             "--output-format", "stream-json",
+            "--channel=SDK",
         ]
 
+        if permission_mode:
+            args.extend(["--approval-mode", permission_mode])
         if model:
             args.extend(["--model", model])
+        if allowed_tools:
+            for tool in allowed_tools:
+                args.extend(["--allowed-tools", tool])
 
+        return args
+
+    def supports_stdin_input(self) -> bool:
+        """Qwen CLI supports stdin input via stream-json format."""
+        return True
+
+    def build_single_shot_args(
+        self, prompt: str, project_path: str, model: Optional[str] = None
+    ) -> List[str]:
+        args = [
+            self.EXECUTABLE,
+            "--auth-type", "openai",
+            "--output-format", "stream-json",
+            prompt,
+        ]
+        if model:
+            args.extend(["--model", model])
         return args
 
     def get_display_name(self) -> str:
