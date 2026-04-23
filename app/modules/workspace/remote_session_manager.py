@@ -160,6 +160,43 @@ class RemoteSessionManager:
             "created_at": session.created_at.isoformat() if session.created_at else None,
         }
 
+    def _get_machine_id(self, session_id: str) -> Optional[str]:
+        """Get machine_id for a session, with DB fallback on restart.
+
+        Tries in-memory mapping first, then falls back to agent_sessions
+        table and session context JSON. Re-binds the mapping on recovery.
+        """
+        machine_id = self._agent_manager.get_machine_for_session(session_id)
+        if machine_id:
+            return machine_id
+
+        # Fallback 1: session context JSON
+        session = self._session_manager.get_session(session_id)
+        if session and session.context:
+            machine_id = session.context.get("remote_machine_id")
+
+        # Fallback 2: dedicated DB column
+        if not machine_id:
+            try:
+                from app.repositories.database import get_db_connection
+                with get_db_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT remote_machine_id FROM agent_sessions WHERE session_id = %s",
+                        (session_id,),
+                    )
+                    row = cursor.fetchone()
+                    if row:
+                        machine_id = row[0] if isinstance(row, (list, tuple)) else row.get("remote_machine_id")
+            except Exception as e:
+                logger.warning(f"DB fallback failed for session {session_id}: {e}")
+
+        if machine_id:
+            self._agent_manager.bind_session(session_id, machine_id)
+            logger.info(f"Recovered machine binding for session {session_id[:8]}: {machine_id[:8]}")
+
+        return machine_id
+
     def send_message(self, session_id: str, content: str,
                      user_id: Optional[int] = None) -> bool:
         """
@@ -173,7 +210,7 @@ class RemoteSessionManager:
         Returns:
             True if message was sent successfully.
         """
-        machine_id = self._agent_manager.get_machine_for_session(session_id)
+        machine_id = self._get_machine_id(session_id)
         if not machine_id:
             logger.warning(f"No machine bound for session {session_id}")
             return False
@@ -196,7 +233,7 @@ class RemoteSessionManager:
 
     def update_permission_mode(self, session_id: str, permission_mode: str) -> bool:
         """Send update_permission_mode command to the remote agent."""
-        machine_id = self._agent_manager.get_machine_for_session(session_id)
+        machine_id = self._get_machine_id(session_id)
         if not machine_id:
             return False
 
@@ -210,7 +247,7 @@ class RemoteSessionManager:
 
     def update_model(self, session_id: str, model: str) -> bool:
         """Switch the model of an active remote session."""
-        machine_id = self._agent_manager.get_machine_for_session(session_id)
+        machine_id = self._get_machine_id(session_id)
         if not machine_id:
             return False
 
@@ -230,14 +267,9 @@ class RemoteSessionManager:
 
     def stop_session(self, session_id: str) -> bool:
         """Stop a remote session."""
-        machine_id = self._agent_manager.get_machine_for_session(session_id)
+        machine_id = self._get_machine_id(session_id)
         if not machine_id:
-            # Session might already be unbound, try to get from session data
-            session = self._session_manager.get_session(session_id)
-            if session and session.context:
-                machine_id = session.context.get("remote_machine_id")
-            if not machine_id:
-                return False
+            return False
 
         command = {
             "type": "command",
@@ -256,7 +288,7 @@ class RemoteSessionManager:
 
     def pause_session(self, session_id: str) -> bool:
         """Pause a remote session."""
-        machine_id = self._agent_manager.get_machine_for_session(session_id)
+        machine_id = self._get_machine_id(session_id)
         if not machine_id:
             return False
 
@@ -277,7 +309,7 @@ class RemoteSessionManager:
 
     def resume_session(self, session_id: str) -> bool:
         """Resume a paused remote session."""
-        machine_id = self._agent_manager.get_machine_for_session(session_id)
+        machine_id = self._get_machine_id(session_id)
         if not machine_id:
             return False
 
@@ -302,7 +334,7 @@ class RemoteSessionManager:
         if not session:
             return None
 
-        machine_id = self._agent_manager.get_machine_for_session(session_id)
+        machine_id = self._get_machine_id(session_id)
         output = self._agent_manager.get_buffered_output(session_id)
 
         return {

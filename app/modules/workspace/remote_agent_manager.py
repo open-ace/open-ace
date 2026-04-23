@@ -58,7 +58,8 @@ class RemoteAgentManager:
         # Lock for thread safety
         self._lock = threading.Lock()
         self._ensure_tables()
-        self._cleanup_stale_sessions()
+        self._restore_in_memory_state()
+        self._cleanup_offline_sessions()
         self._start_heartbeat_monitor()
 
     def _get_connection(self) -> Union[sqlite3.Connection, Any]:
@@ -129,35 +130,92 @@ class RemoteAgentManager:
         conn.commit()
         conn.close()
 
-    def _cleanup_stale_sessions(self) -> None:
-        """Mark all active remote sessions as completed on server restart.
+    def _restore_in_memory_state(self) -> None:
+        """Restore _session_machines and _session_end_flags from DB after restart.
 
-        On restart the in-memory state (_connections, _session_machines,
-        _output_buffers) is gone, so any previously active session is
-        effectively dead.  Marking them completed ensures:
-        - SSE streams break cleanly on reconnection instead of hanging
-        - The frontend can show a "session ended" message
+        The agent_sessions table already persists remote_machine_id and status,
+        so we can rebuild the in-memory mappings needed for send_message, SSE
+        stream, and other session operations.
         """
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
+
+            # Restore session → machine mapping for active/paused sessions
             cursor.execute(
-                f"""
-                UPDATE agent_sessions
-                SET status = 'completed', updated_at = {_param()}
-                WHERE status = 'active' AND workspace_type = 'remote'
-                """,
-                (datetime.utcnow().isoformat(),),
+                "SELECT session_id, remote_machine_id FROM agent_sessions "
+                f"WHERE workspace_type = 'remote' AND status IN ('active', 'paused') "
+                "AND remote_machine_id IS NOT NULL"
             )
-            updated = cursor.rowcount
-            conn.commit()
+            rows = cursor.fetchall()
+            with self._lock:
+                for row in rows:
+                    sid = row["session_id"]
+                    mid = row["remote_machine_id"]
+                    if sid and mid:
+                        self._session_machines[sid] = mid
+                        self._output_buffers.setdefault(sid, [])
+
+            # Restore end flags for completed/stopped/error sessions
+            cursor.execute(
+                "SELECT session_id FROM agent_sessions "
+                "WHERE workspace_type = 'remote' AND status IN ('completed', 'error', 'stopped')"
+            )
+            with self._lock:
+                for row in cursor.fetchall():
+                    self._session_end_flags[row["session_id"]] = True
+
             conn.close()
-            if updated > 0:
+            if self._session_machines:
                 logger.info(
-                    "Cleaned up %d stale remote sessions on startup", updated
+                    "Restored %d remote session bindings from DB",
+                    len(self._session_machines),
                 )
         except Exception as e:
-            logger.warning("Failed to cleanup stale sessions: %s", e)
+            logger.warning("Failed to restore in-memory state: %s", e)
+
+    def _cleanup_offline_sessions(self) -> None:
+        """Mark active remote sessions as completed when their machine is offline.
+
+        Unlike the old _cleanup_stale_sessions which nuked ALL active remote
+        sessions on startup, this only cleans up sessions whose machine is
+        confirmed offline in the remote_machines table.
+        """
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            # Find active remote sessions whose machine is offline
+            cursor.execute(
+                "SELECT s.session_id, s.remote_machine_id FROM agent_sessions s "
+                "LEFT JOIN remote_machines m ON s.remote_machine_id = m.machine_id "
+                "WHERE s.status = 'active' AND s.workspace_type = 'remote' "
+                "AND (m.status IS NULL OR m.status != 'online')"
+            )
+            offline = cursor.fetchall()
+            if not offline:
+                conn.close()
+                return
+
+            sids = [r["session_id"] for r in offline]
+            with self._lock:
+                for sid in sids:
+                    self._session_end_flags[sid] = True
+
+            placeholders = ", ".join([_param()] * len(sids))
+            cursor.execute(
+                f"UPDATE agent_sessions SET status = 'completed', "
+                f"updated_at = {_param()} WHERE session_id IN ({placeholders})",
+                [datetime.utcnow().isoformat()] + sids,
+            )
+            conn.commit()
+            conn.close()
+            if offline:
+                logger.info(
+                    "Cleaned up %d remote sessions with offline machines", len(offline)
+                )
+        except Exception as e:
+            logger.warning("Failed to cleanup offline sessions: %s", e)
 
     def _start_heartbeat_monitor(self) -> None:
         """Start background thread for heartbeat monitoring."""
