@@ -642,10 +642,8 @@ def stream_session_output(session_id):
                     pass
                 last_index += 1
 
-            # Check if session ended
-            session_mgr = RemoteSessionManager()
-            status = session_mgr.get_session_status(session_id)
-            if status and status.get("status") in ("completed", "stopped", "error"):
+            # Check if session ended (in-memory, no DB query)
+            if agent_mgr.is_session_ended(session_id):
                 break
             time.sleep(0.2)
 

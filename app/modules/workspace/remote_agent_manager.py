@@ -53,9 +53,12 @@ class RemoteAgentManager:
         self._registration_tokens: Dict[str, Dict] = {}
         # Command queues for HTTP-mode agents: {machine_id: [commands]}
         self._command_queues: Dict[str, List[Dict]] = {}
+        # Session end flags: {session_id: True} — set when session completes/stops/errors
+        self._session_end_flags: Dict[str, bool] = {}
         # Lock for thread safety
         self._lock = threading.Lock()
         self._ensure_tables()
+        self._cleanup_stale_sessions()
         self._start_heartbeat_monitor()
 
     def _get_connection(self) -> Union[sqlite3.Connection, Any]:
@@ -125,6 +128,36 @@ class RemoteAgentManager:
 
         conn.commit()
         conn.close()
+
+    def _cleanup_stale_sessions(self) -> None:
+        """Mark all active remote sessions as completed on server restart.
+
+        On restart the in-memory state (_connections, _session_machines,
+        _output_buffers) is gone, so any previously active session is
+        effectively dead.  Marking them completed ensures:
+        - SSE streams break cleanly on reconnection instead of hanging
+        - The frontend can show a "session ended" message
+        """
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""
+                UPDATE agent_sessions
+                SET status = 'completed', updated_at = {_param()}
+                WHERE status = 'active' AND workspace_type = 'remote'
+                """,
+                (datetime.utcnow().isoformat(),),
+            )
+            updated = cursor.rowcount
+            conn.commit()
+            conn.close()
+            if updated > 0:
+                logger.info(
+                    "Cleaned up %d stale remote sessions on startup", updated
+                )
+        except Exception as e:
+            logger.warning("Failed to cleanup stale sessions: %s", e)
 
     def _start_heartbeat_monitor(self) -> None:
         """Start background thread for heartbeat monitoring."""
@@ -307,10 +340,10 @@ class RemoteAgentManager:
 
     # ==================== Connection Management ====================
 
-    def register_connection(self, machine_id: str, websocket) -> None:
-        """Register an active WebSocket connection from a remote agent."""
+    def register_connection(self, machine_id: str, websocket=None) -> None:
+        """Register an active connection from a remote agent (HTTP polling mode)."""
         with self._lock:
-            self._connections[machine_id] = websocket
+            self._connections[machine_id] = None  # HTTP polling — no WebSocket
 
         # Update status to online
         conn = self._get_connection()
@@ -326,10 +359,10 @@ class RemoteAgentManager:
         conn.commit()
         conn.close()
 
-        logger.info(f"Agent connected: {machine_id}")
+        logger.info(f"Agent connected (HTTP): {machine_id}")
 
-    def unregister_connection(self, machine_id: str) -> None:
-        """Unregister an agent WebSocket connection."""
+    def unregister_connection(self, machine_id: str, websocket=None) -> None:
+        """Unregister an agent connection."""
         with self._lock:
             self._connections.pop(machine_id, None)
 
@@ -348,47 +381,32 @@ class RemoteAgentManager:
         logger.info(f"Agent disconnected: {machine_id}")
 
     def is_connected(self, machine_id: str) -> bool:
-        """Check if a machine has an active WebSocket connection."""
+        """Check if a machine has an active connection (HTTP polling)."""
         return machine_id in self._connections
 
     # ==================== Command Dispatch ====================
 
     def send_command(self, machine_id: str, command: Dict[str, Any]) -> bool:
         """
-        Send a command to a remote agent via WebSocket.
-
-        If no WebSocket is available, queues the command for HTTP polling.
+        Queue a command for a remote agent (delivered via HTTP polling).
 
         Args:
             machine_id: Target machine ID.
             command: Command dict with 'type', 'command', etc.
 
         Returns:
-            True if command was sent or queued successfully.
+            True if command was queued successfully.
         """
-        with self._lock:
-            ws = self._connections.get(machine_id)
-
-        if not ws:
-            # No WebSocket — queue command for HTTP polling
-            if machine_id in self._connections:
-                # Connected via HTTP (ws is None)
-                with self._lock:
-                    if machine_id not in self._command_queues:
-                        self._command_queues[machine_id] = []
-                    self._command_queues[machine_id].append(command)
-                logger.info(f"Queued command for HTTP-mode agent {machine_id}")
-                return True
+        if machine_id not in self._connections:
             logger.warning(f"No active connection for machine {machine_id}")
             return False
 
-        try:
-            ws.send(json.dumps(command))
-            return True
-        except Exception as e:
-            logger.error(f"Failed to send command to {machine_id}: {e}")
-            self.unregister_connection(machine_id)
-            return False
+        with self._lock:
+            if machine_id not in self._command_queues:
+                self._command_queues[machine_id] = []
+            self._command_queues[machine_id].append(command)
+        logger.info(f"Queued command for agent {machine_id}")
+        return True
 
     def get_pending_commands(self, machine_id: str) -> List[Dict]:
         """Get and clear pending commands for an HTTP-mode agent."""
@@ -428,11 +446,28 @@ class RemoteAgentManager:
             buf = self._output_buffers.get(session_id, [])
             return buf[after_index:]
 
+    def mark_session_ended(self, session_id: str) -> None:
+        """Mark a session as ended (completed/stopped/error)."""
+        with self._lock:
+            self._session_end_flags[session_id] = True
+
+    def is_session_ended(self, session_id: str) -> bool:
+        """Check if a session has ended (in-memory, no DB query)."""
+        with self._lock:
+            return self._session_end_flags.get(session_id, False)
+
     # ==================== Heartbeat ====================
 
     def process_heartbeat(self, machine_id: str, status: str = "idle",
                           active_sessions: int = 0) -> None:
         """Process a heartbeat from a remote agent."""
+        # Ensure HTTP polling agents are tracked in _connections
+        # (needed after server restart, since _connections is in-memory)
+        with self._lock:
+            if machine_id not in self._connections:
+                self._connections[machine_id] = None
+                logger.info(f"Re-registered HTTP polling agent via heartbeat: {machine_id}")
+
         conn = self._get_connection()
         cursor = conn.cursor()
         now = datetime.utcnow().isoformat()

@@ -47,6 +47,7 @@ class RemoteSessionManager:
         cli_tool: str = "qwen-code-cli",
         title: str = "",
         tenant_id: Optional[int] = None,
+        permission_mode: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Create a new remote session.
@@ -117,6 +118,8 @@ class RemoteSessionManager:
             "cli_tool": cli_tool,
             "proxy_token": proxy_token,
         }
+        if permission_mode:
+            command["permission_mode"] = permission_mode
 
         success = self._agent_manager.send_command(machine_id, command)
         if not success:
@@ -189,6 +192,20 @@ class RemoteSessionManager:
             "content": content,
         }
 
+        return self._agent_manager.send_command(machine_id, command)
+
+    def update_permission_mode(self, session_id: str, permission_mode: str) -> bool:
+        """Send update_permission_mode command to the remote agent."""
+        machine_id = self._agent_manager.get_machine_for_session(session_id)
+        if not machine_id:
+            return False
+
+        command = {
+            "type": "command",
+            "command": "update_permission_mode",
+            "session_id": session_id,
+            "permission_mode": permission_mode,
+        }
         return self._agent_manager.send_command(machine_id, command)
 
     def stop_session(self, session_id: str) -> bool:
@@ -335,6 +352,30 @@ class RemoteSessionManager:
             except Exception as e:
                 logger.error(f"Failed to record quota usage: {e}")
 
+    def process_permission_request(self, session_id: str,
+                                    control_request: dict) -> None:
+        """
+        Process a permission request from the remote agent.
+
+        Buffers the permission request as a special output entry so it
+        is delivered to the frontend via the SSE stream.  The entry uses
+        a distinct ``permission_request`` type that the frontend can detect.
+        """
+        output_entry = {
+            "session_id": session_id,
+            "data": json.dumps(control_request),
+            "stream": "permission",
+            "is_complete": False,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+
+        self._agent_manager.buffer_output(session_id, output_entry)
+        logger.info(
+            "Buffered permission request for session %s: %s",
+            session_id[:8],
+            control_request.get("request", {}).get("subtype"),
+        )
+
     def process_session_status_update(self, session_id: str, status: str,
                                       pid: Optional[int] = None) -> None:
         """Process a session status update from a remote agent."""
@@ -344,11 +385,18 @@ class RemoteSessionManager:
 
         if status in ("running", "active"):
             session.status = "active"
-        elif status in ("stopped", "completed", "exited"):
+        elif status == "stopped":
+            # User-initiated stop — finalize the session
             session.status = "completed"
             self._agent_manager.unbind_session(session_id)
+            self._agent_manager.mark_session_ended(session_id)
+        elif status in ("completed", "exited"):
+            # CLI exited after a response — keep session active so the user
+            # can send follow-up messages (executor restarts the CLI).
+            session.status = "active"
         elif status == "error":
             session.status = "error"
+            self._agent_manager.mark_session_ended(session_id)
 
         self._session_manager.update_session(session)
 

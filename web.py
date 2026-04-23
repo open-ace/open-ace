@@ -16,6 +16,14 @@ For the legacy implementation, see web_legacy.py
 import os
 import sys
 
+# gevent monkey-patch must be applied before any other imports
+from gevent import monkey
+monkey.patch_all()
+
+# Make psycopg2 cooperative with gevent (prevents blocking the event loop)
+import psycogreen.gevent
+psycogreen.gevent.patch_psycopg()
+
 # Add the project root to the path
 project_root = os.path.dirname(os.path.abspath(__file__))
 if project_root not in sys.path:
@@ -70,6 +78,8 @@ if __name__ == "__main__":
             # stdin is not available or termios not supported
             use_reloader = False
 
-    app.run(
-        host=WEB_HOST, port=WEB_PORT, debug=debug_mode, threaded=True, use_reloader=use_reloader
-    )
+    from gevent.pywsgi import WSGIServer
+
+    server = WSGIServer((WEB_HOST, WEB_PORT), app)
+    print(f"Starting Open ACE on {WEB_HOST}:{WEB_PORT} (gevent)")
+    server.serve_forever()

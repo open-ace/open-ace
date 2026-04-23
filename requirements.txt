@@ -10,12 +10,16 @@ cryptography>=41.0.0
 # Production server
 gunicorn>=21.0.0
 
+# WebSocket support (removed gevent-websocket, using HTTP polling)
+gevent>=23.0.0
+
 # Database
 sqlalchemy>=2.0.0
 alembic>=1.12.0
 
 # PostgreSQL driver
 psycopg2-binary>=2.9.0
+psycogreen>=1.0.0
 
 # Testing
 pytest>=7.0.0
