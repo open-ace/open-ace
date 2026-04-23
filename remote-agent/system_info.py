@@ -154,8 +154,11 @@ def check_cli_tool(name: str) -> Dict[str, Any]:
     """
     Check whether a CLI tool is installed and accessible.
 
+    Uses the CLI adapter to resolve the actual executable name
+    (e.g. 'qwen-code-cli' → 'qwen') before checking PATH.
+
     Args:
-        name: Name of the CLI executable.
+        name: Tool identifier (e.g. 'qwen-code-cli').
 
     Returns:
         Dict with 'installed' (bool), 'path' (str or None),
@@ -167,7 +170,20 @@ def check_cli_tool(name: str) -> Dict[str, Any]:
         "version": None,
     }
 
-    tool_path = shutil.which(name)
+    # Resolve the actual executable name via adapter
+    exe_name = name
+    try:
+        from cli_adapters import get_adapter
+        adapter = get_adapter(name)
+        exe_name = adapter.get_executable_name()
+    except Exception:
+        pass  # Fall back to the raw tool name
+
+    tool_path = shutil.which(exe_name)
+    if not tool_path:
+        # Also try the raw tool name if different
+        if exe_name != name:
+            tool_path = shutil.which(name)
     if not tool_path:
         return result
 
@@ -177,7 +193,7 @@ def check_cli_tool(name: str) -> Dict[str, Any]:
     # Try to get version
     try:
         proc = subprocess.run(
-            [name, "--version"],
+            [tool_path, "--version"],
             capture_output=True,
             text=True,
             timeout=10,

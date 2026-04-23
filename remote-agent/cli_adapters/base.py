@@ -43,3 +43,13 @@ class BaseCLIAdapter(abc.ABC):
     def get_executable_name(self) -> str:
         """Return the executable name (e.g., 'qwen', 'claude')."""
         pass
+
+    def supports_stdin_input(self) -> bool:
+        """Whether this CLI tool supports sending messages via stdin pipe."""
+        return True
+
+    def build_single_shot_args(
+        self, prompt: str, project_path: str, model: Optional[str] = None
+    ) -> List[str]:
+        """Build args for a single-shot prompt execution (used when stdin is not supported)."""
+        return [self.get_executable_name(), prompt]
