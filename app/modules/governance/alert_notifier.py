@@ -675,7 +675,9 @@ class AlertNotifier:
             tool_name=row["tool_name"],
             metadata=json.loads(row["metadata"]) if row["metadata"] else {},
             created_at=(
-                datetime.fromisoformat(row["created_at"])
+                row["created_at"]
+                if isinstance(row["created_at"], datetime)
+                else datetime.fromisoformat(row["created_at"])
                 if row["created_at"]
                 else datetime.utcnow()
             ),

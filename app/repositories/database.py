@@ -155,8 +155,6 @@ def adapt_boolean_condition(column: str, value: bool) -> str:
     Returns:
         str: SQL condition string.
     """
-    if is_postgresql():
-        return f"{column} IS {'TRUE' if value else 'FALSE'}"
     return f"{column} = {1 if value else 0}"
 
 

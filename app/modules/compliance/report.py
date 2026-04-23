@@ -685,29 +685,32 @@ class ReportGenerator:
         self, report_type: Optional[str] = None, tenant_id: Optional[int] = None, limit: int = 50
     ) -> List[Dict[str, Any]]:
         """Get saved reports."""
-        conditions = []
-        params = []
+        try:
+            conditions = []
+            params = []
 
-        if report_type:
-            conditions.append("report_type = ?")
-            params.append(report_type)
+            if report_type:
+                conditions.append("report_type = ?")
+                params.append(report_type)
 
-        if tenant_id:
-            conditions.append("tenant_id = ?")
-            params.append(tenant_id)
+            if tenant_id:
+                conditions.append("tenant_id = ?")
+                params.append(tenant_id)
 
-        where_clause = " AND ".join(conditions) if conditions else "1=1"
+            where_clause = " AND ".join(conditions) if conditions else "1=1"
 
-        query = f"""
-            SELECT report_id, report_type, generated_at, period_start, period_end
-            FROM compliance_reports
-            WHERE {where_clause}
-            ORDER BY generated_at DESC
-            LIMIT ?
-        """
+            query = f"""
+                SELECT report_id, report_type, generated_at, period_start, period_end
+                FROM compliance_reports
+                WHERE {where_clause}
+                ORDER BY generated_at DESC
+                LIMIT ?
+            """
 
-        rows = self.db.fetch_all(query, tuple(params + [limit]))
-        return [dict(r) for r in rows]
+            rows = self.db.fetch_all(query, tuple(params + [limit]))
+            return [dict(r) for r in rows]
+        except Exception:
+            return []
 
     def get_saved_report(self, report_id: str) -> Optional[ComplianceReport]:
         """Get a saved report by ID."""

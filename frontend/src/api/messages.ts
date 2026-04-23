@@ -200,14 +200,14 @@ export const messagesApi = {
     if (filters.host) params.host = filters.host;
     if (filters.sender) params.sender = filters.sender;
 
-    const response = await apiClient.get<ConversationHistory[]>(
+    const response = await apiClient.get<{ data: ConversationHistory[]; total: number }>(
       '/api/conversation-history',
       params
     );
 
     return {
-      data: response,
-      total: response.length,
+      data: response.data ?? (Array.isArray(response) ? response : []),
+      total: response.total ?? (Array.isArray(response) ? response.length : 0),
     };
   },
 

@@ -35,6 +35,23 @@ import {
 } from '@/api';
 import type { AuditLogFilters } from '@/api';
 
+type AuditLog = {
+  id: number;
+  timestamp: string;
+  user_id: number | null;
+  username: string | null;
+  action: string;
+  severity: string;
+  resource_type: string;
+  resource_id: string | null;
+  details: Record<string, unknown> | null;
+  ip_address: string | null;
+  user_agent: string | null;
+  session_id: string | null;
+  success: boolean | null;
+  error_message: string | null;
+};
+
 const ITEMS_PER_PAGE = 20;
 
 const ACTION_COLORS: Record<string, BadgeVariant> = {
@@ -55,6 +72,7 @@ export const AuditCenter: React.FC = () => {
   // --- Audit Log State ---
   const [filters, setFilters] = useState<AuditLogFilters>({});
   const [page, setPage] = useState(1);
+  const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
 
   const { data, isLoading, isFetching, isError, error, refetch } = useAuditLogs({
     ...filters,
@@ -155,8 +173,8 @@ export const AuditCenter: React.FC = () => {
 
   // --- Analysis Chart Data ---
   const loginPatternData = useMemo(() => {
-    if (!patterns?.login_patterns) return { labels: [], data: [] };
-    const entries = Object.entries(patterns.login_patterns);
+    if (!patterns?.hourly_distribution) return { labels: [], data: [] };
+    const entries = Object.entries(patterns.hourly_distribution);
     return {
       labels: entries.map(([hour]) => `${hour}:00`),
       data: entries.map(([, count]) => count),
@@ -164,8 +182,8 @@ export const AuditCenter: React.FC = () => {
   }, [patterns]);
 
   const operationDistributionData = useMemo(() => {
-    if (!patterns?.operation_distribution) return { labels: [], data: [] };
-    const entries = Object.entries(patterns.operation_distribution);
+    if (!patterns?.action_distribution) return { labels: [], data: [] };
+    const entries = Object.entries(patterns.action_distribution);
     return {
       labels: entries.map(([op]) => op),
       data: entries.map(([, count]) => count),
@@ -297,14 +315,13 @@ export const AuditCenter: React.FC = () => {
                         <small className="text-muted">{log.ip_address ?? '-'}</small>
                       </td>
                       <td>
-                        {log.details && Object.keys(log.details).length > 0 && (
-                          <button
-                            className="btn btn-link btn-sm p-0"
-                            onClick={() => window.alert(JSON.stringify(log.details, null, 2))}
-                          >
-                            <i className="bi bi-eye" />
-                          </button>
-                        )}
+                        <button
+                          className="btn btn-outline-primary btn-sm audit-detail-btn"
+                          onClick={() => setSelectedLog(log as unknown as AuditLog)}
+                        >
+                          <i className="bi bi-eye me-1" />
+                          {t('details', language)}
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -352,6 +369,89 @@ export const AuditCenter: React.FC = () => {
                 </nav>
               </div>
             )}
+
+            {/* Detail Modal */}
+            {selectedLog && (
+              <div className="modal show d-block" tabIndex={-1} onClick={() => setSelectedLog(null)}>
+                <div className="modal-dialog modal-lg modal-dialog-scrollable" onClick={(e) => e.stopPropagation()}>
+                  <div className="modal-content">
+                    <div className="modal-header">
+                      <h5 className="modal-title">
+                        <i className="bi bi-journal-text me-2" />
+                        {t('details', language)} - {selectedLog.action}
+                      </h5>
+                      <button type="button" className="btn-close" onClick={() => setSelectedLog(null)} />
+                    </div>
+                    <div className="modal-body">
+                      <table className="table table-borderless mb-0">
+                        <tbody>
+                          <tr>
+                            <th style={{ width: '30%' }}>{t('tableTimestamp', language)}</th>
+                            <td>{formatDateTime(selectedLog.timestamp)}</td>
+                          </tr>
+                          <tr>
+                            <th>{t('tableUser', language)}</th>
+                            <td>{selectedLog.username ?? `User ${selectedLog.user_id}`}</td>
+                          </tr>
+                          <tr>
+                            <th>{t('tableAction', language)}</th>
+                            <td><Badge variant={ACTION_COLORS[selectedLog.action] ?? 'secondary'}>{selectedLog.action}</Badge></td>
+                          </tr>
+                          <tr>
+                            <th>{t('resourceType', language)}</th>
+                            <td>{selectedLog.resource_type}</td>
+                          </tr>
+                          {selectedLog.resource_id && (
+                            <tr>
+                              <th>{t('resourceId', language)}</th>
+                              <td><code>{selectedLog.resource_id}</code></td>
+                            </tr>
+                          )}
+                          <tr>
+                            <th>{t('tableIpAddress', language)}</th>
+                            <td>{selectedLog.ip_address ?? '-'}</td>
+                          </tr>
+                          {selectedLog.session_id && (
+                            <tr>
+                              <th>Session ID</th>
+                              <td><code>{selectedLog.session_id}</code></td>
+                            </tr>
+                          )}
+                          <tr>
+                            <th>{t('status', language) ?? 'Status'}</th>
+                            <td>
+                              <Badge variant={selectedLog.success !== false ? 'success' : 'danger'}>
+                                {selectedLog.success !== false ? 'Success' : 'Failed'}
+                              </Badge>
+                            </td>
+                          </tr>
+                          {selectedLog.error_message && (
+                            <tr>
+                              <th>Error</th>
+                              <td className="text-danger">{selectedLog.error_message}</td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                      {selectedLog.details && typeof selectedLog.details === 'object' && Object.keys(selectedLog.details).length > 0 && (
+                        <div className="mt-3">
+                          <h6>{t('tableDetails', language)}</h6>
+                          <pre className="bg-light p-3 rounded" style={{ maxHeight: '300px', overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                            {JSON.stringify(selectedLog.details, null, 2)}
+                          </pre>
+                        </div>
+                      )}
+                    </div>
+                    <div className="modal-footer">
+                      <Button variant="secondary" onClick={() => setSelectedLog(null)}>
+                        {t('close', language) ?? 'Close'}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+            {selectedLog && <div className="modal-backdrop show" />}
           </>
         )}
       </>
@@ -378,9 +478,9 @@ export const AuditCenter: React.FC = () => {
                 <div
                   className={cn(
                     'security-score-circle',
-                    securityScore.overall_score >= 80
+                    securityScore.score >= 80
                       ? 'text-success'
-                      : securityScore.overall_score >= 60
+                      : securityScore.score >= 60
                         ? 'text-warning'
                         : 'text-danger'
                   )}
@@ -390,51 +490,50 @@ export const AuditCenter: React.FC = () => {
                     style={{
                       fontSize: '4rem',
                       color:
-                        securityScore.overall_score >= 80
+                        securityScore.score >= 80
                           ? '#198754'
-                          : securityScore.overall_score >= 60
+                          : securityScore.score >= 60
                             ? '#ffc107'
                             : '#dc3545',
                     }}
                   >
-                    {securityScore.overall_score}
+                    {securityScore.score}
                   </div>
-                  <div className="text-muted">{t('overallScore', language)}</div>
+                  <div className="text-muted">
+                    {t('overallScore', language)} ({securityScore.grade})
+                  </div>
                 </div>
               </div>
               <div className="col-md-8">
-                <h6>{t('categoryScores', language)}</h6>
-                {Object.entries(securityScore.categories || {}).map(([category, data]) => (
-                  <div key={category} className="mb-2">
-                    <div className="d-flex justify-content-between">
-                      <span>{category}</span>
-                      <span
-                        className={cn(
-                          (data as { status: string }).status === 'good'
-                            ? 'text-success'
-                            : (data as { status: string }).status === 'warning'
-                              ? 'text-warning'
-                              : 'text-danger'
-                        )}
-                      >
-                        {(data as { score: number }).score}%
-                      </span>
+                <h6>{t('categoryScores', language) ?? 'Severity Breakdown'}</h6>
+                {[
+                  { label: 'High Severity', count: securityScore.high_severity_count, max: 10, variant: 'danger' },
+                  { label: 'Medium Severity', count: securityScore.medium_severity_count, max: 10, variant: 'warning' },
+                  { label: 'Low Severity', count: securityScore.low_severity_count, max: 10, variant: 'info' },
+                ].map((item) => {
+                  const scorePercent = Math.max(0, 100 - (item.count / item.max) * 100);
+                  return (
+                    <div key={item.label} className="mb-2">
+                      <div className="d-flex justify-content-between">
+                        <span>{item.label}</span>
+                        <span className={item.count > 0 ? `text-${item.variant}` : 'text-success'}>
+                          {item.count} {t('totalAnomalies', language) ?? 'anomalies'}
+                        </span>
+                      </div>
+                      <div className="progress" style={{ height: '8px' }}>
+                        <div
+                          className={cn('progress-bar', `bg-${scorePercent >= 80 ? 'success' : scorePercent >= 60 ? 'warning' : 'danger'}`)}
+                          style={{ width: `${scorePercent}%` }}
+                        />
+                      </div>
                     </div>
-                    <div className="progress" style={{ height: '8px' }}>
-                      <div
-                        className={cn(
-                          'progress-bar',
-                          (data as { status: string }).status === 'good'
-                            ? 'bg-success'
-                            : (data as { status: string }).status === 'warning'
-                              ? 'bg-warning'
-                              : 'bg-danger'
-                        )}
-                        style={{ width: `${(data as { score: number }).score}%` }}
-                      />
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
+                <div className="mt-2">
+                  <small className="text-muted">
+                    {t('totalAnomalies', language) ?? 'Total'}: {securityScore.anomaly_count}
+                  </small>
+                </div>
               </div>
             </div>
             {securityScore.recommendations && securityScore.recommendations.length > 0 && (
@@ -537,11 +636,11 @@ export const AuditCenter: React.FC = () => {
                   {anomalies.slice(0, 10).map((anomaly, index) => (
                     <tr key={index}>
                       <td>
-                        <span className="badge bg-secondary">{anomaly.type}</span>
+                        <span className="badge bg-secondary">{anomaly.anomaly_type}</span>
                       </td>
                       <td>{anomaly.description}</td>
                       <td>
-                        <small className="text-muted">{formatDateTime(anomaly.timestamp)}</small>
+                        <small className="text-muted">{formatDateTime(anomaly.first_seen)}</small>
                       </td>
                       <td>
                         <span className={cn('badge', `bg-${getSeverityVariant(anomaly.severity)}`)}>
@@ -575,16 +674,30 @@ export const AuditCenter: React.FC = () => {
 
           {userProfile ? (
             <div>
+              <div className="row mb-3">
+                <div className="col-md-3">
+                  <StatCard label={t('total', language) ?? 'Total Actions'} value={String(userProfile.total_actions)} variant="primary" />
+                </div>
+                <div className="col-md-3">
+                  <StatCard label={t('actionsPerDay', language) ?? 'Actions/Day'} value={userProfile.actions_per_day.toFixed(1)} variant="info" />
+                </div>
+                <div className="col-md-3">
+                  <StatCard label={t('peakHour', language) ?? 'Peak Hour'} value={`${userProfile.peak_activity_hour}:00`} variant="warning" />
+                </div>
+                <div className="col-md-3">
+                  <StatCard label={t('peakDay', language) ?? 'Peak Day'} value={userProfile.peak_activity_day} variant="success" />
+                </div>
+              </div>
               <div className="row">
                 <div className="col-md-6">
                   <h6>{t('activeHours', language)}</h6>
-                  {Object.keys(userProfile.active_hours || {}).length > 0 ? (
+                  {userProfile.hourly_distribution && Object.keys(userProfile.hourly_distribution).length > 0 ? (
                     <BarChart
-                      labels={Object.keys(userProfile.active_hours)}
+                      labels={Object.keys(userProfile.hourly_distribution).map((h) => `${h}:00`)}
                       datasets={[
                         {
                           label: t('activity', language),
-                          data: Object.values(userProfile.active_hours),
+                          data: Object.values(userProfile.hourly_distribution),
                         },
                       ]}
                       height={150}
@@ -595,13 +708,17 @@ export const AuditCenter: React.FC = () => {
                 </div>
                 <div className="col-md-6">
                   <h6>{t('commonOperations', language)}</h6>
-                  {userProfile.common_operations && userProfile.common_operations.length > 0 ? (
+                  {userProfile.action_breakdown && Object.keys(userProfile.action_breakdown).length > 0 ? (
                     <ul className="list-group">
-                      {userProfile.common_operations.map((op, index) => (
-                        <li key={index} className="list-group-item">
-                          {op}
-                        </li>
-                      ))}
+                      {Object.entries(userProfile.action_breakdown)
+                        .sort(([, a], [, b]) => b - a)
+                        .slice(0, 10)
+                        .map(([op, count]) => (
+                          <li key={op} className="list-group-item d-flex justify-content-between">
+                            <span>{op}</span>
+                            <Badge variant="secondary">{count}</Badge>
+                          </li>
+                        ))}
                     </ul>
                   ) : (
                     <p className="text-muted">{t('noData', language)}</p>

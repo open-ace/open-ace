@@ -417,9 +417,9 @@ class ProjectRepository:
             project_name=project.name,
             total_users=result.get("total_users", 0) or 0,
             total_sessions=result.get("total_sessions", 0) or 0,
-            total_tokens=result.get("total_tokens", 0) or 0,
-            total_requests=result.get("total_requests", 0) or 0,
-            total_duration_seconds=result.get("total_duration_seconds", 0) or 0,
+            total_tokens=int(result.get("total_tokens", 0) or 0),
+            total_requests=int(result.get("total_requests", 0) or 0),
+            total_duration_seconds=int(result.get("total_duration_seconds", 0) or 0),
             first_access=(
                 datetime.fromisoformat(result["first_access"])
                 if result.get("first_access")
@@ -481,9 +481,9 @@ class ProjectRepository:
                 project_name=r["project_name"],
                 total_users=r.get("total_users", 0) or 0,
                 total_sessions=r.get("total_sessions", 0) or 0,
-                total_tokens=r.get("total_tokens", 0) or 0,
-                total_requests=r.get("total_requests", 0) or 0,
-                total_duration_seconds=r.get("total_duration_seconds", 0) or 0,
+                total_tokens=int(r.get("total_tokens", 0) or 0),
+                total_requests=int(r.get("total_requests", 0) or 0),
+                total_duration_seconds=int(r.get("total_duration_seconds", 0) or 0),
                 first_access=parse_datetime(r.get("first_access")),
                 last_access=parse_datetime(r.get("last_access")),
                 user_stats=user_stats,
@@ -543,11 +543,11 @@ class ProjectRepository:
                 date=r["date"],
                 project_id=r["project_id"],
                 project_path=r.get("project_path", ""),
-                total_tokens=r.get("total_tokens", 0) or 0,
-                total_input_tokens=r.get("total_input_tokens", 0) or 0,
-                total_output_tokens=r.get("total_output_tokens", 0) or 0,
-                total_requests=r.get("total_requests", 0) or 0,
-                active_users=r.get("active_users", 0) or 0,
+                total_tokens=int(r.get("total_tokens", 0) or 0),
+                total_input_tokens=int(r.get("total_input_tokens", 0) or 0),
+                total_output_tokens=int(r.get("total_output_tokens", 0) or 0),
+                total_requests=int(r.get("total_requests", 0) or 0),
+                active_users=int(r.get("active_users", 0) or 0),
             )
             for r in results
         ]

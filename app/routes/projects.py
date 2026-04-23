@@ -52,7 +52,7 @@ def get_webui_user():
     """Get user from webui token (for iframe integration)."""
     from app.services.webui_manager import get_webui_manager
 
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    token = request.cookies.get("session_token") or request.headers.get("Authorization", "").replace("Bearer ", "")
     if not token:
         # Also check query parameter for token
         token = request.args.get("token")

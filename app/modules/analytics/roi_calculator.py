@@ -549,59 +549,54 @@ class ROICalculator:
         return result
 
     @cached(ttl=60, key_prefix="roi", skip_args=[0])
-    def get_roi_by_user(self, start_date: str, end_date: str) -> Dict[int, ROIMetrics]:
+    def get_roi_by_user(self, start_date: str, end_date: str) -> Dict[str, ROIMetrics]:
         """
-        Get ROI breakdown by user.
-
-        Optimized: Uses a single query with user grouping instead of
-        multiple queries per user (N+1 problem fixed).
+        Get ROI breakdown by user (via host_name grouping).
 
         Args:
             start_date: Start date.
             end_date: End date.
 
         Returns:
-            Dict mapping user ID to ROI metrics.
+            Dict mapping host_name to ROI metrics.
         """
-        # Single query to get aggregated data by user
+        # Aggregate by host_name since daily_usage lacks user_id
         query = """
             SELECT
-                user_id,
+                host_name,
                 COUNT(*) as request_count,
                 SUM(input_tokens) as total_input_tokens,
                 SUM(output_tokens) as total_output_tokens
             FROM daily_usage
-            WHERE date >= ? AND date <= ? AND user_id IS NOT NULL
-            GROUP BY user_id
+            WHERE date >= ? AND date <= ? AND host_name IS NOT NULL
+            GROUP BY host_name
         """
         rows = self.db.fetch_all(query, (start_date, end_date))
 
-        # Single query to get model breakdown by user
+        # Model breakdown by host_name
         model_query = """
             SELECT
-                user_id,
+                host_name,
                 models_used as model,
                 SUM(input_tokens) as input_tokens,
                 SUM(output_tokens) as output_tokens
             FROM daily_usage
-            WHERE date >= ? AND date <= ? AND user_id IS NOT NULL
-            GROUP BY user_id, models_used
+            WHERE date >= ? AND date <= ? AND host_name IS NOT NULL
+            GROUP BY host_name, models_used
         """
         model_rows = self.db.fetch_all(model_query, (start_date, end_date))
 
-        # Group model data by user
-        model_data_by_user: Dict[int, List[Dict]] = {}
+        # Group model data by host
+        model_data_by_host: Dict[str, List[Dict]] = {}
         for row in model_rows:
-            user_id = row.get("user_id")
-            if user_id:
-                if user_id not in model_data_by_user:
-                    model_data_by_user[user_id] = []
-                model_data_by_user[user_id].append(row)
+            host = row.get("host_name")
+            if host:
+                model_data_by_host.setdefault(host, []).append(row)
 
         result = {}
         for row in rows:
-            user_id = row.get("user_id")
-            if not user_id:
+            host_name = row.get("host_name")
+            if not host_name:
                 continue
 
             requests = row.get("request_count") or 0
@@ -609,12 +604,11 @@ class ROICalculator:
             output_tokens = row.get("total_output_tokens") or 0
             tokens = input_tokens + output_tokens
 
-            # Calculate costs for this user
             total_cost = 0.0
             total_input_cost = 0.0
             total_output_cost = 0.0
 
-            for model_row in model_data_by_user.get(user_id, []):
+            for model_row in model_data_by_host.get(host_name, []):
                 model = model_row.get("model") or "default"
                 m_input_tokens = model_row.get("input_tokens") or 0
                 m_output_tokens = model_row.get("output_tokens") or 0
@@ -626,17 +620,15 @@ class ROICalculator:
                 total_output_cost += output_cost
                 total_cost += cost
 
-            # Calculate savings
             estimated_hours_saved = requests * self.AVG_TIME_SAVED_PER_REQUEST / 60
             estimated_savings = estimated_hours_saved * self.HOURLY_LABOR_COST
 
-            # Calculate ROI
             if total_cost > 0:
                 roi_percentage = ((estimated_savings - total_cost) / total_cost) * 100
             else:
                 roi_percentage = 0.0
 
-            result[user_id] = ROIMetrics(
+            result[host_name] = ROIMetrics(
                 period=f"{start_date} to {end_date}",
                 start_date=start_date,
                 end_date=end_date,

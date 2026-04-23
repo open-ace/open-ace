@@ -24,7 +24,9 @@ auth_service = AuthService()
 
 def _require_admin():
     """Require admin authentication."""
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    token = request.cookies.get("session_token") or request.headers.get(
+        "Authorization", ""
+    ).replace("Bearer ", "")
     is_admin, result = auth_service.require_admin(token)
 
     if not is_admin:

@@ -34,30 +34,48 @@ export interface SavedReport {
 }
 
 export interface AuditPattern {
-  login_patterns: Record<string, number>;
-  operation_distribution: Record<string, number>;
-  resource_access_heatmap: Record<string, number>;
+  period: { start: string; end: string };
+  total_events: number;
+  hourly_distribution: Record<string, number>;
+  daily_distribution: Record<string, number>;
+  action_distribution: Record<string, number>;
+  unique_users: number;
+  top_users: [number, number][];
 }
 
 export interface AuditAnomaly {
-  type: string;
+  anomaly_type: string;
   description: string;
-  timestamp: string;
   severity: 'low' | 'medium' | 'high';
+  affected_users: number[];
+  occurrences: number;
+  first_seen: string;
+  last_seen: string;
   details?: Record<string, unknown>;
 }
 
 export interface UserProfile {
   user_id: number;
-  username?: string;
-  active_hours: Record<string, number>;
-  common_operations: string[];
-  access_patterns: Record<string, number>;
+  period_days: number;
+  total_actions: number;
+  actions_per_day: number;
+  action_breakdown: Record<string, number>;
+  peak_activity_hour: number;
+  peak_activity_day: string;
+  hourly_distribution: Record<string, number>;
+  daily_distribution: Record<string, number>;
+  first_activity: string;
+  last_activity: string;
 }
 
 export interface SecurityScore {
-  overall_score: number;
-  categories: Record<string, { score: number; status: string }>;
+  score: number;
+  grade: string;
+  anomaly_count: number;
+  high_severity_count: number;
+  medium_severity_count: number;
+  low_severity_count: number;
+  anomalies: { type: string; severity: string; description: string }[];
   recommendations: string[];
 }
 

@@ -87,8 +87,8 @@ export const AuditAnalysis: React.FC = () => {
 
   // Prepare chart data
   const loginPatternData = useMemo(() => {
-    if (!patterns?.login_patterns) return { labels: [], data: [] };
-    const entries = Object.entries(patterns.login_patterns);
+    if (!patterns?.hourly_distribution) return { labels: [], data: [] };
+    const entries = Object.entries(patterns.hourly_distribution);
     return {
       labels: entries.map(([hour]) => `${hour}:00`),
       data: entries.map(([, count]) => count),
@@ -96,8 +96,8 @@ export const AuditAnalysis: React.FC = () => {
   }, [patterns]);
 
   const operationDistributionData = useMemo(() => {
-    if (!patterns?.operation_distribution) return { labels: [], data: [] };
-    const entries = Object.entries(patterns.operation_distribution);
+    if (!patterns?.action_distribution) return { labels: [], data: [] };
+    const entries = Object.entries(patterns.action_distribution);
     return {
       labels: entries.map(([op]) => op),
       data: entries.map(([, count]) => count),
@@ -162,9 +162,9 @@ export const AuditAnalysis: React.FC = () => {
               <div
                 className={cn(
                   'security-score-circle',
-                  securityScore.overall_score >= 80
+                  securityScore.score >= 80
                     ? 'text-success'
-                    : securityScore.overall_score >= 60
+                    : securityScore.score >= 60
                       ? 'text-warning'
                       : 'text-danger'
                 )}
@@ -174,51 +174,50 @@ export const AuditAnalysis: React.FC = () => {
                   style={{
                     fontSize: '4rem',
                     color:
-                      securityScore.overall_score >= 80
+                      securityScore.score >= 80
                         ? '#198754'
-                        : securityScore.overall_score >= 60
+                        : securityScore.score >= 60
                           ? '#ffc107'
                           : '#dc3545',
                   }}
                 >
-                  {securityScore.overall_score}
+                  {securityScore.score}
                 </div>
-                <div className="text-muted">{t('overallScore', language)}</div>
+                <div className="text-muted">
+                  {t('overallScore', language)} ({securityScore.grade})
+                </div>
               </div>
             </div>
             <div className="col-md-8">
-              <h6>{t('categoryScores', language)}</h6>
-              {Object.entries(securityScore.categories || {}).map(([category, data]) => (
-                <div key={category} className="mb-2">
-                  <div className="d-flex justify-content-between">
-                    <span>{category}</span>
-                    <span
-                      className={cn(
-                        data.status === 'good'
-                          ? 'text-success'
-                          : data.status === 'warning'
-                            ? 'text-warning'
-                            : 'text-danger'
-                      )}
-                    >
-                      {(data as { score: number }).score}%
-                    </span>
+              <h6>{t('categoryScores', language) ?? 'Severity Breakdown'}</h6>
+              {[
+                { label: 'High Severity', count: securityScore.high_severity_count, max: 10, variant: 'danger' },
+                { label: 'Medium Severity', count: securityScore.medium_severity_count, max: 10, variant: 'warning' },
+                { label: 'Low Severity', count: securityScore.low_severity_count, max: 10, variant: 'info' },
+              ].map((item) => {
+                const scorePercent = Math.max(0, 100 - (item.count / item.max) * 100);
+                return (
+                  <div key={item.label} className="mb-2">
+                    <div className="d-flex justify-content-between">
+                      <span>{item.label}</span>
+                      <span className={item.count > 0 ? `text-${item.variant}` : 'text-success'}>
+                        {item.count}
+                      </span>
+                    </div>
+                    <div className="progress" style={{ height: '8px' }}>
+                      <div
+                        className={cn('progress-bar', `bg-${scorePercent >= 80 ? 'success' : scorePercent >= 60 ? 'warning' : 'danger'}`)}
+                        style={{ width: `${scorePercent}%` }}
+                      />
+                    </div>
                   </div>
-                  <div className="progress" style={{ height: '8px' }}>
-                    <div
-                      className={cn(
-                        'progress-bar',
-                        data.status === 'good'
-                          ? 'bg-success'
-                          : data.status === 'warning'
-                            ? 'bg-warning'
-                            : 'bg-danger'
-                      )}
-                      style={{ width: `${(data as { score: number }).score}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
+                );
+              })}
+              <div className="mt-2">
+                <small className="text-muted">
+                  Total anomalies: {securityScore.anomaly_count}
+                </small>
+              </div>
             </div>
           </div>
           {securityScore.recommendations && securityScore.recommendations.length > 0 && (
@@ -321,11 +320,11 @@ export const AuditAnalysis: React.FC = () => {
                 {anomalies.slice(0, 10).map((anomaly, index) => (
                   <tr key={index}>
                     <td>
-                      <span className="badge bg-secondary">{anomaly.type}</span>
+                      <span className="badge bg-secondary">{anomaly.anomaly_type}</span>
                     </td>
                     <td>{anomaly.description}</td>
                     <td>
-                      <small className="text-muted">{formatDateTime(anomaly.timestamp)}</small>
+                      <small className="text-muted">{formatDateTime(anomaly.first_seen)}</small>
                     </td>
                     <td>
                       <span className={cn('badge', `bg-${getSeverityVariant(anomaly.severity)}`)}>
@@ -359,16 +358,30 @@ export const AuditAnalysis: React.FC = () => {
 
         {userProfile ? (
           <div>
+            <div className="row mb-3">
+              <div className="col-md-3">
+                <StatCard label="Total Actions" value={String(userProfile.total_actions)} variant="primary" />
+              </div>
+              <div className="col-md-3">
+                <StatCard label="Actions/Day" value={userProfile.actions_per_day.toFixed(1)} variant="info" />
+              </div>
+              <div className="col-md-3">
+                <StatCard label="Peak Hour" value={`${userProfile.peak_activity_hour}:00`} variant="warning" />
+              </div>
+              <div className="col-md-3">
+                <StatCard label="Peak Day" value={userProfile.peak_activity_day} variant="success" />
+              </div>
+            </div>
             <div className="row">
               <div className="col-md-6">
                 <h6>{t('activeHours', language)}</h6>
-                {Object.keys(userProfile.active_hours ?? {}).length > 0 ? (
+                {userProfile.hourly_distribution && Object.keys(userProfile.hourly_distribution).length > 0 ? (
                   <BarChart
-                    labels={Object.keys(userProfile.active_hours)}
+                    labels={Object.keys(userProfile.hourly_distribution).map((h) => `${h}:00`)}
                     datasets={[
                       {
                         label: t('activity', language),
-                        data: Object.values(userProfile.active_hours),
+                        data: Object.values(userProfile.hourly_distribution),
                       },
                     ]}
                     height={150}
@@ -379,13 +392,17 @@ export const AuditAnalysis: React.FC = () => {
               </div>
               <div className="col-md-6">
                 <h6>{t('commonOperations', language)}</h6>
-                {userProfile.common_operations && userProfile.common_operations.length > 0 ? (
+                {userProfile.action_breakdown && Object.keys(userProfile.action_breakdown).length > 0 ? (
                   <ul className="list-group">
-                    {userProfile.common_operations.map((op, index) => (
-                      <li key={index} className="list-group-item">
-                        {op}
-                      </li>
-                    ))}
+                    {Object.entries(userProfile.action_breakdown)
+                      .sort(([, a], [, b]) => b - a)
+                      .slice(0, 10)
+                      .map(([op, count]) => (
+                        <li key={op} className="list-group-item d-flex justify-content-between">
+                          <span>{op}</span>
+                          <span className="badge bg-secondary">{count}</span>
+                        </li>
+                      ))}
                   </ul>
                 ) : (
                   <p className="text-muted">{t('noData', language)}</p>

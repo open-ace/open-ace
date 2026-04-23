@@ -90,6 +90,7 @@ class MessageService:
                 tool_name=tool_name,
                 host_name=host_name,
                 role=role,
+                sender_name=sender_name,
                 search=search,
                 limit=limit,
                 offset=offset,
@@ -115,6 +116,8 @@ class MessageService:
     def get_conversation_history(
         self,
         date: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
         tool_name: Optional[str] = None,
         host_name: Optional[str] = None,
         sender_name: Optional[str] = None,
@@ -126,6 +129,8 @@ class MessageService:
 
         Args:
             date: Optional date filter.
+            start_date: Optional start date filter.
+            end_date: Optional end date filter.
             tool_name: Optional tool name filter.
             host_name: Optional host name filter.
             sender_name: Optional sender name filter.
@@ -137,11 +142,32 @@ class MessageService:
         """
         return self.message_repo.get_conversation_history(
             date=date,
+            start_date=start_date,
+            end_date=end_date,
             tool_name=tool_name,
             host_name=host_name,
             sender_name=sender_name,
             limit=limit,
             offset=offset,
+        )
+
+    def count_conversations(
+        self,
+        date: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        tool_name: Optional[str] = None,
+        host_name: Optional[str] = None,
+        sender_name: Optional[str] = None,
+    ) -> int:
+        """Count total conversations matching filters."""
+        return self.message_repo.count_conversations(
+            date=date,
+            start_date=start_date,
+            end_date=end_date,
+            tool_name=tool_name,
+            host_name=host_name,
+            sender_name=sender_name,
         )
 
     def get_conversation_timeline(self, session_id: str) -> List[Dict]:

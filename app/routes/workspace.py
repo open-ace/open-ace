@@ -410,8 +410,8 @@ def list_sessions():
         ))
         if remote_machine_ids:
             try:
-                from app.repositories.database import _placeholder, _params
-                p = _placeholder()
+                from app.repositories.database import get_param_placeholder
+                p = get_param_placeholder()
                 machine_name_map = {}
                 if is_postgresql():
                     placeholders = ", ".join([p] * len(remote_machine_ids))
@@ -534,13 +534,14 @@ def get_session(session_id):
             return jsonify({"success": True, "data": session.to_dict()})
 
         # If not found in agent_sessions, try to get from daily_messages
-        from scripts.shared.db import get_connection, _execute, _placeholder
+        from scripts.shared.db import get_connection, _execute
 
         conn = get_connection()
         cursor = conn.cursor()
 
         # Get session info from daily_messages
-        p = _placeholder()
+        from app.repositories.database import get_param_placeholder
+        p = get_param_placeholder()
         session_query = f"""
             SELECT
                 agent_session_id as session_id,
@@ -685,12 +686,13 @@ def restore_session(session_id):
         - url: The workspace URL to access this session
     """
     try:
-        from scripts.shared.db import get_connection, _execute, _placeholder
+        from scripts.shared.db import get_connection, _execute
+        from app.repositories.database import get_param_placeholder
 
         # Get session info from agent_sessions table (now contains all sessions)
         conn = get_connection()
         cursor = conn.cursor()
-        p = _placeholder()
+        p = get_param_placeholder()
 
         session_query = f"""
             SELECT
@@ -753,9 +755,9 @@ def restore_session(session_id):
         if workspace_type == "remote" and remote_machine_id:
             # Look up machine name
             try:
-                from app.repositories.database import Database, _placeholder
+                from app.repositories.database import Database, get_param_placeholder
                 db = Database()
-                p2 = _placeholder()
+                p2 = get_param_placeholder()
                 machine_query = f"SELECT machine_name FROM remote_machines WHERE machine_id = {p2} LIMIT 1"
                 machine_row = db.fetch_one(machine_query, [remote_machine_id])
                 if machine_row:

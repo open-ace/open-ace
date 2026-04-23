@@ -29,7 +29,9 @@ auth_service = AuthService()
 
 def _require_admin():
     """Require admin authentication."""
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    token = request.cookies.get("session_token") or request.headers.get(
+        "Authorization", ""
+    ).replace("Bearer ", "")
     is_admin, result = auth_service.require_admin(token)
 
     if not is_admin:
@@ -233,9 +235,16 @@ def detect_anomalies():
 
     anomalies = audit_analyzer.detect_anomalies(start_time=start_time)
 
+    def serialize_anomaly(a):
+        d = a.__dict__.copy()
+        for key in ("first_seen", "last_seen"):
+            if isinstance(d.get(key), datetime):
+                d[key] = d[key].isoformat()
+        return d
+
     return jsonify(
         {
-            "anomalies": [a.__dict__ for a in anomalies],
+            "anomalies": [serialize_anomaly(a) for a in anomalies],
             "count": len(anomalies),
         }
     )

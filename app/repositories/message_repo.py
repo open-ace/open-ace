@@ -247,6 +247,7 @@ class MessageRepository:
         tool_name: Optional[str] = None,
         host_name: Optional[str] = None,
         role: Optional[str] = None,
+        sender_name: Optional[str] = None,
         search: Optional[str] = None,
         limit: Optional[int] = None,
         offset: int = 0,
@@ -289,6 +290,10 @@ class MessageRepository:
                 conditions.append(f"role IN ({placeholders})")
                 params.extend(roles)
 
+        if sender_name:
+            conditions.append("sender_name = ?")
+            params.append(sender_name)
+
         if search:
             conditions.append("content LIKE ?")
             params.append(f"%{search}%")
@@ -307,6 +312,8 @@ class MessageRepository:
     def get_conversation_history(
         self,
         date: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
         tool_name: Optional[str] = None,
         host_name: Optional[str] = None,
         sender_name: Optional[str] = None,
@@ -318,6 +325,8 @@ class MessageRepository:
 
         Args:
             date: Optional date filter.
+            start_date: Optional start date filter (defaults to 90 days ago).
+            end_date: Optional end date filter.
             tool_name: Optional tool name filter.
             host_name: Optional host name filter.
             sender_name: Optional sender name filter.
@@ -327,12 +336,23 @@ class MessageRepository:
         Returns:
             List[Dict]: List of conversation records.
         """
+        from datetime import datetime, timedelta
+
         conditions = []
         params = []
 
         if date:
             conditions.append("date = ?")
             params.append(date)
+        else:
+            if not start_date:
+                start_date = (datetime.utcnow() - timedelta(days=90)).strftime("%Y-%m-%d")
+            if not end_date:
+                end_date = datetime.utcnow().strftime("%Y-%m-%d")
+            conditions.append("date >= ?")
+            params.append(start_date)
+            conditions.append("date <= ?")
+            params.append(end_date)
 
         if tool_name:
             conditions.append("tool_name = ?")
@@ -383,6 +403,61 @@ class MessageRepository:
 
         params.extend([limit, offset])
         return self.db.fetch_all(query, tuple(params))
+
+    def count_conversations(
+        self,
+        date: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        tool_name: Optional[str] = None,
+        host_name: Optional[str] = None,
+        sender_name: Optional[str] = None,
+    ) -> int:
+        """Count total conversations matching filters."""
+        from datetime import datetime, timedelta
+
+        conditions = []
+        params = []
+
+        if date:
+            conditions.append("date = ?")
+            params.append(date)
+        else:
+            if not start_date:
+                start_date = (datetime.utcnow() - timedelta(days=90)).strftime("%Y-%m-%d")
+            if not end_date:
+                end_date = datetime.utcnow().strftime("%Y-%m-%d")
+            conditions.append("date >= ?")
+            params.append(start_date)
+            conditions.append("date <= ?")
+            params.append(end_date)
+
+        if tool_name:
+            conditions.append("tool_name = ?")
+            params.append(tool_name)
+        if host_name:
+            conditions.append("host_name = ?")
+            params.append(host_name)
+        if sender_name:
+            conditions.append("sender_name = ?")
+            params.append(sender_name)
+
+        id_filter = "COALESCE(conversation_id, feishu_conversation_id, agent_session_id) IS NOT NULL"
+        conditions.append(id_filter)
+
+        where_clause = f"WHERE {' AND '.join(conditions)}"
+
+        query = f"""
+            SELECT COUNT(*) as total FROM (
+                SELECT 1 FROM daily_messages
+                {where_clause}
+                GROUP BY COALESCE(conversation_id, feishu_conversation_id, agent_session_id),
+                         agent_session_id, tool_name, host_name, sender_name
+            ) sub
+        """
+
+        result = self.db.fetch_one(query, tuple(params))
+        return result["total"] if result else 0
 
     def get_conversation_timeline(self, session_id: str) -> List[Dict]:
         """

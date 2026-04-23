@@ -14,6 +14,7 @@ from app.repositories.message_repo import MessageRepository
 from app.repositories.usage_repo import UsageRepository
 from app.repositories.daily_stats_repo import DailyStatsRepository
 from app.utils.cache import cached
+from app.utils.cache import cached
 from app.utils.helpers import get_today, get_days_ago
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,7 @@ class AnalysisService:
         self.daily_stats_repo = daily_stats_repo or DailyStatsRepository()
 
     @cached(ttl=60, key_prefix="analysis", skip_args=[0])
+    @cached(ttl=120, key_prefix="analysis")
     def get_batch_analysis(
         self,
         start_date: Optional[str] = None,
@@ -267,6 +269,7 @@ class AnalysisService:
         }
 
     @cached(ttl=60, key_prefix="analysis", skip_args=[0])
+    @cached(ttl=120, key_prefix="analysis")
     def get_key_metrics(
         self,
         start_date: Optional[str] = None,
@@ -381,22 +384,31 @@ class AnalysisService:
         host_name: Optional[str] = None,
     ) -> List[Dict]:
         """
-        Get hourly usage breakdown.
-
-        Args:
-            date: Date string (defaults to today).
-            tool_name: Optional tool name filter.
-            host_name: Optional host name filter.
-
-        Returns:
-            List[Dict]: Hourly usage data.
+        Get hourly usage breakdown from hourly_stats table.
         """
         if not date:
             date = datetime.now().strftime("%Y-%m-%d")
 
-        # This would require timestamp analysis from messages
-        # For now, return placeholder
-        return []
+        conditions = ["date = ?"]
+        params: list = [date]
+
+        if tool_name:
+            conditions.append("tool_name = ?")
+            params.append(tool_name)
+        if host_name:
+            conditions.append("host_name = ?")
+            params.append(host_name)
+
+        where_clause = " AND ".join(conditions)
+        query = f"""
+            SELECT date, hour, tool_name, host_name,
+                   total_tokens, total_input_tokens as input_tokens,
+                   total_output_tokens as output_tokens, message_count as request_count
+            FROM hourly_stats
+            WHERE {where_clause}
+            ORDER BY hour ASC
+        """
+        return self.usage_repo.db.fetch_all(query, tuple(params))
 
     @cached(ttl=60, key_prefix="analysis", skip_args=[0])
     def get_daily_hourly_usage(
@@ -459,6 +471,7 @@ class AnalysisService:
         return {"daily": daily_result, "hourly": hourly_result}
 
     @cached(ttl=60, key_prefix="analysis", skip_args=[0])
+    @cached(ttl=120, key_prefix="analysis")
     def get_peak_usage(
         self,
         start_date: Optional[str] = None,

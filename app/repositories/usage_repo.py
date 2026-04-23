@@ -140,31 +140,27 @@ class UsageRepository:
         self, date: str, tool_name: Optional[str] = None, host_name: Optional[str] = None
     ) -> List[Dict]:
         """
-        Get usage data for a specific date.
-
-        Args:
-            date: Date string (YYYY-MM-DD).
-            tool_name: Optional tool name filter.
-            host_name: Optional host name filter.
-
-        Returns:
-            List[Dict]: List of usage records.
+        Get usage data for a specific date from daily_messages joined with daily_usage.
         """
-        conditions = ["date = ?"]
-        params = [date]
+        conditions = ["dm.date = ?"]
+        params: list = [date]
 
         if tool_name:
-            conditions.append("tool_name = ?")
+            conditions.append("dm.tool_name = ?")
             params.append(tool_name)
 
         if host_name:
-            conditions.append("host_name = ?")
+            conditions.append("dm.host_name = ?")
             params.append(host_name)
 
+        where_clause = " AND ".join(conditions)
         query = f"""
-            SELECT * FROM daily_messages
-            WHERE {' AND '.join(conditions)}
-            ORDER BY date DESC
+            SELECT dm.*,
+                   COALESCE(du.request_count, 0) as request_count
+            FROM daily_messages dm
+            LEFT JOIN daily_usage du ON dm.date::text = du.date::text AND dm.tool_name = du.tool_name AND dm.host_name = du.host_name
+            WHERE {where_clause}
+            ORDER BY dm.date DESC
         """
 
         rows = self.db.fetch_all(query, tuple(params))

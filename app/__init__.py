@@ -61,7 +61,11 @@ def create_app(config=None):
         """Health check endpoint for Docker and load balancers."""
         from app.utils.version import get_git_commit
 
-        return jsonify({"status": "healthy", "service": "open-ace", "version": get_git_commit()})
+        return jsonify({
+            "status": "healthy",
+            "service": "open-ace",
+            "version": get_git_commit(),
+        })
 
     # Start background services
     start_background_services()
@@ -184,9 +188,9 @@ def register_blueprints(app):
     app.register_blueprint(governance_bp, url_prefix="/api")
     app.register_blueprint(analytics_bp, url_prefix="/api")
     app.register_blueprint(workspace_bp, url_prefix="/api/workspace")
-    app.register_blueprint(tenant_bp, url_prefix="/api")
-    app.register_blueprint(sso_bp, url_prefix="/api")
-    app.register_blueprint(compliance_bp, url_prefix="/api")
+    app.register_blueprint(tenant_bp)
+    app.register_blueprint(sso_bp)
+    app.register_blueprint(compliance_bp)
     app.register_blueprint(alerts_bp, url_prefix="/api")
     app.register_blueprint(roi_bp, url_prefix="/api")
     app.register_blueprint(quota_bp, url_prefix="/api")

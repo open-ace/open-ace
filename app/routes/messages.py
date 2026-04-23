@@ -5,12 +5,17 @@ Open ACE - Messages Routes
 API routes for message data operations.
 """
 
+import time
 from flask import Blueprint, jsonify, request
 
 from app.services.message_service import MessageService
 
 messages_bp = Blueprint("messages", __name__)
 message_service = MessageService()
+
+# Simple in-memory cache for expensive queries
+_senders_cache = {"data": None, "timestamp": 0}
+_senders_cache_ttl = 300  # 5 minutes
 
 
 @messages_bp.route("/messages")
@@ -44,9 +49,21 @@ def api_messages():
 
 @messages_bp.route("/senders")
 def api_senders():
-    """Get list of all senders."""
+    """Get list of all senders (cached for 5 minutes)."""
     host = request.args.get("host")
-    senders = message_service.get_all_senders(host_name=host)
+    now = time.time()
+    if host:
+        # Host-specific queries are less common, skip cache
+        senders = message_service.get_all_senders(host_name=host)
+        return jsonify(senders)
+
+    cache_key = "all"
+    if _senders_cache["data"] is not None and (now - _senders_cache["timestamp"]) < _senders_cache_ttl:
+        return jsonify(_senders_cache["data"])
+
+    senders = message_service.get_all_senders()
+    _senders_cache["data"] = senders
+    _senders_cache["timestamp"] = now
     return jsonify(senders)
 
 
@@ -63,7 +80,10 @@ def api_conversation_history():
     conversations = message_service.get_conversation_history(
         date=date, tool_name=tool, host_name=host, sender_name=sender, limit=limit, offset=offset
     )
-    return jsonify(conversations)
+    total = message_service.count_conversations(
+        date=date, tool_name=tool, host_name=host, sender_name=sender
+    )
+    return jsonify({"data": conversations, "total": total})
 
 
 @messages_bp.route("/conversation-timeline/<path:session_id>")

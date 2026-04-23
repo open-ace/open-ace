@@ -246,6 +246,20 @@ class DataRetentionManager:
 
         return report
 
+    # Time column name per table
+    TABLE_TIME_COLUMNS = {
+        "audit_logs": "timestamp",
+        "quota_alerts": "created_at",
+        "sessions": "created_at",
+        "sso_sessions": "created_at",
+        "daily_usage": "date",
+        "daily_messages": "created_at",
+    }
+
+    def _get_time_column(self, table_name: str) -> Optional[str]:
+        """Get the appropriate time column for a table."""
+        return self.TABLE_TIME_COLUMNS.get(table_name)
+
     def _delete_old_data(self, data_type: str, cutoff: datetime, dry_run: bool) -> int:
         """Delete old data from a table."""
         table_mapping = {
@@ -262,11 +276,14 @@ class DataRetentionManager:
             logger.warning(f"Unknown data type for deletion: {data_type}")
             return 0
 
+        time_col = self._get_time_column(table_name)
+        if not time_col:
+            logger.warning(f"No time column configured for table {table_name}")
+            return 0
+
         # Count records to delete
-        count_query = (
-            f"SELECT COUNT(*) as count FROM {table_name} WHERE created_at < ? OR timestamp < ?"
-        )
-        result = self.db.fetch_one(count_query, (cutoff, cutoff))
+        count_query = f"SELECT COUNT(*) as count FROM {table_name} WHERE {time_col} < ?"
+        result = self.db.fetch_one(count_query, (cutoff,))
         count = result["count"] if result else 0
 
         if dry_run:
@@ -277,7 +294,7 @@ class DataRetentionManager:
         with self.db.connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                f"DELETE FROM {table_name} WHERE created_at < ? OR timestamp < ?", (cutoff, cutoff)
+                f"DELETE FROM {table_name} WHERE {time_col} < ?", (cutoff,)
             )
             conn.commit()
             deleted = cursor.rowcount
@@ -302,11 +319,14 @@ class DataRetentionManager:
             logger.warning(f"Unknown data type for anonymization: {data_type}")
             return 0
 
+        time_col = self._get_time_column(table_name)
+        if not time_col:
+            logger.warning(f"No time column configured for table {table_name}")
+            return 0
+
         # Count records to anonymize
-        count_query = (
-            f"SELECT COUNT(*) as count FROM {table_name} WHERE created_at < ? OR timestamp < ?"
-        )
-        result = self.db.fetch_one(count_query, (cutoff, cutoff))
+        count_query = f"SELECT COUNT(*) as count FROM {table_name} WHERE {time_col} < ?"
+        result = self.db.fetch_one(count_query, (cutoff,))
         count = result["count"] if result else 0
 
         if dry_run:
@@ -318,13 +338,13 @@ class DataRetentionManager:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    """
+                    f"""
                     UPDATE daily_messages
                     SET sender = 'ANONYMIZED',
                         recipient = 'ANONYMIZED'
-                    WHERE created_at < ? OR timestamp < ?
+                    WHERE {time_col} < ?
                 """,
-                    (cutoff, cutoff),
+                    (cutoff,),
                 )
                 conn.commit()
                 anonymized = cursor.rowcount
@@ -333,12 +353,12 @@ class DataRetentionManager:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    """
+                    f"""
                     UPDATE audit_logs
                     SET username = 'ANONYMIZED',
                         ip_address = NULL,
                         user_agent = NULL
-                    WHERE timestamp < ?
+                    WHERE {time_col} < ?
                 """,
                     (cutoff,),
                 )
