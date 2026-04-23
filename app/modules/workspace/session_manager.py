@@ -361,6 +361,13 @@ class SessionManager:
         except Exception:
             pass  # Column already exists
 
+        try:
+            cursor.execute(
+                "ALTER TABLE agent_sessions ADD COLUMN request_count INTEGER DEFAULT 0"
+            )
+        except Exception:
+            pass  # Column already exists
+
         conn.commit()
         conn.close()
 
@@ -537,7 +544,7 @@ class SessionManager:
             UPDATE agent_sessions
             SET title = {_param()}, status = {_param()}, context = {_param()}, settings = {_param()},
                 total_tokens = {_param()}, total_input_tokens = {_param()}, total_output_tokens = {_param()},
-                message_count = {_param()}, model = {_param()}, tags = {_param()}, updated_at = {_param()}, completed_at = {_param()}
+                message_count = {_param()}, request_count = {_param()}, model = {_param()}, tags = {_param()}, updated_at = {_param()}, completed_at = {_param()}
             WHERE session_id = {_param()}
         """,
             (
@@ -549,6 +556,7 @@ class SessionManager:
                 session.total_input_tokens,
                 session.total_output_tokens,
                 session.message_count,
+                session.request_count,
                 session.model,
                 json.dumps(session.tags),
                 session.updated_at.isoformat(),
@@ -661,16 +669,18 @@ class SessionManager:
             ),
         )
 
-        # Update session message count and token count
+        # Update session message count, request count and token count
+        request_count_increment = 1 if role in ('assistant', 'toolResult') else 0
         cursor.execute(
             f"""
             UPDATE agent_sessions
             SET message_count = message_count + 1,
+                request_count = COALESCE(request_count, 0) + {_param()},
                 total_tokens = total_tokens + {_param()},
                 updated_at = {_param()}
             WHERE session_id = {_param()}
         """,
-            (tokens_used, now.isoformat(), session_id),
+            (request_count_increment, tokens_used, now.isoformat(), session_id),
         )
 
         message.id = cursor.lastrowid
