@@ -501,6 +501,30 @@ def send_remote_message(session_id):
     return jsonify({"error": "Failed to send message. Session may not be active."}), 400
 
 
+@remote_bp.route("/sessions/<session_id>/model", methods=["PUT"])
+def update_remote_session_model(session_id):
+    """Switch the model of an active remote session."""
+    auth_error = _require_auth()
+    if auth_error:
+        return auth_error
+
+    _, access_error = _check_session_access(session_id)
+    if access_error:
+        return access_error
+
+    data = request.get_json() or {}
+    model = data.get("model")
+    if not model:
+        return jsonify({"error": "model is required"}), 400
+
+    session_mgr = RemoteSessionManager()
+    success = session_mgr.update_model(session_id, model)
+
+    if success:
+        return jsonify({"success": True})
+    return jsonify({"error": "Failed to update model"}), 400
+
+
 @remote_bp.route("/sessions/<session_id>/stop", methods=["POST"])
 def stop_remote_session(session_id):
     """Stop a remote session."""

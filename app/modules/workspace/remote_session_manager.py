@@ -208,6 +208,26 @@ class RemoteSessionManager:
         }
         return self._agent_manager.send_command(machine_id, command)
 
+    def update_model(self, session_id: str, model: str) -> bool:
+        """Switch the model of an active remote session."""
+        machine_id = self._agent_manager.get_machine_for_session(session_id)
+        if not machine_id:
+            return False
+
+        # Update model in DB
+        session = self._session_manager.get_session(session_id)
+        if session:
+            session.model = model
+            self._session_manager.update_session(session)
+
+        command = {
+            "type": "command",
+            "command": "update_model",
+            "session_id": session_id,
+            "model": model,
+        }
+        return self._agent_manager.send_command(machine_id, command)
+
     def stop_session(self, session_id: str) -> bool:
         """Stop a remote session."""
         machine_id = self._agent_manager.get_machine_for_session(session_id)

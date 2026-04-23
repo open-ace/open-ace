@@ -869,6 +869,25 @@ class ProcessExecutor:
         )
         return self._restart_session(session_id)
 
+    def update_model(
+        self, session_id: str, model: str
+    ) -> Dict[str, Any]:
+        """Update the model and restart the CLI process."""
+        with self._lock:
+            session = self._sessions.get(session_id)
+        if not session:
+            return {"success": False, "error": "Session not found"}
+
+        if session.model == model:
+            return {"success": True}  # No change needed
+
+        session.model = model
+        logger.info(
+            "Updating model to %s for session %s, restarting",
+            model, session_id[:8],
+        )
+        return self._restart_session(session_id)
+
     def stop_session(self, session_id: str) -> Dict[str, Any]:
         """
         Stop a running session.

@@ -300,54 +300,61 @@ export const Sessions: React.FC = () => {
       )}
 
       {/* Filters */}
-      <Card className="mb-3">
-        <div className="d-flex flex-wrap align-items-center gap-2">
-          {/* Tool Filter */}
-          <div className="d-flex align-items-center gap-1">
-            <small className="text-muted">{t('tableTool', language)}:</small>
+      <Card className="mb-3 sessions-filter-card">
+        <div className="sessions-filter-row">
+          <div className="sessions-filter-group">
+            <label className="sessions-filter-label">
+              {t('tableTool', language)}:
+            </label>
             <Select
               options={toolOptions}
               value={filters.tool_name ?? ''}
               onChange={(value) => handleFilterChange('tool_name', value)}
               size="sm"
+              className="sessions-filter-select"
             />
           </div>
-          {/* Status Filter */}
-          <div className="d-flex align-items-center gap-1">
-            <small className="text-muted">{t('status', language) ?? 'Status'}:</small>
+          <div className="sessions-filter-group">
+            <label className="sessions-filter-label">
+              {t('status', language) ?? 'Status'}:
+            </label>
             <Select
               options={statusOptions}
               value={filters.status ?? ''}
               onChange={(value) => handleFilterChange('status', value)}
               size="sm"
+              className="sessions-filter-select"
             />
           </div>
           {/* Status count pills */}
-          <div className="d-flex align-items-center gap-1">
-            {Object.entries(statusCounts).map(([st, count]) => (
-              <span
-                key={st}
-                className={`badge bg-${statusColors[st] ?? 'secondary'}`}
-                style={{ fontSize: '0.7rem', cursor: 'pointer', opacity: filters.status === st ? 1 : 0.7 }}
-                onClick={() => handleFilterChange('status', filters.status === st ? '' : st)}
-              >
-                {count}
-              </span>
-            ))}
-          </div>
-          {/* Type Filter */}
-          <div className="d-flex align-items-center gap-1">
-            <small className="text-muted">{t('type', language) ?? 'Type'}:</small>
+          {Object.entries(statusCounts).length > 0 && (
+            <div className="sessions-filter-counts">
+              {Object.entries(statusCounts).map(([st, count]) => (
+                <span
+                  key={st}
+                  className={`badge bg-${statusColors[st] ?? 'secondary'}`}
+                  style={{ fontSize: '0.7rem', cursor: 'pointer', opacity: filters.status === st ? 1 : 0.7 }}
+                  onClick={() => handleFilterChange('status', filters.status === st ? '' : st)}
+                >
+                  {count}
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="sessions-filter-group">
+            <label className="sessions-filter-label">
+              {t('type', language) ?? 'Type'}:
+            </label>
             <Select
               options={typeOptions}
               value={filters.session_type ?? ''}
               onChange={(value) => handleFilterChange('session_type', value)}
               size="sm"
+              className="sessions-filter-select"
             />
           </div>
-          {/* Search */}
-          <div className="d-flex align-items-center gap-1 ms-auto" style={{ minWidth: '250px' }}>
-            <div className="input-group input-group-sm" style={{ width: '200px' }}>
+          <div className="sessions-filter-search">
+            <div className="input-group input-group-sm">
               <span className="input-group-text">
                 <i className="bi bi-search" />
               </span>
@@ -360,7 +367,6 @@ export const Sessions: React.FC = () => {
               />
             </div>
           </div>
-          {/* Reset Button */}
           <Button variant="outline-secondary" size="sm" onClick={handleReset}>
             <i className="bi bi-x-circle me-1" />
             {t('reset', language)}
@@ -531,63 +537,38 @@ const SessionCard: React.FC<SessionCardProps> = ({
       onClick={onClick}
       style={{ cursor: 'pointer' }}
     >
-      <div className="card-body py-4 px-4">
-        {/* Header Row - Spacious Layout */}
-        <div className="d-flex justify-content-between align-items-start">
-          <div className="flex-grow-1">
-            {/* Title and Badges */}
-            <div className="d-flex align-items-center gap-3 mb-3">
-              <h5 className="mb-0" style={{ fontSize: '1.1rem', fontWeight: 600 }}>
-                {session.title ?? session.session_id.substring(0, 8)}
-              </h5>
-              <code className="text-muted ms-2" style={{ fontSize: '0.75rem' }}>
-                ID: {session.session_id.substring(0, 8)}
-              </code>
-              <Badge variant={statusColors[session.status] ?? 'secondary'}>
-                {statusIcons[session.status] && <i className={`bi ${statusIcons[session.status]} me-1`} />}
-                {session.status}
-              </Badge>
-              <Badge variant={typeColors[session.session_type] ?? 'secondary'}>
-                {session.session_type}
-              </Badge>
-              {isRemote && (
-                <Badge variant="info">
-                  <i className="bi bi-cloud-fill me-1" />
-                  {session.machine_name || 'Remote'}
-                </Badge>
-              )}
-            </div>
-
-            {/* Meta Info - Two rows for better spacing */}
-            <div className="d-flex flex-wrap gap-4 text-muted" style={{ fontSize: '0.875rem' }}>
-              <span>
-                <i className="bi bi-tools me-2" />
-                {session.tool_name}
-              </span>
-              <span>
-                <i className="bi bi-pc-display me-2" />
-                {session.host_name}
-              </span>
-              {session.model && (
-                <span>
-                  <i className="bi bi-cpu me-2" />
-                  {session.model}
-                </span>
-              )}
-              <span>
-                <i className="bi bi-chat-dots me-2" />
-                {session.message_count} {t('messages', language)}
-              </span>
-              <span>
-                <i className="bi bi-cpu me-2" />
-                {formatTokens(session.total_tokens)} {t('tokens', language)}
-              </span>
-            </div>
+      <div className="card-body session-card-body">
+        {/* Row 1: Title | Badges | Actions — three-column grid */}
+        <div className="session-card-header">
+          {/* Left: Title + ID */}
+          <div className="session-card-title">
+            <h5 className="mb-0" style={{ fontSize: '0.95rem', fontWeight: 600 }}>
+              {session.title ?? session.session_id.substring(0, 8)}
+            </h5>
+            <code className="text-muted" style={{ fontSize: '0.72rem' }}>
+              {session.session_id.substring(0, 8)}
+            </code>
           </div>
 
-          {/* Actions */}
-          <div className="d-flex flex-column gap-2 ms-4" onClick={(e) => e.stopPropagation()}>
-            {/* Restore to Workspace button - always show for completed sessions */}
+          {/* Center: Badges */}
+          <div className="session-card-badges">
+            <Badge variant={statusColors[session.status] ?? 'secondary'}>
+              {statusIcons[session.status] && <i className={`bi ${statusIcons[session.status]} me-1`} />}
+              {session.status}
+            </Badge>
+            <Badge variant={typeColors[session.session_type] ?? 'secondary'}>
+              {session.session_type}
+            </Badge>
+            {isRemote && (
+              <Badge variant="info">
+                <i className="bi bi-cloud-fill me-1" />
+                {session.machine_name || 'Remote'}
+              </Badge>
+            )}
+          </div>
+
+          {/* Right: Actions */}
+          <div className="session-card-actions" onClick={(e) => e.stopPropagation()}>
             <span title={t('restoreToWorkspace', language) ?? 'Restore to Workspace'}>
               <Button
                 variant="outline-primary"
@@ -598,7 +579,6 @@ const SessionCard: React.FC<SessionCardProps> = ({
                 <i className="bi bi-box-arrow-in-right" />
               </Button>
             </span>
-            {/* Remote session controls */}
             {isRemote && session.status === 'active' && (
               <>
                 <span title={t('pauseSession', language)}>
@@ -635,7 +615,6 @@ const SessionCard: React.FC<SessionCardProps> = ({
                 </Button>
               </span>
             )}
-            {/* Local session complete button */}
             {!isRemote && session.status === 'active' && (
               <span title={t('complete', language) ?? 'Complete'}>
                 <Button
@@ -661,19 +640,23 @@ const SessionCard: React.FC<SessionCardProps> = ({
           </div>
         </div>
 
-        {/* Timestamps - Two separate lines */}
-        <div className="d-flex flex-column gap-2 text-muted mt-4" style={{ fontSize: '0.8rem' }}>
-          <span>
-            <i className="bi bi-clock me-2" />
-            {t('created', language) ?? 'Created'}:{' '}
-            {session.created_at ? formatDateTime(session.created_at) : '-'}
-          </span>
-          {session.completed_at && (
-            <span>
-              <i className="bi bi-check-circle me-2" />
-              {t('completed', language) ?? 'Completed'}: {formatDateTime(session.completed_at)}
-            </span>
-          )}
+        {/* Row 2: Meta info — left group | time pushed right */}
+        <div className="session-card-meta">
+          <div className="session-card-meta-left">
+            <span><i className="bi bi-tools me-1" />{session.tool_name}</span>
+            <span><i className="bi bi-pc-display me-1" />{session.host_name}</span>
+            {session.model && (
+              <span><i className="bi bi-cpu me-1" />{session.model}</span>
+            )}
+            <span><i className="bi bi-chat-dots me-1" />{session.message_count} {t('messages', language)}</span>
+            <span><i className="bi bi-cpu me-1" />{formatTokens(session.total_tokens)} {t('tokens', language)}</span>
+          </div>
+          <div className="session-card-meta-right">
+            <span><i className="bi bi-clock me-1" />{session.created_at ? formatDateTime(session.created_at) : '-'}</span>
+            {session.completed_at && (
+              <span><i className="bi bi-check-circle me-1" />{formatDateTime(session.completed_at)}</span>
+            )}
+          </div>
         </div>
       </div>
     </div>

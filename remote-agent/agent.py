@@ -289,6 +289,8 @@ class RemoteAgent:
             self._cmd_permission_response(data)
         elif command == "update_permission_mode":
             self._cmd_update_permission_mode(data)
+        elif command == "update_model":
+            self._cmd_update_model(data)
         elif command == "pause_session":
             # Forward compatibility: pause is not implemented at the
             # subprocess level; send acknowledgement
@@ -405,6 +407,24 @@ class RemoteAgent:
         if not result["success"]:
             logger.warning(
                 "Failed to update permission mode: %s",
+                result.get("error"),
+            )
+
+    def _cmd_update_model(self, data: Dict[str, Any]) -> None:
+        """Handle update_model command from the frontend."""
+        session_id = data.get("session_id", "")
+        model = data.get("model", "")
+
+        logger.info(
+            "Updating model for session %s: %s",
+            session_id[:8],
+            model,
+        )
+
+        result = self._executor.update_model(session_id, model)
+        if not result["success"]:
+            logger.warning(
+                "Failed to update model: %s",
                 result.get("error"),
             )
 
