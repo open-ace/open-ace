@@ -32,6 +32,7 @@ import {
 import { t } from '@/i18n';
 import { Error, Button, Card, useToast, Modal } from '@/components/common';
 import { NewSessionModal } from '@/components/work/NewSessionModal';
+import { remoteApi } from '@/api/remote';
 import { cn } from '@/utils';
 
 /**
@@ -75,6 +76,8 @@ export const Workspace: React.FC = () => {
   const [showRenameModal, setShowRenameModal] = useState(false);
   const [showNewSessionModal, setShowNewSessionModal] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
+  const [remoteCloseTabId, setRemoteCloseTabId] = useState<string | null>(null);
+  const [isStoppingRemote, setIsStoppingRemote] = useState(false);
   const [tabWidths, setTabWidths] = useState<Record<string, number>>({});
   const [resizingTabId, setResizingTabId] = useState<string | null>(null);
 
@@ -633,9 +636,12 @@ export const Workspace: React.FC = () => {
   // Create a new tab
   const createNewTab = useCallback((
     restoreSessionId?: string,
-    remoteParams?: { workspaceType?: 'local' | 'remote'; machineId?: string; machineName?: string; sessionId?: string },
+    remoteParams?: { workspaceType?: 'local' | 'remote'; machineId?: string; machineName?: string; sessionId?: string; projectPath?: string },
   ) => {
-    const effectiveUrl = getEffectiveUrl(restoreSessionId || remoteParams?.sessionId || undefined, undefined, undefined, undefined, remoteParams);
+    // Pass raw project path — getEffectiveUrl will URL-encode it.
+    // ChatPage Strategy 1.5 decodes it, correctly handling hyphens in paths.
+    const encodedProjectName = remoteParams?.projectPath || undefined;
+    const effectiveUrl = getEffectiveUrl(restoreSessionId || remoteParams?.sessionId || undefined, encodedProjectName, undefined, undefined, remoteParams);
     if (!effectiveUrl) return;
 
     // Title: "Restored Session" only when restoring from session list, not new remote sessions
@@ -649,6 +655,7 @@ export const Workspace: React.FC = () => {
       waitingForUser: false,
       waitingType: null,
       sessionId: restoreSessionId || remoteParams?.sessionId,
+      encodedProjectName,
       workspaceType: remoteParams?.workspaceType,
       machineId: remoteParams?.machineId,
       machineName: remoteParams?.machineName,
@@ -678,31 +685,68 @@ export const Workspace: React.FC = () => {
     setLoadingTabs((prev) => new Set(prev).add(newTab.id));
   }, [getEffectiveUrl, userWebUI, language, addStoredTab, setStoredActiveTabId]);
 
+  // Actually remove a tab (shared by closeTab and remote close confirmation)
+  const doCloseTab = useCallback(
+    (tabId: string) => {
+      setTabs((prev) => {
+        const newTabs = prev.filter((tab) => tab.id !== tabId);
+        if (activeTabId === tabId && newTabs.length > 0) {
+          const closedIndex = prev.findIndex((tab) => tab.id === tabId);
+          const newActiveIndex = Math.min(closedIndex, newTabs.length - 1);
+          setActiveTabId(newTabs[newActiveIndex].id);
+        }
+        return newTabs;
+      });
+      removeStoredTab(tabId);
+    },
+    [activeTabId, removeStoredTab]
+  );
+
   // Close a tab
   const closeTab = useCallback(
     (tabId: string, e: React.MouseEvent) => {
       e.stopPropagation();
 
-      // Update local state
-      setTabs((prev) => {
-        const newTabs = prev.filter((tab) => tab.id !== tabId);
+      // For remote workspace tabs, show confirmation dialog
+      const tab = tabs.find((t) => t.id === tabId);
+      if (tab?.workspaceType === 'remote' && tab?.sessionId) {
+        setRemoteCloseTabId(tabId);
+        return;
+      }
 
-        // If closing the active tab, switch to another tab
-        if (activeTabId === tabId && newTabs.length > 0) {
-          // Find the previous tab or the first one
-          const closedIndex = prev.findIndex((tab) => tab.id === tabId);
-          const newActiveIndex = Math.min(closedIndex, newTabs.length - 1);
-          setActiveTabId(newTabs[newActiveIndex].id);
-        }
-
-        return newTabs;
-      });
-
-      // Update store (Issue #65)
-      removeStoredTab(tabId);
+      doCloseTab(tabId);
     },
-    [activeTabId, removeStoredTab]
+    [tabs, doCloseTab]
   );
+
+  // Handle remote tab close with session stop
+  const handleRemoteCloseStop = useCallback(async () => {
+    if (!remoteCloseTabId) return;
+    const tab = tabs.find((t) => t.id === remoteCloseTabId);
+    setIsStoppingRemote(true);
+    try {
+      if (tab?.sessionId) {
+        await remoteApi.stopSession(tab.sessionId);
+      }
+    } catch (err) {
+      console.error('Failed to stop remote session:', err);
+    }
+    setIsStoppingRemote(false);
+    doCloseTab(remoteCloseTabId);
+    setRemoteCloseTabId(null);
+  }, [remoteCloseTabId, tabs, doCloseTab]);
+
+  // Handle remote tab close without stopping session
+  const handleRemoteCloseKeep = useCallback(() => {
+    if (!remoteCloseTabId) return;
+    doCloseTab(remoteCloseTabId);
+    setRemoteCloseTabId(null);
+  }, [remoteCloseTabId, doCloseTab]);
+
+  // Cancel remote tab close
+  const handleRemoteCloseCancel = useCallback(() => {
+    setRemoteCloseTabId(null);
+  }, []);
 
   // Switch to a tab
   const switchTab = useCallback((tabId: string) => {
@@ -1454,16 +1498,51 @@ export const Workspace: React.FC = () => {
           setShowNewSessionModal(false);
           createNewTab();
         }}
-        onCreateRemote={(params: { machineId: string; machineName: string; sessionId: string }) => {
+        onCreateRemote={(params: { machineId: string; machineName: string; sessionId: string; projectPath: string }) => {
           setShowNewSessionModal(false);
           createNewTab(undefined, {
             workspaceType: 'remote',
             machineId: params.machineId,
             machineName: params.machineName,
             sessionId: params.sessionId,
+            projectPath: params.projectPath,
           });
         }}
       />
+
+      {/* Remote Session Close Confirmation Modal */}
+      <Modal
+        isOpen={remoteCloseTabId !== null}
+        onClose={handleRemoteCloseCancel}
+        title="关闭远程工作区"
+        size="sm"
+      >
+        <p style={{ color: 'var(--text-secondary, #6c757d)', fontSize: '0.875rem', marginBottom: '1rem' }}>
+          这是一个远程工作区会话。关闭前请选择是否停止远程会话。
+        </p>
+        <div style={{ background: 'var(--bg-tertiary, #f8f9fa)', borderRadius: '0.5rem', padding: '0.75rem', marginBottom: '1rem', fontSize: '0.8125rem', color: 'var(--text-secondary, #6c757d)' }}>
+          不停止会话可以恢复，但会占用服务器资源。
+        </div>
+        <div className="d-flex justify-content-end gap-2">
+          <button className="btn btn-secondary" onClick={handleRemoteCloseCancel}>
+            取消
+          </button>
+          <button
+            className="btn btn-outline-warning"
+            onClick={handleRemoteCloseKeep}
+            disabled={isStoppingRemote}
+          >
+            保留会话并关闭
+          </button>
+          <button
+            className="btn btn-danger"
+            onClick={handleRemoteCloseStop}
+            disabled={isStoppingRemote}
+          >
+            {isStoppingRemote ? '正在停止...' : '停止会话并关闭'}
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 };

@@ -23,7 +23,7 @@ interface NewSessionModalProps {
   show?: boolean;
   onClose: () => void;
   onCreateLocal?: () => void;
-  onCreateRemote?: (params: { machineId: string; machineName: string; sessionId: string }) => void;
+  onCreateRemote?: (params: { machineId: string; machineName: string; sessionId: string; projectPath: string }) => void;
 }
 
 export const NewSessionModal: React.FC<NewSessionModalProps> = ({
@@ -97,7 +97,7 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
       const sessionId = result.session?.session_id || '';
 
       if (onCreateRemote) {
-        onCreateRemote({ machineId: selectedMachineId, machineName, sessionId });
+        onCreateRemote({ machineId: selectedMachineId, machineName, sessionId, projectPath });
       } else {
         const isWorkspacePage = location.pathname === '/work' || location.pathname === '/work/';
         if (isWorkspacePage) {
