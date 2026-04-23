@@ -5,6 +5,9 @@ nohup.out
 # Screenshots
 screenshots/
 
+# Videos
+videos/
+
 # Database
 *.db
 
