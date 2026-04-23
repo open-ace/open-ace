@@ -88,6 +88,18 @@ export const ConversationHistory: React.FC = () => {
   const [page, setPage] = useState(1);
   const [selectedSession, setSelectedSession] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // ESC key to exit fullscreen (Issue #103)
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsFullscreen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isFullscreen]);
   const [columns, setColumns] = useState<ColumnDef[]>(defaultColumns);
   const [sortColumn, setSortColumn] = useState<string>('');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');

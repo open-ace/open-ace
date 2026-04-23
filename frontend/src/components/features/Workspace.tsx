@@ -277,11 +277,16 @@ export const Workspace: React.FC = () => {
           return currentTabs; // Don't modify tabs, just use it for checking
         });
       }
+
+      // Listen for ESC key forwarded from qwen-code-webui iframe (Issue #103)
+      if (event.data?.type === 'qwen-code-esc-pressed' && workspaceFullscreen) {
+        exitWorkspaceFullscreen();
+      }
     };
 
     window.addEventListener('message', handleIframeMessage);
     return () => window.removeEventListener('message', handleIframeMessage);
-  }, [enableTabNotifications, language]);
+  }, [enableTabNotifications, language, workspaceFullscreen, exitWorkspaceFullscreen]);
 
   // Check quota
   const checkQuota = useCallback(async () => {
