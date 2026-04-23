@@ -117,7 +117,7 @@ ENV FLASK_ENV=development \
     FLASK_DEBUG=1
 
 # Run with auto-reload
-CMD ["python", "-c", "from web import app; app.run(host='0.0.0.0', port=5000, debug=True)"]
+CMD ["python", "web.py"]
 
 # =============================================================================
 # Migration Stage (for running database migrations)
