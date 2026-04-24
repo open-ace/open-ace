@@ -2308,6 +2308,24 @@ install_local() {
         install_systemd_service "$target_path" "$DEPLOY_USER" "$SERVICE_PORT" "$SERVICE_HOST"
     fi
 
+    # For upgrade mode: check if systemd service already exists and restart it
+    # This ensures new code takes effect after upgrade
+    if [ "$DO_UPGRADE" = "yes" ] && command -v systemctl &>/dev/null; then
+        if systemctl is-enabled --quiet open-ace.service 2>/dev/null; then
+            print_info "Restarting existing open-ace service..."
+            systemctl daemon-reload
+            systemctl restart open-ace.service
+            sleep 2
+            if systemctl is-active --quiet open-ace.service; then
+                print_success "Service restarted successfully"
+            else
+                print_warning "Service restart failed, check with: systemctl status open-ace"
+            fi
+            # Set flag to show correct completion message
+            INSTALL_SERVICE="yes"
+        fi
+    fi
+
     # Configure sudoers for multi-user workspace mode
     if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
         # Stop existing qwen-code-webui systemd service first
