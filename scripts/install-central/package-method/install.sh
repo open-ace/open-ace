@@ -2596,10 +2596,10 @@ do_fresh_install() {
             if [ "$DB_INSTALL_METHOD" != "sqlite" ]; then
                 print_info "Installing psycogreen..."
                 if command -v pip3 &>/dev/null; then
-                    run_pip_as_user "$install_user" pip3 install --user --no-warn-script-location --no-index --find-links="$target_path/vendor" psycogreen 2>/dev/null || \
+                    run_pip_as_user "$install_user" pip3 install --user --no-warn-script-location --no-build-isolation --no-index --find-links="$target_path/vendor" psycogreen 2>/dev/null || \
                         print_warning "psycogreen install failed (non-critical, PostgreSQL connection pooling may not work optimally)"
                 elif command -v pip &>/dev/null; then
-                    run_pip_as_user "$install_user" pip install --user --no-warn-script-location --no-index --find-links="$target_path/vendor" psycogreen 2>/dev/null || \
+                    run_pip_as_user "$install_user" pip install --user --no-warn-script-location --no-build-isolation --no-index --find-links="$target_path/vendor" psycogreen 2>/dev/null || \
                         print_warning "psycogreen install failed (non-critical, PostgreSQL connection pooling may not work optimally)"
                 fi
             fi
@@ -2948,10 +2948,10 @@ with open('$config_dir/config.json', 'w') as f:
             # Install psycogreen separately (source dist, needs build tools)
             print_info "Installing psycogreen..."
             if command -v pip3 &>/dev/null; then
-                run_pip_as_user "$install_user" pip3 install --user --no-warn-script-location --no-index --find-links="$target_path/vendor" psycogreen 2>/dev/null || \
+                run_pip_as_user "$install_user" pip3 install --user --no-warn-script-location --no-build-isolation --no-index --find-links="$target_path/vendor" psycogreen 2>/dev/null || \
                     print_warning "psycogreen install failed (non-critical)"
             elif command -v pip &>/dev/null; then
-                run_pip_as_user "$install_user" pip install --user --no-warn-script-location --no-index --find-links="$target_path/vendor" psycogreen 2>/dev/null || \
+                run_pip_as_user "$install_user" pip install --user --no-warn-script-location --no-build-isolation --no-index --find-links="$target_path/vendor" psycogreen 2>/dev/null || \
                     print_warning "psycogreen install failed (non-critical)"
             fi
         else
@@ -3080,9 +3080,9 @@ do_fresh_install_remote() {
             # Install psycogreen separately (source dist, needs build tools)
             echo 'Installing psycogreen...'
             if command -v pip3 >/dev/null 2>&1; then
-                pip3 install --user --no-warn-script-location --no-index --find-links=vendor psycogreen 2>/dev/null || echo 'Warning: psycogreen install failed (non-critical)'
+                pip3 install --user --no-warn-script-location --no-build-isolation --no-index --find-links=vendor psycogreen 2>/dev/null || echo 'Warning: psycogreen install failed (non-critical)'
             elif command -v pip >/dev/null 2>&1; then
-                pip install --user --no-warn-script-location --no-index --find-links=vendor psycogreen 2>/dev/null || echo 'Warning: psycogreen install failed (non-critical)'
+                pip install --user --no-warn-script-location --no-build-isolation --no-index --find-links=vendor psycogreen 2>/dev/null || echo 'Warning: psycogreen install failed (non-critical)'
             fi
         else
             if command -v pip3 >/dev/null 2>&1; then
@@ -3204,9 +3204,9 @@ do_upgrade_remote() {
             # Install psycogreen separately (source dist, needs build tools)
             echo 'Installing psycogreen...'
             if command -v pip3 >/dev/null 2>&1; then
-                pip3 install --user --no-warn-script-location --no-index --find-links=vendor psycogreen 2>/dev/null || echo 'Warning: psycogreen install failed (non-critical)'
+                pip3 install --user --no-warn-script-location --no-build-isolation --no-index --find-links=vendor psycogreen 2>/dev/null || echo 'Warning: psycogreen install failed (non-critical)'
             elif command -v pip >/dev/null 2>&1; then
-                pip install --user --no-warn-script-location --no-index --find-links=vendor psycogreen 2>/dev/null || echo 'Warning: psycogreen install failed (non-critical)'
+                pip install --user --no-warn-script-location --no-build-isolation --no-index --find-links=vendor psycogreen 2>/dev/null || echo 'Warning: psycogreen install failed (non-critical)'
             fi
         else
             if command -v pip3 >/dev/null 2>&1; then
