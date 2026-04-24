@@ -2584,31 +2584,31 @@ do_fresh_install() {
                 local _pip_cmd=""
                 if command -v pip3 &>/dev/null; then _pip_cmd="pip3"; elif command -v pip &>/dev/null; then _pip_cmd="pip"; fi
                 if [ -n "$_pip_cmd" ]; then
-                    run_pip_as_user "$install_user" $_pip_cmd install --user --no-index --find-links="$target_path/vendor" setuptools wheel 2>/dev/null || true
+                    run_pip_as_user "$install_user" $_pip_cmd install --user --no-warn-script-location --no-index --find-links="$target_path/vendor" setuptools wheel 2>/dev/null || true
                 fi
             fi
             if command -v pip3 &>/dev/null; then
-                run_pip_as_user "$install_user" pip3 install --user --no-index --find-links="$target_path/vendor" -r "$TEMP_REQ" && print_success "Dependencies installed from vendor"
+                run_pip_as_user "$install_user" pip3 install --user --no-warn-script-location --no-index --find-links="$target_path/vendor" -r "$TEMP_REQ" && print_success "Dependencies installed from vendor"
             elif command -v pip &>/dev/null; then
-                run_pip_as_user "$install_user" pip install --user --no-index --find-links="$target_path/vendor" -r "$TEMP_REQ" && print_success "Dependencies installed from vendor"
+                run_pip_as_user "$install_user" pip install --user --no-warn-script-location --no-index --find-links="$target_path/vendor" -r "$TEMP_REQ" && print_success "Dependencies installed from vendor"
             fi
             # Install psycogreen separately (source dist, needs build tools)
             if [ "$DB_INSTALL_METHOD" != "sqlite" ]; then
                 print_info "Installing psycogreen..."
                 if command -v pip3 &>/dev/null; then
-                    run_pip_as_user "$install_user" pip3 install --user --no-index --find-links="$target_path/vendor" psycogreen 2>/dev/null || \
+                    run_pip_as_user "$install_user" pip3 install --user --no-warn-script-location --no-index --find-links="$target_path/vendor" psycogreen 2>/dev/null || \
                         print_warning "psycogreen install failed (non-critical, PostgreSQL connection pooling may not work optimally)"
                 elif command -v pip &>/dev/null; then
-                    run_pip_as_user "$install_user" pip install --user --no-index --find-links="$target_path/vendor" psycogreen 2>/dev/null || \
+                    run_pip_as_user "$install_user" pip install --user --no-warn-script-location --no-index --find-links="$target_path/vendor" psycogreen 2>/dev/null || \
                         print_warning "psycogreen install failed (non-critical, PostgreSQL connection pooling may not work optimally)"
                 fi
             fi
         else
             # Install from network
             if command -v pip3 &>/dev/null; then
-                run_pip_as_user "$install_user" pip3 install --user -r "$TEMP_REQ" && print_success "Dependencies installed with pip3"
+                run_pip_as_user "$install_user" pip3 install --user --no-warn-script-location -r "$TEMP_REQ" && print_success "Dependencies installed with pip3"
             elif command -v pip &>/dev/null; then
-                run_pip_as_user "$install_user" pip install --user -r "$TEMP_REQ" && print_success "Dependencies installed with pip"
+                run_pip_as_user "$install_user" pip install --user --no-warn-script-location -r "$TEMP_REQ" && print_success "Dependencies installed with pip"
             fi
         fi
         rm -f "$TEMP_REQ"
@@ -2937,29 +2937,29 @@ with open('$config_dir/config.json', 'w') as f:
                 local _pip_cmd=""
                 if command -v pip3 &>/dev/null; then _pip_cmd="pip3"; elif command -v pip &>/dev/null; then _pip_cmd="pip"; fi
                 if [ -n "$_pip_cmd" ]; then
-                    run_pip_as_user "$install_user" $_pip_cmd install --user --no-index --find-links="$target_path/vendor" setuptools wheel 2>/dev/null || true
+                    run_pip_as_user "$install_user" $_pip_cmd install --user --no-warn-script-location --no-index --find-links="$target_path/vendor" setuptools wheel 2>/dev/null || true
                 fi
             fi
             if command -v pip3 &>/dev/null; then
-                run_pip_as_user "$install_user" pip3 install --user --no-index --find-links="$target_path/vendor" -r "$TEMP_REQ" && print_success "Dependencies installed from vendor"
+                run_pip_as_user "$install_user" pip3 install --user --no-warn-script-location --no-index --find-links="$target_path/vendor" -r "$TEMP_REQ" && print_success "Dependencies installed from vendor"
             elif command -v pip &>/dev/null; then
-                run_pip_as_user "$install_user" pip install --user --no-index --find-links="$target_path/vendor" -r "$TEMP_REQ" && print_success "Dependencies installed from vendor"
+                run_pip_as_user "$install_user" pip install --user --no-warn-script-location --no-index --find-links="$target_path/vendor" -r "$TEMP_REQ" && print_success "Dependencies installed from vendor"
             fi
             # Install psycogreen separately (source dist, needs build tools)
             print_info "Installing psycogreen..."
             if command -v pip3 &>/dev/null; then
-                run_pip_as_user "$install_user" pip3 install --user --no-index --find-links="$target_path/vendor" psycogreen 2>/dev/null || \
+                run_pip_as_user "$install_user" pip3 install --user --no-warn-script-location --no-index --find-links="$target_path/vendor" psycogreen 2>/dev/null || \
                     print_warning "psycogreen install failed (non-critical)"
             elif command -v pip &>/dev/null; then
-                run_pip_as_user "$install_user" pip install --user --no-index --find-links="$target_path/vendor" psycogreen 2>/dev/null || \
+                run_pip_as_user "$install_user" pip install --user --no-warn-script-location --no-index --find-links="$target_path/vendor" psycogreen 2>/dev/null || \
                     print_warning "psycogreen install failed (non-critical)"
             fi
         else
             # Install from network
             if command -v pip3 &>/dev/null; then
-                run_pip_as_user "$install_user" pip3 install --user -r "$TEMP_REQ" && print_success "Dependencies installed with pip3"
+                run_pip_as_user "$install_user" pip3 install --user --no-warn-script-location -r "$TEMP_REQ" && print_success "Dependencies installed with pip3"
             elif command -v pip &>/dev/null; then
-                run_pip_as_user "$install_user" pip install --user -r "$TEMP_REQ" && print_success "Dependencies installed with pip"
+                run_pip_as_user "$install_user" pip install --user --no-warn-script-location -r "$TEMP_REQ" && print_success "Dependencies installed with pip"
             fi
         fi
         rm -f "$TEMP_REQ"
@@ -3067,28 +3067,28 @@ do_fresh_install_remote() {
             if ls vendor/setuptools*.whl 1>/dev/null 2>&1 || ls vendor/wheel*.whl 1>/dev/null 2>&1; then
                 echo 'Installing build tools (setuptools, wheel)...'
                 if command -v pip3 >/dev/null 2>&1; then
-                    pip3 install --user --no-index --find-links=vendor setuptools wheel 2>/dev/null || true
+                    pip3 install --user --no-warn-script-location --no-index --find-links=vendor setuptools wheel 2>/dev/null || true
                 elif command -v pip >/dev/null 2>&1; then
-                    pip install --user --no-index --find-links=vendor setuptools wheel 2>/dev/null || true
+                    pip install --user --no-warn-script-location --no-index --find-links=vendor setuptools wheel 2>/dev/null || true
                 fi
             fi
             if command -v pip3 >/dev/null 2>&1; then
-                pip3 install --user --no-index --find-links=vendor -r \$TEMP_REQ
+                pip3 install --user --no-warn-script-location --no-index --find-links=vendor -r \$TEMP_REQ
             elif command -v pip >/dev/null 2>&1; then
-                pip install --user --no-index --find-links=vendor -r \$TEMP_REQ
+                pip install --user --no-warn-script-location --no-index --find-links=vendor -r \$TEMP_REQ
             fi
             # Install psycogreen separately (source dist, needs build tools)
             echo 'Installing psycogreen...'
             if command -v pip3 >/dev/null 2>&1; then
-                pip3 install --user --no-index --find-links=vendor psycogreen 2>/dev/null || echo 'Warning: psycogreen install failed (non-critical)'
+                pip3 install --user --no-warn-script-location --no-index --find-links=vendor psycogreen 2>/dev/null || echo 'Warning: psycogreen install failed (non-critical)'
             elif command -v pip >/dev/null 2>&1; then
-                pip install --user --no-index --find-links=vendor psycogreen 2>/dev/null || echo 'Warning: psycogreen install failed (non-critical)'
+                pip install --user --no-warn-script-location --no-index --find-links=vendor psycogreen 2>/dev/null || echo 'Warning: psycogreen install failed (non-critical)'
             fi
         else
             if command -v pip3 >/dev/null 2>&1; then
-                pip3 install --user -r \$TEMP_REQ
+                pip3 install --user --no-warn-script-location -r \$TEMP_REQ
             elif command -v pip >/dev/null 2>&1; then
-                pip install --user -r \$TEMP_REQ
+                pip install --user --no-warn-script-location -r \$TEMP_REQ
             fi
         fi
         rm -f \$TEMP_REQ
@@ -3191,28 +3191,28 @@ do_upgrade_remote() {
             if ls vendor/setuptools*.whl 1>/dev/null 2>&1 || ls vendor/wheel*.whl 1>/dev/null 2>&1; then
                 echo 'Installing build tools (setuptools, wheel)...'
                 if command -v pip3 >/dev/null 2>&1; then
-                    pip3 install --user --no-index --find-links=vendor setuptools wheel 2>/dev/null || true
+                    pip3 install --user --no-warn-script-location --no-index --find-links=vendor setuptools wheel 2>/dev/null || true
                 elif command -v pip >/dev/null 2>&1; then
-                    pip install --user --no-index --find-links=vendor setuptools wheel 2>/dev/null || true
+                    pip install --user --no-warn-script-location --no-index --find-links=vendor setuptools wheel 2>/dev/null || true
                 fi
             fi
             if command -v pip3 >/dev/null 2>&1; then
-                pip3 install --user --no-index --find-links=vendor -r \$TEMP_REQ
+                pip3 install --user --no-warn-script-location --no-index --find-links=vendor -r \$TEMP_REQ
             elif command -v pip >/dev/null 2>&1; then
-                pip install --user --no-index --find-links=vendor -r \$TEMP_REQ
+                pip install --user --no-warn-script-location --no-index --find-links=vendor -r \$TEMP_REQ
             fi
             # Install psycogreen separately (source dist, needs build tools)
             echo 'Installing psycogreen...'
             if command -v pip3 >/dev/null 2>&1; then
-                pip3 install --user --no-index --find-links=vendor psycogreen 2>/dev/null || echo 'Warning: psycogreen install failed (non-critical)'
+                pip3 install --user --no-warn-script-location --no-index --find-links=vendor psycogreen 2>/dev/null || echo 'Warning: psycogreen install failed (non-critical)'
             elif command -v pip >/dev/null 2>&1; then
-                pip install --user --no-index --find-links=vendor psycogreen 2>/dev/null || echo 'Warning: psycogreen install failed (non-critical)'
+                pip install --user --no-warn-script-location --no-index --find-links=vendor psycogreen 2>/dev/null || echo 'Warning: psycogreen install failed (non-critical)'
             fi
         else
             if command -v pip3 >/dev/null 2>&1; then
-                pip3 install --user -r \$TEMP_REQ
+                pip3 install --user --no-warn-script-location -r \$TEMP_REQ
             elif command -v pip >/dev/null 2>&1; then
-                pip install --user -r \$TEMP_REQ
+                pip install --user --no-warn-script-location -r \$TEMP_REQ
             fi
         fi
         rm -f \$TEMP_REQ
