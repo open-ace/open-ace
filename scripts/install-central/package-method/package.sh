@@ -505,6 +505,16 @@ if [ "$SKIP_DOWNLOAD" = false ] && [ -f "$PROJECT_DIR/requirements.txt" ]; then
             echo -e "${YELLOW}Warning: Failed to download psycogreen. Install will require network.${NC}"
     fi
 
+    # Download build tools needed for source distributions (psycogreen etc.)
+    # These are required at install time for offline builds of source packages
+    if [ -n "$PIP_CMD" ]; then
+        echo -e "${YELLOW}Downloading build tools (setuptools, wheel)...${NC}"
+        $PIP_CMD download setuptools wheel -d "$VENDOR_DIR" \
+            --python-version 3.9 --only-binary=:all: 2>/dev/null || \
+            $PIP_CMD download setuptools wheel -d "$VENDOR_DIR" 2>/dev/null || \
+            echo -e "${YELLOW}Warning: Failed to download build tools.${NC}"
+    fi
+
     # Count downloaded packages
     pkg_count=$(ls -1 "$VENDOR_DIR"/*.whl 2>/dev/null | wc -l | tr -d ' ')
     echo "  [OK] Downloaded $pkg_count packages to vendor/"

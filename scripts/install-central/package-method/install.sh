@@ -136,6 +136,15 @@ check_openace_user_exists() {
     fi
 }
 
+# Check if a user exists on the system (validates user name)
+user_exists() {
+    local user="$1"
+    if [ -z "$user" ]; then
+        return 1
+    fi
+    id "$user" &>/dev/null
+}
+
 # Check if openace user exists on remote system
 check_openace_user_exists_remote() {
     local remote="$1"
@@ -1792,32 +1801,108 @@ parse_config_file() {
 # Detect existing local installation and load config from it
 # Returns 0 if upgrade detected (config loaded), 1 if fresh install
 detect_and_load_local_upgrade() {
-    # Try common install paths
     local candidate_paths=()
 
-    # Check openace user's home
+    # Priority 1: Scan for users with .open-ace/config.json (most reliable indicator)
+    # This finds existing installations even if they're in non-standard locations
+    local config_based_paths=""
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        # macOS: check /Users/*/.open-ace/config.json
+        for user_home in /Users/*; do
+            if [ -d "$user_home/.open-ace" ] && [ -f "$user_home/.open-ace/config.json" ]; then
+                local user_name=$(basename "$user_home")
+                # Check if there's an installation in this user's home
+                if [ -d "$user_home" ] && [ -f "$user_home/web.py" ]; then
+                    config_based_paths="$user_home"
+                    break
+                fi
+                # Also check for open-ace subdirectory
+                if [ -d "$user_home/open-ace" ] && [ -f "$user_home/open-ace/web.py" ]; then
+                    config_based_paths="$user_home/open-ace"
+                    break
+                fi
+            fi
+        done
+    else
+        # Linux: check /home/*/.open-ace/config.json
+        for user_home in /home/*; do
+            if [ -d "$user_home/.open-ace" ] && [ -f "$user_home/.open-ace/config.json" ]; then
+                local user_name=$(basename "$user_home")
+                # Check if there's an installation in this user's home
+                if [ -d "$user_home" ] && [ -f "$user_home/web.py" ]; then
+                    config_based_paths="$user_home"
+                    break
+                fi
+                # Also check for open-ace subdirectory
+                if [ -d "$user_home/open-ace" ] && [ -f "$user_home/open-ace/web.py" ]; then
+                    config_based_paths="$user_home/open-ace"
+                    break
+                fi
+            fi
+        done
+        # Also check root's config if running as root
+        if [ -z "$config_based_paths" ] && [ -f "/root/.open-ace/config.json" ]; then
+            if [ -d "/root" ] && [ -f "/root/web.py" ]; then
+                config_based_paths="/root"
+            elif [ -d "/root/open-ace" ] && [ -f "/root/open-ace/web.py" ]; then
+                config_based_paths="/root/open-ace"
+            fi
+        fi
+    fi
+
+    # Add config-based path as highest priority
+    if [ -n "$config_based_paths" ]; then
+        candidate_paths+=("$config_based_paths")
+    fi
+
+    # Priority 2: Check openace user's home (if exists)
     local openace_home
     if [[ "$OSTYPE" == "darwin"* ]]; then
         openace_home="/Users/openace"
     else
         openace_home="/home/openace"
     fi
-
-    # Add candidate paths in priority order
-    if check_openace_user_exists; then
-        candidate_paths+=("$openace_home")
+    if check_openace_user_exists && [ -d "$openace_home" ]; then
+        # Avoid duplicates
+        if [[ ! " ${candidate_paths[*]} " =~ " ${openace_home} " ]]; then
+            candidate_paths+=("$openace_home")
+        fi
     fi
-    candidate_paths+=("$HOME/open-ace")
+
+    # Priority 3: Check current user's open-ace directory
+    if [[ ! " ${candidate_paths[*]} " =~ " ${HOME}/open-ace " ]]; then
+        candidate_paths+=("$HOME/open-ace")
+    fi
+
+    # Priority 4: Check root's open-ace (if running as root and has config)
+    if [ "$EUID" -eq 0 ] && [ -d "/root/open-ace" ] && [ -f "/root/open-ace/web.py" ]; then
+        if [[ ! " ${candidate_paths[*]} " =~ " /root/open-ace " ]]; then
+            candidate_paths+=("/root/open-ace")
+        fi
+    fi
 
     for target_path in "${candidate_paths[@]}"; do
         if [ -d "$target_path" ] && [ -f "$target_path/web.py" ]; then
             print_info "Existing installation found at: $target_path"
-            # Auto-load config from existing installation
+
+            # Get owner of the directory
+            local detected_owner=""
             if [[ "$OSTYPE" == "darwin"* ]]; then
-                DEPLOY_USER=$(stat -f "%Su" "$target_path" 2>/dev/null || echo "$USER")
+                detected_owner=$(stat -f "%Su" "$target_path" 2>/dev/null || echo "")
             else
-                DEPLOY_USER=$(stat -c "%U" "$target_path" 2>/dev/null || echo "$USER")
+                detected_owner=$(stat -c "%U" "$target_path" 2>/dev/null || echo "")
             fi
+
+            # Handle UNKNOWN or invalid user
+            if [ -z "$detected_owner" ] || [ "$detected_owner" = "UNKNOWN" ] || ! user_exists "$detected_owner"; then
+                print_warning "Could not determine valid owner for: $target_path"
+                print_info "Detected owner: '$detected_owner' (not a valid user)"
+                print_info "Using current user: $USER"
+                DEPLOY_USER="$USER"
+            else
+                DEPLOY_USER="$detected_owner"
+            fi
+
             DEPLOY_PATH="$target_path"
             INSTALL_MODE="local"
             INSTALL_SERVICE="no"
@@ -1944,8 +2029,37 @@ configure_local() {
     echo -e "${YELLOW}Configuring deployment...${NC}"
     echo ""
 
+    # Store original user for comparison
+    local original_user="$DEPLOY_USER"
+    local original_path="$DEPLOY_PATH"
+
     prompt_input "Deployment user" "$DEPLOY_USER" DEPLOY_USER
-    prompt_input "Deployment path" "$DEPLOY_PATH" DEPLOY_PATH
+
+    # If user was changed, suggest updating the path
+    if [ -n "$original_user" ] && [ "$DEPLOY_USER" != "$original_user" ]; then
+        local user_home
+        if [ "$DEPLOY_USER" = "root" ]; then
+            user_home="/root"
+        elif [[ "$OSTYPE" == "darwin"* ]]; then
+            user_home="/Users/$DEPLOY_USER"
+        else
+            user_home="/home/$DEPLOY_USER"
+        fi
+
+        # Check if current path matches the old user's home
+        if [[ "$original_path" == *"$original_user"* ]] && [[ "$original_path" != *"$DEPLOY_USER"* ]]; then
+            # Path contains old username but not new username - suggest update
+            local suggested_path="$user_home/open-ace"
+            print_info "User changed from '$original_user' to '$DEPLOY_USER'"
+            print_info "Current path ($original_path) does not match new user's home ($user_home)"
+            prompt_input "Deployment path" "$suggested_path" DEPLOY_PATH
+        else
+            # Path might still be valid, just confirm it
+            prompt_input "Deployment path" "$original_path" DEPLOY_PATH
+        fi
+    else
+        prompt_input "Deployment path" "$DEPLOY_PATH" DEPLOY_PATH
+    fi
 
     # Remove trailing slash from path to avoid double slashes
     DEPLOY_PATH="${DEPLOY_PATH%/}"
@@ -2436,18 +2550,40 @@ do_fresh_install() {
             exit 1
         fi
         
-        # Create temp requirements excluding psycopg2-binary (use system package instead)
+        # Create temp requirements excluding:
+        # - psycopg2-binary: use system package instead (avoids segfault, see Issue #38)
+        # - psycogreen: only has source dist, installed separately after build tools
         TEMP_REQ=$(mktemp)
-        grep -v "psycopg2-binary" "$target_path/requirements.txt" > "$TEMP_REQ" || true
+        grep -v -e "psycopg2-binary" -e "psycogreen" "$target_path/requirements.txt" > "$TEMP_REQ" || true
         chmod 644 "$TEMP_REQ"  # Make readable for non-root users
 
         # Install dependencies (prefer vendor directory for offline install)
         if [ -d "$target_path/vendor" ] && [ "$(ls -A "$target_path/vendor" 2>/dev/null)" ]; then
             print_info "Installing from vendor directory (offline mode)..."
+            # Pre-install setuptools + wheel for building source distributions
+            if ls "$target_path/vendor"/setuptools*.whl 1>/dev/null 2>&1 || ls "$target_path/vendor"/wheel*.whl 1>/dev/null 2>&1; then
+                print_info "Installing build tools (setuptools, wheel)..."
+                local _pip_cmd=""
+                if command -v pip3 &>/dev/null; then _pip_cmd="pip3"; elif command -v pip &>/dev/null; then _pip_cmd="pip"; fi
+                if [ -n "$_pip_cmd" ]; then
+                    run_pip_as_user "$install_user" $_pip_cmd install --user --no-index --find-links="$target_path/vendor" setuptools wheel 2>/dev/null || true
+                fi
+            fi
             if command -v pip3 &>/dev/null; then
                 run_pip_as_user "$install_user" pip3 install --user --no-index --find-links="$target_path/vendor" -r "$TEMP_REQ" && print_success "Dependencies installed from vendor"
             elif command -v pip &>/dev/null; then
                 run_pip_as_user "$install_user" pip install --user --no-index --find-links="$target_path/vendor" -r "$TEMP_REQ" && print_success "Dependencies installed from vendor"
+            fi
+            # Install psycogreen separately (source dist, needs build tools)
+            if [ "$DB_INSTALL_METHOD" != "sqlite" ]; then
+                print_info "Installing psycogreen..."
+                if command -v pip3 &>/dev/null; then
+                    run_pip_as_user "$install_user" pip3 install --user --no-index --find-links="$target_path/vendor" psycogreen 2>/dev/null || \
+                        print_warning "psycogreen install failed (non-critical, PostgreSQL connection pooling may not work optimally)"
+                elif command -v pip &>/dev/null; then
+                    run_pip_as_user "$install_user" pip install --user --no-index --find-links="$target_path/vendor" psycogreen 2>/dev/null || \
+                        print_warning "psycogreen install failed (non-critical, PostgreSQL connection pooling may not work optimally)"
+                fi
             fi
         else
             # Install from network
@@ -2770,17 +2906,35 @@ with open('$config_dir/config.json', 'w') as f:
         fi
         
         # Install dependencies (prefer vendor directory for offline install)
-        # Create temp requirements excluding psycopg2-binary (use system package instead)
+        # Exclude psycopg2-binary (use system package instead) and psycogreen (source dist, handled separately)
         TEMP_REQ=$(mktemp)
-        grep -v "psycopg2-binary" "$target_path/requirements.txt" > "$TEMP_REQ" || true
+        grep -v -e "psycopg2-binary" -e "psycogreen" "$target_path/requirements.txt" > "$TEMP_REQ" || true
         chmod 644 "$TEMP_REQ"  # Make readable for non-root users
 
         if [ -d "$target_path/vendor" ] && [ "$(ls -A "$target_path/vendor" 2>/dev/null)" ]; then
             print_info "Installing from vendor directory (offline mode)..."
+            # Pre-install setuptools + wheel for building source distributions
+            if ls "$target_path/vendor"/setuptools*.whl 1>/dev/null 2>&1 || ls "$target_path/vendor"/wheel*.whl 1>/dev/null 2>&1; then
+                print_info "Installing build tools (setuptools, wheel)..."
+                local _pip_cmd=""
+                if command -v pip3 &>/dev/null; then _pip_cmd="pip3"; elif command -v pip &>/dev/null; then _pip_cmd="pip"; fi
+                if [ -n "$_pip_cmd" ]; then
+                    run_pip_as_user "$install_user" $_pip_cmd install --user --no-index --find-links="$target_path/vendor" setuptools wheel 2>/dev/null || true
+                fi
+            fi
             if command -v pip3 &>/dev/null; then
                 run_pip_as_user "$install_user" pip3 install --user --no-index --find-links="$target_path/vendor" -r "$TEMP_REQ" && print_success "Dependencies installed from vendor"
             elif command -v pip &>/dev/null; then
                 run_pip_as_user "$install_user" pip install --user --no-index --find-links="$target_path/vendor" -r "$TEMP_REQ" && print_success "Dependencies installed from vendor"
+            fi
+            # Install psycogreen separately (source dist, needs build tools)
+            print_info "Installing psycogreen..."
+            if command -v pip3 &>/dev/null; then
+                run_pip_as_user "$install_user" pip3 install --user --no-index --find-links="$target_path/vendor" psycogreen 2>/dev/null || \
+                    print_warning "psycogreen install failed (non-critical)"
+            elif command -v pip &>/dev/null; then
+                run_pip_as_user "$install_user" pip install --user --no-index --find-links="$target_path/vendor" psycogreen 2>/dev/null || \
+                    print_warning "psycogreen install failed (non-critical)"
             fi
         else
             # Install from network
@@ -2886,15 +3040,31 @@ do_fresh_install_remote() {
             exit 1
         fi
         # Install dependencies (prefer vendor directory for offline install)
-        # Exclude psycopg2-binary (use system package instead)
+        # Exclude psycopg2-binary (use system package instead) and psycogreen (source dist, handled separately)
         TEMP_REQ=\$(mktemp)
-        grep -v 'psycopg2-binary' requirements.txt > \$TEMP_REQ || true
+        grep -v -e 'psycopg2-binary' -e 'psycogreen' requirements.txt > \$TEMP_REQ || true
         if [ -d 'vendor' ] && [ \"\$(ls -A vendor 2>/dev/null)\" ]; then
             echo 'Installing from vendor directory (offline mode)...'
+            # Pre-install setuptools + wheel for building source distributions
+            if ls vendor/setuptools*.whl 1>/dev/null 2>&1 || ls vendor/wheel*.whl 1>/dev/null 2>&1; then
+                echo 'Installing build tools (setuptools, wheel)...'
+                if command -v pip3 >/dev/null 2>&1; then
+                    pip3 install --user --no-index --find-links=vendor setuptools wheel 2>/dev/null || true
+                elif command -v pip >/dev/null 2>&1; then
+                    pip install --user --no-index --find-links=vendor setuptools wheel 2>/dev/null || true
+                fi
+            fi
             if command -v pip3 >/dev/null 2>&1; then
                 pip3 install --user --no-index --find-links=vendor -r \$TEMP_REQ
             elif command -v pip >/dev/null 2>&1; then
                 pip install --user --no-index --find-links=vendor -r \$TEMP_REQ
+            fi
+            # Install psycogreen separately (source dist, needs build tools)
+            echo 'Installing psycogreen...'
+            if command -v pip3 >/dev/null 2>&1; then
+                pip3 install --user --no-index --find-links=vendor psycogreen 2>/dev/null || echo 'Warning: psycogreen install failed (non-critical)'
+            elif command -v pip >/dev/null 2>&1; then
+                pip install --user --no-index --find-links=vendor psycogreen 2>/dev/null || echo 'Warning: psycogreen install failed (non-critical)'
             fi
         else
             if command -v pip3 >/dev/null 2>&1; then
@@ -2994,15 +3164,31 @@ do_upgrade_remote() {
             exit 1
         fi
         # Install dependencies (prefer vendor directory for offline install)
-        # Exclude psycopg2-binary (use system package instead)
+        # Exclude psycopg2-binary (use system package instead) and psycogreen (source dist, handled separately)
         TEMP_REQ=\$(mktemp)
-        grep -v 'psycopg2-binary' requirements.txt > \$TEMP_REQ || true
+        grep -v -e 'psycopg2-binary' -e 'psycogreen' requirements.txt > \$TEMP_REQ || true
         if [ -d 'vendor' ] && [ \"\$(ls -A vendor 2>/dev/null)\" ]; then
             echo 'Installing from vendor directory (offline mode)...'
+            # Pre-install setuptools + wheel for building source distributions
+            if ls vendor/setuptools*.whl 1>/dev/null 2>&1 || ls vendor/wheel*.whl 1>/dev/null 2>&1; then
+                echo 'Installing build tools (setuptools, wheel)...'
+                if command -v pip3 >/dev/null 2>&1; then
+                    pip3 install --user --no-index --find-links=vendor setuptools wheel 2>/dev/null || true
+                elif command -v pip >/dev/null 2>&1; then
+                    pip install --user --no-index --find-links=vendor setuptools wheel 2>/dev/null || true
+                fi
+            fi
             if command -v pip3 >/dev/null 2>&1; then
                 pip3 install --user --no-index --find-links=vendor -r \$TEMP_REQ
             elif command -v pip >/dev/null 2>&1; then
                 pip install --user --no-index --find-links=vendor -r \$TEMP_REQ
+            fi
+            # Install psycogreen separately (source dist, needs build tools)
+            echo 'Installing psycogreen...'
+            if command -v pip3 >/dev/null 2>&1; then
+                pip3 install --user --no-index --find-links=vendor psycogreen 2>/dev/null || echo 'Warning: psycogreen install failed (non-critical)'
+            elif command -v pip >/dev/null 2>&1; then
+                pip install --user --no-index --find-links=vendor psycogreen 2>/dev/null || echo 'Warning: psycogreen install failed (non-critical)'
             fi
         else
             if command -v pip3 >/dev/null 2>&1; then
