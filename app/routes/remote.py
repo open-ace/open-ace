@@ -498,7 +498,7 @@ def send_remote_message(session_id):
 
     if success:
         return jsonify({"success": True})
-    return jsonify({"error": "Failed to send message. Session may not be active."}), 400
+    return jsonify({"error": "Failed to send message. Session may not be active.", "reconnect": True}), 400
 
 
 @remote_bp.route("/sessions/<session_id>/model", methods=["PUT"])
@@ -821,8 +821,7 @@ def agent_message():
                 is_complete=is_complete,
             )
 
-        pending = agent_mgr.get_pending_commands(machine_id)
-        return jsonify({"success": True, "pending_commands": pending})
+        return jsonify({"success": True})
 
     elif msg_type == "session_status":
         session_id = data.get("session_id")
@@ -837,8 +836,7 @@ def agent_message():
                 pid=pid,
             )
 
-        pending = agent_mgr.get_pending_commands(machine_id)
-        return jsonify({"success": True, "pending_commands": pending})
+        return jsonify({"success": True})
 
     elif msg_type == "usage_report":
         session_id = data.get("session_id")
@@ -853,8 +851,7 @@ def agent_message():
                 requests=requests_count,
             )
 
-        pending = agent_mgr.get_pending_commands(machine_id)
-        return jsonify({"success": True, "pending_commands": pending})
+        return jsonify({"success": True})
 
     elif msg_type == "permission_request":
         session_id = data.get("session_id")
