@@ -2584,7 +2584,13 @@ do_fresh_install() {
                 local _pip_cmd=""
                 if command -v pip3 &>/dev/null; then _pip_cmd="pip3"; elif command -v pip &>/dev/null; then _pip_cmd="pip"; fi
                 if [ -n "$_pip_cmd" ]; then
-                    run_pip_as_user "$install_user" $_pip_cmd install --user --no-warn-script-location --no-index --find-links="$target_path/vendor" setuptools wheel 2>/dev/null || true
+                    # Install setuptools first (needed for setup.py based packages)
+                    run_pip_as_user "$install_user" $_pip_cmd install --user --no-warn-script-location --no-index --find-links="$target_path/vendor" setuptools 2>/dev/null || true
+                    # Install wheel separately (needed for bdist_wheel command)
+                    # If not in vendor, try from network (non-critical, only needed for building wheels)
+                    if ls "$target_path/vendor"/wheel*.whl 1>/dev/null 2>&1; then
+                        run_pip_as_user "$install_user" $_pip_cmd install --user --no-warn-script-location --no-index --find-links="$target_path/vendor" wheel 2>/dev/null || true
+                    fi
                 fi
             fi
             if command -v pip3 &>/dev/null; then
@@ -2937,7 +2943,13 @@ with open('$config_dir/config.json', 'w') as f:
                 local _pip_cmd=""
                 if command -v pip3 &>/dev/null; then _pip_cmd="pip3"; elif command -v pip &>/dev/null; then _pip_cmd="pip"; fi
                 if [ -n "$_pip_cmd" ]; then
-                    run_pip_as_user "$install_user" $_pip_cmd install --user --no-warn-script-location --no-index --find-links="$target_path/vendor" setuptools wheel 2>/dev/null || true
+                    # Install setuptools first (needed for setup.py based packages)
+                    run_pip_as_user "$install_user" $_pip_cmd install --user --no-warn-script-location --no-index --find-links="$target_path/vendor" setuptools 2>/dev/null || true
+                    # Install wheel separately (needed for bdist_wheel command)
+                    # If not in vendor, try from network (non-critical, only needed for building wheels)
+                    if ls "$target_path/vendor"/wheel*.whl 1>/dev/null 2>&1; then
+                        run_pip_as_user "$install_user" $_pip_cmd install --user --no-warn-script-location --no-index --find-links="$target_path/vendor" wheel 2>/dev/null || true
+                    fi
                 fi
             fi
             if command -v pip3 &>/dev/null; then
@@ -3067,9 +3079,15 @@ do_fresh_install_remote() {
             if ls vendor/setuptools*.whl 1>/dev/null 2>&1 || ls vendor/wheel*.whl 1>/dev/null 2>&1; then
                 echo 'Installing build tools (setuptools, wheel)...'
                 if command -v pip3 >/dev/null 2>&1; then
-                    pip3 install --user --no-warn-script-location --no-index --find-links=vendor setuptools wheel 2>/dev/null || true
+                    pip3 install --user --no-warn-script-location --no-index --find-links=vendor setuptools 2>/dev/null || true
+                    if ls vendor/wheel*.whl 1>/dev/null 2>&1; then
+                        pip3 install --user --no-warn-script-location --no-index --find-links=vendor wheel 2>/dev/null || true
+                    fi
                 elif command -v pip >/dev/null 2>&1; then
-                    pip install --user --no-warn-script-location --no-index --find-links=vendor setuptools wheel 2>/dev/null || true
+                    pip install --user --no-warn-script-location --no-index --find-links=vendor setuptools 2>/dev/null || true
+                    if ls vendor/wheel*.whl 1>/dev/null 2>&1; then
+                        pip install --user --no-warn-script-location --no-index --find-links=vendor wheel 2>/dev/null || true
+                    fi
                 fi
             fi
             if command -v pip3 >/dev/null 2>&1; then
@@ -3191,9 +3209,15 @@ do_upgrade_remote() {
             if ls vendor/setuptools*.whl 1>/dev/null 2>&1 || ls vendor/wheel*.whl 1>/dev/null 2>&1; then
                 echo 'Installing build tools (setuptools, wheel)...'
                 if command -v pip3 >/dev/null 2>&1; then
-                    pip3 install --user --no-warn-script-location --no-index --find-links=vendor setuptools wheel 2>/dev/null || true
+                    pip3 install --user --no-warn-script-location --no-index --find-links=vendor setuptools 2>/dev/null || true
+                    if ls vendor/wheel*.whl 1>/dev/null 2>&1; then
+                        pip3 install --user --no-warn-script-location --no-index --find-links=vendor wheel 2>/dev/null || true
+                    fi
                 elif command -v pip >/dev/null 2>&1; then
-                    pip install --user --no-warn-script-location --no-index --find-links=vendor setuptools wheel 2>/dev/null || true
+                    pip install --user --no-warn-script-location --no-index --find-links=vendor setuptools 2>/dev/null || true
+                    if ls vendor/wheel*.whl 1>/dev/null 2>&1; then
+                        pip install --user --no-warn-script-location --no-index --find-links=vendor wheel 2>/dev/null || true
+                    fi
                 fi
             fi
             if command -v pip3 >/dev/null 2>&1; then
