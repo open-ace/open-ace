@@ -443,11 +443,12 @@ fi
 if [ "$SKIP_DOWNLOAD" = false ] && [ -f "$PROJECT_DIR/requirements.txt" ]; then
     echo -e "${YELLOW}Downloading Python dependencies...${NC}"
 
-    # Create a temporary requirements file excluding psycopg2-binary
+    # Create a temporary requirements file excluding packages without wheels
     # psycopg2-binary causes segfault on some Linux systems (see Issue #38)
     # Users should install system package python3-psycopg2 instead
+    # psycogreen only has source distributions (no wheels), handled separately below
     TEMP_REQ=$(mktemp)
-    grep -v "psycopg2-binary" "$PROJECT_DIR/requirements.txt" > "$TEMP_REQ" || true
+    grep -v -e "psycopg2-binary" -e "psycogreen" "$PROJECT_DIR/requirements.txt" > "$TEMP_REQ" || true
 
     # Download dependencies
     # Note: --prefer-binary requires pip 20.3+, check version before using
@@ -495,6 +496,14 @@ if [ "$SKIP_DOWNLOAD" = false ] && [ -f "$PROJECT_DIR/requirements.txt" ]; then
     fi
 
     rm -f "$TEMP_REQ"
+
+    # Download psycogreen separately (only has source dist, no wheels)
+    if [ -n "$PIP_CMD" ]; then
+        echo -e "${YELLOW}Downloading psycogreen (source distribution)...${NC}"
+        $PIP_CMD download psycogreen -d "$VENDOR_DIR" --prefer-binary 2>/dev/null || \
+            $PIP_CMD download psycogreen -d "$VENDOR_DIR" || \
+            echo -e "${YELLOW}Warning: Failed to download psycogreen. Install will require network.${NC}"
+    fi
 
     # Count downloaded packages
     pkg_count=$(ls -1 "$VENDOR_DIR"/*.whl 2>/dev/null | wc -l | tr -d ' ')
