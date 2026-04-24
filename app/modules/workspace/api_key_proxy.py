@@ -312,9 +312,9 @@ class APIKeyProxyService:
         return success
 
     def generate_proxy_token(self, user_id: int, session_id: str, tenant_id: int,
-                             provider: str, expires_minutes: int = 5) -> str:
+                             provider: str, expires_minutes: int = 1440) -> str:
         """
-        Generate a short-lived proxy token for a remote agent session.
+        Generate a proxy token for a remote agent session.
 
         The token is a signed JSON payload containing user/session/tenant info
         that the agent presents when making LLM proxy calls.
@@ -324,7 +324,7 @@ class APIKeyProxyService:
             session_id: Session ID.
             tenant_id: Tenant ID for API key lookup.
             provider: LLM provider name.
-            expires_minutes: Token validity in minutes.
+            expires_minutes: Token validity in minutes (default 24 hours).
 
         Returns:
             Proxy token string.
@@ -389,6 +389,28 @@ class APIKeyProxyService:
             if datetime.utcnow() > exp:
                 logger.warning("Proxy token expired")
                 return None
+
+            # Check session is still active
+            session_id = payload.get("session_id")
+            if session_id:
+                try:
+                    from app.repositories.database import get_db_connection
+                    with get_db_connection() as conn:
+                        cursor = conn.cursor()
+                        cursor.execute(
+                            "SELECT status FROM agent_sessions WHERE session_id = %s",
+                            (session_id,),
+                        )
+                        row = cursor.fetchone()
+                        if not row:
+                            logger.warning("Proxy token session not found: %s", session_id[:8])
+                            return None
+                        status = row[0] if isinstance(row, (list, tuple)) else row.get("status")
+                        if status not in ("active", "paused"):
+                            logger.warning("Proxy token session not active: %s (status=%s)", session_id[:8], status)
+                            return None
+                except Exception as e:
+                    logger.warning("Failed to check session status for proxy token: %s", e)
 
             return payload
         except Exception as e:
