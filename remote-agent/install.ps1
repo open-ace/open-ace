@@ -145,7 +145,7 @@ Write-Host "[OK] Configuration saved" -ForegroundColor Green
 # Step 7: Register with server
 Write-Host "[INFO] Registering with Open ACE server..." -ForegroundColor Cyan
 
-$osType = "windows"
+$osType = "Windows"
 $osVersion = [System.Environment]::OSVersion.Version.ToString()
 $hostname = $env:COMPUTERNAME
 

@@ -221,7 +221,7 @@ log_success "Configuration saved"
 # Step 7: Register with server
 log_info "Registering with Open ACE server..."
 
-OS_TYPE=$(uname -s 2>/dev/null | tr '[:upper:]' '[:lower:]' || echo "unknown")
+OS_TYPE=$(uname -s 2>/dev/null || echo "unknown")
 OS_VERSION=$(uname -r 2>/dev/null || echo "unknown")
 
 CAPABILITIES=$(python3 -c "
