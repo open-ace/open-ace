@@ -77,18 +77,55 @@ export const RemoteMachineManagement: React.FC = () => {
     }
   };
 
-  const handleCopyToken = () => {
-    navigator.clipboard.writeText(generatedToken);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  // Fallback copy function for HTTP environments where clipboard API is blocked
+  const copyToClipboard = async (text: string): Promise<boolean> => {
+    try {
+      // Try modern clipboard API first (requires HTTPS or localhost)
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch {
+      // Clipboard API failed, try fallback
+    }
+
+    // Fallback: use execCommand with a temporary textarea
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.left = '-9999px';
+    textarea.style.top = '0';
+    textarea.setAttribute('readonly', '');
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+
+    try {
+      const success = document.execCommand('copy');
+      document.body.removeChild(textarea);
+      return success;
+    } catch {
+      document.body.removeChild(textarea);
+      return false;
+    }
   };
 
-  const handleCopyInstallCommand = () => {
+  const handleCopyToken = async () => {
+    const success = await copyToClipboard(generatedToken);
+    if (success) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const handleCopyInstallCommand = async () => {
     const server = window.location.origin;
     const cmd = `curl -fsSL ${server}/api/remote/agent/install.sh | bash -s -- --server ${server} --token ${generatedToken}`;
-    navigator.clipboard.writeText(cmd);
-    setCopiedInstall(true);
-    setTimeout(() => setCopiedInstall(false), 2000);
+    const success = await copyToClipboard(cmd);
+    if (success) {
+      setCopiedInstall(true);
+      setTimeout(() => setCopiedInstall(false), 2000);
+    }
   };
 
   const handleViewDetails = (machine: RemoteMachine) => {
