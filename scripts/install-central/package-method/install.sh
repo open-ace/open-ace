@@ -1507,13 +1507,31 @@ Defaults env_keep += \"OPENAI_API_KEY OPENAI_BASE_URL BAILIAN_CODING_PLAN_API_KE
 
     # Check if sudoers file already exists
     if [ -f "$sudoers_file" ]; then
+        # Check if both webui_path and fetch rules exist
+        local has_webui=false
+        local has_fetch=false
+        
         if grep -q "$webui_path" "$sudoers_file" 2>/dev/null; then
-            print_success "Sudoers rule already exists with correct path"
+            has_webui=true
+        fi
+        
+        # Check for fetch script rules (at least one should exist)
+        if grep -q "fetch_qwen.py\|fetch_claude.py\|fetch_openclaw.py" "$sudoers_file" 2>/dev/null; then
+            has_fetch=true
+        fi
+        
+        # If both exist, no need to update
+        if [ "$has_webui" = true ] && [ "$has_fetch" = true ]; then
+            print_success "Sudoers rules already exist with correct paths"
             return 0
         fi
+        
+        # Need to update - missing either webui or fetch rules
         # Check for old paths that need to be updated
         if grep -qE '/.*npm.*bin/qwen-code-webui|/usr/local/bin/qwen-code-webui' "$sudoers_file" 2>/dev/null; then
             print_info "Found old qwen-code-webui path in sudoers, updating to /usr/bin/qwen-code-webui..."
+        elif [ "$has_fetch" = false ]; then
+            print_info "Sudoers file missing fetch script rules, adding them..."
         else
             print_info "Updating existing sudoers file..."
         fi
@@ -1533,6 +1551,21 @@ Defaults env_keep += \"OPENAI_API_KEY OPENAI_BASE_URL BAILIAN_CODING_PLAN_API_KE
         print_error "Sudoers syntax error, rolling back..."
         rm -f "$sudoers_file"
         return 1
+    fi
+
+    # Install system-level Python dependencies for fetch scripts
+    # Fetch scripts run as root via sudo, so they need dependencies in system Python
+    print_info "Installing system-level Python dependencies for fetch scripts..."
+    local fetch_deps="requests websockets"
+    if command -v pip3 &>/dev/null; then
+        pip3 install $fetch_deps 2>/dev/null && print_success "System dependencies installed: $fetch_deps" || \
+            print_warning "Failed to install some system dependencies, fetch scripts may need manual setup"
+    elif command -v pip &>/dev/null; then
+        pip install $fetch_deps 2>/dev/null && print_success "System dependencies installed: $fetch_deps" || \
+            print_warning "Failed to install some system dependencies, fetch scripts may need manual setup"
+    else
+        print_warning "pip not found, skipping system dependencies installation"
+        print_info "Fetch scripts may need: pip install requests websockets"
     fi
 
     return 0
