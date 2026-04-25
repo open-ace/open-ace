@@ -8,6 +8,9 @@ screenshots/
 # Videos
 videos/
 
+# Large binary files
+*.tar.gz
+
 # Database
 *.db
 
