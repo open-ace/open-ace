@@ -137,9 +137,13 @@ if (Test-Path "$InstallDir\requirements.txt") {
 if ($InstallCli) {
     Write-Host "[INFO] Installing CLI tool: $InstallCli..." -ForegroundColor Cyan
     if (Get-Command npm -ErrorAction SilentlyContinue) {
+        # Temporarily relax error handling for npm (it may output warnings to stderr)
+        $prevErrorAction = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        
         switch ($InstallCli) {
             "qwen-code-cli" {
-                npm install -g "@qwen-code/qwen-code@latest" 2>$null
+                npm install -g "@qwen-code/qwen-code@latest" 2>&1 | Out-Null
                 if ($LASTEXITCODE -eq 0) {
                     Write-Host "[OK] qwen-code-cli installed" -ForegroundColor Green
                 } else {
@@ -147,7 +151,7 @@ if ($InstallCli) {
                 }
             }
             "claude-code" {
-                npm install -g "@anthropic-ai/claude-code@latest" 2>$null
+                npm install -g "@anthropic-ai/claude-code@latest" 2>&1 | Out-Null
                 if ($LASTEXITCODE -eq 0) {
                     Write-Host "[OK] Claude Code installed" -ForegroundColor Green
                 } else {
@@ -155,6 +159,9 @@ if ($InstallCli) {
                 }
             }
         }
+        
+        # Restore error handling
+        $ErrorActionPreference = $prevErrorAction
     } else {
         Write-Host "[WARN] npm not found. Skipping CLI installation." -ForegroundColor Yellow
     }

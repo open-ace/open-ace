@@ -259,8 +259,8 @@ class SessionProcess:
         """
         Gracefully stop the subprocess.
 
-        On POSIX: sends SIGTERM, then SIGKILL after the timeout.
-        On Windows: uses taskkill /T /F to kill the entire process tree.
+        Sends SIGTERM, then SIGKILL after the timeout if the process
+        does not exit.
         """
         if not self.is_running:
             return
@@ -268,36 +268,22 @@ class SessionProcess:
         self._stopped.set()
         logger.info("Stopping session %s (pid %s)", self.session_id, self.pid)
 
-        if os.name == "nt":
+        try:
+            self.process.terminate()
+        except OSError:
+            pass
+
+        try:
+            self.process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            logger.warning(
+                "Session %s did not exit gracefully, killing", self.session_id
+            )
             try:
-                subprocess.run(
-                    ["taskkill", "/T", "/F", "/PID", str(self.pid)],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    timeout=10,
-                )
-            except (OSError, subprocess.TimeoutExpired):
-                try:
-                    self.process.kill()
-                except OSError:
-                    pass
-        else:
-            try:
-                self.process.terminate()
+                self.process.kill()
+                self.process.wait(timeout=2.0)
             except OSError:
                 pass
-
-            try:
-                self.process.wait(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                logger.warning(
-                    "Session %s did not exit gracefully, killing", self.session_id
-                )
-                try:
-                    self.process.kill()
-                    self.process.wait(timeout=2.0)
-                except OSError:
-                    pass
 
     def wait_for_exit(self, timeout: float = 1.0) -> Optional[int]:
         """
