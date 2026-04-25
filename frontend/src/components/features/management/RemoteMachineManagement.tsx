@@ -54,6 +54,7 @@ export const RemoteMachineManagement: React.FC = () => {
   const [generatedToken, setGeneratedToken] = useState<string>('');
   const [copied, setCopied] = useState(false);
   const [copiedInstall, setCopiedInstall] = useState(false);
+  const [selectedOS, setSelectedOS] = useState<'linux' | 'windows' | 'macos'>('linux');
 
   const [selectedMachine, setSelectedMachine] = useState<RemoteMachine | null>(null);
   const [showDetailsDialog, setShowDetailsDialog] = useState(false);
@@ -120,11 +121,37 @@ export const RemoteMachineManagement: React.FC = () => {
 
   const handleCopyInstallCommand = async () => {
     const server = window.location.origin;
-    const cmd = `curl -fsSL ${server}/api/remote/agent/install.sh | bash -s -- --server ${server} --token ${generatedToken}`;
+    let cmd = '';
+    switch (selectedOS) {
+      case 'linux':
+        cmd = `curl -fsSL ${server}/api/remote/agent/install.sh | bash -s -- --server ${server} --token ${generatedToken}`;
+        break;
+      case 'macos':
+        cmd = `curl -fsSL ${server}/api/remote/agent/install.sh | bash -s -- --server ${server} --token ${generatedToken}`;
+        break;
+      case 'windows':
+        cmd = `powershell -Command "Invoke-WebRequest -Uri '${server}/api/remote/agent/install.ps1' -OutFile 'install.ps1'; powershell -ExecutionPolicy Bypass -File install.ps1 -Server '${server}' -Token '${generatedToken}'"`;
+        break;
+    }
     const success = await copyToClipboard(cmd);
     if (success) {
       setCopiedInstall(true);
       setTimeout(() => setCopiedInstall(false), 2000);
+    }
+  };
+
+  // Generate install command based on selected OS
+  const getInstallCommand = () => {
+    const server = window.location.origin;
+    switch (selectedOS) {
+      case 'linux':
+        return `curl -fsSL ${server}/api/remote/agent/install.sh | bash -s -- --server ${server} --token ${generatedToken}`;
+      case 'macos':
+        return `curl -fsSL ${server}/api/remote/agent/install.sh | bash -s -- --server ${server} --token ${generatedToken}`;
+      case 'windows':
+        return `powershell -Command "Invoke-WebRequest -Uri '${server}/api/remote/agent/install.ps1' -OutFile 'install.ps1'; powershell -ExecutionPolicy Bypass -File install.ps1 -Server '${server}' -Token '${generatedToken}'"`;
+      default:
+        return '';
     }
   };
 
@@ -345,11 +372,39 @@ export const RemoteMachineManagement: React.FC = () => {
           <p className="text-muted mb-1">
             <strong>{t('installCommand', language)}</strong>
           </p>
+
+          {/* OS Selector */}
+          <div className="mb-2">
+            <div className="btn-group w-100" role="group">
+              <button
+                type="button"
+                className={`btn ${selectedOS === 'linux' ? 'btn-primary' : 'btn-outline-primary'}`}
+                onClick={() => setSelectedOS('linux')}
+              >
+                <i className="bi bi-linux me-1" />Linux
+              </button>
+              <button
+                type="button"
+                className={`btn ${selectedOS === 'macos' ? 'btn-primary' : 'btn-outline-primary'}`}
+                onClick={() => setSelectedOS('macos')}
+              >
+                <i className="bi bi-apple me-1" />macOS
+              </button>
+              <button
+                type="button"
+                className={`btn ${selectedOS === 'windows' ? 'btn-primary' : 'btn-outline-primary'}`}
+                onClick={() => setSelectedOS('windows')}
+              >
+                <i className="bi bi-windows me-1" />Windows
+              </button>
+            </div>
+          </div>
+
           <div className="input-group">
             <input
               type="text"
               className="form-control font-monospace"
-              value={`curl -fsSL ${window.location.origin}/api/remote/agent/install.sh | bash -s -- --server ${window.location.origin} --token ${generatedToken}`}
+              value={getInstallCommand()}
               readOnly
             />
             <Button variant="outline-secondary" onClick={handleCopyInstallCommand}>

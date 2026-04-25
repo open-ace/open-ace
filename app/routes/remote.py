@@ -700,11 +700,20 @@ AGENT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path
 
 @remote_bp.route("/agent/install.sh", methods=["GET"])
 def agent_install_script():
-    """Serve the agent installation shell script."""
+    """Serve the agent installation shell script (Linux/macOS)."""
     install_sh = os.path.join(AGENT_DIR, "install.sh")
     if not os.path.isfile(install_sh):
         return jsonify({"error": "install.sh not found"}), 404
     return Response(open(install_sh).read(), mimetype="text/x-shellscript")
+
+
+@remote_bp.route("/agent/install.ps1", methods=["GET"])
+def agent_install_script_windows():
+    """Serve the agent installation PowerShell script (Windows)."""
+    install_ps1 = os.path.join(AGENT_DIR, "install.ps1")
+    if not os.path.isfile(install_ps1):
+        return jsonify({"error": "install.ps1 not found"}), 404
+    return Response(open(install_ps1).read(), mimetype="text/plain")
 
 
 @remote_bp.route("/agent/files/<path:filename>", methods=["GET"])
