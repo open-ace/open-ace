@@ -130,7 +130,7 @@ export const RemoteMachineManagement: React.FC = () => {
         cmd = `curl -fsSL ${server}/api/remote/agent/install.sh | bash -s -- --server ${server} --token ${generatedToken}`;
         break;
       case 'windows':
-        cmd = `powershell -Command "Invoke-WebRequest -Uri '${server}/api/remote/agent/install.ps1' -OutFile 'install.ps1'; powershell -ExecutionPolicy Bypass -File install.ps1 -Server '${server}' -Token '${generatedToken}'"`;
+        cmd = `powershell -Command "Invoke-WebRequest -Uri '${server}/api/remote/agent/install.ps1' -OutFile 'install.ps1'; powershell -ExecutionPolicy Bypass -File install.ps1 -ServerUrl '${server}' -RegistrationToken '${generatedToken}'"`;
         break;
     }
     const success = await copyToClipboard(cmd);
@@ -149,7 +149,7 @@ export const RemoteMachineManagement: React.FC = () => {
       case 'macos':
         return `curl -fsSL ${server}/api/remote/agent/install.sh | bash -s -- --server ${server} --token ${generatedToken}`;
       case 'windows':
-        return `powershell -Command "Invoke-WebRequest -Uri '${server}/api/remote/agent/install.ps1' -OutFile 'install.ps1'; powershell -ExecutionPolicy Bypass -File install.ps1 -Server '${server}' -Token '${generatedToken}'"`;
+        return `powershell -Command "Invoke-WebRequest -Uri '${server}/api/remote/agent/install.ps1' -OutFile 'install.ps1'; powershell -ExecutionPolicy Bypass -File install.ps1 -ServerUrl '${server}' -RegistrationToken '${generatedToken}'"`;
       default:
         return '';
     }

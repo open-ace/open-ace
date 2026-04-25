@@ -27,6 +27,13 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Trap unhandled errors to prevent silent exits
+trap {
+    Write-Host "[ERROR] Script failed: $_" -ForegroundColor Red
+    Write-Host $_.ScriptStackTrace -ForegroundColor Red
+    exit 1
+}
+
 Write-Host "Open ACE Remote Agent Installer" -ForegroundColor Blue
 Write-Host "================================" -ForegroundColor Blue
 Write-Host "Server: $ServerUrl"
@@ -74,17 +81,19 @@ $adapterFiles = @("__init__.py", "base.py", "qwen_code.py", "claude_code.py", "o
 
 foreach ($file in $files) {
     try {
-        Invoke-WebRequest -Uri "$agentUrl/$file" -OutFile "$InstallDir\$file" -ErrorAction Stop
+        Invoke-WebRequest -Uri "$agentUrl/$file" -OutFile "$InstallDir\$file" -UseBasicParsing -ErrorAction Stop
+        Write-Host "  [OK] Downloaded $file" -ForegroundColor Green
     } catch {
-        Write-Host "[WARN] Could not download $file" -ForegroundColor Yellow
+        Write-Host "[WARN] Could not download $file : $_" -ForegroundColor Yellow
     }
 }
 
 foreach ($file in $adapterFiles) {
     try {
-        Invoke-WebRequest -Uri "$agentUrl/cli_adapters/$file" -OutFile "$InstallDir\cli_adapters\$file" -ErrorAction Stop
+        Invoke-WebRequest -Uri "$agentUrl/cli_adapters/$file" -OutFile "$InstallDir\cli_adapters\$file" -UseBasicParsing -ErrorAction Stop
+        Write-Host "  [OK] Downloaded cli_adapters/$file" -ForegroundColor Green
     } catch {
-        Write-Host "[WARN] Could not download cli_adapters/$file" -ForegroundColor Yellow
+        Write-Host "[WARN] Could not download cli_adapters/$file : $_" -ForegroundColor Yellow
     }
 }
 
@@ -94,7 +103,10 @@ Write-Host "[OK] Agent files installed" -ForegroundColor Green
 # Step 4: Install Python dependencies
 Write-Host "[INFO] Installing Python dependencies..." -ForegroundColor Cyan
 if (Test-Path "$InstallDir\requirements.txt") {
-    python -m pip install -q -r "$InstallDir\requirements.txt"
+    $pipResult = python -m pip install -q -r "$InstallDir\requirements.txt" 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[WARN] pip install failed: $pipResult" -ForegroundColor Yellow
+    }
 }
 Write-Host "[OK] Dependencies installed" -ForegroundColor Green
 
