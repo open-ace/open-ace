@@ -63,6 +63,11 @@ class SSOManager:
                 if self.db.is_postgresql
                 else "INTEGER PRIMARY KEY AUTOINCREMENT"
             )
+            bool_true = (
+                "BOOLEAN DEFAULT TRUE"
+                if self.db.is_postgresql
+                else "INTEGER DEFAULT 1"
+            )
 
             # SSO providers table
             cursor.execute(
@@ -73,7 +78,7 @@ class SSOManager:
                     provider_type TEXT NOT NULL,
                     config TEXT NOT NULL,
                     tenant_id INTEGER,
-                    is_active INTEGER DEFAULT 1,
+                    is_active {bool_true},
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (tenant_id) REFERENCES tenants(id)

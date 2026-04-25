@@ -161,6 +161,7 @@ class PromptLibrary:
 
         # Use SERIAL for PostgreSQL, AUTOINCREMENT for SQLite
         id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
+        bool_false = "BOOLEAN DEFAULT FALSE" if is_postgresql() else "INTEGER DEFAULT 0"
 
         # Create prompt_templates table
         cursor.execute(
@@ -175,8 +176,8 @@ class PromptLibrary:
                 tags TEXT,
                 author_id INTEGER,
                 author_name TEXT,
-                is_public INTEGER DEFAULT 0,
-                is_featured INTEGER DEFAULT 0,
+                is_public {bool_false},
+                is_featured {bool_false},
                 use_count INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

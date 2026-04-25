@@ -144,6 +144,8 @@ class AlertNotifier:
 
         # Use SERIAL for PostgreSQL, AUTOINCREMENT for SQLite
         id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
+        bool_true = "BOOLEAN DEFAULT TRUE" if is_postgresql() else "INTEGER DEFAULT 1"
+        bool_false = "BOOLEAN DEFAULT FALSE" if is_postgresql() else "INTEGER DEFAULT 0"
 
         # Create alerts table
         cursor.execute(
@@ -160,7 +162,7 @@ class AlertNotifier:
                 tool_name TEXT,
                 metadata TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                read INTEGER DEFAULT 0,
+                read {bool_false},
                 action_url TEXT,
                 action_text TEXT
             )
@@ -172,8 +174,8 @@ class AlertNotifier:
             """
             CREATE TABLE IF NOT EXISTS notification_preferences (
                 user_id INTEGER PRIMARY KEY,
-                email_enabled INTEGER DEFAULT 1,
-                push_enabled INTEGER DEFAULT 1,
+                email_enabled {bool_true},
+                push_enabled {bool_true},
                 webhook_url TEXT,
                 alert_types TEXT,
                 min_severity TEXT DEFAULT 'warning'

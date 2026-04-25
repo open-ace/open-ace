@@ -80,6 +80,7 @@ class APIKeyProxyService:
         cursor = conn.cursor()
 
         id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
+        bool_true = "BOOLEAN DEFAULT TRUE" if is_postgresql() else "INTEGER DEFAULT 1"
 
         # api_key_store table is created by migration, but ensure it exists for
         # environments that don't run migrations
@@ -93,7 +94,7 @@ class APIKeyProxyService:
                 encrypted_key TEXT NOT NULL,
                 key_hash TEXT NOT NULL,
                 base_url TEXT,
-                is_active INTEGER DEFAULT 1,
+                is_active {bool_true},
                 created_by INTEGER,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

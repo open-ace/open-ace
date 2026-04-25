@@ -282,6 +282,8 @@ class CollaborationManager:
 
         # Use SERIAL for PostgreSQL, AUTOINCREMENT for SQLite
         id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
+        bool_true = "BOOLEAN DEFAULT TRUE" if is_postgresql() else "INTEGER DEFAULT 1"
+        bool_false = "BOOLEAN DEFAULT FALSE" if is_postgresql() else "INTEGER DEFAULT 0"
 
         # Create teams table
         cursor.execute(
@@ -328,8 +330,8 @@ class CollaborationManager:
                 target_id INTEGER,
                 target_name TEXT,
                 expires_at TIMESTAMP,
-                allow_comments INTEGER DEFAULT 1,
-                allow_copy INTEGER DEFAULT 1,
+                allow_comments {bool_true},
+                allow_copy {bool_true},
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 access_count INTEGER DEFAULT 0,
                 last_accessed TIMESTAMP
@@ -370,7 +372,7 @@ class CollaborationManager:
                 tags TEXT,
                 author_id INTEGER,
                 author_name TEXT,
-                is_published INTEGER DEFAULT 0,
+                is_published {bool_false},
                 view_count INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
