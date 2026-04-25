@@ -450,6 +450,10 @@ class ProcessExecutor:
         adapter_env = adapter.get_env_vars(proxy_url, proxy_token)
         env.update(adapter_env)
 
+        # Force UTF-8 encoding for subprocess I/O (important on Windows)
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["PYTHONUTF8"] = "1"
+
         # Also set generic Open ACE env vars that any tool can read
         env["OPENACE_PROXY_URL"] = proxy_url
         env["OPENACE_PROXY_TOKEN"] = proxy_token
