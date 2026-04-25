@@ -42,13 +42,11 @@ Write-Host "Install CLI: $InstallCli"
 Write-Host "Install dir: $InstallDir"
 Write-Host ""
 
-# Remove trailing slash
 $ServerUrl = $ServerUrl.TrimEnd('/')
 
 # Step 1: Check prerequisites
 Write-Host "[INFO] Checking prerequisites..." -ForegroundColor Cyan
 
-# Check Python 3
 try {
     $pythonVersion = python --version 2>&1
     Write-Host "[OK] Python found: $pythonVersion" -ForegroundColor Green
@@ -57,7 +55,6 @@ try {
     exit 1
 }
 
-# Check pip
 try {
     python -m pip --version | Out-Null
     Write-Host "[OK] pip found" -ForegroundColor Green
@@ -80,20 +77,38 @@ $files = @("agent.py", "config.py", "executor.py", "system_info.py", "requiremen
 $adapterFiles = @("__init__.py", "base.py", "qwen_code.py", "claude_code.py", "openclaw.py")
 
 foreach ($file in $files) {
-    try {
-        Invoke-WebRequest -Uri "$agentUrl/$file" -OutFile "$InstallDir\$file" -UseBasicParsing -ErrorAction Stop
+    $downloaded = $false
+    for ($retry = 1; $retry -le 3; $retry++) {
+        try {
+            Start-BitsTransfer -Source "$agentUrl/$file" -Destination "$InstallDir\$file" -ErrorAction Stop | Out-Null
+            $downloaded = $true
+            break
+        } catch {
+            Start-Sleep -Milliseconds 500
+        }
+    }
+    if ($downloaded) {
         Write-Host "  [OK] Downloaded $file" -ForegroundColor Green
-    } catch {
-        Write-Host "[WARN] Could not download $file : $_" -ForegroundColor Yellow
+    } else {
+        Write-Host "[WARN] Could not download $file after 3 retries" -ForegroundColor Yellow
     }
 }
 
 foreach ($file in $adapterFiles) {
-    try {
-        Invoke-WebRequest -Uri "$agentUrl/cli_adapters/$file" -OutFile "$InstallDir\cli_adapters\$file" -UseBasicParsing -ErrorAction Stop
+    $downloaded = $false
+    for ($retry = 1; $retry -le 3; $retry++) {
+        try {
+            Start-BitsTransfer -Source "$agentUrl/cli_adapters/$file" -Destination "$InstallDir\cli_adapters\$file" -ErrorAction Stop | Out-Null
+            $downloaded = $true
+            break
+        } catch {
+            Start-Sleep -Milliseconds 500
+        }
+    }
+    if ($downloaded) {
         Write-Host "  [OK] Downloaded cli_adapters/$file" -ForegroundColor Green
-    } catch {
-        Write-Host "[WARN] Could not download cli_adapters/$file : $_" -ForegroundColor Yellow
+    } else {
+        Write-Host "[WARN] Could not download cli_adapters/$file after 3 retries" -ForegroundColor Yellow
     }
 }
 
@@ -103,12 +118,20 @@ Write-Host "[OK] Agent files installed" -ForegroundColor Green
 # Step 4: Install Python dependencies
 Write-Host "[INFO] Installing Python dependencies..." -ForegroundColor Cyan
 if (Test-Path "$InstallDir\requirements.txt") {
-    $pipResult = python -m pip install -q -r "$InstallDir\requirements.txt" 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "[WARN] pip install failed: $pipResult" -ForegroundColor Yellow
+    $pipOutFile = "$env:TEMP\pip_install_out_$([System.Guid]::NewGuid()).log"
+    $pipErrFile = "$env:TEMP\pip_install_err_$([System.Guid]::NewGuid()).log"
+    $pipProc = Start-Process -FilePath "python" -ArgumentList "-m", "pip", "install", "-r", "$InstallDir\requirements.txt" -NoNewWindow -Wait -RedirectStandardOutput $pipOutFile -RedirectStandardError $pipErrFile -PassThru
+    if ($pipProc.ExitCode -ne 0) {
+        Write-Host "[WARN] pip install failed (exit code $($pipProc.ExitCode))" -ForegroundColor Yellow
+        if (Test-Path $pipErrFile) { Get-Content $pipErrFile }
+    } else {
+        Write-Host "[OK] Dependencies installed" -ForegroundColor Green
     }
+    Remove-Item $pipOutFile -ErrorAction SilentlyContinue
+    Remove-Item $pipErrFile -ErrorAction SilentlyContinue
+} else {
+    Write-Host "[WARN] requirements.txt not found, skipping" -ForegroundColor Yellow
 }
-Write-Host "[OK] Dependencies installed" -ForegroundColor Green
 
 # Step 5: Optionally install CLI tool
 if ($InstallCli) {
@@ -116,7 +139,7 @@ if ($InstallCli) {
     if (Get-Command npm -ErrorAction SilentlyContinue) {
         switch ($InstallCli) {
             "qwen-code-cli" {
-                npm install -g "@anthropic-ai/qwen-code@latest" 2>$null
+                npm install -g "@qwen-code/qwen-code@latest" 2>$null
                 if ($LASTEXITCODE -eq 0) {
                     Write-Host "[OK] qwen-code-cli installed" -ForegroundColor Green
                 } else {
@@ -167,8 +190,7 @@ $capabilities = @{
     cpu_cores = [System.Environment]::ProcessorCount
 }
 
-# Check installed CLIs
-foreach ($cli in @("qwen-code", "claude", "openclaw")) {
+foreach ($cli in @("qwen", "claude", "openclaw")) {
     $cmd = Get-Command $cli -ErrorAction SilentlyContinue
     $capabilities["${cli}_installed"] = ($null -ne $cmd)
 }
@@ -185,11 +207,31 @@ $body = @{
 } | ConvertTo-Json
 
 try {
-    $response = Invoke-RestMethod -Uri "$ServerUrl/api/remote/agent/register" -Method Post -Body $body -ContentType "application/json"
+    $bodyFile = "$env:TEMP\agent_register_$([System.Guid]::NewGuid()).json"
+    $body | Out-File -FilePath $bodyFile -Encoding utf8 -NoNewline
+
+    $responseFile = "$env:TEMP\agent_response_$([System.Guid]::NewGuid()).json"
+    $curlPath = "$env:SYSTEMROOT\System32\curl.exe"
+    & $curlPath -s -X POST -H "Content-Type: application/json" -d "@$bodyFile" -o $responseFile "$ServerUrl/api/remote/agent/register" 2>&1 | Out-Null
+
+    if (-not (Test-Path $responseFile)) {
+        Write-Host "[ERROR] Registration failed: no response from server" -ForegroundColor Red
+        exit 1
+    }
+
+    $responseRaw = Get-Content $responseFile -Raw
+    $response = $responseRaw | ConvertFrom-Json
+    Remove-Item $bodyFile -ErrorAction SilentlyContinue
+    Remove-Item $responseFile -ErrorAction SilentlyContinue
+
     if ($response.success) {
         Write-Host "[OK] Machine registered successfully!" -ForegroundColor Green
+    } elseif ($response.error) {
+        Write-Host "[ERROR] Registration failed: $($response.error)" -ForegroundColor Red
+        Write-Host "       This may happen if the machine is already registered. Delete it from the server first to re-register." -ForegroundColor Yellow
+        exit 1
     } else {
-        Write-Host "[ERROR] Registration failed" -ForegroundColor Red
+        Write-Host "[ERROR] Registration failed. Response: $responseRaw" -ForegroundColor Red
         exit 1
     }
 } catch {
@@ -197,16 +239,35 @@ try {
     exit 1
 }
 
-# Step 8: Install as Windows service (optional)
-Write-Host "[INFO] To run as a service, use Task Scheduler or NSSM:" -ForegroundColor Cyan
-Write-Host "  nssm install OpenACEAgent python $InstallDir\agent.py"
-Write-Host ""
+# Step 8: Set up auto-start via Windows Task Scheduler
+Write-Host "[INFO] Setting up auto-start..." -ForegroundColor Cyan
+try {
+    $taskName = "OpenACEAgent"
+    $action = New-ScheduledTaskAction -Execute "python" -Argument "`"$InstallDir\agent.py`"" -WorkingDirectory $InstallDir
+    $trigger = New-ScheduledTaskTrigger -AtStartup
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 0)
+    $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Description "Open ACE Remote Agent - Auto-start" -Force | Out-Null
+    Write-Host "[OK] Auto-start configured (Task Scheduler)" -ForegroundColor Green
+} catch {
+    Write-Host "[WARN] Failed to configure auto-start: $_" -ForegroundColor Yellow
+    Write-Host "       Manual setup: nssm install OpenACEAgent python $InstallDir\agent.py" -ForegroundColor Yellow
+}
 
+# Step 9: Start the agent immediately
+Write-Host "[INFO] Starting Open ACE Remote Agent..." -ForegroundColor Cyan
+$agentProc = Start-Process -FilePath "python" -ArgumentList "`"$InstallDir\agent.py`"" -WorkingDirectory $InstallDir -WindowStyle Hidden -PassThru
+if ($agentProc -and $agentProc.Id) {
+    Write-Host "[OK] Agent started (PID: $($agentProc.Id))" -ForegroundColor Green
+} else {
+    Write-Host "[WARN] Failed to start agent. Start manually: python $InstallDir\agent.py" -ForegroundColor Yellow
+}
+
+Write-Host ""
 Write-Host "[OK] ============================================" -ForegroundColor Green
 Write-Host "[OK] Open ACE Remote Agent installed successfully!" -ForegroundColor Green
 Write-Host "[OK] ============================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "Machine ID: $machineId"
 Write-Host "Config: $InstallDir\config.json"
-Write-Host ""
-Write-Host "To start the agent: python $InstallDir\agent.py"
+Write-Host "Agent PID: $($agentProc.Id)"

@@ -447,12 +447,14 @@ class RemoteAgent:
 def setup_logging(level: str = "INFO") -> None:
     """Configure logging for the agent daemon."""
     numeric_level = getattr(logging, level.upper(), logging.INFO)
+    log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent.log")
     logging.basicConfig(
         level=numeric_level,
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
         handlers=[
             logging.StreamHandler(sys.stdout),
+            logging.FileHandler(log_file, encoding="utf-8"),
         ],
     )
 

@@ -488,6 +488,15 @@ class ProcessExecutor:
             Path.home() / "node_modules" / ".bin" / exe_name,
         ]
 
+        # Windows npm global bin path
+        if os.name == "nt":
+            npm_bin = Path(os.environ.get("APPDATA", "")) / "npm"
+            candidates.extend([
+                npm_bin / exe_name,
+                npm_bin / f"{exe_name}.cmd",
+                npm_bin / f"{exe_name}.bat",
+            ])
+
         for candidate in candidates:
             if candidate.exists() and os.access(str(candidate), os.X_OK):
                 return str(candidate)
@@ -566,10 +575,17 @@ class ProcessExecutor:
                 cwd=project_path,
                 env=env,
                 # Create a new process group so we can terminate the tree
-                start_new_session=True,
+                start_new_session=os.name != "nt",
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
             )
         except (OSError, subprocess.SubprocessError) as e:
-            msg = f"Failed to start CLI process: {e}"
+            err_msg = str(e)
+            if os.name == "nt":
+                try:
+                    err_msg = str(e).encode("latin-1").decode("gbk")
+                except (UnicodeDecodeError, UnicodeEncodeError):
+                    pass
+            msg = f"Failed to start CLI process: {err_msg}"
             logger.error(msg)
             return {"success": False, "error": msg}
 
@@ -769,10 +785,17 @@ class ProcessExecutor:
                     stderr=subprocess.PIPE,
                     cwd=old_session.project_path,
                     env=old_session.env,
-                    start_new_session=True,
+                    start_new_session=os.name != "nt",
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
                 )
             except (OSError, subprocess.SubprocessError) as e:
-                return {"success": False, "error": f"Failed to restart CLI: {e}"}
+                err_msg = str(e)
+                if os.name == "nt":
+                    try:
+                        err_msg = str(e).encode("latin-1").decode("gbk")
+                    except (UnicodeDecodeError, UnicodeEncodeError):
+                        pass
+                return {"success": False, "error": f"Failed to restart CLI: {err_msg}"}
 
             new_session = SessionProcess(
                 session_id=session_id,

@@ -289,7 +289,7 @@ OS_TYPE=$(uname -s 2>/dev/null || echo "unknown")
 OS_VERSION=$(uname -r 2>/dev/null || echo "unknown")
 
 CAPABILITIES=$(python3 -c "
-import json, os, platform
+import json, os, platform, shutil
 caps = {
     'os': platform.system().lower(),
     'os_version': platform.release(),
@@ -297,7 +297,6 @@ caps = {
     'python_version': platform.python_version(),
 }
 try:
-    import shutil
     total, used, free = shutil.disk_usage('/')
     caps['disk_total_gb'] = round(total / (1024**3), 1)
     caps['disk_free_gb'] = round(free / (1024**3), 1)
@@ -308,7 +307,7 @@ try:
 except:
     pass
 # Check installed CLIs
-for cli in ['qwen-code', 'claude', 'openclaw']:
+for cli in ['qwen', 'claude', 'openclaw']:
     caps[f'{cli}_installed'] = shutil.which(cli) is not None
 print(json.dumps(caps))
 " 2>/dev/null || echo "{}")
