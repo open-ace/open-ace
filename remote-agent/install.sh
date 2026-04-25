@@ -179,6 +179,68 @@ log_success "Dependencies installed"
 # Step 5: Optionally install CLI tool
 if [[ -n "$INSTALL_CLI" ]]; then
     log_info "Installing CLI tool: $INSTALL_CLI..."
+
+    # Check if npm is available, if not try to install Node.js
+    if ! command -v npm &>/dev/null; then
+        log_info "npm not found, attempting to install Node.js..."
+
+        # Detect OS and install Node.js
+        if [ -f /etc/os-release ]; then
+            . /etc/os-release
+            case "$ID" in
+                rhel|centos|fedora|rocky|almalinux|ol)
+                    # RHEL/CentOS/Rocky/Alma - use nodesource RPM repo
+                    log_info "Installing Node.js via NodeSource (RPM)..."
+                    if command -v curl &>/dev/null; then
+                        curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+                    elif command -v wget &>/dev/null; then
+                        wget -qO- https://rpm.nodesource.com/setup_20.x | bash -
+                    fi
+                    if command -v yum &>/dev/null; then
+                        yum install -y nodejs
+                    elif command -v dnf &>/dev/null; then
+                        dnf install -y nodejs
+                    fi
+                    ;;
+                debian|ubuntu|linuxmint|pop)
+                    # Debian/Ubuntu - use nodesource APT repo
+                    log_info "Installing Node.js via NodeSource (APT)..."
+                    if command -v curl &>/dev/null; then
+                        curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+                    elif command -v wget &>/dev/null; then
+                        wget -qO- https://deb.nodesource.com/setup_20.x | bash -
+                    fi
+                    apt-get install -y nodejs
+                    ;;
+                alpine)
+                    # Alpine Linux - use apk
+                    log_info "Installing Node.js via apk..."
+                    apk add --no-cache nodejs npm
+                    ;;
+                arch|manjaro)
+                    # Arch Linux - use pacman
+                    log_info "Installing Node.js via pacman..."
+                    pacman -Sy --noconfirm nodejs npm
+                    ;;
+                sles|suse)
+                    # SUSE - use zypper
+                    log_info "Installing Node.js via zypper..."
+                    zypper install -y nodejs20
+                    ;;
+                *)
+                    log_warn "Unsupported OS: $ID. Cannot auto-install Node.js."
+                    log_warn "Please install Node.js manually and then run:"
+                    log_warn "  npm install -g @qwen-code/qwen-code@latest"
+                    ;;
+            esac
+        else
+            log_warn "Cannot detect OS. Cannot auto-install Node.js."
+            log_warn "Please install Node.js manually and then run:"
+            log_warn "  npm install -g @qwen-code/qwen-code@latest"
+        fi
+    fi
+
+    # Now try to install the CLI tool
     if command -v npm &>/dev/null; then
         case "$INSTALL_CLI" in
             qwen-code-cli)
@@ -196,7 +258,9 @@ if [[ -n "$INSTALL_CLI" ]]; then
                 ;;
         esac
     else
-        log_warn "npm not found. Skipping CLI installation. Install it manually."
+        log_warn "npm still not available after attempting Node.js installation."
+        log_warn "Please install Node.js manually and then run:"
+        log_warn "  npm install -g @qwen-code/qwen-code@latest"
     fi
 fi
 
