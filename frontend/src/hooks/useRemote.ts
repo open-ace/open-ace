@@ -41,6 +41,7 @@ export function useDeregisterMachine() {
     mutationFn: (machineId: string) => remoteApi.deregisterMachine(machineId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['remote', 'machines'] });
+      queryClient.invalidateQueries({ queryKey: ['remote', 'available-machines'] });
     },
   });
 }
@@ -54,6 +55,7 @@ export function useAssignUser() {
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['remote', 'machines', variables.machineId, 'users'] });
       queryClient.invalidateQueries({ queryKey: ['remote', 'machines'] });
+      queryClient.invalidateQueries({ queryKey: ['remote', 'available-machines'] });
     },
   });
 }
@@ -67,6 +69,7 @@ export function useRevokeUser() {
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['remote', 'machines', variables.machineId, 'users'] });
       queryClient.invalidateQueries({ queryKey: ['remote', 'machines'] });
+      queryClient.invalidateQueries({ queryKey: ['remote', 'available-machines'] });
     },
   });
 }

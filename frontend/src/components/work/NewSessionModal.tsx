@@ -64,7 +64,8 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
     setSelectedMachineId(machineId);
     const machine = machines.find((m) => m.machine_id === machineId);
     if (machine) {
-      setProjectPath(machine.work_dir || '/root/workspace');
+      const isWindows = (machine.os_type || '').toLowerCase().includes('windows');
+      setProjectPath(machine.work_dir || (isWindows ? 'C:\\workspace' : '/root/workspace'));
     }
   };
 
@@ -226,7 +227,7 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
                 className="form-control"
                 value={projectPath}
                 onChange={(e) => setProjectPath(e.target.value)}
-                placeholder="/root/workspace"
+                placeholder={selectedMachine && (selectedMachine.os_type || '').toLowerCase().includes('windows') ? 'C:\\workspace' : '/root/workspace'}
               />
               <div className="form-text text-muted small">
                 {t('projectPathHint', language)}

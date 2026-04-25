@@ -58,7 +58,7 @@ const PageLoader: React.FC = () => {
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 5 * 60 * 1000, // 5 minutes
+      staleTime: 1 * 60 * 1000, // 1 minute
       retry: 1,
       refetchOnWindowFocus: true,
     },
