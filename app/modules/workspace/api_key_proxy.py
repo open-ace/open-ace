@@ -170,7 +170,7 @@ class APIKeyProxyService:
                         encrypted_key = EXCLUDED.encrypted_key,
                         key_hash = EXCLUDED.key_hash,
                         base_url = EXCLUDED.base_url,
-                        is_active = 1,
+                        is_active = TRUE,
                         updated_at = CURRENT_TIMESTAMP
                 """,
                     (tenant_id, provider, key_name, encrypted, key_hash, base_url, created_by),
@@ -184,7 +184,7 @@ class APIKeyProxyService:
                         encrypted_key = excluded.encrypted_key,
                         key_hash = excluded.key_hash,
                         base_url = excluded.base_url,
-                        is_active = 1,
+                        is_active = TRUE,
                         updated_at = CURRENT_TIMESTAMP
                 """,
                     (tenant_id, provider, key_name, encrypted, key_hash, base_url, created_by),
@@ -223,7 +223,7 @@ class APIKeyProxyService:
             cursor.execute(
                 f"""
                 SELECT encrypted_key, base_url FROM api_key_store
-                WHERE tenant_id = {_param()} AND provider = {_param()} AND is_active = 1
+                WHERE tenant_id = {_param()} AND provider = {_param()} AND is_active = TRUE
                 LIMIT 1
             """,
                 (tenant_id, provider),
