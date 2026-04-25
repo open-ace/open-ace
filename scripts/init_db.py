@@ -2,7 +2,7 @@
 """
 Initialize Database Admin User
 
-This script creates a default admin user.
+This script creates a default admin user and default tenant.
 Database schema is created by schema.sql during installation.
 """
 
@@ -19,11 +19,82 @@ if script_dir not in sys.path:
 from shared import db
 
 
+def create_default_tenant(
+    name: str = "Default",
+    slug: str = "default",
+    tenant_id: int = 1,
+) -> bool:
+    """Create a default tenant with id=1 for remote agent registration."""
+    conn = db.get_connection()
+    cursor = conn.cursor()
+
+    # Check if tenant already exists
+    cursor.execute(
+        db._convert_sql("SELECT id FROM tenants WHERE id = ?"),
+        (tenant_id,)
+    )
+    existing = cursor.fetchone()
+    if existing:
+        print(f"Default tenant (id={tenant_id}) already exists")
+        conn.close()
+        return True
+
+    try:
+        # Create tenant
+        cursor.execute(
+            db._convert_sql("""
+                INSERT INTO tenants (id, name, slug, status, plan)
+                VALUES (?, ?, ?, 'active', 'standard')
+            """),
+            (tenant_id, name, slug)
+        )
+
+        # Create tenant_quotas
+        cursor.execute(
+            db._convert_sql("""
+                INSERT INTO tenant_quotas (tenant_id, daily_token_limit, monthly_token_limit,
+                    daily_request_limit, monthly_request_limit, max_users, max_sessions_per_user)
+                VALUES (?, 10000000, 300000000, 10000, 300000, 100, 10)
+            """),
+            (tenant_id,)
+        )
+
+        # Create tenant_settings
+        if db.is_postgresql():
+            cursor.execute(
+                """
+                INSERT INTO tenant_settings (tenant_id, content_filter_enabled, audit_log_enabled,
+                    audit_log_retention_days, data_retention_days, sso_enabled)
+                VALUES (?, TRUE, TRUE, 90, 365, FALSE)
+            """,
+                (tenant_id,)
+            )
+        else:
+            cursor.execute(
+                db._convert_sql("""
+                    INSERT INTO tenant_settings (tenant_id, content_filter_enabled, audit_log_enabled,
+                        audit_log_retention_days, data_retention_days, sso_enabled)
+                    VALUES (?, 1, 1, 90, 365, 0)
+                """),
+                (tenant_id,)
+            )
+
+        conn.commit()
+        print(f"Created default tenant: {name} (id={tenant_id})")
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"Failed to create default tenant: {e}")
+        conn.close()
+        return False
+
+
 def create_default_admin(
     username: str = "admin",
     password: str = "admin123",
     email: str = "admin@localhost",
     system_account: str = None,
+    tenant_id: int = 1,
 ) -> bool:
     """Create a default admin user with forced password change on first login."""
     # Hash password using bcrypt
@@ -46,12 +117,14 @@ def create_default_admin(
         is_active=True,
         must_change_password=True,  # Force password change on first login
         system_account=system_account,
+        tenant_id=tenant_id,
     )
 
     if result:
         print(f"Created default admin user: {username}")
         print(f"Email: {email}")
         print(f"Password: {password}")
+        print(f"Tenant ID: {tenant_id}")
         print("\nIMPORTANT: You MUST change the password on first login!")
         return True
     else:
@@ -60,8 +133,8 @@ def create_default_admin(
 
 
 def main():
-    """Main function to create default admin user."""
-    print("Creating default admin user...")
+    """Main function to create default tenant and admin user."""
+    print("Initializing default tenant and admin user...")
 
     # Get system_account from command line argument or environment variable
     system_account = None
@@ -70,8 +143,11 @@ def main():
     elif os.environ.get("OPENACE_SYSTEM_ACCOUNT"):
         system_account = os.environ.get("OPENACE_SYSTEM_ACCOUNT")
 
-    # Create default admin user
-    create_default_admin(system_account=system_account)
+    # Create default tenant first (id=1)
+    create_default_tenant()
+
+    # Create default admin user with tenant_id=1
+    create_default_admin(system_account=system_account, tenant_id=1)
 
     print("\nDefault admin credentials:")
     print("  Username: admin")

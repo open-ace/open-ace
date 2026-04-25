@@ -1454,6 +1454,7 @@ def create_user_with_is_active(
     is_active: bool = True,
     system_account: str = None,
     must_change_password: bool = False,
+    tenant_id: int = None,
 ) -> bool:
     """Create a new user with is_active and must_change_password flags."""
     conn = get_connection()
@@ -1474,8 +1475,8 @@ def create_user_with_is_active(
         _execute(
             cursor,
             """
-            INSERT INTO users (username, password_hash, email, role, daily_token_quota, daily_request_quota, is_active, system_account, must_change_password)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO users (username, password_hash, email, role, daily_token_quota, daily_request_quota, is_active, system_account, must_change_password, tenant_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
                 username,
@@ -1487,6 +1488,7 @@ def create_user_with_is_active(
                 is_active_val,
                 system_account,
                 must_change_val,
+                tenant_id,
             ),
         )
         conn.commit()
