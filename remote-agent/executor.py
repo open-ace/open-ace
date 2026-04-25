@@ -488,18 +488,41 @@ class ProcessExecutor:
             Path.home() / "node_modules" / ".bin" / exe_name,
         ]
 
-        # Windows npm global bin path
+        # Windows npm global bin path and other common locations
         if os.name == "nt":
-            npm_bin = Path(os.environ.get("APPDATA", "")) / "npm"
+            appdata = os.environ.get("APPDATA", "")
+            if appdata:
+                npm_bin = Path(appdata) / "npm"
+                candidates.extend([
+                    npm_bin / exe_name,
+                    npm_bin / f"{exe_name}.cmd",
+                    npm_bin / f"{exe_name}.bat",
+                    npm_bin / f"{exe_name}.ps1",
+                ])
+
+            # Also check NVM/npm installation paths on Windows
+            program_files = os.environ.get("PROGRAMFILES", "C:\\Program Files")
             candidates.extend([
-                npm_bin / exe_name,
-                npm_bin / f"{exe_name}.cmd",
-                npm_bin / f"{exe_name}.bat",
+                Path(program_files) / "nodejs" / exe_name,
+                Path(program_files) / "nodejs" / f"{exe_name}.cmd",
+                Path(program_files) / "nodejs" / f"{exe_name}.bat",
             ])
 
+            # Check user-local npm prefix
+            localappdata = os.environ.get("LOCALAPPDATA", "")
+            if localappdata:
+                candidates.extend([
+                    Path(localappdata) / "npm" / exe_name,
+                    Path(localappdata) / "npm" / f"{exe_name}.cmd",
+                    Path(localappdata) / "npm" / f"{exe_name}.bat",
+                ])
+
         for candidate in candidates:
-            if candidate.exists() and os.access(str(candidate), os.X_OK):
-                return str(candidate)
+            if candidate.exists():
+                # On Windows, os.access with X_OK doesn't work reliably,
+                # so we just check if the file exists
+                if os.name == "nt" or os.access(str(candidate), os.X_OK):
+                    return str(candidate)
 
         return None
 
@@ -514,11 +537,13 @@ class ProcessExecutor:
         allowed_tools: Optional[List[str]] = None,
     ) -> List[str]:
         adapter = get_adapter(cli_tool)
-        return adapter.build_start_args(
+        # Use the resolved executable path (may have .cmd/.bat on Windows)
+        adapter_args = adapter.build_start_args(
             session_id, project_path, model,
             permission_mode=permission_mode,
             allowed_tools=allowed_tools,
         )
+        return [executable] + adapter_args[1:]
 
     # ------------------------------------------------------------------
     # Session lifecycle
@@ -541,7 +566,24 @@ class ProcessExecutor:
         # Find the executable via the adapter
         executable = self._find_executable(cli_tool)
         if not executable:
-            msg = f"CLI tool '{cli_tool}' not found on this machine"
+            adapter = get_adapter(cli_tool)
+            display_name = adapter.get_display_name()
+            install_cmd = adapter.get_install_command()
+
+            # Build a helpful error message with installation instructions
+            msg = (
+                f"CLI tool '{cli_tool}' ({display_name}) not found on this machine.\n"
+                f"Please install it first by running: {install_cmd}"
+            )
+
+            # Add Windows-specific hints if applicable
+            if os.name == "nt":
+                msg += (
+                    f"\n\nOn Windows, npm global binaries are typically installed in:\n"
+                    f"  %APPDATA%\\npm (e.g., C:\\Users\\<username>\\AppData\\Roaming\\npm)\n"
+                    f"Ensure this directory is in your system PATH."
+                )
+
             logger.error(msg)
             return {"success": False, "error": msg}
 
@@ -566,26 +608,56 @@ class ProcessExecutor:
             project_path,
         )
 
+        # On Windows, .cmd/.bat/.ps1 files need to be executed via shell
+        use_shell = os.name == "nt" and executable.lower().endswith((".cmd", ".bat", ".ps1"))
+
+        # When shell=True on Windows, cmd should be a string, not a list
+        cmd_to_use = " ".join(cmd) if use_shell else cmd
+
         try:
             process = subprocess.Popen(
-                cmd,
+                cmd_to_use,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 cwd=project_path,
                 env=env,
+                shell=use_shell,
                 # Create a new process group so we can terminate the tree
-                start_new_session=os.name != "nt",
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
+                start_new_session=not use_shell and os.name != "nt",
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" and not use_shell else 0,
             )
         except (OSError, subprocess.SubprocessError) as e:
-            err_msg = str(e)
-            if os.name == "nt":
-                try:
-                    err_msg = str(e).encode("latin-1").decode("gbk")
-                except (UnicodeDecodeError, UnicodeEncodeError):
-                    pass
-            msg = f"Failed to start CLI process: {err_msg}"
+            # Use error code for platform-independent messages
+            errno = getattr(e, 'errno', None)
+            winerror = getattr(e, 'winerror', None)
+
+            # Map common Windows error codes to English messages
+            if os.name == "nt" and winerror is not None:
+                error_map = {
+                    2: "The system cannot find the file specified",
+                    3: "The system cannot find the path specified",
+                    5: "Access is denied",
+                    15: "The system cannot find the drive specified",
+                    87: "The parameter is incorrect",
+                    123: "The filename, directory name, or volume label syntax is incorrect",
+                    193: "Not a valid Win32 application",
+                    267: "The directory name is invalid",
+                }
+                err_msg = error_map.get(winerror, f"Windows error {winerror}")
+            else:
+                err_msg = str(e)
+
+            # Build a helpful diagnostic message
+            adapter = get_adapter(cli_tool)
+            display_name = adapter.get_display_name()
+            install_cmd = adapter.get_install_command()
+
+            msg = (
+                f"Failed to start {display_name} process: [WinError {winerror or errno}] {err_msg}\n"
+                f"The executable '{executable}' was found but failed to launch.\n"
+                f"This may indicate a corrupted installation. Try reinstalling with: {install_cmd}"
+            )
             logger.error(msg)
             return {"success": False, "error": msg}
 
@@ -777,25 +849,38 @@ class ProcessExecutor:
                 "Restarting session %s: %s", session_id[:8], " ".join(cmd)
             )
 
+            # On Windows, .cmd/.bat/.ps1 files need to be executed via shell
+            use_shell = os.name == "nt" and cmd[0].lower().endswith((".cmd", ".bat", ".ps1"))
+
+            # When shell=True on Windows, cmd should be a string, not a list
+            cmd_to_use = " ".join(cmd) if use_shell else cmd
+
             try:
                 process = subprocess.Popen(
-                    cmd,
+                    cmd_to_use,
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     cwd=old_session.project_path,
                     env=old_session.env,
-                    start_new_session=os.name != "nt",
-                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
+                    shell=use_shell,
+                    start_new_session=not use_shell and os.name != "nt",
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" and not use_shell else 0,
                 )
             except (OSError, subprocess.SubprocessError) as e:
-                err_msg = str(e)
-                if os.name == "nt":
-                    try:
-                        err_msg = str(e).encode("latin-1").decode("gbk")
-                    except (UnicodeDecodeError, UnicodeEncodeError):
-                        pass
-                return {"success": False, "error": f"Failed to restart CLI: {err_msg}"}
+                # Use error code for platform-independent English messages
+                errno = getattr(e, 'errno', None)
+                winerror = getattr(e, 'winerror', None)
+                if os.name == "nt" and winerror is not None:
+                    error_map = {
+                        2: "The system cannot find the file specified",
+                        3: "The system cannot find the path specified",
+                        5: "Access is denied",
+                    }
+                    err_msg = error_map.get(winerror, f"Windows error {winerror}")
+                else:
+                    err_msg = str(e)
+                return {"success": False, "error": f"Failed to restart CLI: [WinError {winerror or errno}] {err_msg}"}
 
             new_session = SessionProcess(
                 session_id=session_id,
