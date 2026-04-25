@@ -59,25 +59,24 @@ def create_default_tenant(
             (tenant_id,)
         )
 
-        # Create tenant_settings
+        # Create tenant_settings - use same approach for both databases
+        # PostgreSQL: psycopg2 converts Python True/False to PostgreSQL TRUE/FALSE
+        # SQLite: use integer 1/0 for boolean
         if db.is_postgresql():
-            cursor.execute(
-                """
+            bool_true = True
+            bool_false = False
+        else:
+            bool_true = 1
+            bool_false = 0
+
+        cursor.execute(
+            db._convert_sql("""
                 INSERT INTO tenant_settings (tenant_id, content_filter_enabled, audit_log_enabled,
                     audit_log_retention_days, data_retention_days, sso_enabled)
-                VALUES (?, TRUE, TRUE, 90, 365, FALSE)
-            """,
-                (tenant_id,)
-            )
-        else:
-            cursor.execute(
-                db._convert_sql("""
-                    INSERT INTO tenant_settings (tenant_id, content_filter_enabled, audit_log_enabled,
-                        audit_log_retention_days, data_retention_days, sso_enabled)
-                    VALUES (?, 1, 1, 90, 365, 0)
-                """),
-                (tenant_id,)
-            )
+                VALUES (?, ?, ?, ?, ?, ?)
+            """),
+            (tenant_id, bool_true, bool_true, 90, 365, bool_false)
+        )
 
         conn.commit()
         print(f"Created default tenant: {name} (id={tenant_id})")
