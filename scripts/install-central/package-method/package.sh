@@ -256,6 +256,7 @@ INCLUDE_ITEMS=(
     "migrations"
     "docs"
     "schema"
+    "remote-agent"
 )
 
 # Files to exclude from scripts directory
