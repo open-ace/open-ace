@@ -292,11 +292,21 @@ class RemoteAgent:
         elif command == "update_model":
             self._cmd_update_model(data)
         elif command == "pause_session":
-            # Forward compatibility: pause is not implemented at the
-            # subprocess level; send acknowledgement
-            self._send_session_status(session_id, "paused")
+            result = self._executor.pause_session(session_id)
+            if result["success"]:
+                self._send_session_status(session_id, "paused")
+            else:
+                self._send_session_output(
+                    session_id, f"Pause failed: {result.get('error')}", "stderr", True
+                )
         elif command == "resume_session":
-            self._send_session_status(session_id, "running")
+            result = self._executor.resume_session(session_id)
+            if result["success"]:
+                self._send_session_status(session_id, "running")
+            else:
+                self._send_session_output(
+                    session_id, f"Resume failed: {result.get('error')}", "stderr", True
+                )
         else:
             logger.warning("Unknown command: %s", command)
 

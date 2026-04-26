@@ -30,7 +30,9 @@ class BaseCLIAdapter(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def build_start_args(self, session_id: str, project_path: str, model: Optional[str] = None) -> List[str]:
+    def build_start_args(self, session_id: str, project_path: str, model: Optional[str] = None,
+                         permission_mode: Optional[str] = None, allowed_tools: Optional[List[str]] = None,
+                         resume: bool = False) -> List[str]:
         """Build the command-line arguments to start the CLI."""
         pass
 

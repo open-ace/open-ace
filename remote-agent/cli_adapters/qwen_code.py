@@ -59,6 +59,7 @@ class QwenCodeAdapter(BaseCLIAdapter):
         model: Optional[str] = None,
         permission_mode: Optional[str] = None,
         allowed_tools: Optional[List[str]] = None,
+        resume: bool = False,
     ) -> List[str]:
         args = [
             self.EXECUTABLE,
@@ -68,6 +69,8 @@ class QwenCodeAdapter(BaseCLIAdapter):
             "--channel=SDK",
         ]
 
+        if resume:
+            args.extend(["--resume", session_id])
         if permission_mode:
             args.extend(["--approval-mode", permission_mode])
         if model:

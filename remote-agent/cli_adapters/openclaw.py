@@ -61,6 +61,9 @@ class OpenClawAdapter(BaseCLIAdapter):
         session_id: str,
         project_path: str,
         model: Optional[str] = None,
+        permission_mode: Optional[str] = None,
+        allowed_tools: Optional[List[str]] = None,
+        resume: bool = False,
     ) -> List[str]:
         """
         Build command-line arguments to start OpenClaw.

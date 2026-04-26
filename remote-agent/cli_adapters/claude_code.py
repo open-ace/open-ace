@@ -50,6 +50,9 @@ class ClaudeCodeAdapter(BaseCLIAdapter):
         session_id: str,
         project_path: str,
         model: Optional[str] = None,
+        permission_mode: Optional[str] = None,
+        allowed_tools: Optional[List[str]] = None,
+        resume: bool = False,
     ) -> List[str]:
         """
         Build command-line arguments to start Claude Code.
@@ -64,6 +67,8 @@ class ClaudeCodeAdapter(BaseCLIAdapter):
             "--output-format", "stream-json",
         ]
 
+        if resume:
+            args.extend(["--resume", session_id])
         if model:
             args.extend(["--model", model])
 

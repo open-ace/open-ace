@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -66,6 +67,8 @@ class SessionProcess:
         self._stderr_thread: Optional[threading.Thread] = None
         self._stopped = threading.Event()
         self._restart_lock = threading.Lock()  # Prevents concurrent restarts
+        self._paused = False
+        self._pause_lock = threading.Lock()
 
         # SDK mode initialization tracking
         self._sdk_initialized = threading.Event()
@@ -266,6 +269,16 @@ class SessionProcess:
             return
 
         self._stopped.set()
+
+        # Resume the process first if paused so it can handle SIGTERM
+        if self._paused:
+            try:
+                if os.name != "nt":
+                    os.killpg(os.getpgid(self.process.pid), signal.SIGCONT)
+            except OSError:
+                pass
+            self._paused = False
+
         logger.info("Stopping session %s (pid %s)", self.session_id, self.pid)
 
         try:
@@ -284,6 +297,90 @@ class SessionProcess:
                 self.process.wait(timeout=2.0)
             except OSError:
                 pass
+
+    def pause(self) -> bool:
+        """Suspend the subprocess using SIGSTOP (Unix) or psutil (Windows)."""
+        with self._pause_lock:
+            if self._paused:
+                return True
+            if not self.is_running:
+                return False
+            try:
+                if os.name != "nt":
+                    pgid = os.getpgid(self.process.pid)
+                    os.killpg(pgid, signal.SIGSTOP)
+                    self._paused = True
+                    logger.info(
+                        "Paused session %s (pid %d)", self.session_id[:8], self.process.pid
+                    )
+                    return True
+                else:
+                    return self._pause_windows()
+            except (ProcessLookupError, PermissionError, OSError) as e:
+                logger.error(
+                    "Failed to pause session %s: %s", self.session_id[:8], e
+                )
+                return False
+
+    def resume(self) -> bool:
+        """Resume a paused subprocess using SIGCONT (Unix) or psutil (Windows)."""
+        with self._pause_lock:
+            if not self._paused:
+                return True  # Already running, nothing to do
+            try:
+                if os.name != "nt":
+                    pgid = os.getpgid(self.process.pid)
+                    os.killpg(pgid, signal.SIGCONT)
+                    self._paused = False
+                    logger.info(
+                        "Resumed session %s (pid %d)", self.session_id[:8], self.process.pid
+                    )
+                    return True
+                else:
+                    return self._resume_windows()
+            except (ProcessLookupError, PermissionError, OSError) as e:
+                logger.error(
+                    "Failed to resume session %s: %s", self.session_id[:8], e
+                )
+                self._paused = False
+                return False
+
+    def _pause_windows(self) -> bool:
+        """Windows fallback: suspend via psutil or stop process entirely."""
+        try:
+            import psutil
+            psutil.Process(self.process.pid).suspend()
+            self._paused = True
+            logger.info(
+                "Paused session %s (pid %d) via psutil", self.session_id[:8], self.process.pid
+            )
+            return True
+        except ImportError:
+            logger.warning(
+                "psutil not available, stopping process for pause on session %s",
+                self.session_id[:8],
+            )
+            self.stop()
+            self._stopped_for_pause = True
+            self._paused = True
+            return True
+
+    def _resume_windows(self) -> bool:
+        """Windows fallback: resume via psutil or signal restart needed."""
+        if getattr(self, "_stopped_for_pause", False):
+            self._stopped_for_pause = False
+            self._paused = False
+            return False  # Caller should restart with --resume
+        try:
+            import psutil
+            psutil.Process(self.process.pid).resume()
+            self._paused = False
+            logger.info(
+                "Resumed session %s (pid %d) via psutil", self.session_id[:8], self.process.pid
+            )
+            return True
+        except ImportError:
+            return False
 
     def wait_for_exit(self, timeout: float = 1.0) -> Optional[int]:
         """
@@ -539,6 +636,7 @@ class ProcessExecutor:
         model: Optional[str] = None,
         permission_mode: Optional[str] = None,
         allowed_tools: Optional[List[str]] = None,
+        resume: bool = False,
     ) -> List[str]:
         adapter = get_adapter(cli_tool)
         # Use the resolved executable path (may have .cmd/.bat on Windows)
@@ -546,6 +644,7 @@ class ProcessExecutor:
             session_id, project_path, model,
             permission_mode=permission_mode,
             allowed_tools=allowed_tools,
+            resume=resume,
         )
         return [executable] + adapter_args[1:]
 
@@ -847,6 +946,7 @@ class ProcessExecutor:
                 old_session.model,
                 old_session.permission_mode,
                 old_session.allowed_tools,
+                resume=True,
             )
 
             logger.info(
@@ -1044,6 +1144,30 @@ class ProcessExecutor:
             return {"success": True}
         return {"success": False, "error": "Failed to write permission response to stdin"}
 
+    def pause_session(self, session_id: str) -> Dict[str, Any]:
+        """Pause a session by suspending its subprocess."""
+        with self._lock:
+            session = self._sessions.get(session_id)
+        if not session:
+            return {"success": False, "error": "Session not found"}
+        ok = session.pause()
+        return {"success": ok, "paused": session._paused, "pid": session.pid}
+
+    def resume_session(self, session_id: str) -> Dict[str, Any]:
+        """Resume a paused session. If the process died while paused, restart with --resume."""
+        with self._lock:
+            session = self._sessions.get(session_id)
+        if not session:
+            return {"success": False, "error": "Session not found"}
+        ok = session.resume()
+        if not ok:
+            # Process stopped while paused (Windows fallback or process died)
+            restart_ok = self._restart_session(session_id)
+            if restart_ok.get("success"):
+                return {"success": True, "restarted": True}
+            return restart_ok
+        return {"success": True, "paused": session._paused, "pid": session.pid}
+
     def get_session_info(self, session_id: str) -> Optional[Dict[str, Any]]:
         """Get information about a session."""
         with self._lock:
@@ -1058,6 +1182,7 @@ class ProcessExecutor:
             "project_path": session.project_path,
             "pid": session.pid,
             "is_running": session.is_running,
+            "paused": session._paused,
         }
 
     def cleanup_stopped(self) -> List[str]:

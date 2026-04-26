@@ -253,6 +253,50 @@ class RemoteAgentManager:
         conn.commit()
         conn.close()
 
+        # Clean up sessions paused too long (>4 hours)
+        self._cleanup_stale_paused_sessions()
+
+    def _cleanup_stale_paused_sessions(self) -> None:
+        """Stop sessions that have been paused for more than 4 hours."""
+        PAUSE_TIMEOUT_HOURS = 4
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cutoff = datetime.utcnow() - timedelta(hours=PAUSE_TIMEOUT_HOURS)
+
+        try:
+            cursor.execute(
+                f"""
+                SELECT session_id FROM agent_sessions
+                WHERE status = 'paused' AND paused_at < {_param()}
+                """,
+                (cutoff.isoformat(),),
+            )
+            stale_sessions = [row[0] for row in cursor.fetchall()]
+        except Exception:
+            conn.close()
+            return
+
+        conn.close()
+
+        if not stale_sessions:
+            return
+
+        from app.modules.workspace.remote_session_manager import get_remote_session_manager
+        session_mgr = get_remote_session_manager()
+
+        for session_id in stale_sessions:
+            logger.info(
+                "Stopping stale paused session %s (paused > %dh)",
+                session_id[:8], PAUSE_TIMEOUT_HOURS,
+            )
+            try:
+                session_mgr.stop_session(session_id)
+            except Exception as e:
+                logger.error(
+                    "Failed to stop stale paused session %s: %s",
+                    session_id[:8], e,
+                )
+
     # ==================== Registration ====================
 
     def create_registration_token(self, tenant_id: int, created_by: int) -> str:

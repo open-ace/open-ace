@@ -133,6 +133,7 @@ class AgentSession:
     messages: List[SessionMessage] = field(default_factory=list)
     workspace_type: str = "local"  # local or remote
     remote_machine_id: Optional[str] = None
+    paused_at: Optional[datetime] = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -163,6 +164,7 @@ class AgentSession:
             "messages": [m.to_dict() for m in self.messages],
             "workspace_type": self.workspace_type,
             "remote_machine_id": self.remote_machine_id,
+            "paused_at": _format_dt(self.paused_at),
         }
 
     @classmethod
@@ -202,6 +204,9 @@ class AgentSession:
             messages=[SessionMessage.from_dict(m) for m in data.get("messages", [])],
             workspace_type=data.get("workspace_type", "local"),
             remote_machine_id=data.get("remote_machine_id"),
+            paused_at=(
+                datetime.fromisoformat(data["paused_at"]) if data.get("paused_at") else None
+            ),
         )
 
     def is_expired(self) -> bool:
@@ -364,6 +369,13 @@ class SessionManager:
         try:
             cursor.execute(
                 "ALTER TABLE agent_sessions ADD COLUMN request_count INTEGER DEFAULT 0"
+            )
+        except Exception:
+            pass  # Column already exists
+
+        try:
+            cursor.execute(
+                "ALTER TABLE agent_sessions ADD COLUMN paused_at TIMESTAMP"
             )
         except Exception:
             pass  # Column already exists
@@ -544,7 +556,9 @@ class SessionManager:
             UPDATE agent_sessions
             SET title = {_param()}, status = {_param()}, context = {_param()}, settings = {_param()},
                 total_tokens = {_param()}, total_input_tokens = {_param()}, total_output_tokens = {_param()},
-                message_count = {_param()}, request_count = {_param()}, model = {_param()}, tags = {_param()}, updated_at = {_param()}, completed_at = {_param()}
+                message_count = {_param()}, request_count = {_param()}, model = {_param()}, tags = {_param()},
+                updated_at = {_param()}, completed_at = {_param()},
+                workspace_type = {_param()}, remote_machine_id = {_param()}, paused_at = {_param()}
             WHERE session_id = {_param()}
         """,
             (
@@ -561,6 +575,9 @@ class SessionManager:
                 json.dumps(session.tags),
                 session.updated_at.isoformat(),
                 session.completed_at.isoformat() if session.completed_at else None,
+                session.workspace_type,
+                session.remote_machine_id,
+                session.paused_at.isoformat() if session.paused_at else None,
                 session.session_id,
             ),
         )
@@ -1129,6 +1146,7 @@ class SessionManager:
             project_path=get_value("project_path"),
             workspace_type=get_value("workspace_type") or "local",
             remote_machine_id=get_value("remote_machine_id"),
+            paused_at=parse_datetime(get_value("paused_at")),
         )
 
     def _row_to_message(self, row: Union[sqlite3.Row, Dict]) -> SessionMessage:

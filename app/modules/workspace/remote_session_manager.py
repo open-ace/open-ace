@@ -331,6 +331,7 @@ class RemoteSessionManager:
             session = self._session_manager.get_session(session_id)
             if session:
                 session.status = "paused"
+                session.paused_at = datetime.utcnow()
                 self._session_manager.update_session(session)
 
         return success
@@ -352,6 +353,7 @@ class RemoteSessionManager:
             session = self._session_manager.get_session(session_id)
             if session:
                 session.status = "active"
+                session.paused_at = None
                 self._session_manager.update_session(session)
 
         return success
@@ -386,6 +388,7 @@ class RemoteSessionManager:
             "output": output,
             "messages": messages,
             "created_at": session.created_at.isoformat() if session.created_at else None,
+            "paused_at": session.paused_at.isoformat() if session.paused_at else None,
         }
 
     def process_session_output(self, session_id: str, data: str,
@@ -481,9 +484,15 @@ class RemoteSessionManager:
 
         if status in ("running", "active"):
             session.status = "active"
+            session.paused_at = None
+        elif status == "paused":
+            session.status = "paused"
+            if not session.paused_at:
+                session.paused_at = datetime.utcnow()
         elif status == "stopped":
             # User-initiated stop — finalize the session
             session.status = "completed"
+            session.paused_at = None
             self._agent_manager.unbind_session(session_id)
             self._agent_manager.mark_session_ended(session_id)
         elif status in ("completed", "exited"):
@@ -492,6 +501,7 @@ class RemoteSessionManager:
             session.status = "active"
         elif status == "error":
             session.status = "error"
+            session.paused_at = None
             self._agent_manager.mark_session_ended(session_id)
 
         self._session_manager.update_session(session)

@@ -133,7 +133,12 @@ export function useRemoteSession(sessionId: string | null) {
     queryKey: ['remote', 'sessions', sessionId],
     queryFn: () => remoteApi.getSession(sessionId!),
     enabled: !!sessionId,
-    refetchInterval: sessionId ? 3000 : false,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      // Paused sessions don't need frequent polling
+      if (data && (data as any).status === 'paused') return 30000;
+      return sessionId ? 3000 : false;
+    },
   });
 }
 
@@ -165,6 +170,19 @@ export function usePauseRemoteSession() {
 
   return useMutation({
     mutationFn: (sessionId: string) => remoteApi.pauseSession(sessionId),
+    onMutate: async (sessionId) => {
+      await queryClient.cancelQueries({ queryKey: ['remote', 'sessions', sessionId] });
+      const previous = queryClient.getQueryData(['remote', 'sessions', sessionId]);
+      queryClient.setQueryData(['remote', 'sessions', sessionId], (old: any) =>
+        old ? { ...old, status: 'paused' } : old
+      );
+      return { previous, sessionId };
+    },
+    onError: (_err, sessionId, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(['remote', 'sessions', sessionId], context.previous);
+      }
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
     },
@@ -176,6 +194,19 @@ export function useResumeRemoteSession() {
 
   return useMutation({
     mutationFn: (sessionId: string) => remoteApi.resumeSession(sessionId),
+    onMutate: async (sessionId) => {
+      await queryClient.cancelQueries({ queryKey: ['remote', 'sessions', sessionId] });
+      const previous = queryClient.getQueryData(['remote', 'sessions', sessionId]);
+      queryClient.setQueryData(['remote', 'sessions', sessionId], (old: any) =>
+        old ? { ...old, status: 'active' } : old
+      );
+      return { previous, sessionId };
+    },
+    onError: (_err, sessionId, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(['remote', 'sessions', sessionId], context.previous);
+      }
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
     },

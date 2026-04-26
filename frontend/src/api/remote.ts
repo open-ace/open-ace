@@ -66,6 +66,7 @@ export interface RemoteSession {
   request_count: number;
   output: RemoteSessionOutput[];
   created_at: string | null;
+  paused_at: string | null;
 }
 
 export interface RemoteSessionOutput {
