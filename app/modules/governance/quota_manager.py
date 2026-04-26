@@ -190,8 +190,8 @@ class QuotaManager:
                     INSERT INTO quota_usage (user_id, date, period, tokens_used, requests_used)
                     VALUES (?, ?, 'daily', ?, ?)
                     ON CONFLICT(user_id, date, period) DO UPDATE SET
-                        tokens_used = tokens_used + ?,
-                        requests_used = requests_used + ?,
+                        tokens_used = quota_usage.tokens_used + ?,
+                        requests_used = quota_usage.requests_used + ?,
                         updated_at = CURRENT_TIMESTAMP
                 """
                     ),
