@@ -915,13 +915,13 @@ class UsageRepository:
         end_date: str,
     ) -> Dict:
         """
-        Get combined usage from both daily_messages (local CLI) and quota_usage (remote proxy).
+        Get combined usage from daily_messages (local CLI) and agent_sessions (remote).
 
-        Filters out remote_workspace messages from daily_messages to avoid double-counting,
-        since remote session token data lives in quota_usage.
+        Uses agent_sessions instead of quota_usage for remote data because
+        quota_usage was historically unreliable (broken PostgreSQL UPSERT).
 
         Args:
-            user_id: User ID for quota_usage lookup.
+            user_id: User ID.
             system_account: System account name for sender_name matching in daily_messages.
             start_date: Start date (YYYY-MM-DD).
             end_date: End date (YYYY-MM-DD).
@@ -944,14 +944,20 @@ class UsageRepository:
             (f"{system_account}%", start_date, end_date),
         )
 
-        # Remote proxy usage from quota_usage
+        # Remote session usage from agent_sessions
         remote_row = self.db.fetch_one(
             """
             SELECT
-                COALESCE(SUM(tokens_used), 0) as tokens,
-                COALESCE(SUM(requests_used), 0) as requests
-            FROM quota_usage
-            WHERE user_id = ? AND date >= ? AND date <= ?
+                COALESCE(SUM(total_tokens), 0) as tokens,
+                COALESCE(SUM(
+                    (SELECT COUNT(*) FROM session_messages sm
+                     WHERE sm.session_id = agent_sessions.session_id
+                       AND sm.role IN ('assistant', 'toolResult'))
+                ), 0) as requests
+            FROM agent_sessions
+            WHERE user_id = ?
+              AND workspace_type = 'remote'
+              AND CAST(created_at AS DATE) >= ? AND CAST(created_at AS DATE) <= ?
         """,
             (user_id, start_date, end_date),
         )
@@ -969,3 +975,83 @@ class UsageRepository:
             "remote_tokens": remote_tokens,
             "remote_requests": remote_requests,
         }
+
+    def get_user_daily_detail(
+        self,
+        user_id: int,
+        system_account: str,
+        start_date: str,
+        end_date: str,
+    ) -> List[Dict]:
+        """
+        Get daily usage detail for a specific user, combining local and remote sessions.
+
+        Returns a list of daily records suitable for the user's usage report page.
+        """
+        # Local CLI usage from daily_messages
+        local_rows = self.db.fetch_all(
+            """
+            SELECT
+                date,
+                tool_name,
+                SUM(tokens_used) as tokens_used,
+                SUM(input_tokens) as input_tokens,
+                SUM(output_tokens) as output_tokens,
+                COUNT(*) as request_count
+            FROM daily_messages
+            WHERE sender_name LIKE ?
+              AND date >= ? AND date <= ?
+              AND role = 'assistant'
+              AND (message_source IS NULL OR message_source != 'remote_workspace')
+            GROUP BY date, tool_name
+            ORDER BY date DESC
+        """,
+            (f"{system_account}%", start_date, end_date),
+        )
+
+        # Remote session usage from agent_sessions + session_messages
+        remote_rows = self.db.fetch_all(
+            """
+            SELECT
+                CAST(s.created_at AS DATE) as date,
+                'remote' as tool_name,
+                SUM(s.total_tokens) as tokens_used,
+                SUM(s.input_tokens) as input_tokens,
+                SUM(s.output_tokens) as output_tokens,
+                SUM(
+                    (SELECT COUNT(*) FROM session_messages sm
+                     WHERE sm.session_id = s.session_id
+                       AND sm.role IN ('assistant', 'toolResult'))
+                ) as request_count
+            FROM agent_sessions s
+            WHERE s.user_id = ?
+              AND s.workspace_type = 'remote'
+              AND CAST(s.created_at AS DATE) >= ? AND CAST(s.created_at AS DATE) <= ?
+            GROUP BY CAST(s.created_at AS DATE)
+            ORDER BY CAST(s.created_at AS DATE) DESC
+        """,
+            (user_id, start_date, end_date),
+        )
+
+        results = []
+        for row in local_rows:
+            results.append({
+                "date": str(row["date"]),
+                "tool_name": row["tool_name"] or "unknown",
+                "tokens_used": int(row["tokens_used"] or 0),
+                "input_tokens": int(row["input_tokens"] or 0),
+                "output_tokens": int(row["output_tokens"] or 0),
+                "request_count": int(row["request_count"] or 0),
+            })
+        for row in remote_rows:
+            results.append({
+                "date": str(row["date"]),
+                "tool_name": row["tool_name"],
+                "tokens_used": int(row["tokens_used"] or 0),
+                "input_tokens": int(row["input_tokens"] or 0),
+                "output_tokens": int(row["output_tokens"] or 0),
+                "request_count": int(row["request_count"] or 0),
+            })
+
+        results.sort(key=lambda x: x["date"], reverse=True)
+        return results

@@ -423,21 +423,27 @@ class QuotaManager:
         return start, end
 
     def _get_usage_in_range(self, user_id: int, start_date: str, end_date: str) -> dict[str, int]:
-        """Get total usage in a date range from both quota_usage (remote) and daily_messages (local)."""
-        # Remote proxy usage from quota_usage
-        result = self.db.fetch_one(
+        """Get total usage in a date range from agent_sessions (remote) and daily_messages (local)."""
+        # Remote session usage from agent_sessions
+        remote_result = self.db.fetch_one(
             """
             SELECT
-                COALESCE(SUM(tokens_used), 0) as tokens,
-                COALESCE(SUM(requests_used), 0) as requests
-            FROM quota_usage
-            WHERE user_id = ? AND date >= ? AND date <= ?
+                COALESCE(SUM(total_tokens), 0) as tokens,
+                COALESCE(SUM(
+                    (SELECT COUNT(*) FROM session_messages sm
+                     WHERE sm.session_id = agent_sessions.session_id
+                       AND sm.role IN ('assistant', 'toolResult'))
+                ), 0) as requests
+            FROM agent_sessions
+            WHERE user_id = ?
+              AND workspace_type = 'remote'
+              AND CAST(created_at AS DATE) >= ? AND CAST(created_at AS DATE) <= ?
         """,
             (user_id, start_date, end_date),
         )
 
-        remote_tokens = int(result["tokens"]) if result else 0
-        remote_requests = int(result["requests"]) if result else 0
+        remote_tokens = int(remote_result["tokens"]) if remote_result else 0
+        remote_requests = int(remote_result["requests"]) if remote_result else 0
 
         # Local CLI usage from daily_messages — use sender_name LIKE since many rows lack user_id
         local_tokens = 0
@@ -540,13 +546,20 @@ class QuotaManager:
         # Get all user IDs
         user_ids = [u.get("id") for u in users if u.get("id")]
 
-        # Batch query: get usage for all users in one query
+        # Batch query: get remote usage from agent_sessions for all users
         start_date, end_date = self._get_period_dates("daily")
-        usage_rows = self.db.fetch_all(
+        remote_usage_rows = self.db.fetch_all(
             """
-            SELECT user_id, SUM(tokens_used) as tokens, SUM(requests_used) as requests
-            FROM quota_usage
-            WHERE user_id IN ({}) AND date >= ? AND date <= ?
+            SELECT user_id,
+                   COALESCE(SUM(total_tokens), 0) as tokens,
+                   COALESCE(SUM(
+                       (SELECT COUNT(*) FROM session_messages sm
+                        WHERE sm.session_id = agent_sessions.session_id
+                          AND sm.role IN ('assistant', 'toolResult'))
+                   ), 0) as requests
+            FROM agent_sessions
+            WHERE user_id IN ({}) AND workspace_type = 'remote'
+              AND CAST(created_at AS DATE) >= ? AND CAST(created_at AS DATE) <= ?
             GROUP BY user_id
         """.format(
                 ",".join(["?"] * len(user_ids))
@@ -554,10 +567,10 @@ class QuotaManager:
             tuple(user_ids) + (start_date, end_date),
         )
 
-        # Build usage lookup
-        usage_lookup = {
+        # Build remote usage lookup
+        remote_usage_lookup = {
             row["user_id"]: {"tokens": row["tokens"], "requests": row["requests"]}
-            for row in usage_rows
+            for row in remote_usage_rows
         }
 
         # Batch query: get local CLI usage from daily_messages for all users
@@ -659,10 +672,10 @@ class QuotaManager:
             token_limit = (user.get("daily_token_quota") or 1) * TOKEN_QUOTA_MULTIPLIER  # Convert M units to actual tokens
             request_limit = user.get("daily_request_quota") or 1000
 
-            usage = usage_lookup.get(user_id, {"tokens": 0, "requests": 0})
+            remote_usage = remote_usage_lookup.get(user_id, {"tokens": 0, "requests": 0})
             local_usage = local_usage_lookup.get(user_id, {"tokens": 0, "requests": 0})
-            tokens_used = int(usage.get("tokens", 0)) + int(local_usage.get("tokens", 0))
-            requests_used = int(usage.get("requests", 0)) + int(local_usage.get("requests", 0))
+            tokens_used = int(remote_usage.get("tokens", 0)) + int(local_usage.get("tokens", 0))
+            requests_used = int(remote_usage.get("requests", 0)) + int(local_usage.get("requests", 0))
 
             token_pct = (tokens_used / token_limit * 100) if token_limit > 0 else 0
             request_pct = (requests_used / request_limit * 100) if request_limit > 0 else 0

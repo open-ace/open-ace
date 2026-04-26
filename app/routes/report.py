@@ -12,12 +12,16 @@ from flask import Blueprint, jsonify, request
 from app.services.auth_service import AuthService
 from app.services.message_service import MessageService
 from app.services.usage_service import UsageService
+from app.repositories.usage_repo import UsageRepository
+from app.repositories.user_repo import UserRepository
 from app.utils.helpers import get_days_ago, get_today
 
 report_bp = Blueprint("report", __name__)
 auth_service = AuthService()
 usage_service = UsageService()
 message_service = MessageService()
+usage_repo = UsageRepository()
+user_repo = UserRepository()
 logger = logging.getLogger(__name__)
 
 
@@ -40,10 +44,17 @@ def api_my_usage():
     user_id = session_or_error.get("user_id")
     username = session_or_error.get("username")
 
-    # Get usage data
-    # Note: This would need to be enhanced to filter by user
-    # For now, return general usage data
-    usage_data = usage_service.get_range_usage(start_date, end_date)
+    # Get user's system_account for daily_messages matching
+    user = user_repo.get_user_by_id(user_id)
+    system_account = (user.get("system_account") or user.get("username", "")) if user else username
+
+    # Get combined usage data (local + remote)
+    usage_data = usage_repo.get_user_daily_detail(
+        user_id=user_id,
+        system_account=system_account,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
     # Calculate totals
     total_tokens = sum(u.get("tokens_used", 0) for u in usage_data)
