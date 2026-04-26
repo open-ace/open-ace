@@ -421,7 +421,8 @@ class QuotaManager:
         return start, end
 
     def _get_usage_in_range(self, user_id: int, start_date: str, end_date: str) -> dict[str, int]:
-        """Get total usage in a date range."""
+        """Get total usage in a date range from both quota_usage (remote) and daily_messages (local)."""
+        # Remote proxy usage from quota_usage
         result = self.db.fetch_one(
             """
             SELECT
@@ -433,9 +434,34 @@ class QuotaManager:
             (user_id, start_date, end_date),
         )
 
+        remote_tokens = int(result["tokens"]) if result else 0
+        remote_requests = int(result["requests"]) if result else 0
+
+        # Local CLI usage from daily_messages — use sender_name LIKE since many rows lack user_id
+        local_tokens = 0
+        local_requests = 0
+        user = self.user_repo.get_user_by_id(user_id)
+        if user:
+            system_account = user.get("system_account") or user.get("username", "")
+            if system_account:
+                local_result = self.db.fetch_one(
+                    """
+                    SELECT
+                        COALESCE(SUM(tokens_used), 0) as tokens,
+                        COUNT(*) as requests
+                    FROM daily_messages
+                    WHERE sender_name LIKE ? AND date >= ? AND date <= ?
+                      AND role = 'assistant'
+                      AND (message_source IS NULL OR message_source != 'remote_workspace')
+                """,
+                    (f"{system_account}%", start_date, end_date),
+                )
+                local_tokens = int(local_result["tokens"]) if local_result else 0
+                local_requests = int(local_result["requests"]) if local_result else 0
+
         return {
-            "tokens": result["tokens"] if result else 0,
-            "requests": result["requests"] if result else 0,
+            "tokens": remote_tokens + local_tokens,
+            "requests": remote_requests + local_requests,
         }
 
     def _get_recent_alerts(self, user_id: int, limit: int = 10) -> list[QuotaAlert]:
@@ -532,6 +558,48 @@ class QuotaManager:
             for row in usage_rows
         }
 
+        # Batch query: get local CLI usage from daily_messages for all users
+        # Use sender_name LIKE to cover rows that lack user_id
+        sender_conditions = []
+        sender_params = []
+        for user in users:
+            system_account = user.get("system_account") or user.get("username", "")
+            if system_account:
+                sender_conditions.append("sender_name LIKE ?")
+                sender_params.append(f"{system_account}%")
+
+        local_usage_lookup = {}
+        if sender_conditions:
+            local_usage_rows = self.db.fetch_all(
+                """
+                SELECT sender_name,
+                       COALESCE(SUM(tokens_used), 0) as tokens,
+                       COUNT(*) as requests
+                FROM daily_messages
+                WHERE ({}) AND date >= ? AND date <= ?
+                  AND role = 'assistant'
+                  AND (message_source IS NULL OR message_source != 'remote_workspace')
+                GROUP BY sender_name
+            """.format(
+                    " OR ".join(sender_conditions)
+                ),
+                tuple(sender_params) + (start_date, end_date),
+            )
+
+            # Map sender_name results back to user_id
+            for row in local_usage_rows:
+                sender_name = row["sender_name"] or ""
+                for user in users:
+                    uid = user.get("id")
+                    sa = user.get("system_account") or user.get("username", "")
+                    if sa and sender_name.startswith(sa):
+                        existing = local_usage_lookup.get(uid, {"tokens": 0, "requests": 0})
+                        local_usage_lookup[uid] = {
+                            "tokens": existing["tokens"] + int(row["tokens"]),
+                            "requests": existing["requests"] + int(row["requests"]),
+                        }
+                        break
+
         # Batch query: get recent alerts for all users
         alert_rows = self.db.fetch_all(
             """
@@ -590,8 +658,9 @@ class QuotaManager:
             request_limit = user.get("daily_request_quota") or 1000
 
             usage = usage_lookup.get(user_id, {"tokens": 0, "requests": 0})
-            tokens_used = usage.get("tokens", 0)
-            requests_used = usage.get("requests", 0)
+            local_usage = local_usage_lookup.get(user_id, {"tokens": 0, "requests": 0})
+            tokens_used = int(usage.get("tokens", 0)) + int(local_usage.get("tokens", 0))
+            requests_used = int(usage.get("requests", 0)) + int(local_usage.get("requests", 0))
 
             token_pct = (tokens_used / token_limit * 100) if token_limit > 0 else 0
             request_pct = (requests_used / request_limit * 100) if request_limit > 0 else 0

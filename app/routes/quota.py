@@ -128,19 +128,24 @@ def check_quota():
         username = user.get("username", "")
         system_account = user.get("system_account") or username
 
-        # Get today's usage from daily_messages
+        # Get today's usage combining local CLI and remote proxy
         today = datetime.now().strftime("%Y-%m-%d")
-        today_stats = usage_repo.get_request_stats_by_user(date=today, user_name=system_account)
-        today_requests = sum(stat.get("requests", 0) for stat in today_stats)
-        today_tokens = sum(stat.get("tokens", 0) for stat in today_stats)
-
-        # Get monthly usage from daily_messages
-        now = datetime.now()
-        monthly_stats = usage_repo.get_monthly_request_stats_by_user(
-            now.year, now.month, user_name=system_account
+        today_combined = usage_repo.get_combined_usage(
+            user_id=user_id, system_account=system_account,
+            start_date=today, end_date=today,
         )
-        monthly_requests = sum(stat.get("requests", 0) for stat in monthly_stats)
-        monthly_tokens = sum(stat.get("tokens", 0) for stat in monthly_stats)
+        today_requests = today_combined["requests"]
+        today_tokens = today_combined["tokens"]
+
+        # Get monthly usage combining local CLI and remote proxy
+        now = datetime.now()
+        month_start = now.replace(day=1).strftime("%Y-%m-%d")
+        monthly_combined = usage_repo.get_combined_usage(
+            user_id=user_id, system_account=system_account,
+            start_date=month_start, end_date=today,
+        )
+        monthly_requests = monthly_combined["requests"]
+        monthly_tokens = monthly_combined["tokens"]
 
         # Quota limits
         daily_token_limit = (user.get("daily_token_quota") or 1) * TOKEN_QUOTA_MULTIPLIER
@@ -222,22 +227,24 @@ def get_quota_status():
         # sender_name format: {system_account}-{hostname}-{tool}
         system_account = user.get("system_account") or username
 
-        # Get today's usage - filter by system_account prefix
+        # Get today's usage combining local CLI and remote proxy
         today = datetime.now().strftime("%Y-%m-%d")
-        today_stats = usage_repo.get_request_stats_by_user(date=today, user_name=system_account)
-
-        # Aggregate today's stats for this user
-        today_requests = sum(stat.get("requests", 0) for stat in today_stats)
-        today_tokens = sum(stat.get("tokens", 0) for stat in today_stats)
-
-        # Get monthly usage - filter by system_account prefix
-        now = datetime.now()
-        monthly_request_stats = usage_repo.get_monthly_request_stats_by_user(
-            now.year, now.month, user_name=system_account
+        today_combined = usage_repo.get_combined_usage(
+            user_id=user_id, system_account=system_account,
+            start_date=today, end_date=today,
         )
+        today_requests = today_combined["requests"]
+        today_tokens = today_combined["tokens"]
 
-        monthly_requests = sum(stat.get("requests", 0) for stat in monthly_request_stats)
-        monthly_tokens = sum(stat.get("tokens", 0) for stat in monthly_request_stats)
+        # Get monthly usage combining local CLI and remote proxy
+        now = datetime.now()
+        month_start = now.replace(day=1).strftime("%Y-%m-%d")
+        monthly_combined = usage_repo.get_combined_usage(
+            user_id=user_id, system_account=system_account,
+            start_date=month_start, end_date=today,
+        )
+        monthly_requests = monthly_combined["requests"]
+        monthly_tokens = monthly_combined["tokens"]
 
         # Build response
         # Token quotas are stored in M units, convert to actual tokens for display
@@ -402,19 +409,24 @@ def webui_quota_check():
         username = user.get("username", "")
         system_account = user.get("system_account") or username
 
-        # Get today's usage from daily_messages
+        # Get today's usage combining local CLI and remote proxy
         today = datetime.now().strftime("%Y-%m-%d")
-        today_stats = usage_repo.get_request_stats_by_user(date=today, user_name=system_account)
-        today_requests = sum(stat.get("requests", 0) for stat in today_stats)
-        today_tokens = sum(stat.get("tokens", 0) for stat in today_stats)
-
-        # Get monthly usage from daily_messages
-        now = datetime.now()
-        monthly_stats = usage_repo.get_monthly_request_stats_by_user(
-            now.year, now.month, user_name=system_account
+        today_combined = usage_repo.get_combined_usage(
+            user_id=user_id, system_account=system_account,
+            start_date=today, end_date=today,
         )
-        monthly_requests = sum(stat.get("requests", 0) for stat in monthly_stats)
-        monthly_tokens = sum(stat.get("tokens", 0) for stat in monthly_stats)
+        today_requests = today_combined["requests"]
+        today_tokens = today_combined["tokens"]
+
+        # Get monthly usage combining local CLI and remote proxy
+        now = datetime.now()
+        month_start = now.replace(day=1).strftime("%Y-%m-%d")
+        monthly_combined = usage_repo.get_combined_usage(
+            user_id=user_id, system_account=system_account,
+            start_date=month_start, end_date=today,
+        )
+        monthly_requests = monthly_combined["requests"]
+        monthly_tokens = monthly_combined["tokens"]
 
         # Quota limits
         daily_token_limit = (user.get("daily_token_quota") or 1) * TOKEN_QUOTA_MULTIPLIER

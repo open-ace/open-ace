@@ -906,3 +906,66 @@ class UsageRepository:
             })
 
         return results
+
+    def get_combined_usage(
+        self,
+        user_id: int,
+        system_account: str,
+        start_date: str,
+        end_date: str,
+    ) -> Dict:
+        """
+        Get combined usage from both daily_messages (local CLI) and quota_usage (remote proxy).
+
+        Filters out remote_workspace messages from daily_messages to avoid double-counting,
+        since remote session token data lives in quota_usage.
+
+        Args:
+            user_id: User ID for quota_usage lookup.
+            system_account: System account name for sender_name matching in daily_messages.
+            start_date: Start date (YYYY-MM-DD).
+            end_date: End date (YYYY-MM-DD).
+
+        Returns:
+            Dict with tokens, requests, and per-source breakdown.
+        """
+        # Local CLI usage from daily_messages
+        local_row = self.db.fetch_one(
+            """
+            SELECT
+                COALESCE(SUM(tokens_used), 0) as tokens,
+                COUNT(*) as requests
+            FROM daily_messages
+            WHERE sender_name LIKE ?
+              AND date >= ? AND date <= ?
+              AND role = 'assistant'
+              AND (message_source IS NULL OR message_source != 'remote_workspace')
+        """,
+            (f"{system_account}%", start_date, end_date),
+        )
+
+        # Remote proxy usage from quota_usage
+        remote_row = self.db.fetch_one(
+            """
+            SELECT
+                COALESCE(SUM(tokens_used), 0) as tokens,
+                COALESCE(SUM(requests_used), 0) as requests
+            FROM quota_usage
+            WHERE user_id = ? AND date >= ? AND date <= ?
+        """,
+            (user_id, start_date, end_date),
+        )
+
+        local_tokens = int(local_row["tokens"]) if local_row else 0
+        local_requests = int(local_row["requests"]) if local_row else 0
+        remote_tokens = int(remote_row["tokens"]) if remote_row else 0
+        remote_requests = int(remote_row["requests"]) if remote_row else 0
+
+        return {
+            "tokens": local_tokens + remote_tokens,
+            "requests": local_requests + remote_requests,
+            "local_tokens": local_tokens,
+            "local_requests": local_requests,
+            "remote_tokens": remote_tokens,
+            "remote_requests": remote_requests,
+        }

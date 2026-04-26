@@ -1431,13 +1431,16 @@ def get_workspace_status():
                 username = user.get("username", "")
                 system_account = user.get("system_account") or username
 
-                # Get today's usage from daily_messages table
+                # Get today's usage combining local CLI (daily_messages) and remote proxy (quota_usage)
                 usage_repo = UsageRepository()
-                today_stats = usage_repo.get_request_stats_by_user(date=today, user_name=system_account)
-
-                # Aggregate today's stats from daily_messages
-                requests_used = sum(stat.get("requests", 0) for stat in today_stats)
-                tokens_used = sum(stat.get("tokens", 0) for stat in today_stats)
+                combined = usage_repo.get_combined_usage(
+                    user_id=user_id,
+                    system_account=system_account,
+                    start_date=today,
+                    end_date=today,
+                )
+                tokens_used = combined["tokens"]
+                requests_used = combined["requests"]
 
         status = {
             "tokens_used": tokens_used,
