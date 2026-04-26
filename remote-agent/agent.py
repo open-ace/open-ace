@@ -526,6 +526,15 @@ def setup_logging(level: str = "INFO") -> None:
         )
     )
 
+    # On Windows, force stdout to UTF-8 to prevent garbled non-ASCII text.
+    # Windows console defaults to code pages like CP936 (GBK) for Chinese,
+    # which causes UTF-8 strings to be mis-decoded.
+    if os.name == "nt" and sys.stdout and hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+        except Exception:
+            pass  # Ignore if reconfigure fails
+
     if is_unix_service:
         # Service manager handles log redirection - use stdout only
         logging.basicConfig(
