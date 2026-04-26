@@ -9,6 +9,7 @@ SessionManager for persistence and QuotaManager for enforcement.
 
 import json
 import logging
+import threading
 import time
 import uuid
 from datetime import datetime
@@ -34,10 +35,16 @@ class RemoteSessionManager:
     - Integration with QuotaManager for usage tracking
     """
 
+    # Class-level buffer for accumulating assistant text across requests
+    _assistant_text_buffer: Dict[str, str] = {}
+    _buffer_lock = threading.Lock()
+
     def __init__(self):
         self._session_manager = SessionManager()
         self._agent_manager = get_remote_agent_manager()
         self._api_key_proxy = APIKeyProxyService()
+        # Cache of session permission modes to avoid unnecessary updates
+        self._session_permission_modes: Dict[str, str] = {}
 
     def create_remote_session(
         self,
@@ -157,6 +164,9 @@ class RemoteSessionManager:
 
         logger.info(f"Created remote session {session_id} on machine {machine_id}")
 
+        # Cache the initial permission mode (default if not specified)
+        self._session_permission_modes[session_id] = permission_mode or "default"
+
         return {
             "session_id": session_id,
             "machine_id": machine_id,
@@ -239,7 +249,29 @@ class RemoteSessionManager:
         return self._agent_manager.send_command(machine_id, command)
 
     def update_permission_mode(self, session_id: str, permission_mode: str) -> bool:
-        """Send update_permission_mode command to the remote agent."""
+        """Send update_permission_mode command to the remote agent.
+
+        Only sends the command if the permission mode has actually changed
+        from the cached value to avoid unnecessary network traffic.
+        """
+        # Check cached permission mode - skip if unchanged
+        cached_mode = self._session_permission_modes.get(session_id)
+        # Treat None as equivalent to "default" for consistency
+        new_mode = permission_mode or "default"
+
+        # If no cached mode (e.g., after server restart), initialize it
+        # and skip the update since we don't know if it's actually changed
+        if cached_mode is None:
+            self._session_permission_modes[session_id] = new_mode
+            logger.debug(f"Initialized permission_mode cache for {session_id[:8]}: {new_mode}")
+            return True
+
+        current_mode = cached_mode or "default"
+
+        if current_mode == new_mode:
+            logger.debug(f"Skipping permission_mode update for {session_id[:8]}: unchanged ({new_mode})")
+            return True  # No change needed, consider it successful
+
         machine_id = self._get_machine_id(session_id)
         if not machine_id:
             return False
@@ -250,7 +282,14 @@ class RemoteSessionManager:
             "session_id": session_id,
             "permission_mode": permission_mode,
         }
-        return self._agent_manager.send_command(machine_id, command)
+        success = self._agent_manager.send_command(machine_id, command)
+
+        # Update cache on success
+        if success:
+            self._session_permission_modes[session_id] = permission_mode or "default"
+            logger.info(f"Updated permission_mode for {session_id[:8]}: {new_mode}")
+
+        return success
 
     def update_model(self, session_id: str, model: str) -> bool:
         """Switch the model of an active remote session."""
@@ -405,18 +444,87 @@ class RemoteSessionManager:
 
         self._agent_manager.buffer_output(session_id, output_entry)
 
-        # If this is a complete message, store it
-        if is_complete and stream == "stdout":
-            self._session_manager.add_message(
-                session_id=session_id,
-                role="assistant",
-                content=data,
-            )
-        elif is_complete and stream == "system":
+        if stream == "stdout":
+            # Parse streaming JSON to accumulate assistant text per turn
+            self._accumulate_assistant_text(session_id, data)
+
+            # Flush on completion signal (process exit)
+            if is_complete:
+                self._flush_assistant_buffer(session_id)
+        elif stream == "system" and is_complete and data.strip():
             self._session_manager.add_message(
                 session_id=session_id,
                 role="system",
                 content=data,
+            )
+
+    def _accumulate_assistant_text(self, session_id: str, data: str) -> None:
+        """Parse streaming JSON and accumulate assistant text for a session."""
+        if not data or not data.strip():
+            return
+
+        try:
+            parsed = json.loads(data.strip())
+        except (json.JSONDecodeError, ValueError):
+            return
+
+        if not isinstance(parsed, dict):
+            return
+
+        msg_type = parsed.get("type")
+
+        if msg_type == "assistant":
+            message = parsed.get("message", {})
+            if not isinstance(message, dict):
+                return
+            content = message.get("content", [])
+            if not isinstance(content, list):
+                return
+
+            text_parts = []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    text = block.get("text", "")
+                    if text:
+                        text_parts.append(text)
+
+            if text_parts:
+                combined = "".join(text_parts)
+                with self._buffer_lock:
+                    buf = self._assistant_text_buffer.get(session_id, "")
+                    self._assistant_text_buffer[session_id] = buf + combined
+
+        elif msg_type == "message":
+            role = parsed.get("role")
+            if role == "assistant":
+                content = parsed.get("content")
+                if isinstance(content, str) and content:
+                    with self._buffer_lock:
+                        buf = self._assistant_text_buffer.get(session_id, "")
+                        self._assistant_text_buffer[session_id] = buf + content
+                elif isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            text = block.get("text", "")
+                            if text:
+                                with self._buffer_lock:
+                                    buf = self._assistant_text_buffer.get(session_id, "")
+                                    self._assistant_text_buffer[session_id] = buf + text
+
+        elif msg_type == "result":
+            # End of turn — flush accumulated assistant text
+            self._flush_assistant_buffer(session_id)
+
+    def _flush_assistant_buffer(self, session_id: str) -> None:
+        """Flush accumulated assistant text to DB."""
+        with self._buffer_lock:
+            text = self._assistant_text_buffer.pop(session_id, "")
+
+        if text.strip():
+            self._session_manager.add_message(
+                session_id=session_id,
+                role="assistant",
+                content=text,
             )
 
     def process_usage_report(self, session_id: str,
@@ -495,6 +603,8 @@ class RemoteSessionManager:
             session.paused_at = None
             self._agent_manager.unbind_session(session_id)
             self._agent_manager.mark_session_ended(session_id)
+            # Clean up permission mode cache
+            self._session_permission_modes.pop(session_id, None)
         elif status in ("completed", "exited"):
             # CLI exited after a response — keep session active so the user
             # can send follow-up messages (executor restarts the CLI).
@@ -503,6 +613,8 @@ class RemoteSessionManager:
             session.status = "error"
             session.paused_at = None
             self._agent_manager.mark_session_ended(session_id)
+            # Clean up permission mode cache
+            self._session_permission_modes.pop(session_id, None)
 
         self._session_manager.update_session(session)
 

@@ -105,11 +105,6 @@ export const SessionDetailContent: React.FC<SessionDetailContentProps> = ({
           <div className="col-md-4">
             <small className="text-muted d-block">{t('totalTokens', language)}</small>
             <span>{formatTokens(session.total_tokens)}</span>
-            {(session.total_input_tokens > 0 || session.total_output_tokens > 0) && (
-              <small className="text-muted ms-2">
-                ({t('inputTokens', language) ?? 'Input'}: {formatTokens(session.total_input_tokens)} / {t('outputTokens', language) ?? 'Output'}: {formatTokens(session.total_output_tokens)})
-              </small>
-            )}
           </div>
           <div className="col-md-4">
             <small className="text-muted d-block">{t('requestsMessages', language)}</small>
