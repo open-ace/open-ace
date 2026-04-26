@@ -1016,8 +1016,8 @@ class UsageRepository:
                 CAST(s.created_at AS DATE) as date,
                 'remote' as tool_name,
                 SUM(s.total_tokens) as tokens_used,
-                SUM(s.input_tokens) as input_tokens,
-                SUM(s.output_tokens) as output_tokens,
+                SUM(s.total_input_tokens) as input_tokens,
+                SUM(s.total_output_tokens) as output_tokens,
                 SUM(
                     (SELECT COUNT(*) FROM session_messages sm
                      WHERE sm.session_id = s.session_id
