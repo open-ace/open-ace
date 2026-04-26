@@ -1179,10 +1179,10 @@ export const Workspace: React.FC = () => {
                     'text-truncate small flex-grow-1',
                     tab.waitingForUser && 'fw-semibold'
                   )} style={{ minWidth: 0 }}>
-                    {tab.workspaceType === 'remote' && (
-                      <span className="me-1" title={`Remote: ${tab.machineName || tab.machineId}`}>
-                        <i className="bi bi-cloud text-purple-500" style={{ fontSize: '0.7rem' }} />
-                      </span>
+                    {tab.workspaceType === 'remote' ? (
+                      <i className="bi bi-cloud-fill text-primary me-1" title={`Remote: ${tab.machineName || tab.machineId}`} />
+                    ) : (
+                      <i className="bi bi-laptop text-success me-1" title="Local" />
                     )}
                     {tab.title}
                   </span>
