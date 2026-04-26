@@ -461,19 +461,68 @@ class RemoteAgent:
         logger.info("Agent shutdown complete")
 
 
+def fix_stdin_for_service() -> None:
+    """Fix stdin state when running under launchd/systemd.
+    
+    When running as a service (launchd on macOS, systemd on Linux),
+    stdin may be closed or have an invalid file descriptor. This can
+    affect subprocess stdin pipe creation and cause "Broken pipe" errors
+    when writing to subprocess stdin.
+    
+    This function detects and fixes stdin issues by reopening stdin
+    to /dev/null if necessary.
+    """
+    if sys.stdin is None or sys.stdin.closed:
+        sys.stdin = open("/dev/null", "r")
+        logger.info("Fixed stdin for service environment: stdin was None/closed")
+    else:
+        try:
+            fd = sys.stdin.fileno()
+            if fd < 0:
+                sys.stdin = open("/dev/null", "r")
+                logger.info("Fixed stdin for service environment: invalid fd (%d)", fd)
+        except (ValueError, OSError):
+            # fileno() raises ValueError if stdin is not connected to a real file
+            # OSError if the file descriptor is invalid
+            sys.stdin = open("/dev/null", "r")
+            logger.info("Fixed stdin for service environment: no valid fileno")
+
+
 def setup_logging(level: str = "INFO") -> None:
     """Configure logging for the agent daemon."""
     numeric_level = getattr(logging, level.upper(), logging.INFO)
     log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent.log")
-    logging.basicConfig(
-        level=numeric_level,
-        format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-            logging.FileHandler(log_file, encoding="utf-8"),
-        ],
+
+    # Check if running under launchd (macOS) or systemd (Linux)
+    # These init systems redirect stdout/stderr to log files,
+    # so we don't need a separate FileHandler (would cause duplicate logs)
+    under_service_manager = (
+        os.environ.get("TERM") is None  # No terminal typically means service
+        or "INVOCATION_ID" in os.environ  # systemd sets this
+        or os.path.exists("/proc/self/cgroup")  # Linux container/systemd
     )
+
+    if under_service_manager:
+        # Service manager handles log redirection - use stdout only
+        logging.basicConfig(
+            level=numeric_level,
+            format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+            handlers=[
+                logging.StreamHandler(sys.stdout),
+            ],
+        )
+    else:
+        # Running manually - write to both stdout and file
+        logging.basicConfig(
+            level=numeric_level,
+            format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+            handlers=[
+                logging.StreamHandler(sys.stdout),
+                logging.FileHandler(log_file, encoding="utf-8"),
+            ],
+        )
 
 
 def main() -> None:
@@ -481,6 +530,10 @@ def main() -> None:
     config = AgentConfig()
 
     setup_logging(config.log_level)
+
+    # Fix stdin for service environments (launchd/systemd)
+    # This prevents "Broken pipe" errors when writing to subprocess stdin
+    fix_stdin_for_service()
 
     logger.info("=" * 60)
     logger.info("Open ACE Remote Agent")

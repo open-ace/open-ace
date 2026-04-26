@@ -436,6 +436,8 @@ EOF
     <true/>
     <key>KeepAlive</key>
     <true/>
+    <key>StandardInPath</key>
+    <string>/dev/null</string>
     <key>StandardOutPath</key>
     <string>${INSTALL_DIR}/agent.log</string>
     <key>StandardErrorPath</key>

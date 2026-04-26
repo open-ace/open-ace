@@ -690,6 +690,9 @@ class ProcessExecutor:
             logger.error(msg)
             return {"success": False, "error": msg}
 
+        # Expand ~ in project path to actual home directory
+        project_path = os.path.expanduser(project_path)
+
         # Ensure project path exists
         try:
             Path(project_path).mkdir(parents=True, exist_ok=True)
@@ -1275,6 +1278,10 @@ class ProcessExecutor:
         restored = []
 
         for sid, info in meta.items():
+            # Expand ~ in project path if present
+            if info.get("project_path"):
+                info["project_path"] = os.path.expanduser(info["project_path"])
+
             executable = self._find_executable(info["cli_tool"])
             if not executable:
                 logger.warning(

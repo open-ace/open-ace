@@ -348,6 +348,12 @@ Create `~/Library/LaunchAgents/com.open-ace.web.plist`:
     <true/>
     <key>KeepAlive</key>
     <true/>
+    <key>StandardInPath</key>
+    <string>/dev/null</string>
+    <key>StandardOutPath</key>
+    <string>/path/to/open-ace/server.log</string>
+    <key>StandardErrorPath</key>
+    <string>/path/to/open-ace/server-error.log</string>
 </dict>
 </plist>
 ```
