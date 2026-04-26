@@ -16,7 +16,7 @@ import {
   TokenTrendChart,
   TokenDistributionChart,
 } from '@/components/common';
-import { formatTokens, formatDate } from '@/utils';
+import { formatTokens, formatDate, formatToolName } from '@/utils';
 
 export const Report: React.FC = () => {
   const language = useLanguage();
@@ -217,7 +217,7 @@ export const Report: React.FC = () => {
                 {report.daily_usage.slice(0, 20).map((item, index) => (
                   <tr key={`${item.date}-${item.tool_name ?? index}`}>
                     <td>{item.date}</td>
-                    <td>{item.tool_name ?? '-'}</td>
+                    <td>{formatToolName(item.tool_name ?? '')}</td>
                     <td className="text-end">{formatTokens(item.input_tokens)}</td>
                     <td className="text-end">{formatTokens(item.output_tokens)}</td>
                     <td className="text-end">{formatTokens(item.tokens_used)}</td>

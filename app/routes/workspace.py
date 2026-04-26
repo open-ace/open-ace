@@ -336,8 +336,15 @@ def list_sessions():
             params.append(user_id)
 
         if tool_name:
-            conditions.append("tool_name = ?")
-            params.append(tool_name)
+            TOOL_NAME_ALIASES = {
+                'qwen': ['qwen', 'qwen-code', 'qwen-code-cli'],
+                'claude': ['claude', 'claude-code'],
+                'openclaw': ['openclaw'],
+            }
+            aliases = TOOL_NAME_ALIASES.get(tool_name, [tool_name])
+            placeholders = ','.join(['?' for _ in aliases])
+            conditions.append(f"tool_name IN ({placeholders})")
+            params.extend(aliases)
 
         if host_name:
             conditions.append("host_name = ?")

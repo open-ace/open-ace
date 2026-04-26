@@ -30,7 +30,7 @@ import {
   SessionDetailContent,
 } from '@/components/common';
 import type { BadgeVariant } from '@/components/common';
-import { formatDateTime, formatTokens } from '@/utils';
+import { formatDateTime, formatTokens, formatToolName } from '@/utils';
 import type { AgentSession, SessionFilters } from '@/api/sessions';
 
 const ITEMS_PER_PAGE = 20;
@@ -640,23 +640,19 @@ const SessionCard: React.FC<SessionCardProps> = ({
           </div>
         </div>
 
-        {/* Row 2: Meta info — left group | time pushed right */}
+        {/* Row 2: Meta info — grid aligned columns */}
         <div className="session-card-meta">
-          <div className="session-card-meta-left">
-            <span><i className="bi bi-tools me-1" />{session.tool_name}</span>
-            <span><i className="bi bi-pc-display me-1" />{session.host_name}</span>
-            {session.model && (
-              <span><i className="bi bi-cpu me-1" />{session.model}</span>
-            )}
-            <span><i className="bi bi-chat-dots me-1" />{session.message_count} {t('messages', language)}</span>
-            <span><i className="bi bi-cpu me-1" />{formatTokens(session.total_tokens)} {t('tokens', language)}</span>
-          </div>
-          <div className="session-card-meta-right">
-            <span><i className="bi bi-clock me-1" />{session.created_at ? formatDateTime(session.created_at) : '-'}</span>
-            {session.completed_at && (
-              <span><i className="bi bi-check-circle me-1" />{formatDateTime(session.completed_at)}</span>
-            )}
-          </div>
+          <span><i className="bi bi-tools me-1" />{formatToolName(session.tool_name)}</span>
+          <span><i className="bi bi-pc-display me-1" />{session.host_name}</span>
+          <span className="meta-model">
+            {session.model && <><i className="bi bi-cpu me-1" />{session.model}</>}
+          </span>
+          <span><i className="bi bi-chat-dots me-1" />{session.message_count} {t('messages', language)}</span>
+          <span><i className="bi bi-cpu me-1" />{formatTokens(session.total_tokens)} {t('tokens', language)}</span>
+          <span><i className="bi bi-clock me-1" />{session.created_at ? formatDateTime(session.created_at) : '-'}</span>
+          {session.completed_at && (
+            <span><i className="bi bi-check-circle me-1" />{formatDateTime(session.completed_at)}</span>
+          )}
         </div>
       </div>
     </div>

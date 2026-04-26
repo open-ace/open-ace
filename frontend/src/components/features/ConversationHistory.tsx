@@ -23,7 +23,7 @@ import {
   LineChart,
   Skeleton,
 } from '@/components/common';
-import { formatDateTime, formatTokens } from '@/utils';
+import { formatDateTime, formatTokens, formatToolName } from '@/utils';
 import type { ConversationHistory as ConversationHistoryType } from '@/api';
 
 const ITEMS_PER_PAGE = 20;
@@ -429,7 +429,7 @@ const ConversationRow: React.FC<ConversationRowProps> = ({
       case 'date':
         return conversation.date;
       case 'tool_name':
-        return <span className="badge bg-secondary">{conversation.tool_name}</span>;
+        return <span className="badge bg-secondary">{formatToolName(conversation.tool_name ?? '')}</span>;
       case 'host_name':
         return conversation.host_name ?? '-';
       case 'sender_name':

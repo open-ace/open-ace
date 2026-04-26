@@ -16,7 +16,7 @@ import {
   TokenDistributionChart,
   DashboardSkeleton,
 } from '@/components/common';
-import { formatTokens, formatDate } from '@/utils';
+import { formatTokens, formatDate, TOOL_DISPLAY_NAMES } from '@/utils';
 import type { ToolUsage, ToolSummary } from '@/types';
 
 // Color palette for each tool
@@ -345,7 +345,7 @@ const TodayCard = React.memo<TodayCardProps>(({ item, language }) => {
     <div className="col-md-4">
       <div className={cn('card usage-card text-white', colors.card)}>
         <div className="card-body">
-          <h6 className="card-subtitle mb-3 text-white-50">{item.tool_name.toUpperCase()}</h6>
+          <h6 className="card-subtitle mb-3 text-white-50">{(TOOL_DISPLAY_NAMES[item.tool_name] ?? item.tool_name).toUpperCase()}</h6>
           {item.tokens_used > 0 ? (
             <h3 className="card-title mb-3">
               {formatTokens(item.tokens_used)}{' '}
