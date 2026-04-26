@@ -101,7 +101,7 @@ export OPENACE_ENCRYPTION_KEY="<your-random-32byte-key>"
 sudo systemctl restart open-ace  # 或你的启动方式
 
 # 5. 验证 API 可访问
-curl -s http://localhost:5001/api/remote/agent/install.sh | head -5
+curl -s http://localhost:5000/api/remote/agent/install.sh | head -5
 # 应该输出安装脚本内容
 ```
 
@@ -109,12 +109,12 @@ curl -s http://localhost:5001/api/remote/agent/install.sh | head -5
 
 ```bash
 # 1. 管理员登录
-curl -c cookies.txt -X POST http://<server>:5001/api/auth/login \
+curl -c cookies.txt -X POST http://<server>:5000/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"admin","password":"admin123"}'
 
 # 2. 存储 LLM API Key（远程会话必需）
-curl -b cookies.txt -X POST http://<server>:5001/api/remote/api-keys \
+curl -b cookies.txt -X POST http://<server>:5000/api/remote/api-keys \
   -H "Content-Type: application/json" \
   -d '{
     "provider": "openai",
@@ -124,7 +124,7 @@ curl -b cookies.txt -X POST http://<server>:5001/api/remote/api-keys \
   }'
 
 # 3. 生成注册令牌
-curl -b cookies.txt -X POST http://<server>:5001/api/remote/machines/register \
+curl -b cookies.txt -X POST http://<server>:5000/api/remote/machines/register \
   -H "Content-Type: application/json" \
   -d '{"tenant_id": 1}'
 # → {"registration_token": "abc123..."}
@@ -134,8 +134,8 @@ curl -b cookies.txt -X POST http://<server>:5001/api/remote/machines/register \
 
 ```bash
 # 在远程机器上执行一行安装（将 <token> 替换为上一步获取的注册令牌）
-curl -fsSL http://<server>:5001/api/remote/agent/install.sh | \
-  bash -s -- --server http://<server>:5001 --token <token>
+curl -fsSL http://<server>:5000/api/remote/agent/install.sh | \
+  bash -s -- --server http://<server>:5000 --token <token>
 
 # 如果 curl 404，说明服务器缺少安装脚本路由，请使用手动安装（见下方）
 ```
@@ -144,11 +144,11 @@ curl -fsSL http://<server>:5001/api/remote/agent/install.sh | \
 
 ```bash
 # 获取 machine_id（从安装输出或管理界面获取）
-curl -b cookies.txt http://<server>:5001/api/remote/machines
+curl -b cookies.txt http://<server>:5000/api/remote/machines
 
 # 分配用户（user_id 从用户管理页面获取）
 curl -b cookies.txt -X POST \
-  http://<server>:5001/api/remote/machines/<machine_id>/assign \
+  http://<server>:5000/api/remote/machines/<machine_id>/assign \
   -H "Content-Type: application/json" \
   -d '{"user_id": <user_id>, "permission": "user"}'
 ```
@@ -174,12 +174,12 @@ curl -b cookies.txt -X POST \
 
 ```bash
 # 管理员登录获取 session_token
-curl -c cookies.txt -X POST http://<server>:5001/api/auth/login \
+curl -c cookies.txt -X POST http://<server>:5000/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"admin","password":"admin123"}'
 
 # 生成注册令牌
-curl -b cookies.txt -X POST http://<server>:5001/api/remote/machines/register \
+curl -b cookies.txt -X POST http://<server>:5000/api/remote/machines/register \
   -H "Content-Type: application/json" \
   -d '{"tenant_id": 1}'
 ```
@@ -192,8 +192,8 @@ curl -b cookies.txt -X POST http://<server>:5001/api/remote/machines/register \
 **第二步：在远程机器上安装 Agent**
 
 ```bash
-curl -fsSL http://<server>:5001/api/remote/agent/install.sh | \
-  bash -s -- --server http://<server>:5001 --token <registration-token>
+curl -fsSL http://<server>:5000/api/remote/agent/install.sh | \
+  bash -s -- --server http://<server>:5000 --token <registration-token>
 ```
 
 > **注意**：如果此命令返回 404，说明服务器尚未部署安装脚本路由。请先确认服务器代码已更新到最新版本并重启。临时替代方案见[手动安装](#手动安装)。
@@ -211,7 +211,7 @@ curl -fsSL http://<server>:5001/api/remote/agent/install.sh | \
 
 ```bash
 curl -b cookies.txt -X POST \
-  http://<server>:5001/api/remote/machines/<machine_id>/assign \
+  http://<server>:5000/api/remote/machines/<machine_id>/assign \
   -H "Content-Type: application/json" \
   -d '{"user_id": <user_id>, "permission": "user"}'
 ```
@@ -249,7 +249,7 @@ curl -b cookies.txt -X POST \
 
 ```bash
 # 存储 OpenAI API Key
-curl -b cookies.txt -X POST http://<server>:5001/api/remote/api-keys \
+curl -b cookies.txt -X POST http://<server>:5000/api/remote/api-keys \
   -H "Content-Type: application/json" \
   -d '{
     "provider": "openai",
@@ -293,14 +293,14 @@ curl -b cookies.txt -X POST http://<server>:5001/api/remote/api-keys \
 **Linux / macOS：**
 
 ```bash
-curl -fsSL http://<server>:5001/api/remote/agent/install.sh | \
-  bash -s -- --server http://<server>:5001 --token <token>
+curl -fsSL http://<server>:5000/api/remote/agent/install.sh | \
+  bash -s -- --server http://<server>:5000 --token <token>
 ```
 
 **Windows (PowerShell)：**
 
 ```powershell
-Invoke-WebRequest -Uri "http://<server>:5001/api/remote/agent/install.ps1" | Invoke-Expression
+Invoke-WebRequest -Uri "http://<server>:5000/api/remote/agent/install.ps1" | Invoke-Expression
 ```
 
 ### 安装参数
@@ -316,7 +316,7 @@ Invoke-WebRequest -Uri "http://<server>:5001/api/remote/agent/install.ps1" | Inv
 示例 — 安装 Claude Code：
 
 ```bash
-curl -fsSL http://<server>:5001/api/remote/agent/install.sh | \
+curl -fsSL http://<server>:5000/api/remote/agent/install.sh | \
   bash -s -- --server https://ace.example.com \
               --token abc123... \
               --install-cli claude-code \
@@ -441,12 +441,12 @@ python3 agent.py
 
 ```bash
 # 1. 管理员登录
-curl -c cookies.txt -X POST http://localhost:5001/api/auth/login \
+curl -c cookies.txt -X POST http://localhost:5000/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"admin","password":"admin123"}'
 
 # 2. 生成注册令牌
-curl -b cookies.txt -X POST http://localhost:5001/api/remote/machines/register \
+curl -b cookies.txt -X POST http://localhost:5000/api/remote/machines/register \
   -H "Content-Type: application/json" \
   -d '{"tenant_id": 1}'
 # → {"registration_token": "abc123..."}
@@ -455,7 +455,7 @@ curl -b cookies.txt -X POST http://localhost:5001/api/remote/machines/register \
 ### 查看所有机器
 
 ```bash
-curl -b cookies.txt http://localhost:5001/api/remote/machines
+curl -b cookies.txt http://localhost:5000/api/remote/machines
 ```
 
 响应示例：
@@ -483,7 +483,7 @@ curl -b cookies.txt http://localhost:5001/api/remote/machines
 ```bash
 # 给用户分配机器使用权
 curl -b cookies.txt -X POST \
-  http://localhost:5001/api/remote/machines/<machine_id>/assign \
+  http://localhost:5000/api/remote/machines/<machine_id>/assign \
   -H "Content-Type: application/json" \
   -d '{"user_id": <user_id>, "permission": "user"}'
 ```
@@ -520,14 +520,14 @@ curl -b cookies.txt -X POST \
 
 ```bash
 curl -b cookies.txt -X DELETE \
-  http://localhost:5001/api/remote/machines/<machine_id>/assign/<user_id>
+  http://localhost:5000/api/remote/machines/<machine_id>/assign/<user_id>
 ```
 
 ### 注销机器
 
 ```bash
 curl -b cookies.txt -X DELETE \
-  http://localhost:5001/api/remote/machines/<machine_id>
+  http://localhost:5000/api/remote/machines/<machine_id>
 ```
 
 ---
@@ -585,33 +585,33 @@ curl -b cookies.txt -X DELETE \
 
 ```bash
 # 机器管理员登录获取 token
-curl -c cookies.txt -X POST http://<server>:5001/api/auth/login \
+curl -c cookies.txt -X POST http://<server>:5000/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"<username>","password":"<password>"}'
 
 # 查看自己被分配的机器（含 current_user_permission 字段）
-curl -b cookies.txt http://<server>:5001/api/remote/machines
+curl -b cookies.txt http://<server>:5000/api/remote/machines
 
 # 查看机器已分配用户列表
-curl -b cookies.txt http://<server>:5001/api/remote/machines/<machine_id>/users
+curl -b cookies.txt http://<server>:5000/api/remote/machines/<machine_id>/users
 
 # 分配用户到机器（权限被强制为 user，无法授权 admin）
 curl -b cookies.txt -X POST \
-  http://<server>:5001/api/remote/machines/<machine_id>/assign \
+  http://<server>:5000/api/remote/machines/<machine_id>/assign \
   -H "Content-Type: application/json" \
   -d '{"user_id": <user_id>, "permission": "admin"}'
 # → 实际存储的 permission 为 "user"
 
 # 撤销普通用户（不能撤销 admin 用户，返回 403）
 curl -b cookies.txt -X DELETE \
-  http://<server>:5001/api/remote/machines/<machine_id>/assign/<user_id>
+  http://<server>:5000/api/remote/machines/<machine_id>/assign/<user_id>
 
 # 查看本机器上其他用户的会话
-curl -b cookies.txt http://<server>:5001/api/remote/sessions/<session_id>
+curl -b cookies.txt http://<server>:5000/api/remote/sessions/<session_id>
 
 # 停止本机器上其他用户的会话
 curl -b cookies.txt -X POST \
-  http://<server>:5001/api/remote/sessions/<session_id>/stop
+  http://<server>:5000/api/remote/sessions/<session_id>/stop
 ```
 
 ---
@@ -646,13 +646,13 @@ curl -b cookies.txt -X POST \
 
 ```bash
 # 用户登录后查看分配给自己的在线机器
-curl -b cookies.txt http://localhost:5001/api/remote/machines/available
+curl -b cookies.txt http://localhost:5000/api/remote/machines/available
 ```
 
 ### 创建远程会话
 
 ```bash
-curl -b cookies.txt -X POST http://localhost:5001/api/remote/sessions \
+curl -b cookies.txt -X POST http://localhost:5000/api/remote/sessions \
   -H "Content-Type: application/json" \
   -d '{
     "machine_id": "<machine_id>",
@@ -677,7 +677,7 @@ curl -b cookies.txt -X POST http://localhost:5001/api/remote/sessions \
 
 ```bash
 curl -b cookies.txt -X POST \
-  http://localhost:5001/api/remote/sessions/<session_id>/chat \
+  http://localhost:5000/api/remote/sessions/<session_id>/chat \
   -H "Content-Type: application/json" \
   -d '{"content": "请帮我审查 main.py 的代码"}'
 ```
@@ -686,7 +686,7 @@ curl -b cookies.txt -X POST \
 
 ```bash
 curl -b cookies.txt \
-  http://localhost:5001/api/remote/sessions/<session_id>
+  http://localhost:5000/api/remote/sessions/<session_id>
 ```
 
 响应包含会话状态和所有输出：
@@ -713,7 +713,7 @@ curl -b cookies.txt \
 
 ```bash
 curl -b cookies.txt -X POST \
-  http://localhost:5001/api/remote/sessions/<session_id>/stop
+  http://localhost:5000/api/remote/sessions/<session_id>/stop
 ```
 
 ### 暂停/恢复会话
@@ -721,11 +721,11 @@ curl -b cookies.txt -X POST \
 ```bash
 # 暂停
 curl -b cookies.txt -X POST \
-  http://localhost:5001/api/remote/sessions/<session_id>/pause
+  http://localhost:5000/api/remote/sessions/<session_id>/pause
 
 # 恢复
 curl -b cookies.txt -X POST \
-  http://localhost:5001/api/remote/sessions/<session_id>/resume
+  http://localhost:5000/api/remote/sessions/<session_id>/resume
 ```
 
 ---
@@ -962,7 +962,7 @@ ADAPTERS = {
 
 ### 安装脚本返回 404
 
-**症状**：`curl -fsSL http://<server>:5001/api/remote/agent/install.sh` 返回 404。
+**症状**：`curl -fsSL http://<server>:5000/api/remote/agent/install.sh` 返回 404。
 
 **原因**：服务器代码中缺少安装脚本路由（`/api/remote/agent/install.sh` 和 `/api/remote/agent/files/<path>`）。
 
@@ -987,7 +987,7 @@ sudo journalctl -u open-ace-agent -f
 
 1. **网络连通性**：确认远程机器可以访问服务器端口
    ```bash
-   curl -v http://<server>:5001/api/auth/login
+   curl -v http://<server>:5000/api/auth/login
    ```
 
 2. **注册令牌过期**：令牌为一次性使用，注册成功后即失效。如果注册失败，需要管理员重新生成。
