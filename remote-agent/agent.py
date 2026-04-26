@@ -261,13 +261,21 @@ class RemoteAgent:
         self, session_id: str, status: str, pid: Optional[int] = None
     ) -> None:
         """Send a session_status message to the server."""
-        self._http_send({
+        logger.info(
+            "Sending session_status: session=%s status=%s pid=%s",
+            session_id[:8], status, pid
+        )
+        result = self._http_send({
             "type": "session_status",
             "session_id": session_id,
             "status": status,
             "pid": pid,
             "machine_id": self.config.machine_id,
         })
+        if result:
+            logger.info("session_status sent successfully for session %s", session_id[:8])
+        else:
+            logger.warning("Failed to send session_status for session %s", session_id[:8])
 
     def _send_usage_report(
         self, session_id: str, tokens: Dict[str, int], requests: int = 1

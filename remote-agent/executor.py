@@ -295,7 +295,20 @@ class SessionProcess:
         logger.info("Stopping session %s (pid %s)", self.session_id, self.pid)
 
         try:
-            self.process.terminate()
+            # On Unix, use process group to kill all child processes
+            # This is especially important on macOS where subprocess.terminate()
+            # only kills the main process, not the entire process group
+            if os.name != "nt" and self.process.pid:
+                try:
+                    pgid = os.getpgid(self.process.pid)
+                    os.killpg(pgid, signal.SIGTERM)
+                    logger.debug("Sent SIGTERM to process group %d for session %s", pgid, self.session_id[:8])
+                except (ProcessLookupError, OSError) as e:
+                    # Process group doesn't exist, fall back to terminate
+                    logger.debug("Process group not found, using terminate: %s", e)
+                    self.process.terminate()
+            else:
+                self.process.terminate()
         except OSError:
             pass
 
@@ -306,7 +319,15 @@ class SessionProcess:
                 "Session %s did not exit gracefully, killing", self.session_id
             )
             try:
-                self.process.kill()
+                # Use process group for SIGKILL as well
+                if os.name != "nt" and self.process.pid:
+                    try:
+                        pgid = os.getpgid(self.process.pid)
+                        os.killpg(pgid, signal.SIGKILL)
+                    except (ProcessLookupError, OSError):
+                        self.process.kill()
+                else:
+                    self.process.kill()
                 self.process.wait(timeout=2.0)
             except OSError:
                 pass
@@ -1095,13 +1116,18 @@ class ProcessExecutor:
         if not session:
             return {"success": False, "error": "Session not found"}
 
-        if session.permission_mode == permission_mode:
+        # Treat None as equivalent to "default" to avoid unnecessary restarts
+        # when frontend sends "default" but session was started without permission_mode
+        current_mode = session.permission_mode or "default"
+        new_mode = permission_mode or "default"
+
+        if current_mode == new_mode:
             return {"success": True}  # No change needed
 
         session.permission_mode = permission_mode
         logger.info(
-            "Updating permission mode to %s for session %s, restarting",
-            permission_mode, session_id[:8],
+            "Updating permission mode from %s to %s for session %s, restarting",
+            current_mode, permission_mode, session_id[:8],
         )
         return self._restart_session(session_id)
 
