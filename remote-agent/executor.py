@@ -73,6 +73,8 @@ class SessionProcess:
         # SDK mode initialization tracking
         self._sdk_initialized = threading.Event()
         self._init_request_id: Optional[str] = None
+        # CLI's internal session_id (from SDK init response), used for --resume
+        self._cli_session_id: Optional[str] = None
 
     @property
     def pid(self) -> Optional[int]:
@@ -132,10 +134,21 @@ class SessionProcess:
                             if req_id == self._init_request_id:
                                 subtype = resp.get("subtype")
                                 if subtype == "success":
-                                    logger.info(
-                                        "SDK initialization complete for session %s",
-                                        self.session_id[:8],
-                                    )
+                                    # Extract CLI's internal session_id for --resume
+                                    inner_resp = resp.get("response", {})
+                                    cli_sid = inner_resp.get("session_id")
+                                    if cli_sid:
+                                        self._cli_session_id = cli_sid
+                                        logger.info(
+                                            "SDK initialization complete for session %s (CLI session_id: %s)",
+                                            self.session_id[:8],
+                                            cli_sid[:8],
+                                        )
+                                    else:
+                                        logger.info(
+                                            "SDK initialization complete for session %s",
+                                            self.session_id[:8],
+                                        )
                                     self._sdk_initialized.set()
                                 else:
                                     logger.error(
@@ -942,10 +955,14 @@ class ProcessExecutor:
                     "error": f"CLI tool '{old_session.cli_tool}' not found",
                 }
 
+            # Use CLI's internal session_id for --resume (if available)
+            # This ensures the CLI can find its session state for resume
+            resume_session_id = old_session._cli_session_id or session_id
+
             cmd = self._build_command(
                 executable,
                 old_session.cli_tool,
-                session_id,
+                resume_session_id,  # Use CLI's session_id for --resume
                 old_session.project_path,
                 old_session.model,
                 old_session.permission_mode,
@@ -954,7 +971,10 @@ class ProcessExecutor:
             )
 
             logger.info(
-                "Restarting session %s: %s", session_id[:8], " ".join(cmd)
+                "Restarting session %s (CLI session: %s): %s",
+                session_id[:8],
+                resume_session_id[:8] if resume_session_id else "N/A",
+                " ".join(cmd),
             )
 
             # On Windows, .cmd/.bat/.ps1 files need to be executed via shell
