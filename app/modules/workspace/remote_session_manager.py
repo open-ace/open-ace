@@ -18,6 +18,8 @@ from typing import Any, Dict, List, Optional
 from app.modules.workspace.api_key_proxy import APIKeyProxyService
 from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
 from app.modules.workspace.session_manager import SessionManager, SessionType
+from app.repositories.message_repo import MessageRepository
+from app.repositories.user_repo import UserRepository
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +47,10 @@ class RemoteSessionManager:
         self._api_key_proxy = APIKeyProxyService()
         # Cache of session permission modes to avoid unnecessary updates
         self._session_permission_modes: Dict[str, str] = {}
+        self._message_repo = MessageRepository()
+        self._user_repo = UserRepository()
+        # Cache user names to avoid repeated lookups
+        self._user_name_cache: Dict[int, str] = {}
 
     def create_remote_session(
         self,
@@ -238,6 +244,7 @@ class RemoteSessionManager:
             role="user",
             content=content,
         )
+        self._save_to_daily_messages(session_id, "user", content)
 
         command = {
             "type": "command",
@@ -457,6 +464,7 @@ class RemoteSessionManager:
                 role="system",
                 content=data,
             )
+            self._save_to_daily_messages(session_id, "system", data)
 
     def _accumulate_assistant_text(self, session_id: str, data: str) -> None:
         """Parse streaming JSON and accumulate assistant text for a session."""
@@ -526,6 +534,7 @@ class RemoteSessionManager:
                 role="assistant",
                 content=text,
             )
+            self._save_to_daily_messages(session_id, "assistant", text)
 
     def process_usage_report(self, session_id: str,
                              tokens: Dict[str, int],
@@ -626,3 +635,49 @@ class RemoteSessionManager:
             "openclaw": "openai",
         }
         return mapping.get(cli_tool, "openai")
+
+    def _get_user_name(self, user_id: Optional[int]) -> str:
+        """Get user display name with caching."""
+        if not user_id:
+            return ""
+        if user_id in self._user_name_cache:
+            return self._user_name_cache[user_id]
+        try:
+            user = self._user_repo.get_user_by_id(user_id)
+            name = user.get("display_name") or user.get("username", "") if user else ""
+            self._user_name_cache[user_id] = name
+            return name
+        except Exception:
+            return ""
+
+    def _save_to_daily_messages(
+        self, session_id: str, role: str, content: str, tokens_used: int = 0
+    ) -> None:
+        """Mirror a message to daily_messages so it appears in manage pages."""
+        session = self._session_manager.get_session(session_id)
+        if not session:
+            return
+        try:
+            now = datetime.utcnow()
+            self._message_repo.save_message(
+                date=now.strftime("%Y-%m-%d"),
+                tool_name=session.tool_name or "unknown",
+                message_id=str(uuid.uuid4()),
+                role=role,
+                host_name=session.host_name or "remote",
+                content=content,
+                full_entry=json.dumps(
+                    {"session_id": session_id, "role": role, "content": content},
+                    ensure_ascii=False,
+                ),
+                tokens_used=tokens_used,
+                model=session.model,
+                timestamp=now.isoformat(),
+                sender_id=str(session.user_id) if session.user_id else None,
+                sender_name=self._get_user_name(session.user_id),
+                message_source="remote_workspace",
+                agent_session_id=session_id,
+                conversation_id=session_id,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to mirror message to daily_messages for {session_id[:8]}: {e}")
