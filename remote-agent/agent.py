@@ -496,6 +496,14 @@ def fix_stdin_for_service() -> None:
             logger.info("Fixed stdin for service environment: no valid fileno")
 
 
+class _FlushFileHandler(logging.FileHandler):
+    """FileHandler that flushes after each record to prevent data loss on crash."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        super().emit(record)
+        self.flush()
+
+
 def setup_logging(level: str = "INFO") -> None:
     """Configure logging for the agent daemon."""
     numeric_level = getattr(logging, level.upper(), logging.INFO)
@@ -529,14 +537,16 @@ def setup_logging(level: str = "INFO") -> None:
             ],
         )
     else:
-        # Running manually or on Windows - always write to both stdout and file
+        # Running manually or on Windows - always write to both stdout and file.
+        # Uses _FlushFileHandler to ensure every log line is persisted immediately,
+        # so crash diagnostics are never lost to an unflushed buffer.
         logging.basicConfig(
             level=numeric_level,
             format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
             handlers=[
                 logging.StreamHandler(sys.stdout),
-                logging.FileHandler(log_file, encoding="utf-8"),
+                _FlushFileHandler(log_file, encoding="utf-8"),
             ],
         )
 
@@ -547,9 +557,12 @@ def main() -> None:
 
     setup_logging(config.log_level)
 
-    # Fix stdin for service environments (launchd/systemd)
+    # Fix stdin for service environments (launchd/systemd/Task Scheduler)
     # This prevents "Broken pipe" errors when writing to subprocess stdin
-    fix_stdin_for_service()
+    try:
+        fix_stdin_for_service()
+    except Exception as e:
+        logger.warning("fix_stdin_for_service failed (non-fatal): %s", e)
 
     logger.info("=" * 60)
     logger.info("Open ACE Remote Agent")
@@ -557,8 +570,12 @@ def main() -> None:
     logger.info("Machine: %s", config.machine_id)
     logger.info("=" * 60)
 
-    agent = RemoteAgent(config)
-    agent.start()
+    try:
+        agent = RemoteAgent(config)
+        agent.start()
+    except Exception:
+        logger.exception("Agent crashed with unhandled exception")
+        raise
 
 
 if __name__ == "__main__":
