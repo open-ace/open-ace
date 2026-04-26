@@ -183,16 +183,18 @@ class QuotaManager:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
 
-                # Try to insert or update
+                # Use db.execute with adapt_sql for cross-DB compatibility (? → %s for PostgreSQL)
                 cursor.execute(
-                    """
-                    INSERT INTO quota_usage (user_id, date, tokens_used, requests_used)
-                    VALUES (?, ?, ?, ?)
-                    ON CONFLICT(user_id, date) DO UPDATE SET
+                    adapt_sql(
+                        """
+                    INSERT INTO quota_usage (user_id, date, period, tokens_used, requests_used)
+                    VALUES (?, ?, 'daily', ?, ?)
+                    ON CONFLICT(user_id, date, period) DO UPDATE SET
                         tokens_used = tokens_used + ?,
                         requests_used = requests_used + ?,
                         updated_at = CURRENT_TIMESTAMP
-                """,
+                """
+                    ),
                     (user_id, date, tokens, requests, tokens, requests),
                 )
 

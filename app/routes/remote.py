@@ -1092,34 +1092,58 @@ def _record_llm_usage(content: bytes, session_id: str, user_id: int,
                        provider: str, content_type: str) -> None:
     """Extract and record token usage from LLM response."""
     try:
-        # For non-streaming responses, parse the JSON body
-        if b"usage" in content:
+        if b"usage" not in content:
+            return
+
+        usage = None
+
+        # Try parsing as a single JSON object (non-streaming response)
+        try:
             data = json.loads(content)
             usage = data.get("usage", {})
-            input_tokens = usage.get("prompt_tokens", 0)
-            output_tokens = usage.get("completion_tokens", 0)
+        except json.JSONDecodeError:
+            # Streaming SSE response — scan each line for usage data
+            for line in content.split(b"\n"):
+                line = line.strip()
+                if not line or not line.startswith(b"data:"):
+                    continue
+                payload = line[len(b"data:"):].strip()
+                if payload == b"[DONE]":
+                    continue
+                try:
+                    chunk = json.loads(payload)
+                    if "usage" in chunk:
+                        usage = chunk["usage"]
+                        break
+                except (json.JSONDecodeError, ValueError):
+                    continue
 
-            if input_tokens or output_tokens:
-                from app.modules.governance.quota_manager import QuotaManager
-                quota_mgr = QuotaManager()
-                quota_mgr.record_usage(
-                    user_id=user_id,
-                    tokens=input_tokens + output_tokens,
-                    requests=1,
-                )
+        if not usage or not isinstance(usage, dict):
+            return
 
-                # Update session token counts
-                from app.modules.workspace.session_manager import SessionManager
-                sm = SessionManager()
-                session = sm.get_session(session_id)
-                if session:
-                    session.total_input_tokens += input_tokens
-                    session.total_output_tokens += output_tokens
-                    session.total_tokens += input_tokens + output_tokens
-                    session.request_count += 1
-                    sm.update_session(session)
-    except (json.JSONDecodeError, KeyError, TypeError):
-        pass  # Not all responses have usage data
+        input_tokens = usage.get("prompt_tokens", 0)
+        output_tokens = usage.get("completion_tokens", 0)
+
+        if input_tokens or output_tokens:
+            from app.modules.governance.quota_manager import QuotaManager
+            quota_mgr = QuotaManager()
+            quota_mgr.record_usage(
+                user_id=user_id,
+                tokens=input_tokens + output_tokens,
+                requests=1,
+            )
+
+            # Update session token counts
+            from app.modules.workspace.session_manager import SessionManager
+            sm = SessionManager()
+            session = sm.get_session(session_id)
+            if session:
+                session.total_input_tokens += input_tokens
+                session.total_output_tokens += output_tokens
+                session.total_tokens += input_tokens + output_tokens
+                sm.update_session(session)
+    except Exception:
+        pass
 
 
 # ==================== Usage Report (from Agent) ====================
