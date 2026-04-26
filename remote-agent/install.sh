@@ -95,19 +95,35 @@ echo ""
 # Step 1: Check prerequisites
 log_info "Checking prerequisites..."
 
-# Check Python 3
-if ! command -v python3 &>/dev/null; then
-    log_error "Python 3 is not installed. Please install Python 3.8+ first."
+# Find the best Python 3 installation
+# Priority: python3.12 > python3.11 > python3.10 > python3.9 > python3
+find_python() {
+    for py in python3.12 python3.11 python3.10 python3.9 python3; do
+        if command -v "$py" &>/dev/null; then
+            PYTHON_PATH=$(command -v "$py")
+            # Verify it's actually working
+            if "$PYTHON_PATH" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)' 2>/dev/null; then
+                echo "$PYTHON_PATH"
+                return 0
+            fi
+        fi
+    done
+    return 1
+}
+
+PYTHON_PATH=$(find_python)
+if [[ -z "$PYTHON_PATH" ]]; then
+    log_error "Python 3.8+ is not installed. Please install Python 3.8+ first."
     exit 1
 fi
 
-PYTHON_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-log_success "Python $PYTHON_VERSION found"
+PYTHON_VERSION=$("$PYTHON_PATH" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+log_success "Python $PYTHON_PATH found at $PYTHON_PATH"
 
 # Check pip
-if ! python3 -m pip --version &>/dev/null; then
+if ! "$PYTHON_PATH" -m pip --version &>/dev/null; then
     log_warn "pip not found. Installing pip..."
-    python3 -m ensurepip --upgrade 2>/dev/null || {
+    "$PYTHON_PATH" -m ensurepip --upgrade 2>/dev/null || {
         log_error "Failed to install pip"
         exit 1
     }
@@ -170,9 +186,17 @@ log_success "Agent files installed"
 # Step 4: Install Python dependencies
 log_info "Installing Python dependencies..."
 if [[ -f "${INSTALL_DIR}/requirements.txt" ]]; then
-    python3 -m pip install -q -r "${INSTALL_DIR}/requirements.txt" 2>/dev/null || {
-        log_warn "Some dependencies may not have installed correctly"
-    }
+    # Try different installation methods for externally-managed environments (PEP 668)
+    # Method 1: --user (safest, installs to user directory)
+    # Method 2: --break-system-packages (for Homebrew Python etc.)
+    # Method 3: Standard pip install
+    if ! "$PYTHON_PATH" -m pip install --user -q -r "${INSTALL_DIR}/requirements.txt" 2>/dev/null; then
+        if ! "$PYTHON_PATH" -m pip install --break-system-packages -q -r "${INSTALL_DIR}/requirements.txt" 2>/dev/null; then
+            "$PYTHON_PATH" -m pip install -q -r "${INSTALL_DIR}/requirements.txt" 2>/dev/null || {
+                log_warn "Some dependencies may not have installed correctly"
+            }
+        fi
+    fi
 fi
 log_success "Dependencies installed"
 
@@ -185,7 +209,24 @@ if [[ -n "$INSTALL_CLI" ]]; then
         log_info "npm not found, attempting to install Node.js..."
 
         # Detect OS and install Node.js
-        if [ -f /etc/os-release ]; then
+        if [[ "$(uname)" == "Darwin" ]]; then
+            # macOS - use Homebrew
+            log_info "Detected macOS. Installing Node.js via Homebrew..."
+            if command -v brew &>/dev/null; then
+                brew install node
+            else
+                log_warn "Homebrew not found. Installing Homebrew first..."
+                /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+                if command -v brew &>/dev/null; then
+                    brew install node
+                else
+                    log_warn "Failed to install Homebrew. Please install Node.js manually:"
+                    log_warn "  1. Install Homebrew: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+                    log_warn "  2. Install Node.js: brew install node"
+                    log_warn "  3. Install CLI: npm install -g @qwen-code/qwen-code@latest"
+                fi
+            fi
+        elif [ -f /etc/os-release ]; then
             . /etc/os-release
             case "$ID" in
                 rhel|centos|fedora|rocky|almalinux|ol)
@@ -266,7 +307,7 @@ fi
 
 # Step 6: Generate machine ID and save config
 log_info "Generating configuration..."
-MACHINE_ID=$(python3 -c "import uuid; print(uuid.uuid4())")
+MACHINE_ID=$("$PYTHON_PATH" -c "import uuid; print(uuid.uuid4())")
 
 cat > "${INSTALL_DIR}/config.json" << EOF
 {
@@ -275,6 +316,7 @@ cat > "${INSTALL_DIR}/config.json" << EOF
     "machine_name": "${MACHINE_NAME}",
     "registration_token": "${REGISTRATION_TOKEN}",
     "cli_tool": "${INSTALL_CLI}",
+    "python_path": "${PYTHON_PATH}",
     "heartbeat_interval": 60,
     "reconnect_backoff_max": 60
 }
@@ -288,7 +330,7 @@ log_info "Registering with Open ACE server..."
 OS_TYPE=$(uname -s 2>/dev/null || echo "unknown")
 OS_VERSION=$(uname -r 2>/dev/null || echo "unknown")
 
-CAPABILITIES=$(python3 -c "
+CAPABILITIES=$("$PYTHON_PATH" -c "
 import json, os, platform, shutil
 caps = {
     'os': platform.system().lower(),
@@ -325,7 +367,7 @@ REGISTER_RESPONSE=$(curl -s -X POST "${SERVER_URL}/api/remote/agent/register" \
         \"agent_version\": \"${AGENT_VERSION}\"
     }" 2>/dev/null || echo '{"success": false}')
 
-if echo "$REGISTER_RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); sys.exit(0 if d.get('success') else 1)" 2>/dev/null; then
+if echo "$REGISTER_RESPONSE" | "$PYTHON_PATH" -c "import sys,json; d=json.load(sys.stdin); sys.exit(0 if d.get('success') else 1)" 2>/dev/null; then
     log_success "Machine registered successfully!"
 else
     log_error "Registration failed. Response: $REGISTER_RESPONSE"
@@ -361,7 +403,7 @@ Wants=network-online.target
 Type=simple
 User=$(whoami)
 WorkingDirectory=${INSTALL_DIR}
-ExecStart=$(which python3) ${INSTALL_DIR}/agent.py
+ExecStart=${PYTHON_PATH} ${INSTALL_DIR}/agent.py
 Restart=always
 RestartSec=10
 Environment=PYTHONUNBUFFERED=1
@@ -385,7 +427,7 @@ EOF
     <string>com.open-ace.agent</string>
     <key>ProgramArguments</key>
     <array>
-        <string>$(which python3)</string>
+        <string>${PYTHON_PATH}</string>
         <string>${INSTALL_DIR}/agent.py</string>
     </array>
     <key>WorkingDirectory</key>

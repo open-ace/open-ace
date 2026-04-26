@@ -60,12 +60,23 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
     [machines, selectedMachineId]
   );
 
+  // Get default workspace path based on OS type
+  const getDefaultPath = (osType: string | null | undefined): string => {
+    const os = (osType || '').toLowerCase();
+    if (os.includes('windows')) {
+      return 'C:\\workspace';
+    }
+    if (os.includes('darwin') || os.includes('mac')) {
+      return '~/workspace';
+    }
+    return '/root/workspace';
+  };
+
   const handleMachineSelect = (machineId: string) => {
     setSelectedMachineId(machineId);
     const machine = machines.find((m) => m.machine_id === machineId);
     if (machine) {
-      const isWindows = (machine.os_type || '').toLowerCase().includes('windows');
-      setProjectPath(machine.work_dir || (isWindows ? 'C:\\workspace' : '/root/workspace'));
+      setProjectPath(machine.work_dir || getDefaultPath(machine.os_type));
     }
   };
 
@@ -227,7 +238,7 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
                 className="form-control"
                 value={projectPath}
                 onChange={(e) => setProjectPath(e.target.value)}
-                placeholder={selectedMachine && (selectedMachine.os_type || '').toLowerCase().includes('windows') ? 'C:\\workspace' : '/root/workspace'}
+                placeholder={selectedMachine ? getDefaultPath(selectedMachine.os_type) : '/root/workspace'}
               />
               <div className="form-text text-muted small">
                 {t('projectPathHint', language)}

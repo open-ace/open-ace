@@ -272,6 +272,27 @@ class RemoteSessionManager:
         }
         return self._agent_manager.send_command(machine_id, command)
 
+    def abort_request(self, session_id: str) -> bool:
+        """Abort the current in-progress request without stopping the session.
+
+        Sends an interrupt signal (SIGINT/Ctrl+C) to the remote CLI process
+        so the user can continue interacting with the session afterwards.
+        """
+        machine_id = self._get_machine_id(session_id)
+        if not machine_id:
+            return False
+
+        command = {
+            "type": "command",
+            "command": "abort_request",
+            "session_id": session_id,
+        }
+
+        success = self._agent_manager.send_command(machine_id, command)
+        if success:
+            logger.info(f"Sent abort_request for session {session_id[:8]}")
+        return success
+
     def stop_session(self, session_id: str) -> bool:
         """Stop a remote session."""
         machine_id = self._get_machine_id(session_id)
@@ -344,6 +365,13 @@ class RemoteSessionManager:
         machine_id = self._get_machine_id(session_id)
         output = self._agent_manager.get_buffered_output(session_id)
 
+        # Include DB-stored messages for frontend replay on reconnect
+        messages = []
+        try:
+            messages = self._session_manager.get_messages(session_id) or []
+        except Exception:
+            pass
+
         return {
             "session_id": session_id,
             "status": session.status,
@@ -351,9 +379,12 @@ class RemoteSessionManager:
             "project_path": session.project_path,
             "model": session.model,
             "total_tokens": session.total_tokens,
+            "total_input_tokens": session.total_input_tokens,
+            "total_output_tokens": session.total_output_tokens,
             "message_count": session.message_count,
             "request_count": session.request_count,
             "output": output,
+            "messages": messages,
             "created_at": session.created_at.isoformat() if session.created_at else None,
         }
 
@@ -371,11 +402,17 @@ class RemoteSessionManager:
 
         self._agent_manager.buffer_output(session_id, output_entry)
 
-        # If this is a complete assistant message, store it
+        # If this is a complete message, store it
         if is_complete and stream == "stdout":
             self._session_manager.add_message(
                 session_id=session_id,
                 role="assistant",
+                content=data,
+            )
+        elif is_complete and stream == "system":
+            self._session_manager.add_message(
+                session_id=session_id,
+                role="system",
                 content=data,
             )
 
@@ -395,7 +432,7 @@ class RemoteSessionManager:
         session.total_tokens += total
         session.total_input_tokens += input_tokens
         session.total_output_tokens += output_tokens
-        session.request_count += requests
+        # request_count is managed by add_message() — avoid double counting
         self._session_manager.update_session(session)
 
         # Record usage in QuotaManager

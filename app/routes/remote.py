@@ -525,6 +525,25 @@ def update_remote_session_model(session_id):
     return jsonify({"error": "Failed to update model"}), 400
 
 
+@remote_bp.route("/sessions/<session_id>/abort", methods=["POST"])
+def abort_remote_request(session_id):
+    """Abort the current in-progress request without stopping the session."""
+    auth_error = _require_auth()
+    if auth_error:
+        return auth_error
+
+    _, access_error = _check_session_access(session_id)
+    if access_error:
+        return access_error
+
+    session_mgr = RemoteSessionManager()
+    success = session_mgr.abort_request(session_id)
+
+    if success:
+        return jsonify({"success": True})
+    return jsonify({"error": "Failed to abort request"}), 400
+
+
 @remote_bp.route("/sessions/<session_id>/stop", methods=["POST"])
 def stop_remote_session(session_id):
     """Stop a remote session."""
@@ -714,6 +733,24 @@ def agent_install_script_windows():
     if not os.path.isfile(install_ps1):
         return jsonify({"error": "install.ps1 not found"}), 404
     return Response(open(install_ps1).read(), mimetype="text/plain")
+
+
+@remote_bp.route("/agent/uninstall.sh", methods=["GET"])
+def agent_uninstall_script():
+    """Serve the agent uninstallation shell script (Linux/macOS)."""
+    uninstall_sh = os.path.join(AGENT_DIR, "uninstall.sh")
+    if not os.path.isfile(uninstall_sh):
+        return jsonify({"error": "uninstall.sh not found"}), 404
+    return Response(open(uninstall_sh).read(), mimetype="text/x-shellscript")
+
+
+@remote_bp.route("/agent/uninstall.ps1", methods=["GET"])
+def agent_uninstall_script_windows():
+    """Serve the agent uninstallation PowerShell script (Windows)."""
+    uninstall_ps1 = os.path.join(AGENT_DIR, "uninstall.ps1")
+    if not os.path.isfile(uninstall_ps1):
+        return jsonify({"error": "uninstall.ps1 not found"}), 404
+    return Response(open(uninstall_ps1).read(), mimetype="text/plain")
 
 
 @remote_bp.route("/agent/files/<path:filename>", methods=["GET"])

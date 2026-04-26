@@ -101,10 +101,15 @@ export const SessionDetailContent: React.FC<SessionDetailContentProps> = ({
       {/* Session Meta Info - Three column layout */}
       <div className="session-meta mb-3 p-3 bg-light rounded">
         <div className="row g-3">
-          {/* Row 1: Total Tokens, Requests/Messages, Model */}
+          {/* Row 1: Token Breakdown, Requests/Messages, Model */}
           <div className="col-md-4">
             <small className="text-muted d-block">{t('totalTokens', language)}</small>
             <span>{formatTokens(session.total_tokens)}</span>
+            {(session.total_input_tokens > 0 || session.total_output_tokens > 0) && (
+              <small className="text-muted ms-2">
+                ({t('inputTokens', language) ?? 'Input'}: {formatTokens(session.total_input_tokens)} / {t('outputTokens', language) ?? 'Output'}: {formatTokens(session.total_output_tokens)})
+              </small>
+            )}
           </div>
           <div className="col-md-4">
             <small className="text-muted d-block">{t('requestsMessages', language)}</small>

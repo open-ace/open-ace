@@ -66,6 +66,8 @@ export const RemoteMachineManagement: React.FC = () => {
 
   const [showDeregisterDialog, setShowDeregisterDialog] = useState(false);
   const [deregisterTarget, setDeregisterTarget] = useState<RemoteMachine | null>(null);
+  const [deregisterOS, setDeregisterOS] = useState<'linux' | 'windows' | 'macos'>('linux');
+  const [copiedUninstall, setCopiedUninstall] = useState(false);
 
   // Handlers
   const handleGenerateToken = async () => {
@@ -191,7 +193,39 @@ export const RemoteMachineManagement: React.FC = () => {
 
   const handleOpenDeregister = (machine: RemoteMachine) => {
     setDeregisterTarget(machine);
+    // Set default OS based on machine's os_type
+    const os = (machine.os_type || '').toLowerCase();
+    if (os.includes('windows')) {
+      setDeregisterOS('windows');
+    } else if (os.includes('darwin') || os.includes('mac')) {
+      setDeregisterOS('macos');
+    } else {
+      setDeregisterOS('linux');
+    }
     setShowDeregisterDialog(true);
+  };
+
+  // Generate uninstall command based on selected OS
+  const getUninstallCommand = () => {
+    const server = window.location.origin;
+    switch (deregisterOS) {
+      case 'linux':
+        return `curl -fsSL ${server}/api/remote/agent/uninstall.sh | bash`;
+      case 'macos':
+        return `curl -fsSL ${server}/api/remote/agent/uninstall.sh | bash`;
+      case 'windows':
+        return `powershell -Command "Invoke-WebRequest -Uri '${server}/api/remote/agent/uninstall.ps1' -OutFile 'uninstall.ps1'; powershell -ExecutionPolicy Bypass -File uninstall.ps1"`;
+      default:
+        return '';
+    }
+  };
+
+  const handleCopyUninstallCommand = async () => {
+    const success = await copyToClipboard(getUninstallCommand());
+    if (success) {
+      setCopiedUninstall(true);
+      setTimeout(() => setCopiedUninstall(false), 2000);
+    }
   };
 
   const handleDeregister = async () => {
@@ -480,6 +514,7 @@ export const RemoteMachineManagement: React.FC = () => {
         isOpen={showDeregisterDialog}
         onClose={() => setShowDeregisterDialog(false)}
         title={t('deregisterMachine', language)}
+        size="lg"
         footer={
           <>
             <Button variant="secondary" onClick={() => setShowDeregisterDialog(false)}>
@@ -501,6 +536,53 @@ export const RemoteMachineManagement: React.FC = () => {
             <strong>{deregisterTarget.machine_name}</strong> ({deregisterTarget.hostname || deregisterTarget.machine_id.substring(0, 8)})
           </p>
         )}
+
+        {/* Uninstall Command */}
+        <div className="mt-3">
+          <p className="text-muted mb-1">
+            <strong>{t('uninstallCommand', language)}</strong>
+          </p>
+          <p className="text-muted small">{t('uninstallCommandDesc', language)}</p>
+
+          {/* OS Selector */}
+          <div className="mb-2">
+            <div className="btn-group w-100" role="group">
+              <button
+                type="button"
+                className={`btn ${deregisterOS === 'linux' ? 'btn-primary' : 'btn-outline-primary'}`}
+                onClick={() => setDeregisterOS('linux')}
+              >
+                <i className="bi bi-linux me-1" />Linux
+              </button>
+              <button
+                type="button"
+                className={`btn ${deregisterOS === 'macos' ? 'btn-primary' : 'btn-outline-primary'}`}
+                onClick={() => setDeregisterOS('macos')}
+              >
+                <i className="bi bi-apple me-1" />macOS
+              </button>
+              <button
+                type="button"
+                className={`btn ${deregisterOS === 'windows' ? 'btn-primary' : 'btn-outline-primary'}`}
+                onClick={() => setDeregisterOS('windows')}
+              >
+                <i className="bi bi-windows me-1" />Windows
+              </button>
+            </div>
+          </div>
+
+          <div className="input-group">
+            <input
+              type="text"
+              className="form-control font-monospace"
+              value={getUninstallCommand()}
+              readOnly
+            />
+            <Button variant="outline-secondary" onClick={handleCopyUninstallCommand}>
+              {copiedUninstall ? <i className="bi bi-check" /> : <i className="bi bi-clipboard" />}
+            </Button>
+          </div>
+        </div>
       </Modal>
     </div>
   );
@@ -532,6 +614,7 @@ const MachineDetailsDialog: React.FC<MachineDetailsDialogProps> = ({
 }) => {
   const { data: usersData, refetch } = useMachineUsers(machine.machine_id);
   const assignedUsers = usersData?.users ?? [];
+  const [capabilitiesExpanded, setCapabilitiesExpanded] = useState(false);
 
   return (
     <Modal
@@ -601,13 +684,22 @@ const MachineDetailsDialog: React.FC<MachineDetailsDialogProps> = ({
         </div>
       </div>
 
-      {/* Capabilities */}
+      {/* Capabilities - Collapsible */}
       {machine.capabilities && Object.keys(machine.capabilities).length > 0 && (
         <div className="mb-4">
-          <label className="text-muted small">{t('capabilities', language)}</label>
-          <pre className="bg-light p-2 rounded small mb-0" style={{ maxHeight: '200px', overflow: 'auto' }}>
-            {JSON.stringify(machine.capabilities, null, 2)}
-          </pre>
+          <div
+            className="d-flex align-items-center cursor-pointer"
+            onClick={() => setCapabilitiesExpanded(!capabilitiesExpanded)}
+            style={{ cursor: 'pointer' }}
+          >
+            <label className="text-muted small mb-0 me-2">{t('capabilities', language)}</label>
+            <i className={`bi ${capabilitiesExpanded ? 'bi-chevron-up' : 'bi-chevron-down'}`} />
+          </div>
+          {capabilitiesExpanded && (
+            <pre className="bg-light p-2 rounded small mb-0 mt-2" style={{ maxHeight: '200px', overflow: 'auto' }}>
+              {JSON.stringify(machine.capabilities, null, 2)}
+            </pre>
+          )}
         </div>
       )}
 
