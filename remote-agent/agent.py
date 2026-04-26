@@ -470,29 +470,29 @@ class RemoteAgent:
 
 
 def fix_stdin_for_service() -> None:
-    """Fix stdin state when running under launchd/systemd.
-    
-    When running as a service (launchd on macOS, systemd on Linux),
-    stdin may be closed or have an invalid file descriptor. This can
-    affect subprocess stdin pipe creation and cause "Broken pipe" errors
-    when writing to subprocess stdin.
-    
+    """Fix stdin state when running under a service manager.
+
+    When running as a service (launchd on macOS, systemd on Linux,
+    Task Scheduler on Windows), stdin may be closed or have an invalid
+    file descriptor. This can affect subprocess stdin pipe creation and
+    cause "Broken pipe" errors when writing to subprocess stdin.
+
     This function detects and fixes stdin issues by reopening stdin
-    to /dev/null if necessary.
+    to the platform-appropriate null device if necessary.
     """
+    null_dev = os.devnull  # '/dev/null' on Unix, 'nul' on Windows
+
     if sys.stdin is None or sys.stdin.closed:
-        sys.stdin = open("/dev/null", "r")
+        sys.stdin = open(null_dev, "r")
         logger.info("Fixed stdin for service environment: stdin was None/closed")
     else:
         try:
             fd = sys.stdin.fileno()
             if fd < 0:
-                sys.stdin = open("/dev/null", "r")
+                sys.stdin = open(null_dev, "r")
                 logger.info("Fixed stdin for service environment: invalid fd (%d)", fd)
         except (ValueError, OSError):
-            # fileno() raises ValueError if stdin is not connected to a real file
-            # OSError if the file descriptor is invalid
-            sys.stdin = open("/dev/null", "r")
+            sys.stdin = open(null_dev, "r")
             logger.info("Fixed stdin for service environment: no valid fileno")
 
 
@@ -501,16 +501,24 @@ def setup_logging(level: str = "INFO") -> None:
     numeric_level = getattr(logging, level.upper(), logging.INFO)
     log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent.log")
 
-    # Check if running under launchd (macOS) or systemd (Linux)
-    # These init systems redirect stdout/stderr to log files,
-    # so we don't need a separate FileHandler (would cause duplicate logs)
-    under_service_manager = (
-        os.environ.get("TERM") is None  # No terminal typically means service
-        or "INVOCATION_ID" in os.environ  # systemd sets this
-        or os.path.exists("/proc/self/cgroup")  # Linux container/systemd
+    # Determine if running under a *nix service manager that redirects
+    # stdout/stderr to its own log files (launchd, systemd).
+    # On these platforms we skip the FileHandler to avoid duplicate logs.
+    # On Windows, we ALWAYS write a log file because stdout is typically
+    # invisible when running under Task Scheduler or Start-Process -Hidden.
+    is_unix_service = (
+        os.name != "nt"
+        and (
+            "INVOCATION_ID" in os.environ  # systemd sets this
+            or os.path.exists("/proc/self/cgroup")  # Linux container/systemd
+            or (
+                os.environ.get("TERM") is None
+                and os.environ.get("_LAUNCHD_SOCKET") is not None  # macOS launchd
+            )
+        )
     )
 
-    if under_service_manager:
+    if is_unix_service:
         # Service manager handles log redirection - use stdout only
         logging.basicConfig(
             level=numeric_level,
@@ -521,7 +529,7 @@ def setup_logging(level: str = "INFO") -> None:
             ],
         )
     else:
-        # Running manually - write to both stdout and file
+        # Running manually or on Windows - always write to both stdout and file
         logging.basicConfig(
             level=numeric_level,
             format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
