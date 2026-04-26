@@ -1295,6 +1295,7 @@ class ProcessExecutor:
                         "permission_mode": s.permission_mode,
                         "allowed_tools": s.allowed_tools,
                         "paused": s._paused,
+                        "cli_session_id": s._cli_session_id,
                         "env": {k: v for k, v in s.env.items() if not k.endswith("TOKEN")} if s.env else {},
                     }
             self._META_FILE.write_text(json.dumps(meta, indent=2), encoding="utf-8")
@@ -1344,10 +1345,13 @@ class ProcessExecutor:
             if info.get("env"):
                 env.update(info["env"])
 
+            # Use CLI's internal session_id for --resume if available
+            resume_session_id = info.get("cli_session_id") or sid
+
             cmd = self._build_command(
                 executable,
                 info["cli_tool"],
-                sid,
+                resume_session_id,
                 info["project_path"],
                 info.get("model"),
                 info.get("permission_mode"),
@@ -1401,8 +1405,10 @@ class ProcessExecutor:
 
             restored.append(sid)
             logger.info(
-                "Restored session %s (pid %d) with --resume",
-                sid[:8], process.pid,
+                "Restored session %s (CLI session: %s, pid %d) with --resume",
+                sid[:8],
+                resume_session_id[:8] if resume_session_id else "N/A",
+                process.pid,
             )
 
         # Clear metadata file after successful restore
