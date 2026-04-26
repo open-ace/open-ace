@@ -66,6 +66,13 @@ class RemoteAgent:
         )
         logger.info("Capabilities: %s", json.dumps(self._capabilities, indent=2))
 
+        # Restore sessions from previous run (crash recovery)
+        restored = self._executor.restore_sessions()
+        if restored:
+            logger.info("Restored %d session(s) from crash recovery", len(restored))
+            for sid in restored:
+                self._send_session_status(sid, "running")
+
         while self._running:
             try:
                 self._http_poll_loop()

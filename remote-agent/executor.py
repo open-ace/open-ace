@@ -805,6 +805,7 @@ class ProcessExecutor:
             cli_tool,
         )
 
+        self._save_sessions_meta()
         return {"success": True, "pid": process.pid}
 
     def send_message(self, session_id: str, content: str) -> Dict[str, Any]:
@@ -1118,6 +1119,7 @@ class ProcessExecutor:
 
         session.stop()
         logger.info("Session %s stopped", session_id[:8])
+        self._save_sessions_meta()
         return {"success": True}
 
     def send_permission_response(self, session_id: str, request_id: str, behavior: str, message: Optional[str] = None) -> Dict[str, Any]:
@@ -1151,6 +1153,7 @@ class ProcessExecutor:
         if not session:
             return {"success": False, "error": "Session not found"}
         ok = session.pause()
+        self._save_sessions_meta()
         return {"success": ok, "paused": session._paused, "pid": session.pid}
 
     def resume_session(self, session_id: str) -> Dict[str, Any]:
@@ -1164,8 +1167,10 @@ class ProcessExecutor:
             # Process stopped while paused (Windows fallback or process died)
             restart_ok = self._restart_session(session_id)
             if restart_ok.get("success"):
+                self._save_sessions_meta()
                 return {"success": True, "restarted": True}
             return restart_ok
+        self._save_sessions_meta()
         return {"success": True, "paused": session._paused, "pid": session.pid}
 
     def get_session_info(self, session_id: str) -> Optional[Dict[str, Any]]:
@@ -1217,4 +1222,141 @@ class ProcessExecutor:
         with self._lock:
             self._sessions.clear()
 
+        self._save_sessions_meta()
         logger.info("All sessions stopped")
+
+    # ------------------------------------------------------------------
+    # Crash recovery: session metadata persistence
+    # ------------------------------------------------------------------
+
+    _META_DIR = Path.home() / ".open-ace-agent"
+    _META_FILE = Path.home() / ".open-ace-agent" / "sessions.json"
+
+    def _save_sessions_meta(self) -> None:
+        """Persist active session metadata to disk for crash recovery."""
+        try:
+            self._META_DIR.mkdir(parents=True, exist_ok=True)
+            with self._lock:
+                meta = {}
+                for sid, s in self._sessions.items():
+                    meta[sid] = {
+                        "cli_tool": s.cli_tool,
+                        "project_path": s.project_path,
+                        "model": s.model,
+                        "permission_mode": s.permission_mode,
+                        "allowed_tools": s.allowed_tools,
+                        "paused": s._paused,
+                        "env": {k: v for k, v in s.env.items() if not k.endswith("TOKEN")} if s.env else {},
+                    }
+            self._META_FILE.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+            logger.debug("Saved %d session(s) metadata", len(meta))
+        except Exception as e:
+            logger.warning("Failed to save session metadata: %s", e)
+
+    def restore_sessions(self) -> List[str]:
+        """
+        Restore sessions from persisted metadata after a crash.
+
+        Returns list of successfully restored session IDs.
+        """
+        if not self._META_FILE.exists():
+            return []
+
+        try:
+            meta = json.loads(self._META_FILE.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("Failed to load session metadata: %s", e)
+            return []
+
+        if not meta:
+            return []
+
+        logger.info("Restoring %d session(s) from metadata", len(meta))
+        restored = []
+
+        for sid, info in meta.items():
+            executable = self._find_executable(info["cli_tool"])
+            if not executable:
+                logger.warning(
+                    "Cannot restore session %s: CLI tool '%s' not found",
+                    sid[:8], info["cli_tool"],
+                )
+                continue
+
+            # Rebuild env without saved proxy token — the server will
+            # provide a fresh one on the next start_session command.
+            # For now, build minimal env from adapter defaults.
+            env = self._build_env(info["cli_tool"], "", info.get("model"))
+            # Merge any saved non-token env vars
+            if info.get("env"):
+                env.update(info["env"])
+
+            cmd = self._build_command(
+                executable,
+                info["cli_tool"],
+                sid,
+                info["project_path"],
+                info.get("model"),
+                info.get("permission_mode"),
+                info.get("allowed_tools"),
+                resume=True,
+            )
+
+            use_shell = os.name == "nt" and executable.lower().endswith((".cmd", ".bat", ".ps1"))
+            cmd_to_use = " ".join(cmd) if use_shell else cmd
+
+            try:
+                process = subprocess.Popen(
+                    cmd_to_use,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    cwd=info["project_path"],
+                    env=env,
+                    shell=use_shell,
+                    start_new_session=not use_shell and os.name != "nt",
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" and not use_shell else 0,
+                )
+            except (OSError, subprocess.SubprocessError) as e:
+                logger.error("Failed to restore session %s: %s", sid[:8], e)
+                continue
+
+            session_proc = SessionProcess(
+                session_id=sid,
+                process=process,
+                project_path=info["project_path"],
+                cli_tool=info["cli_tool"],
+                output_callback=self._output_callback,
+                permission_callback=self._permission_callback,
+                usage_callback=self._usage_callback,
+                env=env,
+                model=info.get("model"),
+                permission_mode=info.get("permission_mode"),
+                allowed_tools=info.get("allowed_tools"),
+            )
+
+            with self._lock:
+                self._sessions[sid] = session_proc
+
+            session_proc.start_readers()
+
+            # Send SDK init
+            adapter = get_adapter(info["cli_tool"])
+            if adapter.supports_stdin_input():
+                session_proc.send_sdk_init()
+                session_proc.wait_sdk_initialized(timeout=15.0)
+
+            restored.append(sid)
+            logger.info(
+                "Restored session %s (pid %d) with --resume",
+                sid[:8], process.pid,
+            )
+
+        # Clear metadata file after successful restore
+        try:
+            self._META_FILE.write_text("{}", encoding="utf-8")
+        except OSError:
+            pass
+
+        self._save_sessions_meta()
+        return restored
