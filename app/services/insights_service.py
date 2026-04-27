@@ -270,9 +270,24 @@ class InsightsService:
             )
         return content
 
+    def _extract_json(self, text: str) -> str:
+        """Extract JSON from AI response, stripping markdown code fences if present."""
+        text = text.strip()
+        # Match ```json ... ``` or ``` ... ```
+        if text.startswith("```"):
+            # Find the first newline after the opening ```
+            first_newline = text.find("\n")
+            if first_newline != -1:
+                # Find the closing ```
+                last_backticks = text.rfind("```")
+                if last_backticks > first_newline:
+                    text = text[first_newline + 1 : last_backticks].strip()
+        return text
+
     def _parse_ai_response(self, response_text: str, stats: Dict) -> Dict:
         """Parse AI response into structured report data."""
-        parsed = json.loads(response_text)
+        clean_text = self._extract_json(response_text)
+        parsed = json.loads(clean_text)
 
         # Validate required fields
         required_fields = ["overall_score", "overall_assessment", "strengths", "areas_for_improvement"]
