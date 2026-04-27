@@ -258,11 +258,17 @@ class InsightsService:
             "response_format": {"type": "json_object"},
         }
 
-        response = requests.post(url, headers=headers, json=payload, timeout=120)
+        response = requests.post(url, headers=headers, json=payload, timeout=300)
         response.raise_for_status()
 
         data = response.json()
-        return data["choices"][0]["message"]["content"]
+        content = data["choices"][0]["message"].get("content", "")
+        if not content or not content.strip():
+            raise ValueError(
+                "AI returned empty content (reasoning model may have consumed all tokens). "
+                "Consider increasing max_tokens or using a non-reasoning model."
+            )
+        return content
 
     def _parse_ai_response(self, response_text: str, stats: Dict) -> Dict:
         """Parse AI response into structured report data."""
