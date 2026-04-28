@@ -568,6 +568,14 @@ class RemoteSessionManager:
             except Exception as e:
                 logger.error(f"Failed to record quota usage: {e}")
 
+            # Refresh user_daily_stats so quota checks see up-to-date data
+            try:
+                from app.repositories.daily_stats_repo import DailyStatsRepository
+                daily_stats_repo = DailyStatsRepository()
+                daily_stats_repo.refresh_stats()
+            except Exception as e:
+                logger.warning(f"Failed to refresh daily stats after usage report: {e}")
+
     def process_permission_request(self, session_id: str,
                                     control_request: dict) -> None:
         """

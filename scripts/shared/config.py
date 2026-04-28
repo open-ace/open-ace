@@ -210,3 +210,12 @@ def is_data_fetch_enabled() -> bool:
     # Priority 2: Config file
     fetch_config = get_data_fetch_config()
     return fetch_config.get("enabled", True)
+
+
+def get_quota_enforcement_config() -> dict:
+    """Get quota enforcement configuration from config.json."""
+    user_config = _load_user_config()
+    enforcement_config = user_config.get("quota_enforcement", {})
+    default_config = {"interval": 60, "enabled": True}
+    default_config.update(enforcement_config)
+    return default_config

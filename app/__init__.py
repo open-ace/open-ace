@@ -209,6 +209,14 @@ def start_background_services():
         from app.services.data_fetch_scheduler import init_scheduler
 
         init_scheduler()
-        logger.info("Background services started")
     except Exception as e:
-        logger.warning(f"Failed to start background services: {e}")
+        logger.warning(f"Failed to start data fetch scheduler: {e}")
+
+    try:
+        from app.services.quota_enforcement_scheduler import init_quota_enforcement
+
+        init_quota_enforcement()
+    except Exception as e:
+        logger.warning(f"Failed to start quota enforcement scheduler: {e}")
+
+    logger.info("Background services started")

@@ -224,9 +224,13 @@ class QuotaManager:
         user = self.user_repo.get_user_by_id(user_id)
         username = user.get("username", "") if user else ""
 
-        # Get quota limits from user (stored in M units, convert to actual tokens)
-        token_limit = user.get("daily_token_quota") * TOKEN_QUOTA_MULTIPLIER if user and user.get("daily_token_quota") else None
-        request_limit = user.get("daily_request_quota") if user else None
+        # Get quota limits based on period
+        if period == "monthly":
+            token_limit = user.get("monthly_token_quota") * TOKEN_QUOTA_MULTIPLIER if user and user.get("monthly_token_quota") else None
+            request_limit = user.get("monthly_request_quota") if user else None
+        else:
+            token_limit = user.get("daily_token_quota") * TOKEN_QUOTA_MULTIPLIER if user and user.get("daily_token_quota") else None
+            request_limit = user.get("daily_request_quota") if user else None
 
         # Default limits if not set
         if token_limit is None:
@@ -295,6 +299,26 @@ class QuotaManager:
                 "status": status.to_dict(),
             }
 
+        # Check monthly quotas
+        user = self.user_repo.get_user_by_id(user_id)
+        if user:
+            monthly_token_quota = user.get("monthly_token_quota")
+            monthly_request_quota = user.get("monthly_request_quota")
+            if monthly_token_quota or monthly_request_quota:
+                monthly_status = self.get_user_quota_status(user_id, period="monthly")
+                if monthly_token_quota and monthly_status.tokens_used + tokens >= monthly_token_quota * TOKEN_QUOTA_MULTIPLIER:
+                    return {
+                        "allowed": False,
+                        "reason": f"Monthly token quota exceeded. Used: {monthly_status.tokens_used}/{monthly_token_quota * TOKEN_QUOTA_MULTIPLIER}",
+                        "status": monthly_status.to_dict(),
+                    }
+                if monthly_request_quota and monthly_status.requests_used + requests >= monthly_request_quota:
+                    return {
+                        "allowed": False,
+                        "reason": f"Monthly request quota exceeded. Used: {monthly_status.requests_used}/{monthly_request_quota}",
+                        "status": monthly_status.to_dict(),
+                    }
+
         return {
             "allowed": True,
             "reason": None,
@@ -322,6 +346,22 @@ class QuotaManager:
             quota_limit=status.request_limit,
             percentage=status.request_percentage / 100,
         )
+
+        # Also push to the main alerts table (supports WebSocket notifications)
+        try:
+            user = self.user_repo.get_user_by_id(user_id)
+            username = user.get("username", "") if user else ""
+            max_pct = max(status.token_percentage, status.request_percentage)
+            if max_pct >= 80:
+                from app.modules.governance.alert_notifier import create_quota_alert
+                create_quota_alert(
+                    user_id=user_id,
+                    username=username,
+                    usage_percent=max_pct,
+                    quota_type="tokens" if status.token_percentage >= status.request_percentage else "requests",
+                )
+        except Exception as e:
+            logger.warning(f"Failed to push quota alert to notifier: {e}")
 
     def _create_alert_if_needed(
         self, user_id: int, quota_type: str, current_usage: int, quota_limit: int, percentage: float
@@ -422,8 +462,36 @@ class QuotaManager:
 
         return start, end
 
+    def _get_usage_from_daily_stats(self, user_id: int, start_date: str, end_date: str) -> dict[str, int]:
+        """Get usage from pre-aggregated user_daily_stats table (fast path)."""
+        result = self.db.fetch_one(
+            """
+            SELECT
+                COALESCE(SUM(requests), 0) as requests,
+                COALESCE(SUM(tokens), 0) as tokens
+            FROM user_daily_stats
+            WHERE user_id = ? AND date >= ? AND date <= ?
+        """,
+            (user_id, start_date, end_date),
+        )
+        if result:
+            return {
+                "tokens": int(result["tokens"]),
+                "requests": int(result["requests"]),
+            }
+        return {"tokens": 0, "requests": 0}
+
     def _get_usage_in_range(self, user_id: int, start_date: str, end_date: str) -> dict[str, int]:
-        """Get total usage in a date range from agent_sessions (remote) and daily_messages (local)."""
+        """Get total usage in a date range. Tries user_daily_stats first, falls back to raw queries."""
+        # Fast path: use pre-aggregated user_daily_stats
+        try:
+            stats = self._get_usage_from_daily_stats(user_id, start_date, end_date)
+            if stats["tokens"] > 0 or stats["requests"] > 0:
+                return stats
+        except Exception:
+            pass  # Fall through to legacy query
+
+        # Legacy path: agent_sessions (remote) + daily_messages (local)
         # Remote session usage from agent_sessions
         remote_result = self.db.fetch_one(
             """

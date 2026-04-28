@@ -967,7 +967,13 @@ def llm_proxy(path=""):
                 }
             }), 429
     except Exception as e:
-        logger.warning(f"Quota check failed: {e}")
+        logger.error(f"Quota check failed, denying request for safety: {e}")
+        return jsonify({
+            "error": {
+                "message": "Quota check unavailable - request denied for safety",
+                "type": "quota_check_error",
+            }
+        }), 429
 
     # Resolve real API key
     key_result = api_proxy.resolve_api_key(tenant_id, provider)
@@ -1142,6 +1148,14 @@ def _record_llm_usage(content: bytes, session_id: str, user_id: int,
                 session.total_output_tokens += output_tokens
                 session.total_tokens += input_tokens + output_tokens
                 sm.update_session(session)
+
+            # Refresh user_daily_stats so quota checks see up-to-date data
+            try:
+                from app.repositories.daily_stats_repo import DailyStatsRepository
+                daily_stats_repo = DailyStatsRepository()
+                daily_stats_repo.refresh_stats()
+            except Exception:
+                pass
     except Exception:
         pass
 
