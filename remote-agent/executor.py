@@ -271,6 +271,25 @@ class SessionProcess:
             )
             return False
 
+    def interrupt(self) -> bool:
+        """Send SIGINT (Ctrl+C) to the subprocess to cancel current request."""
+        if not self.is_running:
+            return False
+        try:
+            if os.name != "nt":
+                pgid = os.getpgid(self.process.pid)
+                os.killpg(pgid, signal.SIGINT)
+            else:
+                self.process.send_signal(signal.CTRL_C_EVENT)
+            logger.info(
+                "Sent SIGINT to session %s (pid %d)",
+                self.session_id[:8], self.process.pid,
+            )
+            return True
+        except (ProcessLookupError, OSError) as e:
+            logger.warning("Failed to send SIGINT: %s", e)
+            return False
+
     def stop(self, timeout: float = 5.0) -> None:
         """
         Gracefully stop the subprocess.
@@ -1149,6 +1168,16 @@ class ProcessExecutor:
             model, session_id[:8],
         )
         return self._restart_session(session_id)
+
+    def interrupt_session(self, session_id: str) -> Dict[str, Any]:
+        """Interrupt the current request in a session without stopping it."""
+        session = self._sessions.get(session_id)
+        if not session:
+            return {"success": False, "error": "Session not found"}
+        result = session.interrupt()
+        if result:
+            logger.info("Interrupted request in session %s", session_id[:8])
+        return {"success": result}
 
     def stop_session(self, session_id: str) -> Dict[str, Any]:
         """

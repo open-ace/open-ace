@@ -145,21 +145,34 @@ const LegacyAppContent: React.FC = () => {
 
 // Work Mode Routes
 const WorkRoutes: React.FC = () => {
+  const location = useLocation();
+  const isWorkspaceRoute = location.pathname === '/work' ||
+    location.pathname === '/work/' ||
+    location.pathname === '/work/workspace';
+
   return (
     <Suspense fallback={<PageLoader />}>
       <Routes>
         <Route path="/" element={
           <WorkLayout>
-            <Outlet />
+            {/* Workspace always mounted - hidden when other routes are active.
+                display:contents makes children direct flex children of .work-main,
+                preserving layout. display:none hides but keeps iframe in DOM. */}
+            <div style={{ display: isWorkspaceRoute ? 'contents' : 'none' }}>
+              <Workspace />
+            </div>
+            <div style={{ display: isWorkspaceRoute ? 'none' : 'contents' }}>
+              <Outlet />
+            </div>
           </WorkLayout>
         }>
-          <Route index element={<Workspace />} />
+          <Route index element={null} />
           <Route path="sessions" element={<Sessions />} />
           <Route path="prompts" element={<Prompts />} />
           <Route path="usage" element={<UsageOverview />} />
           <Route path="insights" element={<InsightsReport />} />
           {/* Explicit /workspace route for session restore */}
-          <Route path="workspace" element={<Workspace />} />
+          <Route path="workspace" element={null} />
           <Route path="*" element={<Navigate to="/work" replace />} />
         </Route>
       </Routes>

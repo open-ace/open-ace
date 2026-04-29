@@ -322,6 +322,14 @@ class RemoteAgent:
                 self._send_session_output(
                     session_id, f"Resume failed: {result.get('error')}", "stderr", True
                 )
+        elif command == "abort_request":
+            result = self._executor.interrupt_session(session_id)
+            if not result["success"]:
+                logger.warning(
+                    "Abort failed for session %s: %s",
+                    session_id[:8] if session_id else "N/A",
+                    result.get("error"),
+                )
         else:
             logger.warning("Unknown command: %s", command)
 

@@ -662,44 +662,55 @@ def stream_session_output(session_id):
     agent_mgr = get_remote_agent_manager()
 
     def generate():
-        yield ": connected\n\n"
-        last_index = 0
-        idle_count = 0
-        while True:
-            new_output = agent_mgr.get_buffered_output(
-                session_id, after_index=last_index
-            )
-            if new_output:
-                idle_count = 0
-                for entry in new_output:
-                    data = entry.get("data", "").strip()
-                    stream = entry.get("stream", "stdout")
-                    if not data or stream == "stderr":
-                        last_index += 1
-                        continue
-                    try:
-                        parsed = json.loads(data)
-                        if stream == "permission":
-                            # Forward permission requests with a distinct type
-                            yield f"data: {json.dumps({'type': 'permission_request', 'data': parsed})}\n\n"
-                        else:
-                            # Wrap as claude_json to match local streaming format
-                            yield f"data: {json.dumps({'type': 'claude_json', 'data': parsed})}\n\n"
-                    except (json.JSONDecodeError, TypeError):
-                        pass
-                    last_index += 1
-            else:
-                idle_count += 1
-                if idle_count >= 150:  # ~30 seconds (150 * 0.2s)
-                    yield ": keepalive\n\n"
+        try:
+            yield ": connected\n\n"
+            last_index = 0
+            idle_count = 0
+            while True:
+                new_output = agent_mgr.get_buffered_output(
+                    session_id, after_index=last_index
+                )
+                if new_output:
                     idle_count = 0
+                    for entry in new_output:
+                        data = entry.get("data", "").strip()
+                        stream = entry.get("stream", "stdout")
+                        if not data or stream == "stderr":
+                            last_index += 1
+                            continue
+                        try:
+                            parsed = json.loads(data)
+                            if stream == "permission":
+                                # Forward permission requests with a distinct type
+                                yield f"data: {json.dumps({'type': 'permission_request', 'data': parsed})}\n\n"
+                            else:
+                                # Wrap as claude_json to match local streaming format
+                                yield f"data: {json.dumps({'type': 'claude_json', 'data': parsed})}\n\n"
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                        last_index += 1
+                else:
+                    idle_count += 1
+                    if idle_count >= 150:  # ~30 seconds (150 * 0.2s)
+                        yield ": keepalive\n\n"
+                        idle_count = 0
 
-            # Check if session ended (in-memory, no DB query)
-            if agent_mgr.is_session_ended(session_id):
-                break
-            time.sleep(0.2)
+                # Check if session ended (in-memory, no DB query)
+                if agent_mgr.is_session_ended(session_id):
+                    break
+                time.sleep(0.2)
 
-        yield "data: [DONE]\n\n"
+            yield "data: [DONE]\n\n"
+        except GeneratorExit:
+            logger.info(
+                "Client disconnected during SSE for session %s, aborting request",
+                session_id[:8],
+            )
+            try:
+                session_mgr = RemoteSessionManager()
+                session_mgr.abort_request(session_id)
+            except Exception:
+                pass
 
     return Response(
         stream_with_context(generate()),
