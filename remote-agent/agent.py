@@ -143,13 +143,10 @@ class RemoteAgent:
             time.sleep(0.5)
 
     def _poll_commands_via_http(self) -> None:
-        """Fetch pending commands from server without sending a full heartbeat."""
-        active = self._executor.active_sessions
+        """Fetch pending commands from server without triggering a DB write."""
         resp = self._http_send({
-            "type": "heartbeat",
+            "type": "poll",
             "machine_id": self.config.machine_id,
-            "status": "busy" if active else "idle",
-            "active_sessions": len(active),
         })
 
         if resp and isinstance(resp, dict):

@@ -22,7 +22,16 @@ logger = logging.getLogger(__name__)
 sso_bp = Blueprint("sso", __name__, url_prefix="/api/sso")
 
 # Services
-sso_manager = SSOManager()
+_sso_manager = None
+
+
+def get_sso_manager():
+    global _sso_manager
+    if _sso_manager is None:
+        _sso_manager = SSOManager()
+    return _sso_manager
+
+
 user_repo = UserRepository()
 auth_service = AuthService()
 
@@ -32,7 +41,7 @@ def list_sso_providers():
     """List available SSO providers."""
     tenant_id = request.args.get("tenant_id", type=int)
 
-    providers = sso_manager.list_providers(tenant_id=tenant_id)
+    providers = get_sso_manager().list_providers(tenant_id=tenant_id)
 
     # Also include predefined providers
     predefined = list_providers()
@@ -73,7 +82,7 @@ def register_provider():
 
     # Check if it's a predefined provider
     if data.get("predefined"):
-        success = sso_manager.register_predefined_provider(
+        success = get_sso_manager().register_predefined_provider(
             provider_name=provider_name,
             client_id=client_id,
             client_secret=client_secret,
@@ -83,7 +92,7 @@ def register_provider():
         )
     else:
         # Custom provider
-        success = sso_manager.register_provider(
+        success = get_sso_manager().register_provider(
             name=provider_name,
             provider_type=data.get("provider_type", "oauth2"),
             client_id=client_id,
@@ -113,7 +122,7 @@ def disable_provider(provider_name: str):
     if not is_admin:
         return jsonify({"error": result.get("error", "Admin access required")}), 403
 
-    success = sso_manager.disable_provider(provider_name)
+    success = get_sso_manager().disable_provider(provider_name)
 
     if success:
         return jsonify({"message": f"Provider {provider_name} disabled"})
@@ -135,7 +144,7 @@ def start_login(provider_name: str):
         # Build default callback URL
         redirect_uri = url_for("sso.callback", provider_name=provider_name, _external=True)
 
-    result = sso_manager.start_authentication(provider_name, redirect_uri)
+    result = get_sso_manager().start_authentication(provider_name, redirect_uri)
 
     if not result:
         return jsonify({"error": f"Failed to start authentication for {provider_name}"}), 500
@@ -182,7 +191,7 @@ def callback(provider_name: str):
     )
 
     # Complete authentication
-    auth_result = sso_manager.complete_authentication(
+    auth_result = get_sso_manager().complete_authentication(
         provider_name=provider_name,
         code=code,
         state=state,
@@ -203,7 +212,7 @@ def callback(provider_name: str):
     # Get or create local user
     user_id = None
     if auth_result.user:
-        user_id = sso_manager.get_user_by_sso_identity(
+        user_id = get_sso_manager().get_user_by_sso_identity(
             provider_name,
             auth_result.user.provider_user_id,
         )
@@ -221,7 +230,7 @@ def callback(provider_name: str):
 
             # Link identity
             if user_id:
-                sso_manager.link_identity(
+                get_sso_manager().link_identity(
                     user_id=user_id,
                     provider_name=provider_name,
                     provider_user_id=auth_result.user.provider_user_id,
@@ -231,7 +240,7 @@ def callback(provider_name: str):
     # Create session
     session_token = None
     if user_id and auth_result.token:
-        session_token = sso_manager.create_sso_session(
+        session_token = get_sso_manager().create_sso_session(
             user_id=user_id,
             provider_name=provider_name,
             access_token=auth_result.token.access_token,
@@ -264,7 +273,7 @@ def get_session():
     if not token:
         return jsonify({"error": "No session token provided"}), 401
 
-    session_data = sso_manager.get_sso_session(token)
+    session_data = get_sso_manager().get_sso_session(token)
 
     if not session_data:
         return jsonify({"error": "Invalid or expired session"}), 401
@@ -278,7 +287,7 @@ def logout():
     token = request.cookies.get("session_token") or request.headers.get("Authorization", "").replace("Bearer ", "")
 
     if token:
-        sso_manager.delete_sso_session(token)
+        get_sso_manager().delete_sso_session(token)
 
     return jsonify({"message": "Logged out successfully"})
 
@@ -300,7 +309,7 @@ def get_user_identities(user_id: int):
         return jsonify({"error": "Access denied"}), 403
 
     # Get identities from database
-    identities = sso_manager.db.fetch_all(
+    identities = get_sso_manager().db.fetch_all(
         """
         SELECT provider_name, provider_user_id, created_at, last_used_at
         FROM sso_identities
@@ -334,7 +343,7 @@ def unlink_identity(user_id: int, provider_name: str):
         return jsonify({"error": "Access denied"}), 403
 
     try:
-        with sso_manager.db.connection() as conn:
+        with get_sso_manager().db.connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 """

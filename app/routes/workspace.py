@@ -14,9 +14,9 @@ import logging
 
 from flask import Blueprint, g, jsonify, request
 
-from app.modules.workspace.collaboration import CollaborationManager, SharePermission
-from app.modules.workspace.prompt_library import PromptCategory, PromptLibrary, PromptTemplate
-from app.modules.workspace.session_manager import SessionManager, SessionType, _param
+from app.modules.workspace.collaboration import CollaborationManager, SharePermission, get_collaboration_manager
+from app.modules.workspace.prompt_library import PromptCategory, PromptLibrary, PromptTemplate, get_prompt_library
+from app.modules.workspace.session_manager import SessionManager, SessionType, _param, get_session_manager
 from app.modules.workspace.state_sync import get_state_sync_manager
 from app.modules.workspace.tool_connector import get_tool_connector
 from app.services.auth_service import AuthService
@@ -108,7 +108,7 @@ def load_user():
 def list_prompts():
     """List prompt templates."""
     try:
-        library = PromptLibrary()
+        library = get_prompt_library()
 
         category = request.args.get("category")
         search = request.args.get("search")
@@ -167,7 +167,7 @@ def create_prompt():
             is_public=data.get("is_public", False),
         )
 
-        library = PromptLibrary()
+        library = get_prompt_library()
         template_id = library.create_template(template)
 
         return jsonify({"success": True, "data": {"id": template_id}}), 201
@@ -180,7 +180,7 @@ def create_prompt():
 def get_prompt(template_id):
     """Get a prompt template."""
     try:
-        library = PromptLibrary()
+        library = get_prompt_library()
         template = library.get_template(template_id)
 
         if not template:
@@ -200,7 +200,7 @@ def update_prompt(template_id):
         if not data:
             return jsonify({"success": False, "error": "No data provided"}), 400
 
-        library = PromptLibrary()
+        library = get_prompt_library()
         template = library.get_template(template_id)
 
         if not template:
@@ -229,7 +229,7 @@ def delete_prompt(template_id):
     try:
         user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
 
-        library = PromptLibrary()
+        library = get_prompt_library()
         success = library.delete_template(template_id, user_id)
 
         if not success:
@@ -248,7 +248,7 @@ def render_prompt(template_id):
         data = request.get_json() or {}
         variables = data.get("variables", {})
 
-        library = PromptLibrary()
+        library = get_prompt_library()
         template = library.get_template(template_id)
 
         if not template:
@@ -280,7 +280,7 @@ def render_prompt(template_id):
 def get_prompt_categories():
     """Get prompt categories with counts."""
     try:
-        library = PromptLibrary()
+        library = get_prompt_library()
         categories = library.get_categories()
 
         return jsonify({"success": True, "data": categories})
@@ -294,7 +294,7 @@ def get_featured_prompts():
     """Get featured prompt templates."""
     try:
         limit = int(request.args.get("limit", 10))
-        library = PromptLibrary()
+        library = get_prompt_library()
         templates = library.get_featured_templates(limit)
 
         return jsonify({"success": True, "data": [t.to_dict() for t in templates]})
@@ -484,7 +484,7 @@ def create_session():
             except Exception as e:
                 logger.warning(f"Failed to look up project by path: {e}")
 
-        manager = SessionManager()
+        manager = get_session_manager()
         session = manager.create_session(
             tool_name=tool_name,
             user_id=user_id,
@@ -513,7 +513,7 @@ def get_session(session_id):
         include_messages = request.args.get("include_messages", "false").lower() == "true"
 
         # First try to get from SessionManager (agent_sessions table)
-        manager = SessionManager()
+        manager = get_session_manager()
         session = manager.get_session(session_id, include_messages=include_messages)
 
         if session:
@@ -650,7 +650,7 @@ def get_session(session_id):
 def complete_session(session_id):
     """Mark a session as completed."""
     try:
-        manager = SessionManager()
+        manager = get_session_manager()
         success = manager.complete_session(session_id)
 
         if not success:
@@ -666,7 +666,7 @@ def complete_session(session_id):
 def delete_session(session_id):
     """Delete a session."""
     try:
-        manager = SessionManager()
+        manager = get_session_manager()
         success = manager.delete_session(session_id)
 
         if not success:
@@ -814,7 +814,7 @@ def rename_session(session_id):
         if not new_name:
             return jsonify({"success": False, "error": "Session name cannot be empty"}), 400
 
-        manager = SessionManager()
+        manager = get_session_manager()
         session = manager.get_session(session_id)
 
         if not session:
@@ -838,7 +838,7 @@ def get_session_stats():
     try:
         user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
 
-        manager = SessionManager()
+        manager = get_session_manager()
         stats = manager.get_session_stats(user_id)
 
         return jsonify({"success": True, "data": stats})
@@ -958,7 +958,7 @@ def list_teams():
         if not user_id:
             return jsonify({"success": False, "error": "Authentication required"}), 401
 
-        manager = CollaborationManager()
+        manager = get_collaboration_manager()
         teams = manager.list_user_teams(user_id)
 
         return jsonify({"success": True, "data": [t.to_dict() for t in teams]})
@@ -983,7 +983,7 @@ def create_team():
         if not name:
             return jsonify({"success": False, "error": "name is required"}), 400
 
-        manager = CollaborationManager()
+        manager = get_collaboration_manager()
         team = manager.create_team(
             name=name,
             owner_id=user_id,
@@ -1005,7 +1005,7 @@ def list_shares():
         if not user_id:
             return jsonify({"success": False, "error": "Authentication required"}), 401
 
-        manager = CollaborationManager()
+        manager = get_collaboration_manager()
         shares = manager.get_user_shared_sessions(user_id)
 
         return jsonify({"success": True, "data": [s.to_dict() for s in shares]})
@@ -1032,7 +1032,7 @@ def create_share():
         if not session_id:
             return jsonify({"success": False, "error": "session_id is required"}), 400
 
-        manager = CollaborationManager()
+        manager = get_collaboration_manager()
         share = manager.share_session(
             session_id=session_id,
             shared_by=user_id,
@@ -1058,7 +1058,7 @@ def revoke_share(share_id):
     try:
         user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
 
-        manager = CollaborationManager()
+        manager = get_collaboration_manager()
         success = manager.revoke_share(share_id, user_id)
 
         if not success:
@@ -1078,7 +1078,7 @@ def get_annotations():
         if not session_id:
             return jsonify({"success": False, "error": "session_id is required"}), 400
 
-        manager = CollaborationManager()
+        manager = get_collaboration_manager()
         annotations = manager.get_session_annotations(session_id)
 
         return jsonify({"success": True, "data": [a.to_dict() for a in annotations]})
@@ -1107,7 +1107,7 @@ def create_annotation():
         if not session_id or not content:
             return jsonify({"success": False, "error": "session_id and content are required"}), 400
 
-        manager = CollaborationManager()
+        manager = get_collaboration_manager()
         annotation = manager.add_annotation(
             session_id=session_id,
             user_id=user_id,
@@ -1132,7 +1132,7 @@ def create_annotation():
 def list_knowledge():
     """List knowledge base entries."""
     try:
-        manager = CollaborationManager()
+        manager = get_collaboration_manager()
 
         team_id = request.args.get("team_id")
         category = request.args.get("category")
@@ -1180,7 +1180,7 @@ def create_knowledge():
         if not title or not content:
             return jsonify({"success": False, "error": "title and content are required"}), 400
 
-        manager = CollaborationManager()
+        manager = get_collaboration_manager()
         entry = manager.create_knowledge_entry(
             title=title,
             content=content,
@@ -1202,7 +1202,7 @@ def create_knowledge():
 def get_knowledge(entry_id):
     """Get a knowledge base entry."""
     try:
-        manager = CollaborationManager()
+        manager = get_collaboration_manager()
         entry = manager.get_knowledge_entry(entry_id)
 
         if not entry:

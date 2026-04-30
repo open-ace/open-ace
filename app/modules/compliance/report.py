@@ -744,3 +744,25 @@ class ReportGenerator:
                 logger.error(f"Failed to load report: {e}")
 
         return None
+
+
+def get_ddl_statements() -> list[str]:
+    """Return DDL statements for compliance report tables."""
+    from app.repositories.database import is_postgresql
+    id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    return [
+        f"""
+        CREATE TABLE IF NOT EXISTS compliance_reports (
+            id {id_type},
+            report_id TEXT UNIQUE NOT NULL,
+            report_type TEXT NOT NULL,
+            generated_at TIMESTAMP NOT NULL,
+            period_start TIMESTAMP NOT NULL,
+            period_end TIMESTAMP NOT NULL,
+            generated_by INTEGER,
+            tenant_id INTEGER,
+            report_data TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+    ]

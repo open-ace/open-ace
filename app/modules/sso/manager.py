@@ -8,6 +8,7 @@ Manages SSO providers and authentication sessions.
 import json
 import logging
 import secrets
+import threading
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -22,7 +23,7 @@ from app.modules.sso.provider import (
     SSOProviderConfig,
     get_provider_config,
 )
-from app.repositories.database import Database
+from app.repositories.database import Database, is_postgresql
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ class SSOManager:
         """
         self.db = db or Database()
         self._providers: Dict[str, SSOProvider] = {}
-        self._ensure_tables()
+        self._providers_lock = threading.Lock()
 
     def _ensure_tables(self) -> None:
         """Ensure SSO-related tables exist."""
@@ -211,8 +212,9 @@ class SSOManager:
                 conn.commit()
 
             # Clear cached provider
-            if name in self._providers:
-                del self._providers[name]
+            with self._providers_lock:
+                if name in self._providers:
+                    del self._providers[name]
 
             logger.info(f"Registered SSO provider: {name}")
             return True
@@ -275,8 +277,9 @@ class SSOManager:
             Optional[SSOProvider]: Provider instance or None.
         """
         # Check cache
-        if name in self._providers:
-            return self._providers[name]
+        with self._providers_lock:
+            if name in self._providers:
+                return self._providers[name]
 
         # Load from database
         row = self.db.fetch_one(
@@ -308,7 +311,8 @@ class SSOManager:
             provider = provider_class(config)
 
             # Cache it
-            self._providers[name] = provider
+            with self._providers_lock:
+                self._providers[name] = provider
 
             return provider
 
@@ -346,8 +350,9 @@ class SSOManager:
                 cursor.execute("UPDATE sso_providers SET is_active = FALSE WHERE name = ?", (name,))
                 conn.commit()
 
-            if name in self._providers:
-                del self._providers[name]
+            with self._providers_lock:
+                if name in self._providers:
+                    del self._providers[name]
 
             return True
 
@@ -684,3 +689,64 @@ class SSOManager:
 
         except Exception as e:
             logger.error(f"Failed to delete auth state: {e}")
+
+
+def get_ddl_statements() -> list[str]:
+    """Return DDL statements for SSO tables."""
+    id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    bool_true = "BOOLEAN DEFAULT TRUE" if is_postgresql() else "INTEGER DEFAULT 1"
+    return [
+        f"""
+        CREATE TABLE IF NOT EXISTS sso_providers (
+            id {id_type},
+            name TEXT UNIQUE NOT NULL,
+            provider_type TEXT NOT NULL,
+            config TEXT NOT NULL,
+            tenant_id INTEGER,
+            is_active {bool_true},
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+        )
+        """,
+        f"""
+        CREATE TABLE IF NOT EXISTS sso_identities (
+            id {id_type},
+            user_id INTEGER NOT NULL,
+            provider_name TEXT NOT NULL,
+            provider_user_id TEXT NOT NULL,
+            provider_data TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_used_at TIMESTAMP,
+            UNIQUE(provider_name, provider_user_id),
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+        """,
+        f"""
+        CREATE TABLE IF NOT EXISTS sso_sessions (
+            id {id_type},
+            session_token TEXT UNIQUE NOT NULL,
+            user_id INTEGER NOT NULL,
+            provider_name TEXT NOT NULL,
+            access_token TEXT,
+            refresh_token TEXT,
+            expires_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS sso_auth_states (
+            state TEXT PRIMARY KEY,
+            code_verifier TEXT NOT NULL,
+            provider_name TEXT NOT NULL,
+            nonce TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_sso_providers_tenant ON sso_providers(tenant_id)",
+        "CREATE INDEX IF NOT EXISTS idx_sso_identities_user ON sso_identities(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_sso_identities_provider ON sso_identities(provider_name, provider_user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_sso_sessions_token ON sso_sessions(session_token)",
+        "CREATE INDEX IF NOT EXISTS idx_sso_sessions_user ON sso_sessions(user_id)",
+    ]

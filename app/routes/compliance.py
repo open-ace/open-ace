@@ -23,7 +23,17 @@ compliance_bp = Blueprint("compliance", __name__, url_prefix="/api/compliance")
 # Services
 report_generator = ReportGenerator()
 audit_analyzer = AuditAnalyzer()
-retention_manager = DataRetentionManager()
+
+_retention_manager = None
+
+
+def get_retention_manager():
+    global _retention_manager
+    if _retention_manager is None:
+        _retention_manager = DataRetentionManager()
+    return _retention_manager
+
+
 auth_service = AuthService()
 
 
@@ -291,7 +301,7 @@ def get_retention_rules():
     if not is_admin:
         return error_response
 
-    rules = retention_manager.get_all_rules()
+    rules = get_retention_manager().get_all_rules()
 
     return jsonify(
         {
@@ -319,12 +329,12 @@ def set_retention_rule():
     if not data_type or retention_days is None:
         return jsonify({"error": "data_type and retention_days are required"}), 400
 
-    retention_manager.set_rule(data_type, retention_days, action)
+    get_retention_manager().set_rule(data_type, retention_days, action)
 
     return jsonify(
         {
             "message": f"Retention rule set for {data_type}",
-            "rule": retention_manager.get_rule(data_type).to_dict(),
+            "rule": get_retention_manager().get_rule(data_type).to_dict(),
         }
     )
 
@@ -338,7 +348,7 @@ def run_retention_cleanup():
 
     dry_run = request.args.get("dry_run", "false").lower() == "true"
 
-    report = retention_manager.run_cleanup(dry_run=dry_run)
+    report = get_retention_manager().run_cleanup(dry_run=dry_run)
 
     return jsonify(report.to_dict())
 
@@ -352,7 +362,7 @@ def get_retention_history():
 
     limit = request.args.get("limit", 30, type=int)
 
-    history = retention_manager.get_retention_history(limit=limit)
+    history = get_retention_manager().get_retention_history(limit=limit)
 
     return jsonify(
         {
@@ -369,7 +379,7 @@ def estimate_storage():
     if not is_admin:
         return error_response
 
-    estimates = retention_manager.estimate_storage()
+    estimates = get_retention_manager().estimate_storage()
 
     return jsonify(estimates)
 
@@ -381,7 +391,7 @@ def get_retention_status():
     if not is_admin:
         return error_response
 
-    status = retention_manager.get_compliance_status()
+    status = get_retention_manager().get_compliance_status()
 
     return jsonify(status)
 

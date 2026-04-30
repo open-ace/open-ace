@@ -689,3 +689,15 @@ class RemoteSessionManager:
             )
         except Exception as e:
             logger.warning(f"Failed to mirror message to daily_messages for {session_id[:8]}: {e}")
+
+
+# Global singleton
+_remote_session_manager: Optional["RemoteSessionManager"] = None
+
+
+def get_remote_session_manager() -> "RemoteSessionManager":
+    """Get the global RemoteSessionManager instance."""
+    global _remote_session_manager
+    if _remote_session_manager is None:
+        _remote_session_manager = RemoteSessionManager()
+    return _remote_session_manager

@@ -252,7 +252,6 @@ class CollaborationManager:
             db_path: Optional custom database path.
         """
         self.db_path = db_path or str(DB_PATH)
-        self._ensure_tables()
 
     def _get_connection(self) -> Union[sqlite3.Connection, Any]:
         """Get database connection (SQLite or PostgreSQL)."""
@@ -1184,3 +1183,106 @@ class CollaborationManager:
             created_at=datetime.fromisoformat(row["created_at"]) if row["created_at"] else None,
             updated_at=datetime.fromisoformat(row["updated_at"]) if row["updated_at"] else None,
         )
+
+
+def get_ddl_statements() -> list[str]:
+    """Return DDL statements for collaboration tables."""
+    id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    bool_true = "BOOLEAN DEFAULT TRUE" if is_postgresql() else "INTEGER DEFAULT 1"
+    bool_false = "BOOLEAN DEFAULT FALSE" if is_postgresql() else "INTEGER DEFAULT 0"
+    return [
+        f"""
+        CREATE TABLE IF NOT EXISTS teams (
+            id {id_type},
+            team_id TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            description TEXT,
+            owner_id INTEGER,
+            settings TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        f"""
+        CREATE TABLE IF NOT EXISTS team_members (
+            id {id_type},
+            team_id TEXT NOT NULL,
+            user_id INTEGER NOT NULL,
+            username TEXT,
+            role TEXT DEFAULT 'member',
+            joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(team_id, user_id)
+        )
+        """,
+        f"""
+        CREATE TABLE IF NOT EXISTS shared_sessions (
+            id {id_type},
+            share_id TEXT NOT NULL UNIQUE,
+            session_id TEXT NOT NULL,
+            shared_by INTEGER,
+            shared_by_name TEXT,
+            permission TEXT DEFAULT 'view',
+            share_type TEXT DEFAULT 'user',
+            target_id INTEGER,
+            target_name TEXT,
+            expires_at TIMESTAMP,
+            allow_comments {bool_true},
+            allow_copy {bool_true},
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            access_count INTEGER DEFAULT 0,
+            last_accessed TIMESTAMP
+        )
+        """,
+        f"""
+        CREATE TABLE IF NOT EXISTS annotations (
+            id {id_type},
+            annotation_id TEXT NOT NULL UNIQUE,
+            session_id TEXT NOT NULL,
+            message_id TEXT,
+            user_id INTEGER,
+            username TEXT,
+            content TEXT,
+            annotation_type TEXT DEFAULT 'comment',
+            position TEXT,
+            parent_id INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        f"""
+        CREATE TABLE IF NOT EXISTS knowledge_base (
+            id {id_type},
+            entry_id TEXT NOT NULL UNIQUE,
+            team_id TEXT,
+            title TEXT NOT NULL,
+            content TEXT,
+            category TEXT DEFAULT 'general',
+            tags TEXT,
+            author_id INTEGER,
+            author_name TEXT,
+            is_published {bool_false},
+            view_count INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_teams_owner ON teams(owner_id)",
+        "CREATE INDEX IF NOT EXISTS idx_team_members_team ON team_members(team_id)",
+        "CREATE INDEX IF NOT EXISTS idx_team_members_user ON team_members(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_shared_sessions_session ON shared_sessions(session_id)",
+        "CREATE INDEX IF NOT EXISTS idx_shared_sessions_target ON shared_sessions(target_id)",
+        "CREATE INDEX IF NOT EXISTS idx_annotations_session ON annotations(session_id)",
+        "CREATE INDEX IF NOT EXISTS idx_knowledge_team ON knowledge_base(team_id)",
+    ]
+
+
+# Module-level singleton
+_instance: Optional[CollaborationManager] = None
+
+
+def get_collaboration_manager() -> CollaborationManager:
+    """Get the module-level CollaborationManager singleton."""
+    global _instance
+    if _instance is None:
+        _instance = CollaborationManager()
+    return _instance

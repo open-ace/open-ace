@@ -19,9 +19,9 @@ from datetime import datetime
 
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
-from app.modules.workspace.api_key_proxy import APIKeyProxyService
+from app.modules.workspace.api_key_proxy import APIKeyProxyService, get_api_key_proxy_service
 from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
-from app.modules.workspace.remote_session_manager import RemoteSessionManager
+from app.modules.workspace.remote_session_manager import RemoteSessionManager, get_remote_session_manager
 from app.services.auth_service import AuthService
 
 logger = logging.getLogger(__name__)
@@ -128,7 +128,7 @@ def _require_machine_admin(machine_id):
 
 def _check_session_access(session_id):
     """Check session access: owner, system admin, or machine admin. Returns (session_status, error)."""
-    session_mgr = RemoteSessionManager()
+    session_mgr = get_remote_session_manager()
     status = session_mgr.get_session_status(session_id)
     if not status:
         return None, (jsonify({"error": "Session not found"}), 404)
@@ -311,7 +311,7 @@ def list_api_keys():
     data = request.args
     tenant_id = int(data.get("tenant_id", 1))
 
-    api_proxy = APIKeyProxyService()
+    api_proxy = get_api_key_proxy_service()
     keys = api_proxy.list_api_keys(tenant_id)
 
     return jsonify({
@@ -337,7 +337,7 @@ def store_api_key():
     if not provider or not key_name or not api_key:
         return jsonify({"error": "provider, key_name, and api_key are required"}), 400
 
-    api_proxy = APIKeyProxyService()
+    api_proxy = get_api_key_proxy_service()
     result = api_proxy.store_api_key(
         tenant_id=tenant_id,
         provider=provider,
@@ -362,7 +362,7 @@ def delete_api_key(key_id):
     data = request.get_json() or {}
     tenant_id = int(data.get("tenant_id", 1))
 
-    api_proxy = APIKeyProxyService()
+    api_proxy = get_api_key_proxy_service()
     success = api_proxy.delete_api_key_by_id(key_id, tenant_id)
 
     if success:
@@ -434,7 +434,7 @@ def create_remote_session():
     if not project_path:
         return jsonify({"error": "project_path is required"}), 400
 
-    session_mgr = RemoteSessionManager()
+    session_mgr = get_remote_session_manager()
     result = session_mgr.create_remote_session(
         user_id=g.user["id"],
         machine_id=machine_id,
@@ -484,7 +484,7 @@ def send_remote_message(session_id):
     if not content:
         return jsonify({"error": "content is required"}), 400
 
-    session_mgr = RemoteSessionManager()
+    session_mgr = get_remote_session_manager()
 
     # If permission_mode changed, send update command to agent
     if permission_mode:
@@ -517,7 +517,7 @@ def update_remote_session_model(session_id):
     if not model:
         return jsonify({"error": "model is required"}), 400
 
-    session_mgr = RemoteSessionManager()
+    session_mgr = get_remote_session_manager()
     success = session_mgr.update_model(session_id, model)
 
     if success:
@@ -536,7 +536,7 @@ def abort_remote_request(session_id):
     if access_error:
         return access_error
 
-    session_mgr = RemoteSessionManager()
+    session_mgr = get_remote_session_manager()
     success = session_mgr.abort_request(session_id)
 
     if success:
@@ -555,7 +555,7 @@ def stop_remote_session(session_id):
     if access_error:
         return access_error
 
-    session_mgr = RemoteSessionManager()
+    session_mgr = get_remote_session_manager()
     success = session_mgr.stop_session(session_id)
 
     if success:
@@ -574,7 +574,7 @@ def pause_remote_session(session_id):
     if access_error:
         return access_error
 
-    session_mgr = RemoteSessionManager()
+    session_mgr = get_remote_session_manager()
     success = session_mgr.pause_session(session_id)
 
     if success:
@@ -593,7 +593,7 @@ def resume_remote_session(session_id):
     if access_error:
         return access_error
 
-    session_mgr = RemoteSessionManager()
+    session_mgr = get_remote_session_manager()
     success = session_mgr.resume_session(session_id)
 
     if success:
@@ -707,7 +707,7 @@ def stream_session_output(session_id):
                 session_id[:8],
             )
             try:
-                session_mgr = RemoteSessionManager()
+                session_mgr = get_remote_session_manager()
                 session_mgr.abort_request(session_id)
             except Exception:
                 pass
@@ -863,6 +863,15 @@ def agent_message():
         pending = agent_mgr.get_pending_commands(machine_id)
         return jsonify({"success": True, "type": "heartbeat_ack", "pending_commands": pending})
 
+    elif msg_type == "poll":
+        # Lightweight poll — no DB write, just return pending commands
+        with agent_mgr._lock:
+            if machine_id not in agent_mgr._connections:
+                agent_mgr._connections[machine_id] = None
+                logger.info(f"Re-registered HTTP polling agent via poll: {machine_id}")
+        pending = agent_mgr.get_pending_commands(machine_id)
+        return jsonify({"success": True, "type": "poll_ack", "pending_commands": pending})
+
     elif msg_type == "session_output":
         session_id = data.get("session_id")
         output_data = data.get("data", "")
@@ -870,7 +879,7 @@ def agent_message():
         is_complete = data.get("is_complete", False)
 
         if session_id:
-            session_mgr = RemoteSessionManager()
+            session_mgr = get_remote_session_manager()
             session_mgr.process_session_output(
                 session_id=session_id,
                 data=output_data,
@@ -886,7 +895,7 @@ def agent_message():
         pid = data.get("pid")
 
         if session_id and status:
-            session_mgr = RemoteSessionManager()
+            session_mgr = get_remote_session_manager()
             session_mgr.process_session_status_update(
                 session_id=session_id,
                 status=status,
@@ -901,7 +910,7 @@ def agent_message():
         requests_count = data.get("requests", 1)
 
         if session_id:
-            session_mgr = RemoteSessionManager()
+            session_mgr = get_remote_session_manager()
             session_mgr.process_usage_report(
                 session_id=session_id,
                 tokens=tokens,
@@ -915,7 +924,7 @@ def agent_message():
         control_request = data.get("control_request", {})
 
         if session_id:
-            session_mgr = RemoteSessionManager()
+            session_mgr = get_remote_session_manager()
             session_mgr.process_permission_request(
                 session_id=session_id,
                 control_request=control_request,
@@ -954,7 +963,7 @@ def llm_proxy(path=""):
         return jsonify({"error": {"message": "Missing authorization token", "type": "auth_error"}}), 401
 
     # Validate proxy token
-    api_proxy = APIKeyProxyService()
+    api_proxy = get_api_key_proxy_service()
     token_payload = api_proxy.validate_proxy_token(proxy_token)
 
     if not token_payload:
@@ -1151,8 +1160,8 @@ def _record_llm_usage(content: bytes, session_id: str, user_id: int,
             )
 
             # Update session token counts
-            from app.modules.workspace.session_manager import SessionManager
-            sm = SessionManager()
+            from app.modules.workspace.session_manager import get_session_manager
+            sm = get_session_manager()
             session = sm.get_session(session_id)
             if session:
                 session.total_input_tokens += input_tokens
@@ -1186,7 +1195,7 @@ def usage_report():
     if not session_id:
         return jsonify({"error": "session_id is required"}), 400
 
-    session_mgr = RemoteSessionManager()
+    session_mgr = get_remote_session_manager()
     session_mgr.process_usage_report(
         session_id=session_id,
         tokens=tokens,

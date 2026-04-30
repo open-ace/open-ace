@@ -55,6 +55,10 @@ def create_app(config=None):
     # Register blueprints
     register_blueprints(app)
 
+    # Ensure all tables exist (runs DDL once at startup, not per-request)
+    from app.repositories.schema_init import ensure_all_tables
+    ensure_all_tables()
+
     # Health check endpoint
     @app.route("/health")
     def health_check():

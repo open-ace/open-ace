@@ -244,7 +244,6 @@ class SessionManager:
             db_path: Optional custom database path.
         """
         self.db_path = db_path or str(DB_PATH)
-        self._ensure_tables()
 
     def _get_connection(self) -> Union[sqlite3.Connection, Any]:
         """Get database connection (SQLite or PostgreSQL)."""
@@ -1176,3 +1175,83 @@ class SessionManager:
             timestamp=parse_datetime(get_value("timestamp")),
             metadata=json.loads(get_value("metadata")) if get_value("metadata") else {},
         )
+
+
+def get_ddl_statements() -> list[str]:
+    """Return DDL statements for session manager tables."""
+    id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    return [
+        f"""
+        CREATE TABLE IF NOT EXISTS agent_sessions (
+            id {id_type},
+            session_id TEXT NOT NULL UNIQUE,
+            session_type TEXT DEFAULT 'chat',
+            title TEXT,
+            tool_name TEXT NOT NULL,
+            host_name TEXT DEFAULT 'localhost',
+            user_id INTEGER,
+            status TEXT DEFAULT 'active',
+            context TEXT,
+            settings TEXT,
+            total_tokens INTEGER DEFAULT 0,
+            total_input_tokens INTEGER DEFAULT 0,
+            total_output_tokens INTEGER DEFAULT 0,
+            message_count INTEGER DEFAULT 0,
+            model TEXT,
+            tags TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            completed_at TIMESTAMP,
+            expires_at TIMESTAMP
+        )
+        """,
+        f"""
+        CREATE TABLE IF NOT EXISTS session_messages (
+            id {id_type},
+            session_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT,
+            tokens_used INTEGER DEFAULT 0,
+            model TEXT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            metadata TEXT,
+            FOREIGN KEY (session_id) REFERENCES agent_sessions(session_id)
+        )
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_agent_sessions_session_id
+        ON agent_sessions(session_id)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_agent_sessions_user_id
+        ON agent_sessions(user_id)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_agent_sessions_status
+        ON agent_sessions(status)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_agent_sessions_tool_name
+        ON agent_sessions(tool_name)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_session_messages_session_id
+        ON session_messages(session_id)
+        """,
+        "ALTER TABLE agent_sessions ADD COLUMN workspace_type TEXT DEFAULT 'local'",
+        "ALTER TABLE agent_sessions ADD COLUMN remote_machine_id TEXT",
+        "ALTER TABLE agent_sessions ADD COLUMN request_count INTEGER DEFAULT 0",
+        "ALTER TABLE agent_sessions ADD COLUMN paused_at TIMESTAMP",
+    ]
+
+
+# Module-level singleton
+_instance: Optional[SessionManager] = None
+
+
+def get_session_manager() -> SessionManager:
+    """Get the module-level SessionManager singleton."""
+    global _instance
+    if _instance is None:
+        _instance = SessionManager()
+    return _instance

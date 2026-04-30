@@ -105,8 +105,6 @@ class DataRetentionManager:
         if custom_rules:
             self.rules.update(custom_rules)
 
-        self._ensure_tables()
-
     def _ensure_tables(self) -> None:
         """Ensure retention-related tables exist."""
         with self.db.connection() as conn:
@@ -464,6 +462,21 @@ class DataRetentionManager:
             "estimates": estimates,
             "timestamp": datetime.utcnow().isoformat(),
         }
+
+
+def get_ddl_statements() -> list[str]:
+    """Return DDL statements for retention tables."""
+    from app.repositories.database import is_postgresql
+    id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    return [
+        f"""
+        CREATE TABLE IF NOT EXISTS retention_history (
+            id {id_type},
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            report_data TEXT NOT NULL
+        )
+        """,
+    ]
 
     def get_compliance_status(self) -> Dict[str, Any]:
         """

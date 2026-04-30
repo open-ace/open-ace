@@ -131,7 +131,6 @@ class PromptLibrary:
             db_path: Optional custom database path.
         """
         self.db_path = db_path or str(DB_PATH)
-        self._ensure_tables()
 
     def _get_connection(self) -> Union[sqlite3.Connection, Any]:
         """Get database connection (SQLite or PostgreSQL)."""
@@ -767,3 +766,53 @@ class PromptLibrary:
             if not exists:
                 self.create_template(template)
                 logger.info(f"Seeded default template: {template.name}")
+
+
+def get_ddl_statements() -> list[str]:
+    """Return DDL statements for prompt library tables."""
+    id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    bool_false = "BOOLEAN DEFAULT FALSE" if is_postgresql() else "INTEGER DEFAULT 0"
+    return [
+        f"""
+        CREATE TABLE IF NOT EXISTS prompt_templates (
+            id {id_type},
+            name TEXT NOT NULL,
+            description TEXT,
+            category TEXT DEFAULT 'general',
+            content TEXT NOT NULL,
+            variables TEXT,
+            tags TEXT,
+            author_id INTEGER,
+            author_name TEXT,
+            is_public {bool_false},
+            is_featured {bool_false},
+            use_count INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_prompt_templates_category
+        ON prompt_templates(category)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_prompt_templates_author
+        ON prompt_templates(author_id)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_prompt_templates_public
+        ON prompt_templates(is_public)
+        """,
+    ]
+
+
+# Module-level singleton
+_instance: Optional[PromptLibrary] = None
+
+
+def get_prompt_library() -> PromptLibrary:
+    """Get the module-level PromptLibrary singleton."""
+    global _instance
+    if _instance is None:
+        _instance = PromptLibrary()
+    return _instance

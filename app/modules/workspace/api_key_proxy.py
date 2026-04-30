@@ -45,7 +45,6 @@ class APIKeyProxyService:
     def __init__(self, db_path: Optional[str] = None):
         self.db_path = db_path or str(DB_PATH)
         self._encryption_key = self._get_encryption_key()
-        self._ensure_tables()
 
     def _get_encryption_key(self) -> bytes:
         """Get the AES encryption key from environment variable."""
@@ -426,3 +425,39 @@ class APIKeyProxyService:
             256-bit random hex token.
         """
         return secrets.token_hex(32)
+
+
+def get_ddl_statements() -> list[str]:
+    """Return DDL statements for API key proxy tables."""
+    id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    bool_true = "BOOLEAN DEFAULT TRUE" if is_postgresql() else "INTEGER DEFAULT 1"
+    return [
+        f"""
+        CREATE TABLE IF NOT EXISTS api_key_store (
+            id {id_type},
+            tenant_id INTEGER,
+            provider TEXT NOT NULL,
+            key_name TEXT NOT NULL,
+            encrypted_key TEXT NOT NULL,
+            key_hash TEXT NOT NULL,
+            base_url TEXT,
+            is_active {bool_true},
+            created_by INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(tenant_id, provider, key_name)
+        )
+        """,
+    ]
+
+
+# Module-level singleton
+_instance: Optional[APIKeyProxyService] = None
+
+
+def get_api_key_proxy_service() -> APIKeyProxyService:
+    """Get the module-level APIKeyProxyService singleton."""
+    global _instance
+    if _instance is None:
+        _instance = APIKeyProxyService()
+    return _instance
