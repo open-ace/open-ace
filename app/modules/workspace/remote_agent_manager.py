@@ -176,7 +176,7 @@ class RemoteAgentManager:
                 f"""
                 UPDATE remote_machines
                 SET status = 'offline', updated_at = {_param()}
-                WHERE status = 'online' AND last_heartbeat < {_param()}
+                WHERE status != 'offline' AND last_heartbeat < {_param()}
             """,
                 (datetime.utcnow().isoformat(), cutoff.isoformat()),
             )
@@ -381,9 +381,10 @@ class RemoteAgentManager:
             success = cursor.rowcount > 0
             conn.commit()
 
-        # Close active connection
+        # Close active connection and cleanup rate limiter
         with self._lock:
             self._connections.pop(machine_id, None)
+        self._last_heartbeat_db_write.pop(machine_id, None)
 
         return success
 
@@ -413,6 +414,7 @@ class RemoteAgentManager:
         """Unregister an agent connection."""
         with self._lock:
             self._connections.pop(machine_id, None)
+        self._last_heartbeat_db_write.pop(machine_id, None)
 
         with self.db.connection() as conn:
             cursor = conn.cursor()
