@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Open ACE - Database Connection
 
@@ -64,7 +63,7 @@ def _get_db_path() -> str:
         return DEFAULT_SQLITE_PATH
     # For SQLite, extract path from URL
     if url and url.startswith("sqlite"):
-        return url.replace("sqlite:///", "")
+        return str(url.replace("sqlite:///", ""))
     return DEFAULT_SQLITE_PATH
 
 
@@ -82,7 +81,7 @@ def get_database_url() -> str:
     # Import here to avoid circular import
     from scripts.shared.config import get_database_url as _get_database_url
 
-    return _get_database_url()
+    return str(_get_database_url())
 
 
 def is_postgresql() -> bool:
@@ -145,8 +144,9 @@ def adapt_boolean_condition(column: str, value: bool) -> str:
     """
     Generate boolean condition for SQL query.
 
-    PostgreSQL uses IS TRUE/FALSE for boolean comparisons.
-    SQLite uses = 1/0 for boolean comparisons.
+    Works with both BOOLEAN and INTEGER (0/1) column types on PostgreSQL.
+    Uses (column)::int cast to normalize before comparison, since PostgreSQL
+    columns may be INTEGER if migration 029 hasn't been applied yet.
 
     Args:
         column: Column name.
@@ -156,7 +156,7 @@ def adapt_boolean_condition(column: str, value: bool) -> str:
         str: SQL condition string.
     """
     if is_postgresql():
-        return f"{column} IS {'TRUE' if value else 'FALSE'}"
+        return f"({column})::int {'!=' if value else '='} 0"
     return f"{column} = {1 if value else 0}"
 
 
@@ -416,7 +416,7 @@ class Database:
 
             # Handle both SQLite Row and psycopg2 RealDictRow
             if rows and isinstance(rows[0], dict):
-                return rows
+                return list(rows)
             return [dict(row) for row in rows]
 
     def executemany(self, query: str, params_list: list[tuple]) -> Any:
@@ -451,7 +451,7 @@ class Database:
                 "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = %s)",
                 (table_name,),
             )
-            return result.get("exists", False) if result else False
+            return bool(result.get("exists", False)) if result else False
         else:
             result = self.fetch_one(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,)
