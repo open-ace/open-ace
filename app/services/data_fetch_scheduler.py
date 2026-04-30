@@ -7,7 +7,6 @@ Background scheduler for automatic data fetching at configurable intervals.
 
 import logging
 import threading
-import time
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -172,14 +171,16 @@ class DataFetchScheduler:
         """Safety net: aggregate user_daily_stats periodically."""
         try:
             from app.services.user_stats_aggregator import aggregate_user_stats_background
+
             aggregate_user_stats_background()
         except Exception as e:
             logger.warning(f"Scheduled user stats aggregation failed: {e}")
 
     def _check_quotas(self):
         """Check all users' quotas and enforce limits after data refresh."""
-        from app.repositories.database import Database, adapt_sql
         from datetime import datetime as dt
+
+        from app.repositories.database import Database, adapt_sql
 
         today = dt.utcnow().strftime("%Y-%m-%d")
         month_start = dt.utcnow().replace(day=1).strftime("%Y-%m-%d")
@@ -252,24 +253,27 @@ class DataFetchScheduler:
         try:
             req_key = f"{month_prefix}requests" if month_prefix else "today_requests"
             tok_key = f"{month_prefix}tokens" if month_prefix else "today_tokens"
-            req_quota_key = f"{month_prefix}request_quota" if month_prefix else "daily_request_quota"
+            req_quota_key = (
+                f"{month_prefix}request_quota" if month_prefix else "daily_request_quota"
+            )
             tok_quota_key = f"{month_prefix}token_quota" if month_prefix else "daily_token_quota"
 
             tokens_pct = (
                 row[tok_key] / (row[tok_quota_key] * 1_000_000) * 100
-                if row.get(tok_quota_key) else 0
+                if row.get(tok_quota_key)
+                else 0
             )
-            requests_pct = (
-                row[req_key] / row[req_quota_key] * 100
-                if row.get(req_quota_key) else 0
-            )
+            requests_pct = row[req_key] / row[req_quota_key] * 100 if row.get(req_quota_key) else 0
             max_pct = max(tokens_pct, requests_pct)
             from app.modules.governance.alert_notifier import create_quota_alert
+
             create_quota_alert(
                 user_id=user_id,
                 username=username,
                 usage_percent=max_pct,
-                quota_type=f"{period}_requests" if requests_pct >= tokens_pct else f"{period}_tokens",
+                quota_type=(
+                    f"{period}_requests" if requests_pct >= tokens_pct else f"{period}_tokens"
+                ),
             )
         except Exception as e:
             logger.warning(f"Failed to create quota alert for user {user_id}: {e}")
@@ -277,12 +281,15 @@ class DataFetchScheduler:
         # Terminate active sessions
         try:
             from app.modules.workspace.session_manager import SessionManager
+
             sm = SessionManager()
             active_sessions = sm.get_active_sessions(user_id)
             for session in active_sessions:
                 try:
                     sm.complete_session(session.session_id)
-                    logger.info(f"Completed session {session.session_id[:8]} for user {user_id} ({period} quota exceeded)")
+                    logger.info(
+                        f"Completed session {session.session_id[:8]} for user {user_id} ({period} quota exceeded)"
+                    )
                 except Exception as e:
                     logger.warning(f"Failed to complete session {session.session_id[:8]}: {e}")
         except Exception as e:
@@ -306,8 +313,8 @@ scheduler = DataFetchScheduler()
 
 def init_scheduler():
     """Initialize and start the data fetch scheduler."""
-    import sys
     import os
+    import sys
 
     # Add scripts/shared to path for config import
     scripts_path = os.path.join(

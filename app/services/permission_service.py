@@ -8,7 +8,7 @@ Business logic for role-based access control (RBAC).
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional, Set
+from typing import Optional
 
 from app.repositories.database import Database
 from app.repositories.user_repo import UserRepository
@@ -63,7 +63,7 @@ class Role:
 
     name: str
     description: str
-    permissions: Set[str] = field(default_factory=set)
+    permissions: set[str] = field(default_factory=set)
 
     def has_permission(self, permission: str) -> bool:
         """Check if role has a permission."""
@@ -135,7 +135,7 @@ class PermissionService:
         self.db = db or Database()
         self.user_repo = user_repo or UserRepository()
         self.roles = dict(DEFAULT_ROLES)
-        self._ensure_tables()
+        self._load_role_permissions()
 
     def _ensure_tables(self) -> None:
         """Ensure permission tables exist."""
@@ -150,8 +150,7 @@ class PermissionService:
             )
 
             # User permissions table (for custom permissions)
-            cursor.execute(
-                f"""
+            cursor.execute(f"""
                 CREATE TABLE IF NOT EXISTS user_permissions (
                     id {id_type},
                     user_id INTEGER NOT NULL,
@@ -161,12 +160,10 @@ class PermissionService:
                     UNIQUE(user_id, permission),
                     FOREIGN KEY (user_id) REFERENCES users(id)
                 )
-            """
-            )
+            """)
 
             # Role permissions override table
-            cursor.execute(
-                f"""
+            cursor.execute(f"""
                 CREATE TABLE IF NOT EXISTS role_permissions (
                     id {id_type},
                     role_name TEXT NOT NULL,
@@ -174,8 +171,7 @@ class PermissionService:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(role_name, permission)
                 )
-            """
-            )
+            """)
 
             # Create indexes
             cursor.execute(
@@ -217,11 +213,11 @@ class PermissionService:
         """
         return self.roles.get(role_name)
 
-    def get_all_roles(self) -> Dict[str, Role]:
+    def get_all_roles(self) -> dict[str, Role]:
         """Get all role definitions."""
         return self.roles
 
-    def get_user_permissions(self, user_id: int) -> Set[str]:
+    def get_user_permissions(self, user_id: int) -> set[str]:
         """
         Get all permissions for a user.
 
@@ -351,7 +347,7 @@ class PermissionService:
             logger.error(f"Failed to revoke permission: {e}")
             return False
 
-    def create_role(self, role_name: str, description: str, permissions: Set[str]) -> bool:
+    def create_role(self, role_name: str, description: str, permissions: set[str]) -> bool:
         """
         Create a new role.
 
@@ -393,7 +389,7 @@ class PermissionService:
             logger.error(f"Failed to create role: {e}")
             return False
 
-    def update_role_permissions(self, role_name: str, permissions: Set[str]) -> bool:
+    def update_role_permissions(self, role_name: str, permissions: set[str]) -> bool:
         """
         Update permissions for a role.
 
@@ -470,7 +466,7 @@ class PermissionService:
             logger.error(f"Failed to delete role: {e}")
             return False
 
-    def get_users_with_permission(self, permission: str) -> List[Dict]:
+    def get_users_with_permission(self, permission: str) -> list[dict]:
         """
         Get all users who have a specific permission.
 
@@ -490,7 +486,7 @@ class PermissionService:
 
         return result
 
-    def get_permission_audit_log(self, user_id: Optional[int] = None) -> List[Dict]:
+    def get_permission_audit_log(self, user_id: Optional[int] = None) -> list[dict]:
         """
         Get audit log of permission changes.
 
@@ -512,13 +508,42 @@ class PermissionService:
                 (user_id,),
             )
         else:
-            return self.db.fetch_all(
-                """
+            return self.db.fetch_all("""
                 SELECT up.*, u.username, grantor.username as granted_by_username
                 FROM user_permissions up
                 JOIN users u ON up.user_id = u.id
                 LEFT JOIN users grantor ON up.granted_by = grantor.id
                 ORDER BY up.granted_at DESC
                 LIMIT 100
-            """
-            )
+            """)
+
+
+def get_ddl_statements() -> list[str]:
+    """Return DDL statements for permission service tables."""
+    from app.repositories.database import is_postgresql
+
+    id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    return [
+        f"""
+        CREATE TABLE IF NOT EXISTS user_permissions (
+            id {id_type},
+            user_id INTEGER NOT NULL,
+            permission TEXT NOT NULL,
+            granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            granted_by INTEGER,
+            UNIQUE(user_id, permission),
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+        """,
+        f"""
+        CREATE TABLE IF NOT EXISTS role_permissions (
+            id {id_type},
+            role_name TEXT NOT NULL,
+            permission TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(role_name, permission)
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_user_permissions_user ON user_permissions(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_role_permissions_role ON role_permissions(role_name)",
+    ]

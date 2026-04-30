@@ -11,7 +11,7 @@ import os
 import sqlite3
 import sys
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Union, Any
+from typing import Any, Optional, Union
 
 # Ensure scripts directory is in path for standalone script execution
 _script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -65,8 +65,8 @@ def sanitize_utf8(text: Optional[str]) -> Optional[str]:
         return None
 
     # Remove NUL characters first (PostgreSQL doesn't support them)
-    if '\x00' in text:
-        text = text.replace('\x00', '')
+    if "\x00" in text:
+        text = text.replace("\x00", "")
 
     try:
         # Try to encode to UTF-8 - if it works, the text is valid
@@ -191,7 +191,7 @@ def _column_exists(cursor, table_name: str, column_name: str) -> bool:
 
 def init_database() -> None:
     """Verify database schema exists.
-    
+
     For PostgreSQL: Only verifies tables exist (schema created by schema.sql).
     For SQLite: Creates tables if needed (for local development/testing).
     """
@@ -199,11 +199,11 @@ def init_database() -> None:
         # PostgreSQL: Just verify tables exist
         conn = get_connection()
         cursor = conn.cursor()
-        
+
         # Check core tables
         core_tables = ["daily_messages", "daily_usage", "users", "sessions"]
         missing_tables = []
-        
+
         for table in core_tables:
             cursor.execute(f"""
                 SELECT EXISTS (
@@ -213,16 +213,16 @@ def init_database() -> None:
             """)
             if not cursor.fetchone()["exists"]:
                 missing_tables.append(table)
-        
+
         conn.close()
-        
+
         if missing_tables:
             print(f"Warning: Missing database tables: {missing_tables}")
             print("Please run schema.sql or 'alembic upgrade head' to create the schema")
         else:
             print("Database schema verified")
         return
-    
+
     # SQLite: Create tables if needed (for local development)
     if not is_postgresql():
         ensure_db_dir()
@@ -413,7 +413,7 @@ def save_usage(
     output_tokens: int = 0,
     cache_tokens: int = 0,
     request_count: int = 0,
-    models_used: Optional[List[str]] = None,
+    models_used: Optional[list[str]] = None,
     host_name: str = "localhost",
 ) -> bool:
     """Save or update usage data for a specific date and tool."""
@@ -477,7 +477,7 @@ def save_usage(
 
 def get_usage_by_date(
     date: str, tool_name: Optional[str] = None, host_name: Optional[str] = None
-) -> List[Dict]:
+) -> list[dict]:
     """Get usage data for a specific date, optionally filtered by tool and host."""
     conn = get_connection()
     cursor = conn.cursor()
@@ -521,7 +521,7 @@ def get_usage_by_date(
 
 def get_usage_by_tool(
     tool_name: str, days: int = 7, end_date: Optional[str] = None, host_name: Optional[str] = None
-) -> List[Dict]:
+) -> list[dict]:
     """Get usage data for a specific tool over a date range."""
     conn = get_connection()
     cursor = conn.cursor()
@@ -567,7 +567,7 @@ def get_usage_by_tool(
     return results
 
 
-def get_all_tools() -> List[str]:
+def get_all_tools() -> list[str]:
     """Get list of all tools in the database."""
     conn = get_connection()
     cursor = conn.cursor()
@@ -586,7 +586,7 @@ def get_all_tools() -> List[str]:
     return [row["tool_name"] for row in rows]
 
 
-def get_all_hosts(active_only: bool = True) -> List[str]:
+def get_all_hosts(active_only: bool = True) -> list[str]:
     """Get list of all hosts in the database.
 
     Args:
@@ -629,7 +629,7 @@ def get_all_hosts(active_only: bool = True) -> List[str]:
     return [row["host_name"] for row in rows]
 
 
-def get_summary_by_tool(host_name: Optional[str] = None) -> Dict[str, Dict]:
+def get_summary_by_tool(host_name: Optional[str] = None) -> dict[str, dict]:
     """Get summary statistics grouped by tool, optionally filtered by host."""
     conn = get_connection()
     cursor = conn.cursor()
@@ -693,7 +693,7 @@ def get_summary_by_tool(host_name: Optional[str] = None) -> Dict[str, Dict]:
 
 def get_daily_range(
     start_date: str, end_date: str, tool_name: Optional[str] = None, host_name: Optional[str] = None
-) -> List[Dict]:
+) -> list[dict]:
     """Get usage data within a date range."""
     conn = get_connection()
     cursor = conn.cursor()
@@ -858,7 +858,7 @@ def save_message(
     return True
 
 
-def save_messages_batch(messages: List[Dict], batch_size: int = 1000) -> int:
+def save_messages_batch(messages: list[dict], batch_size: int = 1000) -> int:
     """Save multiple messages to the database using batch insert with transaction.
 
     This is much faster than calling save_message() for each message individually
@@ -1091,13 +1091,13 @@ def save_messages_batch(messages: List[Dict], batch_size: int = 1000) -> int:
 def get_messages_by_date(
     date: str,
     tool_name: Optional[str] = None,
-    roles: Optional[List[str]] = None,
+    roles: Optional[list[str]] = None,
     search: Optional[str] = None,
     page: int = 1,
     limit: int = 50,
     host_name: Optional[str] = None,
     sender: Optional[str] = None,
-) -> Dict:
+) -> dict:
     """Get messages for a specific date with filters.
 
     Args:
@@ -1194,7 +1194,7 @@ def get_messages_by_date(
     }
 
 
-def get_hosts_by_tool(tool_name: str) -> List[str]:
+def get_hosts_by_tool(tool_name: str) -> list[str]:
     """Get list of hosts for a specific tool."""
     conn = get_connection()
     cursor = conn.cursor()
@@ -1217,7 +1217,7 @@ def get_hosts_by_tool(tool_name: str) -> List[str]:
 
 def get_unique_senders(
     date: str, tool_name: Optional[str] = None, host_name: Optional[str] = None
-) -> List[str]:
+) -> list[str]:
     """Get unique sender names for a specific date.
 
     Args:
@@ -1395,7 +1395,9 @@ def init_auth_database() -> None:
 
     # Add system_account column if not exists (migration for existing databases)
     # First check for old linux_account column and rename it
-    if _column_exists(cursor, "users", "linux_account") and not _column_exists(cursor, "users", "system_account"):
+    if _column_exists(cursor, "users", "linux_account") and not _column_exists(
+        cursor, "users", "system_account"
+    ):
         print("Renaming linux_account column to system_account...")
         _execute(cursor, "ALTER TABLE users RENAME COLUMN linux_account TO system_account")
         conn.commit()
@@ -1408,7 +1410,10 @@ def init_auth_database() -> None:
     if not _column_exists(cursor, "users", "must_change_password"):
         print("Adding must_change_password column to users table...")
         default_val = "FALSE" if is_postgresql() else "0"
-        _execute(cursor, f"ALTER TABLE users ADD COLUMN must_change_password BOOLEAN DEFAULT {default_val}")
+        _execute(
+            cursor,
+            f"ALTER TABLE users ADD COLUMN must_change_password BOOLEAN DEFAULT {default_val}",
+        )
         conn.commit()
 
     conn.close()
@@ -1499,7 +1504,7 @@ def create_user_with_is_active(
         conn.close()
 
 
-def get_user_by_username(username: str) -> Optional[Dict]:
+def get_user_by_username(username: str) -> Optional[dict]:
     """Get user by username."""
     conn = get_connection()
     cursor = conn.cursor()
@@ -1513,7 +1518,7 @@ def get_user_by_username(username: str) -> Optional[Dict]:
     return None
 
 
-def get_user_by_id(user_id: int) -> Optional[Dict]:
+def get_user_by_id(user_id: int) -> Optional[dict]:
     """Get user by ID."""
     conn = get_connection()
     cursor = conn.cursor()
@@ -1545,7 +1550,7 @@ def is_default_admin_password() -> bool:
     return admin_user["password_hash"] == default_password_hash
 
 
-def get_all_users() -> List[Dict]:
+def get_all_users() -> list[dict]:
     """Get all users (admin only)."""
     conn = get_connection()
     cursor = conn.cursor()
@@ -1565,7 +1570,7 @@ def get_all_users() -> List[Dict]:
     return [dict(row) for row in rows]
 
 
-def get_global_quota_summary(start_date: str, end_date: str) -> Dict:
+def get_global_quota_summary(start_date: str, end_date: str) -> dict:
     """Get global quota summary within a date range."""
     conn = get_connection()
     cursor = conn.cursor()
@@ -1601,7 +1606,7 @@ def get_global_quota_summary(start_date: str, end_date: str) -> Dict:
     }
 
 
-def get_user_quota_breakdown(start_date: str, end_date: str) -> List[Dict]:
+def get_user_quota_breakdown(start_date: str, end_date: str) -> list[dict]:
     """Get quota usage breakdown by user."""
     conn = get_connection()
     cursor = conn.cursor()
@@ -1636,7 +1641,7 @@ def get_user_quota_breakdown(start_date: str, end_date: str) -> List[Dict]:
     return result
 
 
-def verify_password(username: str, password: str) -> Optional[Dict]:
+def verify_password(username: str, password: str) -> Optional[dict]:
     """Verify user password and return user info if valid."""
     import hashlib
 
@@ -1674,7 +1679,7 @@ def create_session(user_id: int, session_token: str, expires_at: datetime) -> bo
         conn.close()
 
 
-def get_session_by_token(session_token: str) -> Optional[Dict]:
+def get_session_by_token(session_token: str) -> Optional[dict]:
     """Get session by token if not expired."""
     conn = get_connection()
     cursor = conn.cursor()
@@ -1707,18 +1712,6 @@ def delete_session(session_token: str) -> bool:
     conn.commit()
     conn.close()
     return True
-
-
-def get_all_users() -> List[Dict]:
-    """Get all users (for admin)."""
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    _execute(cursor, "SELECT * FROM users ORDER BY created_at DESC")
-    rows = cursor.fetchall()
-    conn.close()
-
-    return [dict(row) for row in rows]
 
 
 def update_user(user_id: int, **kwargs) -> bool:
@@ -1960,7 +1953,7 @@ def aggregate_quota_usage_from_messages(start_date: str = None, end_date: str = 
     usage_data = {}  # (date, tool_name, sender) -> {tokens, requests}
 
     # Count requests from user messages
-    for msg_id, msg_info in user_msg_map.items():
+    for _msg_id, msg_info in user_msg_map.items():
         key = (msg_info["date"], msg_info["tool_name"], msg_info["sender"])
         if key not in usage_data:
             usage_data[key] = {"tokens": 0, "requests": 0}
@@ -2016,7 +2009,7 @@ def aggregate_quota_usage_from_messages(start_date: str = None, end_date: str = 
     return records_created
 
 
-def get_quota_usage(user_id: int, start_date: str, end_date: str) -> List[Dict]:
+def get_quota_usage(user_id: int, start_date: str, end_date: str) -> list[dict]:
     """Get quota usage for a user within a date range."""
     conn = get_connection()
     cursor = conn.cursor()
@@ -2037,7 +2030,7 @@ def get_quota_usage(user_id: int, start_date: str, end_date: str) -> List[Dict]:
     return [dict(row) for row in rows]
 
 
-def get_total_quota_usage(user_id: int, start_date: str, end_date: str) -> Dict:
+def get_total_quota_usage(user_id: int, start_date: str, end_date: str) -> dict:
     """Get total quota usage for a user within a date range."""
     conn = get_connection()
     cursor = conn.cursor()
@@ -2064,7 +2057,7 @@ def get_total_quota_usage(user_id: int, start_date: str, end_date: str) -> Dict:
     )
 
 
-def get_quota_usage_by_tool(user_id: int, start_date: str, end_date: str) -> List[Dict]:
+def get_quota_usage_by_tool(user_id: int, start_date: str, end_date: str) -> list[dict]:
     """Get quota usage grouped by tool for a user."""
     conn = get_connection()
     cursor = conn.cursor()
@@ -2091,7 +2084,7 @@ def get_quota_usage_by_tool(user_id: int, start_date: str, end_date: str) -> Lis
     return [dict(row) for row in rows]
 
 
-def get_quota_usage_by_day(user_id: int, start_date: str, end_date: str) -> List[Dict]:
+def get_quota_usage_by_day(user_id: int, start_date: str, end_date: str) -> list[dict]:
     """Get quota usage grouped by day for a user.
 
     Returns data from the first day with usage to the end_date,
@@ -2171,7 +2164,7 @@ def get_quota_usage_by_day(user_id: int, start_date: str, end_date: str) -> List
 
 def get_hourly_usage_from_messages(
     start_date: str, end_date: str, tool_name: Optional[str] = None, host_name: Optional[str] = None
-) -> List[Dict]:
+) -> list[dict]:
     """Get hourly usage statistics from daily_messages table.
 
     Args:
@@ -2261,7 +2254,7 @@ def get_hourly_usage_from_messages(
 
 def get_daily_hourly_usage(
     start_date: str, end_date: str, tool_name: Optional[str] = None, host_name: Optional[str] = None
-) -> List[Dict]:
+) -> list[dict]:
     """Get hourly usage statistics grouped by date (not day_of_week).
 
     Args:
@@ -2356,7 +2349,7 @@ def get_user_activity_ranking(
     limit: int = 10,
     tool_name: Optional[str] = None,
     host_name: Optional[str] = None,
-) -> List[Dict]:
+) -> list[dict]:
     """Get user activity ranking.
 
     Args:
@@ -2413,7 +2406,7 @@ def get_user_activity_ranking(
 
 def get_conversation_statistics(
     start_date: str, end_date: str, tool_name: Optional[str] = None, host_name: Optional[str] = None
-) -> Dict:
+) -> dict:
     """Get conversation statistics.
 
     Analyzes conversation patterns based on conversation_id field.
@@ -2535,7 +2528,7 @@ def get_peak_usage_periods(
     tool_name: Optional[str] = None,
     host_name: Optional[str] = None,
     limit: int = 10,
-) -> List[Dict]:
+) -> list[dict]:
     """Get peak usage periods.
 
     Args:
@@ -2609,7 +2602,7 @@ def get_peak_usage_periods(
 
 def get_user_segmentation(
     start_date: str, end_date: str, tool_name: Optional[str] = None, host_name: Optional[str] = None
-) -> Dict:
+) -> dict:
     """Get user segmentation by activity level.
 
     Segments:
@@ -2678,7 +2671,7 @@ def get_user_segmentation(
 
     end_date_obj = datetime.strptime(end_date, "%Y-%m-%d")
     start_date_obj = datetime.strptime(start_date, "%Y-%m-%d")
-    period_days = (end_date_obj - start_date_obj).days + 1
+    (end_date_obj - start_date_obj).days + 1
     thirty_days_ago = (end_date_obj - timedelta(days=30)).strftime("%Y-%m-%d")
 
     _execute(
@@ -2707,7 +2700,7 @@ def get_user_segmentation(
 
 def get_tool_comparison_metrics(
     start_date: str, end_date: str, host_name: Optional[str] = None
-) -> List[Dict]:
+) -> list[dict]:
     """Get comparison metrics for different tools.
 
     Args:
@@ -2734,7 +2727,7 @@ def get_tool_comparison_metrics(
     _execute(
         cursor,
         f"""
-        SELECT 
+        SELECT
             tool_name,
             SUM(tokens_used) as total_tokens,
             SUM(input_tokens) as input_tokens,
@@ -2756,7 +2749,7 @@ def get_tool_comparison_metrics(
     _execute(
         cursor,
         f"""
-        SELECT 
+        SELECT
             tool_name,
             COUNT(*) as total_messages,
             COUNT(DISTINCT COALESCE(sender_name, sender_id)) as unique_users,
@@ -2791,7 +2784,7 @@ def detect_usage_anomalies(
     tool_name: Optional[str] = None,
     host_name: Optional[str] = None,
     threshold_std: float = 3.0,
-) -> List[Dict]:
+) -> list[dict]:
     """Detect usage anomalies using statistical methods (3-sigma rule).
 
     Args:
@@ -2824,7 +2817,7 @@ def detect_usage_anomalies(
     _execute(
         cursor,
         f"""
-        SELECT 
+        SELECT
             date,
             tool_name,
             tokens_used,
@@ -2900,7 +2893,7 @@ def get_key_metrics(
     end_date: Optional[str] = None,
     tool_name: Optional[str] = None,
     host_name: Optional[str] = None,
-) -> Dict:
+) -> dict:
     """Get key metrics for dashboard.
 
     Args:
@@ -3015,7 +3008,7 @@ def get_key_metrics(
     }
 
 
-def get_data_status_by_host(host_name: str) -> Dict:
+def get_data_status_by_host(host_name: str) -> dict:
     """Get data status for a specific host.
 
     Args:
@@ -3055,9 +3048,8 @@ def get_data_status_by_host(host_name: str) -> Dict:
 
     # Use the most recent update time
     last_updated = last_updated_usage
-    if last_updated_messages:
-        if not last_updated or last_updated_messages > last_updated:
-            last_updated = last_updated_messages
+    if last_updated_messages and (not last_updated or last_updated_messages > last_updated):
+        last_updated = last_updated_messages
 
     # Get record counts
     _execute(
@@ -3125,7 +3117,7 @@ def get_data_status_by_host(host_name: str) -> Dict:
     }
 
 
-def get_all_hosts_with_status() -> List[Dict]:
+def get_all_hosts_with_status() -> list[dict]:
     """Get data status for all hosts in the database.
 
     Returns:
@@ -3234,7 +3226,7 @@ def get_conversation_history(
     limit: int = 20,
     sort_by: str = "start_time",
     sort_order: str = "desc",
-) -> Dict:
+) -> dict:
     """Get agent session history with pagination and sorting.
 
     An agent session is identified by agent_session_id field (tool process session).
@@ -3434,7 +3426,7 @@ def get_conversation_history(
     }
 
 
-def _calculate_avg_latency(messages: List[Dict]) -> float:
+def _calculate_avg_latency(messages: list[dict]) -> float:
     """Calculate average AI response latency from messages.
 
     Latency is calculated as the time difference between a user message
@@ -3492,7 +3484,7 @@ def _calculate_avg_latency(messages: List[Dict]) -> float:
     return round(sum(latencies) / len(latencies), 2)
 
 
-def _calculate_max_latency(messages: List[Dict]) -> float:
+def _calculate_max_latency(messages: list[dict]) -> float:
     """Calculate maximum AI response latency from messages.
 
     Latency is calculated as the time difference between a user message
@@ -3550,7 +3542,7 @@ def _calculate_max_latency(messages: List[Dict]) -> float:
     return round(max(latencies), 2)
 
 
-def get_conversation_timeline(session_id: str) -> Dict:
+def get_conversation_timeline(session_id: str) -> dict:
     """Get detailed timeline data for a specific conversation.
 
     Args:
@@ -3678,7 +3670,6 @@ def get_conversation_timeline(session_id: str) -> Dict:
     # Build a map of message_id -> message_time for user messages
     # and track user message times by their IDs for parent_id lookup
     user_message_times = {}  # message_id -> datetime
-    message_times = {}  # For looking up any message by some identifier
 
     # First pass: collect all user message times
     for row in rows:
@@ -3804,7 +3795,7 @@ def get_conversation_timeline(session_id: str) -> Dict:
     return {"timeline": timeline, "latency_curve": latency_data}
 
 
-def get_conversation_details(session_id: str) -> Dict:
+def get_conversation_details(session_id: str) -> dict:
     """Get complete conversation details for a specific conversation.
 
     Args:
@@ -3988,13 +3979,13 @@ def get_conversation_details(session_id: str) -> Dict:
         "ai_messages": len(ai_messages),
         "start_time": first_msg.get("formatted_time"),
         "end_time": last_msg.get("formatted_time"),
-        "models": list(set(m.get("model") for m in messages if m.get("model"))),
+        "models": list({m.get("model") for m in messages if m.get("model")}),
         "sender_name": first_msg.get("sender_name") or first_msg.get("sender_id") or "Unknown",
         "conversation_id": first_msg.get("conversation_id"),
     }
 
 
-def _refresh_daily_stats_for_messages(messages: List[Dict]) -> None:
+def _refresh_daily_stats_for_messages(messages: list[dict]) -> None:
     """
     Refresh daily_stats and hourly_stats for affected dates after saving messages.
 
@@ -4006,7 +3997,7 @@ def _refresh_daily_stats_for_messages(messages: List[Dict]) -> None:
     from datetime import datetime
 
     # Get unique dates from messages
-    dates = set(msg.get("date") for msg in messages if msg.get("date"))
+    dates = {msg.get("date") for msg in messages if msg.get("date")}
     if not dates:
         return
 
@@ -4127,6 +4118,7 @@ def _refresh_daily_stats_for_messages(messages: List[Dict]) -> None:
     # Also refresh user_daily_stats for affected dates
     try:
         from scripts.shared.user_stats_helper import _refresh_user_daily_stats_for_dates
+
         _refresh_user_daily_stats_for_dates(dates)
     except Exception as e:
         # Log but don't fail the save operation

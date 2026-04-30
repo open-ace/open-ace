@@ -11,17 +11,16 @@ Usage:
     python3 tests/issues/94/test_ui_conversation_history.py
 """
 
-import pytest
-import sys
 import os
+import sys
 import time
 
 sys.path.insert(
     0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 )
 
-from playwright.sync_api import sync_playwright, expect
-from datetime import datetime
+
+from playwright.sync_api import expect, sync_playwright
 
 # Test configuration
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000/")

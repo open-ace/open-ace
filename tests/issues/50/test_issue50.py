@@ -2,6 +2,7 @@
 """Test issue 50: Normal user should only see Workspace and My Usage Report in menu."""
 
 import asyncio
+
 from playwright.async_api import async_playwright
 
 # Test user credentials (normal user, not admin)

@@ -8,7 +8,7 @@ Data models for message tracking.
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +140,7 @@ class DailyMessage:
     total_tokens: int = 0
     total_input_tokens: int = 0
     total_output_tokens: int = 0
-    messages: List[Message] = field(default_factory=list)
+    messages: list[Message] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -161,7 +161,7 @@ class Conversation:
     session_id: str
     tool_name: str
     host_name: str
-    messages: List[Message] = field(default_factory=list)
+    messages: list[Message] = field(default_factory=list)
     total_tokens: int = 0
     total_input_tokens: int = 0
     total_output_tokens: int = 0

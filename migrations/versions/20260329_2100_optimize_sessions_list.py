@@ -37,8 +37,8 @@ Query pattern optimized:
 
 from typing import Union
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "022_sessions_list_opt"
@@ -102,9 +102,7 @@ def upgrade() -> None:
     if conn.dialect.name == "postgresql":
         # Create materialized view for session statistics
         if not _matview_exists(conn, "session_stats"):
-            op.execute(
-                sa.text(
-                    """
+            op.execute(sa.text("""
                     CREATE MATERIALIZED VIEW session_stats AS
                     SELECT
                         agent_session_id as session_id,
@@ -122,9 +120,7 @@ def upgrade() -> None:
                     FROM daily_messages
                     WHERE agent_session_id IS NOT NULL
                     GROUP BY agent_session_id, tool_name, host_name, sender_name
-                    """
-                )
-            )
+                    """))
 
         # Create indexes on materialized view
         if not _index_exists(conn, "session_stats", "idx_session_stats_updated_at"):
@@ -136,7 +132,9 @@ def upgrade() -> None:
 
         if not _index_exists(conn, "session_stats", "idx_session_stats_tool_host"):
             op.execute(
-                sa.text("CREATE INDEX idx_session_stats_tool_host ON session_stats(tool_name, host_name)")
+                sa.text(
+                    "CREATE INDEX idx_session_stats_tool_host ON session_stats(tool_name, host_name)"
+                )
             )
 
         # Also add a simple index on agent_session_id for other queries

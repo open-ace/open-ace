@@ -59,7 +59,7 @@ def ensure_dir():
 
 def shot(page, name):
     ensure_dir()
-    path = os.path.join(SCREENSHOT_DIR, "%s.png" % name)
+    path = os.path.join(SCREENSHOT_DIR, f"{name}.png")
     try:
         page.screenshot(path=path, full_page=True, timeout=30000)
     except Exception:
@@ -67,11 +67,11 @@ def shot(page, name):
             page.screenshot(path=path, full_page=False, timeout=10000)
         except Exception:
             return
-    print("    📸 %s.png" % name)
+    print(f"    📸 {name}.png")
 
 
 def log(tag, msg):
-    print("    [%s] %s" % (tag, msg))
+    print(f"    [{tag}] {msg}")
 
 
 def pause(seconds):
@@ -83,7 +83,7 @@ def pause(seconds):
 
 def api_login(username=TEST_USER, password=TEST_PASS):
     r = requests.post(
-        "%s/api/auth/login" % BASE_URL,
+        f"{BASE_URL}/api/auth/login",
         json={"username": username, "password": password},
         proxies=PROXIES,
     )
@@ -95,7 +95,7 @@ def api_login(username=TEST_USER, password=TEST_PASS):
 
 def get_webui_info(token):
     r = requests.get(
-        "%s/api/workspace/user-url" % BASE_URL,
+        f"{BASE_URL}/api/workspace/user-url",
         cookies={"session_token": token},
         proxies=PROXIES,
     )
@@ -140,7 +140,7 @@ def run_tests():
 
         try:
             _run_test(page, token, effective_webui_url, webui_token, captured_session_id)
-        except Exception as e:
+        except Exception:
             shot(page, "ERROR_final")
             traceback.print_exc()
             raise
@@ -148,16 +148,16 @@ def run_tests():
             sid = captured_session_id[0]
             if sid:
                 requests.post(
-                    "%s/api/remote/sessions/%s/stop" % (BASE_URL, sid),
+                    f"{BASE_URL}/api/remote/sessions/{sid}/stop",
                     cookies={"session_token": token},
                     proxies=PROXIES,
                 )
-                log("Cleanup", "Stopped session %s..." % sid[:8])
+                log("Cleanup", f"Stopped session {sid[:8]}...")
             context.close()
             browser.close()
 
     print("\n" + "=" * 60)
-    print("  ALL PASSED! Screenshots: %s" % SCREENSHOT_DIR)
+    print(f"  ALL PASSED! Screenshots: {SCREENSHOT_DIR}")
     print("=" * 60)
 
 
@@ -169,15 +169,15 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
     print("\n══════ STEP 1: Open ChatPage (default mode) ══════")
 
     chat_url = (
-        "%s/projects"
-        "?token=%s"
-        "&openace_url=%s"
+        f"{webui_url}/projects"
+        f"?token={webui_token}"
+        f"&openace_url={BASE_URL}"
         "&workspaceType=remote"
-        "&machineId=%s"
+        f"&machineId={MACHINE_ID}"
         "&machineName=TestServer"
         "&encodedProjectName=-root"
         "&permissionMode=default"
-    ) % (webui_url, webui_token, BASE_URL, MACHINE_ID)
+    )
 
     log("Navigate", "Opening ChatPage with permissionMode=default")
     page.goto(chat_url, wait_until="domcontentloaded", timeout=60000)
@@ -204,7 +204,7 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
     for _ in range(30):
         try:
             r = requests.get(
-                "%s/api/remote/sessions" % BASE_URL,
+                f"{BASE_URL}/api/remote/sessions",
                 cookies={"session_token": token},
                 proxies=PROXIES,
             )
@@ -225,14 +225,14 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
         sid = captured_session_id[0]
 
     assert sid, "Session ID not captured - remote session was not created"
-    log("Session", "Using session: %s..." % sid[:12])
+    log("Session", f"Using session: {sid[:12]}...")
 
     # Wait for CLI to initialize (SDK init takes a few seconds)
     time.sleep(8)
 
-    log("Send", "Sending via API: '%s'" % TEST_MESSAGE)
+    log("Send", f"Sending via API: '{TEST_MESSAGE}'")
     r = requests.post(
-        "%s/api/remote/sessions/%s/chat" % (BASE_URL, sid),
+        f"{BASE_URL}/api/remote/sessions/{sid}/chat",
         json={"content": TEST_MESSAGE},
         cookies={"session_token": token},
         proxies=PROXIES,
@@ -248,7 +248,7 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
 
     print("\n══════ STEP 3: Wait for Permission Request ══════")
 
-    log("Session", "Monitoring: %s..." % sid[:12])
+    log("Session", f"Monitoring: {sid[:12]}...")
 
     start = time.time()
     write_tool_use_found = False
@@ -266,7 +266,7 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
 
         try:
             r = requests.get(
-                "%s/api/remote/sessions/%s" % (BASE_URL, sid),
+                f"{BASE_URL}/api/remote/sessions/{sid}",
                 cookies={"session_token": token},
                 proxies=PROXIES,
             )
@@ -286,12 +286,15 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
                             try:
                                 pdata = json.loads(data)
                                 log("Permission", "✓ PERMISSION REQUEST FOUND in stream!")
-                                log("Permission", "  type=%s" % pdata.get("type"))
+                                log("Permission", "  type={}".format(pdata.get("type")))
                                 req = pdata.get("request", {})
-                                log("Permission", "  subtype=%s tool=%s" % (
-                                    req.get("subtype", ""),
-                                    req.get("tool_name", ""),
-                                ))
+                                log(
+                                    "Permission",
+                                    "  subtype={} tool={}".format(
+                                        req.get("subtype", ""),
+                                        req.get("tool_name", ""),
+                                    ),
+                                )
                                 permission_found = True
                                 permission_request_id = pdata.get("request_id", "")
                                 permission_tool_name = req.get("tool_name", "")
@@ -306,14 +309,17 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
                             if t == "system" and msg.get("subtype") == "init":
                                 init_permission_mode = msg.get("permission_mode", "?")
                                 model = msg.get("model", "?")
-                                log("Output", "  [system/init] permission_mode=%s model=%s" % (init_permission_mode, model))
+                                log(
+                                    "Output",
+                                    f"  [system/init] permission_mode={init_permission_mode} model={model}",
+                                )
 
                             elif t == "control_request":
                                 # Control request in stdout stream (not "permission" stream yet)
                                 req = msg.get("request", {})
                                 if req.get("subtype") == "can_use_tool":
                                     log("Permission", "✓ CONTROL REQUEST (can_use_tool) detected!")
-                                    log("Permission", "  tool=%s" % req.get("tool_name", ""))
+                                    log("Permission", "  tool={}".format(req.get("tool_name", "")))
                                     permission_found = True
                                     permission_request_id = msg.get("request_id", "")
                                     permission_tool_name = req.get("tool_name", "")
@@ -325,13 +331,13 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
                                         ctype = c.get("type", "")
                                         if ctype == "tool_use":
                                             tool_name = c.get("name", "")
-                                            log("Output", "  [assistant/tool_use] %s" % tool_name)
+                                            log("Output", f"  [assistant/tool_use] {tool_name}")
                                             if tool_name in ("write_file", "edit"):
                                                 write_tool_use_found = True
                                         elif ctype == "text":
                                             text = c.get("text", "")
                                             if text.strip():
-                                                log("Output", "  [assistant/text] %s" % text[:80])
+                                                log("Output", f"  [assistant/text] {text[:80]}")
                                         elif ctype == "thinking":
                                             log("Output", "  [assistant/thinking]")
 
@@ -339,7 +345,10 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
                                 result_content = str(msg.get("result", ""))
                                 is_error = msg.get("is_error", False)
                                 duration = msg.get("duration_ms", 0)
-                                log("Output", "  [result] error=%s duration=%dms" % (is_error, duration))
+                                log(
+                                    "Output",
+                                    "  [result] error=%s duration=%dms" % (is_error, duration),
+                                )
                                 if not is_error:
                                     result_found = True
 
@@ -349,7 +358,7 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
                     last_output_len = len(outputs)
 
         except Exception as e:
-            log("Error", "Poll failed: %s" % e)
+            log("Error", f"Poll failed: {e}")
 
         # Exit loop if permission found (go to approval step)
         if permission_found:
@@ -361,9 +370,11 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
 
         elapsed = int(time.time() - start)
         if elapsed > 0 and elapsed % 30 == 0:
-            log("Polling", "Waiting... (%ds, %d checks, write_tool=%s permission=%s)" % (
-                elapsed, check_count, write_tool_use_found, permission_found
-            ))
+            log(
+                "Polling",
+                "Waiting... (%ds, %d checks, write_tool=%s permission=%s)"
+                % (elapsed, check_count, write_tool_use_found, permission_found),
+            )
 
         time.sleep(3)
 
@@ -375,13 +386,16 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
 
     if permission_found and permission_request_id:
         print("\n══════ STEP 4: Approve Permission Request ══════")
-        log("Approve", "Approving %s (request_id=%s...)" % (
-            permission_tool_name or "unknown",
-            permission_request_id[:8],
-        ))
+        log(
+            "Approve",
+            "Approving {} (request_id={}...)".format(
+                permission_tool_name or "unknown",
+                permission_request_id[:8],
+            ),
+        )
 
         r = requests.post(
-            "%s/api/remote/sessions/%s/permission" % (BASE_URL, sid),
+            f"{BASE_URL}/api/remote/sessions/{sid}/permission",
             json={
                 "request_id": permission_request_id,
                 "behavior": "allow",
@@ -397,7 +411,7 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
         while time.time() - start2 < RESPONSE_TIMEOUT:
             try:
                 r = requests.get(
-                    "%s/api/remote/sessions/%s" % (BASE_URL, sid),
+                    f"{BASE_URL}/api/remote/sessions/{sid}",
                     cookies={"session_token": token},
                     proxies=PROXIES,
                 )
@@ -415,11 +429,17 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
                                 content = msg.get("message", {}).get("content", [])
                                 for c in content:
                                     if isinstance(c, dict) and c.get("type") == "text":
-                                        log("Output", "  [assistant/text] %s" % c.get("text", "")[:80])
+                                        log(
+                                            "Output",
+                                            "  [assistant/text] {}".format(c.get("text", "")[:80]),
+                                        )
                             elif t == "result":
                                 result_content = str(msg.get("result", ""))
                                 result_found = not msg.get("is_error", False)
-                                log("Output", "  [result] error=%s" % msg.get("is_error", False))
+                                log(
+                                    "Output",
+                                    "  [result] error={}".format(msg.get("is_error", False)),
+                                )
                         except Exception:
                             pass
                     last_output_len = len(outputs)
@@ -440,27 +460,31 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
 
     print("    " + "=" * 50)
     print("    Results:")
-    print("    Session permission_mode: %s" % init_permission_mode)
+    print(f"    Session permission_mode: {init_permission_mode}")
     print("    Write tool use detected: %s" % ("YES" if write_tool_use_found else "NO"))
     print("    Permission request (control_request): %s" % ("YES" if permission_found else "NO"))
     print("    Task completed: %s" % ("YES" if result_found else "NO"))
     if result_content:
-        print("    Result: %s" % result_content[:100])
+        print(f"    Result: {result_content[:100]}")
     print("    " + "=" * 50)
 
     # Core assertions
-    assert write_tool_use_found, \
-        "AI did not attempt to use write_file tool! Check if the LLM understood the request."
+    assert (
+        write_tool_use_found
+    ), "AI did not attempt to use write_file tool! Check if the LLM understood the request."
 
-    assert permission_found, \
-        "Permission request (control_request) was NOT emitted for write_file! " \
+    assert permission_found, (
+        "Permission request (control_request) was NOT emitted for write_file! "
         "This means the CLI auto-approved a write tool in default mode, which is a bug."
+    )
 
-    assert result_found, \
+    assert result_found, (
         "Task did not complete successfully within %ds after approval!" % RESPONSE_TIMEOUT
+    )
 
-    assert init_permission_mode == "default", \
-        "Expected permission_mode=default, got %s" % init_permission_mode
+    assert (
+        init_permission_mode == "default"
+    ), f"Expected permission_mode=default, got {init_permission_mode}"
 
     log("Verify", "✓ ALL CHECKS PASSED!")
     log("Verify", "✓ Permission confirmation panel works correctly in default mode!")

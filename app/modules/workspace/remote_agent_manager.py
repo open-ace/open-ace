@@ -8,15 +8,14 @@ command dispatching, and message routing for remote workspace sessions.
 
 import json
 import logging
-import os
-import sqlite3
 import threading
 import time
 import uuid
+from contextlib import suppress
 from datetime import datetime, timedelta
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Optional
 
-from app.repositories.database import DB_PATH, is_postgresql, get_database_url
+from app.repositories.database import DB_PATH, Database, is_postgresql
 
 logger = logging.getLogger(__name__)
 
@@ -41,94 +40,31 @@ class RemoteAgentManager:
     HEARTBEAT_TIMEOUT_SECONDS = 180  # 3 minutes without heartbeat = offline
     HEARTBEAT_CHECK_INTERVAL = 60  # Check every 60 seconds
 
+    # Heartbeat rate-limiting interval (seconds)
+    HEARTBEAT_DB_WRITE_INTERVAL = 30
+
     def __init__(self, db_path: Optional[str] = None):
         self.db_path = db_path or str(DB_PATH)
+        self.db = Database()
         # Active WebSocket connections: {machine_id: websocket_connection}
-        self._connections: Dict[str, Any] = {}
+        self._connections: dict[str, Any] = {}
         # Session to machine mapping: {session_id: machine_id}
-        self._session_machines: Dict[str, str] = {}
+        self._session_machines: dict[str, str] = {}
         # Output buffers: {session_id: [output_lines]}
-        self._output_buffers: Dict[str, List[Dict]] = {}
+        self._output_buffers: dict[str, list[dict]] = {}
         # Registration tokens: {token: {tenant_id, created_by, created_at}}
-        self._registration_tokens: Dict[str, Dict] = {}
+        self._registration_tokens: dict[str, dict] = {}
         # Command queues for HTTP-mode agents: {machine_id: [commands]}
-        self._command_queues: Dict[str, List[Dict]] = {}
+        self._command_queues: dict[str, list[dict]] = {}
         # Session end flags: {session_id: True} — set when session completes/stops/errors
-        self._session_end_flags: Dict[str, bool] = {}
+        self._session_end_flags: dict[str, bool] = {}
+        # Heartbeat rate limiter: {machine_id: last_db_write_timestamp}
+        self._last_heartbeat_db_write: dict[str, float] = {}
         # Lock for thread safety
         self._lock = threading.Lock()
-        self._ensure_tables()
         self._restore_in_memory_state()
         self._cleanup_offline_sessions()
         self._start_heartbeat_monitor()
-
-    def _get_connection(self) -> Union[sqlite3.Connection, Any]:
-        """Get database connection."""
-        if is_postgresql():
-            try:
-                import psycopg2
-                from psycopg2.extras import RealDictCursor
-                url = get_database_url()
-                return psycopg2.connect(url, cursor_factory=RealDictCursor)
-            except ImportError:
-                raise ImportError("psycopg2 is required for PostgreSQL")
-        else:
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
-            return conn
-
-    def _ensure_tables(self) -> None:
-        """Ensure required tables exist."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-
-        id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
-
-        cursor.execute(
-            f"""
-            CREATE TABLE IF NOT EXISTS remote_machines (
-                id {id_type},
-                machine_id TEXT NOT NULL UNIQUE,
-                machine_name TEXT NOT NULL,
-                hostname TEXT,
-                os_type TEXT,
-                os_version TEXT,
-                ip_address TEXT,
-                status TEXT DEFAULT 'offline',
-                agent_version TEXT,
-                capabilities TEXT,
-                cli_path TEXT,
-                work_dir TEXT,
-                tenant_id INTEGER,
-                created_by INTEGER,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                last_heartbeat TIMESTAMP
-            )
-        """
-        )
-
-        cursor.execute(
-            f"""
-            CREATE TABLE IF NOT EXISTS machine_assignments (
-                id {id_type},
-                machine_id TEXT NOT NULL,
-                user_id INTEGER NOT NULL,
-                permission TEXT DEFAULT 'user',
-                granted_by INTEGER,
-                granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(machine_id, user_id)
-            )
-        """
-        )
-
-        # Indexes
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_remote_machines_machine_id ON remote_machines(machine_id)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_remote_machines_status ON remote_machines(status)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_machine_assignments_user_id ON machine_assignments(user_id)")
-
-        conn.commit()
-        conn.close()
 
     def _restore_in_memory_state(self) -> None:
         """Restore _session_machines and _session_end_flags from DB after restart.
@@ -138,34 +74,33 @@ class RemoteAgentManager:
         stream, and other session operations.
         """
         try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
+            with self.db.connection() as conn:
+                cursor = conn.cursor()
 
-            # Restore session → machine mapping for active/paused sessions
-            cursor.execute(
-                "SELECT session_id, remote_machine_id FROM agent_sessions "
-                f"WHERE workspace_type = 'remote' AND status IN ('active', 'paused') "
-                "AND remote_machine_id IS NOT NULL"
-            )
-            rows = cursor.fetchall()
-            with self._lock:
-                for row in rows:
-                    sid = row["session_id"]
-                    mid = row["remote_machine_id"]
-                    if sid and mid:
-                        self._session_machines[sid] = mid
-                        self._output_buffers.setdefault(sid, [])
+                # Restore session → machine mapping for active/paused sessions
+                cursor.execute(
+                    "SELECT session_id, remote_machine_id FROM agent_sessions "
+                    "WHERE workspace_type = 'remote' AND status IN ('active', 'paused') "
+                    "AND remote_machine_id IS NOT NULL"
+                )
+                rows = cursor.fetchall()
+                with self._lock:
+                    for row in rows:
+                        sid = row["session_id"]
+                        mid = row["remote_machine_id"]
+                        if sid and mid:
+                            self._session_machines[sid] = mid
+                            self._output_buffers.setdefault(sid, [])
 
-            # Restore end flags for completed/stopped/error sessions
-            cursor.execute(
-                "SELECT session_id FROM agent_sessions "
-                "WHERE workspace_type = 'remote' AND status IN ('completed', 'error', 'stopped')"
-            )
-            with self._lock:
-                for row in cursor.fetchall():
-                    self._session_end_flags[row["session_id"]] = True
+                # Restore end flags for completed/stopped/error sessions
+                cursor.execute(
+                    "SELECT session_id FROM agent_sessions "
+                    "WHERE workspace_type = 'remote' AND status IN ('completed', 'error', 'stopped')"
+                )
+                with self._lock:
+                    for row in cursor.fetchall():
+                        self._session_end_flags[row["session_id"]] = True
 
-            conn.close()
             if self._session_machines:
                 logger.info(
                     "Restored %d remote session bindings from DB",
@@ -182,43 +117,41 @@ class RemoteAgentManager:
         confirmed offline in the remote_machines table.
         """
         try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
+            with self.db.connection() as conn:
+                cursor = conn.cursor()
 
-            # Find active remote sessions whose machine is offline
-            cursor.execute(
-                "SELECT s.session_id, s.remote_machine_id FROM agent_sessions s "
-                "LEFT JOIN remote_machines m ON s.remote_machine_id = m.machine_id "
-                "WHERE s.status = 'active' AND s.workspace_type = 'remote' "
-                "AND (m.status IS NULL OR m.status != 'online')"
-            )
-            offline = cursor.fetchall()
-            if not offline:
-                conn.close()
-                return
-
-            sids = [r["session_id"] for r in offline]
-            with self._lock:
-                for sid in sids:
-                    self._session_end_flags[sid] = True
-
-            placeholders = ", ".join([_param()] * len(sids))
-            cursor.execute(
-                f"UPDATE agent_sessions SET status = 'completed', "
-                f"updated_at = {_param()} WHERE session_id IN ({placeholders})",
-                [datetime.utcnow().isoformat()] + sids,
-            )
-            conn.commit()
-            conn.close()
-            if offline:
-                logger.info(
-                    "Cleaned up %d remote sessions with offline machines", len(offline)
+                # Find active remote sessions whose machine is offline
+                cursor.execute(
+                    "SELECT s.session_id, s.remote_machine_id FROM agent_sessions s "
+                    "LEFT JOIN remote_machines m ON s.remote_machine_id = m.machine_id "
+                    "WHERE s.status = 'active' AND s.workspace_type = 'remote' "
+                    "AND (m.status IS NULL OR m.status != 'online')"
                 )
+                offline = cursor.fetchall()
+                if not offline:
+                    return
+
+                sids = [r["session_id"] for r in offline]
+                with self._lock:
+                    for sid in sids:
+                        self._session_end_flags[sid] = True
+
+                placeholders = ", ".join([_param()] * len(sids))
+                cursor.execute(
+                    f"UPDATE agent_sessions SET status = 'completed', "
+                    f"updated_at = {_param()} WHERE session_id IN ({placeholders})",
+                    [datetime.utcnow().isoformat()] + sids,
+                )
+                conn.commit()
+
+            if offline:
+                logger.info("Cleaned up %d remote sessions with offline machines", len(offline))
         except Exception as e:
             logger.warning("Failed to cleanup offline sessions: %s", e)
 
     def _start_heartbeat_monitor(self) -> None:
         """Start background thread for heartbeat monitoring."""
+
         def monitor():
             while True:
                 try:
@@ -233,25 +166,24 @@ class RemoteAgentManager:
 
     def _check_heartbeats(self) -> None:
         """Check for stale heartbeats and mark machines offline."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        cutoff = datetime.utcnow() - timedelta(seconds=self.HEARTBEAT_TIMEOUT_SECONDS)
+        with self.db.connection() as conn:
+            cursor = conn.cursor()
+            cutoff = datetime.utcnow() - timedelta(seconds=self.HEARTBEAT_TIMEOUT_SECONDS)
 
-        cursor.execute(
-            f"""
-            UPDATE remote_machines
-            SET status = 'offline', updated_at = {_param()}
-            WHERE status = 'online' AND last_heartbeat < {_param()}
-        """,
-            (datetime.utcnow().isoformat(), cutoff.isoformat()),
-        )
+            cursor.execute(
+                f"""
+                UPDATE remote_machines
+                SET status = 'offline', updated_at = {_param()}
+                WHERE status != 'offline' AND last_heartbeat < {_param()}
+            """,
+                (datetime.utcnow().isoformat(), cutoff.isoformat()),
+            )
 
-        updated = cursor.rowcount
-        if updated > 0:
-            logger.info(f"Marked {updated} machines offline due to heartbeat timeout")
+            updated = cursor.rowcount
+            if updated > 0:
+                logger.info(f"Marked {updated} machines offline due to heartbeat timeout")
 
-        conn.commit()
-        conn.close()
+            conn.commit()
 
         # Clean up sessions paused too long (>4 hours)
         self._cleanup_stale_paused_sessions()
@@ -259,42 +191,42 @@ class RemoteAgentManager:
     def _cleanup_stale_paused_sessions(self) -> None:
         """Stop sessions that have been paused for more than 4 hours."""
         PAUSE_TIMEOUT_HOURS = 4
-        conn = self._get_connection()
-        cursor = conn.cursor()
         cutoff = datetime.utcnow() - timedelta(hours=PAUSE_TIMEOUT_HOURS)
 
         try:
-            cursor.execute(
-                f"""
-                SELECT session_id FROM agent_sessions
-                WHERE status = 'paused' AND paused_at < {_param()}
-                """,
-                (cutoff.isoformat(),),
-            )
-            stale_sessions = [row[0] for row in cursor.fetchall()]
+            with self.db.connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    f"""
+                    SELECT session_id FROM agent_sessions
+                    WHERE status = 'paused' AND paused_at < {_param()}
+                    """,
+                    (cutoff.isoformat(),),
+                )
+                stale_sessions = [row["session_id"] for row in cursor.fetchall()]
         except Exception:
-            conn.close()
             return
-
-        conn.close()
 
         if not stale_sessions:
             return
 
         from app.modules.workspace.remote_session_manager import get_remote_session_manager
+
         session_mgr = get_remote_session_manager()
 
         for session_id in stale_sessions:
             logger.info(
                 "Stopping stale paused session %s (paused > %dh)",
-                session_id[:8], PAUSE_TIMEOUT_HOURS,
+                session_id[:8],
+                PAUSE_TIMEOUT_HOURS,
             )
             try:
                 session_mgr.stop_session(session_id)
             except Exception as e:
                 logger.error(
                     "Failed to stop stale paused session %s: %s",
-                    session_id[:8], e,
+                    session_id[:8],
+                    e,
                 )
 
     # ==================== Registration ====================
@@ -328,10 +260,10 @@ class RemoteAgentManager:
         hostname: Optional[str] = None,
         os_type: Optional[str] = None,
         os_version: Optional[str] = None,
-        capabilities: Optional[Dict] = None,
+        capabilities: Optional[dict] = None,
         agent_version: Optional[str] = None,
         ip_address: Optional[str] = None,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> Optional[dict[str, Any]]:
         """
         Register a new remote machine using a registration token.
 
@@ -356,87 +288,101 @@ class RemoteAgentManager:
             logger.warning("Invalid or expired registration token")
             return None
 
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        with self.db.connection() as conn:
+            cursor = conn.cursor()
 
-        now = datetime.utcnow().isoformat()
+            now = datetime.utcnow().isoformat()
 
-        try:
-            cursor.execute(
-                f"""
-                INSERT INTO remote_machines
-                (machine_id, machine_name, hostname, os_type, os_version, ip_address,
-                 status, agent_version, capabilities, tenant_id, created_by, created_at, updated_at, last_heartbeat)
-                VALUES ({_params(14)})
-            """,
-                (
-                    machine_id,
-                    machine_name,
-                    hostname,
-                    os_type,
-                    os_version,
-                    ip_address,
-                    "online",
-                    agent_version,
-                    json.dumps(capabilities) if capabilities else None,
-                    token_info["tenant_id"],
-                    token_info["created_by"],
-                    now,
-                    now,
-                    now,
-                ),
-            )
-
-            conn.commit()
-
-            # Also auto-assign the creator
-            if is_postgresql():
+            try:
                 cursor.execute(
                     f"""
-                    INSERT INTO machine_assignments (machine_id, user_id, permission, granted_by, granted_at)
-                    VALUES ({_params(5)})
-                    ON CONFLICT (machine_id, user_id) DO NOTHING
+                    INSERT INTO remote_machines
+                    (machine_id, machine_name, hostname, os_type, os_version, ip_address,
+                     status, agent_version, capabilities, tenant_id, created_by, created_at, updated_at, last_heartbeat)
+                    VALUES ({_params(14)})
                 """,
-                    (machine_id, token_info["created_by"], "admin", token_info["created_by"], now),
+                    (
+                        machine_id,
+                        machine_name,
+                        hostname,
+                        os_type,
+                        os_version,
+                        ip_address,
+                        "online",
+                        agent_version,
+                        json.dumps(capabilities) if capabilities else None,
+                        token_info["tenant_id"],
+                        token_info["created_by"],
+                        now,
+                        now,
+                        now,
+                    ),
                 )
-            else:
-                cursor.execute(
-                    f"""
-                    INSERT OR IGNORE INTO machine_assignments (machine_id, user_id, permission, granted_by, granted_at)
-                    VALUES ({_params(5)})
-                """,
-                (machine_id, token_info["created_by"], "admin", token_info["created_by"], now),
-            )
-            conn.commit()
 
-            return {
-                "machine_id": machine_id,
-                "machine_name": machine_name,
-                "status": "online",
-                "tenant_id": token_info["tenant_id"],
-            }
-        except Exception as e:
-            logger.error(f"Failed to register machine: {e}")
-            conn.rollback()
-            return None
-        finally:
-            conn.close()
+                conn.commit()
+
+                # Also auto-assign the creator
+                if is_postgresql():
+                    cursor.execute(
+                        f"""
+                        INSERT INTO machine_assignments (machine_id, user_id, permission, granted_by, granted_at)
+                        VALUES ({_params(5)})
+                        ON CONFLICT (machine_id, user_id) DO NOTHING
+                    """,
+                        (
+                            machine_id,
+                            token_info["created_by"],
+                            "admin",
+                            token_info["created_by"],
+                            now,
+                        ),
+                    )
+                else:
+                    cursor.execute(
+                        f"""
+                        INSERT OR IGNORE INTO machine_assignments (machine_id, user_id, permission, granted_by, granted_at)
+                        VALUES ({_params(5)})
+                    """,
+                        (
+                            machine_id,
+                            token_info["created_by"],
+                            "admin",
+                            token_info["created_by"],
+                            now,
+                        ),
+                    )
+                conn.commit()
+
+                return {
+                    "machine_id": machine_id,
+                    "machine_name": machine_name,
+                    "status": "online",
+                    "tenant_id": token_info["tenant_id"],
+                }
+            except Exception as e:
+                logger.error(f"Failed to register machine: {e}")
+                conn.rollback()
+                return None
 
     def deregister_machine(self, machine_id: str) -> bool:
         """Remove a machine and its assignments."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        with self.db.connection() as conn:
+            cursor = conn.cursor()
 
-        cursor.execute(f"DELETE FROM machine_assignments WHERE machine_id = {_param()}", (machine_id,))
-        cursor.execute(f"DELETE FROM remote_machines WHERE machine_id = {_param()}", (machine_id,))
+            cursor.execute(
+                f"DELETE FROM machine_assignments WHERE machine_id = {_param()}", (machine_id,)
+            )
+            cursor.execute(
+                f"DELETE FROM remote_machines WHERE machine_id = {_param()}", (machine_id,)
+            )
 
-        success = cursor.rowcount > 0
-        conn.commit()
-        conn.close()
+            success = cursor.rowcount > 0
+            conn.commit()
 
-        # Close active connection
+        # Close active connection and cleanup rate limiter
         with self._lock:
             self._connections.pop(machine_id, None)
+        self._last_heartbeat_db_write.pop(machine_id, None)
 
         return success
 
@@ -448,18 +394,17 @@ class RemoteAgentManager:
             self._connections[machine_id] = None  # HTTP polling — no WebSocket
 
         # Update status to online
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            f"""
-            UPDATE remote_machines
-            SET status = 'online', last_heartbeat = {_param()}, updated_at = {_param()}
-            WHERE machine_id = {_param()}
-        """,
-            (datetime.utcnow().isoformat(), datetime.utcnow().isoformat(), machine_id),
-        )
-        conn.commit()
-        conn.close()
+        with self.db.connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""
+                UPDATE remote_machines
+                SET status = 'online', last_heartbeat = {_param()}, updated_at = {_param()}
+                WHERE machine_id = {_param()}
+            """,
+                (datetime.utcnow().isoformat(), datetime.utcnow().isoformat(), machine_id),
+            )
+            conn.commit()
 
         logger.info(f"Agent connected (HTTP): {machine_id}")
 
@@ -467,18 +412,18 @@ class RemoteAgentManager:
         """Unregister an agent connection."""
         with self._lock:
             self._connections.pop(machine_id, None)
+        self._last_heartbeat_db_write.pop(machine_id, None)
 
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            f"""
-            UPDATE remote_machines SET status = 'offline', updated_at = {_param()}
-            WHERE machine_id = {_param()}
-        """,
-            (datetime.utcnow().isoformat(), machine_id),
-        )
-        conn.commit()
-        conn.close()
+        with self.db.connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""
+                UPDATE remote_machines SET status = 'offline', updated_at = {_param()}
+                WHERE machine_id = {_param()}
+            """,
+                (datetime.utcnow().isoformat(), machine_id),
+            )
+            conn.commit()
 
         logger.info(f"Agent disconnected: {machine_id}")
 
@@ -486,9 +431,20 @@ class RemoteAgentManager:
         """Check if a machine has an active connection (HTTP polling)."""
         return machine_id in self._connections
 
+    def ensure_agent_tracked(self, machine_id: str) -> None:
+        """Ensure an HTTP polling agent is tracked in _connections.
+
+        Used by lightweight poll handlers to register agents without
+        triggering a full heartbeat DB write.
+        """
+        with self._lock:
+            if machine_id not in self._connections:
+                self._connections[machine_id] = None
+                logger.info(f"Registered HTTP polling agent: {machine_id}")
+
     # ==================== Command Dispatch ====================
 
-    def send_command(self, machine_id: str, command: Dict[str, Any]) -> bool:
+    def send_command(self, machine_id: str, command: dict[str, Any]) -> bool:
         """
         Queue a command for a remote agent (delivered via HTTP polling).
 
@@ -510,7 +466,7 @@ class RemoteAgentManager:
         logger.info(f"Queued command for agent {machine_id}")
         return True
 
-    def get_pending_commands(self, machine_id: str) -> List[Dict]:
+    def get_pending_commands(self, machine_id: str) -> list[dict]:
         """Get and clear pending commands for an HTTP-mode agent."""
         with self._lock:
             return self._command_queues.pop(machine_id, [])
@@ -535,14 +491,14 @@ class RemoteAgentManager:
 
     # ==================== Output Buffering ====================
 
-    def buffer_output(self, session_id: str, output: Dict[str, Any]) -> None:
+    def buffer_output(self, session_id: str, output: dict[str, Any]) -> None:
         """Buffer output from a remote session."""
         with self._lock:
             if session_id not in self._output_buffers:
                 self._output_buffers[session_id] = []
             self._output_buffers[session_id].append(output)
 
-    def get_buffered_output(self, session_id: str, after_index: int = 0) -> List[Dict]:
+    def get_buffered_output(self, session_id: str, after_index: int = 0) -> list[dict]:
         """Get buffered output for a session after a given index."""
         with self._lock:
             buf = self._output_buffers.get(session_id, [])
@@ -560,8 +516,9 @@ class RemoteAgentManager:
 
     # ==================== Heartbeat ====================
 
-    def process_heartbeat(self, machine_id: str, status: str = "idle",
-                          active_sessions: int = 0) -> None:
+    def process_heartbeat(
+        self, machine_id: str, status: str = "idle", active_sessions: int = 0
+    ) -> None:
         """Process a heartbeat from a remote agent."""
         # Ensure HTTP polling agents are tracked in _connections
         # (needed after server restart, since _connections is in-memory)
@@ -570,67 +527,74 @@ class RemoteAgentManager:
                 self._connections[machine_id] = None
                 logger.info(f"Re-registered HTTP polling agent via heartbeat: {machine_id}")
 
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        now = datetime.utcnow().isoformat()
+        # Rate-limit DB writes: skip if last write was within HEARTBEAT_DB_WRITE_INTERVAL
+        now_ts = time.time()
+        last_write = self._last_heartbeat_db_write.get(machine_id, 0)
+        if now_ts - last_write < self.HEARTBEAT_DB_WRITE_INTERVAL:
+            return
+        self._last_heartbeat_db_write[machine_id] = now_ts
 
-        cursor.execute(
-            f"""
-            UPDATE remote_machines
-            SET last_heartbeat = {_param()}, status = 'online', updated_at = {_param()}
-            WHERE machine_id = {_param()}
-        """,
-            (now, now, machine_id),
-        )
-        conn.commit()
-        conn.close()
+        with self.db.connection() as conn:
+            cursor = conn.cursor()
+            now = datetime.utcnow().isoformat()
+
+            cursor.execute(
+                f"""
+                UPDATE remote_machines
+                SET last_heartbeat = {_param()}, status = {_param()}, updated_at = {_param()}
+                WHERE machine_id = {_param()}
+            """,
+                (now, status, now, machine_id),
+            )
+            conn.commit()
 
     # ==================== Machine Queries ====================
 
-    def get_machine(self, machine_id: str) -> Optional[Dict[str, Any]]:
+    def get_machine(self, machine_id: str) -> Optional[dict[str, Any]]:
         """Get machine details."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        with self.db.connection() as conn:
+            cursor = conn.cursor()
 
-        cursor.execute(f"SELECT * FROM remote_machines WHERE machine_id = {_param()}", (machine_id,))
-        row = cursor.fetchone()
-        conn.close()
+            cursor.execute(
+                f"SELECT * FROM remote_machines WHERE machine_id = {_param()}", (machine_id,)
+            )
+            row = cursor.fetchone()
 
         if not row:
             return None
 
         return self._row_to_machine(row)
 
-    def list_machines(self, tenant_id: Optional[int] = None,
-                      user_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    def list_machines(
+        self, tenant_id: Optional[int] = None, user_id: Optional[int] = None
+    ) -> list[dict[str, Any]]:
         """List machines, optionally filtered by tenant or user assignments."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        with self.db.connection() as conn:
+            cursor = conn.cursor()
 
-        if user_id:
-            cursor.execute(
-                f"""
-                SELECT rm.* FROM remote_machines rm
-                JOIN machine_assignments ma ON rm.machine_id = ma.machine_id
-                WHERE ma.user_id = {_param()}
-                ORDER BY rm.updated_at DESC
-            """,
-                (user_id,),
-            )
-        elif tenant_id:
-            cursor.execute(
-                f"""
-                SELECT * FROM remote_machines
-                WHERE tenant_id = {_param()}
-                ORDER BY updated_at DESC
-            """,
-                (tenant_id,),
-            )
-        else:
-            cursor.execute("SELECT * FROM remote_machines ORDER BY updated_at DESC")
+            if user_id:
+                cursor.execute(
+                    f"""
+                    SELECT rm.* FROM remote_machines rm
+                    JOIN machine_assignments ma ON rm.machine_id = ma.machine_id
+                    WHERE ma.user_id = {_param()}
+                    ORDER BY rm.updated_at DESC
+                """,
+                    (user_id,),
+                )
+            elif tenant_id:
+                cursor.execute(
+                    f"""
+                    SELECT * FROM remote_machines
+                    WHERE tenant_id = {_param()}
+                    ORDER BY updated_at DESC
+                """,
+                    (tenant_id,),
+                )
+            else:
+                cursor.execute("SELECT * FROM remote_machines ORDER BY updated_at DESC")
 
-        rows = cursor.fetchall()
-        conn.close()
+            rows = cursor.fetchall()
 
         machines = [self._row_to_machine(row) for row in rows]
         if user_id:
@@ -638,75 +602,88 @@ class RemoteAgentManager:
                 m["current_user_permission"] = self.check_user_access(m["machine_id"], user_id)
         return machines
 
-    def get_available_machines(self, user_id: int) -> List[Dict[str, Any]]:
+    def get_available_machines(self, user_id: int) -> list[dict[str, Any]]:
         """Get machines available to a specific user."""
         return self.list_machines(user_id=user_id)
 
-    def assign_user(self, machine_id: str, user_id: int, granted_by: int,
-                    permission: str = "user") -> bool:
+    def assign_user(
+        self, machine_id: str, user_id: int, granted_by: int, permission: str = "user"
+    ) -> bool:
         """Assign a user to a machine."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        with self.db.connection() as conn:
+            cursor = conn.cursor()
 
-        try:
-            if is_postgresql():
-                cursor.execute(
-                    f"""
-                    INSERT INTO machine_assignments
-                    (machine_id, user_id, permission, granted_by, granted_at)
-                    VALUES ({_params(5)})
-                    ON CONFLICT (machine_id, user_id) DO NOTHING
-                """,
-                    (machine_id, user_id, permission, granted_by, datetime.utcnow().isoformat()),
-                )
-            else:
-                cursor.execute(
-                    f"""
-                    INSERT OR IGNORE INTO machine_assignments
-                    (machine_id, user_id, permission, granted_by, granted_at)
-                    VALUES ({_params(5)})
-                """,
-                    (machine_id, user_id, permission, granted_by, datetime.utcnow().isoformat()),
-                )
-            conn.commit()
-            return True
-        except Exception as e:
-            logger.error(f"Failed to assign user: {e}")
-            return False
-        finally:
-            conn.close()
+            try:
+                if is_postgresql():
+                    cursor.execute(
+                        f"""
+                        INSERT INTO machine_assignments
+                        (machine_id, user_id, permission, granted_by, granted_at)
+                        VALUES ({_params(5)})
+                        ON CONFLICT (machine_id, user_id) DO NOTHING
+                    """,
+                        (
+                            machine_id,
+                            user_id,
+                            permission,
+                            granted_by,
+                            datetime.utcnow().isoformat(),
+                        ),
+                    )
+                else:
+                    cursor.execute(
+                        f"""
+                        INSERT OR IGNORE INTO machine_assignments
+                        (machine_id, user_id, permission, granted_by, granted_at)
+                        VALUES ({_params(5)})
+                    """,
+                        (
+                            machine_id,
+                            user_id,
+                            permission,
+                            granted_by,
+                            datetime.utcnow().isoformat(),
+                        ),
+                    )
+                conn.commit()
+                return True
+            except Exception as e:
+                logger.error(f"Failed to assign user: {e}")
+                with suppress(Exception):
+                    conn.rollback()
+                return False
 
     def revoke_user(self, machine_id: str, user_id: int) -> bool:
         """Revoke a user's access to a machine."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        with self.db.connection() as conn:
+            cursor = conn.cursor()
 
-        cursor.execute(
-            f"""
-            DELETE FROM machine_assignments
-            WHERE machine_id = {_param()} AND user_id = {_param()}
-        """,
-            (machine_id, user_id),
-        )
-        success = cursor.rowcount > 0
-        conn.commit()
-        conn.close()
+            cursor.execute(
+                f"""
+                DELETE FROM machine_assignments
+                WHERE machine_id = {_param()} AND user_id = {_param()}
+            """,
+                (machine_id, user_id),
+            )
+            success = cursor.rowcount > 0
+            conn.commit()
+
         return success
 
     def check_user_access(self, machine_id: str, user_id: int) -> Optional[str]:
         """Check user access, returns permission level ('admin'/'user') or None."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        with self.db.connection() as conn:
+            cursor = conn.cursor()
 
-        cursor.execute(
-            f"""
-            SELECT permission FROM machine_assignments
-            WHERE machine_id = {_param()} AND user_id = {_param()}
-        """,
-            (machine_id, user_id),
-        )
-        result = cursor.fetchone()
-        conn.close()
+            cursor.execute(
+                f"""
+                SELECT permission FROM machine_assignments
+                WHERE machine_id = {_param()} AND user_id = {_param()}
+            """,
+                (machine_id, user_id),
+            )
+            result = cursor.fetchone()
+
         if result is None:
             return None
         return result["permission"] if isinstance(result, dict) else result[0]
@@ -715,41 +692,48 @@ class RemoteAgentManager:
         """Return user's machine permission: 'admin', 'user', or None."""
         return self.check_user_access(machine_id, user_id)
 
-    def get_machine_assignments(self, machine_id: str) -> List[Dict[str, Any]]:
+    def get_machine_assignments(self, machine_id: str) -> list[dict[str, Any]]:
         """Get list of users assigned to a machine."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        with self.db.connection() as conn:
+            cursor = conn.cursor()
 
-        try:
-            cursor.execute(
-                f"""
-                SELECT ma.user_id, u.username, ma.permission, ma.granted_at
-                FROM machine_assignments ma
-                LEFT JOIN users u ON ma.user_id = u.id
-                WHERE ma.machine_id = {_param()}
-                ORDER BY ma.granted_at ASC
-            """,
-                (machine_id,),
-            )
+            try:
+                cursor.execute(
+                    f"""
+                    SELECT ma.user_id, u.username, ma.permission, ma.granted_at
+                    FROM machine_assignments ma
+                    LEFT JOIN users u ON ma.user_id = u.id
+                    WHERE ma.machine_id = {_param()}
+                    ORDER BY ma.granted_at ASC
+                """,
+                    (machine_id,),
+                )
 
-            rows = cursor.fetchall()
-            result = []
-            for row in rows:
-                result.append({
-                    "user_id": row["user_id"] if isinstance(row, dict) else row["user_id"],
-                    "username": row["username"] if isinstance(row, dict) else row["username"],
-                    "permission": row["permission"] if isinstance(row, dict) else row["permission"],
-                    "granted_at": row["granted_at"] if isinstance(row, dict) else row["granted_at"],
-                })
-            return result
-        except Exception as e:
-            logger.error(f"Failed to get machine assignments: {e}")
-            return []
-        finally:
-            conn.close()
+                rows = cursor.fetchall()
+                result = []
+                for row in rows:
+                    result.append(
+                        {
+                            "user_id": row["user_id"] if isinstance(row, dict) else row["user_id"],
+                            "username": (
+                                row["username"] if isinstance(row, dict) else row["username"]
+                            ),
+                            "permission": (
+                                row["permission"] if isinstance(row, dict) else row["permission"]
+                            ),
+                            "granted_at": (
+                                row["granted_at"] if isinstance(row, dict) else row["granted_at"]
+                            ),
+                        }
+                    )
+                return result
+            except Exception as e:
+                logger.error(f"Failed to get machine assignments: {e}")
+                return []
 
-    def _row_to_machine(self, row) -> Dict[str, Any]:
+    def _row_to_machine(self, row) -> dict[str, Any]:
         """Convert a database row to machine dict."""
+
         def get_value(key: str):
             if isinstance(row, dict):
                 return row.get(key)
@@ -785,6 +769,48 @@ class RemoteAgentManager:
             "last_heartbeat": get_value("last_heartbeat"),
             "connected": self.is_connected(get_value("machine_id") or ""),
         }
+
+
+def get_ddl_statements() -> list[str]:
+    """Return DDL statements for remote agent manager tables."""
+    id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    return [
+        f"""
+        CREATE TABLE IF NOT EXISTS remote_machines (
+            id {id_type},
+            machine_id TEXT NOT NULL UNIQUE,
+            machine_name TEXT NOT NULL,
+            hostname TEXT,
+            os_type TEXT,
+            os_version TEXT,
+            ip_address TEXT,
+            status TEXT DEFAULT 'offline',
+            agent_version TEXT,
+            capabilities TEXT,
+            cli_path TEXT,
+            work_dir TEXT,
+            tenant_id INTEGER,
+            created_by INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_heartbeat TIMESTAMP
+        )
+        """,
+        f"""
+        CREATE TABLE IF NOT EXISTS machine_assignments (
+            id {id_type},
+            machine_id TEXT NOT NULL,
+            user_id INTEGER NOT NULL,
+            permission TEXT DEFAULT 'user',
+            granted_by INTEGER,
+            granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(machine_id, user_id)
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_remote_machines_machine_id ON remote_machines(machine_id)",
+        "CREATE INDEX IF NOT EXISTS idx_remote_machines_status ON remote_machines(status)",
+        "CREATE INDEX IF NOT EXISTS idx_machine_assignments_user_id ON machine_assignments(user_id)",
+    ]
 
 
 # Global singleton

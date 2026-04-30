@@ -10,9 +10,9 @@ Usage:
 """
 
 import asyncio
-import time
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -117,13 +117,19 @@ async def test_tab_keyboard_shortcut():
                 print(f"   Tab {i+1}: {tab_id[:20]}...")
 
             active_tab_before = await page.locator(".workspace-tab.active").element_handle()
-            active_tab_id_before = await active_tab_before.evaluate("el => el.getAttribute('data-tab-id')") if active_tab_before else ""
-            print(f"   Active tab before tests: {active_tab_id_before[:20] if active_tab_id_before else 'N/A'}...")
+            active_tab_id_before = (
+                await active_tab_before.evaluate("el => el.getAttribute('data-tab-id')")
+                if active_tab_before
+                else ""
+            )
+            print(
+                f"   Active tab before tests: {active_tab_id_before[:20] if active_tab_id_before else 'N/A'}..."
+            )
             test_results.append(("Initial Tab State", "PASS", "Tab active"))
 
             # Step 6: Test Cmd+Shift+. (next tab)
             print("\n[Step 6] Testing keyboard shortcut Meta+Shift+. (Cmd+Shift+.)...")
-            
+
             if active_tab_id_before != tab_ids[0]:
                 await tabs[0].click()
                 await page.wait_for_timeout(500)
@@ -132,14 +138,20 @@ async def test_tab_keyboard_shortcut():
             await page.wait_for_timeout(1000)
 
             active_tab_after_dot = await page.locator(".workspace-tab.active").element_handle()
-            active_tab_id_after_dot = await active_tab_after_dot.evaluate("el => el.getAttribute('data-tab-id')") if active_tab_after_dot else ""
+            active_tab_id_after_dot = (
+                await active_tab_after_dot.evaluate("el => el.getAttribute('data-tab-id')")
+                if active_tab_after_dot
+                else ""
+            )
 
             if active_tab_id_after_dot == tab_ids[1]:
                 print("   ✓ Cmd+Shift+. switched to next tab (tab 2) successfully!")
                 test_results.append(("Cmd+Shift+. Shortcut", "PASS", "Switched to next tab"))
             else:
-                print(f"   ✗ Cmd+Shift+. did not switch to next tab (active: {active_tab_id_after_dot[:20]})")
-                test_results.append(("Cmd+Shift+. Shortcut", "FAIL", f"Expected tab 2"))
+                print(
+                    f"   ✗ Cmd+Shift+. did not switch to next tab (active: {active_tab_id_after_dot[:20]})"
+                )
+                test_results.append(("Cmd+Shift+. Shortcut", "FAIL", "Expected tab 2"))
 
             await page.screenshot(path=f"{SCREENSHOT_DIR}/03_after_cmd_dot_{timestamp}.png")
 
@@ -149,14 +161,20 @@ async def test_tab_keyboard_shortcut():
             await page.wait_for_timeout(1000)
 
             active_tab_after_dot2 = await page.locator(".workspace-tab.active").element_handle()
-            active_tab_id_after_dot2 = await active_tab_after_dot2.evaluate("el => el.getAttribute('data-tab-id')") if active_tab_after_dot2 else ""
+            active_tab_id_after_dot2 = (
+                await active_tab_after_dot2.evaluate("el => el.getAttribute('data-tab-id')")
+                if active_tab_after_dot2
+                else ""
+            )
 
             if active_tab_id_after_dot2 == tab_ids[2]:
                 print("   ✓ Cmd+Shift+. switched to next tab (tab 3) successfully!")
                 test_results.append(("Cmd+Shift+. Again", "PASS", "Switched to tab 3"))
             else:
-                print(f"   ✗ Cmd+Shift+. did not switch to tab 3 (active: {active_tab_id_after_dot2[:20]})")
-                test_results.append(("Cmd+Shift+. Again", "FAIL", f"Expected tab 3"))
+                print(
+                    f"   ✗ Cmd+Shift+. did not switch to tab 3 (active: {active_tab_id_after_dot2[:20]})"
+                )
+                test_results.append(("Cmd+Shift+. Again", "FAIL", "Expected tab 3"))
 
             await page.screenshot(path=f"{SCREENSHOT_DIR}/04_after_cmd_dot2_{timestamp}.png")
 
@@ -166,35 +184,47 @@ async def test_tab_keyboard_shortcut():
             await page.wait_for_timeout(1000)
 
             active_tab_after_comma = await page.locator(".workspace-tab.active").element_handle()
-            active_tab_id_after_comma = await active_tab_after_comma.evaluate("el => el.getAttribute('data-tab-id')") if active_tab_after_comma else ""
+            active_tab_id_after_comma = (
+                await active_tab_after_comma.evaluate("el => el.getAttribute('data-tab-id')")
+                if active_tab_after_comma
+                else ""
+            )
 
             if active_tab_id_after_comma == tab_ids[1]:
                 print("   ✓ Cmd+Shift+, switched to previous tab (tab 2) successfully!")
                 test_results.append(("Cmd+Shift+, Shortcut", "PASS", "Switched to previous tab"))
             else:
-                print(f"   ✗ Cmd+Shift+, did not switch to previous tab (active: {active_tab_id_after_comma[:20]})")
-                test_results.append(("Cmd+Shift+, Shortcut", "FAIL", f"Expected tab 2"))
+                print(
+                    f"   ✗ Cmd+Shift+, did not switch to previous tab (active: {active_tab_id_after_comma[:20]})"
+                )
+                test_results.append(("Cmd+Shift+, Shortcut", "FAIL", "Expected tab 2"))
 
             await page.screenshot(path=f"{SCREENSHOT_DIR}/05_after_cmd_comma_{timestamp}.png")
 
             # Step 9: Test wrap-around
             print("\n[Step 9] Testing wrap-around: Cmd+Shift+, from tab 1...")
-            
+
             await tabs[0].click()
             await page.wait_for_timeout(500)
-            
+
             await page.keyboard.press("Meta+Shift+,")
             await page.wait_for_timeout(1000)
 
             active_tab_after_wrap = await page.locator(".workspace-tab.active").element_handle()
-            active_tab_id_after_wrap = await active_tab_after_wrap.evaluate("el => el.getAttribute('data-tab-id')") if active_tab_after_wrap else ""
+            active_tab_id_after_wrap = (
+                await active_tab_after_wrap.evaluate("el => el.getAttribute('data-tab-id')")
+                if active_tab_after_wrap
+                else ""
+            )
 
             if active_tab_id_after_wrap == tab_ids[-1]:
-                print(f"   ✓ Cmd+Shift+, wrapped to last tab successfully!")
+                print("   ✓ Cmd+Shift+, wrapped to last tab successfully!")
                 test_results.append(("Wrap-around Left", "PASS", "Wrapped to last tab"))
             else:
-                print(f"   ✗ Cmd+Shift+, did not wrap to last tab (active: {active_tab_id_after_wrap[:20]})")
-                test_results.append(("Wrap-around Left", "FAIL", f"Expected last tab"))
+                print(
+                    f"   ✗ Cmd+Shift+, did not wrap to last tab (active: {active_tab_id_after_wrap[:20]})"
+                )
+                test_results.append(("Wrap-around Left", "FAIL", "Expected last tab"))
 
             await page.screenshot(path=f"{SCREENSHOT_DIR}/06_wrap_left_{timestamp}.png")
 
@@ -226,6 +256,7 @@ async def test_tab_keyboard_shortcut():
         except Exception as e:
             print(f"\n✗ Test failed with error: {e}")
             import traceback
+
             traceback.print_exc()
             await page.screenshot(path=f"{SCREENSHOT_DIR}/error_{timestamp}.png")
             return False

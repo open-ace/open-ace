@@ -10,9 +10,9 @@ This script tests the enhanced conversation detail modal which includes:
 """
 
 import asyncio
-import aiohttp
-import json
 from datetime import datetime
+
+import aiohttp
 
 BASE_URL = "http://localhost:5000"
 
@@ -70,7 +70,7 @@ async def test_conversation_timeline_api(session_id):
                     if msg.get("sender_name"):
                         senders.add(msg.get("sender_name"))
 
-                print(f"\n  Message Statistics:")
+                print("\n  Message Statistics:")
                 print(f"    - Roles: {roles}")
                 print(f"    - Total Tokens: {total_tokens}")
                 print(f"    - Models: {models if models else 'N/A'}")
@@ -99,18 +99,18 @@ async def test_conversation_timeline_api(session_id):
                         last_user_time = None
 
                 if latencies:
-                    print(f"\n  Latency Statistics:")
+                    print("\n  Latency Statistics:")
                     print(f"    - Count: {len(latencies)}")
                     print(f"    - Average: {round(sum(latencies) / len(latencies), 2)}s")
                     print(f"    - Min: {min(latencies)}s")
                     print(f"    - Max: {max(latencies)}s")
                     print(f"    - Latencies: {latencies}")
                 else:
-                    print(f"\n  Latency: No valid latency data found")
+                    print("\n  Latency: No valid latency data found")
 
                 # Show sample message
                 if messages:
-                    print(f"\n  Sample Message:")
+                    print("\n  Sample Message:")
                     msg = messages[0]
                     print(f"    - Role: {msg.get('role')}")
                     print(f"    - Content: {msg.get('content', '')[:100]}...")

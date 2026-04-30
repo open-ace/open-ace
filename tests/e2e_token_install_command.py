@@ -86,8 +86,7 @@ def run_tests():
 
             # ══════ 2. 进入远程机器管理页面 ══════
             print("\n══════ 2. 进入远程机器管理页面 ══════")
-            page.goto(f"{BASE_URL}/manage/remote/machines",
-                      wait_until="domcontentloaded")
+            page.goto(f"{BASE_URL}/manage/remote/machines", wait_until="domcontentloaded")
             page.wait_for_selector("h2", timeout=10000)
             pause(2)
             shot(page, "03_remote_machines_page")
@@ -141,7 +140,9 @@ def run_tests():
             # ══════ 5. 验证复制安装命令按钮 ══════
             print("\n══════ 5. 测试复制安装命令按钮 ══════")
             # 安装命令旁边的复制按钮（第二个）
-            copy_btns = page.locator(".modal .btn-outline-secondary:has(.bi-clipboard), .modal .btn-outline-secondary:has(.bi-check)")
+            copy_btns = page.locator(
+                ".modal .btn-outline-secondary:has(.bi-clipboard), .modal .btn-outline-secondary:has(.bi-check)"
+            )
             btn_count = copy_btns.count()
             log_step("验证", f"复制按钮数量: {btn_count}")
             assert btn_count >= 2, f"应有至少 2 个复制按钮，实际 {btn_count}"

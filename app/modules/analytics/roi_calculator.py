@@ -7,10 +7,10 @@ Provides cost analysis, savings estimation, and productivity metrics.
 """
 
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from app.repositories.database import Database
 from app.utils.cache import cached
@@ -289,7 +289,7 @@ class ROICalculator:
         )
 
     @cached(ttl=120, key_prefix="roi", skip_args=[0])
-    def get_roi_trend(self, months: int = 6, user_id: Optional[int] = None) -> List[ROIMetrics]:
+    def get_roi_trend(self, months: int = 6, user_id: Optional[int] = None) -> list[ROIMetrics]:
         """
         Get ROI trend over months.
 
@@ -357,7 +357,7 @@ class ROICalculator:
         model_rows = self.db.fetch_all(model_query, model_params)
 
         # Group model data by month
-        model_data_by_month: Dict[str, List[Dict]] = {}
+        model_data_by_month: dict[str, list[dict]] = {}
         for row in model_rows:
             month = row.get("month")
             if month:
@@ -440,7 +440,7 @@ class ROICalculator:
         return trends
 
     @cached(ttl=60, key_prefix="roi", skip_args=[0])
-    def get_roi_by_tool(self, start_date: str, end_date: str) -> Dict[str, ROIMetrics]:
+    def get_roi_by_tool(self, start_date: str, end_date: str) -> dict[str, ROIMetrics]:
         """
         Get ROI breakdown by tool.
 
@@ -481,7 +481,7 @@ class ROICalculator:
         model_rows = self.db.fetch_all(model_query, (start_date, end_date))
 
         # Group model data by tool
-        model_data_by_tool: Dict[str, List[Dict]] = {}
+        model_data_by_tool: dict[str, list[dict]] = {}
         for row in model_rows:
             tool = row.get("tool_name")
             if tool:
@@ -549,7 +549,7 @@ class ROICalculator:
         return result
 
     @cached(ttl=60, key_prefix="roi", skip_args=[0])
-    def get_roi_by_user(self, start_date: str, end_date: str) -> Dict[str, ROIMetrics]:
+    def get_roi_by_user(self, start_date: str, end_date: str) -> dict[str, ROIMetrics]:
         """
         Get ROI breakdown by user (via host_name grouping).
 
@@ -587,7 +587,7 @@ class ROICalculator:
         model_rows = self.db.fetch_all(model_query, (start_date, end_date))
 
         # Group model data by host
-        model_data_by_host: Dict[str, List[Dict]] = {}
+        model_data_by_host: dict[str, list[dict]] = {}
         for row in model_rows:
             host = row.get("host_name")
             if host:
@@ -652,7 +652,7 @@ class ROICalculator:
     @cached(ttl=60, key_prefix="roi", skip_args=[0])
     def get_cost_breakdown(
         self, start_date: str, end_date: str, user_id: Optional[int] = None
-    ) -> List[CostBreakdown]:
+    ) -> list[CostBreakdown]:
         """
         Get detailed cost breakdown.
 
@@ -710,7 +710,7 @@ class ROICalculator:
     @cached(ttl=60, key_prefix="roi", skip_args=[0])
     def get_daily_costs(
         self, start_date: str, end_date: str, user_id: Optional[int] = None
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Get daily cost data for charting.
 
@@ -765,7 +765,7 @@ class ROICalculator:
     @cached(ttl=60, key_prefix="roi", skip_args=[0])
     def get_summary_stats(
         self, start_date: str, end_date: str, user_id: Optional[int] = None
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Get summary statistics for the period.
 

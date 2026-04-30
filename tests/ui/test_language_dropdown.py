@@ -3,8 +3,9 @@
 验证下拉列表文字是否可见
 """
 
-from playwright.sync_api import sync_playwright, expect, Page
 import time
+
+from playwright.sync_api import expect, sync_playwright
 
 BASE_URL = "http://localhost:5000/"
 USERNAME = "admin"
@@ -134,9 +135,9 @@ def test_language_dropdown():
 
             # 检查文字是否可见（非白色文字在白色背景上）
             if "rgb(255, 255, 255)" in color and "rgb(255, 255, 255)" in bg_color:
-                print(f"      ⚠️ 警告：白色文字在白色背景上可能不可见")
+                print("      ⚠️ 警告：白色文字在白色背景上可能不可见")
             elif "rgb(0, 0, 0)" in color or "rgb(15, 23, 42)" in color:
-                print(f"      ✓ 文字颜色正常（深色）")
+                print("      ✓ 文字颜色正常（深色）")
             else:
                 print(f"      ✓ 文字颜色：{color}")
 

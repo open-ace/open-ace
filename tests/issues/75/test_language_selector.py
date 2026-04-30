@@ -7,10 +7,11 @@ Issue: Language selector should be a dropdown above Version.
 Fix: Change from button to select element, move above Version.
 """
 
-import pytest
-import sys
 import os
+import sys
 from datetime import datetime
+
+import pytest
 
 # Get project root directory
 PROJECT_ROOT = os.path.dirname(

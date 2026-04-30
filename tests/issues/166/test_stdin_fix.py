@@ -8,10 +8,11 @@ Tests:
 3. Invalid stdin fd
 """
 
+import contextlib
+import json
 import os
 import subprocess
 import sys
-import json
 import threading
 import time
 import uuid
@@ -29,6 +30,7 @@ def test_with_closed_stdin() -> dict:
 
     # Find qwen
     import shutil
+
     qwen_path = shutil.which("qwen")
     if not qwen_path:
         print("ERROR: qwen not found")
@@ -101,9 +103,12 @@ def test_with_closed_stdin() -> dict:
 
     cmd = [
         qwen_path,
-        "--auth-type", "openai",
-        "--input-format", "stream-json",
-        "--output-format", "stream-json",
+        "--auth-type",
+        "openai",
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
         "--channel=SDK",
     ]
 
@@ -114,7 +119,7 @@ def test_with_closed_stdin() -> dict:
     try:
         sys.stdin.close()
         print("Parent stdin closed (simulating launchd)")
-        
+
         # Now try to start subprocess - this should work with stdin=subprocess.PIPE
         process = subprocess.Popen(
             cmd,
@@ -126,7 +131,7 @@ def test_with_closed_stdin() -> dict:
             start_new_session=True,
         )
         print(f"Process started with PID: {process.pid}")
-        
+
         # Start readers
         stdout_thread = threading.Thread(target=read_stdout, args=(process.stdout,), daemon=True)
         stderr_thread = threading.Thread(target=read_stderr, args=(process.stderr,), daemon=True)
@@ -143,7 +148,7 @@ def test_with_closed_stdin() -> dict:
             "request": {"subtype": "initialize"},
         }
 
-        print(f"\nSending SDK init...")
+        print("\nSending SDK init...")
         try:
             payload = json.dumps(init_msg) + "\n"
             process.stdin.write(payload.encode("utf-8"))
@@ -176,10 +181,8 @@ def test_with_closed_stdin() -> dict:
 
         # Cleanup
         stop_readers.set()
-        try:
+        with contextlib.suppress(BaseException):
             process.stdin.close()
-        except:
-            pass
         process.terminate()
         try:
             process.wait(timeout=5)
@@ -190,15 +193,17 @@ def test_with_closed_stdin() -> dict:
         stdout_thread.join(timeout=2)
         stderr_thread.join(timeout=2)
 
-        results["success"] = results["sdk_init_response"] and not results["timeout"] and not results["broken_pipe"]
+        results["success"] = (
+            results["sdk_init_response"] and not results["timeout"] and not results["broken_pipe"]
+        )
 
     finally:
         # Restore stdin
         sys.stdin = old_stdin
         if sys.stdin is None or sys.stdin.closed:
-            sys.stdin = open("/dev/null", "r")
+            sys.stdin = open("/dev/null")
 
-    print(f"\nResults:")
+    print("\nResults:")
     print(f"  SDK init sent: {results['sdk_init_sent']}")
     print(f"  Broken pipe: {results['broken_pipe']}")
     print(f"  SDK init response: {results['sdk_init_response']}")
@@ -216,6 +221,7 @@ def test_with_fixed_stdin() -> dict:
 
     # Find qwen
     import shutil
+
     qwen_path = shutil.which("qwen")
     if not qwen_path:
         print("ERROR: qwen not found")
@@ -281,16 +287,16 @@ def test_with_fixed_stdin() -> dict:
 
     # Apply stdin fix first (like agent.py does)
     if sys.stdin is None or sys.stdin.closed:
-        sys.stdin = open("/dev/null", "r")
+        sys.stdin = open("/dev/null")
         print("Applied stdin fix: reopened to /dev/null")
     else:
         try:
             fd = sys.stdin.fileno()
             if fd < 0:
-                sys.stdin = open("/dev/null", "r")
+                sys.stdin = open("/dev/null")
                 print(f"Applied stdin fix: invalid fd ({fd}), reopened to /dev/null")
         except (ValueError, OSError):
-            sys.stdin = open("/dev/null", "r")
+            sys.stdin = open("/dev/null")
             print("Applied stdin fix: no valid fileno, reopened to /dev/null")
 
     env = dict(os.environ)
@@ -300,9 +306,12 @@ def test_with_fixed_stdin() -> dict:
 
     cmd = [
         qwen_path,
-        "--auth-type", "openai",
-        "--input-format", "stream-json",
-        "--output-format", "stream-json",
+        "--auth-type",
+        "openai",
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
         "--channel=SDK",
     ]
 
@@ -319,7 +328,7 @@ def test_with_fixed_stdin() -> dict:
             start_new_session=True,
         )
         print(f"Process started with PID: {process.pid}")
-        
+
         stdout_thread = threading.Thread(target=read_stdout, args=(process.stdout,), daemon=True)
         stderr_thread = threading.Thread(target=read_stderr, args=(process.stderr,), daemon=True)
         stdout_thread.start()
@@ -334,7 +343,7 @@ def test_with_fixed_stdin() -> dict:
             "request": {"subtype": "initialize"},
         }
 
-        print(f"\nSending SDK init...")
+        print("\nSending SDK init...")
         try:
             payload = json.dumps(init_msg) + "\n"
             process.stdin.write(payload.encode("utf-8"))
@@ -365,10 +374,8 @@ def test_with_fixed_stdin() -> dict:
             results["timeout"] = True
 
         stop_readers.set()
-        try:
+        with contextlib.suppress(BaseException):
             process.stdin.close()
-        except:
-            pass
         process.terminate()
         try:
             process.wait(timeout=5)
@@ -379,13 +386,15 @@ def test_with_fixed_stdin() -> dict:
         stdout_thread.join(timeout=2)
         stderr_thread.join(timeout=2)
 
-        results["success"] = results["sdk_init_response"] and not results["timeout"] and not results["broken_pipe"]
+        results["success"] = (
+            results["sdk_init_response"] and not results["timeout"] and not results["broken_pipe"]
+        )
 
     except Exception as e:
         print(f"ERROR: {e}")
         results["error"] = str(e)
 
-    print(f"\nResults:")
+    print("\nResults:")
     print(f"  SDK init sent: {results['sdk_init_sent']}")
     print(f"  Broken pipe: {results['broken_pipe']}")
     print(f"  SDK init response: {results['sdk_init_response']}")
@@ -410,17 +419,21 @@ def main():
     print("\n" + "=" * 70)
     print("SUMMARY")
     print("=" * 70)
-    
+
     print(f"\n{'Test':<25} {'SDK Init':<12} {'Broken Pipe':<12} {'Success':<10}")
     print("-" * 60)
-    print(f"{result1['test_name']:<25} {str(result1['sdk_init_response']):<12} {str(result1['broken_pipe']):<12} {str(result1['success']):<10}")
-    print(f"{result2['test_name']:<25} {str(result2['sdk_init_response']):<12} {str(result2['broken_pipe']):<12} {str(result2['success']):<10}")
+    print(
+        f"{result1['test_name']:<25} {str(result1['sdk_init_response']):<12} {str(result1['broken_pipe']):<12} {str(result1['success']):<10}"
+    )
+    print(
+        f"{result2['test_name']:<25} {str(result2['sdk_init_response']):<12} {str(result2['broken_pipe']):<12} {str(result2['success']):<10}"
+    )
 
     # Diagnosis
     print("\n" + "=" * 70)
     print("DIAGNOSIS")
     print("=" * 70)
-    
+
     if result1["broken_pipe"] and result2["success"]:
         print("✅ stdin fix is EFFECTIVE!")
         print("   - Without fix: Broken pipe error")

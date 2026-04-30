@@ -12,16 +12,14 @@ import logging
 import os
 import platform
 import secrets
-import signal
 import socket
 import subprocess
 import threading
-from threading import RLock
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from threading import RLock
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +68,7 @@ class WorkspaceConfig:
     token_secret: str = ""
     webui_path: str = ""  # Path to qwen-code-webui project directory
     auth_type: str = ""  # Authentication type: openai, anthropic, gemini etc.
-    auth_env: Dict[str, str] = field(default_factory=dict)  # Environment variables for auth
+    auth_env: dict[str, str] = field(default_factory=dict)  # Environment variables for auth
 
 
 class WebUIManager:
@@ -97,8 +95,8 @@ class WebUIManager:
             config: Workspace configuration. If None, loads from config.json.
         """
         self.config = config or self._load_config()
-        self._instances: Dict[int, WebUIInstance] = {}  # user_id -> instance
-        self._port_allocations: Dict[int, int] = {}  # port -> user_id
+        self._instances: dict[int, WebUIInstance] = {}  # user_id -> instance
+        self._port_allocations: dict[int, int] = {}  # port -> user_id
         self._lock = RLock()  # Use reentrant lock to avoid deadlock
         self._cleanup_thread: Optional[threading.Thread] = None
         self._running = False
@@ -134,7 +132,7 @@ class WebUIManager:
             return WorkspaceConfig()
 
         try:
-            with open(config_path, "r") as f:
+            with open(config_path) as f:
                 config = json.load(f)
 
             workspace = config.get("workspace", {})
@@ -163,9 +161,7 @@ class WebUIManager:
             return
 
         self._running = True
-        self._cleanup_thread = threading.Thread(
-            target=self._cleanup_loop, daemon=True
-        )
+        self._cleanup_thread = threading.Thread(target=self._cleanup_loop, daemon=True)
         self._cleanup_thread.start()
         logger.info("Cleanup thread started")
 
@@ -224,9 +220,7 @@ class WebUIManager:
                     return port
 
             # Find an available port
-            for port in range(
-                self.config.port_range_start, self.config.port_range_end + 1
-            ):
+            for port in range(self.config.port_range_start, self.config.port_range_end + 1):
                 if port not in self._port_allocations:
                     # Verify port is actually available
                     if self._is_port_available(port):
@@ -269,9 +263,11 @@ class WebUIManager:
                     # Try to connect to the port
                     s.connect(("localhost", port))
                     # Service is ready
-                    logger.info(f"WebUI service on port {port} is ready after {time.time() - start_time:.1f}s")
+                    logger.info(
+                        f"WebUI service on port {port} is ready after {time.time() - start_time:.1f}s"
+                    )
                     return True
-            except (socket.error, OSError):
+            except OSError:
                 # Service not ready yet, wait and retry
                 time.sleep(check_interval)
 
@@ -304,7 +300,7 @@ class WebUIManager:
         ).hexdigest()[:16]
         return f"{user_id}:{port}:{random_part}:{signature}"
 
-    def validate_token(self, token: str) -> Tuple[bool, Optional[int], Optional[str]]:
+    def validate_token(self, token: str) -> tuple[bool, Optional[int], Optional[str]]:
         """
         Validate an authentication token.
 
@@ -339,9 +335,7 @@ class WebUIManager:
         except (ValueError, TypeError) as e:
             return False, None, f"Token parse error: {e}"
 
-    def get_user_webui_url(
-        self, user_id: int, system_account: str
-    ) -> Tuple[str, str]:
+    def get_user_webui_url(self, user_id: int, system_account: str) -> tuple[str, str]:
         """
         Get or create the webui URL for a user.
 
@@ -370,17 +364,13 @@ class WebUIManager:
             # Check instance limit
             active_count = sum(1 for i in self._instances.values() if i.is_alive())
             if active_count >= self.config.max_instances:
-                raise ValueError(
-                    f"Maximum instances ({self.config.max_instances}) reached"
-                )
+                raise ValueError(f"Maximum instances ({self.config.max_instances}) reached")
 
             # Start new instance
             instance = self._start_instance_internal(user_id, system_account)
             return instance.url, instance.token
 
-    def _start_instance_internal(
-        self, user_id: int, system_account: str
-    ) -> WebUIInstance:
+    def _start_instance_internal(self, user_id: int, system_account: str) -> WebUIInstance:
         """
         Start a webui instance for a user (internal, must be called with lock).
 
@@ -457,17 +447,16 @@ class WebUIManager:
     def _load_server_config(self) -> dict:
         """Load server configuration from config.json."""
         from app.repositories.database import CONFIG_DIR
+
         config_path = os.path.join(CONFIG_DIR, "config.json")
         try:
-            with open(config_path, "r") as f:
+            with open(config_path) as f:
                 config = json.load(f)
             return config.get("server", {})
         except Exception:
             return {}
 
-    def _launch_webui_process(
-        self, system_account: str, port: int
-    ) -> Optional[subprocess.Popen]:
+    def _launch_webui_process(self, system_account: str, port: int) -> Optional[subprocess.Popen]:
         """
         Launch a webui process as the specified user.
 
@@ -494,21 +483,52 @@ class WebUIManager:
         # Build command based on platform
         if webui_dir:
             # Running from project directory using node
-            cmd = ["node", webui_cmd, "--port", str(port), "--host", "0.0.0.0",
-                   "--token-secret", self.config.token_secret,
-                   "--quota-check-enabled", "--openace-api-url", openace_api_url]
+            cmd = [
+                "node",
+                webui_cmd,
+                "--port",
+                str(port),
+                "--host",
+                "0.0.0.0",
+                "--token-secret",
+                self.config.token_secret,
+                "--quota-check-enabled",
+                "--openace-api-url",
+                openace_api_url,
+            ]
             cwd = webui_dir
         elif self._platform in ("linux", "darwin"):
             # Linux/macOS: use sudo -u for global executable
-            cmd = ["sudo", "-u", system_account, webui_cmd, "--port", str(port),
-                   "--host", "0.0.0.0", "--token-secret", self.config.token_secret,
-                   "--quota-check-enabled", "--openace-api-url", openace_api_url]
+            cmd = [
+                "sudo",
+                "-u",
+                system_account,
+                webui_cmd,
+                "--port",
+                str(port),
+                "--host",
+                "0.0.0.0",
+                "--token-secret",
+                self.config.token_secret,
+                "--quota-check-enabled",
+                "--openace-api-url",
+                openace_api_url,
+            ]
             cwd = None
         else:
             # Other platforms: direct execution (no user switching)
-            cmd = [webui_cmd, "--port", str(port), "--host", "0.0.0.0",
-                   "--token-secret", self.config.token_secret,
-                   "--quota-check-enabled", "--openace-api-url", openace_api_url]
+            cmd = [
+                webui_cmd,
+                "--port",
+                str(port),
+                "--host",
+                "0.0.0.0",
+                "--token-secret",
+                self.config.token_secret,
+                "--quota-check-enabled",
+                "--openace-api-url",
+                openace_api_url,
+            ]
             cwd = None
 
         # Append --auth-type if configured
@@ -539,7 +559,7 @@ class WebUIManager:
             logger.error(f"Failed to launch webui process: {e}")
             return None
 
-    def _find_webui_executable(self) -> Tuple[Optional[str], Optional[str]]:
+    def _find_webui_executable(self) -> tuple[Optional[str], Optional[str]]:
         """
         Find the qwen-code-webui executable.
 
@@ -570,7 +590,7 @@ class WebUIManager:
                         timeout=60,
                     )
                     if os.path.isfile(node_entry):
-                        logger.info(f"WebUI project built successfully")
+                        logger.info("WebUI project built successfully")
                         return node_entry, webui_backend
                 except Exception as e:
                     logger.error(f"Failed to build webui project: {e}")
@@ -585,9 +605,7 @@ class WebUIManager:
         # Also check if webui is bundled with open-ace
         from app.repositories.database import CONFIG_DIR
 
-        bundled_path = os.path.join(
-            os.path.dirname(CONFIG_DIR), "webui", "bin", "qwen-code-webui"
-        )
+        bundled_path = os.path.join(os.path.dirname(CONFIG_DIR), "webui", "bin", "qwen-code-webui")
         candidates.append(bundled_path)
 
         for candidate in candidates:
@@ -669,7 +687,7 @@ class WebUIManager:
         with self._lock:
             return self._instances.get(user_id)
 
-    def get_all_instances(self) -> List[Dict[str, Any]]:
+    def get_all_instances(self) -> list[dict[str, Any]]:
         """Get information about all instances."""
         with self._lock:
             return [

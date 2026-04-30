@@ -11,9 +11,9 @@ Usage:
 """
 
 import asyncio
-import time
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -70,7 +70,7 @@ async def test_auto_fullscreen_on_chat():
 
             # Take screenshot of initial state
             await page.screenshot(path=f"{SCREENSHOT_DIR}/01_initial_state_{timestamp}.png")
-            print(f"   ✓ Initial screenshot saved")
+            print("   ✓ Initial screenshot saved")
 
             # Step 3: Check initial panel state (should be expanded)
             print("\n[Step 3] Checking initial panel state...")
@@ -130,12 +130,16 @@ async def test_auto_fullscreen_on_chat():
 
             # Check if we're on project selector page or chat page
             # Look for project items or chat elements
-            project_items = iframe_frame.locator("button, [data-testid], .project-item, [role='button']")
+            project_items = iframe_frame.locator(
+                "button, [data-testid], .project-item, [role='button']"
+            )
             project_count = await project_items.count()
             print(f"   Found {project_count} clickable elements in iframe")
 
             # Check for project list items - use cursor-pointer class
-            project_list_item = iframe_frame.locator("div.cursor-pointer, [class*='cursor-pointer']")
+            project_list_item = iframe_frame.locator(
+                "div.cursor-pointer, [class*='cursor-pointer']"
+            )
             project_item_count = await project_list_item.count()
             print(f"   Found {project_item_count} clickable project items")
 
@@ -149,18 +153,22 @@ async def test_auto_fullscreen_on_chat():
                 test_results.append(("Click Project", "PASS", ""))
             else:
                 # Check if already on chat page (path contains /projects)
-                current_path_check = await iframe_frame.locator("h1, .text-lg").first.evaluate(
-                    "el => el.textContent || el.innerText"
-                ) if await iframe_frame.locator("h1, .text-lg").count() > 0 else ""
+                current_path_check = (
+                    await iframe_frame.locator("h1, .text-lg").first.evaluate(
+                        "el => el.textContent || el.innerText"
+                    )
+                    if await iframe_frame.locator("h1, .text-lg").count() > 0
+                    else ""
+                )
                 print(f"   Current page title: {current_path_check[:50]}...")
-                
+
                 # If there's a back button or breadcrumb, we might be on chat page
                 # Just proceed to check fullscreen state
                 print("   ⚠ Could not find project list, may already be on chat page")
                 test_results.append(("Project Selection", "WARN", "No project list found"))
 
             await page.screenshot(path=f"{SCREENSHOT_DIR}/02_after_project_click_{timestamp}.png")
-            print(f"   ✓ Screenshot saved after project selection")
+            print("   ✓ Screenshot saved after project selection")
 
             # Step 6: Verify fullscreen mode is activated
             print("\n[Step 6] Verifying auto fullscreen mode...")
@@ -189,13 +197,21 @@ async def test_auto_fullscreen_on_chat():
                 test_results.append(("Panels Collapsed", "PASS", ""))
             elif left_width_fs < left_width_initial and right_width_fs < right_width_initial:
                 print("   ✓ Panels at least partially collapsed")
-                test_results.append(("Panels Collapsed", "PASS", f"Reduced from {left_width_initial}/{right_width_initial}"))
+                test_results.append(
+                    (
+                        "Panels Collapsed",
+                        "PASS",
+                        f"Reduced from {left_width_initial}/{right_width_initial}",
+                    )
+                )
             else:
                 print("   ✗ Panels not collapsed")
-                test_results.append(("Panels Collapsed", "FAIL", f"L:{left_width_fs}, R:{right_width_fs}"))
+                test_results.append(
+                    ("Panels Collapsed", "FAIL", f"L:{left_width_fs}, R:{right_width_fs}")
+                )
 
             await page.screenshot(path=f"{SCREENSHOT_DIR}/03_fullscreen_state_{timestamp}.png")
-            print(f"   ✓ Final screenshot saved")
+            print("   ✓ Final screenshot saved")
 
             # Step 7: Test ESC to exit fullscreen
             print("\n[Step 7] Testing ESC key to exit fullscreen...")
@@ -214,7 +230,7 @@ async def test_auto_fullscreen_on_chat():
                 test_results.append(("ESC Exit Fullscreen", "FAIL", "Still in fullscreen"))
 
             await page.screenshot(path=f"{SCREENSHOT_DIR}/04_after_esc_{timestamp}.png")
-            print(f"   ✓ After ESC screenshot saved")
+            print("   ✓ After ESC screenshot saved")
 
             # Print summary
             print("\n" + "=" * 60)
@@ -246,6 +262,7 @@ async def test_auto_fullscreen_on_chat():
         except Exception as e:
             print(f"\n✗ Test failed with error: {e}")
             import traceback
+
             traceback.print_exc()
             await page.screenshot(path=f"{SCREENSHOT_DIR}/error_{timestamp}.png")
             print(f"Error screenshot saved to {SCREENSHOT_DIR}")

@@ -8,9 +8,10 @@ This test verifies that:
 3. Host filter shows simplified names
 """
 
-import pytest
-import time
 import re
+import time
+
+import pytest
 from playwright.async_api import async_playwright
 
 # Test configuration
@@ -123,9 +124,9 @@ async def test_issue36_simplified_display():
 
                 # Check if simplified
                 if ".local" in option_text.lower():
-                    print(f"    ✗ Option NOT simplified")
+                    print("    ✗ Option NOT simplified")
                 else:
-                    print(f"    ✓ Option appears simplified")
+                    print("    ✓ Option appears simplified")
         else:
             print("  Sender filter not found")
 
@@ -142,9 +143,9 @@ async def test_issue36_simplified_display():
                 print(f"  Option {i}: '{option_text}'")
 
                 if ".local" in option_text.lower():
-                    print(f"    ✗ Option NOT simplified")
+                    print("    ✗ Option NOT simplified")
                 else:
-                    print(f"    ✓ Option appears simplified")
+                    print("    ✓ Option appears simplified")
         else:
             print("  Host filter not found")
 

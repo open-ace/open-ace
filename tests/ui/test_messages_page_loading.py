@@ -8,9 +8,10 @@ This test verifies that:
 [Commented out] 3. Manual refresh button works correctly
 """
 
-import pytest
 import time
-from playwright.async_api import async_playwright, expect
+
+import pytest
+from playwright.async_api import async_playwright
 
 # Test configuration
 BASE_URL = "http://localhost:5000"

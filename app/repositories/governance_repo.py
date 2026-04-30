@@ -11,9 +11,9 @@ import json
 import logging
 import os
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
-from app.repositories.database import Database, CONFIG_DIR
+from app.repositories.database import CONFIG_DIR, Database
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ class GovernanceRepository:
     # Content Filter Rules
     # =========================================================================
 
-    def get_filter_rules(self) -> List[Dict]:
+    def get_filter_rules(self) -> list[dict]:
         """
         Get all content filter rules.
 
@@ -58,7 +58,7 @@ class GovernanceRepository:
 
         return rules
 
-    def get_filter_rule(self, rule_id: int) -> Optional[Dict]:
+    def get_filter_rule(self, rule_id: int) -> Optional[dict]:
         """
         Get a specific filter rule.
 
@@ -235,7 +235,7 @@ class GovernanceRepository:
     # Security Settings
     # =========================================================================
 
-    def get_security_settings(self) -> Dict[str, Any]:
+    def get_security_settings(self) -> dict[str, Any]:
         """
         Get security settings from database.
 
@@ -282,7 +282,7 @@ class GovernanceRepository:
         try:
             self._ensure_config_dir()
             if os.path.exists(SETTINGS_FILE):
-                with open(SETTINGS_FILE, "r") as f:
+                with open(SETTINGS_FILE) as f:
                     saved_settings = json.load(f)
                     default_settings.update(saved_settings)
         except Exception as e:
@@ -290,7 +290,7 @@ class GovernanceRepository:
 
         return default_settings
 
-    def update_security_settings(self, settings: Dict[str, Any]) -> bool:
+    def update_security_settings(self, settings: dict[str, Any]) -> bool:
         """
         Update security settings in database.
 
@@ -317,15 +317,13 @@ class GovernanceRepository:
                         str_value = str(value)
 
                     cursor.execute(
-                        adapt_sql(
-                            """
+                        adapt_sql("""
                         INSERT INTO security_settings (setting_key, setting_value, updated_at)
                         VALUES (?, ?, CURRENT_TIMESTAMP)
                         ON CONFLICT(setting_key) DO UPDATE SET
                             setting_value = excluded.setting_value,
                             updated_at = CURRENT_TIMESTAMP
-                    """
-                        ),
+                    """),
                         (key, str_value),
                     )
 

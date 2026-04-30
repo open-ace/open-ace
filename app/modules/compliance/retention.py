@@ -9,7 +9,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from app.repositories.database import Database
 
@@ -49,11 +49,11 @@ class RetentionReport:
     """Report of retention cleanup."""
 
     timestamp: datetime
-    rules_applied: List[Dict[str, Any]]
+    rules_applied: list[dict[str, Any]]
     records_deleted: int
     records_archived: int
     records_anonymized: int
-    errors: List[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -91,7 +91,7 @@ class DataRetentionManager:
     }
 
     def __init__(
-        self, db: Optional[Database] = None, custom_rules: Optional[Dict[str, RetentionRule]] = None
+        self, db: Optional[Database] = None, custom_rules: Optional[dict[str, RetentionRule]] = None
     ):
         """
         Initialize retention manager.
@@ -105,8 +105,6 @@ class DataRetentionManager:
         if custom_rules:
             self.rules.update(custom_rules)
 
-        self._ensure_tables()
-
     def _ensure_tables(self) -> None:
         """Ensure retention-related tables exist."""
         with self.db.connection() as conn:
@@ -115,25 +113,21 @@ class DataRetentionManager:
             # Retention history table
             # Use SERIAL for PostgreSQL, AUTOINCREMENT for SQLite
             if self.db.is_postgresql:
-                cursor.execute(
-                    """
+                cursor.execute("""
                     CREATE TABLE IF NOT EXISTS retention_history (
                         id SERIAL PRIMARY KEY,
                         timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         report_data TEXT NOT NULL
                     )
-                """
-                )
+                """)
             else:
-                cursor.execute(
-                    """
+                cursor.execute("""
                     CREATE TABLE IF NOT EXISTS retention_history (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         report_data TEXT NOT NULL
                     )
-                """
-                )
+                """)
 
             conn.commit()
 
@@ -165,7 +159,7 @@ class DataRetentionManager:
         """
         return self.rules.get(data_type)
 
-    def get_all_rules(self) -> Dict[str, RetentionRule]:
+    def get_all_rules(self) -> dict[str, RetentionRule]:
         """
         Get all retention rules.
 
@@ -293,9 +287,7 @@ class DataRetentionManager:
         # Delete records
         with self.db.connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                f"DELETE FROM {table_name} WHERE {time_col} < ?", (cutoff,)
-            )
+            cursor.execute(f"DELETE FROM {table_name} WHERE {time_col} < ?", (cutoff,))
             conn.commit()
             deleted = cursor.rowcount
 
@@ -390,7 +382,7 @@ class DataRetentionManager:
         except Exception as e:
             logger.error(f"Failed to save retention report: {e}")
 
-    def get_retention_history(self, limit: int = 30) -> List[Dict[str, Any]]:
+    def get_retention_history(self, limit: int = 30) -> list[dict[str, Any]]:
         """
         Get retention cleanup history.
 
@@ -433,7 +425,7 @@ class DataRetentionManager:
 
         return history
 
-    def estimate_storage(self) -> Dict[str, Any]:
+    def estimate_storage(self) -> dict[str, Any]:
         """
         Estimate storage usage by data type.
 
@@ -465,7 +457,7 @@ class DataRetentionManager:
             "timestamp": datetime.utcnow().isoformat(),
         }
 
-    def get_compliance_status(self) -> Dict[str, Any]:
+    def get_compliance_status(self) -> dict[str, Any]:
         """
         Get data retention compliance status.
 
@@ -473,12 +465,10 @@ class DataRetentionManager:
             Dict with compliance status.
         """
         # Check if cleanup has been run recently
-        last_cleanup = self.db.fetch_one(
-            """
+        last_cleanup = self.db.fetch_one("""
             SELECT timestamp FROM retention_history
             ORDER BY timestamp DESC LIMIT 1
-        """
-        )
+        """)
 
         last_cleanup_time = None
         days_since_cleanup = None
@@ -518,3 +508,19 @@ class DataRetentionManager:
                 "Archive important data before deletion",
             ],
         }
+
+
+def get_ddl_statements() -> list[str]:
+    """Return DDL statements for retention tables."""
+    from app.repositories.database import is_postgresql
+
+    id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    return [
+        f"""
+        CREATE TABLE IF NOT EXISTS retention_history (
+            id {id_type},
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            report_data TEXT NOT NULL
+        )
+        """,
+    ]

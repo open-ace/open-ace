@@ -8,7 +8,6 @@ This test verifies that:
 """
 
 import pytest
-import time
 from playwright.async_api import async_playwright, expect
 
 # Test configuration

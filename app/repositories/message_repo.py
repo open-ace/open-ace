@@ -6,7 +6,7 @@ Repository for message data access operations.
 """
 
 import logging
-from typing import Dict, List, Optional
+from typing import Optional
 
 from app.repositories.database import Database
 
@@ -182,7 +182,7 @@ class MessageRepository:
         search: Optional[str] = None,
         limit: Optional[int] = None,
         offset: int = 0,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Get messages for a specific date.
 
@@ -251,7 +251,7 @@ class MessageRepository:
         search: Optional[str] = None,
         limit: Optional[int] = None,
         offset: int = 0,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Get messages for a date range.
 
@@ -319,7 +319,7 @@ class MessageRepository:
         sender_name: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Get conversation history with aggregated statistics.
 
@@ -380,7 +380,7 @@ class MessageRepository:
         # Use COALESCE to get the first available session ID
         # Priority: feishu_conversation_id > agent_session_id > conversation_id
         query = f"""
-            SELECT 
+            SELECT
                 COALESCE(conversation_id, feishu_conversation_id, agent_session_id) as conversation_id,
                 agent_session_id as session_id,
                 tool_name,
@@ -442,7 +442,9 @@ class MessageRepository:
             conditions.append("sender_name = ?")
             params.append(sender_name)
 
-        id_filter = "COALESCE(conversation_id, feishu_conversation_id, agent_session_id) IS NOT NULL"
+        id_filter = (
+            "COALESCE(conversation_id, feishu_conversation_id, agent_session_id) IS NOT NULL"
+        )
         conditions.append(id_filter)
 
         where_clause = f"WHERE {' AND '.join(conditions)}"
@@ -459,7 +461,7 @@ class MessageRepository:
         result = self.db.fetch_one(query, tuple(params))
         return result["total"] if result else 0
 
-    def get_conversation_timeline(self, session_id: str) -> List[Dict]:
+    def get_conversation_timeline(self, session_id: str) -> list[dict]:
         """
         Get timeline of messages for a conversation.
 
@@ -478,7 +480,7 @@ class MessageRepository:
 
         return self.db.fetch_all(query, (session_id,))
 
-    def get_conversation_details(self, session_id: str) -> Optional[Dict]:
+    def get_conversation_details(self, session_id: str) -> Optional[dict]:
         """
         Get details of a conversation.
 
@@ -490,7 +492,7 @@ class MessageRepository:
         """
         # Use COALESCE to match session_id from multiple possible fields
         query = """
-            SELECT 
+            SELECT
                 COALESCE(conversation_id, feishu_conversation_id, agent_session_id) as conversation_id,
                 agent_session_id as session_id,
                 tool_name,
@@ -511,7 +513,7 @@ class MessageRepository:
 
         return self.db.fetch_one(query, (session_id,))
 
-    def get_all_senders(self, host_name: Optional[str] = None) -> List[str]:
+    def get_all_senders(self, host_name: Optional[str] = None) -> list[str]:
         """
         Get list of all senders.
 
@@ -531,8 +533,8 @@ class MessageRepository:
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
         query = f"""
-            SELECT DISTINCT sender_name 
-            FROM daily_messages 
+            SELECT DISTINCT sender_name
+            FROM daily_messages
             {where_clause}
             ORDER BY sender_name
         """
@@ -545,9 +547,7 @@ class MessageRepository:
             if not name:
                 return False
             # Filter out Feishu user IDs (starts with "ou_" followed by hex characters)
-            if name.startswith("ou_") and len(name) > 10:
-                return False
-            return True
+            return not (name.startswith("ou_") and len(name) > 10)
 
         return [row["sender_name"] for row in rows if is_valid_sender(row["sender_name"])]
 
@@ -626,7 +626,7 @@ class MessageRepository:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Get total tokens per user for segmentation analysis.
 
@@ -676,7 +676,7 @@ class MessageRepository:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Get hourly usage patterns from message timestamps.
 
@@ -764,7 +764,7 @@ class MessageRepository:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Get total tokens per day for trend analysis.
 
@@ -813,7 +813,7 @@ class MessageRepository:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Get total tokens per tool for comparison analysis.
 
@@ -857,7 +857,7 @@ class MessageRepository:
 
         return self.db.fetch_all(query, tuple(params))
 
-    def get_conversation_stats_summary(self, host_name: Optional[str] = None) -> Dict:
+    def get_conversation_stats_summary(self, host_name: Optional[str] = None) -> dict:
         """
         Get conversation statistics summary without fetching full history.
 
@@ -932,7 +932,7 @@ class MessageRepository:
 
     def get_daily_range_lightweight(
         self, start_date: str, end_date: str, host_name: Optional[str] = None
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Get lightweight daily range data for batch analysis.
 
@@ -970,7 +970,7 @@ class MessageRepository:
 
     def get_batch_analysis_aggregates(
         self, start_date: str, end_date: str, host_name: Optional[str] = None
-    ) -> Dict:
+    ) -> dict:
         """
         Get all aggregates needed for batch analysis in a single query.
 
@@ -985,7 +985,6 @@ class MessageRepository:
         Returns:
             Dict: All aggregate statistics needed for batch analysis.
         """
-        from app.repositories.database import is_postgresql
 
         conditions = ["date >= ?", "date <= ?"]
         params = [start_date, end_date]
@@ -1036,9 +1035,7 @@ class MessageRepository:
             "unique_days": result.get("unique_days", 0) or 0,
         }
 
-    def get_user_messages_stats(
-        self, start_date: str, end_date: str, sender_prefix: str
-    ) -> Dict:
+    def get_user_messages_stats(self, start_date: str, end_date: str, sender_prefix: str) -> dict:
         """
         Get user message statistics summary for insights analysis.
 
@@ -1072,9 +1069,7 @@ class MessageRepository:
                 "total_messages": total_messages,
                 "total_tokens": total_tokens,
                 "avg_messages_per_conversation": (
-                    round(total_messages / total_conversations, 1)
-                    if total_conversations > 0
-                    else 0
+                    round(total_messages / total_conversations, 1) if total_conversations > 0 else 0
                 ),
             }
 
@@ -1091,7 +1086,7 @@ class MessageRepository:
         end_date: str,
         sender_prefix: str,
         limit: int = 5,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Get sampled conversations for insights analysis.
 
@@ -1143,12 +1138,13 @@ class MessageRepository:
                 logger.warning(f"Skipping session {session_id} due to encoding error: {e}")
                 continue
             if messages:
-                conversations.append({
-                    "session_id": session_id,
-                    "messages": [
-                        {"role": m["role"], "content": m["content"]}
-                        for m in messages
-                    ],
-                })
+                conversations.append(
+                    {
+                        "session_id": session_id,
+                        "messages": [
+                            {"role": m["role"], "content": m["content"]} for m in messages
+                        ],
+                    }
+                )
 
         return conversations

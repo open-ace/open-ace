@@ -4,10 +4,11 @@ Test script to verify notification timing:
 Notification should only appear AFTER AI finishes responding (isLoading becomes false).
 """
 
-import sys
 import os
-from playwright.sync_api import sync_playwright, TimeoutError
+import sys
 import time
+
+from playwright.sync_api import sync_playwright
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, project_root)
@@ -46,7 +47,7 @@ def check_notification_state(page, tab_index=0):
 def find_visible_chat_frame(page):
     """Find the visible chat iframe."""
     frames = page.frames
-    for i, f in enumerate(frames):
+    for _i, f in enumerate(frames):
         if "token=" in f.url or "127.0.0.1:310" in f.url:
             try:
                 ta = f.locator("textarea")
@@ -68,12 +69,12 @@ def select_project(chat_frame, page):
         project_rows = chat_frame.locator("div[class*='rounded-lg'][class*='p-4']")
         if project_rows.count() == 0:
             project_rows = chat_frame.locator("div.font-mono")
-        
+
         if project_rows.count() > 0:
             project_rows.first.click()
             page.wait_for_timeout(3000)
             return True
-        
+
         return False
     except Exception as e:
         print(f"    [ERROR] select_project: {e}")
@@ -112,7 +113,7 @@ def test_notification_timing():
             # Find iframe and select project
             print("\n[3] 选择项目...")
             page.wait_for_timeout(5000)  # Wait for iframe to load
-            
+
             frames = page.frames
             print(f"    Frame 数量: {len(frames)}")
             chat_frame = None
@@ -120,11 +121,11 @@ def test_notification_timing():
                 if "token=" in f.url or "127.0.0.1:310" in f.url:
                     chat_frame = f
                     break
-            
+
             if chat_frame:
                 ta = chat_frame.locator("textarea")
                 print(f"    textarea count: {ta.count()}")
-                
+
                 if ta.count() == 0:
                     if select_project(chat_frame, page):
                         print("    ✓ 项目选择成功")
@@ -136,7 +137,7 @@ def test_notification_timing():
             initial_state = check_notification_state(page, 0)
             if initial_state:
                 print(f"    Bell: {initial_state['has_bell']}, Badge: {initial_state['has_badge']}")
-                if initial_state['has_badge']:
+                if initial_state["has_badge"]:
                     print("    ⚠️  初始状态有徽章（可能之前有未完成的请求）")
                 else:
                     print("    ✓ 初始状态无徽章")
@@ -148,7 +149,7 @@ def test_notification_timing():
             page.wait_for_timeout(3000)  # Wait for iframe to update
             frames = page.frames
             print(f"    Frame 数量: {len(frames)}")
-            
+
             chat_frame = None
             for i, f in enumerate(frames):
                 url = f.url
@@ -190,8 +191,10 @@ def test_notification_timing():
                     try:
                         thinking_text = chat_frame.locator("text=/Thinking|Processing|等待/")
                         spinner = chat_frame.locator(".spinner, .loading, [class*='animate-pulse']")
-                        abort_btn = chat_frame.locator("button:has-text('Abort'), button:has-text('Stop')")
-                        
+                        abort_btn = chat_frame.locator(
+                            "button:has-text('Abort'), button:has-text('Stop')"
+                        )
+
                         is_thinking = thinking_text.count() > 0
                         has_spinner = spinner.count() > 0
                         has_abort = abort_btn.count() > 0
@@ -211,7 +214,7 @@ def test_notification_timing():
                             status += f" -> Loading ended at {elapsed:.1f}s"
 
                         # Record when bell appears (current tab notification)
-                        if state and state.get('has_bell') and notification_appeared_at is None:
+                        if state and state.get("has_bell") and notification_appeared_at is None:
                             notification_appeared_at = elapsed
                             status += f" -> Bell appeared at {elapsed:.1f}s"
 
@@ -256,6 +259,7 @@ def test_notification_timing():
         except Exception as e:
             print(f"\n    ✗ 测试错误：{e}")
             import traceback
+
             traceback.print_exc()
         finally:
             browser.close()

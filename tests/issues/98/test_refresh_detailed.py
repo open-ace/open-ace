@@ -10,6 +10,7 @@ Detailed test for Issue #98: Messages 页面的 refresh 和 auto refresh 都不�
 
 import asyncio
 import time
+
 from playwright.async_api import async_playwright
 
 BASE_URL = "http://localhost:5000"
@@ -156,22 +157,20 @@ async def test_messages_refresh_detailed():
             print("\n[Step 7] Checking React Query state...")
 
             # Execute JavaScript to check React Query state
-            result = await page.evaluate(
-                """() => {
+            result = await page.evaluate("""() => {
                 // Try to find React Query devtools or state
                 const root = document.querySelector('#root');
                 if (!root) return { error: 'No root element' };
-                
+
                 // Check if there are any pending queries
                 const pendingQueries = document.querySelectorAll('[data-query-state="pending"]');
                 const fetchingQueries = document.querySelectorAll('[data-query-state="fetching"]');
-                
+
                 return {
                     pendingQueries: pendingQueries.length,
                     fetchingQueries: fetchingQueries.length,
                 };
-            }"""
-            )
+            }""")
             print(f"  React Query state: {result}")
 
             # Take final screenshot

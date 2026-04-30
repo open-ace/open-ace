@@ -10,21 +10,20 @@
 5. 今日用量显示
 """
 
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from playwright.sync_api import sync_playwright, expect
+from playwright.sync_api import sync_playwright
+
 from tests.regression.test_helpers import (
+    TestRunner,
+    check_element_exists,
     create_browser_context,
     login,
     navigate_to,
     save_screenshot,
-    check_element_exists,
-    TestRunner,
-    BASE_URL,
-    HEADLESS,
 )
 
 MODULE_NAME = "manage_overview_dashboard"

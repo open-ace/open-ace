@@ -7,9 +7,10 @@ This test verifies:
 3. Backend scheduler is running
 """
 
-from playwright.sync_api import sync_playwright
-import requests
 import time
+
+import requests
+from playwright.sync_api import sync_playwright
 
 BASE_URL = "http://localhost:5000"
 USERNAME = "admin"
@@ -179,7 +180,7 @@ def test_refresh_functionality():
                         (
                             "Refresh Speed",
                             "WARN",
-                            f"Refresh was fast but backend fetch was triggered",
+                            "Refresh was fast but backend fetch was triggered",
                         )
                     )
 

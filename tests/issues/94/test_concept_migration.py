@@ -19,7 +19,6 @@ Usage:
 
 import os
 import sys
-import sqlite3
 from datetime import datetime
 
 # Add shared modules
@@ -27,7 +26,7 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(script_dir)))
 sys.path.insert(0, os.path.join(project_root, "scripts", "shared"))
 
-from db import get_connection, DB_PATH
+from db import DB_PATH, get_connection
 
 
 def test_database_schema():
@@ -64,12 +63,12 @@ def test_database_schema():
 
         # Verify old column is removed
         if "conversation_label" not in columns:
-            print(f"  ✓ conversation_label: REMOVED (correctly renamed)")
+            print("  ✓ conversation_label: REMOVED (correctly renamed)")
             results.append(
                 ("Old column removed", True, "conversation_label renamed to feishu_conversation_id")
             )
         else:
-            print(f"  ✗ conversation_label: STILL EXISTS (should be removed)")
+            print("  ✗ conversation_label: STILL EXISTS (should be removed)")
             results.append(("Old column removed", False, "conversation_label should be removed"))
 
         # Check indexes
@@ -136,7 +135,7 @@ def test_data_migration():
             print(f"  ✓ feishu_conversation_id: {feishu_pct:.1f}% coverage")
             results.append(("feishu_conversation_id coverage", True, f"{feishu_pct:.1f}%"))
         else:
-            print(f"  ⚠ feishu_conversation_id: No data (may be expected)")
+            print("  ⚠ feishu_conversation_id: No data (may be expected)")
             results.append(("feishu_conversation_id coverage", True, "No Feishu data"))
 
         # Check agent_session_id coverage
@@ -152,7 +151,7 @@ def test_data_migration():
             print(f"  ⚠ agent_session_id: {agent_pct:.1f}% coverage (partial)")
             results.append(("agent_session_id coverage", True, f"{agent_pct:.1f}% partial"))
         else:
-            print(f"  ✗ agent_session_id: No data populated")
+            print("  ✗ agent_session_id: No data populated")
             results.append(("agent_session_id coverage", False, "0%"))
 
         # Check conversation_id coverage
@@ -168,7 +167,7 @@ def test_data_migration():
             print(f"  ⚠ conversation_id: {conv_pct:.1f}% coverage (partial)")
             results.append(("conversation_id coverage", True, f"{conv_pct:.1f}% partial"))
         else:
-            print(f"  ✗ conversation_id: No data populated")
+            print("  ✗ conversation_id: No data populated")
             results.append(("conversation_id coverage", False, "0%"))
 
         conn.close()
@@ -194,16 +193,14 @@ def test_concept_definitions():
     try:
         # Test Agent Session concept
         print("\n[Agent Session Concept]")
-        cursor.execute(
-            """
+        cursor.execute("""
             SELECT agent_session_id, COUNT(*) as msg_count
             FROM daily_messages
             WHERE agent_session_id IS NOT NULL
             GROUP BY agent_session_id
             ORDER BY msg_count DESC
             LIMIT 5
-        """
-        )
+        """)
         sessions = cursor.fetchall()
 
         if sessions:
@@ -213,29 +210,27 @@ def test_concept_definitions():
 
             # Verify session has multiple messages (a session should contain multiple conversations)
             if sessions[0][1] > 1:
-                print(f"  ✓ Agent sessions contain multiple messages")
+                print("  ✓ Agent sessions contain multiple messages")
                 results.append(
                     ("Agent Session concept", True, f"Top session: {sessions[0][1]} messages")
                 )
             else:
-                print(f"  ⚠ Agent sessions have only 1 message each")
+                print("  ⚠ Agent sessions have only 1 message each")
                 results.append(("Agent Session concept", True, "Single message sessions"))
         else:
-            print(f"  ⚠ No agent session data found")
+            print("  ⚠ No agent session data found")
             results.append(("Agent Session concept", True, "No data"))
 
         # Test Conversation concept
         print("\n[Conversation Concept]")
-        cursor.execute(
-            """
+        cursor.execute("""
             SELECT conversation_id, COUNT(*) as msg_count
             FROM daily_messages
             WHERE conversation_id IS NOT NULL
             GROUP BY conversation_id
             ORDER BY msg_count DESC
             LIMIT 5
-        """
-        )
+        """)
         conversations = cursor.fetchall()
 
         if conversations:
@@ -245,7 +240,7 @@ def test_concept_definitions():
 
             # Verify conversations have appropriate structure
             if conversations[0][1] >= 1:
-                print(f"  ✓ Conversations contain messages")
+                print("  ✓ Conversations contain messages")
                 results.append(
                     (
                         "Conversation concept",
@@ -254,40 +249,38 @@ def test_concept_definitions():
                     )
                 )
             else:
-                print(f"  ✗ Conversations appear empty")
+                print("  ✗ Conversations appear empty")
                 results.append(("Conversation concept", False, "Empty conversations"))
         else:
-            print(f"  ⚠ No conversation data found")
+            print("  ⚠ No conversation data found")
             results.append(("Conversation concept", True, "No data"))
 
         # Test Message role breakdown
         print("\n[Message Role Breakdown]")
-        cursor.execute(
-            """
+        cursor.execute("""
             SELECT role, COUNT(*) as count
             FROM daily_messages
             WHERE role IS NOT NULL
             GROUP BY role
             ORDER BY count DESC
-        """
-        )
+        """)
         roles = cursor.fetchall()
 
         if roles:
-            print(f"  Message roles found:")
+            print("  Message roles found:")
             for role, count in roles:
                 print(f"    - {role}: {count} messages")
 
             # Should have user and assistant at minimum
             role_names = [r[0] for r in roles]
             if "user" in role_names and "assistant" in role_names:
-                print(f"  ✓ Has user and assistant roles")
+                print("  ✓ Has user and assistant roles")
                 results.append(("Message roles", True, f"Roles: {role_names}"))
             else:
-                print(f"  ⚠ Missing expected roles (user, assistant)")
+                print("  ⚠ Missing expected roles (user, assistant)")
                 results.append(("Message roles", True, f"Roles: {role_names}"))
         else:
-            print(f"  ⚠ No role data found")
+            print("  ⚠ No role data found")
             results.append(("Message roles", True, "No data"))
 
         conn.close()
@@ -312,8 +305,7 @@ def test_conversation_structure():
 
     try:
         # Find a conversation with multiple messages
-        cursor.execute(
-            """
+        cursor.execute("""
             SELECT conversation_id, COUNT(*) as msg_count
             FROM daily_messages
             WHERE conversation_id IS NOT NULL
@@ -321,8 +313,7 @@ def test_conversation_structure():
             HAVING msg_count >= 2
             ORDER BY msg_count DESC
             LIMIT 1
-        """
-        )
+        """)
         result = cursor.fetchone()
 
         if result:
@@ -341,7 +332,7 @@ def test_conversation_structure():
             )
             messages = cursor.fetchall()
 
-            print(f"\n  Message chain:")
+            print("\n  Message chain:")
             has_user = False
             has_assistant = False
             for msg in messages:
@@ -358,18 +349,18 @@ def test_conversation_structure():
                     has_assistant = True
 
             if has_user and has_assistant:
-                print(f"\n  ✓ Conversation has user and assistant messages")
+                print("\n  ✓ Conversation has user and assistant messages")
                 results.append(
                     ("Conversation structure", True, f"{msg_count} messages, has user+assistant")
                 )
             elif has_user:
-                print(f"\n  ⚠ Conversation only has user messages")
+                print("\n  ⚠ Conversation only has user messages")
                 results.append(("Conversation structure", True, "Only user messages"))
             else:
-                print(f"\n  ⚠ Conversation structure unclear")
+                print("\n  ⚠ Conversation structure unclear")
                 results.append(("Conversation structure", True, "Structure unclear"))
         else:
-            print(f"\n  ⚠ No conversation with multiple messages found")
+            print("\n  ⚠ No conversation with multiple messages found")
             results.append(("Conversation structure", True, "No multi-message conversations"))
 
         conn.close()
@@ -394,18 +385,16 @@ def test_session_agent_mapping():
 
     try:
         # Check if agent_session_id follows the expected pattern (tool_sessionid)
-        cursor.execute(
-            """
+        cursor.execute("""
             SELECT DISTINCT agent_session_id, tool_name
             FROM daily_messages
             WHERE agent_session_id IS NOT NULL
             LIMIT 10
-        """
-        )
+        """)
         mappings = cursor.fetchall()
 
         if mappings:
-            print(f"\nAgent session to tool mappings (sample):")
+            print("\nAgent session to tool mappings (sample):")
             valid_pattern = 0
             invalid_pattern = 0
 
@@ -433,12 +422,12 @@ def test_session_agent_mapping():
                     )
                 )
             else:
-                print(f"\n  ⚠ No valid session patterns found")
+                print("\n  ⚠ No valid session patterns found")
                 results.append(
                     ("Session-tool mapping", True, f"{invalid_pattern} invalid patterns")
                 )
         else:
-            print(f"\n  ⚠ No agent session data found")
+            print("\n  ⚠ No agent session data found")
             results.append(("Session-tool mapping", True, "No data"))
 
         conn.close()

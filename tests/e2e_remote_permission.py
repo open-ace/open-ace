@@ -20,11 +20,13 @@ import json
 import os
 import sys
 import time
-import uuid
 import traceback
+import uuid
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
+
+import contextlib
 
 import requests
 from playwright.sync_api import sync_playwright
@@ -65,9 +67,11 @@ def pause(seconds):
 
 # ── API helpers ──
 
+
 def api_login_as(username=TEST_USER, password=TEST_PASS):
-    r = requests.post(f"{BASE_URL}/api/auth/login",
-                      json={"username": username, "password": password})
+    r = requests.post(
+        f"{BASE_URL}/api/auth/login", json={"username": username, "password": password}
+    )
     assert r.status_code == 200, f"Login failed: {r.status_code}"
     token = r.cookies.get("session_token")
     assert token, "No session_token cookie"
@@ -80,88 +84,109 @@ def api_admin_login():
 
 def api_register_machine(admin_token):
     global machine_id
-    r = requests.post(f"{BASE_URL}/api/remote/machines/register",
-                      json={"tenant_id": 1},
-                      cookies={"session_token": admin_token})
+    r = requests.post(
+        f"{BASE_URL}/api/remote/machines/register",
+        json={"tenant_id": 1},
+        cookies={"session_token": admin_token},
+    )
     assert r.status_code == 200
     reg_token = r.json()["registration_token"]
 
     machine_id = str(uuid.uuid4())
-    r = requests.post(f"{BASE_URL}/api/remote/agent/register", json={
-        "registration_token": reg_token,
-        "machine_id": machine_id,
-        "machine_name": "E2E Permission Test Server",
-        "hostname": "permission-test.local",
-        "os_type": "linux",
-        "os_version": "Ubuntu 24.04",
-        "capabilities": {"cpu_cores": 8, "memory_gb": 32, "cli_installed": True},
-        "agent_version": "1.0.0-e2e",
-    })
+    r = requests.post(
+        f"{BASE_URL}/api/remote/agent/register",
+        json={
+            "registration_token": reg_token,
+            "machine_id": machine_id,
+            "machine_name": "E2E Permission Test Server",
+            "hostname": "permission-test.local",
+            "os_type": "linux",
+            "os_version": "Ubuntu 24.04",
+            "capabilities": {"cpu_cores": 8, "memory_gb": 32, "cli_installed": True},
+            "agent_version": "1.0.0-e2e",
+        },
+    )
     assert r.status_code == 200
 
-    r = requests.post(f"{BASE_URL}/api/remote/agent/message", json={
-        "type": "register",
-        "machine_id": machine_id,
-        "capabilities": {"cpu_cores": 8, "memory_gb": 32, "cli_installed": True},
-    })
+    r = requests.post(
+        f"{BASE_URL}/api/remote/agent/message",
+        json={
+            "type": "register",
+            "machine_id": machine_id,
+            "capabilities": {"cpu_cores": 8, "memory_gb": 32, "cli_installed": True},
+        },
+    )
     assert r.status_code == 200
 
-    r = requests.post(f"{BASE_URL}/api/remote/machines/{machine_id}/assign",
-                      json={"user_id": 89, "permission": "admin"},
-                      cookies={"session_token": admin_token})
+    r = requests.post(
+        f"{BASE_URL}/api/remote/machines/{machine_id}/assign",
+        json={"user_id": 89, "permission": "admin"},
+        cookies={"session_token": admin_token},
+    )
     assert r.status_code == 200
 
 
 def api_create_session(token, permission_mode="default"):
     global session_id
-    r = requests.post(f"{BASE_URL}/api/remote/sessions",
-                      json={
-                          "machine_id": machine_id,
-                          "project_path": "/home/user/test-project",
-                          "cli_tool": "qwen-code-cli",
-                          "model": "qwen3-coder-plus",
-                          "title": "E2E Permission Test",
-                          "permission_mode": permission_mode,
-                      },
-                      cookies={"session_token": token})
+    r = requests.post(
+        f"{BASE_URL}/api/remote/sessions",
+        json={
+            "machine_id": machine_id,
+            "project_path": "/home/user/test-project",
+            "cli_tool": "qwen-code-cli",
+            "model": "qwen3-coder-plus",
+            "title": "E2E Permission Test",
+            "permission_mode": permission_mode,
+        },
+        cookies={"session_token": token},
+    )
     assert r.status_code == 200, f"Create session failed: {r.status_code} {r.text}"
     session_id = r.json()["session"]["session_id"]
 
 
 def api_send_chat(token, message):
-    r = requests.post(f"{BASE_URL}/api/remote/sessions/{session_id}/chat",
-                      json={"content": message},
-                      cookies={"session_token": token})
+    r = requests.post(
+        f"{BASE_URL}/api/remote/sessions/{session_id}/chat",
+        json={"content": message},
+        cookies={"session_token": token},
+    )
     return r.status_code == 200
 
 
 def api_agent_output(data_str, stream="stdout", is_complete=False, sid=None):
-    r = requests.post(f"{BASE_URL}/api/remote/agent/message", json={
-        "type": "session_output",
-        "machine_id": machine_id,
-        "session_id": sid or session_id,
-        "data": data_str,
-        "stream": stream,
-        "is_complete": is_complete,
-    })
+    r = requests.post(
+        f"{BASE_URL}/api/remote/agent/message",
+        json={
+            "type": "session_output",
+            "machine_id": machine_id,
+            "session_id": sid or session_id,
+            "data": data_str,
+            "stream": stream,
+            "is_complete": is_complete,
+        },
+    )
     return r.status_code == 200
 
 
 def api_agent_permission_request(control_request_dict, sid=None):
     """Simulate CLI emitting a control_request, forwarded by agent."""
-    r = requests.post(f"{BASE_URL}/api/remote/agent/message", json={
-        "type": "permission_request",
-        "machine_id": machine_id,
-        "session_id": sid or session_id,
-        "control_request": control_request_dict,
-    })
+    r = requests.post(
+        f"{BASE_URL}/api/remote/agent/message",
+        json={
+            "type": "permission_request",
+            "machine_id": machine_id,
+            "session_id": sid or session_id,
+            "control_request": control_request_dict,
+        },
+    )
     return r.status_code == 200
 
 
 def api_get_buffered_output(token, sid=None):
     """Get session status with output buffer."""
-    r = requests.get(f"{BASE_URL}/api/remote/sessions/{sid or session_id}",
-                     cookies={"session_token": token})
+    r = requests.get(
+        f"{BASE_URL}/api/remote/sessions/{sid or session_id}", cookies={"session_token": token}
+    )
     assert r.status_code == 200
     return r.json()["session"]
 
@@ -175,20 +200,25 @@ def api_permission_response(token, sid, request_id, behavior, tool_name="", mess
     }
     if message:
         body["message"] = message
-    r = requests.post(f"{BASE_URL}/api/remote/sessions/{sid}/permission",
-                      json=body,
-                      cookies={"session_token": token})
+    r = requests.post(
+        f"{BASE_URL}/api/remote/sessions/{sid}/permission",
+        json=body,
+        cookies={"session_token": token},
+    )
     return r.status_code == 200, r.json() if r.status_code == 200 else r.text
 
 
 def api_get_pending_commands():
     """Trigger heartbeat to get pending commands for the agent."""
-    r = requests.post(f"{BASE_URL}/api/remote/agent/message", json={
-        "type": "heartbeat",
-        "machine_id": machine_id,
-        "status": "busy",
-        "active_sessions": 1,
-    })
+    r = requests.post(
+        f"{BASE_URL}/api/remote/agent/message",
+        json={
+            "type": "heartbeat",
+            "machine_id": machine_id,
+            "status": "busy",
+            "active_sessions": 1,
+        },
+    )
     assert r.status_code == 200
     return r.json().get("pending_commands", [])
 
@@ -196,16 +226,19 @@ def api_get_pending_commands():
 def api_cleanup(token, admin_token):
     global session_id, machine_id
     if session_id:
-        requests.post(f"{BASE_URL}/api/remote/sessions/{session_id}/stop",
-                      cookies={"session_token": token})
+        requests.post(
+            f"{BASE_URL}/api/remote/sessions/{session_id}/stop", cookies={"session_token": token}
+        )
         session_id = None
     if machine_id:
-        requests.delete(f"{BASE_URL}/api/remote/machines/{machine_id}",
-                        cookies={"session_token": admin_token})
+        requests.delete(
+            f"{BASE_URL}/api/remote/machines/{machine_id}", cookies={"session_token": admin_token}
+        )
         machine_id = None
 
 
 # ── SSE reader helper ──
+
 
 def read_sse_events(token, sid, max_events=20, timeout=5):
     """Read SSE events from the stream endpoint."""
@@ -216,8 +249,11 @@ def read_sse_events(token, sid, max_events=20, timeout=5):
 
     parsed = urlparse(url)
     conn = http.client.HTTPConnection(parsed.hostname, parsed.port or 80)
-    conn.request("GET", parsed.path + ("?" + parsed.query if parsed.query else ""),
-                 headers={"Accept": "text/event-stream"})
+    conn.request(
+        "GET",
+        parsed.path + ("?" + parsed.query if parsed.query else ""),
+        headers={"Accept": "text/event-stream"},
+    )
     resp = conn.getresponse()
 
     start = time.time()
@@ -236,6 +272,7 @@ def read_sse_events(token, sid, max_events=20, timeout=5):
 # ══════════════════════════════════════════════════════
 #  Part A: API-level tests (no browser needed)
 # ══════════════════════════════════════════════════════
+
 
 def test_api_permission_flow():
     global auth_token, machine_id, session_id
@@ -261,25 +298,34 @@ def test_api_permission_flow():
 
     # ── A3: Simulate CLI assistant output ──
     print("\n  ── A3: Simulate CLI assistant output ──")
-    system_init = json.dumps({
-        "type": "system",
-        "subtype": "initialized",
-        "session_id": session_id,
-        "model": "qwen3-coder-plus",
-        "permission_mode": "default",
-    })
+    system_init = json.dumps(
+        {
+            "type": "system",
+            "subtype": "initialized",
+            "session_id": session_id,
+            "model": "qwen3-coder-plus",
+            "permission_mode": "default",
+        }
+    )
     api_agent_output(system_init)
     pause(0.5)
 
-    assistant_msg = json.dumps({
-        "type": "assistant",
-        "session_id": session_id,
-        "message": {
-            "id": "msg-001",
-            "role": "assistant",
-            "content": [{"type": "text", "text": "我需要读取 config.json 文件，请允许我使用 read_file 工具。"}],
-        },
-    })
+    assistant_msg = json.dumps(
+        {
+            "type": "assistant",
+            "session_id": session_id,
+            "message": {
+                "id": "msg-001",
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "我需要读取 config.json 文件，请允许我使用 read_file 工具。",
+                    }
+                ],
+            },
+        }
+    )
     api_agent_output(assistant_msg)
     pause(0.5)
     print("  ✓ Assistant output sent")
@@ -309,9 +355,13 @@ def test_api_permission_flow():
     sess = api_get_buffered_output(auth_token)
     outputs = sess.get("output", [])
     permission_outputs = [o for o in outputs if o.get("stream") == "permission"]
-    assert len(permission_outputs) > 0, f"No permission outputs found! streams: {[o.get('stream') for o in outputs]}"
+    assert (
+        len(permission_outputs) > 0
+    ), f"No permission outputs found! streams: {[o.get('stream') for o in outputs]}"
     perm_data = json.loads(permission_outputs[0]["data"])
-    assert perm_data["type"] == "control_request", f"Expected control_request, got {perm_data.get('type')}"
+    assert (
+        perm_data["type"] == "control_request"
+    ), f"Expected control_request, got {perm_data.get('type')}"
     assert perm_data["request"]["tool_name"] == "read_file"
     print(f"  ✓ Permission request buffered (tool={perm_data['request']['tool_name']})")
 
@@ -326,14 +376,16 @@ def test_api_permission_flow():
                 permission_events.append(ev)
         except json.JSONDecodeError:
             pass
-    assert len(permission_events) > 0, f"No permission_request events in SSE! events: {sse_events[:5]}"
+    assert (
+        len(permission_events) > 0
+    ), f"No permission_request events in SSE! events: {sse_events[:5]}"
     print(f"  ✓ SSE delivered {len(permission_events)} permission_request event(s)")
 
     # ── A7: Send permission response (allow) ──
     print("\n  ── A7: Send permission response (allow) ──")
     ok, resp = api_permission_response(auth_token, session_id, request_id, "allow", "read_file")
     assert ok, f"Permission response failed: {resp}"
-    print(f"  ✓ Allow response sent")
+    print("  ✓ Allow response sent")
 
     # ── A8: Verify permission_response command queued for agent ──
     print("\n  ── A8: Verify command queued for agent ──")
@@ -342,36 +394,47 @@ def test_api_permission_flow():
     assert len(perm_cmds) > 0, f"No permission_response command queued! pending: {pending}"
     cmd = perm_cmds[0]
     assert cmd["behavior"] == "allow", f"Expected behavior=allow, got {cmd.get('behavior')}"
-    assert cmd.get("request_id") == request_id, f"request_id mismatch: {cmd.get('request_id')} vs {request_id}"
-    print(f"  ✓ permission_response command queued (behavior={cmd['behavior']}, request_id={cmd['request_id'][:8]}...)")
+    assert (
+        cmd.get("request_id") == request_id
+    ), f"request_id mismatch: {cmd.get('request_id')} vs {request_id}"
+    print(
+        f"  ✓ permission_response command queued (behavior={cmd['behavior']}, request_id={cmd['request_id'][:8]}...)"
+    )
 
     # ── A9: Simulate CLI continuing after allow ──
     print("\n  ── A9: Simulate CLI continuation ──")
-    tool_result = json.dumps({
-        "type": "assistant",
-        "session_id": session_id,
-        "message": {
-            "id": "msg-002",
-            "role": "assistant",
-            "content": [{"type": "text", "text": "文件内容如下：\n```json\n{\"name\": \"test\"}\n```"}],
-        },
-    })
+    tool_result = json.dumps(
+        {
+            "type": "assistant",
+            "session_id": session_id,
+            "message": {
+                "id": "msg-002",
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": '文件内容如下：\n```json\n{"name": "test"}\n```'}
+                ],
+            },
+        }
+    )
     api_agent_output(tool_result)
 
-    result_msg = json.dumps({
-        "type": "result",
-        "subtype": "success",
-        "session_id": session_id,
-        "is_error": False,
-        "duration_ms": 3000,
-        "result": "Successfully read config.json",
-    })
+    result_msg = json.dumps(
+        {
+            "type": "result",
+            "subtype": "success",
+            "session_id": session_id,
+            "is_error": False,
+            "duration_ms": 3000,
+            "result": "Successfully read config.json",
+        }
+    )
     api_agent_output(result_msg, is_complete=True)
     print("  ✓ CLI continued after allow")
 
     # ── Cleanup session for next test ──
-    requests.post(f"{BASE_URL}/api/remote/sessions/{session_id}/stop",
-                  cookies={"session_token": auth_token})
+    requests.post(
+        f"{BASE_URL}/api/remote/sessions/{session_id}/stop", cookies={"session_token": auth_token}
+    )
     session_id = None
     print("\n  ✓ Part A complete")
 
@@ -405,13 +468,14 @@ def test_api_permission_deny():
         },
     }
     api_agent_permission_request(control_request)
-    print(f"  ✓ control_request sent (tool=run_shell_command)")
+    print("  ✓ control_request sent (tool=run_shell_command)")
 
     # ── B3: Deny the permission ──
     print("\n  ── B3: Deny the permission ──")
     deny_msg = "User denied: dangerous command"
-    ok, resp = api_permission_response(auth_token, session_id, request_id, "deny",
-                                        "run_shell_command", deny_msg)
+    ok, resp = api_permission_response(
+        auth_token, session_id, request_id, "deny", "run_shell_command", deny_msg
+    )
     assert ok, f"Deny failed: {resp}"
     print("  ✓ Deny response sent")
 
@@ -426,8 +490,9 @@ def test_api_permission_deny():
     print(f"  ✓ Deny command queued (message={cmd['message']})")
 
     # Cleanup
-    requests.post(f"{BASE_URL}/api/remote/sessions/{session_id}/stop",
-                  cookies={"session_token": auth_token})
+    requests.post(
+        f"{BASE_URL}/api/remote/sessions/{session_id}/stop", cookies={"session_token": auth_token}
+    )
     session_id = None
     print("\n  ✓ Part B complete")
 
@@ -435,6 +500,7 @@ def test_api_permission_deny():
 # ══════════════════════════════════════════════════════
 #  Part C: Browser UI test (Playwright)
 # ══════════════════════════════════════════════════════
+
 
 def test_browser_permission_ui():
     global auth_token, machine_id, session_id
@@ -472,8 +538,7 @@ def test_browser_permission_ui():
 
         # Get webui token for ChatPage URL
         webui_info = requests.get(
-            f"{BASE_URL}/api/workspace/user-url",
-            cookies={"session_token": auth_token}
+            f"{BASE_URL}/api/workspace/user-url", cookies={"session_token": auth_token}
         ).json()
         webui_token = webui_info.get("token", "")
         effective_webui_url = webui_info.get("url", WEBUI_URL)
@@ -550,21 +615,29 @@ def test_browser_permission_ui():
                 print("  ✓ User message sent via ChatPage")
 
             # Simulate CLI output: system init + assistant thinking + control_request
-            system_init = json.dumps({
-                "type": "system", "subtype": "initialized",
-                "session_id": sid, "model": "qwen3-coder-plus",
-                "permission_mode": "default",
-            })
+            system_init = json.dumps(
+                {
+                    "type": "system",
+                    "subtype": "initialized",
+                    "session_id": sid,
+                    "model": "qwen3-coder-plus",
+                    "permission_mode": "default",
+                }
+            )
             api_agent_output(system_init, sid=sid)
             pause(0.5)
 
-            assistant_msg = json.dumps({
-                "type": "assistant", "session_id": sid,
-                "message": {
-                    "id": "msg-browser-001", "role": "assistant",
-                    "content": [{"type": "text", "text": "我需要读取文件，等待权限确认..."}],
-                },
-            })
+            assistant_msg = json.dumps(
+                {
+                    "type": "assistant",
+                    "session_id": sid,
+                    "message": {
+                        "id": "msg-browser-001",
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "我需要读取文件，等待权限确认..."}],
+                    },
+                }
+            )
             api_agent_output(assistant_msg, sid=sid)
             pause(1)
 
@@ -584,7 +657,7 @@ def test_browser_permission_ui():
                 },
             }
             api_agent_permission_request(control_request, sid=sid)
-            print(f"  ✓ control_request sent via agent API")
+            print("  ✓ control_request sent via agent API")
             pause(3)
 
             shot(page, "c3_permission_prompt")
@@ -619,16 +692,22 @@ def test_browser_permission_ui():
                 if "permission" in page_text.lower() or "read_file" in page_text.lower():
                     print("  ✓ Permission-related text found in page")
                 else:
-                    print(f"  ⚠ Permission panel not visible. Permission events: {len(captured_permission_events)}")
+                    print(
+                        f"  ⚠ Permission panel not visible. Permission events: {len(captured_permission_events)}"
+                    )
                     # Even without the UI panel, the API flow is verified in Part A
 
             # Continue after permission response
-            continuation = json.dumps({
-                "type": "result", "subtype": "success",
-                "session_id": sid, "is_error": False,
-                "duration_ms": 2000,
-                "result": "File read successfully",
-            })
+            continuation = json.dumps(
+                {
+                    "type": "result",
+                    "subtype": "success",
+                    "session_id": sid,
+                    "is_error": False,
+                    "duration_ms": 2000,
+                    "result": "File read successfully",
+                }
+            )
             api_agent_output(continuation, is_complete=True, sid=sid)
             pause(2)
             shot(page, "c6_continuation")
@@ -649,6 +728,7 @@ def test_browser_permission_ui():
 #  Main
 # ══════════════════════════════════════════════════════
 
+
 def run_tests():
     global auth_token, machine_id, session_id
 
@@ -661,10 +741,10 @@ def run_tests():
         test_browser_permission_ui()
 
         print(f"\n{'='*60}")
-        print(f"  ALL PASSED!")
-        print(f"  - Part A: API permission allow flow ✓")
-        print(f"  - Part B: API permission deny flow ✓")
-        print(f"  - Part C: Browser permission UI ✓")
+        print("  ALL PASSED!")
+        print("  - Part A: API permission allow flow ✓")
+        print("  - Part B: API permission deny flow ✓")
+        print("  - Part C: Browser permission UI ✓")
         print(f"  Screenshots: {SCREENSHOT_DIR}")
         print(f"{'='*60}")
 
@@ -673,17 +753,13 @@ def run_tests():
         traceback.print_exc()
 
         # Cleanup on failure
-        try:
+        with contextlib.suppress(Exception):
             api_cleanup(auth_token, admin_token)
-        except Exception:
-            pass
         sys.exit(1)
 
     # Cleanup on success
-    try:
+    with contextlib.suppress(Exception):
         api_cleanup(auth_token, admin_token)
-    except Exception:
-        pass
 
 
 if __name__ == "__main__":

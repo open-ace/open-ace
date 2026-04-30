@@ -24,7 +24,6 @@ import subprocess
 import sys
 import time
 import traceback
-import uuid
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
@@ -58,8 +57,9 @@ def log(tag, msg):
 
 
 def api_login(username=TEST_USER, password=TEST_PASS):
-    r = requests.post(f"{BASE_URL}/api/auth/login",
-                      json={"username": username, "password": password})
+    r = requests.post(
+        f"{BASE_URL}/api/auth/login", json={"username": username, "password": password}
+    )
     assert r.status_code == 200, f"Login failed: {r.text}"
     return r.cookies.get("session_token")
 
@@ -79,8 +79,9 @@ def wait_for_server(url=BASE_URL, timeout=30):
 
 def find_real_machine():
     """Find the real online remote machine."""
-    r = requests.get(f"{BASE_URL}/api/remote/machines/available",
-                     cookies={"session_token": auth_token})
+    r = requests.get(
+        f"{BASE_URL}/api/remote/machines/available", cookies={"session_token": auth_token}
+    )
     machines = r.json().get("machines", [])
     for m in machines:
         if m.get("status") == "online":
@@ -92,8 +93,9 @@ def poll_session_output(sid, token, timeout=60):
     """Poll session status until AI responds or timeout."""
     for _ in range(timeout // 2):
         try:
-            r = requests.get(f"{BASE_URL}/api/remote/sessions/{sid}",
-                             cookies={"session_token": token})
+            r = requests.get(
+                f"{BASE_URL}/api/remote/sessions/{sid}", cookies={"session_token": token}
+            )
             if r.status_code != 200:
                 return None
             data = r.json().get("session", {})
@@ -126,13 +128,15 @@ def test_1_normal_session():
     log("准备", f"使用远程机器: {machine_name} ({machine_id[:8]}...)")
 
     # Create session
-    r = requests.post(f"{BASE_URL}/api/remote/sessions",
-                      json={
-                          "machine_id": machine_id,
-                          "project_path": "/root/workspace",
-                          "cli_tool": "qwen-code-cli",
-                      },
-                      cookies={"session_token": auth_token})
+    r = requests.post(
+        f"{BASE_URL}/api/remote/sessions",
+        json={
+            "machine_id": machine_id,
+            "project_path": "/root/workspace",
+            "cli_tool": "qwen-code-cli",
+        },
+        cookies={"session_token": auth_token},
+    )
     assert r.status_code == 200, f"Create session failed: {r.status_code} {r.text}"
     sid = r.json()["session"]["session_id"]
     log("创建", f"Session: {sid[:8]}...")
@@ -141,9 +145,11 @@ def test_1_normal_session():
     time.sleep(8)
 
     # Send message
-    r = requests.post(f"{BASE_URL}/api/remote/sessions/{sid}/chat",
-                      json={"content": "Say 'pong' and nothing else."},
-                      cookies={"session_token": auth_token})
+    r = requests.post(
+        f"{BASE_URL}/api/remote/sessions/{sid}/chat",
+        json={"content": "Say 'pong' and nothing else."},
+        cookies={"session_token": auth_token},
+    )
     assert r.status_code == 200, f"Send message failed: {r.status_code} {r.text}"
     log("发送", "Message sent, waiting for response...")
 
@@ -153,8 +159,9 @@ def test_1_normal_session():
     log("响应", f"AI replied: {result[:80]}")
 
     # Cleanup
-    requests.post(f"{BASE_URL}/api/remote/sessions/{sid}/stop",
-                  cookies={"session_token": auth_token})
+    requests.post(
+        f"{BASE_URL}/api/remote/sessions/{sid}/stop", cookies={"session_token": auth_token}
+    )
     log("清理", "Session stopped")
 
     print("  ✅ TEST 1 PASSED: 正常会话消息收发正常\n")
@@ -170,22 +177,26 @@ def test_2_stale_session_after_restart():
     print("=" * 60)
 
     # Create a session first
-    r = requests.post(f"{BASE_URL}/api/remote/sessions",
-                      json={
-                          "machine_id": machine_id,
-                          "project_path": "/root/workspace",
-                          "cli_tool": "qwen-code-cli",
-                      },
-                      cookies={"session_token": auth_token})
+    r = requests.post(
+        f"{BASE_URL}/api/remote/sessions",
+        json={
+            "machine_id": machine_id,
+            "project_path": "/root/workspace",
+            "cli_tool": "qwen-code-cli",
+        },
+        cookies={"session_token": auth_token},
+    )
     assert r.status_code == 200
     old_sid = r.json()["session"]["session_id"]
     log("创建", f"Old session: {old_sid[:8]}...")
 
     # Verify it works before restart
     time.sleep(8)
-    r = requests.post(f"{BASE_URL}/api/remote/sessions/{old_sid}/chat",
-                      json={"content": "hello before restart"},
-                      cookies={"session_token": auth_token})
+    r = requests.post(
+        f"{BASE_URL}/api/remote/sessions/{old_sid}/chat",
+        json={"content": "hello before restart"},
+        cookies={"session_token": auth_token},
+    )
     assert r.status_code == 200, f"Pre-restart message should succeed: {r.status_code}"
     log("验证", "Pre-restart message succeeded ✓")
 
@@ -213,9 +224,11 @@ def test_2_stale_session_after_restart():
     time.sleep(5)
 
     # Try to send message to the OLD session
-    r = requests.post(f"{BASE_URL}/api/remote/sessions/{old_sid}/chat",
-                      json={"content": "hello after restart"},
-                      cookies={"session_token": auth_token})
+    r = requests.post(
+        f"{BASE_URL}/api/remote/sessions/{old_sid}/chat",
+        json={"content": "hello after restart"},
+        cookies={"session_token": auth_token},
+    )
 
     log("测试", f"Stale session response: {r.status_code}")
 
@@ -224,8 +237,9 @@ def test_2_stale_session_after_restart():
     if r.status_code == 400:
         log("结果", "✅ Old session correctly returns 400 after restart")
         body = r.json()
-        assert "reconnect" in body or "not active" in body.get("error", "").lower(), \
-            f"Error message should indicate session problem: {body}"
+        assert (
+            "reconnect" in body or "not active" in body.get("error", "").lower()
+        ), f"Error message should indicate session problem: {body}"
         log("验证", f"Error body has reconnect info: {body}")
     elif r.status_code == 200:
         log("结果", "Old session still works (agent re-registered quickly)")
@@ -234,8 +248,9 @@ def test_2_stale_session_after_restart():
         raise AssertionError(f"Unexpected status: {r.status_code} {r.text}")
 
     # Cleanup
-    requests.post(f"{BASE_URL}/api/remote/sessions/{old_sid}/stop",
-                  cookies={"session_token": auth_token})
+    requests.post(
+        f"{BASE_URL}/api/remote/sessions/{old_sid}/stop", cookies={"session_token": auth_token}
+    )
 
     print("  ✅ TEST 2 PASSED: 服务器重启后旧 session 正确处理\n")
     return old_sid
@@ -263,13 +278,15 @@ def test_3_new_session_after_restart():
         machine_id = mid
 
     # Create NEW session
-    r = requests.post(f"{BASE_URL}/api/remote/sessions",
-                      json={
-                          "machine_id": machine_id,
-                          "project_path": "/root/workspace",
-                          "cli_tool": "qwen-code-cli",
-                      },
-                      cookies={"session_token": auth_token})
+    r = requests.post(
+        f"{BASE_URL}/api/remote/sessions",
+        json={
+            "machine_id": machine_id,
+            "project_path": "/root/workspace",
+            "cli_tool": "qwen-code-cli",
+        },
+        cookies={"session_token": auth_token},
+    )
     assert r.status_code == 200, f"Create new session failed: {r.status_code} {r.text}"
     new_sid = r.json()["session"]["session_id"]
     log("创建", f"New session: {new_sid[:8]}...")
@@ -278,9 +295,11 @@ def test_3_new_session_after_restart():
     time.sleep(8)
 
     # Send message to new session
-    r = requests.post(f"{BASE_URL}/api/remote/sessions/{new_sid}/chat",
-                      json={"content": "Say 'hello world' and nothing else."},
-                      cookies={"session_token": auth_token})
+    r = requests.post(
+        f"{BASE_URL}/api/remote/sessions/{new_sid}/chat",
+        json={"content": "Say 'hello world' and nothing else."},
+        cookies={"session_token": auth_token},
+    )
     assert r.status_code == 200, f"Send to new session failed: {r.status_code} {r.text}"
     log("发送", "Message sent to new session")
 
@@ -290,8 +309,9 @@ def test_3_new_session_after_restart():
     log("响应", f"New session AI replied: {result[:80]}")
 
     # Cleanup
-    requests.post(f"{BASE_URL}/api/remote/sessions/{new_sid}/stop",
-                  cookies={"session_token": auth_token})
+    requests.post(
+        f"{BASE_URL}/api/remote/sessions/{new_sid}/stop", cookies={"session_token": auth_token}
+    )
 
     print("  ✅ TEST 3 PASSED: 重启后新 session 正常工作\n")
 
@@ -313,35 +333,39 @@ def test_4_sse_latency():
         machine_id = mid
 
     # Create session
-    r = requests.post(f"{BASE_URL}/api/remote/sessions",
-                      json={
-                          "machine_id": machine_id,
-                          "project_path": "/root/workspace",
-                          "cli_tool": "qwen-code-cli",
-                      },
-                      cookies={"session_token": auth_token})
+    r = requests.post(
+        f"{BASE_URL}/api/remote/sessions",
+        json={
+            "machine_id": machine_id,
+            "project_path": "/root/workspace",
+            "cli_tool": "qwen-code-cli",
+        },
+        cookies={"session_token": auth_token},
+    )
     assert r.status_code == 200
     sid = r.json()["session"]["session_id"]
     log("创建", f"Session: {sid[:8]}...")
     time.sleep(8)
 
     # Send a message first to generate output
-    r = requests.post(f"{BASE_URL}/api/remote/sessions/{sid}/chat",
-                      json={"content": "Say 'test' and nothing else."},
-                      cookies={"session_token": auth_token})
+    r = requests.post(
+        f"{BASE_URL}/api/remote/sessions/{sid}/chat",
+        json={"content": "Say 'test' and nothing else."},
+        cookies={"session_token": auth_token},
+    )
     assert r.status_code == 200
 
     # Wait for response to be buffered
     time.sleep(15)
 
     # Now test SSE latency — connect and measure time to first data
-    webui_info = requests.get(f"{BASE_URL}/api/workspace/user-url",
-                              cookies={"session_token": auth_token}).json()
+    webui_info = requests.get(
+        f"{BASE_URL}/api/workspace/user-url", cookies={"session_token": auth_token}
+    ).json()
     webui_token = webui_info.get("token", "")
 
-    sse_url = f"{BASE_URL}/api/remote/sessions/{sid}/stream?token={webui_token}"
-
     import http.client
+
     start = time.time()
     conn = http.client.HTTPConnection("localhost", 5001)
     conn.request("GET", f"/api/remote/sessions/{sid}/stream?token={webui_token}")
@@ -360,13 +384,15 @@ def test_4_sse_latency():
 
     # Verify X-Accel-Buffering header
     headers = dict(resp.getheaders())
-    assert headers.get("X-Accel-Buffering") == "no" or "X-Accel-Buffering" in str(resp.getheaders()), \
-        "Missing X-Accel-Buffering: no header"
+    assert headers.get("X-Accel-Buffering") == "no" or "X-Accel-Buffering" in str(
+        resp.getheaders()
+    ), "Missing X-Accel-Buffering: no header"
     log("SSE", "✓ X-Accel-Buffering: no header present")
 
     # Cleanup
-    requests.post(f"{BASE_URL}/api/remote/sessions/{sid}/stop",
-                  cookies={"session_token": auth_token})
+    requests.post(
+        f"{BASE_URL}/api/remote/sessions/{sid}/stop", cookies={"session_token": auth_token}
+    )
 
     print("  ✅ TEST 4 PASSED: SSE 延迟正常\n")
 
@@ -388,21 +414,25 @@ def test_5_proxy_token_expiry():
         machine_id = mid
 
     # Create session
-    r = requests.post(f"{BASE_URL}/api/remote/sessions",
-                      json={
-                          "machine_id": machine_id,
-                          "project_path": "/root/workspace",
-                          "cli_tool": "qwen-code-cli",
-                      },
-                      cookies={"session_token": auth_token})
+    r = requests.post(
+        f"{BASE_URL}/api/remote/sessions",
+        json={
+            "machine_id": machine_id,
+            "project_path": "/root/workspace",
+            "cli_tool": "qwen-code-cli",
+        },
+        cookies={"session_token": auth_token},
+    )
     assert r.status_code == 200
     sid = r.json()["session"]["session_id"]
     time.sleep(8)
 
     # Send first message → should succeed (token fresh)
-    r = requests.post(f"{BASE_URL}/api/remote/sessions/{sid}/chat",
-                      json={"content": "Say 'ok'"},
-                      cookies={"session_token": auth_token})
+    r = requests.post(
+        f"{BASE_URL}/api/remote/sessions/{sid}/chat",
+        json={"content": "Say 'ok'"},
+        cookies={"session_token": auth_token},
+    )
     assert r.status_code == 200
     log("验证", "First message succeeded")
 
@@ -412,13 +442,15 @@ def test_5_proxy_token_expiry():
 
     # Check the response doesn't contain proxy token error
     log("验证", f"Response: {result[:80]}")
-    assert "401" not in result and "proxy token" not in result.lower(), \
-        f"Proxy token error in response: {result}"
+    assert (
+        "401" not in result and "proxy token" not in result.lower()
+    ), f"Proxy token error in response: {result}"
     log("验证", "✓ No proxy token error in response")
 
     # Cleanup
-    requests.post(f"{BASE_URL}/api/remote/sessions/{sid}/stop",
-                  cookies={"session_token": auth_token})
+    requests.post(
+        f"{BASE_URL}/api/remote/sessions/{sid}/stop", cookies={"session_token": auth_token}
+    )
 
     print("  ✅ TEST 5 PASSED: Proxy token 有效期正常\n")
 

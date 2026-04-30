@@ -9,10 +9,9 @@ requests through the Open ACE proxy.
 
 import json
 import logging
-import os
 import shutil
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Optional
 
 from .base import BaseCLIAdapter
 
@@ -35,7 +34,7 @@ class QwenCodeAdapter(BaseCLIAdapter):
         """Check if qwen-code CLI is installed."""
         return shutil.which(self.EXECUTABLE) is not None
 
-    def get_env_vars(self, proxy_url: str, proxy_token: str) -> Dict[str, str]:
+    def get_env_vars(self, proxy_url: str, proxy_token: str) -> dict[str, str]:
         """
         Get environment variables for qwen-code CLI.
 
@@ -58,14 +57,17 @@ class QwenCodeAdapter(BaseCLIAdapter):
         project_path: str,
         model: Optional[str] = None,
         permission_mode: Optional[str] = None,
-        allowed_tools: Optional[List[str]] = None,
+        allowed_tools: Optional[list[str]] = None,
         resume: bool = False,
-    ) -> List[str]:
+    ) -> list[str]:
         args = [
             self.EXECUTABLE,
-            "--auth-type", "openai",
-            "--input-format", "stream-json",
-            "--output-format", "stream-json",
+            "--auth-type",
+            "openai",
+            "--input-format",
+            "stream-json",
+            "--output-format",
+            "stream-json",
             "--channel=SDK",
         ]
 
@@ -87,11 +89,13 @@ class QwenCodeAdapter(BaseCLIAdapter):
 
     def build_single_shot_args(
         self, prompt: str, project_path: str, model: Optional[str] = None
-    ) -> List[str]:
+    ) -> list[str]:
         args = [
             self.EXECUTABLE,
-            "--auth-type", "openai",
-            "--output-format", "stream-json",
+            "--auth-type",
+            "openai",
+            "--output-format",
+            "stream-json",
             prompt,
         ]
         if model:

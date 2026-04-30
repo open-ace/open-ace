@@ -23,8 +23,8 @@ Performance improvement:
 
 from typing import Union
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "027_session_stats_indexes"
@@ -91,13 +91,12 @@ def downgrade() -> None:
     """Downgrade database schema."""
     conn = op.get_bind()
 
-    if conn.dialect.name == "postgresql":
-        if _matview_exists(conn, "session_stats"):
-            if _index_exists(conn, "session_stats", "idx_session_stats_updated_at"):
-                op.execute(sa.text("DROP INDEX idx_session_stats_updated_at"))
+    if conn.dialect.name == "postgresql" and _matview_exists(conn, "session_stats"):
+        if _index_exists(conn, "session_stats", "idx_session_stats_updated_at"):
+            op.execute(sa.text("DROP INDEX idx_session_stats_updated_at"))
 
-            if _index_exists(conn, "session_stats", "idx_session_stats_tool_host"):
-                op.execute(sa.text("DROP INDEX idx_session_stats_tool_host"))
+        if _index_exists(conn, "session_stats", "idx_session_stats_tool_host"):
+            op.execute(sa.text("DROP INDEX idx_session_stats_tool_host"))
 
-            if _index_exists(conn, "session_stats", "idx_session_stats_session_id"):
-                op.execute(sa.text("DROP INDEX idx_session_stats_session_id"))
+        if _index_exists(conn, "session_stats", "idx_session_stats_session_id"):
+            op.execute(sa.text("DROP INDEX idx_session_stats_session_id"))

@@ -7,8 +7,9 @@ This test verifies remote data fetch interval:
 - Remote data: fetched every 5 minutes (300 seconds)
 """
 
-import pytest
 import time
+
+import pytest
 from playwright.async_api import async_playwright
 
 # Test configuration

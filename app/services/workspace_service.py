@@ -6,7 +6,7 @@ Business logic layer for workspace operations.
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from app.modules.workspace.collaboration import (
     Annotation,
@@ -16,11 +16,7 @@ from app.modules.workspace.collaboration import (
     Team,
 )
 from app.modules.workspace.prompt_library import PromptLibrary, PromptTemplate
-from app.modules.workspace.session_manager import (
-    AgentSession,
-    SessionManager,
-    SessionType,
-)
+from app.modules.workspace.session_manager import AgentSession, SessionManager, SessionType
 from app.modules.workspace.state_sync import (
     StateSyncManager,
     SyncEvent,
@@ -97,8 +93,8 @@ class WorkspaceService:
         username: str = "",
         description: str = "",
         category: str = "general",
-        variables: Optional[List[Dict[str, str]]] = None,
-        tags: Optional[List[str]] = None,
+        variables: Optional[list[dict[str, str]]] = None,
+        tags: Optional[list[str]] = None,
         is_public: bool = False,
     ) -> PromptTemplate:
         """
@@ -136,7 +132,7 @@ class WorkspaceService:
         logger.info(f"Created prompt template: {name} (ID: {template_id})")
         return template
 
-    def render_prompt(self, template_id: int, variables: Dict[str, str]) -> str:
+    def render_prompt(self, template_id: int, variables: dict[str, str]) -> str:
         """
         Render a prompt template with variables.
 
@@ -172,7 +168,7 @@ class WorkspaceService:
         session_type: str = SessionType.CHAT.value,
         title: str = "",
         model: Optional[str] = None,
-        context: Optional[Dict[str, Any]] = None,
+        context: Optional[dict[str, Any]] = None,
         project_id: Optional[int] = None,
         project_path: Optional[str] = None,
     ) -> AgentSession:
@@ -213,7 +209,12 @@ class WorkspaceService:
                 session_id=session.session_id,
                 user_id=user_id,
                 tool_name=tool_name,
-                data={"title": title, "model": model, "project_id": project_id, "project_path": project_path},
+                data={
+                    "title": title,
+                    "model": model,
+                    "project_id": project_id,
+                    "project_path": project_path,
+                },
             )
         )
 
@@ -267,7 +268,7 @@ class WorkspaceService:
 
     # ==================== Tool Operations ====================
 
-    def get_available_tools(self) -> List[ToolInfo]:
+    def get_available_tools(self) -> list[ToolInfo]:
         """
         Get all available AI tools.
 
@@ -295,7 +296,7 @@ class WorkspaceService:
         session_id: Optional[str] = None,
         model: Optional[str] = None,
         **kwargs,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Send a message to an AI tool.
 
@@ -419,7 +420,7 @@ class WorkspaceService:
         author_name: str,
         team_id: Optional[str] = None,
         category: str = "general",
-        tags: Optional[List[str]] = None,
+        tags: Optional[list[str]] = None,
         is_published: bool = False,
     ) -> KnowledgeEntry:
         """
@@ -451,7 +452,7 @@ class WorkspaceService:
 
     # ==================== Statistics ====================
 
-    def get_workspace_stats(self, user_id: Optional[int] = None) -> Dict[str, Any]:
+    def get_workspace_stats(self, user_id: Optional[int] = None) -> dict[str, Any]:
         """
         Get workspace statistics.
 

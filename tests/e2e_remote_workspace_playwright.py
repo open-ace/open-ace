@@ -14,12 +14,10 @@ Run:
   HEADLESS=false python tests/e2e_remote_workspace_playwright.py   # 演示
 """
 
-import json
 import os
 import sys
 import time
 import uuid
-import traceback
 
 # Add project root
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -44,6 +42,7 @@ auth_token = None
 
 
 # ── 工具函数 ──────────────────────────────────────────
+
 
 def ensure_dir():
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
@@ -70,9 +69,11 @@ def pause(seconds):
 
 # ── API 调用（同时在浏览器 Console 面板可看到 fetch 日志）─────
 
+
 def api_login_as(username=TEST_USER, password=TEST_PASS):
-    r = requests.post(f"{BASE_URL}/api/auth/login",
-                      json={"username": username, "password": password})
+    r = requests.post(
+        f"{BASE_URL}/api/auth/login", json={"username": username, "password": password}
+    )
     assert r.status_code == 200, f"Login failed: {r.status_code}"
     token = r.cookies.get("session_token")
     assert token, "No session_token cookie"
@@ -86,105 +87,128 @@ def api_admin_login():
 def api_register_machine(admin_token):
     global machine_id
     # 1. 生成注册 token
-    r = requests.post(f"{BASE_URL}/api/remote/machines/register",
-                      json={"tenant_id": 1},
-                      cookies={"session_token": admin_token})
+    r = requests.post(
+        f"{BASE_URL}/api/remote/machines/register",
+        json={"tenant_id": 1},
+        cookies={"session_token": admin_token},
+    )
     assert r.status_code == 200
     reg_token = r.json()["registration_token"]
 
     # 2. 用 token 注册机器
     machine_id = str(uuid.uuid4())
-    r = requests.post(f"{BASE_URL}/api/remote/agent/register", json={
-        "registration_token": reg_token,
-        "machine_id": machine_id,
-        "machine_name": "E2E Demo Server",
-        "hostname": "demo-server.local",
-        "os_type": "linux",
-        "os_version": "Ubuntu 24.04 LTS",
-        "capabilities": {"cpu_cores": 16, "memory_gb": 64, "cli_installed": True},
-        "agent_version": "1.0.0-e2e",
-    })
+    r = requests.post(
+        f"{BASE_URL}/api/remote/agent/register",
+        json={
+            "registration_token": reg_token,
+            "machine_id": machine_id,
+            "machine_name": "E2E Demo Server",
+            "hostname": "demo-server.local",
+            "os_type": "linux",
+            "os_version": "Ubuntu 24.04 LTS",
+            "capabilities": {"cpu_cores": 16, "memory_gb": 64, "cli_installed": True},
+            "agent_version": "1.0.0-e2e",
+        },
+    )
     assert r.status_code == 200
 
     # 3. HTTP 长连接注册
-    r = requests.post(f"{BASE_URL}/api/remote/agent/message", json={
-        "type": "register",
-        "machine_id": machine_id,
-        "capabilities": {"cpu_cores": 16, "memory_gb": 64, "cli_installed": True},
-    })
+    r = requests.post(
+        f"{BASE_URL}/api/remote/agent/message",
+        json={
+            "type": "register",
+            "machine_id": machine_id,
+            "capabilities": {"cpu_cores": 16, "memory_gb": 64, "cli_installed": True},
+        },
+    )
     assert r.status_code == 200
 
     # 4. 给测试用户分配权限（黄迎春 user_id=89）
-    r = requests.post(f"{BASE_URL}/api/remote/machines/{machine_id}/assign",
-                      json={"user_id": 89, "permission": "admin"},
-                      cookies={"session_token": admin_token})
+    r = requests.post(
+        f"{BASE_URL}/api/remote/machines/{machine_id}/assign",
+        json={"user_id": 89, "permission": "admin"},
+        cookies={"session_token": admin_token},
+    )
     assert r.status_code == 200
 
 
 def api_create_session(token):
     global session_id
-    r = requests.post(f"{BASE_URL}/api/remote/sessions",
-                      json={
-                          "machine_id": machine_id,
-                          "project_path": "/home/rhuang/workspace/demo-project",
-                          "cli_tool": "qwen-code-cli",
-                          "model": "qwen3-coder-plus",
-                          "title": "E2E 远程会话",
-                      },
-                      cookies={"session_token": token})
+    r = requests.post(
+        f"{BASE_URL}/api/remote/sessions",
+        json={
+            "machine_id": machine_id,
+            "project_path": "/home/rhuang/workspace/demo-project",
+            "cli_tool": "qwen-code-cli",
+            "model": "qwen3-coder-plus",
+            "title": "E2E 远程会话",
+        },
+        cookies={"session_token": token},
+    )
     assert r.status_code == 200, f"Create session failed: {r.status_code} {r.text}"
     session_id = r.json()["session"]["session_id"]
 
 
 def api_send_chat(token, message):
-    r = requests.post(f"{BASE_URL}/api/remote/sessions/{session_id}/chat",
-                      json={"content": message},
-                      cookies={"session_token": token})
+    r = requests.post(
+        f"{BASE_URL}/api/remote/sessions/{session_id}/chat",
+        json={"content": message},
+        cookies={"session_token": token},
+    )
     return r.status_code == 200
 
 
 def api_agent_output(step, is_complete=False, sid=None):
     outputs = {
-        "thinking":  '{"type":"thinking","content":"正在分析代码结构，寻找潜在问题..."}',
-        "response":  '{"type":"assistant","content":"发现 3 个问题：\\n1. API 端点缺少错误处理\\n2. SQL 查询存在注入风险\\n3. 文件顶部有未使用的 import"}',
+        "thinking": '{"type":"thinking","content":"正在分析代码结构，寻找潜在问题..."}',
+        "response": '{"type":"assistant","content":"发现 3 个问题：\\n1. API 端点缺少错误处理\\n2. SQL 查询存在注入风险\\n3. 文件顶部有未使用的 import"}',
         "tool_call": '{"type":"tool_use","tool":"read_file","input":{"path":"/home/rhuang/workspace/demo-project/main.py"}}',
         "tool_done": '{"type":"tool_result","tool":"read_file","output":"成功读取 142 行代码"}',
-        "final":     '{"type":"assistant","content":"已修复全部 3 个问题：\\n- 添加了 try/except 错误处理\\n- 参数化 SQL 查询\\n- 移除了 5 个未使用的 import\\n\\n代码已保存，可以运行测试验证。"}',
+        "final": '{"type":"assistant","content":"已修复全部 3 个问题：\\n- 添加了 try/except 错误处理\\n- 参数化 SQL 查询\\n- 移除了 5 个未使用的 import\\n\\n代码已保存，可以运行测试验证。"}',
     }
-    r = requests.post(f"{BASE_URL}/api/remote/agent/message", json={
-        "type": "session_output",
-        "machine_id": machine_id,
-        "session_id": sid or session_id,
-        "data": outputs[step],
-        "stream": "stdout",
-        "is_complete": is_complete,
-    })
+    r = requests.post(
+        f"{BASE_URL}/api/remote/agent/message",
+        json={
+            "type": "session_output",
+            "machine_id": machine_id,
+            "session_id": sid or session_id,
+            "data": outputs[step],
+            "stream": "stdout",
+            "is_complete": is_complete,
+        },
+    )
     return r.status_code == 200
 
 
 def api_send_usage():
-    requests.post(f"{BASE_URL}/api/remote/agent/message", json={
-        "type": "usage_report",
-        "machine_id": machine_id,
-        "session_id": session_id,
-        "tokens": {"input": 1500, "output": 800},
-        "requests": 2,
-    })
+    requests.post(
+        f"{BASE_URL}/api/remote/agent/message",
+        json={
+            "type": "usage_report",
+            "machine_id": machine_id,
+            "session_id": session_id,
+            "tokens": {"input": 1500, "output": 800},
+            "requests": 2,
+        },
+    )
 
 
 def api_cleanup(token):
     global session_id, machine_id
     if session_id:
-        requests.post(f"{BASE_URL}/api/remote/sessions/{session_id}/stop",
-                      cookies={"session_token": token})
+        requests.post(
+            f"{BASE_URL}/api/remote/sessions/{session_id}/stop", cookies={"session_token": token}
+        )
         session_id = None
     if machine_id:
-        requests.delete(f"{BASE_URL}/api/remote/machines/{machine_id}",
-                        cookies={"session_token": token})
+        requests.delete(
+            f"{BASE_URL}/api/remote/machines/{machine_id}", cookies={"session_token": token}
+        )
         machine_id = None
 
 
 # ── 在浏览器页面中执行 fetch 并显示 toast 通知 ──────────
+
 
 def browser_fetch(page, label, method, url, body=None):
     """在浏览器控制台中执行 fetch 请求，并打印结果，让用户在 DevTools Console 看到过程。"""
@@ -222,6 +246,7 @@ def browser_fetch(page, label, method, url, body=None):
 # ══════════════════════════════════════════════════════
 #  主测试流程
 # ══════════════════════════════════════════════════════
+
 
 def run_tests():
     global auth_token, session_id, chatpage_session_id
@@ -280,26 +305,30 @@ def run_tests():
         log_step("API", f"机器已注册: {machine_id[:8]}...")
 
         # 在浏览器中验证机器列表
-        result = browser_fetch(page, "查询可用远程机器", "GET",
-                               f"/api/remote/machines/available")
+        result = browser_fetch(page, "查询可用远程机器", "GET", "/api/remote/machines/available")
         machines = result.get("data", {}).get("machines", [])
         log_step("结果", f"可用机器数: {len(machines)}")
         pause(2)
         shot(page, "04_machine_available")
         assert len(machines) >= 1, f"应有至少 1 台可用机器，实际 {len(machines)}"
-        print(f"  ✓ 远程机器已注册并可用 (connected=true)")
+        print("  ✓ 远程机器已注册并可用 (connected=true)")
 
         # ══════ 4. 创建远程会话（通过浏览器 fetch）══════
         print("\n══════ 4. 创建远程会话")
 
-        result = browser_fetch(page, "创建远程会话", "POST",
-                               "/api/remote/sessions", {
-                                   "machine_id": machine_id,
-                                   "project_path": "/home/rhuang/workspace/demo-project",
-                                   "cli_tool": "qwen-code-cli",
-                                   "model": "qwen3-coder-plus",
-                                   "title": "E2E 远程会话",
-                               })
+        result = browser_fetch(
+            page,
+            "创建远程会话",
+            "POST",
+            "/api/remote/sessions",
+            {
+                "machine_id": machine_id,
+                "project_path": "/home/rhuang/workspace/demo-project",
+                "cli_tool": "qwen-code-cli",
+                "model": "qwen3-coder-plus",
+                "title": "E2E 远程会话",
+            },
+        )
         assert result["ok"], f"创建会话失败: {result}"
         session_id = result["data"]["session"]["session_id"]
         log_step("会话ID", session_id[:8] + "...")
@@ -310,10 +339,15 @@ def run_tests():
         # ══════ 5. 发送用户消息（通过浏览器 fetch）══════
         print("\n══════ 5. 发送用户消息")
 
-        result = browser_fetch(page, "发送消息给远程 AI", "POST",
-                               f"/api/remote/sessions/{session_id}/chat", {
-                                   "content": "请帮我审查 main.py 的代码，找出并修复所有问题。",
-                               })
+        result = browser_fetch(
+            page,
+            "发送消息给远程 AI",
+            "POST",
+            f"/api/remote/sessions/{session_id}/chat",
+            {
+                "content": "请帮我审查 main.py 的代码，找出并修复所有问题。",
+            },
+        )
         assert result["ok"], f"发送消息失败: {result}"
         pause(3)
         shot(page, "06_message_sent")
@@ -323,11 +357,11 @@ def run_tests():
         print("\n══════ 6. 模拟远程 AI 回复（分步）")
 
         steps = [
-            ("thinking",  False, "AI 正在思考..."),
-            ("response",  False, "AI 生成回复（发现 3 个问题）"),
+            ("thinking", False, "AI 正在思考..."),
+            ("response", False, "AI 生成回复（发现 3 个问题）"),
             ("tool_call", False, "AI 调用工具: read_file"),
             ("tool_done", False, "工具返回结果"),
-            ("final",     True,  "AI 最终回复（已修复所有问题）"),
+            ("final", True, "AI 最终回复（已修复所有问题）"),
         ]
         for i, (step, done, label) in enumerate(steps):
             log_step(f"步骤{i+1}/5", label)
@@ -342,8 +376,7 @@ def run_tests():
         # ══════ 7. 验证会话状态（通过浏览器 fetch）══════
         print("\n══════ 7. 验证会话数据")
 
-        result = browser_fetch(page, "查询会话详情", "GET",
-                               f"/api/remote/sessions/{session_id}")
+        result = browser_fetch(page, "查询会话详情", "GET", f"/api/remote/sessions/{session_id}")
         assert result["ok"]
         sess = result["data"]["session"]
         output_count = len(sess.get("output", []))
@@ -364,7 +397,7 @@ def run_tests():
         shot(page, "09_sessions_list")
 
         # 查找并点击我们的远程会话
-        session_items = page.locator('.session-item, .session-card, .list-group-item, tr')
+        session_items = page.locator(".session-item, .session-card, .list-group-item, tr")
         found = False
         for i in range(session_items.count()):
             text = session_items.nth(i).text_content()
@@ -393,6 +426,7 @@ def run_tests():
 
         # 监听 ChatPage 自动创建 session 的网络响应
         captured_sid = [None]
+
         def on_response(response):
             url = response.url
             if "/api/remote/sessions" in url and "/chat" not in url and "/stop" not in url:
@@ -409,15 +443,16 @@ def run_tests():
 
         # 捕获控制台错误帮助调试
         console_errors = []
+
         def on_console(msg):
             if msg.type in ("error", "warning"):
                 console_errors.append(f"[{msg.type}] {msg.text}")
+
         page.on("console", on_console)
 
         # 获取 webui 专用 token（不同于 session cookie）
         webui_info = requests.get(
-            f"{BASE_URL}/api/workspace/user-url",
-            cookies={"session_token": auth_token}
+            f"{BASE_URL}/api/workspace/user-url", cookies={"session_token": auth_token}
         ).json()
         webui_token = webui_info.get("token", "")
         effective_webui_url = webui_info.get("url", WEBUI_URL)
@@ -481,11 +516,13 @@ def run_tests():
                 log_step("会话", f"ChatPage 自动创建会话: {chatpage_session_id[:8]}...")
 
                 # 模拟 AI 回复（3 步快速演示）
-                for i, (step, done, label) in enumerate([
-                    ("thinking", False, "AI 正在思考..."),
-                    ("response", False, "AI 生成回复"),
-                    ("final",    True,  "AI 最终回复"),
-                ]):
+                for i, (step, done, label) in enumerate(
+                    [
+                        ("thinking", False, "AI 正在思考..."),
+                        ("response", False, "AI 生成回复"),
+                        ("final", True, "AI 最终回复"),
+                    ]
+                ):
                     api_agent_output(step, is_complete=done, sid=chatpage_session_id)
                     pause(2)
 
@@ -522,22 +559,27 @@ def run_tests():
         print("\n══════ 11. 停止会话 & 清理")
 
         # 用 requests 停止会话（不依赖页面域）
-        r = requests.post(f"{BASE_URL}/api/remote/sessions/{session_id}/stop",
-                          cookies={"session_token": auth_token})
+        r = requests.post(
+            f"{BASE_URL}/api/remote/sessions/{session_id}/stop",
+            cookies={"session_token": auth_token},
+        )
         log_step("停止", f"原始会话: {session_id[:8]}... → {r.status_code}")
 
         # 停止 ChatPage 创建的远程会话（如果有）
         if chatpage_session_id:
-            r2 = requests.post(f"{BASE_URL}/api/remote/sessions/{chatpage_session_id}/stop",
-                               cookies={"session_token": auth_token})
+            r2 = requests.post(
+                f"{BASE_URL}/api/remote/sessions/{chatpage_session_id}/stop",
+                cookies={"session_token": auth_token},
+            )
             log_step("清理", f"ChatPage 会话: {chatpage_session_id[:8]}... → {r2.status_code}")
 
         pause(2)
 
         # 注销机器需要 admin 权限，用 admin token
         log_step("清理", "用 admin token 注销远程机器")
-        r = requests.delete(f"{BASE_URL}/api/remote/machines/{machine_id}",
-                            cookies={"session_token": admin_token})
+        r = requests.delete(
+            f"{BASE_URL}/api/remote/machines/{machine_id}", cookies={"session_token": admin_token}
+        )
         assert r.status_code == 200, f"注销机器失败: {r.status_code} {r.text}"
         pause(2)
         shot(page, "12_cleanup_done")

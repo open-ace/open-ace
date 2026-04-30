@@ -2,6 +2,7 @@
 """Check sender dropdown on Messages page"""
 
 import time
+
 from playwright.sync_api import sync_playwright
 
 BASE_URL = "http://localhost:5000"

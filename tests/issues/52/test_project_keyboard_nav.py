@@ -15,12 +15,15 @@ UI Test for Project Selector Keyboard Navigation - Issue #52
 6. 按 Enter 进入项目
 """
 
-import pytest
-import sys
-import os
 import asyncio
+import os
+import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+import pytest
+
+sys.path.insert(
+    0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+)
 
 from playwright.async_api import async_playwright
 
@@ -30,8 +33,10 @@ USERNAME = os.environ.get("USERNAME", "testuser")
 PASSWORD = os.environ.get("PASSWORD", "testuser")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 SCREENSHOT_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), 
-    "screenshots", "issues", "52"
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
+    "screenshots",
+    "issues",
+    "52",
 )
 
 
@@ -71,7 +76,7 @@ async def test_project_selector_keyboard_navigation():
             print("\nStep 2: 检查 iframe 是否加载...")
             iframe = page.frame_locator("iframe").first
             iframe_content = iframe.locator("body")
-            
+
             # 等待 iframe 内容可见
             await iframe_content.wait_for(timeout=15000)
             print("  ✓ iframe 已加载")
@@ -84,7 +89,9 @@ async def test_project_selector_keyboard_navigation():
             # Step 3: 检查项目选择界面
             print("\nStep 3: 检查项目选择界面...")
             # 检查是否有项目列表（在 iframe 内）
-            project_items = iframe.locator("div[class*='space-y-3'] > div[class*='border rounded-lg']")
+            project_items = iframe.locator(
+                "div[class*='space-y-3'] > div[class*='border rounded-lg']"
+            )
             item_count = await project_items.count()
             print(f"  找到 {item_count} 个项目")
             results.append(("项目数量", True, f"count: {item_count}"))
@@ -92,24 +99,24 @@ async def test_project_selector_keyboard_navigation():
             if item_count == 0:
                 print("  ! 没有项目，无法测试键盘导航")
                 results.append(("有可测试的项目", False, "项目数量为 0"))
-                assert False, "没有项目进行测试"
+                raise AssertionError("没有项目进行测试")
 
             # Step 4: **关键测试** - 不点击，直接按 ↓ 键
             print("\nStep 4: 关键测试 - 不点击 iframe，直接按 ↓ 键...")
-            
+
             # 先截图当前状态
             screenshot_path = os.path.join(SCREENSHOT_DIR, "project_nav_03_before_key.png")
             await page.screenshot(path=screenshot_path)
-            
+
             # 不点击 iframe，直接在页面上按键盘
             # 注意：Playwright 的 keyboard.press 会发送到当前聚焦的元素
             await page.keyboard.press("ArrowDown")
             await asyncio.sleep(0.5)
-            
+
             # 检查是否有项目被选中（通过 ring-2 ring-blue-500 类）
             selected_item = iframe.locator("div[class*='ring-2 ring-blue-500']")
             selected_count = await selected_item.count()
-            
+
             if selected_count > 0:
                 print(f"  ✓ 键盘导航成功！找到 {selected_count} 个选中的项目")
                 results.append(("直接按 ↓ 键选择项目", True, f"selected count: {selected_count}"))
@@ -120,7 +127,7 @@ async def test_project_selector_keyboard_navigation():
             else:
                 print("  ✗ 键盘导航失败 - 没有项目被选中")
                 results.append(("直接按 ↓ 键选择项目", False, "没有选中的项目"))
-                
+
                 # 截图：失败状态
                 screenshot_path = os.path.join(SCREENSHOT_DIR, "project_nav_04_failed.png")
                 await page.screenshot(path=screenshot_path)
@@ -149,27 +156,27 @@ async def test_project_selector_keyboard_navigation():
 
             # Step 7: 按 Enter 进入项目
             print("\nStep 7: 按 Enter 进入项目...")
-            
+
             # 确保 iframe 获得焦点（通过点击 iframe 内的区域）
             await iframe_content.click()
             await asyncio.sleep(0.3)
-            
+
             # 按 Enter
             await page.keyboard.press("Enter")
             await asyncio.sleep(2)  # 等待页面跳转
-            
+
             # 检查是否进入了项目（URL 应该变化）
             current_url = page.url
             print(f"  当前 URL: {current_url}")
-            
+
             # 检查是否有聊天界面出现（在 iframe 内）
             chat_input = iframe.locator("textarea, input[type='text']").first
             chat_visible = await chat_input.is_visible()
-            
+
             if chat_visible or "/projects/" in current_url:
                 print("  ✓ Enter 键成功进入项目")
                 results.append(("Enter 键进入项目", True, ""))
-                
+
                 # 截图：进入项目后
                 screenshot_path = os.path.join(SCREENSHOT_DIR, "project_nav_07_enter_project.png")
                 await page.screenshot(path=screenshot_path)

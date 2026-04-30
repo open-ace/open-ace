@@ -9,7 +9,7 @@ Fetches user details from Feishu API when needed.
 import json
 import time
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Optional
 
 import requests
 
@@ -24,7 +24,7 @@ def ensure_cache_dir():
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def load_cache() -> Dict:
+def load_cache() -> dict:
     """Load user cache from file."""
     ensure_cache_dir()
     if not CACHE_FILE.exists():
@@ -37,7 +37,7 @@ def load_cache() -> Dict:
         return {"users": {}, "last_updated": 0}
 
 
-def save_cache(cache: Dict):
+def save_cache(cache: dict):
     """Save user cache to file."""
     ensure_cache_dir()
     with open(CACHE_FILE, "w", encoding="utf-8") as f:
@@ -64,7 +64,7 @@ def get_feishu_token(app_id: str, app_secret: str) -> Optional[str]:
         return None
 
 
-def get_user_info(user_id: str, app_id: str, app_secret: str) -> Optional[Dict]:
+def get_user_info(user_id: str, app_id: str, app_secret: str) -> Optional[dict]:
     """Get user info from Feishu API."""
     cache = load_cache()
 

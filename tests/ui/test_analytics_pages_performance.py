@@ -14,6 +14,7 @@ Expected: First load < 2s, cached load < 100ms
 
 import asyncio
 import time
+
 from playwright.async_api import async_playwright
 
 # Configuration

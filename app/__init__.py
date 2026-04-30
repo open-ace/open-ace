@@ -55,17 +55,24 @@ def create_app(config=None):
     # Register blueprints
     register_blueprints(app)
 
+    # Ensure all tables exist (runs DDL once at startup, not per-request)
+    from app.repositories.schema_init import ensure_all_tables
+
+    ensure_all_tables()
+
     # Health check endpoint
     @app.route("/health")
     def health_check():
         """Health check endpoint for Docker and load balancers."""
         from app.utils.version import get_git_commit
 
-        return jsonify({
-            "status": "healthy",
-            "service": "open-ace",
-            "version": get_git_commit(),
-        })
+        return jsonify(
+            {
+                "status": "healthy",
+                "service": "open-ace",
+                "version": get_git_commit(),
+            }
+        )
 
     # Start background services
     start_background_services()
@@ -87,26 +94,27 @@ def register_error_handlers(app):
             # Allow localhost, 127.0.0.1, and workspace URL origins (any IP on port range)
             if origin:
                 # Parse origin to check if it's from a valid webui port
-                import re
                 from urllib.parse import urlparse
-                
+
                 try:
                     parsed = urlparse(origin)
                     # Allow if:
                     # 1. localhost or 127.0.0.1
                     # 2. Same host as server but different port (workspace webui instances)
-                    if parsed.hostname in ("localhost", "127.0.0.1"):
+                    if (
+                        parsed.hostname in ("localhost", "127.0.0.1")
+                        or parsed.port
+                        and 3100 <= parsed.port <= 3200
+                    ):
                         response.headers["Access-Control-Allow-Origin"] = origin
-                        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-                        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+                        response.headers["Access-Control-Allow-Methods"] = (
+                            "GET, POST, PUT, DELETE, OPTIONS"
+                        )
+                        response.headers["Access-Control-Allow-Headers"] = (
+                            "Content-Type, Authorization"
+                        )
                         response.headers["Access-Control-Allow-Credentials"] = "true"
-                    # Also allow any origin that matches workspace port range (3100-3200)
-                    elif parsed.port and 3100 <= parsed.port <= 3200:
-                        response.headers["Access-Control-Allow-Origin"] = origin
-                        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-                        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-                        response.headers["Access-Control-Allow-Credentials"] = "true"
-                except:
+                except Exception:
                     pass
         return response
 
@@ -116,17 +124,19 @@ def register_error_handlers(app):
         """Handle CORS preflight requests."""
         origin = request.headers.get("Origin", "")
         if origin:
-            import re
             from urllib.parse import urlparse
-            
+
             try:
                 parsed = urlparse(origin)
                 # Allow localhost, 127.0.0.1, or any origin from workspace port range
-                if parsed.hostname in ("localhost", "127.0.0.1") or \
-                   (parsed.port and 3100 <= parsed.port <= 3200):
+                if parsed.hostname in ("localhost", "127.0.0.1") or (
+                    parsed.port and 3100 <= parsed.port <= 3200
+                ):
                     response = jsonify({"status": "ok"})
                     response.headers["Access-Control-Allow-Origin"] = origin
-                    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+                    response.headers["Access-Control-Allow-Methods"] = (
+                        "GET, POST, PUT, DELETE, OPTIONS"
+                    )
                     response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
                     response.headers["Access-Control-Allow-Credentials"] = "true"
                     return response

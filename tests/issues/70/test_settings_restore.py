@@ -10,13 +10,12 @@ Test script for issue #70: Tab settings restoration
 6. 验证设置是否正确恢复
 """
 
-import sys
-import os
 import json
-import subprocess
+import os
+import sys
 import urllib.parse
-from playwright.sync_api import sync_playwright, TimeoutError
-import time
+
+from playwright.sync_api import sync_playwright
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, project_root)
@@ -66,41 +65,41 @@ def main():
                 if "token=" in frame.url:
                     chat_frame = frame
                     break
-            
+
             if not chat_frame:
                 print("    ✗ 未找到聊天 iframe")
                 return False
-            
-            print(f"    ✓ 找到聊天 iframe")
+
+            print("    ✓ 找到聊天 iframe")
 
             # Step 4: Select open-ace project if needed
             print("\n[4] 检查是否需要选择项目...")
             textarea_locator = chat_frame.locator("textarea")
             textarea_count = textarea_locator.count()
-            
+
             if textarea_count == 0:
                 project_rows = chat_frame.locator("div[class*='rounded-lg'][class*='p-4']")
                 project_count = project_rows.count()
-                
+
                 if project_count > 0:
                     # 获取项目名称并选择 open-ace
                     project_names = chat_frame.locator("div.font-mono")
                     target_project = 0
                     for i in range(project_names.count()):
                         name = project_names.nth(i).text_content()
-                        if 'open ace' in name.lower() or 'open-ace' in name.lower():
+                        if "open ace" in name.lower() or "open-ace" in name.lower():
                             target_project = i
                             break
-                    
+
                     print(f"    选择 open-ace 项目 (index {target_project})...")
                     project_rows.nth(target_project).click()
                     page.wait_for_timeout(5000)
-            
+
             print("    ✓ 已进入项目")
 
             # Step 5: Change settings using keyboard shortcuts
             print("\n[5] 修改设置...")
-            
+
             # 5.1 切换 permission mode (使用快捷键 Ctrl+Shift+Y)
             # 循环切换几次，确保不是 default
             print("    切换 permission mode...")
@@ -119,7 +118,7 @@ def main():
             textarea.press("Enter")
             print("    等待响应...")
             page.wait_for_timeout(30000)  # Wait for response and session update
-            
+
             print("    ✓ 消息已发送")
 
             # Step 7: Check localStorage for settings
@@ -144,16 +143,16 @@ def main():
 
             # Step 9: Check restored settings
             print("\n[9] 检查恢复后的设置...")
-            
+
             frames = page.frames
             for frame in frames:
                 if "token=" in frame.url:
                     # 检查 URL 参数
                     parsed = urllib.parse.urlparse(frame.url)
                     params = urllib.parse.parse_qs(parsed.query)
-                    
-                    print(f"    URL 参数:")
-                    for key in ['model', 'useWebUI', 'permissionMode', 'sessionId']:
+
+                    print("    URL 参数:")
+                    for key in ["model", "useWebUI", "permissionMode", "sessionId"]:
                         if key in params:
                             print(f"      {key}: {params[key][0]}")
 
@@ -166,6 +165,7 @@ def main():
         except Exception as e:
             print(f"\n✗ 测试错误: {e}")
             import traceback
+
             traceback.print_exc()
             page.screenshot(path=f"{OUTPUT_DIR}/test_error.png")
         finally:

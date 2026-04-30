@@ -5,8 +5,9 @@ Issue: When sidebar is collapsed, menu text like "Wo", "My" is still visible
 because the span elements were removed by renderSidebarNav function.
 """
 
-import pytest
 import asyncio
+
+import pytest
 from playwright.async_api import async_playwright
 
 
@@ -66,7 +67,7 @@ async def test_sidebar_collapse_normal_user():
             workspace_text_count = await nav_workspace_text.count()
             report_text_count = await nav_report_text.count()
 
-            print(f"\n2. 检查菜单项:")
+            print("\n2. 检查菜单项:")
             print(f"   #nav-workspace 存在: {workspace_count > 0}")
             print(f"   #nav-report 存在: {report_count > 0}")
             print(f"   #nav-workspace-text 存在: {workspace_text_count > 0}")
@@ -88,7 +89,7 @@ async def test_sidebar_collapse_normal_user():
             # 检查 sidebar 是否收缩
             sidebar_class_after = await sidebar.get_attribute("class")
             sidebar_width_after = await sidebar.evaluate("el => el.offsetWidth")
-            print(f"\n3. 收缩后:")
+            print("\n3. 收缩后:")
             print(f"   Sidebar class: {sidebar_class_after}")
             print(f"   Sidebar 宽度: {sidebar_width_after}px")
 
@@ -99,7 +100,7 @@ async def test_sidebar_collapse_normal_user():
             report_text_visible = (
                 await nav_report_text.is_visible() if report_text_count > 0 else False
             )
-            print(f"\n4. 收缩后文字可见性:")
+            print("\n4. 收缩后文字可见性:")
             print(f"   #nav-workspace-text 可见: {workspace_text_visible}")
             print(f"   #nav-report-text 可见: {report_text_visible}")
 
@@ -107,7 +108,7 @@ async def test_sidebar_collapse_normal_user():
             await page.screenshot(
                 path="/Users/rhuang/workspace/open-ace/screenshots/issues/82/normal_user_sidebar_collapsed.png"
             )
-            print(f"\n5. 截图已保存: screenshots/issues/82/normal_user_sidebar_collapsed.png")
+            print("\n5. 截图已保存: screenshots/issues/82/normal_user_sidebar_collapsed.png")
 
             # 验证结果
             print("\n" + "=" * 60)
@@ -136,7 +137,7 @@ async def test_sidebar_collapse_normal_user():
             await page.screenshot(
                 path="/Users/rhuang/workspace/open-ace/screenshots/issues/82/normal_user_sidebar_expanded.png"
             )
-            print(f"   截图已保存: screenshots/issues/82/normal_user_sidebar_expanded.png")
+            print("   截图已保存: screenshots/issues/82/normal_user_sidebar_expanded.png")
 
         finally:
             await browser.close()

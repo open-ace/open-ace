@@ -5,10 +5,11 @@ Open ACE - Tenant Repository
 Data access layer for tenant management.
 """
 
+import contextlib
 import json
 import logging
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 
 from app.models.tenant import QuotaConfig, Tenant, TenantSettings, TenantUsage
 from app.repositories.database import Database
@@ -98,14 +99,12 @@ class TenantRepository:
                 # Insert tenant_quotas
                 quota_dict = tenant.quota.to_dict()
                 cursor.execute(
-                    adapt_sql(
-                        """
+                    adapt_sql("""
                     INSERT INTO tenant_quotas
                     (tenant_id, daily_token_limit, monthly_token_limit,
                      daily_request_limit, monthly_request_limit, max_users, max_sessions_per_user)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
-                """
-                    ),
+                """),
                     (
                         tenant_id,
                         quota_dict.get("daily_token_limit", 1000000),
@@ -125,19 +124,19 @@ class TenantRepository:
                     audit_log_val = settings_dict.get("audit_log_enabled", True)
                     sso_val = settings_dict.get("sso_enabled", False)
                 else:
-                    content_filter_val = 1 if settings_dict.get("content_filter_enabled", True) else 0
+                    content_filter_val = (
+                        1 if settings_dict.get("content_filter_enabled", True) else 0
+                    )
                     audit_log_val = 1 if settings_dict.get("audit_log_enabled", True) else 0
                     sso_val = 1 if settings_dict.get("sso_enabled", False) else 0
-                
+
                 cursor.execute(
-                    adapt_sql(
-                        """
+                    adapt_sql("""
                     INSERT INTO tenant_settings
                     (tenant_id, content_filter_enabled, audit_log_enabled,
                      audit_log_retention_days, data_retention_days, sso_enabled, sso_provider)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
-                """
-                    ),
+                """),
                     (
                         tenant_id,
                         content_filter_val,
@@ -203,7 +202,7 @@ class TenantRepository:
         include_deleted: bool = False,
         limit: int = 100,
         offset: int = 0,
-    ) -> List[Tenant]:
+    ) -> list[Tenant]:
         """
         Get all tenants with optional filters.
 
@@ -396,29 +395,25 @@ class TenantRepository:
 
                 # Insert or update usage
                 cursor.execute(
-                    adapt_sql(
-                        """
+                    adapt_sql("""
                     INSERT INTO tenant_usage (tenant_id, date, tokens_used, requests_made)
                     VALUES (?, ?, ?, ?)
                     ON CONFLICT(tenant_id, date) DO UPDATE SET
                         tokens_used = tokens_used + ?,
                         requests_made = requests_made + ?
-                """
-                    ),
+                """),
                     (tenant_id, date, tokens, requests, tokens, requests),
                 )
 
                 # Update tenant totals
                 cursor.execute(
-                    adapt_sql(
-                        """
+                    adapt_sql("""
                     UPDATE tenants SET
                         total_tokens_used = total_tokens_used + ?,
                         total_requests_made = total_requests_made + ?,
                         updated_at = ?
                     WHERE id = ?
-                """
-                    ),
+                """),
                     (tokens, requests, datetime.utcnow(), tenant_id),
                 )
 
@@ -435,7 +430,7 @@ class TenantRepository:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         limit: int = 30,
-    ) -> List[TenantUsage]:
+    ) -> list[TenantUsage]:
         """
         Get usage history for a tenant.
 
@@ -497,14 +492,12 @@ class TenantRepository:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    adapt_sql(
-                        """
+                    adapt_sql("""
                     UPDATE tenants SET
                         user_count = MAX(0, user_count + ?),
                         updated_at = ?
                     WHERE id = ?
-                """
-                    ),
+                """),
                     (delta, datetime.utcnow(), tenant_id),
                 )
                 conn.commit()
@@ -575,16 +568,12 @@ class TenantRepository:
 
         # Fallback to JSON fields if dedicated tables don't have data
         if quota == QuotaConfig() and row.get("quota"):
-            try:
+            with contextlib.suppress(json.JSONDecodeError, TypeError):
                 quota = QuotaConfig.from_dict(json.loads(row["quota"]))
-            except (json.JSONDecodeError, TypeError):
-                pass
 
         if settings == TenantSettings() and row.get("settings"):
-            try:
+            with contextlib.suppress(json.JSONDecodeError, TypeError):
                 settings = TenantSettings.from_dict(json.loads(row["settings"]))
-            except (json.JSONDecodeError, TypeError):
-                pass
 
         return Tenant(
             id=row.get("id"),

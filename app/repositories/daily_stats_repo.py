@@ -9,7 +9,7 @@ instead of scanning the large daily_messages table.
 
 import logging
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Optional
 
 from app.repositories.database import Database, is_postgresql
 from app.utils.cache import cached
@@ -34,7 +34,7 @@ class DailyStatsRepository:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Get daily token totals from pre-aggregated data.
 
@@ -84,7 +84,7 @@ class DailyStatsRepository:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Get tool token totals from pre-aggregated data.
 
@@ -134,7 +134,7 @@ class DailyStatsRepository:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Get user token totals from pre-aggregated data.
 
@@ -185,7 +185,7 @@ class DailyStatsRepository:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Get hourly usage patterns from pre-aggregated hourly_stats table.
 
@@ -231,15 +231,17 @@ class DailyStatsRepository:
         # Convert to expected format
         result = []
         for row in rows:
-            result.append({
-                "hour": int(row["hour"]),
-                "tokens": row["tokens"] or 0,
-                "requests": row["requests"] or 0,
-            })
+            result.append(
+                {
+                    "hour": int(row["hour"]),
+                    "tokens": row["tokens"] or 0,
+                    "requests": row["requests"] or 0,
+                }
+            )
 
         return result
 
-    def get_conversation_stats(self, host_name: Optional[str] = None) -> Dict:
+    def get_conversation_stats(self, host_name: Optional[str] = None) -> dict:
         """
         Get conversation statistics from pre-aggregated data.
 
@@ -327,7 +329,7 @@ class DailyStatsRepository:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
-    ) -> Dict:
+    ) -> dict:
         """
         Get all aggregates in a single query from pre-aggregated data.
 
@@ -493,7 +495,8 @@ class DailyStatsRepository:
         # Check if daily_stats has today's data
         # Compare max date in daily_stats vs max date in daily_messages
         from datetime import datetime
-        today = datetime.now().strftime("%Y-%m-%d")
+
+        datetime.now().strftime("%Y-%m-%d")
 
         stats_max_date_query = "SELECT MAX(date) as max_date FROM daily_stats"
         stats_result = self.db.fetch_one(stats_max_date_query)

@@ -7,6 +7,7 @@ This test verifies that:
 """
 
 import asyncio
+
 from playwright.async_api import async_playwright
 
 
@@ -37,6 +38,7 @@ async def test_language_sync():
 
                 # Extract lang value
                 import re
+
                 lang_match = re.search(r"lang=(\w+)", iframe_src)
                 if lang_match:
                     lang_value = lang_match.group(1)

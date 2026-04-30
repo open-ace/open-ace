@@ -11,10 +11,11 @@ Usage:
     python3 tests/issues/42/test_page_size_loading.py
 """
 
-import pytest
-import time
 import os
-from playwright.async_api import async_playwright, expect
+import time
+
+import pytest
+from playwright.async_api import async_playwright
 
 # Test configuration
 BASE_URL = "http://localhost:5000"
@@ -69,14 +70,12 @@ async def test_page_size_loading():
         time.sleep(1)
 
         # Check if analysis section is visible
-        is_visible = await page.evaluate(
-            """
+        is_visible = await page.evaluate("""
             () => {
                 const section = document.getElementById('analysis-section');
                 return section && section.style.display !== 'none';
             }
-        """
-        )
+        """)
 
         if not is_visible:
             print("  Warning: Analysis section not visible, trying again...")
@@ -110,14 +109,12 @@ async def test_page_size_loading():
         print("\n[Step 6] Finding Page Size selector...")
 
         # Debug: print the HTML structure of the paginator
-        paginator_html = await page.evaluate(
-            """
+        paginator_html = await page.evaluate("""
             () => {
                 const paginator = document.querySelector('.tabulator-paginator');
                 return paginator ? paginator.outerHTML : 'Paginator not found';
             }
-        """
-        )
+        """)
         print(f"  Paginator HTML: {paginator_html[:500]}...")
 
         # Try different selectors for Page Size
@@ -135,14 +132,12 @@ async def test_page_size_loading():
             print("✓ Page Size selector found")
 
             # Debug: print the select element HTML
-            select_html = await page.evaluate(
-                """
+            select_html = await page.evaluate("""
                 () => {
                     const select = document.querySelector('.tabulator-page-size');
                     return select ? select.outerHTML : 'Select not found';
                 }
-            """
-            )
+            """)
             print(f"  Select HTML: {select_html}")
 
             # Get current page size
@@ -162,8 +157,7 @@ async def test_page_size_loading():
             else:
                 print("  No options found in select element")
                 # Try to get options via JavaScript
-                options_js = await page.evaluate(
-                    """
+                options_js = await page.evaluate("""
                     () => {
                         const select = document.querySelector('.tabulator-page-size');
                         if (select) {
@@ -171,21 +165,17 @@ async def test_page_size_loading():
                         }
                         return [];
                     }
-                """
-                )
+                """)
                 print(f"  Options via JS: {options_js}")
 
             # Step 7: Change Page Size and observe loading state
             print("\n[Step 7] Changing Page Size...")
 
             # Set up a listener to detect if "No sessions found" appears
-            no_sessions_found = False
-            loading_shown = False
 
             # Take a quick screenshot right after clicking
             # We'll use JavaScript to monitor the placeholder content
-            await page.evaluate(
-                """
+            await page.evaluate("""
                 window.noSessionsFound = false;
                 window.loadingShown = false;
 
@@ -212,14 +202,12 @@ async def test_page_size_loading():
                         characterData: true
                     });
                 }
-            """
-            )
+            """)
 
             # Change page size using JavaScript (since select options may not be populated)
             # This simulates what happens when user changes page size
             print("  Triggering page size change via JavaScript...")
-            await page.evaluate(
-                """
+            await page.evaluate("""
                 () => {
                     // Get the Tabulator instance
                     const table = Tabulator.findTable('#conversation-history-table')[0];
@@ -228,8 +216,7 @@ async def test_page_size_loading():
                         table.setPageSize(50);
                     }
                 }
-            """
-            )
+            """)
 
             # Wait a brief moment for the change to process
             time.sleep(0.5)
@@ -240,14 +227,12 @@ async def test_page_size_loading():
             print(f"✓ Screenshot saved: {screenshot_path}")
 
             # Check what was shown during loading
-            result = await page.evaluate(
-                """
+            result = await page.evaluate("""
                 ({
                     noSessionsFound: window.noSessionsFound,
                     loadingShown: window.loadingShown
                 })
-            """
-            )
+            """)
 
             print(f"  'No sessions found' shown: {result['noSessionsFound']}")
             print(f"  Loading state shown: {result['loadingShown']}")
@@ -276,14 +261,12 @@ async def test_page_size_loading():
             print(f"  Found {new_row_count} rows after Page Size change")
 
             # Verify page size was actually changed using JavaScript
-            new_page_size = await page.evaluate(
-                """
+            new_page_size = await page.evaluate("""
                 () => {
                     const table = Tabulator.findTable('#conversation-history-table')[0];
                     return table ? table.getPageSize() : null;
                 }
-            """
-            )
+            """)
             print(f"  New Page Size: {new_page_size}")
 
             if new_page_size == 50:
@@ -298,24 +281,20 @@ async def test_page_size_loading():
             print("\n[Step 9] Testing another Page Size change (to 100)...")
 
             # Reset the monitoring flags
-            await page.evaluate(
-                """
+            await page.evaluate("""
                 window.noSessionsFound = false;
                 window.loadingShown = false;
-            """
-            )
+            """)
 
             # Change page size using JavaScript
-            await page.evaluate(
-                """
+            await page.evaluate("""
                 () => {
                     const table = Tabulator.findTable('#conversation-history-table')[0];
                     if (table) {
                         table.setPageSize(100);
                     }
                 }
-            """
-            )
+            """)
             print("  Changed Page Size to 100")
 
             time.sleep(0.5)
@@ -326,14 +305,12 @@ async def test_page_size_loading():
             print(f"✓ Screenshot saved: {screenshot_path}")
 
             # Check what was shown during loading
-            result = await page.evaluate(
-                """
+            result = await page.evaluate("""
                 ({
                     noSessionsFound: window.noSessionsFound,
                     loadingShown: window.loadingShown
                 })
-            """
-            )
+            """)
 
             print(f"  'No sessions found' shown: {result['noSessionsFound']}")
             print(f"  Loading state shown: {result['loadingShown']}")

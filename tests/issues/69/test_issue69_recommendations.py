@@ -12,9 +12,10 @@ Usage:
     python3 tests/ui/test_issue69_recommendations.py
 """
 
-import pytest
 import time
-from playwright.async_api import async_playwright, expect
+
+import pytest
+from playwright.async_api import async_playwright
 
 # Test configuration
 BASE_URL = "http://localhost:5000"
@@ -97,9 +98,9 @@ async def test_recommendations_api():
             if api_responses:
                 for resp in api_responses:
                     if resp["status"] == 200:
-                        print(f"✓ Recommendations API returned 200 OK")
+                        print("✓ Recommendations API returned 200 OK")
                     elif resp["status"] == 500:
-                        print(f"✗ Recommendations API returned 500 Error - Issue #69 NOT fixed!")
+                        print("✗ Recommendations API returned 500 Error - Issue #69 NOT fixed!")
                         raise Exception("API returned 500 error - TypeError still present")
             else:
                 print("⚠ No API response captured (may need manual verification)")

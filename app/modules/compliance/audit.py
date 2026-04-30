@@ -9,7 +9,7 @@ import logging
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from app.modules.governance.audit_logger import AuditLogger
 
@@ -23,11 +23,11 @@ class AnomalyDetection:
     anomaly_type: str
     severity: str  # low, medium, high
     description: str
-    affected_users: List[int]
+    affected_users: list[int]
     occurrences: int
     first_seen: datetime
     last_seen: datetime
-    details: Dict[str, Any]
+    details: dict[str, Any]
 
 
 class AuditAnalyzer:
@@ -57,7 +57,7 @@ class AuditAnalyzer:
 
     def analyze_patterns(
         self, start_time: Optional[datetime] = None, end_time: Optional[datetime] = None
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Analyze patterns in audit logs.
 
@@ -119,7 +119,7 @@ class AuditAnalyzer:
 
     def detect_anomalies(
         self, start_time: Optional[datetime] = None, end_time: Optional[datetime] = None
-    ) -> List[AnomalyDetection]:
+    ) -> list[AnomalyDetection]:
         """
         Detect anomalies in audit logs.
 
@@ -202,7 +202,7 @@ class AuditAnalyzer:
 
     def _detect_rapid_activity_anomaly(
         self, start_time: datetime, end_time: datetime
-    ) -> List[AnomalyDetection]:
+    ) -> list[AnomalyDetection]:
         """Detect rapid activity anomalies."""
         logs = self.audit_logger.query(
             start_time=start_time,
@@ -244,7 +244,7 @@ class AuditAnalyzer:
 
     def _detect_off_hours_anomaly(
         self, start_time: datetime, end_time: datetime
-    ) -> List[AnomalyDetection]:
+    ) -> list[AnomalyDetection]:
         """Detect off-hours activity anomalies."""
         logs = self.audit_logger.query(
             start_time=start_time,
@@ -294,7 +294,7 @@ class AuditAnalyzer:
 
     def _detect_action_pattern_anomaly(
         self, start_time: datetime, end_time: datetime
-    ) -> List[AnomalyDetection]:
+    ) -> list[AnomalyDetection]:
         """Detect unusual action patterns."""
         logs = self.audit_logger.query(
             start_time=start_time,
@@ -312,7 +312,7 @@ class AuditAnalyzer:
                     anomaly_type="frequent_role_changes",
                     severity="high",
                     description=f"{len(role_changes)} role changes detected",
-                    affected_users=list(set(l.user_id for l in role_changes if l.user_id)),
+                    affected_users=list({l.user_id for l in role_changes if l.user_id}),
                     occurrences=len(role_changes),
                     first_seen=min(l.timestamp for l in role_changes if l.timestamp),
                     last_seen=max(l.timestamp for l in role_changes if l.timestamp),
@@ -330,7 +330,7 @@ class AuditAnalyzer:
                     anomaly_type="frequent_permission_changes",
                     severity="medium",
                     description=f"{len(permission_changes)} permission changes detected",
-                    affected_users=list(set(l.user_id for l in permission_changes if l.user_id)),
+                    affected_users=list({l.user_id for l in permission_changes if l.user_id}),
                     occurrences=len(permission_changes),
                     first_seen=min(l.timestamp for l in permission_changes if l.timestamp),
                     last_seen=max(l.timestamp for l in permission_changes if l.timestamp),
@@ -340,7 +340,7 @@ class AuditAnalyzer:
 
         return anomalies
 
-    def get_user_behavior_profile(self, user_id: int, days: int = 30) -> Dict[str, Any]:
+    def get_user_behavior_profile(self, user_id: int, days: int = 30) -> dict[str, Any]:
         """
         Get behavior profile for a user.
 
@@ -408,7 +408,7 @@ class AuditAnalyzer:
 
     def generate_security_score(
         self, start_time: Optional[datetime] = None, end_time: Optional[datetime] = None
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Generate a security score based on audit analysis.
 
@@ -472,7 +472,7 @@ class AuditAnalyzer:
             "recommendations": self._generate_security_recommendations(anomalies),
         }
 
-    def _generate_security_recommendations(self, anomalies: List[AnomalyDetection]) -> List[str]:
+    def _generate_security_recommendations(self, anomalies: list[AnomalyDetection]) -> list[str]:
         """Generate security recommendations based on anomalies."""
         recommendations = []
 

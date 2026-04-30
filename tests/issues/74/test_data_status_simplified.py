@@ -7,11 +7,12 @@ Issue: Data Status panel shows unnecessary header row.
 Fix: Remove header row with 'Data Status' text and refresh button.
 """
 
-import pytest
-import sys
 import os
+import sys
 import time
 from datetime import datetime
+
+import pytest
 
 # Get project root directory
 PROJECT_ROOT = os.path.dirname(

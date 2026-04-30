@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ class FilterResult:
 
     passed: bool
     risk_level: str = "low"
-    matched_rules: List[Dict[str, Any]] = field(default_factory=list)
+    matched_rules: list[dict[str, Any]] = field(default_factory=list)
     redacted_content: Optional[str] = None
     suggestion: Optional[str] = None
     timestamp: datetime = field(default_factory=datetime.utcnow)
@@ -118,9 +118,9 @@ class ContentFilter:
 
     def __init__(
         self,
-        config: Optional[Dict[str, Any]] = None,
-        custom_patterns: Optional[Dict[str, str]] = None,
-        custom_keywords: Optional[List[str]] = None,
+        config: Optional[dict[str, Any]] = None,
+        custom_patterns: Optional[dict[str, str]] = None,
+        custom_keywords: Optional[list[str]] = None,
     ):
         """
         Initialize content filter.
@@ -168,7 +168,7 @@ class ContentFilter:
             "custom_pattern": "medium",
         }
 
-    def check_content(self, content: str, context: Optional[Dict[str, Any]] = None) -> FilterResult:
+    def check_content(self, content: str, context: Optional[dict[str, Any]] = None) -> FilterResult:
         """
         Check content for sensitive information.
 
@@ -255,7 +255,7 @@ class ContentFilter:
             suggestion=suggestion,
         )
 
-    def _check_keywords(self, content: str) -> Set[str]:
+    def _check_keywords(self, content: str) -> set[str]:
         """Check for sensitive keywords."""
         content_lower = content.lower()
         found = set()
@@ -272,7 +272,7 @@ class ContentFilter:
         redact_func = REDACTION_TEMPLATES.get(pattern_name, REDACTION_TEMPLATES["default"])
         return pattern.sub(redact_func, content)
 
-    def _generate_suggestion(self, matched_rules: List[Dict]) -> str:
+    def _generate_suggestion(self, matched_rules: list[dict]) -> str:
         """Generate suggestion for blocked content."""
         suggestions = []
 
@@ -316,7 +316,7 @@ class ContentFilter:
         """
         self.keywords.add(keyword.lower())
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get filter statistics."""
         return {
             "enabled": self.enabled,

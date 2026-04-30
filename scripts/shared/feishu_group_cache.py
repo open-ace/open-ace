@@ -9,7 +9,7 @@ Fetches group details from Feishu API when needed.
 import json
 import time
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Optional
 
 import requests
 
@@ -24,7 +24,7 @@ def ensure_cache_dir():
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def load_cache() -> Dict:
+def load_cache() -> dict:
     """Load group cache from file."""
     ensure_cache_dir()
     if not CACHE_FILE.exists():
@@ -37,7 +37,7 @@ def load_cache() -> Dict:
         return {"groups": {}, "last_updated": 0}
 
 
-def save_cache(cache: Dict):
+def save_cache(cache: dict):
     """Save group cache to file."""
     ensure_cache_dir()
     with open(CACHE_FILE, "w", encoding="utf-8") as f:

@@ -13,14 +13,17 @@ import sys
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from playwright.sync_api import sync_playwright, expect
+from playwright.sync_api import sync_playwright
 
 # Configuration
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 HEADLESS = os.environ.get("HEADLESS", "false").lower() == "true"  # 默认显示浏览器
-SCREENSHOT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "screenshots/issues")
+SCREENSHOT_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "screenshots/issues",
+)
 
 
 def test_tool_accounts_dropdown():
@@ -53,9 +56,11 @@ def test_tool_accounts_dropdown():
 
             # Step 3: 点击第一个"添加工具账号"按钮
             print("Step 3: 点击添加工具账号按钮...")
-            
+
             # 尝试查找按钮
-            add_button = page.locator("button:has-text('Add Tool Account'), button:has-text('添加工具账号')").first
+            add_button = page.locator(
+                "button:has-text('Add Tool Account'), button:has-text('添加工具账号')"
+            ).first
             add_button.click()
             print("  ✓ 按钮已点击")
 
@@ -70,13 +75,13 @@ def test_tool_accounts_dropdown():
 
             # Step 4: 检查工具类型下拉框
             print("Step 4: 检查工具类型下拉框...")
-            
+
             # 查找下拉框
             select = page.locator(".modal select.form-select")
             if select.count() == 0:
                 print("  ✗ 未找到下拉框")
                 return False
-            
+
             print(f"  ✓ 找到下拉框，数量: {select.count()}")
 
             # 检查选项数量
@@ -105,7 +110,7 @@ def test_tool_accounts_dropdown():
             print("Step 5: 验证选项...")
             expected_values = ["", "qwen", "claude", "openclaw", "feishu", "slack", "other"]
             actual_values = [v for v, t in option_values]
-            
+
             for expected in expected_values:
                 if expected in actual_values:
                     print(f"  ✓ 选项 '{expected}' 存在")

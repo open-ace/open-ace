@@ -21,8 +21,8 @@ After index: ~0.2ms (Index Scan)
 
 from typing import Union
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "023_add_user_request_trend_index"
@@ -55,12 +55,10 @@ def upgrade() -> None:
     # Note: CONCURRENTLY is not used because alembic runs in transaction block
     # For fresh installation, locking is not a concern
     if not _index_exists(conn, "daily_messages", "idx_messages_sender_date_role"):
-        op.execute(
-            """
+        op.execute("""
             CREATE INDEX idx_messages_sender_date_role
             ON daily_messages (sender_name, date, role)
-            """
-        )
+            """)
 
 
 def downgrade() -> None:

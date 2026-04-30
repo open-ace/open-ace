@@ -15,10 +15,8 @@ Run:
   HEADLESS=false python tests/172/e2e_quota_enforcement.py
 """
 
-import json
 import os
 import sys
-import time
 import traceback
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -58,9 +56,11 @@ def fail(name, detail=""):
 
 # ── API helpers ───────────────────────────────────────
 
+
 def login(username, password):
-    r = requests.post(f"{BASE_URL}/api/auth/login",
-                      json={"username": username, "password": password})
+    r = requests.post(
+        f"{BASE_URL}/api/auth/login", json={"username": username, "password": password}
+    )
     assert r.status_code == 200, f"Login failed: {r.status_code} {r.text}"
     token = r.cookies.get("session_token")
     assert token, "No session_token cookie"
@@ -72,6 +72,7 @@ def admin_headers(token):
 
 
 # ── Tests ─────────────────────────────────────────────
+
 
 def test_admin_login():
     """Test 1: Admin can login."""
@@ -89,8 +90,7 @@ def test_user_login():
 
 def test_quota_check_endpoint(admin_token):
     """Test 3: GET /quota/check returns correct structure."""
-    r = requests.get(f"{BASE_URL}/api/quota/check",
-                     cookies={"session_token": admin_token})
+    r = requests.get(f"{BASE_URL}/api/quota/check", cookies={"session_token": admin_token})
     if r.status_code != 200:
         fail("Quota check endpoint", f"status={r.status_code}")
         return None
@@ -107,8 +107,7 @@ def test_quota_check_endpoint(admin_token):
 
 def test_quota_status_endpoint(admin_token):
     """Test 4: GET /quota/status returns user quota status."""
-    r = requests.get(f"{BASE_URL}/api/quota/status",
-                     cookies={"session_token": admin_token})
+    r = requests.get(f"{BASE_URL}/api/quota/status", cookies={"session_token": admin_token})
     if r.status_code != 200:
         fail("Quota status endpoint", f"status={r.status_code}")
         return
@@ -123,8 +122,7 @@ def test_quota_status_endpoint(admin_token):
 def test_user_daily_stats(admin_token):
     """Test 5: user_daily_stats has data for rhuang."""
     # Use the usage/me endpoint instead of admin endpoint
-    r = requests.get(f"{BASE_URL}/api/quota/usage/me",
-                     cookies={"session_token": admin_token})
+    r = requests.get(f"{BASE_URL}/api/quota/usage/me", cookies={"session_token": admin_token})
     if r.status_code != 200:
         fail("Usage data endpoint", f"status={r.status_code}")
         return
@@ -134,10 +132,23 @@ def test_user_daily_stats(admin_token):
 def test_quota_manager_daily_stats_fast_path():
     """Test 6: Verify user_daily_stats table is accessible and populated."""
     import subprocess
+
     r = subprocess.run(
-        ["psql", "-U", "openace", "-h", "localhost", "-d", "openace", "-t", "-c",
-         "SELECT COUNT(*) FROM user_daily_stats WHERE date >= CURRENT_DATE - INTERVAL '1 day'"],
-        capture_output=True, text=True, env={**os.environ, "PGPASSWORD": "f43379650019d8eb4b206932"}
+        [
+            "psql",
+            "-U",
+            "openace",
+            "-h",
+            "localhost",
+            "-d",
+            "openace",
+            "-t",
+            "-c",
+            "SELECT COUNT(*) FROM user_daily_stats WHERE date >= CURRENT_DATE - INTERVAL '1 day'",
+        ],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PGPASSWORD": "f43379650019d8eb4b206932"},
     )
     count = int(r.stdout.strip()) if r.stdout.strip() else 0
     if r.returncode != 0:
@@ -149,8 +160,7 @@ def test_quota_manager_daily_stats_fast_path():
 def test_quota_manager_check_quota_includes_monthly():
     """Test 7: Monthly quota in API response."""
     token = login(TEST_USER, TEST_PASS)
-    r = requests.get(f"{BASE_URL}/api/quota/check",
-                     cookies={"session_token": token})
+    r = requests.get(f"{BASE_URL}/api/quota/check", cookies={"session_token": token})
     data = r.json()
     monthly = data.get("monthly", {})
     tokens_monthly = monthly.get("tokens", {})
@@ -158,15 +168,19 @@ def test_quota_manager_check_quota_includes_monthly():
     if "used" not in tokens_monthly or "used" not in requests_monthly:
         fail("Monthly quota in API", f"unexpected monthly structure: {monthly}")
         return
-    ok(f"Monthly quota in API response (tokens_used={tokens_monthly['used']}, requests_used={requests_monthly['used']})")
+    ok(
+        f"Monthly quota in API response (tokens_used={tokens_monthly['used']}, requests_used={requests_monthly['used']})"
+    )
 
 
 def test_data_fetch_scheduler_has_check_quotas():
     """Test 8: DataFetchScheduler has _check_quotas method (code check)."""
     import subprocess
+
     r = subprocess.run(
         ["grep", "-c", "_check_quotas", "/home/openace/app/services/data_fetch_scheduler.py"],
-        capture_output=True, text=True
+        capture_output=True,
+        text=True,
     )
     count = int(r.stdout.strip()) if r.stdout.strip().isdigit() else 0
     if count < 2:
@@ -178,13 +192,15 @@ def test_data_fetch_scheduler_has_check_quotas():
 def test_quota_enforcement_scheduler_running():
     """Test 9: QuotaEnforcementScheduler is running (check logs)."""
     import subprocess
+
     r = subprocess.run(
-        ["journalctl", "-u", "open-ace", "--no-pager", "-n", "200"],
-        capture_output=True, text=True
+        ["journalctl", "-u", "open-ace", "--no-pager", "-n", "200"], capture_output=True, text=True
     )
     # The log message is: "QuotaEnforcementScheduler started with interval 60 seconds"
-    if "QuotaEnforcementScheduler started" not in r.stdout and \
-       "quota_enforcement_scheduler" not in r.stdout:
+    if (
+        "QuotaEnforcementScheduler started" not in r.stdout
+        and "quota_enforcement_scheduler" not in r.stdout
+    ):
         fail("QuotaEnforcementScheduler", "not found in service logs")
         return
     ok("QuotaEnforcementScheduler running (confirmed in service logs)")
@@ -197,8 +213,7 @@ def test_llm_proxy_fail_closed(user_token):
     the code change by checking the quota check response format.
     """
     # Verify that a normal quota check works and returns proper structure
-    r = requests.get(f"{BASE_URL}/api/quota/check",
-                     cookies={"session_token": user_token})
+    r = requests.get(f"{BASE_URL}/api/quota/check", cookies={"session_token": user_token})
     if r.status_code != 200:
         fail("Quota check for user", f"status={r.status_code}")
         return
@@ -206,7 +221,10 @@ def test_llm_proxy_fail_closed(user_token):
     daily = data.get("daily", {})
     requests_info = daily.get("requests", {})
     tokens_info = daily.get("tokens", {})
-    log("INFO", f"  Daily requests: {requests_info.get('used', '?')}/{requests_info.get('limit', '?')}")
+    log(
+        "INFO",
+        f"  Daily requests: {requests_info.get('used', '?')}/{requests_info.get('limit', '?')}",
+    )
     log("INFO", f"  Daily tokens: {tokens_info.get('used', '?')}/{tokens_info.get('limit', '?')}")
     ok("LLM proxy fail-closed (code verified, quota check works)")
 
@@ -214,10 +232,23 @@ def test_llm_proxy_fail_closed(user_token):
 def test_remote_session_stats_refresh():
     """Test 11: Verify refresh_stats works via direct DB query."""
     import subprocess
+
     r = subprocess.run(
-        ["psql", "-U", "openace", "-h", "localhost", "-d", "openace", "-t", "-c",
-         "SELECT EXISTS (SELECT 1 FROM user_daily_stats LIMIT 1)"],
-        capture_output=True, text=True, env={**os.environ, "PGPASSWORD": "f43379650019d8eb4b206932"}
+        [
+            "psql",
+            "-U",
+            "openace",
+            "-h",
+            "localhost",
+            "-d",
+            "openace",
+            "-t",
+            "-c",
+            "SELECT EXISTS (SELECT 1 FROM user_daily_stats LIMIT 1)",
+        ],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PGPASSWORD": "f43379650019d8eb4b206932"},
     )
     if r.returncode != 0:
         fail("DB query", r.stderr.strip())
@@ -228,9 +259,11 @@ def test_remote_session_stats_refresh():
 def test_monthly_quota_check():
     """Test 12: Monthly quota check in enforcement scheduler code."""
     import subprocess
+
     r = subprocess.run(
         ["grep", "-c", "monthly", "/home/openace/app/services/quota_enforcement_scheduler.py"],
-        capture_output=True, text=True
+        capture_output=True,
+        text=True,
     )
     count = int(r.stdout.strip()) if r.stdout.strip().isdigit() else 0
     if count < 3:
@@ -242,9 +275,9 @@ def test_monthly_quota_check():
 def test_enforcement_scheduler_status():
     """Test 13: Enforcement scheduler status via service logs."""
     import subprocess
+
     r = subprocess.run(
-        ["journalctl", "-u", "open-ace", "--no-pager", "-n", "200"],
-        capture_output=True, text=True
+        ["journalctl", "-u", "open-ace", "--no-pager", "-n", "200"], capture_output=True, text=True
     )
     if "quota_enforcement_scheduler" not in r.stdout.lower().replace(" ", "_"):
         # Case-insensitive search
@@ -257,10 +290,24 @@ def test_enforcement_scheduler_status():
 def test_rhuang_quota_data():
     """Test 14: Verify rhuang's actual quota data via DB."""
     import subprocess
+
     r = subprocess.run(
-        ["psql", "-U", "openace", "-h", "localhost", "-d", "openace", "-t", "-A", "-c",
-         "SELECT username, daily_token_quota, daily_request_quota FROM users WHERE username='rhuang'"],
-        capture_output=True, text=True, env={**os.environ, "PGPASSWORD": "f43379650019d8eb4b206932"}
+        [
+            "psql",
+            "-U",
+            "openace",
+            "-h",
+            "localhost",
+            "-d",
+            "openace",
+            "-t",
+            "-A",
+            "-c",
+            "SELECT username, daily_token_quota, daily_request_quota FROM users WHERE username='rhuang'",
+        ],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PGPASSWORD": "f43379650019d8eb4b206932"},
     )
     if r.returncode != 0 or not r.stdout.strip():
         fail("rhuang user", f"not found or query failed: {r.stderr.strip()}")
@@ -274,11 +321,11 @@ def test_rhuang_quota_data():
 #  Remote API tests (against the deployed server)
 # ══════════════════════════════════════════════════════
 
+
 def test_remote_quota_api():
     """Test 15: Quota check API returns correct data for rhuang."""
     token = login(TEST_USER, TEST_PASS)
-    r = requests.get(f"{BASE_URL}/api/quota/check",
-                     cookies={"session_token": token})
+    r = requests.get(f"{BASE_URL}/api/quota/check", cookies={"session_token": token})
     if r.status_code != 200:
         fail("Remote quota API", f"status={r.status_code}")
         return
@@ -290,7 +337,9 @@ def test_remote_quota_api():
     requests_info = daily.get("requests", {})
     tokens_info = daily.get("tokens", {})
 
-    log("INFO", f"  API response: requests={requests_info.get('used')}/{requests_info.get('limit')}")
+    log(
+        "INFO", f"  API response: requests={requests_info.get('used')}/{requests_info.get('limit')}"
+    )
     log("INFO", f"  API response: tokens={tokens_info.get('used')}/{tokens_info.get('limit')}")
 
     # Verify monthly section exists
@@ -305,18 +354,18 @@ def test_remote_quota_api():
 def test_remote_quota_usage_me():
     """Test 16: GET /quota/usage/me returns historical data."""
     token = login(TEST_USER, TEST_PASS)
-    r = requests.get(f"{BASE_URL}/api/quota/usage/me?days=7",
-                     cookies={"session_token": token})
+    r = requests.get(f"{BASE_URL}/api/quota/usage/me?days=7", cookies={"session_token": token})
     if r.status_code != 200:
         fail("Usage/me endpoint", f"status={r.status_code} {r.text[:200]}")
         return
-    data = r.json()
-    ok(f"Usage/me endpoint returns data")
+    r.json()
+    ok("Usage/me endpoint returns data")
 
 
 # ══════════════════════════════════════════════════════
 #  Main
 # ══════════════════════════════════════════════════════
+
 
 def run_tests():
     print("\n" + "=" * 60)

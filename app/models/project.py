@@ -7,7 +7,7 @@ Data models for project management and statistics.
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 
 
 @dataclass
@@ -41,6 +41,7 @@ class Project:
     @classmethod
     def from_dict(cls, data: dict) -> "Project":
         """Create from dictionary."""
+
         def parse_datetime(value):
             if value is None:
                 return None
@@ -92,12 +93,8 @@ class UserProject:
             "id": self.id,
             "user_id": self.user_id,
             "project_id": self.project_id,
-            "first_access_at": (
-                self.first_access_at.isoformat() if self.first_access_at else None
-            ),
-            "last_access_at": (
-                self.last_access_at.isoformat() if self.last_access_at else None
-            ),
+            "first_access_at": (self.first_access_at.isoformat() if self.first_access_at else None),
+            "last_access_at": (self.last_access_at.isoformat() if self.last_access_at else None),
             "total_sessions": self.total_sessions,
             "total_tokens": self.total_tokens,
             "total_requests": self.total_requests,
@@ -107,6 +104,7 @@ class UserProject:
     @classmethod
     def from_dict(cls, data: dict) -> "UserProject":
         """Create from dictionary."""
+
         def parse_datetime(value):
             if value is None:
                 return None
@@ -147,7 +145,7 @@ class ProjectStats:
     total_duration_seconds: int = 0
     first_access: Optional[datetime] = None
     last_access: Optional[datetime] = None
-    user_stats: List[UserProject] = field(default_factory=list)
+    user_stats: list[UserProject] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""

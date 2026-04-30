@@ -10,8 +10,8 @@ Tests:
 Issue: Project Management Feature Test
 """
 
-import sys
 import os
+import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -23,10 +23,8 @@ BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 USERNAME = os.environ.get("USERNAME", "admin")
 PASSWORD = os.environ.get("PASSWORD", "admin123")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
-SCREENSHOT_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
-    "screenshots", "project_management"
-)
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "project_management")
 
 
 def ensure_screenshot_dir():
@@ -92,7 +90,7 @@ def test_project_management():
             cards = page.locator(".grid.grid-cols-1.md:grid-cols-4 > div")
             card_count = cards.count()
             print(f"    Found {card_count} summary cards")
-            
+
             if card_count >= 4:
                 # Take screenshot of summary cards
                 save_screenshot(page, "03_summary_cards")
@@ -115,14 +113,14 @@ def test_project_management():
                 if view_btn.is_visible():
                     view_btn.click()
                     time.sleep(2)
-                    
+
                     # Check modal is visible
                     modal = page.locator(".fixed.inset-0.z-50")
                     if modal.is_visible():
                         print("    Modal opened successfully")
                         save_screenshot(page, "05_detail_modal")
                         screenshots.append(("05_detail_modal", "Project detail modal"))
-                        
+
                         # Close modal
                         close_btn = page.locator(".fixed.inset-0.z-50 button").filter(has_text="✕")
                         if close_btn.is_visible():
@@ -136,14 +134,14 @@ def test_project_management():
                 if delete_btn.is_visible():
                     delete_btn.click()
                     time.sleep(1)
-                    
+
                     # Check confirmation modal is visible
                     confirm_modal = page.locator(".fixed.inset-0.z-50")
                     if confirm_modal.is_visible():
                         print("    Delete confirmation modal shown")
                         save_screenshot(page, "06_delete_modal")
                         screenshots.append(("06_delete_modal", "Delete confirmation modal"))
-                        
+
                         # Close without deleting
                         cancel_btn = page.locator("button").filter(has_text="Cancel")
                         if cancel_btn.is_visible():
@@ -155,7 +153,7 @@ def test_project_management():
             print("  Step 7: Test project daily stats API...")
             # We'll use the browser to make an API call
             # The daily stats page might be accessible via a separate route
-            
+
             # Check if there's a daily stats link or tab
             page.goto(f"{BASE_URL}/manage/projects")
             page.wait_for_load_state("networkidle", timeout=10000)
@@ -182,14 +180,14 @@ def test_project_management():
     for name, desc in screenshots:
         print(f"  - {name}: {desc}")
     print(f"\nScreenshots saved in: {SCREENSHOT_DIR}")
-    
+
     return screenshots
 
 
 def generate_report(screenshots):
     """Generate HTML report from screenshots."""
     report_path = os.path.join(SCREENSHOT_DIR, "project_management_report.html")
-    
+
     html_content = """<!DOCTYPE html>
 <html>
 <head>
@@ -210,7 +208,7 @@ def generate_report(screenshots):
         <p>URL: http://localhost:5001/manage/projects</p>
     </div>
 """
-    
+
     for name, desc in screenshots:
         img_path = f"pm_{name}.png"
         html_content += f"""
@@ -219,15 +217,15 @@ def generate_report(screenshots):
         <img src="{img_path}">
     </div>
 """
-    
+
     html_content += """
 </body>
 </html>
 """
-    
+
     with open(report_path, "w") as f:
         f.write(html_content)
-    
+
     print(f"\nReport generated: {report_path}")
     return report_path
 
@@ -235,7 +233,8 @@ def generate_report(screenshots):
 if __name__ == "__main__":
     screenshots = test_project_management()
     report_path = generate_report(screenshots)
-    
+
     # Open report
     import subprocess
+
     subprocess.run(["open", report_path])

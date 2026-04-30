@@ -8,12 +8,10 @@ Tests the permission model:
   - Regular user: own sessions only
 """
 
-import json
+import contextlib
 import os
-import sqlite3
 import sys
 import tempfile
-import uuid
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
@@ -49,7 +47,7 @@ def print_summary():
     print(f"{'='*60}")
     for r in RESULTS:
         status = "PASS" if r["passed"] else "FAIL"
-        print(f"  [{status}] {r['name']}" + (f" - {r['detail']}" if r['detail'] else ""))
+        print(f"  [{status}] {r['name']}" + (f" - {r['detail']}" if r["detail"] else ""))
     return failed == 0
 
 
@@ -63,14 +61,13 @@ def make_manager():
     global _test_counter, TMP_DB
     _test_counter += 1
     # Clean previous temp DB
-    try:
+    with contextlib.suppress(OSError):
         os.unlink(TMP_DB)
-    except OSError:
-        pass
     TMP_DB = tempfile.mktemp(suffix=".db")
 
     # Patch is_postgresql to return False for testing
     import app.repositories.database as db_mod
+
     original_is_pg = db_mod.is_postgresql
     original_db_path = db_mod.DB_PATH
     db_mod.is_postgresql = lambda: False
@@ -78,10 +75,49 @@ def make_manager():
 
     # Reset singleton so each test gets a fresh manager
     import app.modules.workspace.remote_agent_manager as ram_mod
+
     ram_mod._agent_manager = None
 
     from app.modules.workspace.remote_agent_manager import RemoteAgentManager
+
     mgr = RemoteAgentManager(db_path=TMP_DB)
+
+    # Create required tables (SQLite-compatible DDL)
+    import sqlite3
+
+    conn = sqlite3.connect(TMP_DB)
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS remote_machines ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "machine_id TEXT NOT NULL UNIQUE, "
+        "machine_name TEXT, "
+        "status TEXT DEFAULT 'offline', "
+        "tenant_id INTEGER, "
+        "last_heartbeat TIMESTAMP, "
+        "created_at TIMESTAMP, "
+        "updated_at TIMESTAMP)"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS machine_assignments ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "machine_id TEXT NOT NULL, "
+        "user_id INTEGER NOT NULL, "
+        "permission TEXT NOT NULL DEFAULT 'user', "
+        "granted_by INTEGER, "
+        "granted_at TIMESTAMP)"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS agent_sessions ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "session_id TEXT NOT NULL UNIQUE, "
+        "user_id INTEGER, "
+        "status TEXT DEFAULT 'active', "
+        "remote_machine_id TEXT, "
+        "created_at TIMESTAMP, "
+        "updated_at TIMESTAMP)"
+    )
+    conn.commit()
+    conn.close()
 
     db_mod.is_postgresql = original_is_pg
     db_mod.DB_PATH = original_db_path
@@ -90,67 +126,69 @@ def make_manager():
 
 def setup_test_data(mgr):
     """Create test machines and user assignments."""
-    conn = mgr._get_connection()
-    cursor = conn.cursor()
+    with mgr.db.connection() as conn:
+        cursor = conn.cursor()
 
-    now = "2026-01-01T00:00:00"
+        now = "2026-01-01T00:00:00"
 
-    # 3 machines
-    for i, name in enumerate(["machine-a", "machine-b", "machine-c"]):
-        mid = f"mid-{name}"
+        # 3 machines
+        for _i, name in enumerate(["machine-a", "machine-b", "machine-c"]):
+            mid = f"mid-{name}"
+            cursor.execute(
+                "INSERT INTO remote_machines (machine_id, machine_name, status, tenant_id, created_at, updated_at) "
+                "VALUES (?, ?, 'online', 1, ?, ?)",
+                (mid, name, now, now),
+            )
+
+        # Create a users table for the LEFT JOIN in get_machine_assignments
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY,
+                username TEXT NOT NULL
+            )
+        """)
+        for uid in [1, 2, 3, 4, 5, 99]:
+            cursor.execute(
+                "INSERT OR IGNORE INTO users (id, username) VALUES (?, ?)",
+                (uid, f"user{uid}"),
+            )
+
+        # User 1: system admin (not tracked in machine_assignments for admin check)
+        # User 2: machine admin on machine-a
         cursor.execute(
-            "INSERT INTO remote_machines (machine_id, machine_name, status, tenant_id, created_at, updated_at) "
-            "VALUES (?, ?, 'online', 1, ?, ?)",
-            (mid, name, now, now),
+            "INSERT INTO machine_assignments (machine_id, user_id, permission, granted_by, granted_at) "
+            "VALUES (?, ?, ?, 1, ?)",
+            ("mid-machine-a", 2, "admin", now),
+        )
+        # User 2: regular user on machine-b
+        cursor.execute(
+            "INSERT INTO machine_assignments (machine_id, user_id, permission, granted_by, granted_at) "
+            "VALUES (?, ?, ?, 1, ?)",
+            ("mid-machine-b", 2, "user", now),
+        )
+        # User 3: regular user on machine-a
+        cursor.execute(
+            "INSERT INTO machine_assignments (machine_id, user_id, permission, granted_by, granted_at) "
+            "VALUES (?, ?, ?, 1, ?)",
+            ("mid-machine-a", 3, "user", now),
+        )
+        # User 4: machine admin on machine-b
+        cursor.execute(
+            "INSERT INTO machine_assignments (machine_id, user_id, permission, granted_by, granted_at) "
+            "VALUES (?, ?, ?, 1, ?)",
+            ("mid-machine-b", 4, "admin", now),
         )
 
-    # Create a users table for the LEFT JOIN in get_machine_assignments
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY,
-            username TEXT NOT NULL
-        )
-    """)
-    for uid in [1, 2, 3, 4, 5, 99]:
-        cursor.execute("INSERT OR IGNORE INTO users (id, username) VALUES (?, ?)",
-                       (uid, f"user{uid}"))
-
-    # User 1: system admin (not tracked in machine_assignments for admin check)
-    # User 2: machine admin on machine-a
-    cursor.execute(
-        "INSERT INTO machine_assignments (machine_id, user_id, permission, granted_by, granted_at) "
-        "VALUES (?, ?, ?, 1, ?)",
-        ("mid-machine-a", 2, "admin", now),
-    )
-    # User 2: regular user on machine-b
-    cursor.execute(
-        "INSERT INTO machine_assignments (machine_id, user_id, permission, granted_by, granted_at) "
-        "VALUES (?, ?, ?, 1, ?)",
-        ("mid-machine-b", 2, "user", now),
-    )
-    # User 3: regular user on machine-a
-    cursor.execute(
-        "INSERT INTO machine_assignments (machine_id, user_id, permission, granted_by, granted_at) "
-        "VALUES (?, ?, ?, 1, ?)",
-        ("mid-machine-a", 3, "user", now),
-    )
-    # User 4: machine admin on machine-b
-    cursor.execute(
-        "INSERT INTO machine_assignments (machine_id, user_id, permission, granted_by, granted_at) "
-        "VALUES (?, ?, ?, 1, ?)",
-        ("mid-machine-b", 4, "admin", now),
-    )
-
-    conn.commit()
-    conn.close()
+        conn.commit()
 
 
 # ════════════════════════════════════════════
 #  Tests
 # ════════════════════════════════════════════
 
+
 def test_check_user_access_returns_permission():
-    t = test("check_user_access returns permission string")
+    test("check_user_access returns permission string")
     mgr = make_manager()
     setup_test_data(mgr)
 
@@ -163,7 +201,7 @@ def test_check_user_access_returns_permission():
 
 
 def test_check_user_access_returns_none_for_unassigned():
-    t = test("check_user_access returns None for unassigned user")
+    test("check_user_access returns None for unassigned user")
     mgr = make_manager()
     setup_test_data(mgr)
 
@@ -175,7 +213,7 @@ def test_check_user_access_returns_none_for_unassigned():
 
 
 def test_check_user_access_returns_user_permission():
-    t = test("check_user_access returns 'user' for regular user")
+    test("check_user_access returns 'user' for regular user")
     mgr = make_manager()
     setup_test_data(mgr)
 
@@ -187,7 +225,7 @@ def test_check_user_access_returns_user_permission():
 
 
 def test_get_user_permission():
-    t = test("get_user_permission delegates to check_user_access")
+    test("get_user_permission delegates to check_user_access")
     mgr = make_manager()
     setup_test_data(mgr)
 
@@ -199,7 +237,7 @@ def test_get_user_permission():
 
 
 def test_list_machines_with_user_id_has_permission():
-    t = test("list_machines with user_id attaches current_user_permission")
+    test("list_machines with user_id attaches current_user_permission")
     mgr = make_manager()
     setup_test_data(mgr)
 
@@ -207,16 +245,18 @@ def test_list_machines_with_user_id_has_permission():
     # User 2 is assigned to machine-a (admin) and machine-b (user)
     perms = {m["machine_id"]: m.get("current_user_permission") for m in machines}
 
-    if (perms.get("mid-machine-a") == "admin"
-            and perms.get("mid-machine-b") == "user"
-            and perms.get("mid-machine-c") is None):
+    if (
+        perms.get("mid-machine-a") == "admin"
+        and perms.get("mid-machine-b") == "user"
+        and perms.get("mid-machine-c") is None
+    ):
         ok(f"permissions={perms}")
     else:
         fail(f"unexpected permissions: {perms}")
 
 
 def test_list_machines_without_user_id_no_permission():
-    t = test("list_machines without user_id has no current_user_permission")
+    test("list_machines without user_id has no current_user_permission")
     mgr = make_manager()
     setup_test_data(mgr)
 
@@ -229,7 +269,7 @@ def test_list_machines_without_user_id_no_permission():
 
 
 def test_assign_user_as_machine_admin():
-    t = test("assign_user works for machine admin")
+    test("assign_user works for machine admin")
     mgr = make_manager()
     setup_test_data(mgr)
 
@@ -246,7 +286,7 @@ def test_assign_user_as_machine_admin():
 
 
 def test_revoke_user_as_machine_admin():
-    t = test("revoke_user works for regular user")
+    test("revoke_user works for regular user")
     mgr = make_manager()
     setup_test_data(mgr)
 
@@ -262,7 +302,7 @@ def test_revoke_user_as_machine_admin():
 def test_revoke_admin_by_machine_admin():
     """Verify that the route-level logic prevents machine admin from revoking admin.
     We test the data layer here; route logic is tested separately."""
-    t = test("revoke_user data layer allows revoking admin (route enforces)")
+    test("revoke_user data layer allows revoking admin (route enforces)")
     mgr = make_manager()
     setup_test_data(mgr)
 
@@ -277,7 +317,7 @@ def test_revoke_admin_by_machine_admin():
 
 
 def test_backwards_compat_truthiness():
-    t = test("check_user_access result is truthy for assigned, falsy for unassigned")
+    test("check_user_access result is truthy for assigned, falsy for unassigned")
     mgr = make_manager()
     setup_test_data(mgr)
 
@@ -291,7 +331,7 @@ def test_backwards_compat_truthiness():
 
 
 def test_permission_isolation_across_machines():
-    t = test("user permissions are isolated per machine")
+    test("user permissions are isolated per machine")
     mgr = make_manager()
     setup_test_data(mgr)
 
@@ -307,7 +347,7 @@ def test_permission_isolation_across_machines():
 
 
 def test_assign_user_with_admin_permission():
-    t = test("assign_user can assign admin permission (data layer)")
+    test("assign_user can assign admin permission (data layer)")
     mgr = make_manager()
     setup_test_data(mgr)
 
@@ -323,15 +363,18 @@ def test_assign_user_with_admin_permission():
 #  Route-level permission tests (using Flask test client)
 # ════════════════════════════════════════════
 
+
 def _make_app(mgr):
     """Create a minimal Flask app with remote_bp for route testing."""
     import app.repositories.database as db_mod
+
     db_mod.is_postgresql = lambda: False
     db_mod.DB_PATH = TMP_DB
 
     from flask import Flask
-    from app.routes import remote as remote_mod
+
     import app.modules.workspace.remote_agent_manager as ram_mod
+    from app.routes import remote as remote_mod
 
     # Set the global singleton to our test manager
     ram_mod._agent_manager = mgr
@@ -381,15 +424,18 @@ def _auth_delete(client, url, token, **kwargs):
 
 
 def test_route_assign_by_system_admin():
-    t = test("Route: system admin can assign user with admin permission")
+    test("Route: system admin can assign user with admin permission")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
 
     with app.test_client() as client:
-        resp = _auth_post(client, "/api/remote/machines/mid-machine-a/assign",
-                          "test-token-1-admin",
-                          json={"user_id": 5, "permission": "admin"})
+        resp = _auth_post(
+            client,
+            "/api/remote/machines/mid-machine-a/assign",
+            "test-token-1-admin",
+            json={"user_id": 5, "permission": "admin"},
+        )
         if resp.status_code == 200:
             perm = mgr.check_user_access("mid-machine-a", 5)
             if perm == "admin":
@@ -401,15 +447,18 @@ def test_route_assign_by_system_admin():
 
 
 def test_route_assign_by_machine_admin():
-    t = test("Route: machine admin can assign user (forced to 'user')")
+    test("Route: machine admin can assign user (forced to 'user')")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
 
     with app.test_client() as client:
-        resp = _auth_post(client, "/api/remote/machines/mid-machine-a/assign",
-                          "test-token-2-user",
-                          json={"user_id": 5, "permission": "admin"})
+        resp = _auth_post(
+            client,
+            "/api/remote/machines/mid-machine-a/assign",
+            "test-token-2-user",
+            json={"user_id": 5, "permission": "admin"},
+        )
         if resp.status_code == 200:
             perm = mgr.check_user_access("mid-machine-a", 5)
             if perm == "user":
@@ -421,15 +470,18 @@ def test_route_assign_by_machine_admin():
 
 
 def test_route_assign_by_regular_user():
-    t = test("Route: regular user cannot assign users")
+    test("Route: regular user cannot assign users")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
 
     with app.test_client() as client:
-        resp = _auth_post(client, "/api/remote/machines/mid-machine-a/assign",
-                          "test-token-3-user",
-                          json={"user_id": 5, "permission": "user"})
+        resp = _auth_post(
+            client,
+            "/api/remote/machines/mid-machine-a/assign",
+            "test-token-3-user",
+            json={"user_id": 5, "permission": "user"},
+        )
         if resp.status_code == 403:
             ok(f"status=403, body={resp.get_json()}")
         else:
@@ -437,30 +489,34 @@ def test_route_assign_by_regular_user():
 
 
 def test_route_assign_by_unassigned_user():
-    t = test("Route: unassigned user cannot assign users")
+    test("Route: unassigned user cannot assign users")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
 
     with app.test_client() as client:
-        resp = _auth_post(client, "/api/remote/machines/mid-machine-a/assign",
-                          "test-token-99-user",
-                          json={"user_id": 5, "permission": "user"})
+        resp = _auth_post(
+            client,
+            "/api/remote/machines/mid-machine-a/assign",
+            "test-token-99-user",
+            json={"user_id": 5, "permission": "user"},
+        )
         if resp.status_code == 403:
-            ok(f"status=403")
+            ok("status=403")
         else:
             fail(f"expected 403, got {resp.status_code}")
 
 
 def test_route_revoke_by_machine_admin():
-    t = test("Route: machine admin can revoke regular user")
+    test("Route: machine admin can revoke regular user")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
 
     with app.test_client() as client:
-        resp = _auth_delete(client, "/api/remote/machines/mid-machine-a/assign/3",
-                            "test-token-2-user")
+        resp = _auth_delete(
+            client, "/api/remote/machines/mid-machine-a/assign/3", "test-token-2-user"
+        )
         if resp.status_code == 200:
             perm = mgr.check_user_access("mid-machine-a", 3)
             if perm is None:
@@ -472,15 +528,16 @@ def test_route_revoke_by_machine_admin():
 
 
 def test_route_revoke_admin_by_machine_admin():
-    t = test("Route: machine admin cannot revoke admin user")
+    test("Route: machine admin cannot revoke admin user")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
 
     with app.test_client() as client:
         mgr.assign_user("mid-machine-a", 4, granted_by=1, permission="admin")
-        resp = _auth_delete(client, "/api/remote/machines/mid-machine-a/assign/4",
-                            "test-token-2-user")
+        resp = _auth_delete(
+            client, "/api/remote/machines/mid-machine-a/assign/4", "test-token-2-user"
+        )
         if resp.status_code == 403:
             ok(f"status=403, body={resp.get_json()}")
         else:
@@ -488,14 +545,15 @@ def test_route_revoke_admin_by_machine_admin():
 
 
 def test_route_revoke_admin_by_system_admin():
-    t = test("Route: system admin can revoke admin user")
+    test("Route: system admin can revoke admin user")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
 
     with app.test_client() as client:
-        resp = _auth_delete(client, "/api/remote/machines/mid-machine-a/assign/2",
-                            "test-token-1-admin")
+        resp = _auth_delete(
+            client, "/api/remote/machines/mid-machine-a/assign/2", "test-token-1-admin"
+        )
         if resp.status_code == 200:
             perm = mgr.check_user_access("mid-machine-a", 2)
             if perm is None:
@@ -507,14 +565,13 @@ def test_route_revoke_admin_by_system_admin():
 
 
 def test_route_get_users_by_machine_admin():
-    t = test("Route: machine admin can get machine users")
+    test("Route: machine admin can get machine users")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
 
     with app.test_client() as client:
-        resp = _auth_get(client, "/api/remote/machines/mid-machine-a/users",
-                         "test-token-2-user")
+        resp = _auth_get(client, "/api/remote/machines/mid-machine-a/users", "test-token-2-user")
         data = resp.get_json()
         if resp.status_code == 200 and len(data.get("users", [])) >= 1:
             ok(f"status=200, users={len(data['users'])}")
@@ -523,22 +580,21 @@ def test_route_get_users_by_machine_admin():
 
 
 def test_route_get_users_by_regular_user():
-    t = test("Route: regular user cannot get machine users")
+    test("Route: regular user cannot get machine users")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
 
     with app.test_client() as client:
-        resp = _auth_get(client, "/api/remote/machines/mid-machine-a/users",
-                         "test-token-3-user")
+        resp = _auth_get(client, "/api/remote/machines/mid-machine-a/users", "test-token-3-user")
         if resp.status_code == 403:
-            ok(f"status=403")
+            ok("status=403")
         else:
             fail(f"expected 403, got {resp.status_code}")
 
 
 def test_route_list_machines_includes_permission():
-    t = test("Route: list machines for non-admin includes current_user_permission")
+    test("Route: list machines for non-admin includes current_user_permission")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -548,30 +604,27 @@ def test_route_list_machines_includes_permission():
         data = resp.get_json()
         machines = data.get("machines", [])
         perms = {m["machine_id"]: m.get("current_user_permission") for m in machines}
-        if (perms.get("mid-machine-a") == "admin"
-                and perms.get("mid-machine-b") == "user"):
+        if perms.get("mid-machine-a") == "admin" and perms.get("mid-machine-b") == "user":
             ok(f"permissions={perms}")
         else:
             fail(f"unexpected permissions: {perms}")
 
 
 def test_route_deregister_system_admin_only():
-    t = test("Route: deregister machine is system admin only")
+    test("Route: deregister machine is system admin only")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
 
     with app.test_client() as client:
-        resp = _auth_delete(client, "/api/remote/machines/mid-machine-a",
-                            "test-token-2-user")
+        resp = _auth_delete(client, "/api/remote/machines/mid-machine-a", "test-token-2-user")
         if resp.status_code == 403:
             ok("machine admin gets 403")
         else:
             fail(f"expected 403, got {resp.status_code}")
 
     with app.test_client() as client:
-        resp2 = _auth_delete(client, "/api/remote/machines/mid-machine-c",
-                             "test-token-1-admin")
+        resp2 = _auth_delete(client, "/api/remote/machines/mid-machine-c", "test-token-1-admin")
         if resp2.status_code == 200:
             ok("system admin can deregister")
         else:
@@ -579,15 +632,15 @@ def test_route_deregister_system_admin_only():
 
 
 def test_route_generate_token_system_admin_only():
-    t = test("Route: generate token is system admin only")
+    test("Route: generate token is system admin only")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
 
     with app.test_client() as client:
-        resp = _auth_post(client, "/api/remote/machines/register",
-                          "test-token-2-user",
-                          json={"tenant_id": 1})
+        resp = _auth_post(
+            client, "/api/remote/machines/register", "test-token-2-user", json={"tenant_id": 1}
+        )
         if resp.status_code == 403:
             ok("machine admin gets 403 for token generation")
         else:
@@ -609,6 +662,7 @@ def _create_session_for_test(mgr, user_id, machine_id):
     rsm_mod.get_remote_agent_manager = lambda: mgr
 
     from app.modules.workspace.remote_session_manager import RemoteSessionManager
+
     session_mgr = RemoteSessionManager()
 
     result = session_mgr.create_remote_session(
@@ -623,7 +677,7 @@ def _create_session_for_test(mgr, user_id, machine_id):
 
 
 def test_route_session_access_owner():
-    t = test("Route: session owner can access own session")
+    test("Route: session owner can access own session")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -643,7 +697,7 @@ def test_route_session_access_owner():
 
 
 def test_route_session_access_machine_admin():
-    t = test("Route: machine admin can access others' session")
+    test("Route: machine admin can access others' session")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -663,7 +717,7 @@ def test_route_session_access_machine_admin():
 
 
 def test_route_session_access_denied_other_user():
-    t = test("Route: regular user cannot access others' session")
+    test("Route: regular user cannot access others' session")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -683,7 +737,7 @@ def test_route_session_access_denied_other_user():
 
 
 def test_route_session_access_unassigned_user():
-    t = test("Route: unassigned user cannot access session")
+    test("Route: unassigned user cannot access session")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -704,10 +758,11 @@ def test_route_session_access_unassigned_user():
 
 # ════════════════════════════════════════════
 
+
 def main():
-    print("="*60)
+    print("=" * 60)
     print("  Machine-Level Admin Permission Tests")
-    print("="*60)
+    print("=" * 60)
 
     # Data layer tests
     test_check_user_access_returns_permission()
@@ -746,10 +801,8 @@ def main():
     all_passed = print_summary()
 
     # Cleanup
-    try:
+    with contextlib.suppress(OSError):
         os.unlink(TMP_DB)
-    except OSError:
-        pass
 
     sys.exit(0 if all_passed else 1)
 

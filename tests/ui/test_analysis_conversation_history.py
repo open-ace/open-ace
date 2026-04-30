@@ -12,9 +12,10 @@ Usage:
     python3 tests/ui/test_analysis_conversation_history.py
 """
 
-import pytest
 import time
-from playwright.async_api import async_playwright, expect
+
+import pytest
+from playwright.async_api import async_playwright
 
 # Test configuration
 BASE_URL = "http://localhost:5000"

@@ -15,9 +15,8 @@ Revises: 023
 Create Date: 2026-04-03
 """
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers
 revision = "024_add_user_id_and_tool_accounts"
@@ -33,10 +32,7 @@ def upgrade():
     # Step 1: Add user_id to daily_messages
     # ===========================================
 
-    op.add_column(
-        "daily_messages",
-        sa.Column("user_id", sa.Integer(), nullable=True)
-    )
+    op.add_column("daily_messages", sa.Column("user_id", sa.Integer(), nullable=True))
 
     # Index for user_id queries (covering index for quota queries)
     op.execute("""
@@ -53,7 +49,9 @@ def upgrade():
     op.create_table(
         "user_tool_accounts",
         sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        ),
         sa.Column("tool_account", sa.String(255), nullable=False),
         sa.Column("tool_type", sa.String(50), nullable=True),
         sa.Column("description", sa.String(255), nullable=True),
@@ -62,25 +60,13 @@ def upgrade():
     )
 
     # Unique constraint: one user can only have one mapping per tool_account
-    op.create_unique_constraint(
-        "uq_user_tool_account",
-        "user_tool_accounts",
-        ["tool_account"]
-    )
+    op.create_unique_constraint("uq_user_tool_account", "user_tool_accounts", ["tool_account"])
 
     # Index for user_id lookups
-    op.create_index(
-        "idx_tool_accounts_user_id",
-        "user_tool_accounts",
-        ["user_id"]
-    )
+    op.create_index("idx_tool_accounts_user_id", "user_tool_accounts", ["user_id"])
 
     # Index for tool_account lookups (for matching sender_name)
-    op.create_index(
-        "idx_tool_accounts_tool_account",
-        "user_tool_accounts",
-        ["tool_account"]
-    )
+    op.create_index("idx_tool_accounts_tool_account", "user_tool_accounts", ["tool_account"])
 
     # ===========================================
     # Step 3: Populate user_tool_accounts from existing data

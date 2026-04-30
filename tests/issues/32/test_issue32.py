@@ -3,11 +3,12 @@
 测试 Issue #32: Conversation Timeline 显示不直观
 """
 
-import pytest
 import asyncio
-from playwright.async_api import async_playwright
 import os
 from datetime import datetime
+
+import pytest
+from playwright.async_api import async_playwright
 
 # 配置
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000/")
@@ -56,13 +57,11 @@ async def test_issue32():
 
             # 设置日期范围以确保数据加载
             print("2.5 设置日期范围...")
-            await page.evaluate(
-                """() => {
+            await page.evaluate("""() => {
                 document.getElementById('analysis-start-date').value = '2026-03-01';
                 document.getElementById('analysis-end-date').value = '2026-03-13';
                 onAnalysisDateChange();
-            }"""
-            )
+            }""")
             await asyncio.sleep(2)
 
             # 3. 点击 Conversation History Tab
@@ -73,13 +72,11 @@ async def test_issue32():
                 path=f"{SCREENSHOT_DIR}/issue32_before_tab_click_{timestamp}.png", full_page=True
             )
 
-            await page.evaluate(
-                """() => {
+            await page.evaluate("""() => {
                 const tab = document.getElementById('conversation-history-tab');
                 console.log('Tab found:', tab);
                 if (tab) tab.click();
-            }"""
-            )
+            }""")
             await asyncio.sleep(5)  # Wait longer for data to load
 
             # 截图看看点击后的状态
@@ -100,21 +97,17 @@ async def test_issue32():
                 print(f"   表格容器可见: {table_exists}")
 
                 # 检查表格内容
-                table_html = await page.evaluate(
-                    """() => {
+                table_html = await page.evaluate("""() => {
                     const table = document.getElementById('conversation-history-table');
                     return table ? table.innerHTML : 'not found';
-                }"""
-                )
+                }""")
                 print(f"   表格内容: {table_html[:200]}...")
 
                 # 检查是否有 tabulator 类
-                has_tabulator = await page.evaluate(
-                    """() => {
+                has_tabulator = await page.evaluate("""() => {
                     const table = document.getElementById('conversation-history-table');
                     return table ? table.classList.contains('tabulator') : false;
-                }"""
-                )
+                }""")
                 print(f"   表格有 tabulator 类: {has_tabulator}")
 
                 if table_exists:
@@ -134,16 +127,14 @@ async def test_issue32():
             print("4. 点击 Timeline 按钮...")
 
             # 使用 JavaScript 找到并点击第一个 Timeline 按钮
-            timeline_button_found = await page.evaluate(
-                """() => {
+            timeline_button_found = await page.evaluate("""() => {
                 const buttons = document.querySelectorAll('button[onclick*="showTimelineModal"]');
                 if (buttons.length > 0) {
                     buttons[0].click();
                     return true;
                 }
                 return false;
-            }"""
-            )
+            }""")
 
             if not timeline_button_found:
                 print("   ✗ 失败: 未找到 Timeline 按钮")
@@ -195,11 +186,9 @@ async def test_issue32():
                 results.append(("Timeline Summary 存在", False, "Summary 未找到"))
 
             # 检查 timeline items 是否存在
-            timeline_items_count = await page.evaluate(
-                """() => {
+            timeline_items_count = await page.evaluate("""() => {
                 return document.querySelectorAll('.timeline-item').length;
-            }"""
-            )
+            }""")
 
             if timeline_items_count > 0:
                 print(f"   ✓ 找到 {timeline_items_count} 个 Timeline Items")
@@ -209,11 +198,9 @@ async def test_issue32():
                 results.append(("Timeline Items 显示", False, "无 Timeline Items"))
 
             # 检查卡片样式
-            cards_count = await page.evaluate(
-                """() => {
+            cards_count = await page.evaluate("""() => {
                 return document.querySelectorAll('.timeline-item .card').length;
-            }"""
-            )
+            }""")
 
             if cards_count > 0:
                 print(f"   ✓ 找到 {cards_count} 个卡片样式元素")
@@ -235,7 +222,7 @@ async def test_issue32():
             await page.screenshot(
                 path=f"{SCREENSHOT_DIR}/issue32_timeline_detail_{timestamp}.png", full_page=True
             )
-            print(f"   ✓ 详细截图已保存")
+            print("   ✓ 详细截图已保存")
 
         except Exception as e:
             print(f"   ✗ 测试出错: {str(e)}")

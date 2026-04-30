@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+
 from playwright.async_api import async_playwright
 
 SCREENSHOT_DIR = "/Users/rhuang/workspace/open-ace/screenshots/issues/4"

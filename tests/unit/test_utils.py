@@ -3,8 +3,7 @@
 Unit tests for utils.py module.
 """
 
-import pytest
-from utils import format_tokens, parse_date, get_today, get_days_ago, aggregate_daily_stats
+from utils import aggregate_daily_stats, format_tokens, get_days_ago, get_today, parse_date
 
 
 class TestFormatTokens:

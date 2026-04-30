@@ -12,9 +12,10 @@ Usage:
     python3 tests/ui/test_anomaly_performance.py
 """
 
-import sys
 import os
+import sys
 import time
+
 import requests
 
 # Add the project root to the path
@@ -66,7 +67,7 @@ def test_api_performance():
     end_date = "2026-03-29"
 
     # First request (may hit cache or not)
-    print(f"\n[API Test 1] First request to anomaly-detection API...")
+    print("\n[API Test 1] First request to anomaly-detection API...")
     start_time = time.time()
     response = requests.get(
         f"{BASE_URL}api/analysis/anomaly-detection", params={"start": start_date, "end": end_date}
@@ -86,7 +87,7 @@ def test_api_performance():
         print(f"  ✗ First request exceeded {API_FIRST_REQUEST_THRESHOLD}s threshold")
 
     # Cached request (should be very fast)
-    print(f"\n[API Test 2] Cached request to anomaly-detection API...")
+    print("\n[API Test 2] Cached request to anomaly-detection API...")
     start_time = time.time()
     response = requests.get(
         f"{BASE_URL}api/analysis/anomaly-detection", params={"start": start_date, "end": end_date}
@@ -103,7 +104,7 @@ def test_api_performance():
         print(f"  ✗ Cached request exceeded {API_CACHED_REQUEST_THRESHOLD}s threshold")
 
     # Test anomaly-trend API
-    print(f"\n[API Test 3] Anomaly trend API...")
+    print("\n[API Test 3] Anomaly trend API...")
     start_time = time.time()
     response = requests.get(
         f"{BASE_URL}api/analysis/anomaly-trend", params={"start": start_date, "end": end_date}
@@ -153,7 +154,7 @@ def test_page_load_performance():
             page.click('button[type="submit"]')
             page.wait_for_url(lambda url: "/login" not in url, timeout=15000)
             page.wait_for_load_state("networkidle")
-            print(f"✓ Login successful")
+            print("✓ Login successful")
             screenshots.append(take_screenshot(page, "01_after_login"))
 
             # Step 2: Navigate to Anomaly Detection page and measure load time

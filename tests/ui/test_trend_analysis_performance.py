@@ -8,6 +8,7 @@ Expected: First load < 1s (after optimization from 7.7s -> 2.2s -> 0.75s)
 
 import asyncio
 import time
+
 from playwright.async_api import async_playwright
 
 # Configuration

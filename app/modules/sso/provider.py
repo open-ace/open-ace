@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 
 class ProviderType(Enum):
@@ -32,12 +32,12 @@ class SSOProviderConfig:
     token_url: str
     userinfo_url: Optional[str] = None
     redirect_uri: Optional[str] = None
-    scope: List[str] = field(default_factory=lambda: ["openid", "profile", "email"])
+    scope: list[str] = field(default_factory=lambda: ["openid", "profile", "email"])
     issuer_url: Optional[str] = None
     jwks_url: Optional[str] = None
 
     # Additional configuration
-    extra_params: Dict[str, Any] = field(default_factory=dict)
+    extra_params: dict[str, Any] = field(default_factory=dict)
 
     # Tenant association
     tenant_id: Optional[int] = None
@@ -79,7 +79,7 @@ class SSOUser:
     picture: Optional[str] = None
     locale: Optional[str] = None
     email_verified: bool = False
-    raw_data: Dict[str, Any] = field(default_factory=dict)
+    raw_data: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -311,7 +311,7 @@ PROVIDER_CONFIGS = {
 }
 
 
-def get_provider_config(provider_name: str) -> Optional[Dict[str, Any]]:
+def get_provider_config(provider_name: str) -> Optional[dict[str, Any]]:
     """
     Get predefined provider configuration.
 
@@ -324,7 +324,7 @@ def get_provider_config(provider_name: str) -> Optional[Dict[str, Any]]:
     return PROVIDER_CONFIGS.get(provider_name)
 
 
-def list_providers() -> List[str]:
+def list_providers() -> list[str]:
     """
     List available predefined providers.
 

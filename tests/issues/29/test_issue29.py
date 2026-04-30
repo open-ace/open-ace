@@ -3,11 +3,12 @@
 测试 Issue #29: 去掉 conversation history 表格的 conversation id 一列
 """
 
-import pytest
 import asyncio
-from playwright.async_api import async_playwright
 import os
 from datetime import datetime
+
+import pytest
+from playwright.async_api import async_playwright
 
 # 配置
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000/")
@@ -56,23 +57,19 @@ async def test_issue29():
 
             # 设置日期范围以确保数据加载
             print("2.5 设置日期范围...")
-            await page.evaluate(
-                """() => {
+            await page.evaluate("""() => {
                 document.getElementById('analysis-start-date').value = '2026-03-01';
                 document.getElementById('analysis-end-date').value = '2026-03-13';
                 onAnalysisDateChange();
-            }"""
-            )
+            }""")
             await asyncio.sleep(2)
 
             # 3. 点击 Conversation History Tab
             print("3. 点击 Conversation History Tab...")
-            await page.evaluate(
-                """() => {
+            await page.evaluate("""() => {
                 const tab = document.getElementById('conversation-history-tab');
                 if (tab) tab.click();
-            }"""
-            )
+            }""")
             await asyncio.sleep(3)  # Wait for data to load
             await page.wait_for_selector(
                 "#conversation-history-table .tabulator-row", timeout=10000

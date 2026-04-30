@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Test script for issue 82: Sidebar collapse functionality."""
 
-import pytest
 import asyncio
+
+import pytest
 from playwright.async_api import async_playwright
 
 

@@ -5,9 +5,10 @@ Version 2: 更精确的表单填写
 """
 
 import asyncio
-from playwright.async_api import async_playwright
 import os
 import sys
+
+from playwright.async_api import async_playwright
 
 # 配置
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000")

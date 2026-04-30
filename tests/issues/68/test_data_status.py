@@ -14,15 +14,16 @@ UI 测试: Issue 68 - Data Status 远程机器状态检查功能
 5. 验证远程机器状态更新
 """
 
-import pytest
-import sys
 import os
+import sys
 import time
+
+import pytest
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from playwright.async_api import async_playwright, expect
+from playwright.async_api import async_playwright
 
 # Test configuration
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000")
@@ -200,7 +201,7 @@ async def test_data_status():
     print("测试报告")
     print("=" * 60)
     print(f"测试状态: {'通过 ✓' if test_passed else '失败 ✗'}")
-    print(f"\n截图文件:")
+    print("\n截图文件:")
     for s in screenshots:
         print(f"  - {s}")
     print("=" * 60)

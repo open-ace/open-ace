@@ -9,9 +9,10 @@ This test verifies that:
 4. Page numbers update correctly when navigating
 """
 
-import pytest
 import time
-from playwright.async_api import async_playwright, expect
+
+import pytest
+from playwright.async_api import async_playwright
 
 # Test configuration
 BASE_URL = "http://localhost:5000"

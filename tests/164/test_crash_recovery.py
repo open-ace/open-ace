@@ -18,8 +18,8 @@ import json
 import os
 import sys
 import time
-import uuid
 import traceback
+import uuid
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, PROJECT_ROOT)
@@ -45,8 +45,10 @@ admin_token = None
 
 # ── 工具函数 ──
 
+
 def ensure_dir():
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
+
 
 def shot(page, name):
     ensure_dir()
@@ -54,8 +56,10 @@ def shot(page, name):
     page.screenshot(path=path, full_page=True)
     print(f"    screenshot: {name}.png")
 
+
 def log_step(tag, msg):
     print(f"    [{tag}] {msg}")
+
 
 def pause(seconds):
     if not HEADLESS:
@@ -66,81 +70,114 @@ def pause(seconds):
 
 # ── API 函数 ──
 
+
 def api_login_as(username=TEST_USER, password=TEST_PASS):
-    r = requests.post(f"{BASE_URL}/api/auth/login",
-                      json={"username": username, "password": password})
+    r = requests.post(
+        f"{BASE_URL}/api/auth/login", json={"username": username, "password": password}
+    )
     assert r.status_code == 200, f"Login failed: {r.status_code}"
     return r.cookies.get("session_token")
+
 
 def api_admin_login():
     return api_login_as("admin", "admin123")
 
+
 def api_register_machine(admin_tok):
     global machine_id
-    r = requests.post(f"{BASE_URL}/api/remote/machines/register",
-                      json={"tenant_id": 1},
-                      cookies={"session_token": admin_tok})
+    r = requests.post(
+        f"{BASE_URL}/api/remote/machines/register",
+        json={"tenant_id": 1},
+        cookies={"session_token": admin_tok},
+    )
     assert r.status_code == 200
     reg_token = r.json()["registration_token"]
     machine_id = str(uuid.uuid4())
-    r = requests.post(f"{BASE_URL}/api/remote/agent/register", json={
-        "registration_token": reg_token,
-        "machine_id": machine_id,
-        "machine_name": "Crash Recovery Test Server",
-        "hostname": "crash-test.local",
-        "os_type": "linux",
-        "os_version": "Ubuntu 24.04",
-        "capabilities": {"cpu_cores": 8, "memory_gb": 32, "cli_installed": True},
-        "agent_version": "1.0.0-e2e-crash",
-    })
+    r = requests.post(
+        f"{BASE_URL}/api/remote/agent/register",
+        json={
+            "registration_token": reg_token,
+            "machine_id": machine_id,
+            "machine_name": "Crash Recovery Test Server",
+            "hostname": "crash-test.local",
+            "os_type": "linux",
+            "os_version": "Ubuntu 24.04",
+            "capabilities": {"cpu_cores": 8, "memory_gb": 32, "cli_installed": True},
+            "agent_version": "1.0.0-e2e-crash",
+        },
+    )
     assert r.status_code == 200
-    requests.post(f"{BASE_URL}/api/remote/agent/message", json={
-        "type": "register", "machine_id": machine_id,
-        "capabilities": {"cpu_cores": 8, "memory_gb": 32, "cli_installed": True},
-    })
-    requests.post(f"{BASE_URL}/api/remote/machines/{machine_id}/assign",
+    requests.post(
+        f"{BASE_URL}/api/remote/agent/message",
+        json={
+            "type": "register",
+            "machine_id": machine_id,
+            "capabilities": {"cpu_cores": 8, "memory_gb": 32, "cli_installed": True},
+        },
+    )
+    requests.post(
+        f"{BASE_URL}/api/remote/machines/{machine_id}/assign",
         json={"user_id": 89, "permission": "admin"},
-        cookies={"session_token": admin_tok})
+        cookies={"session_token": admin_tok},
+    )
+
 
 def api_create_session(token):
     global session_id
-    r = requests.post(f"{BASE_URL}/api/remote/sessions",
-                      json={
-                          "machine_id": machine_id,
-                          "project_path": "/home/user/crash-test-project",
-                          "cli_tool": "qwen-code-cli",
-                          "model": "qwen3-coder-plus",
-                          "title": "E2E Crash Recovery Test",
-                      },
-                      cookies={"session_token": token})
+    r = requests.post(
+        f"{BASE_URL}/api/remote/sessions",
+        json={
+            "machine_id": machine_id,
+            "project_path": "/home/user/crash-test-project",
+            "cli_tool": "qwen-code-cli",
+            "model": "qwen3-coder-plus",
+            "title": "E2E Crash Recovery Test",
+        },
+        cookies={"session_token": token},
+    )
     assert r.status_code == 200, f"Create session failed: {r.status_code} {r.text}"
     session_id = r.json()["session"]["session_id"]
+
 
 def api_send_output(step, is_complete=False):
     outputs = {
         "thinking": '{"type":"thinking","content":"Analyzing code for crash recovery..."}',
         "response": '{"type":"assistant","content":"I will help you test crash recovery.\\nThe session should survive process restarts."}',
-        "final":    '{"type":"assistant","content":"Crash recovery analysis complete. Session history will be preserved via --resume."}',
+        "final": '{"type":"assistant","content":"Crash recovery analysis complete. Session history will be preserved via --resume."}',
     }
-    requests.post(f"{BASE_URL}/api/remote/agent/message", json={
-        "type": "session_output", "machine_id": machine_id,
-        "session_id": session_id, "data": outputs[step],
-        "stream": "stdout", "is_complete": is_complete,
-    })
+    requests.post(
+        f"{BASE_URL}/api/remote/agent/message",
+        json={
+            "type": "session_output",
+            "machine_id": machine_id,
+            "session_id": session_id,
+            "data": outputs[step],
+            "stream": "stdout",
+            "is_complete": is_complete,
+        },
+    )
+
 
 def api_send_usage():
-    requests.post(f"{BASE_URL}/api/remote/agent/message", json={
-        "type": "usage_report", "machine_id": machine_id,
-        "session_id": session_id,
-        "tokens": {"input": 800, "output": 400},
-        "requests": 1,
-    })
+    requests.post(
+        f"{BASE_URL}/api/remote/agent/message",
+        json={
+            "type": "usage_report",
+            "machine_id": machine_id,
+            "session_id": session_id,
+            "tokens": {"input": 800, "output": 400},
+            "requests": 1,
+        },
+    )
+
 
 def api_get_session(token):
-    r = requests.get(f"{BASE_URL}/api/remote/sessions/{session_id}",
-                     cookies={"session_token": token})
+    r = requests.get(
+        f"{BASE_URL}/api/remote/sessions/{session_id}", cookies={"session_token": token}
+    )
     assert r.status_code == 200
     return r.json()["session"]
+
 
 def browser_fetch(page, label, method, url, body=None):
     script = """
@@ -165,21 +202,25 @@ def browser_fetch(page, label, method, url, body=None):
     """
     return page.evaluate(script, [label, method, url, body])
 
+
 def cleanup(token, admin_tok):
     global session_id, machine_id
     if session_id:
-        requests.post(f"{BASE_URL}/api/remote/sessions/{session_id}/stop",
-                      cookies={"session_token": token})
+        requests.post(
+            f"{BASE_URL}/api/remote/sessions/{session_id}/stop", cookies={"session_token": token}
+        )
         session_id = None
     if machine_id:
-        requests.delete(f"{BASE_URL}/api/remote/machines/{machine_id}",
-                        cookies={"session_token": admin_tok})
+        requests.delete(
+            f"{BASE_URL}/api/remote/machines/{machine_id}", cookies={"session_token": admin_tok}
+        )
         machine_id = None
 
 
 # ══════════════════════════════════════════════════════
 #  Main Test Flow
 # ══════════════════════════════════════════════════════
+
 
 def run_tests():
     global auth_token, admin_token, session_id
@@ -229,11 +270,12 @@ def run_tests():
             assert sess["status"] == "active"
             assert len(sess.get("output", [])) >= 3
 
-            browser_fetch(page, "Verify session", "GET",
-                         f"/api/remote/sessions/{session_id}")
+            browser_fetch(page, "Verify session", "GET", f"/api/remote/sessions/{session_id}")
             pause(2)
             shot(page, "03_session_active")
-            print(f"  Session verified: {len(sess['output'])} entries, {sess['total_tokens']} tokens")
+            print(
+                f"  Session verified: {len(sess['output'])} entries, {sess['total_tokens']} tokens"
+            )
 
             # ══════ 4. Test ProcessExecutor metadata persistence ══════
             print("\n══════ 4. Test Metadata Persistence ══════")
@@ -282,7 +324,7 @@ def run_tests():
             assert loaded_meta[session_id]["cli_tool"] == "qwen-code-cli"
             assert loaded_meta[session_id]["project_path"] == "/home/user/crash-test-project"
             assert loaded_meta[session_id]["model"] == "qwen3-coder-plus"
-            assert loaded_meta[session_id]["paused"] == False
+            assert not loaded_meta[session_id]["paused"]
             log_step("Verify", f"Session {session_id[:8]} metadata correct")
             log_step("cli_tool", loaded_meta[session_id]["cli_tool"])
             log_step("model", loaded_meta[session_id]["model"])
@@ -312,7 +354,7 @@ def run_tests():
             log_step("Post-crash", "Metadata file still exists with session data")
 
             # New ProcessExecutor instance simulates agent restart
-            pe2 = ProcessExecutor("http://localhost:5001")
+            ProcessExecutor("http://localhost:5001")
             log_step("New executor", "Created to simulate agent restart")
             shot(page, "06_crash_simulation")
             print("  Crash simulation: metadata persists on disk")
@@ -330,11 +372,14 @@ def run_tests():
             assert len(sess2.get("output", [])) >= 3, "Output should be preserved"
             assert sess2.get("total_tokens", 0) >= 1200, "Tokens should be preserved"
 
-            browser_fetch(page, "Verify data after reconnection", "GET",
-                         f"/api/remote/sessions/{session_id}")
+            browser_fetch(
+                page, "Verify data after reconnection", "GET", f"/api/remote/sessions/{session_id}"
+            )
             pause(2)
             shot(page, "07_data_integrity")
-            print(f"  Data integrity verified: {len(sess2['output'])} entries, {sess2['total_tokens']} tokens")
+            print(
+                f"  Data integrity verified: {len(sess2['output'])} entries, {sess2['total_tokens']} tokens"
+            )
 
             # ══════ 8. Send new output after "recovery" ══════
             print("\n══════ 8. Send New Output After Recovery ══════")
@@ -344,7 +389,10 @@ def run_tests():
             pause(2)
 
             sess3 = api_get_session(auth_token)
-            log_step("Output", f"{len(sess3.get('output', []))} entries (was {len(sess2.get('output', []))})")
+            log_step(
+                "Output",
+                f"{len(sess3.get('output', []))} entries (was {len(sess2.get('output', []))})",
+            )
             assert len(sess3.get("output", [])) > len(sess2.get("output", []))
             shot(page, "08_post_recovery_output")
             print("  Post-recovery output works correctly")
@@ -364,7 +412,7 @@ def run_tests():
             context.close()
             browser.close()
 
-        except Exception as e:
+        except Exception:
             shot(page, "ERROR")
             traceback.print_exc()
             context.close()
