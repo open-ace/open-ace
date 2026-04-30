@@ -78,22 +78,46 @@ def make_manager():
 
     ram_mod._agent_manager = None
 
-    from app.modules.workspace.remote_agent_manager import RemoteAgentManager, get_ddl_statements
+    from app.modules.workspace.remote_agent_manager import RemoteAgentManager
 
     mgr = RemoteAgentManager(db_path=TMP_DB)
 
-    # Create tables since __init__ no longer calls _ensure_tables()
-    from app.repositories.database import Database
+    # Create required tables (SQLite-compatible DDL)
+    import sqlite3
 
-    db = Database(db_url=f"sqlite:///{TMP_DB}")
-    with db.connection() as conn:
-        cursor = conn.cursor()
-        for sql in get_ddl_statements():
-            try:
-                cursor.execute(sql)
-            except Exception:
-                pass
-        conn.commit()
+    conn = sqlite3.connect(TMP_DB)
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS remote_machines ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "machine_id TEXT NOT NULL UNIQUE, "
+        "machine_name TEXT, "
+        "status TEXT DEFAULT 'offline', "
+        "tenant_id INTEGER, "
+        "last_heartbeat TIMESTAMP, "
+        "created_at TIMESTAMP, "
+        "updated_at TIMESTAMP)"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS machine_assignments ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "machine_id TEXT NOT NULL, "
+        "user_id INTEGER NOT NULL, "
+        "permission TEXT NOT NULL DEFAULT 'user', "
+        "granted_by INTEGER, "
+        "granted_at TIMESTAMP)"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS agent_sessions ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "session_id TEXT NOT NULL UNIQUE, "
+        "user_id INTEGER, "
+        "status TEXT DEFAULT 'active', "
+        "remote_machine_id TEXT, "
+        "created_at TIMESTAMP, "
+        "updated_at TIMESTAMP)"
+    )
+    conn.commit()
+    conn.close()
 
     db_mod.is_postgresql = original_is_pg
     db_mod.DB_PATH = original_db_path

@@ -36,6 +36,7 @@ if shared_dir not in sys.path:
 import feishu_group_cache
 import feishu_user_cache
 import utils
+
 from shared import db
 
 
