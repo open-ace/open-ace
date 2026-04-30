@@ -114,7 +114,7 @@ def register_error_handlers(app):
                             "Content-Type, Authorization"
                         )
                         response.headers["Access-Control-Allow-Credentials"] = "true"
-                except:
+                except Exception:
                     pass
         return response
 
