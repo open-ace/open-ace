@@ -9,7 +9,6 @@ requests through the Open ACE proxy.
 
 import json
 import logging
-import os
 import shutil
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -63,9 +62,12 @@ class QwenCodeAdapter(BaseCLIAdapter):
     ) -> List[str]:
         args = [
             self.EXECUTABLE,
-            "--auth-type", "openai",
-            "--input-format", "stream-json",
-            "--output-format", "stream-json",
+            "--auth-type",
+            "openai",
+            "--input-format",
+            "stream-json",
+            "--output-format",
+            "stream-json",
             "--channel=SDK",
         ]
 
@@ -90,8 +92,10 @@ class QwenCodeAdapter(BaseCLIAdapter):
     ) -> List[str]:
         args = [
             self.EXECUTABLE,
-            "--auth-type", "openai",
-            "--output-format", "stream-json",
+            "--auth-type",
+            "openai",
+            "--output-format",
+            "stream-json",
             prompt,
         ]
         if model:

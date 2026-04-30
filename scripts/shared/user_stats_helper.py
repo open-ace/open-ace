@@ -36,6 +36,8 @@ def _refresh_user_daily_stats_for_dates(dates: Set[str]) -> None:
     try:
         aggregator = UserDailyStatsAggregator()
         records = aggregator.aggregate_all_users(days=days_back)
-        logger.info(f"Refreshed user_daily_stats for {len(dates)} date(s), {records} records updated")
+        logger.info(
+            f"Refreshed user_daily_stats for {len(dates)} date(s), {records} records updated"
+        )
     except Exception as e:
         logger.warning(f"Failed to refresh user_daily_stats: {e}")

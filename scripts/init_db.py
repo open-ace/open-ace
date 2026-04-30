@@ -29,10 +29,7 @@ def create_default_tenant(
     cursor = conn.cursor()
 
     # Check if tenant already exists
-    cursor.execute(
-        db._convert_sql("SELECT id FROM tenants WHERE id = ?"),
-        (tenant_id,)
-    )
+    cursor.execute(db._convert_sql("SELECT id FROM tenants WHERE id = ?"), (tenant_id,))
     existing = cursor.fetchone()
     if existing:
         print(f"Default tenant (id={tenant_id}) already exists")
@@ -46,7 +43,7 @@ def create_default_tenant(
                 INSERT INTO tenants (id, name, slug, status, plan)
                 VALUES (?, ?, ?, 'active', 'standard')
             """),
-            (tenant_id, name, slug)
+            (tenant_id, name, slug),
         )
 
         # Create tenant_quotas
@@ -56,7 +53,7 @@ def create_default_tenant(
                     daily_request_limit, monthly_request_limit, max_users, max_sessions_per_user)
                 VALUES (?, 10000000, 300000000, 10000, 300000, 100, 10)
             """),
-            (tenant_id,)
+            (tenant_id,),
         )
 
         # Create tenant_settings - use same approach for both databases
@@ -75,7 +72,7 @@ def create_default_tenant(
                     audit_log_retention_days, data_retention_days, sso_enabled)
                 VALUES (?, ?, ?, ?, ?, ?)
             """),
-            (tenant_id, bool_true, bool_true, 90, 365, bool_false)
+            (tenant_id, bool_true, bool_true, 90, 365, bool_false),
         )
 
         conn.commit()

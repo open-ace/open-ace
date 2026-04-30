@@ -4,11 +4,12 @@
 验证 Timeline 不再显示 ToolResult 类型的消息，只保留 User 和 Assistant 两种类型。
 """
 
-import pytest
-import sys
-import os
 import asyncio
+import os
+import sys
 from datetime import datetime
+
+import pytest
 
 # Add project root to path
 sys.path.insert(
@@ -16,6 +17,7 @@ sys.path.insert(
 )
 
 from playwright.async_api import async_playwright
+
 from scripts.shared import utils
 
 # Screenshot directory
@@ -103,16 +105,14 @@ async def test_timeline_no_toolresult():
 
             # 5. 找到并点击第一个 Timeline 按钮
             print("4. 点击 Timeline 按钮...")
-            timeline_button_found = await page.evaluate(
-                """() => {
+            timeline_button_found = await page.evaluate("""() => {
                 const buttons = document.querySelectorAll('button[onclick*="showTimelineModal"]');
                 if (buttons.length > 0) {
                     buttons[0].click();
                     return true;
                 }
                 return false;
-            }"""
-            )
+            }""")
 
             if not timeline_button_found:
                 print("   ✗ 失败: 未找到 Timeline 按钮")
@@ -135,22 +135,18 @@ async def test_timeline_no_toolresult():
                 return results
 
             # 检查 Modal 是否有 show 类
-            modal_has_show = await page.evaluate(
-                """() => {
+            modal_has_show = await page.evaluate("""() => {
                 const modal = document.getElementById('timelineModal');
                 return modal.classList.contains('show');
-            }"""
-            )
+            }""")
 
             if not modal_has_show:
                 print("   ⚠ Modal 元素存在但没有 show 类，等待中...")
                 await page.wait_for_timeout(500)
-                modal_has_show = await page.evaluate(
-                    """() => {
+                modal_has_show = await page.evaluate("""() => {
                     const modal = document.getElementById('timelineModal');
                     return modal.classList.contains('show');
-                }"""
-                )
+                }""")
 
             if not modal_has_show:
                 print("   ✗ 失败: Timeline Modal 未显示（没有 show 类）")
@@ -170,11 +166,9 @@ async def test_timeline_no_toolresult():
 
             # 6. 检查 timeline items 是否存在
             print("6. 检查 Timeline 内容...")
-            timeline_items_count = await page.evaluate(
-                """() => {
+            timeline_items_count = await page.evaluate("""() => {
                 return document.querySelectorAll('.timeline-item').length;
-            }"""
-            )
+            }""")
 
             if timeline_items_count > 0:
                 print(f"   ✓ 找到 {timeline_items_count} 个 Timeline Items")
@@ -187,12 +181,10 @@ async def test_timeline_no_toolresult():
             print("7. 验证 Timeline 只包含 User 和 Assistant 角色...")
 
             # 获取所有显示的角色标签
-            role_labels = await page.evaluate(
-                """() => {
+            role_labels = await page.evaluate("""() => {
                 const items = document.querySelectorAll('.timeline-item .card-body strong');
                 return Array.from(items).map(item => item.textContent.trim());
-            }"""
-            )
+            }""")
 
             print(f"   找到的角色标签: {role_labels}")
 

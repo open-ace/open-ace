@@ -9,7 +9,6 @@ Supports WebSocket connections for live updates and event broadcasting.
 import asyncio
 import json
 import logging
-import os
 import sqlite3
 import uuid
 from collections import defaultdict
@@ -18,7 +17,7 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Set, Union
 
-from app.repositories.database import DB_PATH, is_postgresql, get_database_url
+from app.repositories.database import DB_PATH, get_database_url, is_postgresql
 
 logger = logging.getLogger(__name__)
 
@@ -180,8 +179,7 @@ class StateSyncManager:
         id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
 
         # Create sync_events table for event persistence
-        cursor.execute(
-            f"""
+        cursor.execute(f"""
             CREATE TABLE IF NOT EXISTS sync_events (
                 id {id_type},
                 event_id TEXT NOT NULL UNIQUE,
@@ -194,28 +192,21 @@ class StateSyncManager:
                 data TEXT,
                 metadata TEXT
             )
-        """
-        )
+        """)
 
         # Create indexes
-        cursor.execute(
-            """
+        cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_sync_events_timestamp
             ON sync_events(timestamp)
-        """
-        )
-        cursor.execute(
-            """
+        """)
+        cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_sync_events_session_id
             ON sync_events(session_id)
-        """
-        )
-        cursor.execute(
-            """
+        """)
+        cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_sync_events_user_id
             ON sync_events(user_id)
-        """
-        )
+        """)
 
         conn.commit()
         conn.close()

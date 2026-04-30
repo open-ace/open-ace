@@ -10,7 +10,7 @@ import os
 import platform
 import shutil
 import subprocess
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +84,7 @@ def _get_memory_mb() -> float:
 def _get_memory_mb_linux() -> float:
     """Read total memory from /proc/meminfo."""
     try:
-        with open("/proc/meminfo", "r") as f:
+        with open("/proc/meminfo") as f:
             for line in f:
                 if line.startswith("MemTotal:"):
                     parts = line.split()
@@ -145,7 +145,7 @@ def _get_disk_free_gb() -> float:
     try:
         home = os.path.expanduser("~")
         usage = shutil.disk_usage(home)
-        return usage.free / (1024 ** 3)
+        return usage.free / (1024**3)
     except OSError:
         return 0.0
 
@@ -174,6 +174,7 @@ def check_cli_tool(name: str) -> Dict[str, Any]:
     exe_name = name
     try:
         from cli_adapters import get_adapter
+
         adapter = get_adapter(name)
         exe_name = adapter.get_executable_name()
     except Exception:
@@ -234,9 +235,7 @@ def get_capabilities() -> Dict[str, Any]:
     sys_info = get_system_info()
     tools = get_installed_tools()
 
-    installed_list = [
-        name for name, info in tools.items() if info["installed"]
-    ]
+    installed_list = [name for name, info in tools.items() if info["installed"]]
 
     return {
         "os_type": sys_info["os_type"],

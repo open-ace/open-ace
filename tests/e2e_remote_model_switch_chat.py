@@ -13,7 +13,6 @@ Run:
   HEADLESS=false python tests/e2e_remote_model_switch_chat.py
 """
 
-import json
 import os
 import subprocess
 import sys
@@ -69,8 +68,9 @@ def pause(seconds):
 
 
 def api_login(username=TEST_USER, password=TEST_PASS):
-    r = requests.post(f"{BASE_URL}/api/auth/login",
-                      json={"username": username, "password": password})
+    r = requests.post(
+        f"{BASE_URL}/api/auth/login", json={"username": username, "password": password}
+    )
     assert r.status_code == 200, f"Login failed: {r.status_code}"
     token = r.cookies.get("session_token")
     assert token, "No session_token cookie"
@@ -78,8 +78,7 @@ def api_login(username=TEST_USER, password=TEST_PASS):
 
 
 def find_remote_machine(token):
-    r = requests.get(f"{BASE_URL}/api/remote/machines/available",
-                     cookies={"session_token": token})
+    r = requests.get(f"{BASE_URL}/api/remote/machines/available", cookies={"session_token": token})
     assert r.status_code == 200
     machines = r.json().get("machines", [])
     for m in machines:
@@ -99,7 +98,8 @@ def cleanup_remote_agent():
     try:
         subprocess.run(
             ["ssh"] + ssh_opts + [remote, "killall -9 node qwen 2>/dev/null; echo done"],
-            capture_output=True, timeout=15,
+            capture_output=True,
+            timeout=15,
         )
         time.sleep(1)
     except Exception:
@@ -112,10 +112,15 @@ def wait_for_remote_agent(token, timeout=40):
     ssh_opts = ["-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=no"]
     try:
         subprocess.run(
-            ["ssh"] + ssh_opts + [remote,
-             "bash -c 'cd /root/.open-ace-agent && nohup python3 agent.py "
-             "> /tmp/openace-agent.log 2>&1 & disown'"],
-            capture_output=True, timeout=15,
+            ["ssh"]
+            + ssh_opts
+            + [
+                remote,
+                "bash -c 'cd /root/.open-ace-agent && nohup python3 agent.py "
+                "> /tmp/openace-agent.log 2>&1 & disown'",
+            ],
+            capture_output=True,
+            timeout=15,
         )
     except Exception:
         pass
@@ -157,7 +162,7 @@ def wait_for_response(page, timeout=RESPONSE_TIMEOUT):
         if current_len == last_text_len and current_len > 0:
             stable_count += 1
             if stable_count >= 3:
-                log("Response", f"✓ Response complete (text stable for 6s)")
+                log("Response", "✓ Response complete (text stable for 6s)")
                 return True
         else:
             stable_count = 0
@@ -183,6 +188,7 @@ def send_message(page, message):
 #  Main Test
 # ════════════════════════════════════════════
 
+
 def run_tests():
     token = api_login()
     log("Auth", f"✓ Logged in as {TEST_USER}")
@@ -199,8 +205,7 @@ def run_tests():
 
     # Get webui token
     webui_info = requests.get(
-        f"{BASE_URL}/api/workspace/user-url",
-        cookies={"session_token": token}
+        f"{BASE_URL}/api/workspace/user-url", cookies={"session_token": token}
     ).json()
     webui_token = webui_info.get("token", "")
     webui_url = webui_info.get("url", WEBUI_URL)
@@ -231,11 +236,12 @@ def run_tests():
                             log("Session", f"Created: {sid[:8]}...")
                     except Exception:
                         pass
+
         page.on("response", on_response)
 
         try:
             _run_all(page, machine_id, machine_name, webui_url, webui_token, token)
-        except Exception as e:
+        except Exception:
             shot(page, "ERROR_final")
             traceback.print_exc()
             raise
@@ -243,8 +249,10 @@ def run_tests():
             # Cleanup: stop all sessions
             for sid in session_ids:
                 try:
-                    requests.post(f"{BASE_URL}/api/remote/sessions/{sid}/stop",
-                                  cookies={"session_token": token})
+                    requests.post(
+                        f"{BASE_URL}/api/remote/sessions/{sid}/stop",
+                        cookies={"session_token": token},
+                    )
                 except Exception:
                     pass
             context.close()
@@ -260,8 +268,10 @@ def _run_all(page, machine_id, machine_name, webui_url, webui_token, token):
 
     # Capture console logs
     console_logs = []
+
     def on_console(msg):
         console_logs.append(f"[{msg.type}] {msg.text[:200]}")
+
     page.on("console", on_console)
 
     # ════════════════════════════════════════════

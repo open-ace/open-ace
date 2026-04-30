@@ -11,7 +11,7 @@ import os
 import sqlite3
 import sys
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Union, Any
+from typing import Any, Dict, List, Optional, Union
 
 # Ensure scripts directory is in path for standalone script execution
 _script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -1385,7 +1385,9 @@ def init_auth_database() -> None:
 
     # Add system_account column if not exists (migration for existing databases)
     # First check for old linux_account column and rename it
-    if _column_exists(cursor, "users", "linux_account") and not _column_exists(cursor, "users", "system_account"):
+    if _column_exists(cursor, "users", "linux_account") and not _column_exists(
+        cursor, "users", "system_account"
+    ):
         print("Renaming linux_account column to system_account...")
         _execute(cursor, "ALTER TABLE users RENAME COLUMN linux_account TO system_account")
         conn.commit()
@@ -1444,7 +1446,9 @@ def create_user_with_is_active(
 
     # Convert boolean to appropriate type for database
     is_active_val = is_active if is_postgresql() else (1 if is_active else 0)
-    must_change_val = must_change_password if is_postgresql() else (1 if must_change_password else 0)
+    must_change_val = (
+        must_change_password if is_postgresql() else (1 if must_change_password else 0)
+    )
 
     try:
         _execute(
@@ -2708,7 +2712,7 @@ def get_tool_comparison_metrics(
     _execute(
         cursor,
         f"""
-        SELECT 
+        SELECT
             tool_name,
             SUM(tokens_used) as total_tokens,
             SUM(input_tokens) as input_tokens,
@@ -2730,7 +2734,7 @@ def get_tool_comparison_metrics(
     _execute(
         cursor,
         f"""
-        SELECT 
+        SELECT
             tool_name,
             COUNT(*) as total_messages,
             COUNT(DISTINCT COALESCE(sender_name, sender_id)) as unique_users,
@@ -2798,7 +2802,7 @@ def detect_usage_anomalies(
     _execute(
         cursor,
         f"""
-        SELECT 
+        SELECT
             date,
             tool_name,
             tokens_used,

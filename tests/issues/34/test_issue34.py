@@ -14,11 +14,12 @@
 6. 验证表格内容是否仍然存在
 """
 
-import pytest
 import asyncio
-from playwright.async_api import async_playwright
 import os
 from datetime import datetime
+
+import pytest
+from playwright.async_api import async_playwright
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000/")
 USERNAME = os.environ.get("USERNAME", "admin")
@@ -78,14 +79,12 @@ async def test_issue34():
             await asyncio.sleep(2)
 
             # 使用 JavaScript 点击 Analysis 导航链接
-            await page.evaluate(
-                """() => {
+            await page.evaluate("""() => {
                 const navAnalysis = document.getElementById('nav-analysis');
                 if (navAnalysis && navAnalysis.style.display !== 'none') {
                     navAnalysis.click();
                 }
-            }"""
-            )
+            }""")
             await asyncio.sleep(3)
 
             # 检查 Analysis 页面是否正确显示
@@ -131,25 +130,21 @@ async def test_issue34():
             # 3. 点击 Conversation History 标签
             print("3. 点击 Conversation History 标签...")
             # 使用 Bootstrap 的 Tab API 来切换标签
-            await page.evaluate(
-                """() => {
+            await page.evaluate("""() => {
                 const tab = document.getElementById('conversation-history-tab');
                 if (tab) {
                     // 使用 Bootstrap 的 Tab API
                     const bsTab = new bootstrap.Tab(tab);
                     bsTab.show();
                 }
-            }"""
-            )
+            }""")
             await asyncio.sleep(2)
 
             # 检查标签是否已激活
-            tab_active = await page.evaluate(
-                """() => {
+            tab_active = await page.evaluate("""() => {
                 const tab = document.getElementById('conversation-history-tab');
                 return tab ? tab.classList.contains('active') : false;
-            }"""
-            )
+            }""")
             print(f"   标签激活状态: {tab_active}")
 
             # 检查内容区域是否可见
@@ -172,7 +167,7 @@ async def test_issue34():
                 print(f"   ✓ 表格已加载，共 {row_count_before} 行数据")
                 results.append(("表格数据加载", True, f"{row_count_before} 行"))
             except Exception as e:
-                print(f"   ⚠ 表格数据加载超时，检查是否有数据...")
+                print("   ⚠ 表格数据加载超时，检查是否有数据...")
                 # 检查表格是否存在
                 table_exists = await page.is_visible("#conversation-history-table")
                 print(f"   表格容器存在: {table_exists}")
@@ -257,10 +252,10 @@ async def test_issue34():
             no_sessions_visible = await page.is_visible("text=No sessions found")
 
             if no_sessions_visible:
-                print(f"   ✗ 排序后表格内容消失，显示 'No sessions found'")
+                print("   ✗ 排序后表格内容消失，显示 'No sessions found'")
                 results.append(("排序后表格验证", False, "表格内容消失"))
             elif row_count_after == 0:
-                print(f"   ✗ 排序后表格行数为 0")
+                print("   ✗ 排序后表格行数为 0")
                 results.append(("排序后表格验证", False, "表格行数为 0"))
             elif row_count_after != row_count_before:
                 print(f"   ⚠ 排序前行数 {row_count_before}，排序后行数 {row_count_after}")
@@ -294,10 +289,10 @@ async def test_issue34():
             no_sessions_visible_reverse = await page.is_visible("text=No sessions found")
 
             if no_sessions_visible_reverse:
-                print(f"   ✗ 反向排序后表格内容消失")
+                print("   ✗ 反向排序后表格内容消失")
                 results.append(("反向排序验证", False, "表格内容消失"))
             elif row_count_reverse == 0:
-                print(f"   ✗ 反向排序后表格行数为 0")
+                print("   ✗ 反向排序后表格行数为 0")
                 results.append(("反向排序验证", False, "表格行数为 0"))
             else:
                 print(f"   ✓ 反向排序后表格内容正常，共 {row_count_reverse} 行")

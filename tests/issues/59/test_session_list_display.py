@@ -6,16 +6,15 @@ This test verifies that:
 2. Third field shows Request count (API calls)
 """
 
-import sys
 import os
-from pathlib import Path
-from datetime import datetime
+import sys
 import time
+from pathlib import Path
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
-from playwright.sync_api import sync_playwright, expect
+from playwright.sync_api import sync_playwright
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
@@ -31,10 +30,7 @@ def test_session_list_display():
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        context = browser.new_context(
-            viewport={"width": 1400, "height": 900},
-            locale="zh-CN"
-        )
+        context = browser.new_context(viewport={"width": 1400, "height": 900}, locale="zh-CN")
         page = context.new_page()
 
         try:
@@ -108,9 +104,23 @@ def test_session_list_display():
                     time_text = session_time.text_content().strip()
                     print(f"  Time field: '{time_text}'")
                     # Check if format is short (contains "min" or "hr" or "day" or "刚刚" or "分钟前" etc.)
-                    short_patterns = ["min", "hr", "day", "刚刚", "分钟前", "小时前", "天前", "分前", "時間前", "日前", "분 전", "시간 전", "일 전"]
+                    short_patterns = [
+                        "min",
+                        "hr",
+                        "day",
+                        "刚刚",
+                        "分钟前",
+                        "小时前",
+                        "天前",
+                        "分前",
+                        "時間前",
+                        "日前",
+                        "분 전",
+                        "시간 전",
+                        "일 전",
+                    ]
                     if any(p in time_text.lower() for p in short_patterns):
-                        print(f"  ✓ Time shows short format")
+                        print("  ✓ Time shows short format")
                         results.append(("Time format", True, time_text))
                     else:
                         print(f"  ⚠ Time format: {time_text}")
@@ -125,7 +135,7 @@ def test_session_list_display():
                     req_text = session_requests.text_content().strip()
                     print(f"  Request count field: '{req_text}'")
                     if "req" in req_text.lower():
-                        print(f"  ✓ Request count shows with 'req' suffix")
+                        print("  ✓ Request count shows with 'req' suffix")
                         results.append(("Request count display", True, req_text))
                     else:
                         print(f"  ⚠ Request count format: {req_text}")
@@ -172,6 +182,7 @@ def test_session_list_display():
         except Exception as e:
             print(f"\nError: {e}")
             import traceback
+
             traceback.print_exc()
             results.append(("Test execution", False, str(e)))
 

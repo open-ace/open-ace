@@ -231,11 +231,13 @@ class DailyStatsRepository:
         # Convert to expected format
         result = []
         for row in rows:
-            result.append({
-                "hour": int(row["hour"]),
-                "tokens": row["tokens"] or 0,
-                "requests": row["requests"] or 0,
-            })
+            result.append(
+                {
+                    "hour": int(row["hour"]),
+                    "tokens": row["tokens"] or 0,
+                    "requests": row["requests"] or 0,
+                }
+            )
 
         return result
 
@@ -493,6 +495,7 @@ class DailyStatsRepository:
         # Check if daily_stats has today's data
         # Compare max date in daily_stats vs max date in daily_messages
         from datetime import datetime
+
         today = datetime.now().strftime("%Y-%m-%d")
 
         stats_max_date_query = "SELECT MAX(date) as max_date FROM daily_stats"

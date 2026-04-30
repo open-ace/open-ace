@@ -101,10 +101,15 @@ def generate_report():
 
         if error:
             if error == "insufficient_data":
-                return jsonify({
-                    "error": "insufficient_data",
-                    "message": "Not enough conversation data to generate insights. Please use AI tools more and try again.",
-                }), 200
+                return (
+                    jsonify(
+                        {
+                            "error": "insufficient_data",
+                            "message": "Not enough conversation data to generate insights. Please use AI tools more and try again.",
+                        }
+                    ),
+                    200,
+                )
             return jsonify({"error": error}), 500
 
         return jsonify(report)

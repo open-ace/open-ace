@@ -18,7 +18,7 @@ import uuid
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 try:
     import websockets
@@ -33,8 +33,8 @@ shared_dir = os.path.join(script_dir, "shared")
 if shared_dir not in sys.path:
     sys.path.insert(0, shared_dir)
 
-import feishu_user_cache
 import feishu_group_cache
+import feishu_user_cache
 import utils
 from shared import db
 
@@ -126,7 +126,7 @@ def get_openclaw_gateway_token() -> Optional[str]:
         return None
 
     try:
-        with open(openclaw_config_path, "r") as f:
+        with open(openclaw_config_path) as f:
             data = json.load(f)
             return data.get("gateway", {}).get("auth", {}).get("token")
     except Exception as e:
@@ -178,7 +178,7 @@ async def get_openclaw_usage(gateway_url: str, token: str, days: int = 7) -> Opt
     # OpenClaw requires "localhost secure context" for device identity
     if gateway_host.startswith("127.0.0.1:"):
         gateway_host = gateway_host.replace("127.0.0.1:", "localhost:", 1)
-        print(f"Using localhost instead of 127.0.0.1 for secure context")
+        print("Using localhost instead of 127.0.0.1 for secure context")
 
     ws_url = f"{ws_scheme}{gateway_host}/gateway"
     print(f"Connecting to WebSocket: {ws_url}")
@@ -929,7 +929,10 @@ def extract_user_message_metadata(text: str) -> Optional[dict]:
 
 
 def process_jsonl_file(
-    filepath: Path, hostname: str = "localhost", tool_name: str = "openclaw", system_account: Optional[str] = None
+    filepath: Path,
+    hostname: str = "localhost",
+    tool_name: str = "openclaw",
+    system_account: Optional[str] = None,
 ) -> tuple:
     """Process a single JSONL file and return daily token aggregates and messages.
 
@@ -989,7 +992,7 @@ def process_jsonl_file(
     # Also collect error senders for assistant attribution (error messages can have senders too)
     error_senders = {}
 
-    with open(filepath, "r", encoding="utf-8") as f:
+    with open(filepath, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -1141,7 +1144,11 @@ def process_jsonl_file(
                             # Set default sender for messages without sender info
                             if not sender_id and not sender_name:
                                 sender_id = "openclaw_user"
-                                sender_name = f"{system_account}-{hostname}-{tool_name}" if system_account else get_default_sender_name("openclaw")
+                                sender_name = (
+                                    f"{system_account}-{hostname}-{tool_name}"
+                                    if system_account
+                                    else get_default_sender_name("openclaw")
+                                )
 
                             # Store assistant sender for toolResult attribution
                             if role == "assistant" and (sender_id or sender_name):
@@ -1282,7 +1289,7 @@ def process_jsonl_file(
                 if model:
                     daily[date_key]["models_used"].add(model)
 
-            except (json.JSONDecodeError, KeyError, TypeError) as e:
+            except (json.JSONDecodeError, KeyError, TypeError):
                 # Silently skip problematic entries
                 continue
 
@@ -1310,14 +1317,12 @@ def fetch_and_save_messages(
         True if successful, False otherwise
     """
     # Import db directly to avoid email module conflict
-    import db
     import os
     import sys
-    import json
-    from datetime import datetime, timedelta
     from collections import defaultdict
-    from pathlib import Path
-    from typing import Dict, Optional
+    from datetime import datetime, timedelta
+
+    import db
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
     shared_dir = os.path.join(script_dir, "shared")

@@ -9,21 +9,15 @@ Tests for:
 4. Multi-user mode configuration
 """
 
-import os
-import sys
-import tempfile
 import json
+import sys
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock
 
 # Add app to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
-from app.services.webui_manager import (
-    WebUIManager,
-    WebUIInstance,
-    WorkspaceConfig,
-)
+from app.services.webui_manager import WebUIInstance, WebUIManager, WorkspaceConfig
 
 
 def test_workspace_config_defaults():
@@ -237,7 +231,7 @@ def test_config_json_sample():
     config_path = Path(__file__).parent.parent.parent.parent / "config" / "config.json.sample"
     assert config_path.exists(), f"config.json.sample not found at {config_path}"
 
-    with open(config_path, "r") as f:
+    with open(config_path) as f:
         config = json.load(f)
 
     workspace = config.get("workspace", {})

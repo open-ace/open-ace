@@ -10,14 +10,11 @@
 5. 前端-后端路由匹配
 """
 
-import json
 import os
-import sys
-import time
 from datetime import datetime
 
 import requests
-from playwright.sync_api import sync_playwright, expect
+from playwright.sync_api import sync_playwright
 
 # 配置
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
@@ -76,7 +73,12 @@ class APITester:
                     if has_error and status == 200:
                         # API returned 200 but has error in body
                         self.results.append(
-                            (name, "WARN", f"API returned error: {body.get('error', 'unknown')}", path)
+                            (
+                                name,
+                                "WARN",
+                                f"API returned error: {body.get('error', 'unknown')}",
+                                path,
+                            )
                         )
                         return body
                     self.results.append((name, "PASS", None, path))
@@ -86,12 +88,22 @@ class APITester:
                     return resp.text
             elif not is_json and status == 200:
                 self.results.append(
-                    (name, "FAIL", f"Expected JSON, got HTML (SPA catch-all). Route not registered.", path)
+                    (
+                        name,
+                        "FAIL",
+                        "Expected JSON, got HTML (SPA catch-all). Route not registered.",
+                        path,
+                    )
                 )
                 return None
             else:
                 self.results.append(
-                    (name, "FAIL", f"Expected {expected_status}, got {status}. Content-Type: {content_type}", path)
+                    (
+                        name,
+                        "FAIL",
+                        f"Expected {expected_status}, got {status}. Content-Type: {content_type}",
+                        path,
+                    )
                 )
                 return resp.text if resp else None
         except Exception as e:
@@ -302,11 +314,18 @@ def run_all_tests():
 
         # Collect console errors
         console_errors = []
-        page.on("console", lambda msg: console_errors.append(msg.text) if msg.type == "error" else None)
+        page.on(
+            "console", lambda msg: console_errors.append(msg.text) if msg.type == "error" else None
+        )
 
         # Collect network errors
         network_errors = []
-        page.on("response", lambda resp: network_errors.append(f"{resp.status} {resp.url}") if resp.status >= 400 else None)
+        page.on(
+            "response",
+            lambda resp: (
+                network_errors.append(f"{resp.status} {resp.url}") if resp.status >= 400 else None
+            ),
+        )
 
         # Login
         print("  Logging in...")
@@ -327,10 +346,18 @@ def run_all_tests():
             # (名称, URL路径, 关键元素选择器)
             ("Dashboard", "/manage/dashboard", [".card", "canvas", ".stat-card"]),
             ("Trend Analysis", "/manage/analysis/trend", ["canvas", ".card", "h1, h2, h3"]),
-            ("Request Dashboard", "/manage/analysis/request-dashboard", [".card", "canvas", "table"]),
+            (
+                "Request Dashboard",
+                "/manage/analysis/request-dashboard",
+                [".card", "canvas", "table"],
+            ),
             ("Anomaly Detection", "/manage/analysis/anomaly", ["canvas", ".card", ".anomaly"]),
             ("ROI Analysis", "/manage/analysis/roi", [".card", "canvas", "table"]),
-            ("Conversation History", "/manage/analysis/conversation-history", [".card", "canvas", "table"]),
+            (
+                "Conversation History",
+                "/manage/analysis/conversation-history",
+                [".card", "canvas", "table"],
+            ),
             ("Messages", "/manage/analysis/messages", [".card", "table", ".message"]),
             ("Audit Center", "/manage/audit", [".card", "table", ".nav-tabs"]),
             ("Quota & Alerts", "/manage/quota", [".card", ".nav-tabs", "table"]),
@@ -355,7 +382,9 @@ def run_all_tests():
 
                 # Wait for main content
                 try:
-                    page.wait_for_selector("main, .manage-content, h1, h2, h3, .card", timeout=10000)
+                    page.wait_for_selector(
+                        "main, .manage-content, h1, h2, h3, .card", timeout=10000
+                    )
                 except Exception:
                     pass
 
@@ -404,10 +433,13 @@ def run_all_tests():
                 output_t = item.get("output_tokens", 0)
                 # Validate: tokens_used should equal input + output
                 if tokens != input_t + output_t:
-                    data_results.append((
-                        f"Data - {tool} token计算", "FAIL",
-                        f"tokens_used({tokens}) != input({input_t}) + output({output_t})"
-                    ))
+                    data_results.append(
+                        (
+                            f"Data - {tool} token计算",
+                            "FAIL",
+                            f"tokens_used({tokens}) != input({input_t}) + output({output_t})",
+                        )
+                    )
                 else:
                     data_results.append((f"Data - {tool} token计算", "PASS", None))
         else:
@@ -425,13 +457,18 @@ def run_all_tests():
                     calc_avg = data["total_tokens"] / data["days_count"]
                     reported_avg = data.get("avg_tokens", 0)
                     if abs(calc_avg - reported_avg) > 1:
-                        data_results.append((
-                            f"Data - {tool} 平均值计算", "FAIL",
-                            f"calculated({calc_avg:.0f}) != reported({reported_avg:.0f})"
-                        ))
+                        data_results.append(
+                            (
+                                f"Data - {tool} 平均值计算",
+                                "FAIL",
+                                f"calculated({calc_avg:.0f}) != reported({reported_avg:.0f})",
+                            )
+                        )
                     else:
                         data_results.append((f"Data - {tool} 平均值计算", "PASS", None))
-        data_results.append(("Data - 汇总数据总量", "PASS", f"Total tokens across tools: {total_tokens}"))
+        data_results.append(
+            ("Data - 汇总数据总量", "PASS", f"Total tokens across tools: {total_tokens}")
+        )
 
     # Validate ROI data
     roi_data = api.test_endpoint("Data - ROI数据", "/api/roi")
@@ -442,10 +479,13 @@ def run_all_tests():
         input_cost = d.get("input_cost", 0)
         output_cost = d.get("output_cost", 0)
         if abs(total_cost - input_cost - output_cost) > 0.01:
-            data_results.append((
-                "Data - ROI成本计算", "FAIL",
-                f"total_cost({total_cost}) != input({input_cost}) + output({output_cost})"
-            ))
+            data_results.append(
+                (
+                    "Data - ROI成本计算",
+                    "FAIL",
+                    f"total_cost({total_cost}) != input({input_cost}) + output({output_cost})",
+                )
+            )
         else:
             data_results.append(("Data - ROI成本计算", "PASS", None))
 
@@ -454,10 +494,13 @@ def run_all_tests():
         input_tokens = d.get("input_tokens", 0)
         output_tokens = d.get("output_tokens", 0)
         if total_tokens != input_tokens + output_tokens:
-            data_results.append((
-                "Data - ROI token计算", "FAIL",
-                f"tokens({total_tokens}) != input({input_tokens}) + output({output_tokens})"
-            ))
+            data_results.append(
+                (
+                    "Data - ROI token计算",
+                    "FAIL",
+                    f"tokens({total_tokens}) != input({input_tokens}) + output({output_tokens})",
+                )
+            )
         else:
             data_results.append(("Data - ROI token计算", "PASS", None))
 
@@ -469,10 +512,13 @@ def run_all_tests():
             total_req = proj.get("total_requests", 0)
             user_req_sum = sum(u.get("total_requests", 0) for u in proj.get("user_stats", []))
             if total_req != user_req_sum and user_req_sum > 0:
-                data_results.append((
-                    f"Data - {name} 请求数汇总", "WARN",
-                    f"project_total({total_req}) != user_sum({user_req_sum})"
-                ))
+                data_results.append(
+                    (
+                        f"Data - {name} 请求数汇总",
+                        "WARN",
+                        f"project_total({total_req}) != user_sum({user_req_sum})",
+                    )
+                )
             else:
                 data_results.append((f"Data - {name} 请求数汇总", "PASS", None))
 
@@ -482,10 +528,13 @@ def run_all_tests():
         total_input = key_metrics.get("total_input_tokens", 0)
         total_output = key_metrics.get("total_output_tokens", 0)
         tool_total = sum(t.get("count", 0) for t in key_metrics.get("top_tools", []))
-        data_results.append((
-            "Data - 分析指标 token总计", "INFO",
-            f"input={total_input}, output={total_output}, tool_total={tool_total}"
-        ))
+        data_results.append(
+            (
+                "Data - 分析指标 token总计",
+                "INFO",
+                f"input={total_input}, output={total_output}, tool_total={tool_total}",
+            )
+        )
 
     all_results["data"] = data_results
 
@@ -510,7 +559,7 @@ def run_all_tests():
         print(f"总计: {total} | 通过: {passed} | 失败: {failed} | 警告: {warned} | 错误: {errored}")
 
         if failed > 0 or errored > 0:
-            print(f"\n  失败/错误项:")
+            print("\n  失败/错误项:")
             for name, status, detail, *rest in results:
                 if status in ("FAIL", "ERROR"):
                     path = rest[0] if rest else ""
@@ -530,7 +579,9 @@ def run_all_tests():
     errored_all = sum(1 for r in all_flat if r[1] == "ERROR")
 
     print(f"\n{'=' * 80}")
-    print(f"总通过率: {passed_all}/{total_all} = {(passed_all / total_all * 100) if total_all > 0 else 0:.1f}%")
+    print(
+        f"总通过率: {passed_all}/{total_all} = {(passed_all / total_all * 100) if total_all > 0 else 0:.1f}%"
+    )
     print(f"  通过: {passed_all} | 失败: {failed_all} | 警告: {warned_all} | 错误: {errored_all}")
     print("=" * 80)
 

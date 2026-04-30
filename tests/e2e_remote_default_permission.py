@@ -140,7 +140,7 @@ def run_tests():
 
         try:
             _run_test(page, token, effective_webui_url, webui_token, captured_session_id)
-        except Exception as e:
+        except Exception:
             shot(page, "ERROR_final")
             traceback.print_exc()
             raise
@@ -288,10 +288,14 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
                                 log("Permission", "✓ PERMISSION REQUEST FOUND in stream!")
                                 log("Permission", "  type=%s" % pdata.get("type"))
                                 req = pdata.get("request", {})
-                                log("Permission", "  subtype=%s tool=%s" % (
-                                    req.get("subtype", ""),
-                                    req.get("tool_name", ""),
-                                ))
+                                log(
+                                    "Permission",
+                                    "  subtype=%s tool=%s"
+                                    % (
+                                        req.get("subtype", ""),
+                                        req.get("tool_name", ""),
+                                    ),
+                                )
                                 permission_found = True
                                 permission_request_id = pdata.get("request_id", "")
                                 permission_tool_name = req.get("tool_name", "")
@@ -306,7 +310,11 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
                             if t == "system" and msg.get("subtype") == "init":
                                 init_permission_mode = msg.get("permission_mode", "?")
                                 model = msg.get("model", "?")
-                                log("Output", "  [system/init] permission_mode=%s model=%s" % (init_permission_mode, model))
+                                log(
+                                    "Output",
+                                    "  [system/init] permission_mode=%s model=%s"
+                                    % (init_permission_mode, model),
+                                )
 
                             elif t == "control_request":
                                 # Control request in stdout stream (not "permission" stream yet)
@@ -339,7 +347,10 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
                                 result_content = str(msg.get("result", ""))
                                 is_error = msg.get("is_error", False)
                                 duration = msg.get("duration_ms", 0)
-                                log("Output", "  [result] error=%s duration=%dms" % (is_error, duration))
+                                log(
+                                    "Output",
+                                    "  [result] error=%s duration=%dms" % (is_error, duration),
+                                )
                                 if not is_error:
                                     result_found = True
 
@@ -361,9 +372,11 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
 
         elapsed = int(time.time() - start)
         if elapsed > 0 and elapsed % 30 == 0:
-            log("Polling", "Waiting... (%ds, %d checks, write_tool=%s permission=%s)" % (
-                elapsed, check_count, write_tool_use_found, permission_found
-            ))
+            log(
+                "Polling",
+                "Waiting... (%ds, %d checks, write_tool=%s permission=%s)"
+                % (elapsed, check_count, write_tool_use_found, permission_found),
+            )
 
         time.sleep(3)
 
@@ -375,10 +388,14 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
 
     if permission_found and permission_request_id:
         print("\n══════ STEP 4: Approve Permission Request ══════")
-        log("Approve", "Approving %s (request_id=%s...)" % (
-            permission_tool_name or "unknown",
-            permission_request_id[:8],
-        ))
+        log(
+            "Approve",
+            "Approving %s (request_id=%s...)"
+            % (
+                permission_tool_name or "unknown",
+                permission_request_id[:8],
+            ),
+        )
 
         r = requests.post(
             "%s/api/remote/sessions/%s/permission" % (BASE_URL, sid),
@@ -415,7 +432,10 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
                                 content = msg.get("message", {}).get("content", [])
                                 for c in content:
                                     if isinstance(c, dict) and c.get("type") == "text":
-                                        log("Output", "  [assistant/text] %s" % c.get("text", "")[:80])
+                                        log(
+                                            "Output",
+                                            "  [assistant/text] %s" % c.get("text", "")[:80],
+                                        )
                             elif t == "result":
                                 result_content = str(msg.get("result", ""))
                                 result_found = not msg.get("is_error", False)
@@ -449,18 +469,22 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
     print("    " + "=" * 50)
 
     # Core assertions
-    assert write_tool_use_found, \
-        "AI did not attempt to use write_file tool! Check if the LLM understood the request."
+    assert (
+        write_tool_use_found
+    ), "AI did not attempt to use write_file tool! Check if the LLM understood the request."
 
-    assert permission_found, \
-        "Permission request (control_request) was NOT emitted for write_file! " \
+    assert permission_found, (
+        "Permission request (control_request) was NOT emitted for write_file! "
         "This means the CLI auto-approved a write tool in default mode, which is a bug."
+    )
 
-    assert result_found, \
+    assert result_found, (
         "Task did not complete successfully within %ds after approval!" % RESPONSE_TIMEOUT
+    )
 
-    assert init_permission_mode == "default", \
+    assert init_permission_mode == "default", (
         "Expected permission_mode=default, got %s" % init_permission_mode
+    )
 
     log("Verify", "✓ ALL CHECKS PASSED!")
     log("Verify", "✓ Permission confirmation panel works correctly in default mode!")

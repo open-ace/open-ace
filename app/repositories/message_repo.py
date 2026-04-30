@@ -380,7 +380,7 @@ class MessageRepository:
         # Use COALESCE to get the first available session ID
         # Priority: feishu_conversation_id > agent_session_id > conversation_id
         query = f"""
-            SELECT 
+            SELECT
                 COALESCE(conversation_id, feishu_conversation_id, agent_session_id) as conversation_id,
                 agent_session_id as session_id,
                 tool_name,
@@ -442,7 +442,9 @@ class MessageRepository:
             conditions.append("sender_name = ?")
             params.append(sender_name)
 
-        id_filter = "COALESCE(conversation_id, feishu_conversation_id, agent_session_id) IS NOT NULL"
+        id_filter = (
+            "COALESCE(conversation_id, feishu_conversation_id, agent_session_id) IS NOT NULL"
+        )
         conditions.append(id_filter)
 
         where_clause = f"WHERE {' AND '.join(conditions)}"
@@ -490,7 +492,7 @@ class MessageRepository:
         """
         # Use COALESCE to match session_id from multiple possible fields
         query = """
-            SELECT 
+            SELECT
                 COALESCE(conversation_id, feishu_conversation_id, agent_session_id) as conversation_id,
                 agent_session_id as session_id,
                 tool_name,
@@ -531,8 +533,8 @@ class MessageRepository:
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
         query = f"""
-            SELECT DISTINCT sender_name 
-            FROM daily_messages 
+            SELECT DISTINCT sender_name
+            FROM daily_messages
             {where_clause}
             ORDER BY sender_name
         """
@@ -985,7 +987,6 @@ class MessageRepository:
         Returns:
             Dict: All aggregate statistics needed for batch analysis.
         """
-        from app.repositories.database import is_postgresql
 
         conditions = ["date >= ?", "date <= ?"]
         params = [start_date, end_date]
@@ -1036,9 +1037,7 @@ class MessageRepository:
             "unique_days": result.get("unique_days", 0) or 0,
         }
 
-    def get_user_messages_stats(
-        self, start_date: str, end_date: str, sender_prefix: str
-    ) -> Dict:
+    def get_user_messages_stats(self, start_date: str, end_date: str, sender_prefix: str) -> Dict:
         """
         Get user message statistics summary for insights analysis.
 
@@ -1072,9 +1071,7 @@ class MessageRepository:
                 "total_messages": total_messages,
                 "total_tokens": total_tokens,
                 "avg_messages_per_conversation": (
-                    round(total_messages / total_conversations, 1)
-                    if total_conversations > 0
-                    else 0
+                    round(total_messages / total_conversations, 1) if total_conversations > 0 else 0
                 ),
             }
 
@@ -1143,12 +1140,13 @@ class MessageRepository:
                 logger.warning(f"Skipping session {session_id} due to encoding error: {e}")
                 continue
             if messages:
-                conversations.append({
-                    "session_id": session_id,
-                    "messages": [
-                        {"role": m["role"], "content": m["content"]}
-                        for m in messages
-                    ],
-                })
+                conversations.append(
+                    {
+                        "session_id": session_id,
+                        "messages": [
+                            {"role": m["role"], "content": m["content"]} for m in messages
+                        ],
+                    }
+                )
 
         return conversations

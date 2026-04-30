@@ -8,7 +8,6 @@ Issue: SDK initialization times out when agent runs under launchd on Mac.
 import json
 import os
 import subprocess
-import sys
 import threading
 import time
 import uuid
@@ -59,10 +58,11 @@ def test_qwen_cli(env_name: str, env_mods: dict) -> dict:
     if not os.path.exists(qwen_path):
         # Try which
         import shutil
+
         qwen_path = shutil.which("qwen")
-    
+
     if not qwen_path:
-        print(f"ERROR: qwen CLI not found")
+        print("ERROR: qwen CLI not found")
         return {"success": False, "error": "qwen not found"}
 
     print(f"qwen path: {qwen_path}")
@@ -72,9 +72,12 @@ def test_qwen_cli(env_name: str, env_mods: dict) -> dict:
     # Build command
     cmd = [
         qwen_path,
-        "--auth-type", "openai",
-        "--input-format", "stream-json",
-        "--output-format", "stream-json",
+        "--auth-type",
+        "openai",
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
         "--channel=SDK",
     ]
 
@@ -113,7 +116,7 @@ def test_qwen_cli(env_name: str, env_mods: dict) -> dict:
                 if text_stripped:
                     results["stdout_lines"].append(text_stripped)
                     print(f"[STDOUT] {text_stripped[:100]}")
-                    
+
                     # Check for SDK init response
                     try:
                         parsed = json.loads(text_stripped)
@@ -123,7 +126,7 @@ def test_qwen_cli(env_name: str, env_mods: dict) -> dict:
                             print("[STDOUT] SDK init response received!")
                     except json.JSONDecodeError:
                         pass
-                    
+
                     stdout_ready.set()
         except Exception as e:
             print(f"[STDOUT ERROR] {e}")
@@ -183,7 +186,7 @@ def test_qwen_cli(env_name: str, env_mods: dict) -> dict:
             "subtype": "initialize",
         },
     }
-    
+
     print(f"\nSending SDK init (request_id={init_request_id[:8]}...)")
     try:
         payload = json.dumps(init_msg) + "\n"
@@ -267,7 +270,9 @@ def main():
     print(f"\n{'Environment':<40} {'SDK Response':<15} {'Timeout':<10} {'Success':<10}")
     print("-" * 75)
     for r in all_results:
-        print(f"{r['env_name']:<40} {str(r['sdk_init_response']):<15} {str(r['timeout']):<10} {str(r['success']):<10}")
+        print(
+            f"{r['env_name']:<40} {str(r['sdk_init_response']):<15} {str(r['timeout']):<10} {str(r['success']):<10}"
+        )
 
     # Determine root cause
     print("\n" + "=" * 70)
@@ -283,20 +288,20 @@ def main():
         # Find which config works vs doesn't
         working = [r for r in all_results if r["success"]]
         failing = [r for r in all_results if not r["success"]]
-        
+
         print(f"Working configurations: {len(working)}")
         for r in working:
             print(f"  - {r['env_name']} (TERM={r['term_value']})")
-        
+
         print(f"Failing configurations: {len(failing)}")
         for r in failing:
             print(f"  - {r['env_name']} (TERM={r['term_value']})")
-        
+
         # Compare to find root cause
         if len(working) > 0 and len(failing) > 0:
             working_term = working[0]["term_value"]
             failing_term = failing[0]["term_value"]
-            print(f"\nPotential root cause: TERM environment variable")
+            print("\nPotential root cause: TERM environment variable")
             print(f"  Working TERM: {working_term}")
             print(f"  Failing TERM: {failing_term}")
 

@@ -38,7 +38,7 @@ class InsightsService:
         """Load insights configuration from config.json."""
         config_path = os.path.join(CONFIG_DIR, "config.json")
         try:
-            with open(config_path, "r") as f:
+            with open(config_path) as f:
                 return json.load(f)
         except Exception as e:
             logger.warning(f"Could not load config.json: {e}")
@@ -100,9 +100,7 @@ class InsightsService:
             return None, "Cannot determine user identity"
 
         # 3. Query statistics
-        stats = self.message_repo.get_user_messages_stats(
-            start_date, end_date, sender_prefix
-        )
+        stats = self.message_repo.get_user_messages_stats(start_date, end_date, sender_prefix)
 
         # 4. Check data volume
         if stats.get("total_messages", 0) < 5:
@@ -290,7 +288,12 @@ class InsightsService:
         parsed = json.loads(clean_text)
 
         # Validate required fields
-        required_fields = ["overall_score", "overall_assessment", "strengths", "areas_for_improvement"]
+        required_fields = [
+            "overall_score",
+            "overall_assessment",
+            "strengths",
+            "areas_for_improvement",
+        ]
         for field in required_fields:
             if field not in parsed:
                 raise ValueError(f"Missing required field: {field}")

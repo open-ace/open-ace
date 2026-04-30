@@ -9,10 +9,10 @@ Measures:
 3. Total time to fully render dashboard
 """
 
-import sys
-import os
-import time
 import asyncio
+import os
+import sys
+import time
 
 # Add the project root to the path
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -136,10 +136,14 @@ async def test_dashboard_load_performance():
             # Performance threshold check
             PERFORMANCE_THRESHOLD = 3.0  # 3 seconds
             if dashboard_load_time < PERFORMANCE_THRESHOLD:
-                print(f"\n✅ PASSED: Dashboard load time ({dashboard_load_time:.2f}s) < threshold ({PERFORMANCE_THRESHOLD}s)")
+                print(
+                    f"\n✅ PASSED: Dashboard load time ({dashboard_load_time:.2f}s) < threshold ({PERFORMANCE_THRESHOLD}s)"
+                )
                 return True
             else:
-                print(f"\n⚠️ WARNING: Dashboard load time ({dashboard_load_time:.2f}s) > threshold ({PERFORMANCE_THRESHOLD}s)")
+                print(
+                    f"\n⚠️ WARNING: Dashboard load time ({dashboard_load_time:.2f}s) > threshold ({PERFORMANCE_THRESHOLD}s)"
+                )
                 return False
 
         except Exception as e:

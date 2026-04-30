@@ -14,7 +14,6 @@ Run:
   HEADLESS=false python tests/e2e_remote_reconnect_ui.py
 """
 
-import json
 import os
 import subprocess
 import sys
@@ -72,8 +71,9 @@ def pause(seconds):
 
 
 def api_login(username=TEST_USER, password=TEST_PASS):
-    r = requests.post(f"{BASE_URL}/api/auth/login",
-                      json={"username": username, "password": password})
+    r = requests.post(
+        f"{BASE_URL}/api/auth/login", json={"username": username, "password": password}
+    )
     assert r.status_code == 200, f"Login failed: {r.status_code}"
     token = r.cookies.get("session_token")
     assert token, "No session_token cookie"
@@ -81,8 +81,7 @@ def api_login(username=TEST_USER, password=TEST_PASS):
 
 
 def find_remote_machine(token):
-    r = requests.get(f"{BASE_URL}/api/remote/machines/available",
-                     cookies={"session_token": token})
+    r = requests.get(f"{BASE_URL}/api/remote/machines/available", cookies={"session_token": token})
     assert r.status_code == 200
     machines = r.json().get("machines", [])
     for m in machines:
@@ -148,6 +147,7 @@ def wait_for_ai_response(page, timeout=RESPONSE_TIMEOUT):
 #  Main Test
 # ════════════════════════════════════════════
 
+
 def run_tests():
     global session_id, machine_id
 
@@ -162,8 +162,7 @@ def run_tests():
 
     # Get webui info
     webui_info = requests.get(
-        f"{BASE_URL}/api/workspace/user-url",
-        cookies={"session_token": token}
+        f"{BASE_URL}/api/workspace/user-url", cookies={"session_token": token}
     ).json()
     webui_token = webui_info.get("token", "")
     webui_url = webui_info.get("url", WEBUI_URL)
@@ -183,14 +182,16 @@ def run_tests():
 
         # Console errors
         console_errors = []
+
         def on_console(msg):
             if msg.type in ("error", "warning"):
                 console_errors.append(f"[{msg.type}] {msg.text[:200]}")
+
         page.on("console", on_console)
 
         try:
             _run_all(page, token, webui_url, webui_token, console_errors)
-        except Exception as e:
+        except Exception:
             shot(page, "ERROR_final")
             for err in console_errors[-5:]:
                 log("Console", err)
@@ -198,8 +199,10 @@ def run_tests():
             raise
         finally:
             if session_id:
-                requests.post(f"{BASE_URL}/api/remote/sessions/{session_id}/stop",
-                              cookies={"session_token": token})
+                requests.post(
+                    f"{BASE_URL}/api/remote/sessions/{session_id}/stop",
+                    cookies={"session_token": token},
+                )
             page.remove_listener("console", on_console)
             context.close()
             browser.close()
@@ -230,9 +233,15 @@ def _run_all(page, token, webui_url, webui_token, console_errors):
 
     # Monitor session creation
     captured_sid = [None]
+
     def on_response(response):
         url = response.url
-        if "/api/remote/sessions" in url and "/chat" not in url and "/stop" not in url and "/stream" not in url:
+        if (
+            "/api/remote/sessions" in url
+            and "/chat" not in url
+            and "/stop" not in url
+            and "/stream" not in url
+        ):
             if response.request.method == "POST":
                 try:
                     data = response.json()
@@ -241,6 +250,7 @@ def _run_all(page, token, webui_url, webui_token, console_errors):
                         captured_sid[0] = sid
                 except Exception:
                     pass
+
     page.on("response", on_response)
 
     log("Navigate", "Opening ChatPage remote mode")
@@ -328,7 +338,12 @@ def _run_all(page, token, webui_url, webui_token, console_errors):
     error_el = page.locator(".text-red-500, .text-red-700, [class*='error']")
     reconnect_btn = page.locator('button:has-text("重新连接"), button:has-text("Reconnect")')
 
-    has_error = error_el.count() > 0 or "失效" in page_text or "failed" in page_text.lower() or "error" in page_text.lower()
+    has_error = (
+        error_el.count() > 0
+        or "失效" in page_text
+        or "failed" in page_text.lower()
+        or "error" in page_text.lower()
+    )
     has_reconnect = reconnect_btn.count() > 0
 
     log("Status", f"Error visible: {has_error}, Reconnect button: {has_reconnect}")
@@ -348,8 +363,7 @@ def _run_all(page, token, webui_url, webui_token, console_errors):
         # No reconnect button but error shown — navigate fresh
         log("Action", "Error shown, navigating to fresh ChatPage...")
         webui_info = requests.get(
-            f"{BASE_URL}/api/workspace/user-url",
-            cookies={"session_token": token}
+            f"{BASE_URL}/api/workspace/user-url", cookies={"session_token": token}
         ).json()
         webui_token = webui_info.get("token", "")
         chat_url = (
@@ -403,7 +417,7 @@ def _run_all(page, token, webui_url, webui_token, console_errors):
     # ════════════════════════════════════════════
 
     shot(page, "T_final")
-    print(f"\n══════ Summary ══════")
+    print("\n══════ Summary ══════")
     print(f"    Console errors: {len(console_errors)}")
     for err in console_errors[:5]:
         log("Console", err)

@@ -9,7 +9,6 @@ import logging
 import os
 import platform
 import subprocess
-from datetime import datetime
 
 from flask import Blueprint, jsonify, request
 
@@ -52,7 +51,9 @@ def get_webui_user():
     """Get user from webui token (for iframe integration)."""
     from app.services.webui_manager import get_webui_manager
 
-    token = request.cookies.get("session_token") or request.headers.get("Authorization", "").replace("Bearer ", "")
+    token = request.cookies.get("session_token") or request.headers.get(
+        "Authorization", ""
+    ).replace("Bearer ", "")
     if not token:
         # Also check query parameter for token
         token = request.args.get("token")
@@ -94,10 +95,12 @@ def api_get_projects():
         if p.is_shared and p.id not in [proj.id for proj in projects]:
             projects.append(p)
 
-    return jsonify({
-        "success": True,
-        "projects": [p.to_dict() for p in projects],
-    })
+    return jsonify(
+        {
+            "success": True,
+            "projects": [p.to_dict() for p in projects],
+        }
+    )
 
 
 @projects_bp.route("/projects", methods=["POST"])
@@ -162,8 +165,15 @@ def api_create_project():
                     # Create directory using sudo mkdir -p
                     result = run_as_user(system_account, ["mkdir", "-p", path])
                     if result.returncode != 0:
-                        logger.error(f"Failed to create directory as {system_account}: {result.stderr}")
-                        return jsonify({"error": f"Permission denied to create directory: {result.stderr}"}), 403
+                        logger.error(
+                            f"Failed to create directory as {system_account}: {result.stderr}"
+                        )
+                        return (
+                            jsonify(
+                                {"error": f"Permission denied to create directory: {result.stderr}"}
+                            ),
+                            403,
+                        )
                     dir_created = True
                     logger.info(f"Created project directory as {system_account}: {path}")
                 else:
@@ -198,11 +208,16 @@ def api_create_project():
 
     if project_id:
         project = project_repo.get_project_by_id(project_id)
-        return jsonify({
-            "success": True,
-            "project": project.to_dict(),
-            "dir_created": dir_created,
-        }), 201
+        return (
+            jsonify(
+                {
+                    "success": True,
+                    "project": project.to_dict(),
+                    "dir_created": dir_created,
+                }
+            ),
+            201,
+        )
 
     return jsonify({"error": "Failed to create project"}), 500
 
@@ -231,11 +246,13 @@ def api_get_project(project_id):
     # Get project stats
     stats = project_repo.get_project_stats(project_id)
 
-    return jsonify({
-        "success": True,
-        "project": project.to_dict(),
-        "stats": stats.to_dict() if stats else None,
-    })
+    return jsonify(
+        {
+            "success": True,
+            "project": project.to_dict(),
+            "stats": stats.to_dict() if stats else None,
+        }
+    )
 
 
 @projects_bp.route("/projects/<int:project_id>", methods=["PUT"])
@@ -319,10 +336,12 @@ def api_get_all_project_stats():
 
     stats = project_repo.get_all_project_stats()
 
-    return jsonify({
-        "success": True,
-        "stats": [s.to_dict() for s in stats],
-    })
+    return jsonify(
+        {
+            "success": True,
+            "stats": [s.to_dict() for s in stats],
+        }
+    )
 
 
 @projects_bp.route("/projects/<int:project_id>/daily", methods=["GET"])
@@ -352,10 +371,12 @@ def api_get_project_daily_stats(project_id):
         end_date=end_date,
     )
 
-    return jsonify({
-        "success": True,
-        "stats": [s.to_dict() for s in stats],
-    })
+    return jsonify(
+        {
+            "success": True,
+            "stats": [s.to_dict() for s in stats],
+        }
+    )
 
 
 @projects_bp.route("/projects/<int:project_id>/users", methods=["GET"])
@@ -387,7 +408,9 @@ def api_get_project_users(project_id):
             us_dict["username"] = user_info.get("username")
         result.append(us_dict)
 
-    return jsonify({
-        "success": True,
-        "users": result,
-    })
+    return jsonify(
+        {
+            "success": True,
+            "users": result,
+        }
+    )

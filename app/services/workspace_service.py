@@ -16,11 +16,7 @@ from app.modules.workspace.collaboration import (
     Team,
 )
 from app.modules.workspace.prompt_library import PromptLibrary, PromptTemplate
-from app.modules.workspace.session_manager import (
-    AgentSession,
-    SessionManager,
-    SessionType,
-)
+from app.modules.workspace.session_manager import AgentSession, SessionManager, SessionType
 from app.modules.workspace.state_sync import (
     StateSyncManager,
     SyncEvent,
@@ -213,7 +209,12 @@ class WorkspaceService:
                 session_id=session.session_id,
                 user_id=user_id,
                 tool_name=tool_name,
-                data={"title": title, "model": model, "project_id": project_id, "project_path": project_path},
+                data={
+                    "title": title,
+                    "model": model,
+                    "project_id": project_id,
+                    "project_path": project_path,
+                },
             )
         )
 

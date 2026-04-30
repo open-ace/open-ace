@@ -64,7 +64,8 @@ class ClaudeCodeAdapter(BaseCLIAdapter):
         args = [
             self.EXECUTABLE,
             "--print",
-            "--output-format", "stream-json",
+            "--output-format",
+            "stream-json",
         ]
 
         if resume:

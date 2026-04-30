@@ -9,9 +9,9 @@ Tests:
 4. Search functionality
 """
 
+import asyncio
 import os
 import sys
-import asyncio
 from datetime import datetime
 from pathlib import Path
 
@@ -37,35 +37,35 @@ SCREENSHOT_DIR = Path(__file__).parent.parent.parent.parent / "screenshots" / "i
 async def run_test():
     """Run the test and generate screenshots."""
     SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
-    
+
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(viewport=VIEWPORT)
         page = await context.new_page()
-        
+
         results = []
-        
+
         try:
             # 1. Login
             print("Step 1: Login...")
             await page.goto(f"{BASE_URL}/login", wait_until="networkidle", timeout=30000)
-            await page.fill('#username', USERNAME)
-            await page.fill('#password', PASSWORD)
+            await page.fill("#username", USERNAME)
+            await page.fill("#password", PASSWORD)
             await page.click('button[type="submit"]')
-            await page.wait_for_load_state('networkidle', timeout=10000)
+            await page.wait_for_load_state("networkidle", timeout=10000)
             print("Login successful")
-            
+
             # 2. Navigate to Work page
             print("Step 2: Navigate to Work page...")
             await page.goto(f"{BASE_URL}/work", wait_until="networkidle", timeout=30000)
             # Wait for any content to appear
             await page.wait_for_timeout(3000)
-            
+
             # Take screenshot of Work page
             await page.screenshot(path=str(SCREENSHOT_DIR / "work_page.png"), full_page=False)
             results.append(("work_page.png", "Work Page with Session List"))
             print("Work page screenshot saved")
-            
+
             # 3. Navigate to Sessions page directly (more reliable)
             print("Step 3: Navigate to Sessions page...")
             await page.goto(f"{BASE_URL}/work/sessions", wait_until="networkidle", timeout=30000)
@@ -73,25 +73,31 @@ async def run_test():
             await page.screenshot(path=str(SCREENSHOT_DIR / "sessions_page.png"), full_page=False)
             results.append(("sessions_page.png", "Sessions Page"))
             print("Sessions page screenshot saved")
-            
+
             # 4. Try to click on a session row to open details
             print("Step 4: Try to open session details...")
-            session_rows = await page.query_selector_all('tr.clickable, [role="row"], .session-row, tbody tr')
+            session_rows = await page.query_selector_all(
+                'tr.clickable, [role="row"], .session-row, tbody tr'
+            )
             if session_rows and len(session_rows) > 0:
                 await session_rows[0].click()
                 await page.wait_for_timeout(2000)
-                await page.screenshot(path=str(SCREENSHOT_DIR / "session_detail_modal.png"), full_page=False)
+                await page.screenshot(
+                    path=str(SCREENSHOT_DIR / "session_detail_modal.png"), full_page=False
+                )
                 results.append(("session_detail_modal.png", "Session Detail Modal"))
                 print("Session detail modal screenshot saved")
             else:
                 print("No session rows found, taking screenshot anyway")
-                await page.screenshot(path=str(SCREENSHOT_DIR / "sessions_list.png"), full_page=False)
+                await page.screenshot(
+                    path=str(SCREENSHOT_DIR / "sessions_list.png"), full_page=False
+                )
                 results.append(("sessions_list.png", "Sessions List (no modal)"))
-            
+
             print("\n=== Test Results ===")
             for filename, desc in results:
                 print(f"  - {filename}: {desc}")
-            
+
             # Generate HTML report
             report_path = SCREENSHOT_DIR / "report.html"
             html_content = f"""<!DOCTYPE html>
@@ -111,7 +117,7 @@ async def run_test():
 <body>
     <h1>Issue 54 Test Report</h1>
     <p class="timestamp">Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
-    
+
     <div class="summary">
         <h2>Features Tested:</h2>
         <ul>
@@ -121,22 +127,22 @@ async def run_test():
             <li>Search box - search messages by keyword</li>
         </ul>
     </div>
-    
+
     {"".join([f'<div class="screenshot"><h3>{desc}</h3><img src="{filename}"></div>' for filename, desc in results])}
 </body>
 </html>
 """
             report_path.write_text(html_content)
             print(f"\nReport saved to: {report_path}")
-            
+
         except Exception as e:
             print(f"Error: {e}")
             await page.screenshot(path=str(SCREENSHOT_DIR / "error.png"))
             results.append(("error.png", f"Error occurred: {e}"))
-        
+
         finally:
             await browser.close()
-    
+
     return results
 
 

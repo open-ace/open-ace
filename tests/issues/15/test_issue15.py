@@ -2,6 +2,7 @@
 """Test screenshot for Issue #15 - Session History conversation detail modal."""
 
 import asyncio
+
 from playwright.async_api import async_playwright
 
 
@@ -34,21 +35,18 @@ async def main():
 
         # Set date range
         print("Setting date range...")
-        await page.evaluate(
-            """
+        await page.evaluate("""
             () => {
                 const startDate = document.getElementById('analysis-start-date');
                 const endDate = document.getElementById('analysis-end-date');
                 if (startDate) startDate.value = '2026-01-01';
                 if (endDate) endDate.value = '2026-12-31';
             }
-        """
-        )
+        """)
 
         # Show the tab content
         print("Showing Conversation History tab...")
-        await page.evaluate(
-            """
+        await page.evaluate("""
             () => {
                 const tabElement = document.getElementById('conversation-history-tab');
                 if (tabElement) {
@@ -56,13 +54,11 @@ async def main():
                     tab.show();
                 }
             }
-        """
-        )
+        """)
         await asyncio.sleep(2)
 
         # Force analysis-section to be visible
-        await page.evaluate(
-            """
+        await page.evaluate("""
             () => {
                 const analysisSection = document.getElementById('analysis-section');
                 if (analysisSection) {
@@ -74,13 +70,11 @@ async def main():
                     tableContainer.style.width = '100%';
                 }
             }
-        """
-        )
+        """)
 
         # Initialize table with row click event
         print("Initializing table with row click event...")
-        await page.evaluate(
-            """
+        await page.evaluate("""
             () => {
                 window.conversationHistoryTable = new Tabulator("#conversation-history-table", {
                     height: "100%",
@@ -100,13 +94,11 @@ async def main():
                     }
                 });
             }
-        """
-        )
+        """)
 
         # Load data
         print("Loading data...")
-        result = await page.evaluate(
-            """
+        result = await page.evaluate("""
             async () => {
                 const startDate = document.getElementById('analysis-start-date')?.value;
                 const endDate = document.getElementById('analysis-end-date')?.value;
@@ -124,8 +116,7 @@ async def main():
                 }
                 return {success: false, error: 'No date range'};
             }
-        """
-        )
+        """)
         print(f"Data load result: {result}")
 
         # Wait for table to render
@@ -147,8 +138,7 @@ async def main():
             await asyncio.sleep(3)
 
             # Check modal state
-            modal_state = await page.evaluate(
-                """
+            modal_state = await page.evaluate("""
                 () => {
                     const modal = document.getElementById('conversationModal');
                     if (modal) {
@@ -159,16 +149,14 @@ async def main():
                     }
                     return null;
                 }
-            """
-            )
+            """)
             print(f"Modal state after row click: {modal_state}")
 
             if modal_state and "show" in modal_state.get("classes", ""):
                 print("✓ Conversation detail modal is visible after row click!")
 
                 # Check modal content
-                modal_content = await page.evaluate(
-                    """
+                modal_content = await page.evaluate("""
                     () => {
                         const messages = document.querySelectorAll('#conversation-messages .conversation-message');
                         const user = document.getElementById('conv-user')?.textContent;
@@ -179,8 +167,7 @@ async def main():
                             model: model
                         };
                     }
-                """
-                )
+                """)
                 print(f"Modal content: {modal_content}")
 
                 await page.screenshot(
@@ -194,14 +181,12 @@ async def main():
                     await page.evaluate(f"showConversationModal('{result['firstSession']}')")
                     await asyncio.sleep(3)
 
-                    modal_state2 = await page.evaluate(
-                        """
+                    modal_state2 = await page.evaluate("""
                         () => {
                             const modal = document.getElementById('conversationModal');
                             return modal ? modal.className : null;
                         }
-                    """
-                    )
+                    """)
                     print(f"Modal state after direct call: {modal_state2}")
 
                     if modal_state2 and "show" in modal_state2:

@@ -8,12 +8,9 @@ Tests the permission model:
   - Regular user: own sessions only
 """
 
-import json
 import os
-import sqlite3
 import sys
 import tempfile
-import uuid
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
@@ -49,7 +46,7 @@ def print_summary():
     print(f"{'='*60}")
     for r in RESULTS:
         status = "PASS" if r["passed"] else "FAIL"
-        print(f"  [{status}] {r['name']}" + (f" - {r['detail']}" if r['detail'] else ""))
+        print(f"  [{status}] {r['name']}" + (f" - {r['detail']}" if r["detail"] else ""))
     return failed == 0
 
 
@@ -71,6 +68,7 @@ def make_manager():
 
     # Patch is_postgresql to return False for testing
     import app.repositories.database as db_mod
+
     original_is_pg = db_mod.is_postgresql
     original_db_path = db_mod.DB_PATH
     db_mod.is_postgresql = lambda: False
@@ -78,9 +76,11 @@ def make_manager():
 
     # Reset singleton so each test gets a fresh manager
     import app.modules.workspace.remote_agent_manager as ram_mod
+
     ram_mod._agent_manager = None
 
     from app.modules.workspace.remote_agent_manager import RemoteAgentManager
+
     mgr = RemoteAgentManager(db_path=TMP_DB)
 
     db_mod.is_postgresql = original_is_pg
@@ -112,8 +112,9 @@ def setup_test_data(mgr):
         )
     """)
     for uid in [1, 2, 3, 4, 5, 99]:
-        cursor.execute("INSERT OR IGNORE INTO users (id, username) VALUES (?, ?)",
-                       (uid, f"user{uid}"))
+        cursor.execute(
+            "INSERT OR IGNORE INTO users (id, username) VALUES (?, ?)", (uid, f"user{uid}")
+        )
 
     # User 1: system admin (not tracked in machine_assignments for admin check)
     # User 2: machine admin on machine-a
@@ -148,6 +149,7 @@ def setup_test_data(mgr):
 # ════════════════════════════════════════════
 #  Tests
 # ════════════════════════════════════════════
+
 
 def test_check_user_access_returns_permission():
     t = test("check_user_access returns permission string")
@@ -207,9 +209,11 @@ def test_list_machines_with_user_id_has_permission():
     # User 2 is assigned to machine-a (admin) and machine-b (user)
     perms = {m["machine_id"]: m.get("current_user_permission") for m in machines}
 
-    if (perms.get("mid-machine-a") == "admin"
-            and perms.get("mid-machine-b") == "user"
-            and perms.get("mid-machine-c") is None):
+    if (
+        perms.get("mid-machine-a") == "admin"
+        and perms.get("mid-machine-b") == "user"
+        and perms.get("mid-machine-c") is None
+    ):
         ok(f"permissions={perms}")
     else:
         fail(f"unexpected permissions: {perms}")
@@ -323,15 +327,18 @@ def test_assign_user_with_admin_permission():
 #  Route-level permission tests (using Flask test client)
 # ════════════════════════════════════════════
 
+
 def _make_app(mgr):
     """Create a minimal Flask app with remote_bp for route testing."""
     import app.repositories.database as db_mod
+
     db_mod.is_postgresql = lambda: False
     db_mod.DB_PATH = TMP_DB
 
     from flask import Flask
-    from app.routes import remote as remote_mod
+
     import app.modules.workspace.remote_agent_manager as ram_mod
+    from app.routes import remote as remote_mod
 
     # Set the global singleton to our test manager
     ram_mod._agent_manager = mgr
@@ -387,9 +394,12 @@ def test_route_assign_by_system_admin():
     app = _make_app(mgr)
 
     with app.test_client() as client:
-        resp = _auth_post(client, "/api/remote/machines/mid-machine-a/assign",
-                          "test-token-1-admin",
-                          json={"user_id": 5, "permission": "admin"})
+        resp = _auth_post(
+            client,
+            "/api/remote/machines/mid-machine-a/assign",
+            "test-token-1-admin",
+            json={"user_id": 5, "permission": "admin"},
+        )
         if resp.status_code == 200:
             perm = mgr.check_user_access("mid-machine-a", 5)
             if perm == "admin":
@@ -407,9 +417,12 @@ def test_route_assign_by_machine_admin():
     app = _make_app(mgr)
 
     with app.test_client() as client:
-        resp = _auth_post(client, "/api/remote/machines/mid-machine-a/assign",
-                          "test-token-2-user",
-                          json={"user_id": 5, "permission": "admin"})
+        resp = _auth_post(
+            client,
+            "/api/remote/machines/mid-machine-a/assign",
+            "test-token-2-user",
+            json={"user_id": 5, "permission": "admin"},
+        )
         if resp.status_code == 200:
             perm = mgr.check_user_access("mid-machine-a", 5)
             if perm == "user":
@@ -427,9 +440,12 @@ def test_route_assign_by_regular_user():
     app = _make_app(mgr)
 
     with app.test_client() as client:
-        resp = _auth_post(client, "/api/remote/machines/mid-machine-a/assign",
-                          "test-token-3-user",
-                          json={"user_id": 5, "permission": "user"})
+        resp = _auth_post(
+            client,
+            "/api/remote/machines/mid-machine-a/assign",
+            "test-token-3-user",
+            json={"user_id": 5, "permission": "user"},
+        )
         if resp.status_code == 403:
             ok(f"status=403, body={resp.get_json()}")
         else:
@@ -443,11 +459,14 @@ def test_route_assign_by_unassigned_user():
     app = _make_app(mgr)
 
     with app.test_client() as client:
-        resp = _auth_post(client, "/api/remote/machines/mid-machine-a/assign",
-                          "test-token-99-user",
-                          json={"user_id": 5, "permission": "user"})
+        resp = _auth_post(
+            client,
+            "/api/remote/machines/mid-machine-a/assign",
+            "test-token-99-user",
+            json={"user_id": 5, "permission": "user"},
+        )
         if resp.status_code == 403:
-            ok(f"status=403")
+            ok("status=403")
         else:
             fail(f"expected 403, got {resp.status_code}")
 
@@ -459,8 +478,9 @@ def test_route_revoke_by_machine_admin():
     app = _make_app(mgr)
 
     with app.test_client() as client:
-        resp = _auth_delete(client, "/api/remote/machines/mid-machine-a/assign/3",
-                            "test-token-2-user")
+        resp = _auth_delete(
+            client, "/api/remote/machines/mid-machine-a/assign/3", "test-token-2-user"
+        )
         if resp.status_code == 200:
             perm = mgr.check_user_access("mid-machine-a", 3)
             if perm is None:
@@ -479,8 +499,9 @@ def test_route_revoke_admin_by_machine_admin():
 
     with app.test_client() as client:
         mgr.assign_user("mid-machine-a", 4, granted_by=1, permission="admin")
-        resp = _auth_delete(client, "/api/remote/machines/mid-machine-a/assign/4",
-                            "test-token-2-user")
+        resp = _auth_delete(
+            client, "/api/remote/machines/mid-machine-a/assign/4", "test-token-2-user"
+        )
         if resp.status_code == 403:
             ok(f"status=403, body={resp.get_json()}")
         else:
@@ -494,8 +515,9 @@ def test_route_revoke_admin_by_system_admin():
     app = _make_app(mgr)
 
     with app.test_client() as client:
-        resp = _auth_delete(client, "/api/remote/machines/mid-machine-a/assign/2",
-                            "test-token-1-admin")
+        resp = _auth_delete(
+            client, "/api/remote/machines/mid-machine-a/assign/2", "test-token-1-admin"
+        )
         if resp.status_code == 200:
             perm = mgr.check_user_access("mid-machine-a", 2)
             if perm is None:
@@ -513,8 +535,7 @@ def test_route_get_users_by_machine_admin():
     app = _make_app(mgr)
 
     with app.test_client() as client:
-        resp = _auth_get(client, "/api/remote/machines/mid-machine-a/users",
-                         "test-token-2-user")
+        resp = _auth_get(client, "/api/remote/machines/mid-machine-a/users", "test-token-2-user")
         data = resp.get_json()
         if resp.status_code == 200 and len(data.get("users", [])) >= 1:
             ok(f"status=200, users={len(data['users'])}")
@@ -529,10 +550,9 @@ def test_route_get_users_by_regular_user():
     app = _make_app(mgr)
 
     with app.test_client() as client:
-        resp = _auth_get(client, "/api/remote/machines/mid-machine-a/users",
-                         "test-token-3-user")
+        resp = _auth_get(client, "/api/remote/machines/mid-machine-a/users", "test-token-3-user")
         if resp.status_code == 403:
-            ok(f"status=403")
+            ok("status=403")
         else:
             fail(f"expected 403, got {resp.status_code}")
 
@@ -548,8 +568,7 @@ def test_route_list_machines_includes_permission():
         data = resp.get_json()
         machines = data.get("machines", [])
         perms = {m["machine_id"]: m.get("current_user_permission") for m in machines}
-        if (perms.get("mid-machine-a") == "admin"
-                and perms.get("mid-machine-b") == "user"):
+        if perms.get("mid-machine-a") == "admin" and perms.get("mid-machine-b") == "user":
             ok(f"permissions={perms}")
         else:
             fail(f"unexpected permissions: {perms}")
@@ -562,16 +581,14 @@ def test_route_deregister_system_admin_only():
     app = _make_app(mgr)
 
     with app.test_client() as client:
-        resp = _auth_delete(client, "/api/remote/machines/mid-machine-a",
-                            "test-token-2-user")
+        resp = _auth_delete(client, "/api/remote/machines/mid-machine-a", "test-token-2-user")
         if resp.status_code == 403:
             ok("machine admin gets 403")
         else:
             fail(f"expected 403, got {resp.status_code}")
 
     with app.test_client() as client:
-        resp2 = _auth_delete(client, "/api/remote/machines/mid-machine-c",
-                             "test-token-1-admin")
+        resp2 = _auth_delete(client, "/api/remote/machines/mid-machine-c", "test-token-1-admin")
         if resp2.status_code == 200:
             ok("system admin can deregister")
         else:
@@ -585,9 +602,9 @@ def test_route_generate_token_system_admin_only():
     app = _make_app(mgr)
 
     with app.test_client() as client:
-        resp = _auth_post(client, "/api/remote/machines/register",
-                          "test-token-2-user",
-                          json={"tenant_id": 1})
+        resp = _auth_post(
+            client, "/api/remote/machines/register", "test-token-2-user", json={"tenant_id": 1}
+        )
         if resp.status_code == 403:
             ok("machine admin gets 403 for token generation")
         else:
@@ -609,6 +626,7 @@ def _create_session_for_test(mgr, user_id, machine_id):
     rsm_mod.get_remote_agent_manager = lambda: mgr
 
     from app.modules.workspace.remote_session_manager import RemoteSessionManager
+
     session_mgr = RemoteSessionManager()
 
     result = session_mgr.create_remote_session(
@@ -704,10 +722,11 @@ def test_route_session_access_unassigned_user():
 
 # ════════════════════════════════════════════
 
+
 def main():
-    print("="*60)
+    print("=" * 60)
     print("  Machine-Level Admin Permission Tests")
-    print("="*60)
+    print("=" * 60)
 
     # Data layer tests
     test_check_user_access_returns_permission()

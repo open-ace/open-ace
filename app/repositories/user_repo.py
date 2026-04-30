@@ -59,7 +59,15 @@ class UserRepository:
                     VALUES (?, ?, ?, ?, ?, ?, ?)
                     RETURNING id
                 """,
-                    (username, email, password_hash, role, is_active, datetime.utcnow(), system_account),
+                    (
+                        username,
+                        email,
+                        password_hash,
+                        role,
+                        is_active,
+                        datetime.utcnow(),
+                        system_account,
+                    ),
                     commit=True,
                 )
                 return result["id"] if result else None
@@ -71,7 +79,15 @@ class UserRepository:
                     INSERT INTO users (username, email, password_hash, role, is_active, created_at, system_account)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                    (username, email, password_hash, role, is_active_int, datetime.utcnow(), system_account),
+                    (
+                        username,
+                        email,
+                        password_hash,
+                        role,
+                        is_active_int,
+                        datetime.utcnow(),
+                        system_account,
+                    ),
                 )
                 return cursor.lastrowid
         except Exception as e:

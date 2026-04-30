@@ -7,7 +7,7 @@ Repository for project data access operations.
 
 import logging
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from app.models.project import Project, ProjectDailyStats, ProjectStats, UserProject
 from app.repositories.database import Database
@@ -289,11 +289,20 @@ class ProjectRepository:
                             COALESCE((SELECT total_duration_seconds FROM user_projects
                                       WHERE user_id = ? AND project_id = ?), 0))
                     """,
-                    (user_id, project_id, now, now,
-                     user_id, project_id,
-                     user_id, project_id,
-                     user_id, project_id,
-                     user_id, project_id),
+                    (
+                        user_id,
+                        project_id,
+                        now,
+                        now,
+                        user_id,
+                        project_id,
+                        user_id,
+                        project_id,
+                        user_id,
+                        project_id,
+                        user_id,
+                        project_id,
+                    ),
                 )
                 return cursor.lastrowid
         except Exception as e:
@@ -335,8 +344,15 @@ class ProjectRepository:
             """
             self.db.execute(
                 query,
-                (datetime.utcnow(), sessions_delta, tokens_delta, requests_delta,
-                 duration_delta, user_id, project_id),
+                (
+                    datetime.utcnow(),
+                    sessions_delta,
+                    tokens_delta,
+                    requests_delta,
+                    duration_delta,
+                    user_id,
+                    project_id,
+                ),
             )
             return True
         except Exception as e:
@@ -426,9 +442,7 @@ class ProjectRepository:
                 else None
             ),
             last_access=(
-                datetime.fromisoformat(result["last_access"])
-                if result.get("last_access")
-                else None
+                datetime.fromisoformat(result["last_access"]) if result.get("last_access") else None
             ),
             user_stats=user_stats,
         )
@@ -475,19 +489,21 @@ class ProjectRepository:
                     return datetime.fromisoformat(value)
                 return None
 
-            stats_list.append(ProjectStats(
-                project_id=project_id,
-                project_path=r["project_path"],
-                project_name=r["project_name"],
-                total_users=r.get("total_users", 0) or 0,
-                total_sessions=r.get("total_sessions", 0) or 0,
-                total_tokens=int(r.get("total_tokens", 0) or 0),
-                total_requests=int(r.get("total_requests", 0) or 0),
-                total_duration_seconds=int(r.get("total_duration_seconds", 0) or 0),
-                first_access=parse_datetime(r.get("first_access")),
-                last_access=parse_datetime(r.get("last_access")),
-                user_stats=user_stats,
-            ))
+            stats_list.append(
+                ProjectStats(
+                    project_id=project_id,
+                    project_path=r["project_path"],
+                    project_name=r["project_name"],
+                    total_users=r.get("total_users", 0) or 0,
+                    total_sessions=r.get("total_sessions", 0) or 0,
+                    total_tokens=int(r.get("total_tokens", 0) or 0),
+                    total_requests=int(r.get("total_requests", 0) or 0),
+                    total_duration_seconds=int(r.get("total_duration_seconds", 0) or 0),
+                    first_access=parse_datetime(r.get("first_access")),
+                    last_access=parse_datetime(r.get("last_access")),
+                    user_stats=user_stats,
+                )
+            )
 
         return stats_list
 

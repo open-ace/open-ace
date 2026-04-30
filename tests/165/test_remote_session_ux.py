@@ -25,8 +25,8 @@ import json
 import os
 import sys
 import time
-import uuid
 import traceback
+import uuid
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, PROJECT_ROOT)
@@ -55,6 +55,7 @@ _page = None
 
 # ── 工具函数 ──
 
+
 def ensure_dir():
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
@@ -79,9 +80,11 @@ def pause(seconds):
 
 # ── API helpers ──
 
+
 def api_login_as(username=TEST_USER, password=TEST_PASS):
-    r = requests.post(f"{BASE_URL}/api/auth/login",
-                      json={"username": username, "password": password})
+    r = requests.post(
+        f"{BASE_URL}/api/auth/login", json={"username": username, "password": password}
+    )
     assert r.status_code == 200, f"Login failed: {r.status_code}"
     token = r.cookies.get("session_token")
     assert token, "No session_token cookie"
@@ -94,35 +97,45 @@ def api_admin_login():
 
 def api_register_machine(atoken):
     global machine_id
-    r = requests.post(f"{BASE_URL}/api/remote/machines/register",
-                      json={"tenant_id": 1},
-                      cookies={"session_token": atoken})
+    r = requests.post(
+        f"{BASE_URL}/api/remote/machines/register",
+        json={"tenant_id": 1},
+        cookies={"session_token": atoken},
+    )
     assert r.status_code == 200
     reg_token = r.json()["registration_token"]
 
     machine_id = str(uuid.uuid4())
-    r = requests.post(f"{BASE_URL}/api/remote/agent/register", json={
-        "registration_token": reg_token,
-        "machine_id": machine_id,
-        "machine_name": "E2E-165 Test Server",
-        "hostname": "e2e-165.local",
-        "os_type": "linux",
-        "os_version": "Ubuntu 24.04",
-        "capabilities": {"cpu_cores": 8, "memory_gb": 32, "cli_installed": True},
-        "agent_version": "1.0.0-e2e",
-    })
+    r = requests.post(
+        f"{BASE_URL}/api/remote/agent/register",
+        json={
+            "registration_token": reg_token,
+            "machine_id": machine_id,
+            "machine_name": "E2E-165 Test Server",
+            "hostname": "e2e-165.local",
+            "os_type": "linux",
+            "os_version": "Ubuntu 24.04",
+            "capabilities": {"cpu_cores": 8, "memory_gb": 32, "cli_installed": True},
+            "agent_version": "1.0.0-e2e",
+        },
+    )
     assert r.status_code == 200
 
-    r = requests.post(f"{BASE_URL}/api/remote/agent/message", json={
-        "type": "register",
-        "machine_id": machine_id,
-        "capabilities": {"cpu_cores": 8, "memory_gb": 32, "cli_installed": True},
-    })
+    r = requests.post(
+        f"{BASE_URL}/api/remote/agent/message",
+        json={
+            "type": "register",
+            "machine_id": machine_id,
+            "capabilities": {"cpu_cores": 8, "memory_gb": 32, "cli_installed": True},
+        },
+    )
     assert r.status_code == 200
 
-    r = requests.post(f"{BASE_URL}/api/remote/machines/{machine_id}/assign",
-                      json={"user_id": 89, "permission": "admin"},
-                      cookies={"session_token": atoken})
+    r = requests.post(
+        f"{BASE_URL}/api/remote/machines/{machine_id}/assign",
+        json={"user_id": 89, "permission": "admin"},
+        cookies={"session_token": atoken},
+    )
     assert r.status_code == 200
 
 
@@ -136,58 +149,70 @@ def api_create_session(token, **kwargs):
         "title": "E2E-165",
     }
     body.update(kwargs)
-    r = requests.post(f"{BASE_URL}/api/remote/sessions",
-                      json=body,
-                      cookies={"session_token": token})
+    r = requests.post(
+        f"{BASE_URL}/api/remote/sessions", json=body, cookies={"session_token": token}
+    )
     assert r.status_code == 200, f"Create session failed: {r.status_code} {r.text}"
     session_id = r.json()["session"]["session_id"]
     return session_id
 
 
 def api_send_chat(token, message, sid=None):
-    r = requests.post(f"{BASE_URL}/api/remote/sessions/{sid or session_id}/chat",
-                      json={"content": message},
-                      cookies={"session_token": token})
+    r = requests.post(
+        f"{BASE_URL}/api/remote/sessions/{sid or session_id}/chat",
+        json={"content": message},
+        cookies={"session_token": token},
+    )
     return r.status_code, r.json() if r.status_code != 200 else r.json()
 
 
 def api_agent_output(data_str, stream="stdout", is_complete=False, sid=None):
-    r = requests.post(f"{BASE_URL}/api/remote/agent/message", json={
-        "type": "session_output",
-        "machine_id": machine_id,
-        "session_id": sid or session_id,
-        "data": data_str,
-        "stream": stream,
-        "is_complete": is_complete,
-    })
+    r = requests.post(
+        f"{BASE_URL}/api/remote/agent/message",
+        json={
+            "type": "session_output",
+            "machine_id": machine_id,
+            "session_id": sid or session_id,
+            "data": data_str,
+            "stream": stream,
+            "is_complete": is_complete,
+        },
+    )
     return r.status_code == 200
 
 
 def api_agent_permission_request(control_request_dict, sid=None):
-    r = requests.post(f"{BASE_URL}/api/remote/agent/message", json={
-        "type": "permission_request",
-        "machine_id": machine_id,
-        "session_id": sid or session_id,
-        "control_request": control_request_dict,
-    })
+    r = requests.post(
+        f"{BASE_URL}/api/remote/agent/message",
+        json={
+            "type": "permission_request",
+            "machine_id": machine_id,
+            "session_id": sid or session_id,
+            "control_request": control_request_dict,
+        },
+    )
     return r.status_code == 200
 
 
 def api_send_usage(sid=None, tokens=None, requests_count=1):
     tokens = tokens or {"input": 1000, "output": 500}
-    r = requests.post(f"{BASE_URL}/api/remote/agent/message", json={
-        "type": "usage_report",
-        "machine_id": machine_id,
-        "session_id": sid or session_id,
-        "tokens": tokens,
-        "requests": requests_count,
-    })
+    r = requests.post(
+        f"{BASE_URL}/api/remote/agent/message",
+        json={
+            "type": "usage_report",
+            "machine_id": machine_id,
+            "session_id": sid or session_id,
+            "tokens": tokens,
+            "requests": requests_count,
+        },
+    )
     return r.status_code == 200
 
 
 def api_get_session(token, sid=None):
-    r = requests.get(f"{BASE_URL}/api/remote/sessions/{sid or session_id}",
-                     cookies={"session_token": token})
+    r = requests.get(
+        f"{BASE_URL}/api/remote/sessions/{sid or session_id}", cookies={"session_token": token}
+    )
     assert r.status_code == 200
     return r.json()["session"]
 
@@ -195,7 +220,8 @@ def api_get_session(token, sid=None):
 def api_get_session_messages(token, sid=None):
     r = requests.get(
         f"{BASE_URL}/api/workspace/sessions/{sid or session_id}?include_messages=true",
-        cookies={"session_token": token})
+        cookies={"session_token": token},
+    )
     if r.status_code == 200:
         data = r.json()
         session_data = data.get("data") or data.get("session", {})
@@ -204,8 +230,10 @@ def api_get_session_messages(token, sid=None):
 
 
 def api_abort_request(token, sid=None):
-    r = requests.post(f"{BASE_URL}/api/remote/sessions/{sid or session_id}/abort",
-                      cookies={"session_token": token})
+    r = requests.post(
+        f"{BASE_URL}/api/remote/sessions/{sid or session_id}/abort",
+        cookies={"session_token": token},
+    )
     return r.status_code, r.json() if r.status_code != 200 else r.json()
 
 
@@ -213,19 +241,24 @@ def api_permission_response(token, sid, request_id, behavior, tool_name="", mess
     body = {"request_id": request_id, "behavior": behavior, "tool_name": tool_name}
     if message:
         body["message"] = message
-    r = requests.post(f"{BASE_URL}/api/remote/sessions/{sid}/permission",
-                      json=body,
-                      cookies={"session_token": token})
+    r = requests.post(
+        f"{BASE_URL}/api/remote/sessions/{sid}/permission",
+        json=body,
+        cookies={"session_token": token},
+    )
     return r.status_code == 200, r.json() if r.status_code == 200 else r.text
 
 
 def api_get_pending_commands():
-    r = requests.post(f"{BASE_URL}/api/remote/agent/message", json={
-        "type": "heartbeat",
-        "machine_id": machine_id,
-        "status": "busy",
-        "active_sessions": 1,
-    })
+    r = requests.post(
+        f"{BASE_URL}/api/remote/agent/message",
+        json={
+            "type": "heartbeat",
+            "machine_id": machine_id,
+            "status": "busy",
+            "active_sessions": 1,
+        },
+    )
     assert r.status_code == 200
     return r.json().get("pending_commands", [])
 
@@ -233,12 +266,14 @@ def api_get_pending_commands():
 def api_cleanup(token, atoken):
     global session_id, machine_id
     if session_id:
-        requests.post(f"{BASE_URL}/api/remote/sessions/{session_id}/stop",
-                      cookies={"session_token": token})
+        requests.post(
+            f"{BASE_URL}/api/remote/sessions/{session_id}/stop", cookies={"session_token": token}
+        )
         session_id = None
     if machine_id:
-        requests.delete(f"{BASE_URL}/api/remote/machines/{machine_id}",
-                        cookies={"session_token": atoken})
+        requests.delete(
+            f"{BASE_URL}/api/remote/machines/{machine_id}", cookies={"session_token": atoken}
+        )
         machine_id = None
 
 
@@ -253,15 +288,16 @@ def _check_webui_available(url):
 def _navigate_session_detail(page, sid):
     """Navigate to open-ace session detail page using URL param for exact match."""
     page.goto(f"{BASE_URL}/work/sessions?id={sid}", wait_until="domcontentloaded", timeout=15000)
-    page.wait_for_selector(".modal, .modal-dialog, .session-detail, [class*='modal']", timeout=10000)
+    page.wait_for_selector(
+        ".modal, .modal-dialog, .session-detail, [class*='modal']", timeout=10000
+    )
     pause(2)
 
 
 def _get_webui_url_and_token():
     """Get webui URL and token for ChatPage navigation."""
     webui_info = requests.get(
-        f"{BASE_URL}/api/workspace/user-url",
-        cookies={"session_token": auth_token}
+        f"{BASE_URL}/api/workspace/user-url", cookies={"session_token": auth_token}
     ).json()
     return webui_info.get("url", WEBUI_URL), webui_info.get("token", "")
 
@@ -297,10 +333,10 @@ def _open_chatpage(page, webui_url, webui_token, **extra_params):
     params = [
         f"?token={webui_token}",
         f"&openace_url={BASE_URL}",
-        f"&workspaceType=remote",
+        "&workspaceType=remote",
         f"&machineId={machine_id}",
-        f"&machineName=E2E-165%20Server",
-        f"&encodedProjectName=-home-user-test-165",
+        "&machineName=E2E-165%20Server",
+        "&encodedProjectName=-home-user-test-165",
     ]
     for k, v in extra_params.items():
         params.append(f"&{k}={v}")
@@ -312,6 +348,7 @@ def _open_chatpage(page, webui_url, webui_token, **extra_params):
 #  Tests — 每个 API 测试 + 浏览器 UI 截图
 # ══════════════════════════════════════════════════════
 
+
 def test_a1_token_detail():
     """A1: Token 明细 (input/output/total) — API 验证 + 管理页面截图"""
     global auth_token, session_id
@@ -321,11 +358,19 @@ def test_a1_token_detail():
     sid = api_create_session(auth_token)
     api_send_chat(auth_token, "hello")
     pause(0.3)
-    api_agent_output(json.dumps({
-        "type": "assistant",
-        "message": {"id": "msg-001", "role": "assistant",
-                    "content": [{"type": "text", "text": "你好！"}]},
-    }), is_complete=True)
+    api_agent_output(
+        json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "id": "msg-001",
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "你好！"}],
+                },
+            }
+        ),
+        is_complete=True,
+    )
     pause(0.3)
     api_send_usage(sid=sid, tokens={"input": 2000, "output": 1000}, requests_count=1)
     pause(0.5)
@@ -345,8 +390,9 @@ def test_a1_token_detail():
     shot(page, "a1_token_detail")
 
     # 清理
-    requests.post(f"{BASE_URL}/api/remote/sessions/{sid}/stop",
-                  cookies={"session_token": auth_token})
+    requests.post(
+        f"{BASE_URL}/api/remote/sessions/{sid}/stop", cookies={"session_token": auth_token}
+    )
     session_id = None
     print("  ✅ A1 PASSED: Token 明细正确追踪")
 
@@ -361,11 +407,19 @@ def test_a2_system_message_storage():
     system_msg = json.dumps({"type": "system", "subtype": "initialized", "session_id": sid})
     api_agent_output(system_msg, stream="system", is_complete=True)
     pause(0.5)
-    api_agent_output(json.dumps({
-        "type": "assistant",
-        "message": {"id": "msg-001", "role": "assistant",
-                    "content": [{"type": "text", "text": "Session started."}]},
-    }), is_complete=True)
+    api_agent_output(
+        json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "id": "msg-001",
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "Session started."}],
+                },
+            }
+        ),
+        is_complete=True,
+    )
     pause(0.3)
 
     # API 验证
@@ -385,8 +439,9 @@ def test_a2_system_message_storage():
     shot(page, "a2_system_message")
 
     # 清理
-    requests.post(f"{BASE_URL}/api/remote/sessions/{sid}/stop",
-                  cookies={"session_token": auth_token})
+    requests.post(
+        f"{BASE_URL}/api/remote/sessions/{sid}/stop", cookies={"session_token": auth_token}
+    )
     session_id = None
     print("  ✅ A2 PASSED: System 消息正确存储")
 
@@ -404,11 +459,19 @@ def test_a3_request_count_no_double_count():
 
     api_send_chat(auth_token, "test message")
     pause(0.3)
-    api_agent_output(json.dumps({
-        "type": "assistant",
-        "message": {"id": "msg-001", "role": "assistant",
-                    "content": [{"type": "text", "text": "OK"}]},
-    }), is_complete=True)
+    api_agent_output(
+        json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "id": "msg-001",
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "OK"}],
+                },
+            }
+        ),
+        is_complete=True,
+    )
     pause(0.3)
     api_send_usage(sid=sid, tokens={"input": 500, "output": 200}, requests_count=1)
     pause(0.5)
@@ -425,8 +488,9 @@ def test_a3_request_count_no_double_count():
     shot(page, "a3_request_count")
 
     # 清理
-    requests.post(f"{BASE_URL}/api/remote/sessions/{sid}/stop",
-                  cookies={"session_token": auth_token})
+    requests.post(
+        f"{BASE_URL}/api/remote/sessions/{sid}/stop", cookies={"session_token": auth_token}
+    )
     session_id = None
     print("  ✅ A3 PASSED: request_count 不双重计数")
 
@@ -452,8 +516,9 @@ def test_a4_abort_request():
     pause(0.5)
     sess_after = api_get_session(auth_token, sid)
     log("Status", f"abort 后状态: {sess_after['status']}")
-    assert sess_after["status"] == "active", \
-        f"Session should still be active after abort, got {sess_after['status']}"
+    assert (
+        sess_after["status"] == "active"
+    ), f"Session should still be active after abort, got {sess_after['status']}"
 
     # 验证可以继续发送消息
     code, resp = api_send_chat(auth_token, "继续对话", sid=sid)
@@ -465,8 +530,9 @@ def test_a4_abort_request():
     shot(page, "a4_abort_session_active")
 
     # 清理
-    requests.post(f"{BASE_URL}/api/remote/sessions/{sid}/stop",
-                  cookies={"session_token": auth_token})
+    requests.post(
+        f"{BASE_URL}/api/remote/sessions/{sid}/stop", cookies={"session_token": auth_token}
+    )
     session_id = None
     print("  ✅ A4 PASSED: abort_request 不终止会话")
 
@@ -497,8 +563,7 @@ def test_a5_allow_permanent():
     api_agent_permission_request(control_request, sid=sid)
     pause(0.5)
 
-    ok, resp = api_permission_response(auth_token, sid, request_id,
-                                        "allow-permanent", "write_file")
+    ok, resp = api_permission_response(auth_token, sid, request_id, "allow-permanent", "write_file")
     assert ok, f"allow-permanent response failed: {resp}"
     log("Response", "allow-permanent 已发送")
 
@@ -506,8 +571,9 @@ def test_a5_allow_permanent():
     perm_cmds = [c for c in pending if c.get("command") == "permission_response"]
     assert len(perm_cmds) > 0, "No permission_response command queued"
     cmd = perm_cmds[0]
-    assert cmd["behavior"] == "allow-permanent", \
-        f"Expected behavior=allow-permanent, got {cmd.get('behavior')}"
+    assert (
+        cmd["behavior"] == "allow-permanent"
+    ), f"Expected behavior=allow-permanent, got {cmd.get('behavior')}"
     log("Verify", f"behavior={cmd['behavior']} ✓")
 
     # 截图 — 会话详情页
@@ -515,8 +581,9 @@ def test_a5_allow_permanent():
     shot(page, "a5_allow_permanent")
 
     # 清理
-    requests.post(f"{BASE_URL}/api/remote/sessions/{sid}/stop",
-                  cookies={"session_token": auth_token})
+    requests.post(
+        f"{BASE_URL}/api/remote/sessions/{sid}/stop", cookies={"session_token": auth_token}
+    )
     session_id = None
     print("  ✅ A5 PASSED: allow-permanent 正确传递")
 
@@ -544,8 +611,9 @@ def test_a6_quota_exceeded_detection():
     shot(page, "a6_quota_check")
 
     # 清理
-    requests.post(f"{BASE_URL}/api/remote/sessions/{sid}/stop",
-                  cookies={"session_token": auth_token})
+    requests.post(
+        f"{BASE_URL}/api/remote/sessions/{sid}/stop", cookies={"session_token": auth_token}
+    )
     session_id = None
     print("  ✅ A6 PASSED: 配额超限检测格式验证")
 
@@ -553,6 +621,7 @@ def test_a6_quota_exceeded_detection():
 # ══════════════════════════════════════════════════════
 #  Part B: ChatPage Browser UI Tests
 # ══════════════════════════════════════════════════════
+
 
 def test_b1_reconnect_history():
     """B1: 远程会话重连加载历史消息"""
@@ -566,16 +635,43 @@ def test_b1_reconnect_history():
     pause(0.3)
 
     outputs = [
-        (json.dumps({"type": "system", "subtype": "initialized",
-                      "session_id": sid, "model": "qwen3-coder-plus"}), False),
-        (json.dumps({"type": "assistant", "message": {
-            "id": "msg-001", "role": "assistant",
-            "content": [{"type": "text", "text": "收到第一条消息，正在处理..."}],
-        }}), False),
-        (json.dumps({"type": "assistant", "message": {
-            "id": "msg-002", "role": "assistant",
-            "content": [{"type": "text", "text": "处理完成！这是 AI 的回复。"}],
-        }}), True),
+        (
+            json.dumps(
+                {
+                    "type": "system",
+                    "subtype": "initialized",
+                    "session_id": sid,
+                    "model": "qwen3-coder-plus",
+                }
+            ),
+            False,
+        ),
+        (
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "id": "msg-001",
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "收到第一条消息，正在处理..."}],
+                    },
+                }
+            ),
+            False,
+        ),
+        (
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "id": "msg-002",
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "处理完成！这是 AI 的回复。"}],
+                    },
+                }
+            ),
+            True,
+        ),
     ]
     for data, done in outputs:
         api_agent_output(data, is_complete=done, sid=sid)
@@ -583,12 +679,13 @@ def test_b1_reconnect_history():
 
     webui_url, webui_token = _get_webui_url_and_token()
     if not _check_webui_available(webui_url):
-        log("跳过", f"WebUI 不可访问，仅验证 API")
+        log("跳过", "WebUI 不可访问，仅验证 API")
         sess = api_get_session(auth_token, sid)
         output_count = len(sess.get("output", []))
         assert output_count >= 3
-        requests.post(f"{BASE_URL}/api/remote/sessions/{sid}/stop",
-                      cookies={"session_token": auth_token})
+        requests.post(
+            f"{BASE_URL}/api/remote/sessions/{sid}/stop", cookies={"session_token": auth_token}
+        )
         session_id = None
         print("  ✅ B1 PASSED (API-only)")
         return
@@ -601,8 +698,9 @@ def test_b1_reconnect_history():
         pause(6)
     except Exception:
         log("警告", "ChatPage 未加载")
-        requests.post(f"{BASE_URL}/api/remote/sessions/{sid}/stop",
-                      cookies={"session_token": auth_token})
+        requests.post(
+            f"{BASE_URL}/api/remote/sessions/{sid}/stop", cookies={"session_token": auth_token}
+        )
         session_id = None
         return
 
@@ -625,8 +723,9 @@ def test_b1_reconnect_history():
     page.goto(f"{BASE_URL}/work", wait_until="domcontentloaded")
     pause(1)
 
-    requests.post(f"{BASE_URL}/api/remote/sessions/{sid}/stop",
-                  cookies={"session_token": auth_token})
+    requests.post(
+        f"{BASE_URL}/api/remote/sessions/{sid}/stop", cookies={"session_token": auth_token}
+    )
     session_id = None
     print("  ✅ B1 PASSED: 远程会话重连历史加载")
 
@@ -647,8 +746,9 @@ def test_b2_abort_ui():
         assert status == 200
         sess = api_get_session(auth_token, sid)
         assert sess["status"] == "active"
-        requests.post(f"{BASE_URL}/api/remote/sessions/{sid}/stop",
-                      cookies={"session_token": auth_token})
+        requests.post(
+            f"{BASE_URL}/api/remote/sessions/{sid}/stop", cookies={"session_token": auth_token}
+        )
         session_id = None
         print("  ✅ B2 PASSED (API-only)")
         return
@@ -657,12 +757,15 @@ def test_b2_abort_ui():
     _open_chatpage(page, webui_url, webui_token, permissionMode="default")
 
     abort_requests = []
+
     def on_request(request):
         if "/abort" in request.url:
             abort_requests.append(request.url)
+
     page.on("request", on_request)
 
     captured_sid = [None]
+
     def on_response(response):
         if "/api/remote/sessions" in response.url and response.request.method == "POST":
             try:
@@ -672,6 +775,7 @@ def test_b2_abort_ui():
                     captured_sid[0] = s
             except Exception:
                 pass
+
     page.on("response", on_response)
 
     try:
@@ -680,8 +784,9 @@ def test_b2_abort_ui():
     except Exception:
         log("警告", "ChatPage 未加载")
         page.goto(f"{BASE_URL}/work", wait_until="domcontentloaded")
-        requests.post(f"{BASE_URL}/api/remote/sessions/{sid}/stop",
-                      cookies={"session_token": auth_token})
+        requests.post(
+            f"{BASE_URL}/api/remote/sessions/{sid}/stop", cookies={"session_token": auth_token}
+        )
         session_id = None
         return
 
@@ -709,10 +814,13 @@ def test_b2_abort_ui():
     pause(1)
 
     if captured_sid[0]:
-        requests.post(f"{BASE_URL}/api/remote/sessions/{captured_sid[0]}/stop",
-                      cookies={"session_token": auth_token})
-    requests.post(f"{BASE_URL}/api/remote/sessions/{sid}/stop",
-                  cookies={"session_token": auth_token})
+        requests.post(
+            f"{BASE_URL}/api/remote/sessions/{captured_sid[0]}/stop",
+            cookies={"session_token": auth_token},
+        )
+    requests.post(
+        f"{BASE_URL}/api/remote/sessions/{sid}/stop", cookies={"session_token": auth_token}
+    )
     session_id = None
     print("  ✅ B2 PASSED: Abort UI 行为验证")
 
@@ -729,8 +837,9 @@ def test_b3_permission_permanent_ui():
     webui_url, webui_token = _get_webui_url_and_token()
     if not _check_webui_available(webui_url):
         log("跳过", "WebUI 不可访问")
-        requests.post(f"{BASE_URL}/api/remote/sessions/{sid}/stop",
-                      cookies={"session_token": auth_token})
+        requests.post(
+            f"{BASE_URL}/api/remote/sessions/{sid}/stop", cookies={"session_token": auth_token}
+        )
         session_id = None
         print("  ✅ B3 PASSED (API-only)")
         return
@@ -739,15 +848,18 @@ def test_b3_permission_permanent_ui():
     _open_chatpage(page, webui_url, webui_token, permissionMode="default")
 
     perm_requests = []
+
     def on_request(request):
         if "/permission" in request.url and request.method == "POST":
             try:
                 perm_requests.append(json.loads(request.post_data or "{}"))
             except Exception:
                 pass
+
     page.on("request", on_request)
 
     captured_sid = [None]
+
     def on_response(response):
         if "/api/remote/sessions" in response.url and response.request.method == "POST":
             try:
@@ -757,6 +869,7 @@ def test_b3_permission_permanent_ui():
                     captured_sid[0] = s
             except Exception:
                 pass
+
     page.on("response", on_response)
 
     try:
@@ -765,8 +878,9 @@ def test_b3_permission_permanent_ui():
     except Exception:
         log("警告", "ChatPage 未加载")
         page.goto(f"{BASE_URL}/work", wait_until="domcontentloaded")
-        requests.post(f"{BASE_URL}/api/remote/sessions/{sid}/stop",
-                      cookies={"session_token": auth_token})
+        requests.post(
+            f"{BASE_URL}/api/remote/sessions/{sid}/stop", cookies={"session_token": auth_token}
+        )
         session_id = None
         return
 
@@ -814,8 +928,9 @@ def test_b3_permission_permanent_ui():
     page.goto(f"{BASE_URL}/work", wait_until="domcontentloaded")
     pause(1)
 
-    requests.post(f"{BASE_URL}/api/remote/sessions/{sid}/stop",
-                  cookies={"session_token": auth_token})
+    requests.post(
+        f"{BASE_URL}/api/remote/sessions/{sid}/stop", cookies={"session_token": auth_token}
+    )
     session_id = None
     print("  ✅ B3 PASSED: 永久权限允许 UI")
 
@@ -837,8 +952,13 @@ def test_b6_error_i18n():
     page_zh.set_default_timeout(30000)
 
     _browser_login(page_zh)
-    _open_chatpage(page_zh, webui_url, webui_token,
-                   machineId="nonexistent-machine-id", machineName="Error%20Test")
+    _open_chatpage(
+        page_zh,
+        webui_url,
+        webui_token,
+        machineId="nonexistent-machine-id",
+        machineName="Error%20Test",
+    )
 
     try:
         page_zh.wait_for_selector("textarea, .max-w-6xl, .min-h-screen", timeout=15000)
@@ -854,8 +974,13 @@ def test_b6_error_i18n():
     page_en.set_default_timeout(30000)
 
     _browser_login(page_en)
-    _open_chatpage(page_en, webui_url, webui_token,
-                   machineId="nonexistent-machine-id", machineName="Error%20Test")
+    _open_chatpage(
+        page_en,
+        webui_url,
+        webui_token,
+        machineId="nonexistent-machine-id",
+        machineName="Error%20Test",
+    )
 
     try:
         page_en.wait_for_selector("textarea, .max-w-6xl, .min-h-screen", timeout=15000)
@@ -872,12 +997,13 @@ def test_b6_error_i18n():
 #  Main
 # ══════════════════════════════════════════════════════
 
+
 def run_tests():
     global admin_token, auth_token, machine_id, session_id
     global _browser, _context, _page
 
     print(f"\n{'='*60}")
-    print(f"  Issue #165: 远程会话管理与体验完善 E2E Test")
+    print("  Issue #165: 远程会话管理与体验完善 E2E Test")
     print(f"  BASE_URL: {BASE_URL}")
     print(f"  HEADLESS: {HEADLESS}")
     print(f"{'='*60}")
@@ -922,9 +1048,14 @@ def run_tests():
             print("  Part A: API 验证 + 管理页面截图")
             print(f"{'─'*60}")
 
-            for test_fn in [test_a1_token_detail, test_a2_system_message_storage,
-                             test_a3_request_count_no_double_count, test_a4_abort_request,
-                             test_a5_allow_permanent, test_a6_quota_exceeded_detection]:
+            for test_fn in [
+                test_a1_token_detail,
+                test_a2_system_message_storage,
+                test_a3_request_count_no_double_count,
+                test_a4_abort_request,
+                test_a5_allow_permanent,
+                test_a6_quota_exceeded_detection,
+            ]:
                 try:
                     # 确保回到 open-ace 域
                     _page.goto(f"{BASE_URL}/work", wait_until="domcontentloaded", timeout=10000)
@@ -942,8 +1073,12 @@ def run_tests():
             print("  Part B: ChatPage 浏览器 UI 测试")
             print(f"{'─'*60}")
 
-            for test_fn in [test_b1_reconnect_history, test_b2_abort_ui,
-                             test_b3_permission_permanent_ui, test_b6_error_i18n]:
+            for test_fn in [
+                test_b1_reconnect_history,
+                test_b2_abort_ui,
+                test_b3_permission_permanent_ui,
+                test_b6_error_i18n,
+            ]:
                 try:
                     _page.goto(f"{BASE_URL}/work", wait_until="domcontentloaded", timeout=10000)
                     pause(0.5)
@@ -962,7 +1097,7 @@ def run_tests():
 
     # ── 结果汇总 ──
     print(f"\n{'='*60}")
-    print(f"  Issue #165 E2E Test Results")
+    print("  Issue #165 E2E Test Results")
     print(f"{'='*60}")
     print(f"  PASSED: {len(passed)}/{len(passed) + len(failed)}")
     for name in passed:

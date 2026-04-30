@@ -9,48 +9,53 @@ Usage:
     python3 scripts/generate_schema.py
 """
 
-import os
-import sys
 import re
+import sys
 from pathlib import Path
-
 
 # Boolean field detection patterns
 BOOLEAN_FIELD_PATTERNS = [
-    r'^is_',           # is_admin, is_active, is_published, is_public, is_featured
-    r'_enabled$',      # email_enabled, push_enabled, content_filter_enabled
-    r'^allow_',        # allow_comments, allow_copy
-    r'^must_',         # must_change_password
-    r'^can_',          # can_edit, can_delete (future)
-    r'^has_',          # has_permission, has_access (future)
+    r"^is_",  # is_admin, is_active, is_published, is_public, is_featured
+    r"_enabled$",  # email_enabled, push_enabled, content_filter_enabled
+    r"^allow_",  # allow_comments, allow_copy
+    r"^must_",  # must_change_password
+    r"^can_",  # can_edit, can_delete (future)
+    r"^has_",  # has_permission, has_access (future)
 ]
 BOOLEAN_SPECIAL_WORDS = [
-    'read', 'success', 'acknowledged', 'verified', 'confirmed',
-    'approved', 'rejected', 'completed', 'active'
+    "read",
+    "success",
+    "acknowledged",
+    "verified",
+    "confirmed",
+    "approved",
+    "rejected",
+    "completed",
+    "active",
 ]
 
 # Counter field patterns (should NOT be converted to boolean)
 COUNT_FIELD_PATTERNS = [
-    r'_count$',        # view_count, use_count, message_count
-    r'_used$',         # tokens_used, requests_used
-    r'_made$',         # requests_made
-    r'_limit$',        # daily_token_limit
-    r'_quota$',        # monthly_token_quota
-    r'^total_',        # total_tokens, total_requests, total_sessions
-    r'_tokens$',       # input_tokens, output_tokens, cache_tokens
-    r'_users$',        # active_users, new_users
-    r'_seconds$',      # duration_seconds
-    r'_requests$',     # total_requests
+    r"_count$",  # view_count, use_count, message_count
+    r"_used$",  # tokens_used, requests_used
+    r"_made$",  # requests_made
+    r"_limit$",  # daily_token_limit
+    r"_quota$",  # monthly_token_quota
+    r"^total_",  # total_tokens, total_requests, total_sessions
+    r"_tokens$",  # input_tokens, output_tokens, cache_tokens
+    r"_users$",  # active_users, new_users
+    r"_seconds$",  # duration_seconds
+    r"_requests$",  # total_requests
 ]
 
 
 def is_boolean_field(column_name: str) -> bool:
     """
     Check if a column is likely a boolean field based on naming patterns.
-    
+
     Args:
         column_name: Column name to check.
-        
+
     Returns:
         bool: True if column appears to be boolean.
     """
@@ -58,16 +63,16 @@ def is_boolean_field(column_name: str) -> bool:
     for pattern in COUNT_FIELD_PATTERNS:
         if re.search(pattern, column_name):
             return False
-    
+
     # Check boolean patterns
     for pattern in BOOLEAN_FIELD_PATTERNS:
         if re.search(pattern, column_name):
             return True
-    
+
     # Check special words
     if column_name in BOOLEAN_SPECIAL_WORDS:
         return True
-    
+
     return False
 
 
@@ -79,9 +84,9 @@ def get_project_root():
 
 def clean_postgres_schema(input_sql):
     """Clean up pg_dump output for use as installation schema."""
-    lines = input_sql.split('\n')
+    lines = input_sql.split("\n")
     output_lines = []
-    
+
     # Header
     output_lines.append("-- Open-ACE Database Schema for PostgreSQL")
     output_lines.append("-- Auto-generated from pg_dump")
@@ -90,125 +95,125 @@ def clean_postgres_schema(input_sql):
     output_lines.append("-- Setup session")
     output_lines.append("SET client_encoding = 'UTF8';")
     output_lines.append("")
-    
+
     # Simple skip patterns - just check if line contains these
     skip_contains = [
-        '; Owner:',           # Comment line with Owner
-        'OWNER TO',           # ALTER TABLE/SEQUENCE xxx OWNER TO yyy
-        '\\restrict',
-        '\\unrestrict',
-        'Dumped from database',
-        'Dumped by pg_dump',
-        'set_config',         # SELECT pg_catalog.set_config('search_path', '', false)
+        "; Owner:",  # Comment line with Owner
+        "OWNER TO",  # ALTER TABLE/SEQUENCE xxx OWNER TO yyy
+        "\\restrict",
+        "\\unrestrict",
+        "Dumped from database",
+        "Dumped by pg_dump",
+        "set_config",  # SELECT pg_catalog.set_config('search_path', '', false)
     ]
-    
+
     # Lines to skip if they start with certain patterns
     skip_start_patterns = [
-        '-- Name:',
-        '-- Type:',
-        '-- Schema:',
+        "-- Name:",
+        "-- Type:",
+        "-- Schema:",
     ]
-    
+
     # Tables to include (skip alembic_version as it's managed by alembic stamp)
-    skip_tables = ['alembic_version']
-    
+    skip_tables = ["alembic_version"]
+
     current_table = None
     i = 0
-    
+
     while i < len(lines):
         line = lines[i]
-        
+
         # Skip lines containing certain strings
         skip = False
         for pattern in skip_contains:
             if pattern in line:
                 skip = True
                 break
-        
+
         # Skip lines starting with certain patterns
         if not skip:
             for pattern in skip_start_patterns:
                 if line.strip().startswith(pattern):
                     skip = True
                     break
-        
+
         if skip:
             i += 1
             continue
-        
+
         # Detect table name
-        table_match = re.search(r'CREATE TABLE(?: IF NOT EXISTS)? (?:public\.)?(\w+)', line)
+        table_match = re.search(r"CREATE TABLE(?: IF NOT EXISTS)? (?:public\.)?(\w+)", line)
         if table_match:
             current_table = table_match.group(1)
             if current_table in skip_tables:
                 # Skip this entire table definition
-                while i < len(lines) and not lines[i].rstrip().endswith(';'):
+                while i < len(lines) and not lines[i].rstrip().endswith(";"):
                     i += 1
                 i += 1
                 current_table = None
                 continue
-        
+
         # Clean public. prefix
-        line = line.replace('public.', '')
-        
+        line = line.replace("public.", "")
+
         # Handle CREATE SEQUENCE - keep for PostgreSQL
-        if re.match(r'CREATE SEQUENCE', line):
+        if re.match(r"CREATE SEQUENCE", line):
             output_lines.append(line)
             i += 1
-            while i < len(lines) and not lines[i].rstrip().endswith(';'):
+            while i < len(lines) and not lines[i].rstrip().endswith(";"):
                 # Skip OWNER statements
-                if not re.search(r'ALTER SEQUENCE.*OWNER', lines[i]):
-                    output_lines.append(lines[i].replace('public.', ''))
+                if not re.search(r"ALTER SEQUENCE.*OWNER", lines[i]):
+                    output_lines.append(lines[i].replace("public.", ""))
                 i += 1
             if i < len(lines):
-                output_lines.append(lines[i].replace('public.', ''))
+                output_lines.append(lines[i].replace("public.", ""))
             output_lines.append("")
             i += 1
             continue
-        
+
         # Handle CREATE TABLE
-        if re.match(r'CREATE TABLE', line):
-            output_lines.append(line.replace('public.', ''))
+        if re.match(r"CREATE TABLE", line):
+            output_lines.append(line.replace("public.", ""))
             i += 1
-            while i < len(lines) and not lines[i].rstrip().endswith(';'):
-                col_line = lines[i].replace('public.', '')
-                if not re.search(r'ALTER TABLE.*OWNER', col_line):
+            while i < len(lines) and not lines[i].rstrip().endswith(";"):
+                col_line = lines[i].replace("public.", "")
+                if not re.search(r"ALTER TABLE.*OWNER", col_line):
                     # Convert integer DEFAULT 0/1 to boolean for boolean fields
                     # Match pattern: column_name integer DEFAULT 0, or column_name integer DEFAULT 1,
-                    col_match = re.match(r'^\s+(\w+)\s+integer\s+DEFAULT\s+(0|1)', col_line)
+                    col_match = re.match(r"^\s+(\w+)\s+integer\s+DEFAULT\s+(0|1)", col_line)
                     if col_match:
                         col_name = col_match.group(1)
                         default_val = col_match.group(2)
                         if is_boolean_field(col_name):
                             # Convert to boolean
-                            bool_default = 'false' if default_val == '0' else 'true'
+                            bool_default = "false" if default_val == "0" else "true"
                             col_line = re.sub(
-                                r'integer\s+DEFAULT\s+[01]',
-                                f'boolean DEFAULT {bool_default}',
-                                col_line
+                                r"integer\s+DEFAULT\s+[01]",
+                                f"boolean DEFAULT {bool_default}",
+                                col_line,
                             )
                     output_lines.append(col_line)
                 i += 1
             if i < len(lines):
-                output_lines.append(lines[i].replace('public.', ''))
+                output_lines.append(lines[i].replace("public.", ""))
             output_lines.append("")
             i += 1
             continue
-        
+
         # Handle ALTER TABLE statements
-        if re.match(r'ALTER TABLE', line):
+        if re.match(r"ALTER TABLE", line):
             # Check if target table is in skip_tables
-            table_match = re.search(r'ALTER TABLE(?:\s+ONLY)?(?:\s+(?:public\.)?)?(\w+)', line)
+            table_match = re.search(r"ALTER TABLE(?:\s+ONLY)?(?:\s+(?:public\.)?)?(\w+)", line)
             if table_match and table_match.group(1) in skip_tables:
-                while i < len(lines) and not lines[i].rstrip().endswith(';'):
+                while i < len(lines) and not lines[i].rstrip().endswith(";"):
                     i += 1
                 i += 1
                 continue
-            
+
             # Check if this line is ALTER TABLE SET DEFAULT (single-line format)
             # e.g., ALTER TABLE ONLY public.users ALTER COLUMN id SET DEFAULT nextval(...)
-            if re.search(r'ALTER COLUMN.*SET DEFAULT', line):
-                output_lines.append(line.replace('public.', ''))
+            if re.search(r"ALTER COLUMN.*SET DEFAULT", line):
+                output_lines.append(line.replace("public.", ""))
                 output_lines.append("")
                 i += 1
                 continue
@@ -218,205 +223,208 @@ def clean_postgres_schema(input_sql):
             # ALTER TABLE ONLY public.users
             #     ADD CONSTRAINT users_pkey PRIMARY KEY (id);
             lookahead = i + 1
-            while lookahead < len(lines) and lines[lookahead].strip().startswith('--'):
+            while lookahead < len(lines) and lines[lookahead].strip().startswith("--"):
                 lookahead += 1
             if lookahead < len(lines):
                 next_line = lines[lookahead]
-                if re.search(r'ADD (PRIMARY KEY|FOREIGN KEY|CONSTRAINT)', next_line):
-                    output_lines.append(line.replace('public.', ''))
+                if re.search(r"ADD (PRIMARY KEY|FOREIGN KEY|CONSTRAINT)", next_line):
+                    output_lines.append(line.replace("public.", ""))
                     i += 1
-                    while i < len(lines) and not lines[i].rstrip().endswith(';'):
-                        if not re.search(r'OWNER', lines[i]):
-                            output_lines.append(lines[i].replace('public.', ''))
+                    while i < len(lines) and not lines[i].rstrip().endswith(";"):
+                        if not re.search(r"OWNER", lines[i]):
+                            output_lines.append(lines[i].replace("public.", ""))
                         i += 1
                     if i < len(lines):
-                        output_lines.append(lines[i].replace('public.', ''))
+                        output_lines.append(lines[i].replace("public.", ""))
                     output_lines.append("")
-                elif re.search(r'ALTER COLUMN.*SET DEFAULT', next_line):
+                elif re.search(r"ALTER COLUMN.*SET DEFAULT", next_line):
                     # Keep ALTER TABLE SET DEFAULT for id columns (sequence defaults)
-                    output_lines.append(line.replace('public.', ''))
+                    output_lines.append(line.replace("public.", ""))
                     i += 1
-                    while i < len(lines) and not lines[i].rstrip().endswith(';'):
-                        if not re.search(r'OWNER', lines[i]):
-                            output_lines.append(lines[i].replace('public.', ''))
+                    while i < len(lines) and not lines[i].rstrip().endswith(";"):
+                        if not re.search(r"OWNER", lines[i]):
+                            output_lines.append(lines[i].replace("public.", ""))
                         i += 1
                     if i < len(lines):
-                        output_lines.append(lines[i].replace('public.', ''))
+                        output_lines.append(lines[i].replace("public.", ""))
                     output_lines.append("")
                 else:
                     # Skip other ALTER TABLE
-                    while i < len(lines) and not lines[i].rstrip().endswith(';'):
+                    while i < len(lines) and not lines[i].rstrip().endswith(";"):
                         i += 1
             i += 1
             continue
-        
+
         # Handle CREATE INDEX
-        if re.match(r'CREATE(?: UNIQUE)? INDEX', line):
-            output_lines.append(line.replace('public.', ''))
+        if re.match(r"CREATE(?: UNIQUE)? INDEX", line):
+            output_lines.append(line.replace("public.", ""))
             i += 1
-            while i < len(lines) and not lines[i].rstrip().endswith(';'):
+            while i < len(lines) and not lines[i].rstrip().endswith(";"):
                 # Skip comment lines with Owner
-                if re.search(r'; Owner:', lines[i]):
+                if re.search(r"; Owner:", lines[i]):
                     i += 1
                     continue
-                output_lines.append(lines[i].replace('public.', ''))
+                output_lines.append(lines[i].replace("public.", ""))
                 i += 1
             if i < len(lines):
-                output_lines.append(lines[i].replace('public.', ''))
+                output_lines.append(lines[i].replace("public.", ""))
             output_lines.append("")
             i += 1
             continue
-        
+
         # Handle CREATE MATERIALIZED VIEW
-        if re.match(r'CREATE MATERIALIZED VIEW', line):
-            output_lines.append(line.replace('public.', ''))
+        if re.match(r"CREATE MATERIALIZED VIEW", line):
+            output_lines.append(line.replace("public.", ""))
             i += 1
-            while i < len(lines) and not lines[i].rstrip().endswith(';'):
-                output_lines.append(lines[i].replace('public.', ''))
+            while i < len(lines) and not lines[i].rstrip().endswith(";"):
+                output_lines.append(lines[i].replace("public.", ""))
                 i += 1
             if i < len(lines):
-                output_lines.append(lines[i].replace('public.', ''))
+                output_lines.append(lines[i].replace("public.", ""))
             output_lines.append("")
             i += 1
             continue
-        
+
         # Handle CREATE FUNCTION/TRIGGER (skip for simplicity)
-        if re.match(r'CREATE (FUNCTION|TRIGGER|PROCEDURE)', line):
-            while i < len(lines) and not lines[i].rstrip().endswith('$$;'):
+        if re.match(r"CREATE (FUNCTION|TRIGGER|PROCEDURE)", line):
+            while i < len(lines) and not lines[i].rstrip().endswith("$$;"):
                 i += 1
             i += 1
             continue
-        
+
         # Pass through other content
-        if line.strip() and not line.startswith('--'):
+        if line.strip() and not line.startswith("--"):
             output_lines.append(line)
-        
+
         i += 1
-    
-    return '\n'.join(output_lines)
+
+    return "\n".join(output_lines)
 
 
 def convert_to_sqlite(postgres_sql):
     """Convert PostgreSQL schema to SQLite-compatible format."""
-    lines = postgres_sql.split('\n')
+    lines = postgres_sql.split("\n")
     output_lines = []
-    
+
     # Header
     output_lines.append("-- Open-ACE Database Schema for SQLite")
     output_lines.append("-- Auto-generated from PostgreSQL schema")
     output_lines.append("-- DO NOT EDIT MANUALLY")
     output_lines.append("")
-    
+
     # SQLite doesn't support: SEQUENCE, MATERIALIZED VIEW, partial indexes with WHERE,
     # INCLUDE clause, FOREIGN KEY in ALTER TABLE, ::type casting
-    
+
     i = 0
     while i < len(lines):
         line = lines[i]
-        
+
         # Skip PostgreSQL-specific setup
-        if re.match(r'SET', line):
+        if re.match(r"SET", line):
             i += 1
             continue
-        
+
         # Skip CREATE SEQUENCE (SQLite uses AUTOINCREMENT)
-        if re.match(r'CREATE SEQUENCE', line):
-            while i < len(lines) and not lines[i].rstrip().endswith(';'):
+        if re.match(r"CREATE SEQUENCE", line):
+            while i < len(lines) and not lines[i].rstrip().endswith(";"):
                 i += 1
             i += 1
             continue
-        
+
         # Skip CREATE MATERIALIZED VIEW
-        if re.match(r'CREATE MATERIALIZED VIEW', line):
-            while i < len(lines) and not lines[i].rstrip().endswith(';'):
+        if re.match(r"CREATE MATERIALIZED VIEW", line):
+            while i < len(lines) and not lines[i].rstrip().endswith(";"):
                 i += 1
             i += 1
             continue
-        
+
         # Handle CREATE TABLE
-        if re.match(r'CREATE TABLE', line):
+        if re.match(r"CREATE TABLE", line):
             table_lines = [line]
             i += 1
-            
+
             # Collect full table definition
-            while i < len(lines) and not lines[i].rstrip().endswith(';'):
+            while i < len(lines) and not lines[i].rstrip().endswith(";"):
                 col_line = lines[i]
-                
+
                 # Remove ::type casting
-                col_line = re.sub(r"::[a-z_]+(\([^)]*\))?", '', col_line)
-                
+                col_line = re.sub(r"::[a-z_]+(\([^)]*\))?", "", col_line)
+
                 # Convert types
-                col_line = re.sub(r'character varying\([^)]*\)', 'TEXT', col_line)
-                col_line = re.sub(r'timestamp without time zone', 'TIMESTAMP', col_line)
-                col_line = re.sub(r'timestamp with time zone', 'TIMESTAMP', col_line)
-                col_line = re.sub(r'boolean', 'INTEGER', col_line)
-                col_line = re.sub(r'double precision', 'REAL', col_line)
-                col_line = re.sub(r'bigint', 'INTEGER', col_line)
-                col_line = re.sub(r'smallint', 'INTEGER', col_line)
-                col_line = re.sub(r'numeric\([^)]*\)', 'REAL', col_line)
-                col_line = re.sub(r'decimal\([^)]*\)', 'REAL', col_line)
-                
+                col_line = re.sub(r"character varying\([^)]*\)", "TEXT", col_line)
+                col_line = re.sub(r"timestamp without time zone", "TIMESTAMP", col_line)
+                col_line = re.sub(r"timestamp with time zone", "TIMESTAMP", col_line)
+                col_line = re.sub(r"boolean", "INTEGER", col_line)
+                col_line = re.sub(r"double precision", "REAL", col_line)
+                col_line = re.sub(r"bigint", "INTEGER", col_line)
+                col_line = re.sub(r"smallint", "INTEGER", col_line)
+                col_line = re.sub(r"numeric\([^)]*\)", "REAL", col_line)
+                col_line = re.sub(r"decimal\([^)]*\)", "REAL", col_line)
+
                 # Handle SERIAL -> INTEGER PRIMARY KEY AUTOINCREMENT
-                if re.search(r'integer\s+NOT\s+NULL\s+DEFAULT\s+nextval', col_line):
+                if re.search(r"integer\s+NOT\s+NULL\s+DEFAULT\s+nextval", col_line):
                     col_line = re.sub(
-                        r'integer\s+NOT\s+NULL\s+DEFAULT\s+nextval\([^)]+\)',
-                        'INTEGER PRIMARY KEY AUTOINCREMENT',
-                        col_line
+                        r"integer\s+NOT\s+NULL\s+DEFAULT\s+nextval\([^)]+\)",
+                        "INTEGER PRIMARY KEY AUTOINCREMENT",
+                        col_line,
                     )
                     # Remove the id column line if it's redundant
-                    if 'id' in col_line and 'PRIMARY KEY' in col_line:
-                        col_line = col_line.replace('NOT NULL', '')
-                
+                    if "id" in col_line and "PRIMARY KEY" in col_line:
+                        col_line = col_line.replace("NOT NULL", "")
+
                 # Handle DEFAULT with nextval (sequence) - remove it
-                if 'nextval' in col_line:
-                    col_line = re.sub(r'DEFAULT\s+nextval\([^)]+\)', '', col_line)
-                
+                if "nextval" in col_line:
+                    col_line = re.sub(r"DEFAULT\s+nextval\([^)]+\)", "", col_line)
+
                 # Clean up double spaces
-                col_line = re.sub(r'  +', ' ', col_line)
-                
+                col_line = re.sub(r"  +", " ", col_line)
+
                 table_lines.append(col_line)
                 i += 1
-            
+
             # Closing semicolon
             if i < len(lines):
                 closing = lines[i]
-                closing = re.sub(r'::[a-z_]+', '', closing)
+                closing = re.sub(r"::[a-z_]+", "", closing)
                 table_lines.append(closing)
-            
+
             # Process table to handle PRIMARY KEY and AUTOINCREMENT
             # Find the id column and make it PRIMARY KEY AUTOINCREMENT
             processed = []
             has_pk = False
             for tl in table_lines:
-                if re.search(r'id\s+integer', tl) and not has_pk:
+                if re.search(r"id\s+integer", tl) and not has_pk:
                     # Make id column PRIMARY KEY AUTOINCREMENT
-                    tl = re.sub(r'id\s+integer(?:\s+NOT\s+NULL)?(?:\s+DEFAULT\s+nextval[^,]*)?', 
-                               'id INTEGER PRIMARY KEY AUTOINCREMENT', tl)
+                    tl = re.sub(
+                        r"id\s+integer(?:\s+NOT\s+NULL)?(?:\s+DEFAULT\s+nextval[^,]*)?",
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT",
+                        tl,
+                    )
                     has_pk = True
                 processed.append(tl)
-            
+
             output_lines.extend(processed)
             output_lines.append("")
             i += 1
             continue
-        
+
         # Handle CREATE INDEX
-        if re.match(r'CREATE(?: UNIQUE)? INDEX', line):
+        if re.match(r"CREATE(?: UNIQUE)? INDEX", line):
             idx_line = line
-            
+
             # Remove PostgreSQL-specific: USING btree, INCLUDE, WHERE
-            idx_line = re.sub(r' USING [a-z]+', '', idx_line)
-            idx_line = re.sub(r' INCLUDE \([^)]+\)', '', idx_line)
-            
+            idx_line = re.sub(r" USING [a-z]+", "", idx_line)
+            idx_line = re.sub(r" INCLUDE \([^)]+\)", "", idx_line)
+
             # Keep partial index WHERE clause but warn (SQLite supports it)
             # Actually SQLite supports WHERE in indexes
-            
+
             output_lines.append(idx_line)
             i += 1
-            while i < len(lines) and not lines[i].rstrip().endswith(';'):
+            while i < len(lines) and not lines[i].rstrip().endswith(";"):
                 idx_cont = lines[i]
-                idx_cont = re.sub(r' USING [a-z]+', '', idx_cont)
-                idx_cont = re.sub(r' INCLUDE \([^)]+\)', '', idx_cont)
+                idx_cont = re.sub(r" USING [a-z]+", "", idx_cont)
+                idx_cont = re.sub(r" INCLUDE \([^)]+\)", "", idx_cont)
                 output_lines.append(idx_cont)
                 i += 1
             if i < len(lines):
@@ -424,17 +432,17 @@ def convert_to_sqlite(postgres_sql):
             output_lines.append("")
             i += 1
             continue
-        
+
         # Skip ALTER TABLE ADD FOREIGN KEY (SQLite needs it in CREATE TABLE)
-        if re.match(r'ALTER TABLE', line):
-            if 'FOREIGN KEY' in line:
-                while i < len(lines) and not lines[i].rstrip().endswith(';'):
+        if re.match(r"ALTER TABLE", line):
+            if "FOREIGN KEY" in line:
+                while i < len(lines) and not lines[i].rstrip().endswith(";"):
                     i += 1
                 i += 1
                 continue
-            elif 'PRIMARY KEY' in line:
+            elif "PRIMARY KEY" in line:
                 # Skip ALTER TABLE ADD PRIMARY KEY (handled in CREATE TABLE)
-                while i < len(lines) and not lines[i].rstrip().endswith(';'):
+                while i < len(lines) and not lines[i].rstrip().endswith(";"):
                     i += 1
                 i += 1
                 continue
@@ -442,7 +450,7 @@ def convert_to_sqlite(postgres_sql):
                 # Keep other ALTER TABLE (ADD CONSTRAINT UNIQUE)
                 output_lines.append(line)
                 i += 1
-                while i < len(lines) and not lines[i].rstrip().endswith(';'):
+                while i < len(lines) and not lines[i].rstrip().endswith(";"):
                     output_lines.append(lines[i])
                     i += 1
                 if i < len(lines):
@@ -450,20 +458,15 @@ def convert_to_sqlite(postgres_sql):
                 output_lines.append("")
                 i += 1
                 continue
-        
+
         # Pass through comments and empty lines
         output_lines.append(line)
         i += 1
-    
+
     # Remove alembic_version table (managed by alembic stamp)
-    result = '\n'.join(output_lines)
-    result = re.sub(
-        r'CREATE TABLE alembic_version[^;]+;',
-        '',
-        result,
-        flags=re.DOTALL
-    )
-    
+    result = "\n".join(output_lines)
+    result = re.sub(r"CREATE TABLE alembic_version[^;]+;", "", result, flags=re.DOTALL)
+
     return result
 
 
@@ -471,18 +474,18 @@ def main():
     """Main function."""
     project_root = get_project_root()
     schema_dir = project_root / "schema"
-    
+
     # Run pg_dump to get the schema
     print("Running pg_dump...")
     import subprocess
     from urllib.parse import urlparse
-    
+
     # Get database URL from config
     sys.path.insert(0, str(project_root / "scripts"))
     from shared import config
-    
+
     db_url = config.get_database_url()
-    
+
     # Parse database URL to get database name
     # Format: postgresql://user:pass@host:port/dbname or sqlite:///path/to/db
     if db_url.startswith("postgresql://"):
@@ -494,34 +497,36 @@ def main():
     else:
         print("Error: generate_schema.py only supports PostgreSQL databases")
         return 1
-    
-    result = subprocess.run(['pg_dump', '-d', db_name, '--schema-only'], capture_output=True, text=True)
+
+    result = subprocess.run(
+        ["pg_dump", "-d", db_name, "--schema-only"], capture_output=True, text=True
+    )
     if result.returncode != 0:
         print(f"Error: pg_dump failed: {result.stderr}")
         return 1
     raw_sql = result.stdout
-    
+
     print("Cleaning PostgreSQL schema...")
     clean_sql = clean_postgres_schema(raw_sql)
-    
+
     # Save cleaned PostgreSQL schema
     pg_file = schema_dir / "schema-postgres.sql"
     pg_file.write_text(clean_sql)
     print(f"  Saved: {pg_file}")
-    
+
     print("Converting to SQLite schema...")
     sqlite_sql = convert_to_sqlite(clean_sql)
-    
+
     # Save SQLite schema
     sqlite_file = schema_dir / "schema-sqlite.sql"
     sqlite_file.write_text(sqlite_sql)
     print(f"  Saved: {sqlite_file}")
-    
+
     # Stats
     print("\nStats:")
     print(f"  PostgreSQL: {len(clean_sql.splitlines())} lines")
     print(f"  SQLite: {len(sqlite_sql.splitlines())} lines")
-    
+
     print("\nDone!")
     return 0
 

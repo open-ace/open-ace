@@ -9,11 +9,12 @@ Test script for issue #70: Workspace restore error - 404 Not Found
 4. 如果没有，说明没有保存的工作区状态，测试跳过
 """
 
-import sys
-import os
 import json
-from playwright.sync_api import sync_playwright, expect, TimeoutError
+import os
+import sys
 import time
+
+from playwright.sync_api import TimeoutError, sync_playwright
 
 # Add project root to path
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -73,17 +74,17 @@ def test_workspace_restore():
             if "open-ace-store" in storage_data:
                 store_data = json.loads(storage_data["open-ace-store"])
                 tabs = store_data.get("state", {}).get("workspaceTabs", [])
-                
+
                 if tabs and len(tabs) > 0:
                     has_workspace_state = True
                     print(f"\n    === 发现 {len(tabs)} 个保存的 Workspace Tabs ===")
                     for i, tab in enumerate(tabs):
                         tab_info = {
-                            "id": tab.get('id', 'N/A')[:20],
-                            "sessionId": tab.get('sessionId', 'N/A'),
-                            "encodedProjectName": tab.get('encodedProjectName', 'N/A'),
-                            "toolName": tab.get('toolName', 'N/A'),
-                            "title": tab.get('title', 'N/A')
+                            "id": tab.get("id", "N/A")[:20],
+                            "sessionId": tab.get("sessionId", "N/A"),
+                            "encodedProjectName": tab.get("encodedProjectName", "N/A"),
+                            "toolName": tab.get("toolName", "N/A"),
+                            "title": tab.get("title", "N/A"),
                         }
                         tabs_info.append(tab_info)
                         print(f"\n    Tab {i+1}:")
@@ -133,17 +134,17 @@ def test_workspace_restore():
 
                     # 检查 iframe 中的错误
                     try:
-                        error_locator = frame.locator("text=/Error Loading|Failed to load|404|Not Found/i")
+                        error_locator = frame.locator(
+                            "text=/Error Loading|Failed to load|404|Not Found/i"
+                        )
                         if error_locator.count() > 0:
                             error_text = error_locator.first.text_content(timeout=2000)
                             print(f"      ✗ 发现错误: {error_text}")
-                            iframe_errors.append({
-                                "frame": i,
-                                "url": frame_url,
-                                "error": error_text
-                            })
+                            iframe_errors.append(
+                                {"frame": i, "url": frame_url, "error": error_text}
+                            )
                         else:
-                            print(f"      ✓ 无错误")
+                            print("      ✓ 无错误")
                     except Exception as e:
                         print(f"      检查错误时出错: {e}")
 
@@ -157,7 +158,7 @@ def test_workspace_restore():
                 for err in iframe_errors:
                     print(f"      - Frame {err['frame']}: {err['error']}")
             else:
-                print(f"\n    ✓ 所有 iframe 正常加载")
+                print("\n    ✓ 所有 iframe 正常加载")
 
             # Step 6: Check workspace tabs UI
             print("\n[6] 检查工作区 tabs UI...")
@@ -183,7 +184,7 @@ def test_workspace_restore():
             if load_time > 10:
                 print(f"    ⚠️  加载时间过长 ({load_time:.2f}s > 10s)")
             else:
-                print(f"    ✓ 加载时间正常")
+                print("    ✓ 加载时间正常")
 
             # Step 8: Take final screenshot
             page.wait_for_timeout(2000)
@@ -191,7 +192,7 @@ def test_workspace_restore():
             screenshots.append("03_final.png")
 
             print("\n=== 测试完成 ===")
-            
+
             # 等待用户查看
             if not HEADLESS:
                 print("\n浏览器保持打开，按 Enter 关闭...")
@@ -205,6 +206,7 @@ def test_workspace_restore():
         except Exception as e:
             print(f"\n    ✗ 测试错误：{e}")
             import traceback
+
             traceback.print_exc()
             test_results.append(("测试执行", False))
             page.screenshot(path=f"{OUTPUT_DIR}/error_exception.png")

@@ -331,8 +331,8 @@ class UsageRepository:
             List[str]: List of tool names.
         """
         query = """
-            SELECT DISTINCT tool_name 
-            FROM daily_messages 
+            SELECT DISTINCT tool_name
+            FROM daily_messages
             ORDER BY tool_name
         """
 
@@ -347,8 +347,8 @@ class UsageRepository:
             List[str]: List of host names.
         """
         query = """
-            SELECT DISTINCT host_name 
-            FROM daily_messages 
+            SELECT DISTINCT host_name
+            FROM daily_messages
             ORDER BY host_name
         """
 
@@ -522,15 +522,17 @@ class UsageRepository:
         for row in rows:
             # Convert date to YYYY-MM-DD format if it's a datetime object
             date_val = row["date"]
-            if hasattr(date_val, 'strftime'):
+            if hasattr(date_val, "strftime"):
                 date_str = date_val.strftime("%Y-%m-%d")
             else:
                 # Parse HTTP date format if needed
-                date_str = str(date_val).split()[0] if ' ' in str(date_val) else str(date_val)
-            results.append({
-                "date": date_str,
-                "requests": int(row["requests"] or 0),
-            })
+                date_str = str(date_val).split()[0] if " " in str(date_val) else str(date_val)
+            results.append(
+                {
+                    "date": date_str,
+                    "requests": int(row["requests"] or 0),
+                }
+            )
 
         return results
 
@@ -572,16 +574,18 @@ class UsageRepository:
         for row in rows:
             # Convert date to YYYY-MM-DD format if it's a datetime object
             date_val = row["date"]
-            if hasattr(date_val, 'strftime'):
+            if hasattr(date_val, "strftime"):
                 date_str = date_val.strftime("%Y-%m-%d")
             else:
                 # Parse HTTP date format if needed
-                date_str = str(date_val).split()[0] if ' ' in str(date_val) else str(date_val)
-            results.append({
-                "date": date_str,
-                "tool": row["tool_name"],
-                "requests": int(row["requests"] or 0),
-            })
+                date_str = str(date_val).split()[0] if " " in str(date_val) else str(date_val)
+            results.append(
+                {
+                    "date": date_str,
+                    "tool": row["tool_name"],
+                    "requests": int(row["requests"] or 0),
+                }
+            )
 
         return results
 
@@ -636,8 +640,10 @@ class UsageRepository:
         }
 
     def get_request_stats_by_user(
-        self, date: Optional[str] = None, host_name: Optional[str] = None,
-        user_name: Optional[str] = None
+        self,
+        date: Optional[str] = None,
+        host_name: Optional[str] = None,
+        user_name: Optional[str] = None,
     ) -> List[Dict]:
         """
         Get request statistics grouped by user (sender_name).
@@ -686,21 +692,19 @@ class UsageRepository:
         results = []
         for row in rows:
             sender_name = row["sender_name"] or "unknown"
-            results.append({
-                "user": sender_name,
-                "tool": row["tool_name"],
-                "requests": int(row["requests"] or 0),
-                "tokens": int(row["tokens"] or 0),
-            })
+            results.append(
+                {
+                    "user": sender_name,
+                    "tool": row["tool_name"],
+                    "requests": int(row["requests"] or 0),
+                    "tokens": int(row["tokens"] or 0),
+                }
+            )
 
         return results
 
     def get_user_request_trend(
-        self,
-        user_name: str,
-        start_date: str,
-        end_date: str,
-        host_name: Optional[str] = None
+        self, user_name: str, start_date: str, end_date: str, host_name: Optional[str] = None
     ) -> List[Dict]:
         """
         Get request trend for a specific user.
@@ -719,8 +723,7 @@ class UsageRepository:
         """
         # First, try to get user_id from username
         user = self.db.fetch_one(
-            "SELECT id FROM users WHERE username = ? OR system_account = ?",
-            (user_name, user_name)
+            "SELECT id FROM users WHERE username = ? OR system_account = ?", (user_name, user_name)
         )
 
         if user:
@@ -734,22 +737,24 @@ class UsageRepository:
                     WHERE user_id = ? AND date >= ? AND date <= ?
                     ORDER BY date ASC
                     """,
-                    (user_id, start_date, end_date)
+                    (user_id, start_date, end_date),
                 )
 
                 if rows:
                     results = []
                     for row in rows:
                         date_val = row["date"]
-                        if hasattr(date_val, 'strftime'):
+                        if hasattr(date_val, "strftime"):
                             date_str = date_val.strftime("%Y-%m-%d")
                         else:
                             date_str = str(date_val)
-                        results.append({
-                            "date": date_str,
-                            "requests": int(row["requests"] or 0),
-                            "tokens": int(row["tokens"] or 0),
-                        })
+                        results.append(
+                            {
+                                "date": date_str,
+                                "requests": int(row["requests"] or 0),
+                                "tokens": int(row["tokens"] or 0),
+                            }
+                        )
                     return results
 
             except Exception:
@@ -783,16 +788,18 @@ class UsageRepository:
         for row in rows:
             # Convert date to YYYY-MM-DD format if it's a datetime object
             date_val = row["date"]
-            if hasattr(date_val, 'strftime'):
+            if hasattr(date_val, "strftime"):
                 date_str = date_val.strftime("%Y-%m-%d")
             else:
                 # Parse HTTP date format if needed
-                date_str = str(date_val).split()[0] if ' ' in str(date_val) else str(date_val)
-            results.append({
-                "date": date_str,
-                "requests": int(row["requests"] or 0),
-                "tokens": int(row["tokens"] or 0),
-            })
+                date_str = str(date_val).split()[0] if " " in str(date_val) else str(date_val)
+            results.append(
+                {
+                    "date": date_str,
+                    "requests": int(row["requests"] or 0),
+                    "tokens": int(row["tokens"] or 0),
+                }
+            )
 
         return results
 
@@ -824,24 +831,26 @@ class UsageRepository:
                 WHERE user_id = ? AND date >= ? AND date <= ?
                 ORDER BY date ASC
                 """,
-                (user_id, start_date, end_date)
+                (user_id, start_date, end_date),
             )
 
             results = []
             for row in rows:
                 date_val = row["date"]
-                if hasattr(date_val, 'strftime'):
+                if hasattr(date_val, "strftime"):
                     date_str = date_val.strftime("%Y-%m-%d")
                 else:
                     date_str = str(date_val)
-                results.append({
-                    "date": date_str,
-                    "requests": int(row["requests"] or 0),
-                    "tokens": int(row["tokens"] or 0),
-                    "input_tokens": int(row.get("input_tokens", 0) or 0),
-                    "output_tokens": int(row.get("output_tokens", 0) or 0),
-                    "cache_tokens": int(row.get("cache_tokens", 0) or 0),
-                })
+                results.append(
+                    {
+                        "date": date_str,
+                        "requests": int(row["requests"] or 0),
+                        "tokens": int(row["tokens"] or 0),
+                        "input_tokens": int(row.get("input_tokens", 0) or 0),
+                        "output_tokens": int(row.get("output_tokens", 0) or 0),
+                        "cache_tokens": int(row.get("cache_tokens", 0) or 0),
+                    }
+                )
             return results
 
         except Exception:
@@ -849,8 +858,11 @@ class UsageRepository:
             return []
 
     def get_monthly_request_stats_by_user(
-        self, year: int, month: int, host_name: Optional[str] = None,
-        user_name: Optional[str] = None
+        self,
+        year: int,
+        month: int,
+        host_name: Optional[str] = None,
+        user_name: Optional[str] = None,
     ) -> List[Dict]:
         """
         Get monthly request statistics grouped by user.
@@ -899,11 +911,13 @@ class UsageRepository:
         results = []
         for row in rows:
             sender_name = row["sender_name"] or "unknown"
-            results.append({
-                "user": sender_name,
-                "requests": int(row["requests"] or 0),
-                "tokens": int(row["tokens"] or 0),
-            })
+            results.append(
+                {
+                    "user": sender_name,
+                    "requests": int(row["requests"] or 0),
+                    "tokens": int(row["tokens"] or 0),
+                }
+            )
 
         return results
 
@@ -1035,23 +1049,27 @@ class UsageRepository:
 
         results = []
         for row in local_rows:
-            results.append({
-                "date": str(row["date"]),
-                "tool_name": row["tool_name"] or "unknown",
-                "tokens_used": int(row["tokens_used"] or 0),
-                "input_tokens": int(row["input_tokens"] or 0),
-                "output_tokens": int(row["output_tokens"] or 0),
-                "request_count": int(row["request_count"] or 0),
-            })
+            results.append(
+                {
+                    "date": str(row["date"]),
+                    "tool_name": row["tool_name"] or "unknown",
+                    "tokens_used": int(row["tokens_used"] or 0),
+                    "input_tokens": int(row["input_tokens"] or 0),
+                    "output_tokens": int(row["output_tokens"] or 0),
+                    "request_count": int(row["request_count"] or 0),
+                }
+            )
         for row in remote_rows:
-            results.append({
-                "date": str(row["date"]),
-                "tool_name": row["tool_name"],
-                "tokens_used": int(row["tokens_used"] or 0),
-                "input_tokens": int(row["input_tokens"] or 0),
-                "output_tokens": int(row["output_tokens"] or 0),
-                "request_count": int(row["request_count"] or 0),
-            })
+            results.append(
+                {
+                    "date": str(row["date"]),
+                    "tool_name": row["tool_name"],
+                    "tokens_used": int(row["tokens_used"] or 0),
+                    "input_tokens": int(row["input_tokens"] or 0),
+                    "output_tokens": int(row["output_tokens"] or 0),
+                    "request_count": int(row["request_count"] or 0),
+                }
+            )
 
         results.sort(key=lambda x: x["date"], reverse=True)
         return results

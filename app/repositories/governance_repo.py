@@ -13,7 +13,7 @@ import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from app.repositories.database import Database, CONFIG_DIR
+from app.repositories.database import CONFIG_DIR, Database
 
 logger = logging.getLogger(__name__)
 
@@ -282,7 +282,7 @@ class GovernanceRepository:
         try:
             self._ensure_config_dir()
             if os.path.exists(SETTINGS_FILE):
-                with open(SETTINGS_FILE, "r") as f:
+                with open(SETTINGS_FILE) as f:
                     saved_settings = json.load(f)
                     default_settings.update(saved_settings)
         except Exception as e:
@@ -317,15 +317,13 @@ class GovernanceRepository:
                         str_value = str(value)
 
                     cursor.execute(
-                        adapt_sql(
-                            """
+                        adapt_sql("""
                         INSERT INTO security_settings (setting_key, setting_value, updated_at)
                         VALUES (?, ?, CURRENT_TIMESTAMP)
                         ON CONFLICT(setting_key) DO UPDATE SET
                             setting_value = excluded.setting_value,
                             updated_at = CURRENT_TIMESTAMP
-                    """
-                        ),
+                    """),
                         (key, str_value),
                     )
 

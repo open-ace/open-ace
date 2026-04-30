@@ -11,7 +11,7 @@ import os
 import sqlite3
 import sys
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Union, Any
+from typing import Any, Dict, List, Optional, Union
 
 # Ensure scripts directory is in path for standalone script execution
 _script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -65,8 +65,8 @@ def sanitize_utf8(text: Optional[str]) -> Optional[str]:
         return None
 
     # Remove NUL characters first (PostgreSQL doesn't support them)
-    if '\x00' in text:
-        text = text.replace('\x00', '')
+    if "\x00" in text:
+        text = text.replace("\x00", "")
 
     try:
         # Try to encode to UTF-8 - if it works, the text is valid
@@ -191,7 +191,7 @@ def _column_exists(cursor, table_name: str, column_name: str) -> bool:
 
 def init_database() -> None:
     """Verify database schema exists.
-    
+
     For PostgreSQL: Only verifies tables exist (schema created by schema.sql).
     For SQLite: Creates tables if needed (for local development/testing).
     """
@@ -199,11 +199,11 @@ def init_database() -> None:
         # PostgreSQL: Just verify tables exist
         conn = get_connection()
         cursor = conn.cursor()
-        
+
         # Check core tables
         core_tables = ["daily_messages", "daily_usage", "users", "sessions"]
         missing_tables = []
-        
+
         for table in core_tables:
             cursor.execute(f"""
                 SELECT EXISTS (
@@ -213,16 +213,16 @@ def init_database() -> None:
             """)
             if not cursor.fetchone()["exists"]:
                 missing_tables.append(table)
-        
+
         conn.close()
-        
+
         if missing_tables:
             print(f"Warning: Missing database tables: {missing_tables}")
             print("Please run schema.sql or 'alembic upgrade head' to create the schema")
         else:
             print("Database schema verified")
         return
-    
+
     # SQLite: Create tables if needed (for local development)
     if not is_postgresql():
         ensure_db_dir()
@@ -1395,7 +1395,9 @@ def init_auth_database() -> None:
 
     # Add system_account column if not exists (migration for existing databases)
     # First check for old linux_account column and rename it
-    if _column_exists(cursor, "users", "linux_account") and not _column_exists(cursor, "users", "system_account"):
+    if _column_exists(cursor, "users", "linux_account") and not _column_exists(
+        cursor, "users", "system_account"
+    ):
         print("Renaming linux_account column to system_account...")
         _execute(cursor, "ALTER TABLE users RENAME COLUMN linux_account TO system_account")
         conn.commit()
@@ -1408,7 +1410,10 @@ def init_auth_database() -> None:
     if not _column_exists(cursor, "users", "must_change_password"):
         print("Adding must_change_password column to users table...")
         default_val = "FALSE" if is_postgresql() else "0"
-        _execute(cursor, f"ALTER TABLE users ADD COLUMN must_change_password BOOLEAN DEFAULT {default_val}")
+        _execute(
+            cursor,
+            f"ALTER TABLE users ADD COLUMN must_change_password BOOLEAN DEFAULT {default_val}",
+        )
         conn.commit()
 
     conn.close()
@@ -2734,7 +2739,7 @@ def get_tool_comparison_metrics(
     _execute(
         cursor,
         f"""
-        SELECT 
+        SELECT
             tool_name,
             SUM(tokens_used) as total_tokens,
             SUM(input_tokens) as input_tokens,
@@ -2756,7 +2761,7 @@ def get_tool_comparison_metrics(
     _execute(
         cursor,
         f"""
-        SELECT 
+        SELECT
             tool_name,
             COUNT(*) as total_messages,
             COUNT(DISTINCT COALESCE(sender_name, sender_id)) as unique_users,
@@ -2824,7 +2829,7 @@ def detect_usage_anomalies(
     _execute(
         cursor,
         f"""
-        SELECT 
+        SELECT
             date,
             tool_name,
             tokens_used,
@@ -4127,6 +4132,7 @@ def _refresh_daily_stats_for_messages(messages: List[Dict]) -> None:
     # Also refresh user_daily_stats for affected dates
     try:
         from scripts.shared.user_stats_helper import _refresh_user_daily_stats_for_dates
+
         _refresh_user_daily_stats_for_dates(dates)
     except Exception as e:
         # Log but don't fail the save operation

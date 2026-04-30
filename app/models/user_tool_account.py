@@ -6,15 +6,15 @@ Model for mapping users to their tool accounts (sender_name in different tools).
 Supports multi-source accounts: Slack, Feishu, Qwen, Claude, Openclaw, etc.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional
 
 
 @dataclass
 class UserToolAccount:
     """Mapping between user and their tool account."""
-    
+
     id: int
     user_id: int
     tool_account: str  # sender_name in the tool
@@ -22,7 +22,7 @@ class UserToolAccount:
     description: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
-    
+
     def to_dict(self) -> dict:
         """Convert to dictionary."""
         return {

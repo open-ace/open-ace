@@ -14,9 +14,11 @@ import sys
 import time
 
 # Add project root to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+sys.path.insert(
+    0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+)
 
-from playwright.sync_api import sync_playwright, expect
+from playwright.sync_api import expect, sync_playwright
 
 # Configuration
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
@@ -25,7 +27,9 @@ PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 SCREENSHOT_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
-    "screenshots", "issues", "51"
+    "screenshots",
+    "issues",
+    "51",
 )
 
 
@@ -65,7 +69,7 @@ def test_usage_trend_stats():
                 print("  ✓ 登录成功")
             else:
                 results.append(("登录", "失败", f"仍在登录页面: {current_url}"))
-                print(f"  ✗ 登录失败，仍在登录页面")
+                print("  ✗ 登录失败，仍在登录页面")
                 return False
 
             # Step 2: 导航到 /work/usage
@@ -88,7 +92,9 @@ def test_usage_trend_stats():
             print("Step 3: 检查 Token 趋势图...")
             try:
                 # 检查 Token 趋势图标题
-                token_trend_card = page.locator(".card:has(h5:has-text('Token'), h5:has-text('token'))").first
+                token_trend_card = page.locator(
+                    ".card:has(h5:has-text('Token'), h5:has-text('token'))"
+                ).first
                 expect(token_trend_card).to_be_visible(timeout=10000)
                 results.append(("Token 趋势图卡片", "通过", ""))
                 print("  ✓ Token 趋势图卡片可见")
@@ -133,7 +139,9 @@ def test_usage_trend_stats():
             print("Step 4: 检查 Request 趋势图...")
             try:
                 # 检查 Request 趋势图标题
-                request_trend_card = page.locator(".card:has(h5:has-text('Request'), h5:has-text('请求'))").first
+                request_trend_card = page.locator(
+                    ".card:has(h5:has-text('Request'), h5:has-text('请求'))"
+                ).first
                 expect(request_trend_card).to_be_visible(timeout=10000)
                 results.append(("Request 趋势图卡片", "通过", ""))
                 print("  ✓ Request 趋势图卡片可见")
@@ -178,7 +186,7 @@ def test_usage_trend_stats():
                 import re
 
                 # 匹配数字格式 (包括带逗号的数字和带单位的数字)
-                number_patterns = re.findall(r'[\d,]+\.?\d*[MKB]?|[\d,]+', page_text)
+                number_patterns = re.findall(r"[\d,]+\.?\d*[MKB]?|[\d,]+", page_text)
                 print(f"  页面中的数字格式: {number_patterns[:20]}")  # 只打印前20个
 
                 # 检查统计区域是否有分隔线 (border-top)

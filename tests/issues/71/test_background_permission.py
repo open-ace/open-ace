@@ -9,10 +9,10 @@ Scenario:
 4. Verify tab 2 shows notification badge (blue dot)
 """
 
-import sys
 import os
-from playwright.sync_api import sync_playwright, TimeoutError
-import time
+import sys
+
+from playwright.sync_api import sync_playwright
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, project_root)
@@ -49,12 +49,12 @@ def select_project(chat_frame, page):
         project_rows = chat_frame.locator("div[class*='rounded-lg'][class*='p-4']")
         if project_rows.count() == 0:
             project_rows = chat_frame.locator("div.font-mono")
-        
+
         if project_rows.count() > 0:
             project_rows.first.click()
             page.wait_for_timeout(3000)
             return True
-        
+
         return False
     except Exception as e:
         print(f"    [ERROR] select_project: {e}")
@@ -186,50 +186,52 @@ def test_background_permission_notification():
                 textarea.fill("Read the file /etc/hosts and show me first 2 lines")
                 textarea.press("Enter")
                 print("    发送: 'Read the file /etc/hosts...'")
-                
+
                 # Wait longer for permission dialog to appear
                 page.wait_for_timeout(15000)
 
                 # Check for permission dialog in Tab 2
-                perm_dialog = tab2_frame.locator("button:has-text('Allow'), button:has-text('Deny')")
+                perm_dialog = tab2_frame.locator(
+                    "button:has-text('Allow'), button:has-text('Deny')"
+                )
                 perm_found = perm_dialog.count() > 0
-                
+
                 if perm_found:
                     print("    ✓ 触发了权限请求")
-                    
+
                     # Now switch to Tab 1 (making Tab 2 background)
                     print("\n[7] 切换到 Tab 1...")
                     tabs.first.click()
                     page.wait_for_timeout(2000)
                     print("    ✓ 已切换到 Tab 1")
-                    
+
                     # Check Tab 2 notification (should show badge)
                     print("\n[8] 检查 Tab 2 后台通知...")
                     notification = check_tab_notification(page, 1)
-                    
+
                     if notification:
                         print(f"    has_bell: {notification['has_bell']}")
                         print(f"    has_badge: {notification['has_badge']}")
                         print(f"    bell_is_blue: {notification['bell_is_blue']}")
                         print(f"    badge_is_blue: {notification['badge_is_blue']}")
                         print(f"    badge_is_dot: {notification['badge_is_dot']}")
-                        
-                        if notification['has_bell']:
+
+                        if notification["has_bell"]:
                             results.append(("Tab 2 铃铛存在", True))
-                            if notification['bell_is_blue']:
+                            if notification["bell_is_blue"]:
                                 results.append(("Tab 2 铃铛蓝色", True))
                             else:
                                 results.append(("Tab 2 铃铛蓝色", False))
                         else:
                             results.append(("Tab 2 铃铛存在", False))
-                        
-                        if notification['has_badge']:
+
+                        if notification["has_badge"]:
                             results.append(("Tab 2 徽章存在", True))
-                            if notification['badge_is_blue']:
+                            if notification["badge_is_blue"]:
                                 results.append(("Tab 2 徽章蓝色", True))
                             else:
                                 results.append(("Tab 2 徽章蓝色", False))
-                            if notification['badge_is_dot']:
+                            if notification["badge_is_dot"]:
                                 results.append(("Tab 2 徽章圆点", True))
                             else:
                                 results.append(("Tab 2 徽章圆点", False))
@@ -238,9 +240,9 @@ def test_background_permission_notification():
                     else:
                         print("    ✗ 无法检查 Tab 2 通知")
                         results.append(("Tab 2 通知检查", False))
-                    
+
                     page.screenshot(path=f"{OUTPUT_DIR}/background_permission_test.png")
-                    
+
                     # Handle permission dialog - go back to Tab 2
                     print("\n[9] 返回 Tab 2 处理权限...")
                     tabs.nth(1).click()
@@ -276,6 +278,7 @@ def test_background_permission_notification():
         except Exception as e:
             print(f"\n    ✗ 测试错误: {e}")
             import traceback
+
             traceback.print_exc()
             return False
         finally:

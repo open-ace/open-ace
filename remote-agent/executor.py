@@ -16,9 +16,7 @@ import os
 import shutil
 import signal
 import subprocess
-import sys
 import threading
-import time
 import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -204,9 +202,7 @@ class SessionProcess:
             True if the message was written successfully.
         """
         if not self.is_running:
-            logger.warning(
-                "Cannot send message to stopped session %s", self.session_id
-            )
+            logger.warning("Cannot send message to stopped session %s", self.session_id)
             return False
 
         try:
@@ -214,12 +210,12 @@ class SessionProcess:
             self.process.stdin.flush()
             return True
         except (OSError, BrokenPipeError, AttributeError) as e:
-            logger.error(
-                "Failed to write to stdin for session %s: %s", self.session_id, e
-            )
+            logger.error("Failed to write to stdin for session %s: %s", self.session_id, e)
             return False
 
-    def send_permission_response(self, request_id: str, behavior: str, message: Optional[str] = None) -> bool:
+    def send_permission_response(
+        self, request_id: str, behavior: str, message: Optional[str] = None
+    ) -> bool:
         """
         Write a control_response to the subprocess stdin to approve/deny
         a pending permission request from the CLI.
@@ -283,7 +279,8 @@ class SessionProcess:
                 self.process.send_signal(signal.CTRL_C_EVENT)
             logger.info(
                 "Sent SIGINT to session %s (pid %d)",
-                self.session_id[:8], self.process.pid,
+                self.session_id[:8],
+                self.process.pid,
             )
             return True
         except (ProcessLookupError, OSError) as e:
@@ -321,7 +318,9 @@ class SessionProcess:
                 try:
                     pgid = os.getpgid(self.process.pid)
                     os.killpg(pgid, signal.SIGTERM)
-                    logger.debug("Sent SIGTERM to process group %d for session %s", pgid, self.session_id[:8])
+                    logger.debug(
+                        "Sent SIGTERM to process group %d for session %s", pgid, self.session_id[:8]
+                    )
                 except (ProcessLookupError, OSError) as e:
                     # Process group doesn't exist, fall back to terminate
                     logger.debug("Process group not found, using terminate: %s", e)
@@ -334,9 +333,7 @@ class SessionProcess:
         try:
             self.process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
-            logger.warning(
-                "Session %s did not exit gracefully, killing", self.session_id
-            )
+            logger.warning("Session %s did not exit gracefully, killing", self.session_id)
             try:
                 # Use process group for SIGKILL as well
                 if os.name != "nt" and self.process.pid:
@@ -363,16 +360,12 @@ class SessionProcess:
                     pgid = os.getpgid(self.process.pid)
                     os.killpg(pgid, signal.SIGSTOP)
                     self._paused = True
-                    logger.info(
-                        "Paused session %s (pid %d)", self.session_id[:8], self.process.pid
-                    )
+                    logger.info("Paused session %s (pid %d)", self.session_id[:8], self.process.pid)
                     return True
                 else:
                     return self._pause_windows()
             except (ProcessLookupError, PermissionError, OSError) as e:
-                logger.error(
-                    "Failed to pause session %s: %s", self.session_id[:8], e
-                )
+                logger.error("Failed to pause session %s: %s", self.session_id[:8], e)
                 return False
 
     def resume(self) -> bool:
@@ -392,9 +385,7 @@ class SessionProcess:
                 else:
                     return self._resume_windows()
             except (ProcessLookupError, PermissionError, OSError) as e:
-                logger.error(
-                    "Failed to resume session %s: %s", self.session_id[:8], e
-                )
+                logger.error("Failed to resume session %s: %s", self.session_id[:8], e)
                 self._paused = False
                 return False
 
@@ -402,6 +393,7 @@ class SessionProcess:
         """Windows fallback: suspend via psutil or stop process entirely."""
         try:
             import psutil
+
             psutil.Process(self.process.pid).suspend()
             self._paused = True
             logger.info(
@@ -426,6 +418,7 @@ class SessionProcess:
             return False  # Caller should restart with --resume
         try:
             import psutil
+
             psutil.Process(self.process.pid).resume()
             self._paused = False
             logger.info(
@@ -456,9 +449,7 @@ class SessionProcess:
             True if the initialize message was written successfully.
         """
         if not self.is_running:
-            logger.warning(
-                "Cannot send SDK init to stopped session %s", self.session_id
-            )
+            logger.warning("Cannot send SDK init to stopped session %s", self.session_id)
             return False
 
         init_request_id = str(uuid.uuid4())
@@ -520,7 +511,13 @@ class ProcessExecutor:
     and environment variable mappings.
     """
 
-    def __init__(self, server_url: str, output_callback: Optional[Callable] = None, permission_callback: Optional[Callable] = None, usage_callback: Optional[Callable] = None):
+    def __init__(
+        self,
+        server_url: str,
+        output_callback: Optional[Callable] = None,
+        permission_callback: Optional[Callable] = None,
+        usage_callback: Optional[Callable] = None,
+    ):
         """
         Args:
             server_url: The Open ACE server base URL, used to build the
@@ -647,29 +644,35 @@ class ProcessExecutor:
             appdata = os.environ.get("APPDATA", "")
             if appdata:
                 npm_bin = Path(appdata) / "npm"
-                candidates.extend([
-                    npm_bin / exe_name,
-                    npm_bin / f"{exe_name}.cmd",
-                    npm_bin / f"{exe_name}.bat",
-                    npm_bin / f"{exe_name}.ps1",
-                ])
+                candidates.extend(
+                    [
+                        npm_bin / exe_name,
+                        npm_bin / f"{exe_name}.cmd",
+                        npm_bin / f"{exe_name}.bat",
+                        npm_bin / f"{exe_name}.ps1",
+                    ]
+                )
 
             # Also check NVM/npm installation paths on Windows
             program_files = os.environ.get("PROGRAMFILES", "C:\\Program Files")
-            candidates.extend([
-                Path(program_files) / "nodejs" / exe_name,
-                Path(program_files) / "nodejs" / f"{exe_name}.cmd",
-                Path(program_files) / "nodejs" / f"{exe_name}.bat",
-            ])
+            candidates.extend(
+                [
+                    Path(program_files) / "nodejs" / exe_name,
+                    Path(program_files) / "nodejs" / f"{exe_name}.cmd",
+                    Path(program_files) / "nodejs" / f"{exe_name}.bat",
+                ]
+            )
 
             # Check user-local npm prefix
             localappdata = os.environ.get("LOCALAPPDATA", "")
             if localappdata:
-                candidates.extend([
-                    Path(localappdata) / "npm" / exe_name,
-                    Path(localappdata) / "npm" / f"{exe_name}.cmd",
-                    Path(localappdata) / "npm" / f"{exe_name}.bat",
-                ])
+                candidates.extend(
+                    [
+                        Path(localappdata) / "npm" / exe_name,
+                        Path(localappdata) / "npm" / f"{exe_name}.cmd",
+                        Path(localappdata) / "npm" / f"{exe_name}.bat",
+                    ]
+                )
 
         for candidate in candidates:
             if candidate.exists():
@@ -694,7 +697,9 @@ class ProcessExecutor:
         adapter = get_adapter(cli_tool)
         # Use the resolved executable path (may have .cmd/.bat on Windows)
         adapter_args = adapter.build_start_args(
-            session_id, project_path, model,
+            session_id,
+            project_path,
+            model,
             permission_mode=permission_mode,
             allowed_tools=allowed_tools,
             resume=resume,
@@ -735,9 +740,9 @@ class ProcessExecutor:
             # Add Windows-specific hints if applicable
             if os.name == "nt":
                 msg += (
-                    f"\n\nOn Windows, npm global binaries are typically installed in:\n"
-                    f"  %APPDATA%\\npm (e.g., C:\\Users\\<username>\\AppData\\Roaming\\npm)\n"
-                    f"Ensure this directory is in your system PATH."
+                    "\n\nOn Windows, npm global binaries are typically installed in:\n"
+                    "  %APPDATA%\\npm (e.g., C:\\Users\\<username>\\AppData\\Roaming\\npm)\n"
+                    "Ensure this directory is in your system PATH."
                 )
 
             logger.error(msg)
@@ -758,7 +763,15 @@ class ProcessExecutor:
         env = self._build_env(cli_tool, proxy_token, model)
 
         # Build command using adapter
-        cmd = self._build_command(executable, cli_tool, session_id, project_path, model, permission_mode or "default", allowed_tools)
+        cmd = self._build_command(
+            executable,
+            cli_tool,
+            session_id,
+            project_path,
+            model,
+            permission_mode or "default",
+            allowed_tools,
+        )
 
         logger.info(
             "Starting session %s: %s in %s (pid pending)",
@@ -784,12 +797,14 @@ class ProcessExecutor:
                 shell=use_shell,
                 # Create a new process group so we can terminate the tree
                 start_new_session=not use_shell and os.name != "nt",
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" and not use_shell else 0,
+                creationflags=(
+                    subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" and not use_shell else 0
+                ),
             )
         except (OSError, subprocess.SubprocessError) as e:
             # Use error code for platform-independent messages
-            errno = getattr(e, 'errno', None)
-            winerror = getattr(e, 'winerror', None)
+            errno = getattr(e, "errno", None)
+            winerror = getattr(e, "winerror", None)
 
             # Map common Windows error codes to English messages
             if os.name == "nt" and winerror is not None:
@@ -902,15 +917,20 @@ class ProcessExecutor:
                 return restart_result
 
         # Format as stream-json user message
-        message = json.dumps({
-            "type": "user",
-            "session_id": session_id,
-            "message": {
-                "role": "user",
-                "content": content,
-            },
-            "parent_tool_use_id": None,
-        }) + "\n"
+        message = (
+            json.dumps(
+                {
+                    "type": "user",
+                    "session_id": session_id,
+                    "message": {
+                        "role": "user",
+                        "content": content,
+                    },
+                    "parent_tool_use_id": None,
+                }
+            )
+            + "\n"
+        )
 
         with self._lock:
             session = self._sessions.get(session_id)
@@ -1033,12 +1053,16 @@ class ProcessExecutor:
                     env=old_session.env,
                     shell=use_shell,
                     start_new_session=not use_shell and os.name != "nt",
-                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" and not use_shell else 0,
+                    creationflags=(
+                        subprocess.CREATE_NEW_PROCESS_GROUP
+                        if os.name == "nt" and not use_shell
+                        else 0
+                    ),
                 )
             except (OSError, subprocess.SubprocessError) as e:
                 # Use error code for platform-independent English messages
-                errno = getattr(e, 'errno', None)
-                winerror = getattr(e, 'winerror', None)
+                errno = getattr(e, "errno", None)
+                winerror = getattr(e, "winerror", None)
                 if os.name == "nt" and winerror is not None:
                     error_map = {
                         2: "The system cannot find the file specified",
@@ -1048,7 +1072,10 @@ class ProcessExecutor:
                     err_msg = error_map.get(winerror, f"Windows error {winerror}")
                 else:
                     err_msg = str(e)
-                return {"success": False, "error": f"Failed to restart CLI: [WinError {winerror or errno}] {err_msg}"}
+                return {
+                    "success": False,
+                    "error": f"Failed to restart CLI: [WinError {winerror or errno}] {err_msg}",
+                }
 
             new_session = SessionProcess(
                 session_id=session_id,
@@ -1083,14 +1110,10 @@ class ProcessExecutor:
                         session_id[:8],
                     )
 
-            logger.info(
-                "Restarted session %s (pid %d)", session_id[:8], process.pid
-            )
+            logger.info("Restarted session %s (pid %d)", session_id[:8], process.pid)
             return {"success": True, "pid": process.pid}
 
-    def add_allowed_tool_and_restart(
-        self, session_id: str, tool_name: str
-    ) -> Dict[str, Any]:
+    def add_allowed_tool_and_restart(self, session_id: str, tool_name: str) -> Dict[str, Any]:
         """Add a tool to the allowed list and restart the CLI process."""
         with self._lock:
             session = self._sessions.get(session_id)
@@ -1101,7 +1124,8 @@ class ProcessExecutor:
             session.allowed_tools.append(tool_name)
         logger.info(
             "Adding allowed tool %s to session %s, restarting",
-            tool_name, session_id[:8],
+            tool_name,
+            session_id[:8],
         )
         result = self._restart_session(session_id)
         if not result["success"]:
@@ -1111,12 +1135,20 @@ class ProcessExecutor:
         with self._lock:
             session = self._sessions.get(session_id)
         if session and session.is_running:
-            continue_msg = json.dumps({
-                "type": "user",
-                "session_id": session_id,
-                "message": {"role": "user", "content": "The user approved the tool use. Please continue."},
-                "parent_tool_use_id": None,
-            }) + "\n"
+            continue_msg = (
+                json.dumps(
+                    {
+                        "type": "user",
+                        "session_id": session_id,
+                        "message": {
+                            "role": "user",
+                            "content": "The user approved the tool use. Please continue.",
+                        },
+                        "parent_tool_use_id": None,
+                    }
+                )
+                + "\n"
+            )
             try:
                 session.process.stdin.write(continue_msg.encode("utf-8"))
                 session.process.stdin.flush()
@@ -1126,9 +1158,7 @@ class ProcessExecutor:
 
         return {"success": True}
 
-    def update_permission_mode(
-        self, session_id: str, permission_mode: str
-    ) -> Dict[str, Any]:
+    def update_permission_mode(self, session_id: str, permission_mode: str) -> Dict[str, Any]:
         """Update the permission mode and restart the CLI process if changed."""
         with self._lock:
             session = self._sessions.get(session_id)
@@ -1146,13 +1176,13 @@ class ProcessExecutor:
         session.permission_mode = permission_mode
         logger.info(
             "Updating permission mode from %s to %s for session %s, restarting",
-            current_mode, permission_mode, session_id[:8],
+            current_mode,
+            permission_mode,
+            session_id[:8],
         )
         return self._restart_session(session_id)
 
-    def update_model(
-        self, session_id: str, model: str
-    ) -> Dict[str, Any]:
+    def update_model(self, session_id: str, model: str) -> Dict[str, Any]:
         """Update the model and restart the CLI process."""
         with self._lock:
             session = self._sessions.get(session_id)
@@ -1165,7 +1195,8 @@ class ProcessExecutor:
         session.model = model
         logger.info(
             "Updating model to %s for session %s, restarting",
-            model, session_id[:8],
+            model,
+            session_id[:8],
         )
         return self._restart_session(session_id)
 
@@ -1200,7 +1231,9 @@ class ProcessExecutor:
         self._save_sessions_meta()
         return {"success": True}
 
-    def send_permission_response(self, session_id: str, request_id: str, behavior: str, message: Optional[str] = None) -> Dict[str, Any]:
+    def send_permission_response(
+        self, session_id: str, request_id: str, behavior: str, message: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         Send a permission response to a CLI subprocess.
 
@@ -1325,7 +1358,11 @@ class ProcessExecutor:
                         "allowed_tools": s.allowed_tools,
                         "paused": s._paused,
                         "cli_session_id": s._cli_session_id,
-                        "env": {k: v for k, v in s.env.items() if not k.endswith("TOKEN")} if s.env else {},
+                        "env": (
+                            {k: v for k, v in s.env.items() if not k.endswith("TOKEN")}
+                            if s.env
+                            else {}
+                        ),
                     }
             self._META_FILE.write_text(json.dumps(meta, indent=2), encoding="utf-8")
             logger.debug("Saved %d session(s) metadata", len(meta))
@@ -1362,7 +1399,8 @@ class ProcessExecutor:
             if not executable:
                 logger.warning(
                     "Cannot restore session %s: CLI tool '%s' not found",
-                    sid[:8], info["cli_tool"],
+                    sid[:8],
+                    info["cli_tool"],
                 )
                 continue
 
@@ -1401,7 +1439,11 @@ class ProcessExecutor:
                     env=env,
                     shell=use_shell,
                     start_new_session=not use_shell and os.name != "nt",
-                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" and not use_shell else 0,
+                    creationflags=(
+                        subprocess.CREATE_NEW_PROCESS_GROUP
+                        if os.name == "nt" and not use_shell
+                        else 0
+                    ),
                 )
             except (OSError, subprocess.SubprocessError) as e:
                 logger.error("Failed to restore session %s: %s", sid[:8], e)

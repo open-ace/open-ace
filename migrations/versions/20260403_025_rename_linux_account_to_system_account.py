@@ -10,8 +10,6 @@ Create Date: 2026-04-03
 """
 
 from alembic import op
-import sqlalchemy as sa
-
 
 # revision identifiers
 revision = "025_rename_linux_account_to_system_account"
@@ -22,10 +20,10 @@ depends_on = None
 
 def upgrade():
     """Rename linux_account to system_account."""
-    
+
     # Check if we're using PostgreSQL or SQLite
     bind = op.get_bind()
-    
+
     if bind.dialect.name == "postgresql":
         # PostgreSQL: Use ALTER COLUMN with RENAME
         op.execute("""
@@ -39,7 +37,7 @@ def upgrade():
             -- First check if linux_account exists and system_account doesn't
             -- This is handled by the column detection logic
         """)
-        
+
         # Try to rename (works in SQLite 3.25.0+)
         try:
             op.execute("""
@@ -60,9 +58,9 @@ def upgrade():
 
 def downgrade():
     """Rename system_account back to linux_account."""
-    
+
     bind = op.get_bind()
-    
+
     if bind.dialect.name == "postgresql":
         op.execute("""
             ALTER TABLE users RENAME COLUMN system_account TO linux_account

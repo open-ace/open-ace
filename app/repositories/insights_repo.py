@@ -59,7 +59,9 @@ class InsightsReportRepository:
                         report_data.get("overall_score"),
                         report_data.get("overall_assessment"),
                         json.dumps(report_data.get("strengths", []), ensure_ascii=False),
-                        json.dumps(report_data.get("areas_for_improvement", []), ensure_ascii=False),
+                        json.dumps(
+                            report_data.get("areas_for_improvement", []), ensure_ascii=False
+                        ),
                         json.dumps(report_data.get("suggestions", []), ensure_ascii=False),
                         json.dumps(report_data.get("usage_summary", {}), ensure_ascii=False),
                         model,
@@ -84,7 +86,9 @@ class InsightsReportRepository:
                         report_data.get("overall_score"),
                         report_data.get("overall_assessment"),
                         json.dumps(report_data.get("strengths", []), ensure_ascii=False),
-                        json.dumps(report_data.get("areas_for_improvement", []), ensure_ascii=False),
+                        json.dumps(
+                            report_data.get("areas_for_improvement", []), ensure_ascii=False
+                        ),
                         json.dumps(report_data.get("suggestions", []), ensure_ascii=False),
                         json.dumps(report_data.get("usage_summary", {}), ensure_ascii=False),
                         model,
@@ -98,9 +102,7 @@ class InsightsReportRepository:
             logger.error(f"Error saving insights report: {e}")
             return None
 
-    def get_report(
-        self, user_id: int, start_date: str, end_date: str
-    ) -> Optional[Dict]:
+    def get_report(self, user_id: int, start_date: str, end_date: str) -> Optional[Dict]:
         """
         Get an existing report for the given user and date range.
 

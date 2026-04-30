@@ -34,8 +34,8 @@ Run:
 import os
 import sys
 import time
-import uuid
 import traceback
+import uuid
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
@@ -93,8 +93,9 @@ def do_login(page, username, password):
 
 
 def get_api_token(username, password):
-    r = requests.post(f"{BASE_URL}/api/auth/login",
-                      json={"username": username, "password": password})
+    r = requests.post(
+        f"{BASE_URL}/api/auth/login", json={"username": username, "password": password}
+    )
     assert r.status_code == 200, f"Login failed for {username}: {r.status_code}"
     token = r.cookies.get("session_token")
     assert token, "No session_token cookie"
@@ -102,8 +103,7 @@ def get_api_token(username, password):
 
 
 def lookup_user_id(admin_token, username):
-    r = requests.get(f"{BASE_URL}/api/admin/users",
-                     cookies={"session_token": admin_token})
+    r = requests.get(f"{BASE_URL}/api/admin/users", cookies={"session_token": admin_token})
     assert r.status_code == 200
     for u in r.json():
         if u.get("username") == username:
@@ -115,56 +115,70 @@ def register_machine(admin_token):
     """Register a remote machine via API and return machine_id."""
     global machine_id
     # Generate registration token
-    r = requests.post(f"{BASE_URL}/api/remote/machines/register",
-                      json={"tenant_id": 1},
-                      cookies={"session_token": admin_token})
+    r = requests.post(
+        f"{BASE_URL}/api/remote/machines/register",
+        json={"tenant_id": 1},
+        cookies={"session_token": admin_token},
+    )
     assert r.status_code == 200
     reg_token = r.json()["registration_token"]
 
     # Register machine
     machine_id = str(uuid.uuid4())
-    r = requests.post(f"{BASE_URL}/api/remote/agent/register", json={
-        "registration_token": reg_token,
-        "machine_id": machine_id,
-        "machine_name": "E2E Session Test Server",
-        "hostname": "session-test.local",
-        "os_type": "linux",
-        "os_version": "Ubuntu 24.04",
-        "capabilities": {"cpu_cores": 8, "memory_gb": 32},
-        "agent_version": "1.0.0-e2e",
-    })
+    r = requests.post(
+        f"{BASE_URL}/api/remote/agent/register",
+        json={
+            "registration_token": reg_token,
+            "machine_id": machine_id,
+            "machine_name": "E2E Session Test Server",
+            "hostname": "session-test.local",
+            "os_type": "linux",
+            "os_version": "Ubuntu 24.04",
+            "capabilities": {"cpu_cores": 8, "memory_gb": 32},
+            "agent_version": "1.0.0-e2e",
+        },
+    )
     assert r.status_code == 200
 
     # HTTP register to mark connected
-    r = requests.post(f"{BASE_URL}/api/remote/agent/message", json={
-        "type": "register",
-        "machine_id": machine_id,
-        "capabilities": {"cpu_cores": 8, "memory_gb": 32},
-    })
+    r = requests.post(
+        f"{BASE_URL}/api/remote/agent/message",
+        json={
+            "type": "register",
+            "machine_id": machine_id,
+            "capabilities": {"cpu_cores": 8, "memory_gb": 32},
+        },
+    )
     assert r.status_code == 200
 
 
 def assign_user(admin_token, user_id, permission="user"):
-    r = requests.post(f"{BASE_URL}/api/remote/machines/{machine_id}/assign",
-                      json={"user_id": int(user_id), "permission": permission},
-                      cookies={"session_token": admin_token})
+    r = requests.post(
+        f"{BASE_URL}/api/remote/machines/{machine_id}/assign",
+        json={"user_id": int(user_id), "permission": permission},
+        cookies={"session_token": admin_token},
+    )
     assert r.status_code == 200
 
 
 def send_agent_output(step_data, is_complete=False, sid=None):
-    requests.post(f"{BASE_URL}/api/remote/agent/message", json={
-        "type": "session_output",
-        "machine_id": machine_id,
-        "session_id": sid or session_id,
-        "data": step_data,
-        "stream": "stdout",
-        "is_complete": is_complete,
-    })
+    requests.post(
+        f"{BASE_URL}/api/remote/agent/message",
+        json={
+            "type": "session_output",
+            "machine_id": machine_id,
+            "session_id": sid or session_id,
+            "data": step_data,
+            "stream": "stdout",
+            "is_complete": is_complete,
+        },
+    )
 
 
 # ════════════════════════════════════════════
 #  Main Test
 # ════════════════════════════════════════════
+
 
 def run_tests():
     global machine_id, session_id, test_user_id
@@ -187,7 +201,7 @@ def run_tests():
 
         try:
             _run_all(page, admin_token)
-        except Exception as e:
+        except Exception:
             shot(page, "ERROR_final")
             traceback.print_exc()
             raise
@@ -231,7 +245,9 @@ def _run_all(page, admin_token):
 
     print("\n══════ B3. Open New Session Modal ══════")
     # Click "New Session" button in session list
-    new_btn = page.locator("button:has-text('New Session'), button:has-text('新建会话'), button:has-text('New Chat')")
+    new_btn = page.locator(
+        "button:has-text('New Session'), button:has-text('新建会话'), button:has-text('New Chat')"
+    )
     assert new_btn.count() > 0, "New Session button not found"
     new_btn.first.click()
     pause(1)
@@ -274,6 +290,7 @@ def _run_all(page, admin_token):
     print("\n══════ B6. Create Remote Session ══════")
     # Listen for session creation API call
     captured_session = [None]
+
     def on_response(response):
         url = response.url
         method = response.request.method
@@ -291,10 +308,13 @@ def _run_all(page, admin_token):
                     captured_session[0] = sid
             except Exception as e:
                 log("API", f"Failed to parse response: {e}")
+
     page.on("response", on_response)
 
     # Click Create button
-    create_btn = page.locator(".modal.show button:has-text('Create'), .modal.show button:has-text('创建'), .modal button:has-text('Create'), .modal button:has-text('创建')")
+    create_btn = page.locator(
+        ".modal.show button:has-text('Create'), .modal.show button:has-text('创建'), .modal button:has-text('Create'), .modal button:has-text('创建')"
+    )
     assert create_btn.count() > 0, "Create button not found"
     create_btn.first.click()
     pause(4)
@@ -306,8 +326,9 @@ def _run_all(page, admin_token):
     else:
         # Fallback 1: check via workspace sessions API
         user_token = get_api_token(TEST_USER, TEST_PASS)
-        r = requests.get(f"{BASE_URL}/api/workspace/sessions?limit=5",
-                         cookies={"session_token": user_token})
+        r = requests.get(
+            f"{BASE_URL}/api/workspace/sessions?limit=5", cookies={"session_token": user_token}
+        )
         if r.status_code == 200:
             sessions = r.json().get("data", {}).get("sessions", [])
             for s in sessions:
@@ -316,8 +337,9 @@ def _run_all(page, admin_token):
                     break
         # Fallback 2: check via remote sessions API
         if not session_id:
-            r = requests.get(f"{BASE_URL}/api/remote/sessions?limit=5",
-                             cookies={"session_token": user_token})
+            r = requests.get(
+                f"{BASE_URL}/api/remote/sessions?limit=5", cookies={"session_token": user_token}
+            )
             if r.status_code == 200:
                 for s in r.json().get("sessions", []):
                     if s.get("machine_id") == machine_id:
@@ -326,9 +348,11 @@ def _run_all(page, admin_token):
         # Fallback 3: create directly via API
         if not session_id:
             log("Warning", "UI session creation may have failed, creating via API...")
-            r = requests.post(f"{BASE_URL}/api/remote/sessions",
-                              json={"machine_id": machine_id, "project_path": "/root/workspace"},
-                              cookies={"session_token": user_token})
+            r = requests.post(
+                f"{BASE_URL}/api/remote/sessions",
+                json={"machine_id": machine_id, "project_path": "/root/workspace"},
+                cookies={"session_token": user_token},
+            )
             if r.status_code == 200:
                 session_id = r.json().get("session", {}).get("session_id")
         if session_id:
@@ -350,13 +374,16 @@ def _run_all(page, admin_token):
         pause(1)
 
     # Report usage
-    requests.post(f"{BASE_URL}/api/remote/agent/message", json={
-        "type": "usage_report",
-        "machine_id": machine_id,
-        "session_id": session_id,
-        "tokens": {"input": 500, "output": 300},
-        "requests": 1,
-    })
+    requests.post(
+        f"{BASE_URL}/api/remote/agent/message",
+        json={
+            "type": "usage_report",
+            "machine_id": machine_id,
+            "session_id": session_id,
+            "tokens": {"input": 500, "output": 300},
+            "requests": 1,
+        },
+    )
     log("Output", "✓ Agent output and usage reported")
     shot(page, "B7_agent_output")
 
@@ -382,7 +409,9 @@ def _run_all(page, admin_token):
     session_items = page.locator(".session-group-items .session-item")
     if session_items.count() == 0:
         # Fallback: try without group-items wrapper
-        session_items = page.locator(".session-item").filter(has_not=page.locator("button:has-text('New Session'), button:has-text('新建会话')"))
+        session_items = page.locator(".session-item").filter(
+            has_not=page.locator("button:has-text('New Session'), button:has-text('新建会话')")
+        )
     if session_items.count() > 0:
         session_items.first.click()
         pause(2)
@@ -391,28 +420,36 @@ def _run_all(page, admin_token):
         shot(page, "C2_session_detail")
 
         # Check for remote badge
-        remote_badge = page.locator(".modal .badge:has-text('Remote'), .modal .badge:has-text('远程'), .modal .bi-cloud-fill")
+        remote_badge = page.locator(
+            ".modal .badge:has-text('Remote'), .modal .badge:has-text('远程'), .modal .bi-cloud-fill"
+        )
         if remote_badge.count() > 0:
             log("Badge", "✓ Remote badge found in session detail")
         else:
             log("Badge", "⚠ Remote badge not found in detail modal")
 
         # Check for restore button
-        restore_btn = page.locator(".modal button:has-text('Restore'), .modal button:has-text('恢复')")
+        restore_btn = page.locator(
+            ".modal button:has-text('Restore'), .modal button:has-text('恢复')"
+        )
         if restore_btn.count() > 0:
             log("Restore", "✓ Restore session button found")
         else:
             log("Restore", "⚠ Restore button not found")
 
         # Check for remote output section
-        remote_output = page.locator(".modal :has-text('Remote Output'), .modal :has-text('远程输出'), .modal .bg-dark")
+        remote_output = page.locator(
+            ".modal :has-text('Remote Output'), .modal :has-text('远程输出'), .modal .bg-dark"
+        )
         if remote_output.count() > 0:
             log("Output", "✓ Remote output section found")
         else:
             log("Output", "⚠ Remote output section not found")
 
         # Close modal
-        close_btn = page.locator(".modal.show button:has-text('Close'), .modal.show button:has-text('关闭')")
+        close_btn = page.locator(
+            ".modal.show button:has-text('Close'), .modal.show button:has-text('关闭')"
+        )
         if close_btn.count() > 0:
             close_btn.first.click()
             pause(1)
@@ -435,7 +472,9 @@ def _run_all(page, admin_token):
 
     print("\n══════ D2. Remote Badge on Session Card ══════")
     # Check for remote badge
-    remote_badges = page.locator(".bi-cloud-fill, .badge:has-text('Remote'), .badge:has-text('远程')")
+    remote_badges = page.locator(
+        ".bi-cloud-fill, .badge:has-text('Remote'), .badge:has-text('远程')"
+    )
     if remote_badges.count() > 0:
         log("Badge", f"✓ Found {remote_badges.count()} remote badge(s)")
     else:
@@ -466,7 +505,13 @@ def _run_all(page, admin_token):
             card = session_cards.nth(i)
             card_text = card.text_content() or ""
             # Look for remote indicators or session ID match
-            if "E2E" in card_text or "Remote" in card_text or "远程" in card_text or "cloud-fill" in card.inner_html() or (sid_prefix and sid_prefix in card_text):
+            if (
+                "E2E" in card_text
+                or "Remote" in card_text
+                or "远程" in card_text
+                or "cloud-fill" in card.inner_html()
+                or (sid_prefix and sid_prefix in card_text)
+            ):
                 card.click()
                 found_remote = True
                 break
@@ -481,14 +526,18 @@ def _run_all(page, admin_token):
         shot(page, "D4_session_detail_manage")
 
         # Check for remote output
-        remote_output = page.locator(".modal .bg-dark, .modal :has-text('Remote Output'), .modal :has-text('远程输出')")
+        remote_output = page.locator(
+            ".modal .bg-dark, .modal :has-text('Remote Output'), .modal :has-text('远程输出')"
+        )
         if remote_output.count() > 0:
             log("Output", "✓ Remote output section visible in manage detail")
         else:
             log("Output", "⚠ Remote output section not found")
 
         # Close modal
-        close_btn = page.locator(".modal.show button:has-text('Close'), .modal.show button:has-text('关闭')")
+        close_btn = page.locator(
+            ".modal.show button:has-text('Close'), .modal.show button:has-text('关闭')"
+        )
         if close_btn.count() > 0:
             close_btn.first.click()
     else:
@@ -503,14 +552,17 @@ def _run_all(page, admin_token):
     print("\n══════ E1. Stop Session ══════")
     if session_id:
         user_token = get_api_token(TEST_USER, TEST_PASS)
-        r = requests.post(f"{BASE_URL}/api/remote/sessions/{session_id}/stop",
-                          cookies={"session_token": user_token})
+        r = requests.post(
+            f"{BASE_URL}/api/remote/sessions/{session_id}/stop",
+            cookies={"session_token": user_token},
+        )
         log("Stop", f"Session {session_id[:8]}... → {r.status_code}")
 
     print("\n══════ E2. Deregister Machine ══════")
     if machine_id:
-        r = requests.delete(f"{BASE_URL}/api/remote/machines/{machine_id}",
-                            cookies={"session_token": admin_token})
+        r = requests.delete(
+            f"{BASE_URL}/api/remote/machines/{machine_id}", cookies={"session_token": admin_token}
+        )
         log("Deregister", f"Machine {machine_id[:8]}... → {r.status_code}")
         assert r.status_code == 200, f"Deregister failed: {r.status_code}"
 

@@ -13,10 +13,10 @@ Usage:
     python3 tests/issues/69/test_session_detail_ui.py
 """
 
-import sys
 import os
-from pathlib import Path
+import sys
 import time
+from pathlib import Path
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -37,10 +37,7 @@ def test_session_detail_ui():
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        context = browser.new_context(
-            viewport={"width": 1400, "height": 900},
-            locale="zh-CN"
-        )
+        context = browser.new_context(viewport={"width": 1400, "height": 900}, locale="zh-CN")
         page = context.new_page()
 
         try:
@@ -84,7 +81,7 @@ def test_session_detail_ui():
 
             if count > 0:
                 first_item = session_items.first
-                
+
                 # Get session name
                 session_name_elem = first_item.locator(".session-name")
                 if session_name_elem.is_visible():
@@ -112,7 +109,7 @@ def test_session_detail_ui():
                 modal = page.locator(".modal.show")
                 if modal.is_visible():
                     print("  ✓ Modal is visible")
-                    
+
                     # Take screenshot of modal
                     modal.screenshot(path=str(screenshots_dir / "03_modal.png"))
                     print("  ✓ Modal screenshot saved")
@@ -124,10 +121,11 @@ def test_session_detail_ui():
                         title_text = title.text_content().strip()
                         print(f"  Title text: {title_text}")
                         results.append(("Modal title", True, title_text))
-                        
+
                         # Check if title contains session ID pattern
                         import re
-                        if re.search(r'[a-f0-9]{8}', title_text.lower()):
+
+                        if re.search(r"[a-f0-9]{8}", title_text.lower()):
                             print("  ✓ Title contains Session ID (first 8 chars)")
                             results.append(("Title has Session ID", True))
                         else:
@@ -151,7 +149,11 @@ def test_session_detail_ui():
                     # Verification 3: Last Active field
                     print("\n[Verification 3] Last Active field...")
                     modal_text = modal.text_content()
-                    if "Last Active" in modal_text or "最后活动" in modal_text or "Last active" in modal_text.lower():
+                    if (
+                        "Last Active" in modal_text
+                        or "最后活动" in modal_text
+                        or "Last active" in modal_text.lower()
+                    ):
                         print("  ✓ Last Active text found in modal")
                         results.append(("Last Active field", True))
                     else:
@@ -162,7 +164,8 @@ def test_session_detail_ui():
                     print("\n[Verification 4] Requests/Messages format...")
                     # Look for pattern like "5 / 10" or "5/10"
                     import re
-                    request_pattern = re.search(r'\d+\s*/\s*\d+', modal_text)
+
+                    request_pattern = re.search(r"\d+\s*/\s*\d+", modal_text)
                     if request_pattern:
                         pattern_text = request_pattern.group()
                         print(f"  ✓ Found Requests/Messages format: {pattern_text}")
@@ -177,7 +180,7 @@ def test_session_detail_ui():
 
                 else:
                     print("  ✗ Modal is not visible after clicking session")
-                    
+
                     # Check if there's a detail panel instead
                     detail_panel = page.locator(".session-detail, .detail-panel")
                     if detail_panel.is_visible():
@@ -213,6 +216,7 @@ def test_session_detail_ui():
         except Exception as e:
             print(f"\nError: {e}")
             import traceback
+
             traceback.print_exc()
             results.append(("Test execution", False, str(e)))
             page.screenshot(path=str(screenshots_dir / "error.png"), full_page=True)

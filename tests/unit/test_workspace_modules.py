@@ -6,27 +6,24 @@ Unit tests for prompt_library, session_manager, tool_connector,
 state_sync, and collaboration modules.
 """
 
-import pytest
-import tempfile
 import os
-from datetime import datetime, timedelta
+import tempfile
+from datetime import datetime
 
-from app.modules.workspace.prompt_library import PromptLibrary, PromptTemplate, PromptCategory
-from app.modules.workspace.session_manager import (
-    SessionManager,
-    AgentSession,
-    SessionType,
-    SessionStatus,
-)
-from app.modules.workspace.tool_connector import ToolConnector, ToolInfo, ToolType, ToolStatus
-from app.modules.workspace.state_sync import StateSyncManager, SyncEvent, SyncEventType
+import pytest
+
 from app.modules.workspace.collaboration import (
     CollaborationManager,
-    Team,
-    SharedSession,
     SharePermission,
 )
-
+from app.modules.workspace.prompt_library import PromptCategory, PromptLibrary, PromptTemplate
+from app.modules.workspace.session_manager import (
+    SessionManager,
+    SessionStatus,
+    SessionType,
+)
+from app.modules.workspace.state_sync import StateSyncManager, SyncEvent, SyncEventType
+from app.modules.workspace.tool_connector import ToolConnector, ToolInfo, ToolType
 
 # ==================== Fixtures ====================
 

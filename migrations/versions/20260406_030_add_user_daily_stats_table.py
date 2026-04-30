@@ -16,8 +16,8 @@ Performance improvement:
 
 from typing import Union
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "030_add_user_daily_stats_table"
@@ -30,22 +30,18 @@ def _table_exists(conn, table_name: str) -> bool:
     """Check if a table exists."""
     if conn.dialect.name == "postgresql":
         result = conn.execute(
-            sa.text(
-                """
+            sa.text("""
                 SELECT EXISTS (
                     SELECT FROM information_schema.tables
                     WHERE table_schema = 'public' AND table_name = :table_name
                 )
-                """
-            ),
+                """),
             {"table_name": table_name},
         )
         return result.fetchone()[0]
     else:
         result = conn.execute(
-            sa.text(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name = :table_name"
-            ),
+            sa.text("SELECT name FROM sqlite_master WHERE type='table' AND name = :table_name"),
             {"table_name": table_name},
         )
         return result.fetchone() is not None
@@ -84,34 +80,32 @@ def upgrade() -> None:
                 sa.Column("input_tokens", sa.Integer(), nullable=False, server_default="0"),
                 sa.Column("output_tokens", sa.Integer(), nullable=False, server_default="0"),
                 sa.Column("cache_tokens", sa.Integer(), nullable=False, server_default="0"),
-                sa.Column("created_at", sa.TIMESTAMP(), server_default=sa.func.now(), nullable=False),
-                sa.Column("updated_at", sa.TIMESTAMP(), server_default=sa.func.now(), nullable=False),
+                sa.Column(
+                    "created_at", sa.TIMESTAMP(), server_default=sa.func.now(), nullable=False
+                ),
+                sa.Column(
+                    "updated_at", sa.TIMESTAMP(), server_default=sa.func.now(), nullable=False
+                ),
                 sa.PrimaryKeyConstraint("id"),
                 sa.UniqueConstraint("user_id", "date", name="uq_user_daily_stats_user_date"),
             )
 
             # Create indexes for fast lookups
-            op.execute(
-                """
+            op.execute("""
                 CREATE INDEX idx_user_daily_stats_user_date
                 ON user_daily_stats (user_id, date DESC)
-                """
-            )
-            op.execute(
-                """
+                """)
+            op.execute("""
                 CREATE INDEX idx_user_daily_stats_date
                 ON user_daily_stats (date DESC)
-                """
-            )
+                """)
 
             # Add foreign key constraint
-            op.execute(
-                """
+            op.execute("""
                 ALTER TABLE user_daily_stats
                 ADD CONSTRAINT fk_user_daily_stats_user
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-                """
-            )
+                """)
 
         else:
             # SQLite version
@@ -125,25 +119,31 @@ def upgrade() -> None:
                 sa.Column("input_tokens", sa.Integer(), nullable=False, server_default="0"),
                 sa.Column("output_tokens", sa.Integer(), nullable=False, server_default="0"),
                 sa.Column("cache_tokens", sa.Integer(), nullable=False, server_default="0"),
-                sa.Column("created_at", sa.String(30), server_default="(CURRENT_TIMESTAMP)", nullable=False),
-                sa.Column("updated_at", sa.String(30), server_default="(CURRENT_TIMESTAMP)", nullable=False),
+                sa.Column(
+                    "created_at",
+                    sa.String(30),
+                    server_default="(CURRENT_TIMESTAMP)",
+                    nullable=False,
+                ),
+                sa.Column(
+                    "updated_at",
+                    sa.String(30),
+                    server_default="(CURRENT_TIMESTAMP)",
+                    nullable=False,
+                ),
                 sa.PrimaryKeyConstraint("id"),
                 sa.UniqueConstraint("user_id", "date", name="uq_user_daily_stats_user_date"),
             )
 
             # Create indexes for fast lookups
-            op.execute(
-                """
+            op.execute("""
                 CREATE INDEX idx_user_daily_stats_user_date
                 ON user_daily_stats (user_id, date DESC)
-                """
-            )
-            op.execute(
-                """
+                """)
+            op.execute("""
                 CREATE INDEX idx_user_daily_stats_date
                 ON user_daily_stats (date DESC)
-                """
-            )
+                """)
 
     # Migrate existing data from daily_messages to user_daily_stats
     # This aggregates historical data for all users
@@ -162,8 +162,7 @@ def upgrade() -> None:
                 pass
             else:
                 # SQLite: simpler aggregation
-                op.execute(
-                    """
+                op.execute("""
                     INSERT INTO user_daily_stats (user_id, date, requests, tokens, created_at, updated_at)
                     SELECT
                         u.id as user_id,
@@ -176,8 +175,7 @@ def upgrade() -> None:
                     JOIN users u ON dm.sender_name LIKE (u.username || '%')
                     WHERE dm.role = 'assistant'
                     GROUP BY u.id, dm.date
-                    """
-                )
+                    """)
 
             print("Data migration completed.")
 

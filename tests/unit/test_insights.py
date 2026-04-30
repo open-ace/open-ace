@@ -9,17 +9,18 @@ Tests cover:
 """
 
 import json
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock, patch, PropertyMock
 
 from app.repositories.insights_repo import InsightsReportRepository
 from app.repositories.message_repo import MessageRepository
 from app.services.insights_service import InsightsService
 
-
 # =============================================================================
 # InsightsReportRepository Tests
 # =============================================================================
+
 
 class TestInsightsReportRepository:
     """Test InsightsReportRepository CRUD operations."""
@@ -46,7 +47,7 @@ class TestInsightsReportRepository:
             "overall_assessment": "Good",
             "strengths": '["clear prompts"]',
             "areas_for_improvement": '["needs context"]',
-            "suggestions": '[]',
+            "suggestions": "[]",
             "usage_summary": '{"total_messages": 100}',
             "model": "glm-5",
             "raw_response": None,
@@ -70,8 +71,20 @@ class TestInsightsReportRepository:
         """Test get_user_reports returns list of reports."""
         mock_db = MagicMock()
         mock_db.fetch_all.return_value = [
-            {"id": 1, "start_date": "2026-04-09", "end_date": "2026-04-16", "overall_score": 7, "created_at": "2026-04-16T10:00:00"},
-            {"id": 2, "start_date": "2026-04-02", "end_date": "2026-04-09", "overall_score": 6, "created_at": "2026-04-09T10:00:00"},
+            {
+                "id": 1,
+                "start_date": "2026-04-09",
+                "end_date": "2026-04-16",
+                "overall_score": 7,
+                "created_at": "2026-04-16T10:00:00",
+            },
+            {
+                "id": 2,
+                "start_date": "2026-04-02",
+                "end_date": "2026-04-09",
+                "overall_score": 6,
+                "created_at": "2026-04-09T10:00:00",
+            },
         ]
         repo = InsightsReportRepository(db=mock_db)
         result = repo.get_user_reports(1, limit=10)
@@ -102,6 +115,7 @@ class TestInsightsReportRepository:
 # =============================================================================
 # MessageRepository Insights Methods Tests
 # =============================================================================
+
 
 class TestMessageRepositoryInsights:
     """Test new message repo methods for insights."""
@@ -182,6 +196,7 @@ class TestMessageRepositoryInsights:
 # InsightsService Tests
 # =============================================================================
 
+
 class TestInsightsService:
     """Test InsightsService core logic."""
 
@@ -214,8 +229,8 @@ class TestInsightsService:
                 "overall_assessment": "Good",
                 "strengths": '["clear"]',
                 "areas_for_improvement": '["context"]',
-                "suggestions": '[]',
-                "usage_summary": '{}',
+                "suggestions": "[]",
+                "usage_summary": "{}",
                 "model": "glm-5",
                 "start_date": "2026-04-09",
                 "end_date": "2026-04-16",
@@ -239,7 +254,12 @@ class TestInsightsService:
         """Test error when not enough messages."""
         service, _, _, _ = self._make_service(
             user={"id": 1, "username": "test", "system_account": "test"},
-            stats={"total_messages": 3, "total_conversations": 0, "total_tokens": 0, "avg_messages_per_conversation": 0},
+            stats={
+                "total_messages": 3,
+                "total_conversations": 0,
+                "total_tokens": 0,
+                "avg_messages_per_conversation": 0,
+            },
         )
         result, error = service.generate_insights(1, "2026-04-09", "2026-04-16")
         assert result is None
@@ -249,7 +269,12 @@ class TestInsightsService:
         """Test error when no conversation samples found."""
         service, _, _, _ = self._make_service(
             user={"id": 1, "username": "test", "system_account": "test"},
-            stats={"total_messages": 10, "total_conversations": 2, "total_tokens": 1000, "avg_messages_per_conversation": 5.0},
+            stats={
+                "total_messages": 10,
+                "total_conversations": 2,
+                "total_tokens": 1000,
+                "avg_messages_per_conversation": 5.0,
+            },
             conversations=[],
         )
         result, error = service.generate_insights(1, "2026-04-09", "2026-04-16")
@@ -260,11 +285,18 @@ class TestInsightsService:
         """Test error when API key is missing."""
         service, _, _, _ = self._make_service(
             user={"id": 1, "username": "test", "system_account": "test"},
-            stats={"total_messages": 100, "total_conversations": 10, "total_tokens": 50000, "avg_messages_per_conversation": 10.0},
-            conversations=[{"session_id": "s1", "messages": [{"role": "user", "content": "hello"}]}],
+            stats={
+                "total_messages": 100,
+                "total_conversations": 10,
+                "total_tokens": 50000,
+                "avg_messages_per_conversation": 10.0,
+            },
+            conversations=[
+                {"session_id": "s1", "messages": [{"role": "user", "content": "hello"}]}
+            ],
         )
-        with patch.object(service, '_load_config', return_value={"auth": {"env": {}}}):
-            with patch.dict('os.environ', {}, clear=True):
+        with patch.object(service, "_load_config", return_value={"auth": {"env": {}}}):
+            with patch.dict("os.environ", {}, clear=True):
                 result, error = service.generate_insights(1, "2026-04-09", "2026-04-16")
         assert result is None
         assert "API key" in error
@@ -272,13 +304,15 @@ class TestInsightsService:
     def test_parse_ai_response_valid(self):
         """Test parsing a valid AI response."""
         service, _, _, _ = self._make_service()
-        response_text = json.dumps({
-            "overall_score": 8,
-            "overall_assessment": "Excellent usage",
-            "strengths": ["Clear prompts", "Good context"],
-            "areas_for_improvement": ["Could be more specific"],
-            "suggestions": [{"title": "T", "description": "D", "example": "E"}],
-        })
+        response_text = json.dumps(
+            {
+                "overall_score": 8,
+                "overall_assessment": "Excellent usage",
+                "strengths": ["Clear prompts", "Good context"],
+                "areas_for_improvement": ["Could be more specific"],
+                "suggestions": [{"title": "T", "description": "D", "example": "E"}],
+            }
+        )
         stats = {"total_messages": 100}
         result = service._parse_ai_response(response_text, stats)
         assert result["overall_score"] == 8
@@ -288,23 +322,27 @@ class TestInsightsService:
     def test_parse_ai_response_missing_field(self):
         """Test parsing AI response with missing required field."""
         service, _, _, _ = self._make_service()
-        response_text = json.dumps({
-            "overall_score": 8,
-            "overall_assessment": "Good",
-            # missing strengths and areas_for_improvement
-        })
+        response_text = json.dumps(
+            {
+                "overall_score": 8,
+                "overall_assessment": "Good",
+                # missing strengths and areas_for_improvement
+            }
+        )
         with pytest.raises(ValueError, match="Missing required field"):
             service._parse_ai_response(response_text, {})
 
     def test_parse_ai_response_score_clamped(self):
         """Test that score is clamped to 1-10 range."""
         service, _, _, _ = self._make_service()
-        response_text = json.dumps({
-            "overall_score": 15,
-            "overall_assessment": "Great",
-            "strengths": ["s"],
-            "areas_for_improvement": ["i"],
-        })
+        response_text = json.dumps(
+            {
+                "overall_score": 15,
+                "overall_assessment": "Great",
+                "strengths": ["s"],
+                "areas_for_improvement": ["i"],
+            }
+        )
         result = service._parse_ai_response(response_text, {})
         assert result["overall_score"] == 10
 
@@ -342,7 +380,12 @@ class TestInsightsService:
     def test_build_user_prompt(self):
         """Test user prompt contains stats and conversations."""
         service, _, _, _ = self._make_service()
-        stats = {"total_conversations": 5, "total_messages": 50, "total_tokens": 1000, "avg_messages_per_conversation": 10.0}
+        stats = {
+            "total_conversations": 5,
+            "total_messages": 50,
+            "total_tokens": 1000,
+            "avg_messages_per_conversation": 10.0,
+        }
         conversations = [{"session_id": "s1", "messages": [{"role": "user", "content": "Hello"}]}]
         prompt = service._build_user_prompt(stats, conversations)
         assert "5" in prompt
@@ -353,20 +396,36 @@ class TestInsightsService:
         """Test full successful generation flow with mocked API."""
         service, _, _, mock_insights = self._make_service(
             user={"id": 1, "username": "test", "system_account": "test"},
-            stats={"total_messages": 100, "total_conversations": 10, "total_tokens": 50000, "avg_messages_per_conversation": 10.0},
-            conversations=[{"session_id": "s1", "messages": [{"role": "user", "content": "hello"}]}],
+            stats={
+                "total_messages": 100,
+                "total_conversations": 10,
+                "total_tokens": 50000,
+                "avg_messages_per_conversation": 10.0,
+            },
+            conversations=[
+                {"session_id": "s1", "messages": [{"role": "user", "content": "hello"}]}
+            ],
         )
 
-        ai_response = json.dumps({
-            "overall_score": 7,
-            "overall_assessment": "Good usage",
-            "strengths": ["clear communication"],
-            "areas_for_improvement": ["add more context"],
-            "suggestions": [{"title": "Be specific", "description": "desc", "example": "ex"}],
-        })
+        ai_response = json.dumps(
+            {
+                "overall_score": 7,
+                "overall_assessment": "Good usage",
+                "strengths": ["clear communication"],
+                "areas_for_improvement": ["add more context"],
+                "suggestions": [{"title": "Be specific", "description": "desc", "example": "ex"}],
+            }
+        )
 
-        with patch.object(service, '_load_config', return_value={"auth": {"env": {"OPENAI_API_KEY": "test-key"}}, "insights": {"model": "glm-5"}}):
-            with patch.object(service, '_call_ai_api', return_value=ai_response):
+        with patch.object(
+            service,
+            "_load_config",
+            return_value={
+                "auth": {"env": {"OPENAI_API_KEY": "test-key"}},
+                "insights": {"model": "glm-5"},
+            },
+        ):
+            with patch.object(service, "_call_ai_api", return_value=ai_response):
                 result, error = service.generate_insights(1, "2026-04-09", "2026-04-16")
 
         assert error is None
@@ -380,21 +439,25 @@ class TestInsightsService:
 # Route Tests (basic)
 # =============================================================================
 
+
 class TestInsightsBlueprint:
     """Test insights blueprint registration and basic properties."""
 
     def test_blueprint_exists(self):
         """Test that insights_bp is a Flask Blueprint."""
         from app.routes.insights import insights_bp
+
         assert insights_bp.name == "insights"
 
     def test_blueprint_has_before_request(self):
         """Test that blueprint has before_request handler."""
         from app.routes.insights import insights_bp
+
         assert len(insights_bp.before_request_funcs.get(None, [])) > 0 or insights_bp.before_request
 
     def test_blueprint_import_in_app_init(self):
         """Test that insights_bp is imported in app init."""
         import app.__init__ as app_init
+
         # Verify the module can be imported without errors
-        assert hasattr(app_init, 'register_blueprints')
+        assert hasattr(app_init, "register_blueprints")

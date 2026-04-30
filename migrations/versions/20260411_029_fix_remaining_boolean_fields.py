@@ -24,8 +24,8 @@ SQLite uses type affinity (INTEGER for boolean), so no changes needed.
 
 from typing import Union
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "029_boolean_fields"
@@ -70,13 +70,11 @@ def upgrade() -> None:
     # ============================================
     if _column_exists(op.get_bind(), "users", "is_admin"):
         op.execute("ALTER TABLE users ALTER COLUMN is_admin DROP DEFAULT")
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE users
             ALTER COLUMN is_admin TYPE BOOLEAN
             USING CASE WHEN is_admin = 1 THEN TRUE ELSE FALSE END
-        """
-        )
+        """)
         op.execute("ALTER TABLE users ALTER COLUMN is_admin SET DEFAULT FALSE")
 
     # ============================================
@@ -94,13 +92,11 @@ def upgrade() -> None:
         row = result.fetchone()
         if row and row[0] == "integer":
             op.execute("ALTER TABLE users ALTER COLUMN must_change_password DROP DEFAULT")
-            op.execute(
-                """
+            op.execute("""
                 ALTER TABLE users
                 ALTER COLUMN must_change_password TYPE BOOLEAN
                 USING CASE WHEN must_change_password = 1 THEN TRUE ELSE FALSE END
-            """
-            )
+            """)
             op.execute("ALTER TABLE users ALTER COLUMN must_change_password SET DEFAULT FALSE")
 
     # ============================================
@@ -108,13 +104,11 @@ def upgrade() -> None:
     # ============================================
     if _column_exists(op.get_bind(), "alerts", "read"):
         op.execute("ALTER TABLE alerts ALTER COLUMN read DROP DEFAULT")
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE alerts
             ALTER COLUMN read TYPE BOOLEAN
             USING CASE WHEN read = 1 THEN TRUE ELSE FALSE END
-        """
-        )
+        """)
         op.execute("ALTER TABLE alerts ALTER COLUMN read SET DEFAULT FALSE")
 
     # ============================================
@@ -122,13 +116,11 @@ def upgrade() -> None:
     # ============================================
     if _column_exists(op.get_bind(), "audit_logs", "success"):
         op.execute("ALTER TABLE audit_logs ALTER COLUMN success DROP DEFAULT")
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE audit_logs
             ALTER COLUMN success TYPE BOOLEAN
             USING CASE WHEN success = 1 THEN TRUE ELSE FALSE END
-        """
-        )
+        """)
         op.execute("ALTER TABLE audit_logs ALTER COLUMN success SET DEFAULT TRUE")
 
     # ============================================
@@ -136,13 +128,11 @@ def upgrade() -> None:
     # ============================================
     if _column_exists(op.get_bind(), "knowledge_base", "is_published"):
         op.execute("ALTER TABLE knowledge_base ALTER COLUMN is_published DROP DEFAULT")
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE knowledge_base
             ALTER COLUMN is_published TYPE BOOLEAN
             USING CASE WHEN is_published = 1 THEN TRUE ELSE FALSE END
-        """
-        )
+        """)
         op.execute("ALTER TABLE knowledge_base ALTER COLUMN is_published SET DEFAULT FALSE")
 
     # ============================================
@@ -150,49 +140,45 @@ def upgrade() -> None:
     # ============================================
     if _column_exists(op.get_bind(), "notification_preferences", "email_enabled"):
         op.execute("ALTER TABLE notification_preferences ALTER COLUMN email_enabled DROP DEFAULT")
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE notification_preferences
             ALTER COLUMN email_enabled TYPE BOOLEAN
             USING CASE WHEN email_enabled = 1 THEN TRUE ELSE FALSE END
-        """
+        """)
+        op.execute(
+            "ALTER TABLE notification_preferences ALTER COLUMN email_enabled SET DEFAULT TRUE"
         )
-        op.execute("ALTER TABLE notification_preferences ALTER COLUMN email_enabled SET DEFAULT TRUE")
 
     if _column_exists(op.get_bind(), "notification_preferences", "push_enabled"):
         op.execute("ALTER TABLE notification_preferences ALTER COLUMN push_enabled DROP DEFAULT")
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE notification_preferences
             ALTER COLUMN push_enabled TYPE BOOLEAN
             USING CASE WHEN push_enabled = 1 THEN TRUE ELSE FALSE END
-        """
+        """)
+        op.execute(
+            "ALTER TABLE notification_preferences ALTER COLUMN push_enabled SET DEFAULT TRUE"
         )
-        op.execute("ALTER TABLE notification_preferences ALTER COLUMN push_enabled SET DEFAULT TRUE")
 
     # ============================================
     # prompt_templates: is_public, is_featured -> BOOLEAN
     # ============================================
     if _column_exists(op.get_bind(), "prompt_templates", "is_public"):
         op.execute("ALTER TABLE prompt_templates ALTER COLUMN is_public DROP DEFAULT")
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE prompt_templates
             ALTER COLUMN is_public TYPE BOOLEAN
             USING CASE WHEN is_public = 1 THEN TRUE ELSE FALSE END
-        """
-        )
+        """)
         op.execute("ALTER TABLE prompt_templates ALTER COLUMN is_public SET DEFAULT FALSE")
 
     if _column_exists(op.get_bind(), "prompt_templates", "is_featured"):
         op.execute("ALTER TABLE prompt_templates ALTER COLUMN is_featured DROP DEFAULT")
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE prompt_templates
             ALTER COLUMN is_featured TYPE BOOLEAN
             USING CASE WHEN is_featured = 1 THEN TRUE ELSE FALSE END
-        """
-        )
+        """)
         op.execute("ALTER TABLE prompt_templates ALTER COLUMN is_featured SET DEFAULT FALSE")
 
     # ============================================
@@ -200,13 +186,11 @@ def upgrade() -> None:
     # ============================================
     if _column_exists(op.get_bind(), "quota_alerts", "acknowledged"):
         op.execute("ALTER TABLE quota_alerts ALTER COLUMN acknowledged DROP DEFAULT")
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE quota_alerts
             ALTER COLUMN acknowledged TYPE BOOLEAN
             USING CASE WHEN acknowledged = 1 THEN TRUE ELSE FALSE END
-        """
-        )
+        """)
         op.execute("ALTER TABLE quota_alerts ALTER COLUMN acknowledged SET DEFAULT FALSE")
 
     # ============================================
@@ -214,24 +198,20 @@ def upgrade() -> None:
     # ============================================
     if _column_exists(op.get_bind(), "shared_sessions", "allow_comments"):
         op.execute("ALTER TABLE shared_sessions ALTER COLUMN allow_comments DROP DEFAULT")
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE shared_sessions
             ALTER COLUMN allow_comments TYPE BOOLEAN
             USING CASE WHEN allow_comments = 1 THEN TRUE ELSE FALSE END
-        """
-        )
+        """)
         op.execute("ALTER TABLE shared_sessions ALTER COLUMN allow_comments SET DEFAULT TRUE")
 
     if _column_exists(op.get_bind(), "shared_sessions", "allow_copy"):
         op.execute("ALTER TABLE shared_sessions ALTER COLUMN allow_copy DROP DEFAULT")
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE shared_sessions
             ALTER COLUMN allow_copy TYPE BOOLEAN
             USING CASE WHEN allow_copy = 1 THEN TRUE ELSE FALSE END
-        """
-        )
+        """)
         op.execute("ALTER TABLE shared_sessions ALTER COLUMN allow_copy SET DEFAULT TRUE")
 
     # ============================================
@@ -239,13 +219,11 @@ def upgrade() -> None:
     # ============================================
     if _column_exists(op.get_bind(), "sso_providers", "is_active"):
         op.execute("ALTER TABLE sso_providers ALTER COLUMN is_active DROP DEFAULT")
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE sso_providers
             ALTER COLUMN is_active TYPE BOOLEAN
             USING CASE WHEN is_active = 1 THEN TRUE ELSE FALSE END
-        """
-        )
+        """)
         op.execute("ALTER TABLE sso_providers ALTER COLUMN is_active SET DEFAULT TRUE")
 
 
@@ -257,130 +235,108 @@ def downgrade() -> None:
     # Revert sso_providers: is_active
     if _column_exists(op.get_bind(), "sso_providers", "is_active"):
         op.execute("ALTER TABLE sso_providers ALTER COLUMN is_active DROP DEFAULT")
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE sso_providers
             ALTER COLUMN is_active TYPE INTEGER
             USING CASE WHEN is_active THEN 1 ELSE 0 END
-        """
-        )
+        """)
         op.execute("ALTER TABLE sso_providers ALTER COLUMN is_active SET DEFAULT 1")
 
     # Revert shared_sessions
     if _column_exists(op.get_bind(), "shared_sessions", "allow_copy"):
         op.execute("ALTER TABLE shared_sessions ALTER COLUMN allow_copy DROP DEFAULT")
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE shared_sessions
             ALTER COLUMN allow_copy TYPE INTEGER
             USING CASE WHEN allow_copy THEN 1 ELSE 0 END
-        """
-        )
+        """)
         op.execute("ALTER TABLE shared_sessions ALTER COLUMN allow_copy SET DEFAULT 1")
 
     if _column_exists(op.get_bind(), "shared_sessions", "allow_comments"):
         op.execute("ALTER TABLE shared_sessions ALTER COLUMN allow_comments DROP DEFAULT")
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE shared_sessions
             ALTER COLUMN allow_comments TYPE INTEGER
             USING CASE WHEN allow_comments THEN 1 ELSE 0 END
-        """
-        )
+        """)
         op.execute("ALTER TABLE shared_sessions ALTER COLUMN allow_comments SET DEFAULT 1")
 
     # Revert quota_alerts: acknowledged
     if _column_exists(op.get_bind(), "quota_alerts", "acknowledged"):
         op.execute("ALTER TABLE quota_alerts ALTER COLUMN acknowledged DROP DEFAULT")
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE quota_alerts
             ALTER COLUMN acknowledged TYPE INTEGER
             USING CASE WHEN acknowledged THEN 1 ELSE 0 END
-        """
-        )
+        """)
         op.execute("ALTER TABLE quota_alerts ALTER COLUMN acknowledged SET DEFAULT 0")
 
     # Revert prompt_templates
     if _column_exists(op.get_bind(), "prompt_templates", "is_featured"):
         op.execute("ALTER TABLE prompt_templates ALTER COLUMN is_featured DROP DEFAULT")
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE prompt_templates
             ALTER COLUMN is_featured TYPE INTEGER
             USING CASE WHEN is_featured THEN 1 ELSE 0 END
-        """
-        )
+        """)
         op.execute("ALTER TABLE prompt_templates ALTER COLUMN is_featured SET DEFAULT 0")
 
     if _column_exists(op.get_bind(), "prompt_templates", "is_public"):
         op.execute("ALTER TABLE prompt_templates ALTER COLUMN is_public DROP DEFAULT")
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE prompt_templates
             ALTER COLUMN is_public TYPE INTEGER
             USING CASE WHEN is_public THEN 1 ELSE 0 END
-        """
-        )
+        """)
         op.execute("ALTER TABLE prompt_templates ALTER COLUMN is_public SET DEFAULT 0")
 
     # Revert notification_preferences
     if _column_exists(op.get_bind(), "notification_preferences", "push_enabled"):
         op.execute("ALTER TABLE notification_preferences ALTER COLUMN push_enabled DROP DEFAULT")
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE notification_preferences
             ALTER COLUMN push_enabled TYPE INTEGER
             USING CASE WHEN push_enabled THEN 1 ELSE 0 END
-        """
-        )
+        """)
         op.execute("ALTER TABLE notification_preferences ALTER COLUMN push_enabled SET DEFAULT 1")
 
     if _column_exists(op.get_bind(), "notification_preferences", "email_enabled"):
         op.execute("ALTER TABLE notification_preferences ALTER COLUMN email_enabled DROP DEFAULT")
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE notification_preferences
             ALTER COLUMN email_enabled TYPE INTEGER
             USING CASE WHEN email_enabled THEN 1 ELSE 0 END
-        """
-        )
+        """)
         op.execute("ALTER TABLE notification_preferences ALTER COLUMN email_enabled SET DEFAULT 1")
 
     # Revert knowledge_base: is_published
     if _column_exists(op.get_bind(), "knowledge_base", "is_published"):
         op.execute("ALTER TABLE knowledge_base ALTER COLUMN is_published DROP DEFAULT")
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE knowledge_base
             ALTER COLUMN is_published TYPE INTEGER
             USING CASE WHEN is_published THEN 1 ELSE 0 END
-        """
-        )
+        """)
         op.execute("ALTER TABLE knowledge_base ALTER COLUMN is_published SET DEFAULT 0")
 
     # Revert audit_logs: success
     if _column_exists(op.get_bind(), "audit_logs", "success"):
         op.execute("ALTER TABLE audit_logs ALTER COLUMN success DROP DEFAULT")
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE audit_logs
             ALTER COLUMN success TYPE INTEGER
             USING CASE WHEN success THEN 1 ELSE 0 END
-        """
-        )
+        """)
         op.execute("ALTER TABLE audit_logs ALTER COLUMN success SET DEFAULT 1")
 
     # Revert alerts: read
     if _column_exists(op.get_bind(), "alerts", "read"):
         op.execute("ALTER TABLE alerts ALTER COLUMN read DROP DEFAULT")
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE alerts
             ALTER COLUMN read TYPE INTEGER
             USING CASE WHEN read THEN 1 ELSE 0 END
-        """
-        )
+        """)
         op.execute("ALTER TABLE alerts ALTER COLUMN read SET DEFAULT 0")
 
     # Revert users: must_change_password (only if was integer before)
@@ -389,11 +345,9 @@ def downgrade() -> None:
     # Revert users: is_admin
     if _column_exists(op.get_bind(), "users", "is_admin"):
         op.execute("ALTER TABLE users ALTER COLUMN is_admin DROP DEFAULT")
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE users
             ALTER COLUMN is_admin TYPE INTEGER
             USING CASE WHEN is_admin THEN 1 ELSE 0 END
-        """
-        )
+        """)
         op.execute("ALTER TABLE users ALTER COLUMN is_admin SET DEFAULT 0")

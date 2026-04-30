@@ -14,12 +14,10 @@ Prerequisites:
     3. Run alembic migrations first: alembic upgrade head
 """
 
-import json
 import logging
 import os
 import sqlite3
 import sys
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 # Add project root to path
@@ -262,7 +260,9 @@ def refresh_aggregated_tables():
 
     try:
         # Import here to avoid circular imports and allow standalone execution
-        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        sys.path.insert(
+            0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        )
         from app.repositories.daily_stats_repo import DailyStatsRepository
         from app.services.summary_service import SummaryService
 

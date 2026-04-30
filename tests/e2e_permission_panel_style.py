@@ -16,7 +16,6 @@ Run:
   HEADLESS=false python tests/e2e_permission_panel_style.py
 """
 
-import json
 import os
 import sys
 import time
@@ -130,7 +129,7 @@ def run_tests():
 
         try:
             _run_test(page, token, effective_webui_url, webui_token, captured_session_id)
-        except Exception as e:
+        except Exception:
             shot(page, "ERROR_final")
             traceback.print_exc()
             raise
@@ -279,10 +278,12 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
     log("Style", "  bg=%s text=%s" % (allow_bg, allow_text_color))
 
     # Selected = solid blue background (rgb(59, 130, 246) = blue-500) and white text
-    assert allow_bg != "rgba(0, 0, 0, 0)", \
-        "Allow button should have colored background when selected, got transparent"
-    assert "255" in allow_text_color or "255, 255, 255" in allow_text_color, \
+    assert (
+        allow_bg != "rgba(0, 0, 0, 0)"
+    ), "Allow button should have colored background when selected, got transparent"
+    assert "255" in allow_text_color or "255, 255, 255" in allow_text_color, (
         "Allow button text should be white when selected, got %s" % allow_text_color
+    )
     log("Style", "✓ '允许' has solid colored background + white text (selected)")
     shot(page, "S3_allow_selected")
 
@@ -309,10 +310,12 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
     permanent_text_color = _get_button_text_color(permanent_btn)
     log("Style", "  bg=%s text=%s" % (permanent_bg, permanent_text_color))
 
-    assert permanent_bg != "rgba(0, 0, 0, 0)", \
-        "Permanent button should have colored background when selected"
-    assert "255" in permanent_text_color or "255, 255, 255" in permanent_text_color, \
-        "Permanent button text should be white when selected"
+    assert (
+        permanent_bg != "rgba(0, 0, 0, 0)"
+    ), "Permanent button should have colored background when selected"
+    assert (
+        "255" in permanent_text_color or "255, 255, 255" in permanent_text_color
+    ), "Permanent button text should be white when selected"
     log("Style", "✓ '允许，且不再询问' has solid colored background + white text (selected)")
 
     # Previous button should lose selection
@@ -336,10 +339,10 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
     deny_text_color = _get_button_text_color(deny_btn)
     log("Style", "  bg=%s text=%s" % (deny_bg, deny_text_color))
 
-    assert deny_bg != "rgba(0, 0, 0, 0)", \
-        "Deny button should have colored background when selected"
-    assert "255" in deny_text_color or "255, 255, 255" in deny_text_color, \
-        "Deny button text should be white when selected"
+    assert deny_bg != "rgba(0, 0, 0, 0)", "Deny button should have colored background when selected"
+    assert (
+        "255" in deny_text_color or "255, 255, 255" in deny_text_color
+    ), "Deny button text should be white when selected"
     log("Style", "✓ '拒绝' has solid colored background + white text (selected)")
 
     # ════════════════════════════════════════════
@@ -356,10 +359,12 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
     deny_bg2 = _get_button_bg(deny_btn)
     log("Style", "  permanent bg=%s deny bg=%s" % (permanent_bg2, deny_bg2))
 
-    assert permanent_bg2 != "rgba(0, 0, 0, 0)", \
-        "Permanent button should be selected again after ArrowUp"
-    assert deny_bg2 == "rgba(0, 0, 0, 0)" or deny_bg2 != permanent_bg2, \
-        "Deny button should not be selected after ArrowUp"
+    assert (
+        permanent_bg2 != "rgba(0, 0, 0, 0)"
+    ), "Permanent button should be selected again after ArrowUp"
+    assert (
+        deny_bg2 == "rgba(0, 0, 0, 0)" or deny_bg2 != permanent_bg2
+    ), "Deny button should not be selected after ArrowUp"
     log("Style", "✓ ArrowUp correctly moves selection back")
 
     # ════════════════════════════════════════════
@@ -373,8 +378,7 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
     shot(page, "S7_back_to_blue")
 
     allow_bg2 = _get_button_bg(allow_btn)
-    assert allow_bg2 != "rgba(0, 0, 0, 0)", \
-        "Allow button should be selected again after ArrowUp"
+    assert allow_bg2 != "rgba(0, 0, 0, 0)", "Allow button should be selected again after ArrowUp"
     log("Style", "✓ ArrowUp cycles back to '允许'")
 
     # ════════════════════════════════════════════
@@ -392,8 +396,7 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
         texts = [command_spans.nth(i).text_content() for i in range(count)]
         log("Dup", "  Badge texts: %s" % texts)
         unique = set(texts)
-        assert len(unique) == len(texts), \
-            "Duplicate tool names found: %s" % texts
+        assert len(unique) == len(texts), "Duplicate tool names found: %s" % texts
     log("Dup", "✓ No duplicate tool names")
 
     # ════════════════════════════════════════════

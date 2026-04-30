@@ -6,11 +6,10 @@
 import os
 import sys
 import time
-import json
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from playwright.sync_api import sync_playwright, expect
+from playwright.sync_api import sync_playwright
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
@@ -75,11 +74,18 @@ def run_all_tests():
 
         # Console errors
         console_errors = []
-        page.on("console", lambda msg: console_errors.append(msg.text) if msg.type == "error" else None)
+        page.on(
+            "console", lambda msg: console_errors.append(msg.text) if msg.type == "error" else None
+        )
 
         # Network errors
         network_errors = []
-        page.on("response", lambda resp: network_errors.append(f"{resp.status} {resp.url}") if resp.status >= 400 else None)
+        page.on(
+            "response",
+            lambda resp: (
+                network_errors.append(f"{resp.status} {resp.url}") if resp.status >= 400 else None
+            ),
+        )
 
         # Login
         print("\n[1/17] 登录")
@@ -110,7 +116,9 @@ def run_all_tests():
                 for tool, data in api_data.items():
                     first = data.get("first_date", "")
                     last = data.get("last_date", "")
-                    print(f"    {tool}: {first} ~ {last}, total_tokens={data.get('total_tokens',0)}")
+                    print(
+                        f"    {tool}: {first} ~ {last}, total_tokens={data.get('total_tokens',0)}"
+                    )
                     if tool == "claude" and last < "2026-04-01":
                         add_issue(f"Dashboard-汇总数据-{tool}", f"数据过期: 最后日期是 {last}")
 
@@ -125,7 +133,7 @@ def run_all_tests():
                     reqs = item.get("request_count", 0)
                     print(f"    今日 {tool}: {tokens:,} tokens, {reqs} requests")
                     if tokens == 0:
-                        add_issue(f"Dashboard-今日数据-{tool}", f"今日 tokens=0")
+                        add_issue(f"Dashboard-今日数据-{tool}", "今日 tokens=0")
 
             if not wait_and_check(page, "canvas", timeout=5000):
                 add_issue("Dashboard-图表", "趋势图表未渲染")
@@ -163,7 +171,9 @@ def run_all_tests():
             screenshot(page, "06_conversation_history")
 
             start = time.time()
-            has_data = wait_and_check(page, "table tbody tr, .card, .conversation-item, .list-group-item", timeout=10000)
+            has_data = wait_and_check(
+                page, "table tbody tr, .card, .conversation-item, .list-group-item", timeout=10000
+            )
             elapsed = time.time() - start
             if elapsed > 8:
                 add_issue("对话历史-加载速度", f"加载耗时 {elapsed:.1f}s，过慢")
@@ -177,8 +187,12 @@ def run_all_tests():
             screenshot(page, "07_messages_before_filter")
 
             # Test sender filter exists
-            sender_input = page.locator("input[placeholder*='Search'], input[placeholder*='搜索'], input[placeholder*='Sender']")
-            filter_controls = page.locator("[class*='filter'], [class*='search'], input[type='text'], select")
+            sender_input = page.locator(
+                "input[placeholder*='Search'], input[placeholder*='搜索'], input[placeholder*='Sender']"
+            )
+            filter_controls = page.locator(
+                "[class*='filter'], [class*='search'], input[type='text'], select"
+            )
             if filter_controls.count() > 0:
                 print(f"  找到 {filter_controls.count()} 个筛选控件")
             else:
@@ -211,7 +225,9 @@ def run_all_tests():
                         if close_btn.count() > 0:
                             close_btn.first.click(force=True)
                         else:
-                            page.evaluate("document.querySelector('.modal.show')?.remove(); document.querySelector('.modal-backdrop')?.remove()")
+                            page.evaluate(
+                                "document.querySelector('.modal.show')?.remove(); document.querySelector('.modal-backdrop')?.remove()"
+                            )
                         page.wait_for_timeout(1000)
                     else:
                         add_issue("审计中心-详情按钮", "点击详情按钮后未弹出详情弹窗")
@@ -221,7 +237,9 @@ def run_all_tests():
                 print("  未找到详情按钮")
 
             # Switch to Analysis tab
-            analysis_tab = page.locator(".audit-center .nav-link:has-text('分析'), .audit-center .nav-link:has-text('Analysis')")
+            analysis_tab = page.locator(
+                ".audit-center .nav-link:has-text('分析'), .audit-center .nav-link:has-text('Analysis')"
+            )
             if analysis_tab.count() > 0:
                 print("  切换到分析Tab...")
                 analysis_tab.first.click()
@@ -274,7 +292,9 @@ def run_all_tests():
                 add_issue("安全中心-过滤规则", "过滤规则表格无数据")
 
             # Test create filter rule button
-            create_btn = page.locator("button:has-text('添加'), button:has-text('创建'), button:has-text('Create'), button:has-text('Add')")
+            create_btn = page.locator(
+                "button:has-text('添加'), button:has-text('创建'), button:has-text('Create'), button:has-text('Add')"
+            )
             if create_btn.count() > 0:
                 print("  测试创建过滤规则...")
                 try:
@@ -284,7 +304,10 @@ def run_all_tests():
                     modal = page.locator(".modal.show, .modal-dialog")
                     if modal.count() > 0 and modal.is_visible():
                         print("    OK - 创建规则弹窗显示")
-                        safe_click(page, ".modal .btn-close, .modal button:has-text('取消'), .modal button:has-text('Cancel')")
+                        safe_click(
+                            page,
+                            ".modal .btn-close, .modal button:has-text('取消'), .modal button:has-text('Cancel')",
+                        )
                         page.wait_for_timeout(1000)
                     else:
                         add_issue("安全中心-创建规则", "点击添加按钮后未弹出创建弹窗")

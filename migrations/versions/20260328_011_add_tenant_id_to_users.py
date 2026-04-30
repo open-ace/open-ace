@@ -13,8 +13,8 @@ This migration adds tenant_id column to users table for multi-tenant support:
 
 from typing import Union
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "011_add_tenant_id_to_users"
@@ -37,15 +37,13 @@ def upgrade() -> None:
 
     # For PostgreSQL, add foreign key constraint
     if is_postgresql:
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE users
             ADD CONSTRAINT fk_users_tenant
             FOREIGN KEY (tenant_id)
             REFERENCES tenants(id)
             ON DELETE SET NULL
-        """
-        )
+        """)
 
     # For SQLite, we need to recreate the table to add foreign key
     # SQLite doesn't support ALTER TABLE ADD CONSTRAINT

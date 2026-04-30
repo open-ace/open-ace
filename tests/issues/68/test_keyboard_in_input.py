@@ -12,11 +12,12 @@ Test script for Issue #68: Keyboard shortcut when focus is in iframe input
 - 当用户在输入框中打字时，能否用快捷键切换 tab
 """
 
-import sys
 import os
 import subprocess
-from playwright.sync_api import sync_playwright, TimeoutError
+import sys
 import time
+
+from playwright.sync_api import sync_playwright
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, project_root)
@@ -41,7 +42,7 @@ def ensure_service_running():
             ["python3", "web.py"],
             cwd="/Users/rhuang/workspace/open-ace",
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
+            stderr=subprocess.DEVNULL,
         )
         for i in range(30):
             time.sleep(1)
@@ -338,6 +339,7 @@ def test_keyboard_shortcut_in_input():
         except Exception as e:
             print(f"\n✗ 测试错误: {e}")
             import traceback
+
             traceback.print_exc()
             page.screenshot(path=f"{OUTPUT_DIR}/keyboard_error.png")
             return False

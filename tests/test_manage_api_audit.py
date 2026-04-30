@@ -5,8 +5,7 @@
 
 import os
 import sys
-import json
-import time
+
 import requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -45,9 +44,9 @@ def run_all_tests():
 
     # Login
     print("\n[1] 登录")
-    r = s.post(f"{BASE_URL}/api/auth/login",
-               json={"username": "admin", "password": "admin123"},
-               timeout=10)
+    r = s.post(
+        f"{BASE_URL}/api/auth/login", json={"username": "admin", "password": "admin123"}, timeout=10
+    )
     if r.status_code != 200 or not r.json().get("success"):
         print("  FAIL - 登录失败")
         return issues
@@ -59,7 +58,9 @@ def run_all_tests():
     if data:
         for tool, d in data.items():
             last = d.get("last_date", "")
-            print(f"  {tool}: {d.get('first_date','')} ~ {last}, tokens={d.get('total_tokens',0):,}")
+            print(
+                f"  {tool}: {d.get('first_date','')} ~ {last}, tokens={d.get('total_tokens',0):,}"
+            )
             if tool == "claude" and last < "2026-04-01":
                 add_issue(f"/api/summary ({tool})", f"数据过期: 最后日期 {last}")
 
@@ -96,12 +97,17 @@ def run_all_tests():
 
     # ============================================================
     print("\n[5] Messages API")
-    data = api_get("/api/messages?start_date=2026-04-22&end_date=2026-04-22&role=user&limit=3", timeout=30)
+    data = api_get(
+        "/api/messages?start_date=2026-04-22&end_date=2026-04-22&role=user&limit=3", timeout=30
+    )
     if data:
         print(f"  消息数: {data.get('total', 0)}, 返回: {len(data.get('messages', []))}")
 
     # Sender filter
-    data = api_get("/api/messages?start_date=2026-04-22&end_date=2026-04-22&sender=rhuang&role=user&limit=3", timeout=30)
+    data = api_get(
+        "/api/messages?start_date=2026-04-22&end_date=2026-04-22&sender=rhuang&role=user&limit=3",
+        timeout=30,
+    )
     if data:
         print(f"  Sender filter (rhuang): total={data.get('total', 0)}")
 
@@ -120,7 +126,9 @@ def run_all_tests():
             add_issue("/api/conversation-history", "无对话数据")
         if convs:
             c = convs[0]
-            print(f"  示例: {c.get('conversation_id','?')[:30]}..., messages={c.get('message_count',0)}")
+            print(
+                f"  示例: {c.get('conversation_id','?')[:30]}..., messages={c.get('message_count',0)}"
+            )
 
     # ============================================================
     print("\n[7] Audit Logs API")
@@ -144,7 +152,9 @@ def run_all_tests():
 
     data = api_get("/api/compliance/audit/security-score?days=30", timeout=30)
     if data:
-        print(f"  Score: {data.get('score')}, Grade: {data.get('grade')}, Anomalies: {data.get('anomaly_count')}")
+        print(
+            f"  Score: {data.get('score')}, Grade: {data.get('grade')}, Anomalies: {data.get('anomaly_count')}"
+        )
 
     data = api_get("/api/compliance/audit/anomalies?days=7", timeout=30)
     if data:
@@ -152,7 +162,9 @@ def run_all_tests():
 
     data = api_get("/api/compliance/audit/user/1/profile?days=30", timeout=30)
     if data:
-        print(f"  User 1 profile: actions={data.get('total_actions', 0)}, peak_hour={data.get('peak_activity_hour')}")
+        print(
+            f"  User 1 profile: actions={data.get('total_actions', 0)}, peak_hour={data.get('peak_activity_hour')}"
+        )
 
     # ============================================================
     print("\n[9] Alerts API")
@@ -174,7 +186,7 @@ def run_all_tests():
 
     data = api_get("/api/security-settings", timeout=15)
     if data:
-        print(f"  Security settings: OK")
+        print("  Security settings: OK")
 
     # ============================================================
     print("\n[11] Users API")
@@ -187,7 +199,7 @@ def run_all_tests():
     print("\n[12] Quota API")
     data = api_get("/api/quota/status", timeout=30)
     if data:
-        print(f"  Quota status: OK")
+        print("  Quota status: OK")
 
     # ============================================================
     print("\n[13] Compliance API")
@@ -229,7 +241,7 @@ def run_all_tests():
     print("\n[16] SSO Settings API")
     data = api_get("/api/sso/providers", timeout=15)
     if data:
-        print(f"  SSO providers: OK")
+        print("  SSO providers: OK")
 
     # ============================================================
     print("\n[17] Remote Machines API")

@@ -7,13 +7,14 @@ Work 页面 Sessions 列表加载性能测试
 3. 列表项数量验证
 """
 
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from playwright.sync_api import sync_playwright, expect
 import time
+
+from playwright.sync_api import sync_playwright
 
 # 配置
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000")
@@ -73,27 +74,31 @@ def test_work_sessions_list_performance():
             print("\n步骤 2: 导航到 Work 页面")
             work_start = time.time()
             # 点击 Work 导航按钮
-            work_btn = page.locator('.sidebar button:has-text("Work"), .sidebar button:has-text("工作")')
+            work_btn = page.locator(
+                '.sidebar button:has-text("Work"), .sidebar button:has-text("工作")'
+            )
             if work_btn.count() > 0:
                 work_btn.click()
             else:
                 # 直接导航到 /work
                 page.goto(f"{BASE_URL}/work")
-            
+
             # 等待页面加载
-            page.wait_for_selector(".work-page, .session-list, [data-testid='session-list']", timeout=15000)
+            page.wait_for_selector(
+                ".work-page, .session-list, [data-testid='session-list']", timeout=15000
+            )
             work_load_time = time.time() - work_start
             print(f"  ✓ Work 页面加载成功 (耗时: {work_load_time:.2f}s)")
             performance_metrics["work_page_load"] = work_load_time
             results.append(("Work 页面加载", True, f"{work_load_time:.2f}s"))
-            
+
             # 等待 sessions 列表加载完成
             time.sleep(0.5)  # 等待数据加载
             screenshots.append(save_screenshot(page, "01_work_page_loaded"))
 
             # 3. 检查 Sessions 列表
             print("\n步骤 3: 检查 Sessions 列表")
-            
+
             # 尝试多种选择器来定位 sessions 列表
             session_list_selectors = [
                 ".session-list",
@@ -102,31 +107,39 @@ def test_work_sessions_list_performance():
                 ".work-page .list-group",
                 ".work-page .card .list-group",
             ]
-            
+
             session_list = None
             for selector in session_list_selectors:
                 if page.locator(selector).count() > 0:
                     session_list = page.locator(selector)
                     print(f"  使用选择器: {selector}")
                     break
-            
+
             if session_list:
                 # 检查列表项数量
-                session_items = session_list.locator(".list-group-item, .session-item, [data-testid='session-item']")
+                session_items = session_list.locator(
+                    ".list-group-item, .session-item, [data-testid='session-item']"
+                )
                 item_count = session_items.count()
                 print(f"  找到 {item_count} 个 session 项")
                 screenshots.append(save_screenshot(page, "02_sessions_list"))
-                
+
                 # 性能要求：sessions 列表应该在 1 秒内加载完成
                 if work_load_time < 1.0:
-                    results.append(("Sessions 列表加载性能", True, f"{work_load_time:.2f}s (< 1s 要求)"))
+                    results.append(
+                        ("Sessions 列表加载性能", True, f"{work_load_time:.2f}s (< 1s 要求)")
+                    )
                 else:
-                    results.append(("Sessions 列表加载性能", False, f"{work_load_time:.2f}s (> 1s 要求)"))
-                
+                    results.append(
+                        ("Sessions 列表加载性能", False, f"{work_load_time:.2f}s (> 1s 要求)")
+                    )
+
                 results.append(("Session 列表项数量", True, f"{item_count} 个"))
             else:
                 # 检查是否显示空状态
-                empty_state = page.locator('.empty-state, .text-center:has-text("No sessions"), .text-muted')
+                empty_state = page.locator(
+                    '.empty-state, .text-center:has-text("No sessions"), .text-muted'
+                )
                 if empty_state.count() > 0:
                     print("  显示空状态提示")
                     screenshots.append(save_screenshot(page, "02_empty_state"))
@@ -142,15 +155,15 @@ def test_work_sessions_list_performance():
                 # 滚动到底部触发加载更多
                 session_list.evaluate("el => el.scrollTop = el.scrollHeight")
                 time.sleep(1)
-                
+
                 new_item_count = session_list.locator(".list-group-item, .session-item").count()
                 if new_item_count > item_count:
                     print(f"  ✓ 加载更多成功: {item_count} -> {new_item_count}")
                     results.append(("滚动加载更多", True, f"{item_count} -> {new_item_count}"))
                 else:
-                    print(f"  未触发加载更多 (可能已加载全部)")
+                    print("  未触发加载更多 (可能已加载全部)")
                     results.append(("滚动加载更多", True, "已加载全部"))
-                
+
                 screenshots.append(save_screenshot(page, "03_after_scroll"))
 
             # 5. 测试点击 session 项

@@ -10,11 +10,11 @@ Test for Issue #98: 刷新后数据没有变化
 """
 
 import asyncio
-import time
-import os
 import json
-import psycopg2
+import os
 from datetime import datetime
+
+import psycopg2
 from playwright.async_api import async_playwright
 
 BASE_URL = "http://localhost:5000"
@@ -149,13 +149,13 @@ async def test_data_update():
             print("\n[Step 7] Checking for new message...")
 
             # Check if test message appears (search for partial content)
-            test_msg_locator = page.locator(f'.message-item:has-text("TEST MESSAGE")')
+            test_msg_locator = page.locator('.message-item:has-text("TEST MESSAGE")')
             test_msg_count = await test_msg_locator.count()
 
             if test_msg_count > 0:
-                print(f"  ✓ Test message found in UI!")
+                print("  ✓ Test message found in UI!")
             else:
-                print(f"  ✗ Test message NOT found in UI")
+                print("  ✗ Test message NOT found in UI")
 
                 # Check current messages
                 messages_after = await page.locator(".message-item").count()
@@ -163,13 +163,11 @@ async def test_data_update():
 
                 # Check API directly
                 print("\n  Checking API directly...")
-                api_response = await page.evaluate(
-                    """async () => {
+                api_response = await page.evaluate("""async () => {
                     const response = await fetch('/api/messages?limit=100&role=user,assistant,system');
                     const data = await response.json();
                     return data;
-                }"""
-                )
+                }""")
 
                 if api_response and "messages" in api_response:
                     print(f"  API returned {len(api_response['messages'])} messages")

@@ -54,7 +54,17 @@ def run_fetch_scripts():
                 config_path = os.path.expanduser("~/.open-ace/config.json")
 
                 result = subprocess.run(
-                    ["sudo", "-n", "/usr/bin/python3", qwen_script, "--days", "1", "--multi-user", "--config", config_path],
+                    [
+                        "sudo",
+                        "-n",
+                        "/usr/bin/python3",
+                        qwen_script,
+                        "--days",
+                        "1",
+                        "--multi-user",
+                        "--config",
+                        config_path,
+                    ],
                     capture_output=True,
                     text=True,
                     timeout=300,  # 5 minutes timeout
@@ -77,7 +87,17 @@ def run_fetch_scripts():
         if os.path.exists(claude_script):
             try:
                 result = subprocess.run(
-                    ["sudo", "-n", "/usr/bin/python3", claude_script, "--days", "1", "--multi-user", "--config", config_path],
+                    [
+                        "sudo",
+                        "-n",
+                        "/usr/bin/python3",
+                        claude_script,
+                        "--days",
+                        "1",
+                        "--multi-user",
+                        "--config",
+                        config_path,
+                    ],
                     capture_output=True,
                     text=True,
                     timeout=300,
@@ -100,7 +120,19 @@ def run_fetch_scripts():
         if os.path.exists(openclaw_script):
             try:
                 result = subprocess.run(
-                    ["sudo", "-n", "/usr/bin/python3", openclaw_script, "--days", "1", "--mode", "messages", "--multi-user", "--config", config_path],
+                    [
+                        "sudo",
+                        "-n",
+                        "/usr/bin/python3",
+                        openclaw_script,
+                        "--days",
+                        "1",
+                        "--mode",
+                        "messages",
+                        "--multi-user",
+                        "--config",
+                        config_path,
+                    ],
                     capture_output=True,
                     text=True,
                     timeout=300,
