@@ -10,6 +10,7 @@ import os
 import subprocess
 
 import bcrypt
+
 from flask import Blueprint, jsonify, request
 
 from app.repositories.usage_repo import UsageRepository
@@ -56,7 +57,9 @@ def ensure_system_user(system_account: str, uid: int = None) -> bool:
     base_dir = get_workspace_base_dir()
 
     # Check if user already exists
-    result = subprocess.run(["id", system_account], capture_output=True, text=True)
+    result = subprocess.run(
+        ["id", system_account], capture_output=True, text=True
+    )
     if result.returncode == 0:
         logger.info(f"System user {system_account} already exists")
         # Still ensure workspace directories exist
@@ -96,8 +99,12 @@ def _ensure_workspace_dirs(system_account: str, base_dir: str):
 
     # Set ownership
     try:
-        uid_result = subprocess.run(["id", "-u", system_account], capture_output=True, text=True)
-        gid_result = subprocess.run(["id", "-g", system_account], capture_output=True, text=True)
+        uid_result = subprocess.run(
+            ["id", "-u", system_account], capture_output=True, text=True
+        )
+        gid_result = subprocess.run(
+            ["id", "-g", system_account], capture_output=True, text=True
+        )
         if uid_result.returncode == 0 and gid_result.returncode == 0:
             uid = int(uid_result.stdout.strip())
             gid = int(gid_result.stdout.strip())
@@ -172,9 +179,7 @@ def api_create_user():
     # Create user
     password_hash = hash_password(password)
     system_account = data.get("system_account")
-    user_id = user_repo.create_user(
-        username, email, password_hash, role, system_account=system_account
-    )
+    user_id = user_repo.create_user(username, email, password_hash, role, system_account=system_account)
 
     if user_id:
         # Auto-create system user for workspace if system_account is provided
@@ -183,9 +188,7 @@ def api_create_user():
             if ensure_system_user(system_account, uid=uid):
                 logger.info(f"System user {system_account} ready for workspace")
             else:
-                logger.warning(
-                    f"Failed to create system user {system_account}, workspace may not work"
-                )
+                logger.warning(f"Failed to create system user {system_account}, workspace may not work")
         return jsonify({"success": True, "user_id": user_id}), 201
 
     return jsonify({"error": "Failed to create user"}), 500

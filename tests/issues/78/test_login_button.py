@@ -7,11 +7,10 @@ Issue: Sign In button is not visible on login page.
 Fix: Fix CSS syntax error - missing ':root' selector prefix.
 """
 
-import os
-import sys
-from datetime import datetime
-
 import pytest
+import sys
+import os
+from datetime import datetime
 
 # Get project root directory
 PROJECT_ROOT = os.path.dirname(

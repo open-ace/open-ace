@@ -5,9 +5,9 @@ Open ACE - Auth Routes
 API routes for authentication operations.
 """
 
+import bcrypt
 import logging
 
-import bcrypt
 from flask import Blueprint, jsonify, make_response, request
 
 from app.repositories.user_repo import UserRepository
@@ -67,9 +67,7 @@ def api_login():
                 user_data = user_repo.get_user_by_id(user_id)
                 system_account = user_data.get("system_account") or user_data.get("username")
                 if user_id and system_account:
-                    logger.info(
-                        f"Pre-starting webui for user {user_id} ({system_account}) on login"
-                    )
+                    logger.info(f"Pre-starting webui for user {user_id} ({system_account}) on login")
                     manager.prestart_user_instance_async(user_id, system_account)
         except Exception as e:
             logger.warning(f"Failed to pre-start webui on login: {e}")

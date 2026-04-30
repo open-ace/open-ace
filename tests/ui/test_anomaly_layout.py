@@ -11,16 +11,15 @@ Usage:
     python3 tests/ui/test_anomaly_layout.py
 """
 
-import os
 import sys
+import os
 
 # Add the project root to the path
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, project_root)
 
-import time
-
 from playwright.sync_api import sync_playwright
+import time
 
 # Test configuration
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000/")
@@ -95,7 +94,7 @@ def test_anomaly_detection_layout():
             anomaly_section = page.locator(".anomaly-detection")
             if anomaly_section.count() == 0:
                 print("⚠ .anomaly-detection section not found, checking page content...")
-                page.content()
+                page_content = page.content()
                 print(f"  Page URL: {page.url}")
                 # Check for any error messages
                 error_msg = page.locator(".alert-danger, .error-message")
@@ -171,7 +170,7 @@ def test_anomaly_detection_layout():
                         print("✓ overflow-x is hidden - no visible scrollbar")
                         results["no_horizontal_scrollbar"] = True
                     else:
-                        print("✗ Horizontal scrollbar may be visible")
+                        print(f"✗ Horizontal scrollbar may be visible")
             else:
                 print("⚠ Table container not found (may be empty state)")
                 # If no table, consider it passed (no scrollbar needed)

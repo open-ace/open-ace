@@ -3,9 +3,9 @@
 Test script to measure query performance for trend analysis optimization.
 """
 
-import os
-import sys
 import time
+import sys
+import os
 
 # Add project root to path
 sys.path.insert(
@@ -14,7 +14,7 @@ sys.path.insert(
 
 from app.repositories.message_repo import MessageRepository
 from app.repositories.usage_repo import UsageRepository
-from app.utils.helpers import get_days_ago, get_today
+from app.utils.helpers import get_today, get_days_ago
 
 
 def measure_query(name, func, *args, **kwargs):

@@ -6,10 +6,10 @@ A unified command-line interface for querying token usage data.
 """
 
 import argparse
-import os
 import sys
-from collections import defaultdict
+import os
 from typing import Optional
+from collections import defaultdict
 
 # Add shared directory to path
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -18,7 +18,7 @@ shared_dir = os.path.join(script_dir, "scripts")
 if shared_dir not in sys.path:
     sys.path.insert(0, shared_dir)
 
-from shared import db, email_notifier, utils
+from shared import db, utils, email_notifier
 from shared.config import CONFIG_DIR, CONFIG_PATH
 
 
@@ -184,8 +184,8 @@ def cmd_report() -> None:
 
 def cmd_config(action: str) -> None:
     """Handle configuration management."""
-    import json
     import os
+    import json
 
     config_dir = CONFIG_DIR
     config_path = CONFIG_PATH
@@ -213,7 +213,7 @@ def cmd_config(action: str) -> None:
         # Copy sample config
         sample_path = os.path.join(script_dir, "config", "settings.json.sample")
         if os.path.exists(sample_path):
-            with open(sample_path) as src:
+            with open(sample_path, "r") as src:
                 config = json.load(src)
             with open(config_path, "w") as dst:
                 json.dump(config, dst, indent=2)

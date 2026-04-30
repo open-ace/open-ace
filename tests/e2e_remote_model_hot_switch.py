@@ -23,8 +23,6 @@ import traceback
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
-import contextlib
-
 import requests
 
 # ── Config ──
@@ -43,9 +41,8 @@ def log(tag, msg):
 
 
 def api_login():
-    r = requests.post(
-        f"{BASE_URL}/api/auth/login", json={"username": TEST_USER, "password": TEST_PASS}
-    )
+    r = requests.post(f"{BASE_URL}/api/auth/login",
+                      json={"username": TEST_USER, "password": TEST_PASS})
     assert r.status_code == 200, f"Login failed: {r.status_code}"
     tok = r.cookies.get("session_token")
     assert tok, "No session_token cookie"
@@ -53,7 +50,8 @@ def api_login():
 
 
 def find_remote_machine(tok):
-    r = requests.get(f"{BASE_URL}/api/remote/machines/available", cookies={"session_token": tok})
+    r = requests.get(f"{BASE_URL}/api/remote/machines/available",
+                     cookies={"session_token": tok})
     assert r.status_code == 200
     machines = r.json().get("machines", [])
     for m in machines:
@@ -69,7 +67,8 @@ def wait_for_response(tok, sid, timeout=RESPONSE_TIMEOUT):
     last_output_len = 0
 
     while time.time() - start < timeout:
-        r = requests.get(f"{BASE_URL}/api/remote/sessions/{sid}", cookies={"session_token": tok})
+        r = requests.get(f"{BASE_URL}/api/remote/sessions/{sid}",
+                         cookies={"session_token": tok})
         if r.status_code != 200:
             time.sleep(2)
             continue
@@ -108,10 +107,7 @@ def wait_for_response(tok, sid, timeout=RESPONSE_TIMEOUT):
                                     content_summary = r_item.get("text", "")[:80]
 
                     parsed_events.append((evt_type, content_summary))
-                    log(
-                        "Event",
-                        f"type={evt_type} {content_summary[:60] if content_summary else ''}",
-                    )
+                    log("Event", f"type={evt_type} {content_summary[:60] if content_summary else ''}")
 
                     if evt_type == "result":
                         return True, parsed_events
@@ -129,16 +125,16 @@ def wait_for_response(tok, sid, timeout=RESPONSE_TIMEOUT):
 
 def cleanup_session(tok, sid):
     if sid:
-        with contextlib.suppress(Exception):
-            requests.post(
-                f"{BASE_URL}/api/remote/sessions/{sid}/stop", cookies={"session_token": tok}
-            )
+        try:
+            requests.post(f"{BASE_URL}/api/remote/sessions/{sid}/stop",
+                          cookies={"session_token": tok})
+        except Exception:
+            pass
 
 
 # ════════════════════════════════════════════
 #  Main Test
 # ════════════════════════════════════════════
-
 
 def run_tests():
     global session_id, token
@@ -161,7 +157,7 @@ def run_tests():
         cleanup_session(token, session_id)
 
     print(f"\n{'='*60}")
-    print("  ALL PASSED!")
+    print(f"  ALL PASSED!")
     print(f"{'='*60}")
 
 
@@ -173,15 +169,12 @@ def _run_all(machine_id):
     # ════════════════════════════════════════════
 
     print("\n══════ A1. Verify Model-Switch Route Exists ══════")
-    r = requests.put(
-        f"{BASE_URL}/api/remote/sessions/nonexistent/model",
-        json={"model": "test"},
-        cookies={"session_token": token},
-    )
+    r = requests.put(f"{BASE_URL}/api/remote/sessions/nonexistent/model",
+                     json={"model": "test"},
+                     cookies={"session_token": token})
     # Should be 404 (session not found), not 405 (method not allowed)
-    assert (
-        r.status_code != 405
-    ), f"PUT /sessions/<id>/model returned 405 — route not registered! Got {r.status_code}"
+    assert r.status_code != 405, \
+        f"PUT /sessions/<id>/model returned 405 — route not registered! Got {r.status_code}"
     log("Route", f"Route registered (got {r.status_code} for fake session, expected)")
 
     # ════════════════════════════════════════════
@@ -189,17 +182,15 @@ def _run_all(machine_id):
     # ════════════════════════════════════════════
 
     print("\n══════ B1. Create Remote Session ══════")
-    r = requests.post(
-        f"{BASE_URL}/api/remote/sessions",
-        json={
-            "machine_id": machine_id,
-            "project_path": "/root",
-            "cli_tool": "qwen-code-cli",
-            "model": "qwen3.5-plus",
-            "title": "E2E Model Hot-Switch Test",
-        },
-        cookies={"session_token": token},
-    )
+    r = requests.post(f"{BASE_URL}/api/remote/sessions",
+                      json={
+                          "machine_id": machine_id,
+                          "project_path": "/root",
+                          "cli_tool": "qwen-code-cli",
+                          "model": "qwen3.5-plus",
+                          "title": "E2E Model Hot-Switch Test",
+                      },
+                      cookies={"session_token": token})
     assert r.status_code == 200, f"Create session failed: {r.status_code} {r.text}"
     session_id = r.json()["session"]["session_id"]
     model_before = r.json()["session"].get("model", "")
@@ -211,11 +202,9 @@ def _run_all(machine_id):
     # ════════════════════════════════════════════
 
     print("\n══════ C1. Send First Message ══════")
-    r = requests.post(
-        f"{BASE_URL}/api/remote/sessions/{session_id}/chat",
-        json={"content": "回复 hello"},
-        cookies={"session_token": token},
-    )
+    r = requests.post(f"{BASE_URL}/api/remote/sessions/{session_id}/chat",
+                      json={"content": "回复 hello"},
+                      cookies={"session_token": token})
     assert r.status_code == 200, f"Send message failed: {r.status_code}"
     log("Message", "Sent: '回复 hello'")
 
@@ -224,9 +213,8 @@ def _run_all(machine_id):
     log("Response", f"Got response ({len(events1)} events)")
 
     # Count messages before switch
-    r = requests.get(
-        f"{BASE_URL}/api/remote/sessions/{session_id}", cookies={"session_token": token}
-    )
+    r = requests.get(f"{BASE_URL}/api/remote/sessions/{session_id}",
+                     cookies={"session_token": token})
     output_before = len(r.json().get("session", {}).get("output", []))
     log("Before", f"Output lines before switch: {output_before}")
 
@@ -235,11 +223,9 @@ def _run_all(machine_id):
     # ════════════════════════════════════════════
 
     print("\n══════ D1. Switch Model via PUT API ══════")
-    r = requests.put(
-        f"{BASE_URL}/api/remote/sessions/{session_id}/model",
-        json={"model": "qwen3-plus"},
-        cookies={"session_token": token},
-    )
+    r = requests.put(f"{BASE_URL}/api/remote/sessions/{session_id}/model",
+                     json={"model": "qwen3-plus"},
+                     cookies={"session_token": token})
     assert r.status_code == 200, f"Switch model failed: {r.status_code} {r.text}"
     assert r.json().get("success"), f"Switch model returned non-success: {r.json()}"
     log("Switch", "Model switched to qwen3-plus")
@@ -249,17 +235,14 @@ def _run_all(machine_id):
     # ════════════════════════════════════════════
 
     print("\n══════ E1. Verify Session ID Unchanged ══════")
-    r = requests.get(
-        f"{BASE_URL}/api/remote/sessions/{session_id}", cookies={"session_token": token}
-    )
+    r = requests.get(f"{BASE_URL}/api/remote/sessions/{session_id}",
+                     cookies={"session_token": token})
     assert r.status_code == 200, f"Get session failed: {r.status_code}"
     sess = r.json().get("session", {})
-    assert (
-        sess.get("session_id") == session_id
-    ), f"Session ID changed! {sess.get('session_id')} != {session_id}"
-    assert (
-        sess.get("model") == "qwen3-plus"
-    ), f"Model not updated in session! Got: {sess.get('model')}"
+    assert sess.get("session_id") == session_id, \
+        f"Session ID changed! {sess.get('session_id')} != {session_id}"
+    assert sess.get("model") == "qwen3-plus", \
+        f"Model not updated in session! Got: {sess.get('model')}"
     log("Verify", f"Session ID unchanged: {session_id[:8]}...")
     log("Verify", f"Model updated in DB: {sess.get('model')}")
 
@@ -271,11 +254,9 @@ def _run_all(machine_id):
     time.sleep(12)  # Wait for CLI subprocess to restart with new model
 
     print("\n══════ F2. Send Second Message ══════")
-    r = requests.post(
-        f"{BASE_URL}/api/remote/sessions/{session_id}/chat",
-        json={"content": "回复 goodbye"},
-        cookies={"session_token": token},
-    )
+    r = requests.post(f"{BASE_URL}/api/remote/sessions/{session_id}/chat",
+                      json={"content": "回复 goodbye"},
+                      cookies={"session_token": token})
     assert r.status_code == 200, f"Second message failed: {r.status_code}"
     log("Message", "Sent: '回复 goodbye'")
 
@@ -288,9 +269,8 @@ def _run_all(machine_id):
     # ════════════════════════════════════════════
 
     print("\n══════ G1. Verify Session Still Active ══════")
-    r = requests.get(
-        f"{BASE_URL}/api/remote/sessions/{session_id}", cookies={"session_token": token}
-    )
+    r = requests.get(f"{BASE_URL}/api/remote/sessions/{session_id}",
+                     cookies={"session_token": token})
     sess = r.json().get("session", {})
     output_after = len(sess.get("output", []))
     log("After", f"Output lines after switch+msg: {output_after}")
@@ -307,29 +287,23 @@ def _run_all(machine_id):
     print("\n══════ H1. Verify Edge Cases ══════")
 
     # Switch to same model should be no-op
-    r = requests.put(
-        f"{BASE_URL}/api/remote/sessions/{session_id}/model",
-        json={"model": "qwen3-plus"},
-        cookies={"session_token": token},
-    )
+    r = requests.put(f"{BASE_URL}/api/remote/sessions/{session_id}/model",
+                     json={"model": "qwen3-plus"},
+                     cookies={"session_token": token})
     assert r.status_code == 200, f"Same-model switch failed: {r.status_code}"
     log("Edge", "Switch to same model: no-op OK")
 
     # Switch without model param should return 400
-    r = requests.put(
-        f"{BASE_URL}/api/remote/sessions/{session_id}/model",
-        json={},
-        cookies={"session_token": token},
-    )
+    r = requests.put(f"{BASE_URL}/api/remote/sessions/{session_id}/model",
+                     json={},
+                     cookies={"session_token": token})
     assert r.status_code == 400, f"Missing model should return 400, got {r.status_code}"
     log("Edge", "Missing model param: 400 OK")
 
     # Switch on nonexistent session should fail (404 from session lookup)
-    r = requests.put(
-        f"{BASE_URL}/api/remote/sessions/nonexistent/model",
-        json={"model": "test"},
-        cookies={"session_token": token},
-    )
+    r = requests.put(f"{BASE_URL}/api/remote/sessions/nonexistent/model",
+                     json={"model": "test"},
+                     cookies={"session_token": token})
     assert r.status_code in (400, 404), f"Fake session should return error, got {r.status_code}"
     log("Edge", "Nonexistent session: error OK")
 

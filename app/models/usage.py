@@ -7,7 +7,7 @@ Data models for usage tracking.
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
 
 @dataclass
@@ -22,7 +22,7 @@ class Usage:
     output_tokens: int = 0
     cache_tokens: int = 0
     request_count: int = 0
-    models_used: Optional[list[str]] = None
+    models_used: Optional[List[str]] = None
     id: Optional[int] = None
     created_at: Optional[datetime] = None
 
@@ -72,7 +72,7 @@ class DailyUsage:
     total_output_tokens: int = 0
     total_cache_tokens: int = 0
     total_requests: int = 0
-    tools: list[Usage] = field(default_factory=list)
+    tools: List[Usage] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -98,8 +98,8 @@ class UsageSummary:
     total_cache_tokens: int = 0
     total_requests: int = 0
     days_active: int = 0
-    hosts: list[str] = field(default_factory=list)
-    models_used: list[str] = field(default_factory=list)
+    hosts: List[str] = field(default_factory=list)
+    models_used: List[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""

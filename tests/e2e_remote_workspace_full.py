@@ -47,16 +47,16 @@ Run:
   HEADLESS=false python tests/e2e_remote_workspace_full.py   # 可视化演示
 """
 
+import json
 import os
 import sys
 import time
 import uuid
+import traceback
 
 # ── 项目根目录 ──────────────────────────────────────────
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
-
-import contextlib
 
 import requests
 from playwright.sync_api import sync_playwright
@@ -71,12 +71,12 @@ ADMIN_USER = "admin"
 ADMIN_PASS = "admin123"
 NORMAL_USER = "黄迎春"
 NORMAL_PASS = "admin123"
-NORMAL_USER_ID = 89  # 黄迎春的 user_id
-TESTUSER_ID = 86  # testuser 的 user_id
+NORMAL_USER_ID = 89          # 黄迎春的 user_id
+TESTUSER_ID = 86             # testuser 的 user_id
 
 # ── 测试状态 ────────────────────────────────────────────
-machine_ids = []  # 所有已注册的 machine_id
-api_key_ids = []  # 所有已创建的 API key id
+machine_ids = []              # 所有已注册的 machine_id
+api_key_ids = []              # 所有已创建的 API key id
 session_id = None
 
 # ── 计数 ────────────────────────────────────────────────
@@ -89,10 +89,8 @@ STEPS = []
 #  工具函数
 # ════════════════════════════════════════════════════════
 
-
 def ensure_dir():
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
-
 
 def shot(page, name):
     ensure_dir()
@@ -100,20 +98,17 @@ def shot(page, name):
     page.screenshot(path=path, full_page=True)
     print(f"    📸 {name}.png")
 
-
 def pause(seconds):
     if not HEADLESS:
         time.sleep(seconds)
     else:
         time.sleep(0.3)
 
-
 def passed(step_name, detail=""):
     global PASS
     PASS += 1
     STEPS.append(("PASS", step_name, detail))
     print(f"  ✅ {step_name}" + (f" — {detail}" if detail else ""))
-
 
 def failed(step_name, detail=""):
     global FAIL
@@ -124,155 +119,115 @@ def failed(step_name, detail=""):
 
 # ── API 辅助 ────────────────────────────────────────────
 
-
 def api_login(username, password):
-    r = requests.post(
-        f"{BASE_URL}/api/auth/login", json={"username": username, "password": password}
-    )
+    r = requests.post(f"{BASE_URL}/api/auth/login",
+                      json={"username": username, "password": password})
     assert r.status_code == 200, f"Login failed for {username}: {r.status_code}"
     return r.cookies.get("session_token")
 
-
 def api_gen_reg_token(admin_token):
-    r = requests.post(
-        f"{BASE_URL}/api/remote/machines/register",
-        json={"tenant_id": 1},
-        cookies={"session_token": admin_token},
-    )
+    r = requests.post(f"{BASE_URL}/api/remote/machines/register",
+                      json={"tenant_id": 1},
+                      cookies={"session_token": admin_token})
     assert r.status_code == 200
     return r.json()["registration_token"]
-
 
 def api_register_machine(admin_token, name, hostname, os_type="linux"):
     mid = str(uuid.uuid4())
     reg_token = api_gen_reg_token(admin_token)
-    r = requests.post(
-        f"{BASE_URL}/api/remote/agent/register",
-        json={
-            "registration_token": reg_token,
-            "machine_id": mid,
-            "machine_name": name,
-            "hostname": hostname,
-            "os_type": os_type,
-            "os_version": "Ubuntu 24.04",
-            "capabilities": {"cpu_cores": 8, "memory_gb": 32, "gpu": True},
-            "agent_version": "1.0.0-e2e",
-        },
-    )
+    r = requests.post(f"{BASE_URL}/api/remote/agent/register", json={
+        "registration_token": reg_token,
+        "machine_id": mid,
+        "machine_name": name,
+        "hostname": hostname,
+        "os_type": os_type,
+        "os_version": "Ubuntu 24.04",
+        "capabilities": {"cpu_cores": 8, "memory_gb": 32, "gpu": True},
+        "agent_version": "1.0.0-e2e",
+    })
     assert r.status_code == 200, f"Register failed: {r.text}"
     # HTTP connect
-    requests.post(
-        f"{BASE_URL}/api/remote/agent/message",
-        json={
-            "type": "register",
-            "machine_id": mid,
-            "capabilities": {"cpu_cores": 8, "memory_gb": 32},
-        },
-    )
+    requests.post(f"{BASE_URL}/api/remote/agent/message", json={
+        "type": "register",
+        "machine_id": mid,
+        "capabilities": {"cpu_cores": 8, "memory_gb": 32},
+    })
     # heartbeat
-    requests.post(
-        f"{BASE_URL}/api/remote/agent/message",
-        json={
-            "type": "heartbeat",
-            "machine_id": mid,
-            "status": "idle",
-            "active_sessions": 0,
-        },
-    )
+    requests.post(f"{BASE_URL}/api/remote/agent/message", json={
+        "type": "heartbeat",
+        "machine_id": mid,
+        "status": "idle",
+        "active_sessions": 0,
+    })
     machine_ids.append(mid)
     return mid
 
-
 def api_assign_user(admin_token, machine_id, user_id, permission="user"):
-    r = requests.post(
-        f"{BASE_URL}/api/remote/machines/{machine_id}/assign",
-        json={"user_id": user_id, "permission": permission},
-        cookies={"session_token": admin_token},
-    )
+    r = requests.post(f"{BASE_URL}/api/remote/machines/{machine_id}/assign",
+                      json={"user_id": user_id, "permission": permission},
+                      cookies={"session_token": admin_token})
     return r.status_code == 200
-
 
 def api_revoke_user(admin_token, machine_id, user_id):
-    r = requests.delete(
-        f"{BASE_URL}/api/remote/machines/{machine_id}/assign/{user_id}",
-        cookies={"session_token": admin_token},
-    )
+    r = requests.delete(f"{BASE_URL}/api/remote/machines/{machine_id}/assign/{user_id}",
+                        cookies={"session_token": admin_token})
     return r.status_code == 200
-
 
 def api_get_machine_users(admin_token, machine_id):
-    r = requests.get(
-        f"{BASE_URL}/api/remote/machines/{machine_id}/users", cookies={"session_token": admin_token}
-    )
+    r = requests.get(f"{BASE_URL}/api/remote/machines/{machine_id}/users",
+                     cookies={"session_token": admin_token})
     return r.json().get("users", [])
 
-
 def api_store_key(admin_token, provider, key_name, api_key="sk-test-e2e-xxx"):
-    r = requests.post(
-        f"{BASE_URL}/api/remote/api-keys",
-        json={"provider": provider, "key_name": key_name, "api_key": api_key, "tenant_id": 1},
-        cookies={"session_token": admin_token},
-    )
+    r = requests.post(f"{BASE_URL}/api/remote/api-keys",
+                      json={"provider": provider, "key_name": key_name,
+                            "api_key": api_key, "tenant_id": 1},
+                      cookies={"session_token": admin_token})
     assert r.status_code == 200, f"Store key failed: {r.text}"
 
-
 def api_list_keys(admin_token):
-    r = requests.get(
-        f"{BASE_URL}/api/remote/api-keys?tenant_id=1", cookies={"session_token": admin_token}
-    )
+    r = requests.get(f"{BASE_URL}/api/remote/api-keys?tenant_id=1",
+                     cookies={"session_token": admin_token})
     return r.json().get("keys", [])
 
-
 def api_delete_key(admin_token, key_id):
-    r = requests.delete(
-        f"{BASE_URL}/api/remote/api-keys/{key_id}",
-        json={"tenant_id": 1},
-        cookies={"session_token": admin_token},
-    )
+    r = requests.delete(f"{BASE_URL}/api/remote/api-keys/{key_id}",
+                        json={"tenant_id": 1},
+                        cookies={"session_token": admin_token})
     return r.status_code == 200
-
 
 def api_create_session(token, machine_id):
     global session_id
-    r = requests.post(
-        f"{BASE_URL}/api/remote/sessions",
-        json={
-            "machine_id": machine_id,
-            "project_path": "/home/user/demo-project",
-            "cli_tool": "qwen-code-cli",
-            "model": "qwen3-coder-plus",
-            "title": "E2E 远程会话",
-        },
-        cookies={"session_token": token},
-    )
+    r = requests.post(f"{BASE_URL}/api/remote/sessions",
+                      json={"machine_id": machine_id,
+                            "project_path": "/home/user/demo-project",
+                            "cli_tool": "qwen-code-cli",
+                            "model": "qwen3-coder-plus",
+                            "title": "E2E 远程会话"},
+                      cookies={"session_token": token})
     assert r.status_code == 200, f"Create session failed: {r.text}"
     session_id = r.json()["session"]["session_id"]
 
-
 def api_agent_output(mid, sid, step, is_complete=False):
     outputs = {
-        "thinking": '{"type":"thinking","content":"分析代码..."}',
-        "response": '{"type":"assistant","content":"发现 2 个问题:\\n1. 缺少错误处理\\n2. 硬编码密钥"}',
+        "thinking":  '{"type":"thinking","content":"分析代码..."}',
+        "response":  '{"type":"assistant","content":"发现 2 个问题:\\n1. 缺少错误处理\\n2. 硬编码密钥"}',
         "tool_call": '{"type":"tool_use","tool":"read_file","input":{"path":"main.py"}}',
         "tool_done": '{"type":"tool_result","tool":"read_file","output":"读取 89 行"}',
-        "final": '{"type":"assistant","content":"已修复全部问题，代码已保存。"}',
+        "final":     '{"type":"assistant","content":"已修复全部问题，代码已保存。"}',
     }
-    r = requests.post(
-        f"{BASE_URL}/api/remote/agent/message",
-        json={
-            "type": "session_output",
-            "machine_id": mid,
-            "session_id": sid,
-            "data": outputs[step],
-            "stream": "stdout",
-            "is_complete": is_complete,
-        },
-    )
+    r = requests.post(f"{BASE_URL}/api/remote/agent/message", json={
+        "type": "session_output",
+        "machine_id": mid,
+        "session_id": sid,
+        "data": outputs[step],
+        "stream": "stdout",
+        "is_complete": is_complete,
+    })
     return r.status_code == 200
 
 
 # ── 浏览器 fetch ────────────────────────────────────────
-
 
 def browser_fetch(page, label, method, url, body=None):
     script = """
@@ -304,10 +259,9 @@ def browser_fetch(page, label, method, url, body=None):
 #  主测试
 # ════════════════════════════════════════════════════════
 
-
 def run_tests():
     admin_token = api_login(ADMIN_USER, ADMIN_PASS)
-    api_login(NORMAL_USER, NORMAL_PASS)
+    normal_token = api_login(NORMAL_USER, NORMAL_PASS)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(
@@ -347,21 +301,15 @@ def run_tests():
         # 获取整个侧边栏文本
         sidebar = page.locator(".manage-sidebar, .sidebar-nav")
         sidebar_text = sidebar.first.text_content() if sidebar.count() > 0 else ""
-        has_remote = (
-            "远程" in sidebar_text or "Remote" in sidebar_text or "remote" in sidebar_text.lower()
-        )
+        has_remote = "远程" in sidebar_text or "Remote" in sidebar_text or "remote" in sidebar_text.lower()
         # 也检查 HTML 中是否包含远程菜单项的路径
         sidebar_html = sidebar.first.inner_html() if sidebar.count() > 0 else ""
-        has_remote_path = (
-            "/manage/remote/machines" in sidebar_html or "/manage/remote/api-keys" in sidebar_html
-        )
+        has_remote_path = "/manage/remote/machines" in sidebar_html or "/manage/remote/api-keys" in sidebar_html
         shot(page, "A2_sidebar")
         assert has_remote or has_remote_path, f"侧边栏无远程工作区: {sidebar_text[:200]}"
         # 点击展开远程分组（使用路径定位更可靠）
         if has_remote_path:
-            machines_link = page.locator('a[href*="/manage/remote/machines"], button').filter(
-                has_text="机器"
-            )
+            machines_link = page.locator('a[href*="/manage/remote/machines"], button').filter(has_text="机器")
             if machines_link.count() > 0:
                 machines_link.first.click()
                 pause(0.5)
@@ -373,15 +321,9 @@ def run_tests():
         page.wait_for_selector("main, .remote-machine-management", timeout=10000)
         pause(1)
         shot(page, "A3_machine_page_empty")
-        page_text = (
-            page.locator(".remote-machine-management").text_content()
-            if page.locator(".remote-machine-management").count() > 0
-            else page.locator("main").text_content()
-        )
+        page_text = page.locator(".remote-machine-management").text_content() if page.locator(".remote-machine-management").count() > 0 else page.locator("main").text_content()
         # 页面应有标题和生成令牌按钮
-        assert (
-            "远程机器" in page_text or "Remote" in page_text or "机器" in page_text
-        ), "机器管理页面标题缺失"
+        assert "远程机器" in page_text or "Remote" in page_text or "机器" in page_text, "机器管理页面标题缺失"
         passed("A3 远程机器管理页面加载")
 
         # A4: 生成注册令牌弹窗
@@ -398,11 +340,7 @@ def run_tests():
             dialog = page.locator(".modal, .modal-dialog, [role='dialog']")
             if dialog.count() > 0:
                 dialog_text = dialog.first.text_content()
-                assert (
-                    "令牌" in dialog_text
-                    or "token" in dialog_text.lower()
-                    or "Token" in dialog_text
-                ), "令牌弹窗内容缺失"
+                assert "令牌" in dialog_text or "token" in dialog_text.lower() or "Token" in dialog_text, "令牌弹窗内容缺失"
                 # 关闭弹窗
                 close_btn = dialog.first.locator("button").filter(has_text="关闭")
                 if close_btn.count() == 0:
@@ -427,20 +365,10 @@ def run_tests():
         pause(1)
         shot(page, "A5_machine_list_with_one")
         # 检查列表中有机器
-        table_text = (
-            page.locator("table, .table").first.text_content()
-            if page.locator("table, .table").count() > 0
-            else ""
-        )
-        assert (
-            "E2E-Prod-Server" in table_text or "prod-server" in table_text
-        ), f"机器未出现在列表中: {table_text[:200]}"
+        table_text = page.locator("table, .table").first.text_content() if page.locator("table, .table").count() > 0 else ""
+        assert "E2E-Prod-Server" in table_text or "prod-server" in table_text, f"机器未出现在列表中: {table_text[:200]}"
         # 检查状态 badge
-        badge_text = (
-            page.locator(".badge").first.text_content()
-            if page.locator(".badge").count() > 0
-            else ""
-        )
+        badge_text = page.locator(".badge").first.text_content() if page.locator(".badge").count() > 0 else ""
         passed("A5 注册机器成功", f"列表显示 {mid1[:8]}..., 状态={badge_text}")
 
         # A6: 机器详情弹窗
@@ -455,16 +383,8 @@ def run_tests():
             if dialog.count() > 0:
                 dialog_text = dialog.first.text_content()
                 has_hostname = "prod-server" in dialog_text or "hostname" in dialog_text.lower()
-                has_capabilities = (
-                    "capabilities" in dialog_text.lower()
-                    or "能力" in dialog_text
-                    or "cpu" in dialog_text.lower()
-                )
-                has_users = (
-                    "用户" in dialog_text
-                    or "assign" in dialog_text.lower()
-                    or "分配" in dialog_text
-                )
+                has_capabilities = "capabilities" in dialog_text.lower() or "能力" in dialog_text or "cpu" in dialog_text.lower()
+                has_users = "用户" in dialog_text or "assign" in dialog_text.lower() or "分配" in dialog_text
                 # 关闭弹窗
                 close_btn = dialog.first.locator("button").filter(has_text="关闭")
                 if close_btn.count() == 0:
@@ -472,22 +392,17 @@ def run_tests():
                 if close_btn.count() > 0:
                     close_btn.first.click()
                     pause(0.5)
-                passed(
-                    "A6 机器详情弹窗",
-                    f"hostname={has_hostname}, capabilities={has_capabilities}, users={has_users}",
-                )
+                passed("A6 机器详情弹窗",
+                       f"hostname={has_hostname}, capabilities={has_capabilities}, users={has_users}")
             else:
                 passed("A6 机器详情弹窗", "弹窗已打开")
         else:
             # fallback: API 验证详情
-            r = requests.get(
-                f"{BASE_URL}/api/remote/machines/{mid1}", cookies={"session_token": admin_token}
-            )
+            r = requests.get(f"{BASE_URL}/api/remote/machines/{mid1}",
+                             cookies={"session_token": admin_token})
             m = r.json()["machine"]
-            passed(
-                "A6 机器详情 (API fallback)",
-                f"hostname={m['hostname']}, caps={bool(m['capabilities'])}",
-            )
+            passed("A6 机器详情 (API fallback)",
+                   f"hostname={m['hostname']}, caps={bool(m['capabilities'])}")
 
         # A7: 分配用户到机器
         print("\n── A7: 分配用户到机器 ──")
@@ -523,11 +438,8 @@ def run_tests():
         cards_text = page.locator(".card").all_text_contents()
         all_text = " ".join(cards_text)
         # 应该显示 2 台机器
-        page_text = (
-            page.locator(".remote-machine-management").text_content()
-            if page.locator(".remote-machine-management").count() > 0
-            else ""
-        )
+        page_text = page.locator(".remote-machine-management").text_content() if page.locator(".remote-machine-management").count() > 0 else ""
+        has_2 = "2" in all_text
         passed("A9 第二台机器注册成功", f"统计卡片: {all_text[:100]}")
 
         # A10: 注销机器
@@ -555,9 +467,8 @@ def run_tests():
 
         if not dereg_done:
             # fallback: API 注销
-            requests.delete(
-                f"{BASE_URL}/api/remote/machines/{mid2}", cookies={"session_token": admin_token}
-            )
+            requests.delete(f"{BASE_URL}/api/remote/machines/{mid2}",
+                            cookies={"session_token": admin_token})
             page.reload(wait_until="domcontentloaded")
             pause(1)
 
@@ -570,11 +481,7 @@ def run_tests():
         page.wait_for_selector("main, .api-key-management", timeout=10000)
         pause(1)
         shot(page, "A11_apikeys_page_empty")
-        page_text = (
-            page.locator(".api-key-management").text_content()
-            if page.locator(".api-key-management").count() > 0
-            else ""
-        )
+        page_text = page.locator(".api-key-management").text_content() if page.locator(".api-key-management").count() > 0 else ""
         assert "API" in page_text or "密钥" in page_text, "API Key 页面标题缺失"
         passed("A11 API Key 管理页面加载（空状态）")
 
@@ -588,9 +495,7 @@ def run_tests():
         page.wait_for_selector("main, .api-key-management, table", timeout=10000)
         pause(1)
         shot(page, "A12_openai_key_added")
-        table_text = (
-            page.locator("table").first.text_content() if page.locator("table").count() > 0 else ""
-        )
+        table_text = page.locator("table").first.text_content() if page.locator("table").count() > 0 else ""
         assert "openai" in table_text.lower(), f"OpenAI key 未显示: {table_text[:200]}"
         assert "e2e-openai-key" in table_text, f"key name 未显示: {table_text[:200]}"
         # 获取 key id 用于后续清理
@@ -598,7 +503,7 @@ def run_tests():
         for k in keys:
             if k["key_name"] == "e2e-openai-key":
                 api_key_ids.append(k["id"])
-        passed("A12 添加 OpenAI API Key", "列表显示 openai / e2e-openai-key")
+        passed("A12 添加 OpenAI API Key", f"列表显示 openai / e2e-openai-key")
 
         # A13: 添加 Anthropic API Key
         print("\n── A13: 添加 Anthropic API Key ──")
@@ -608,9 +513,7 @@ def run_tests():
         page.wait_for_selector("main, table", timeout=10000)
         pause(1)
         shot(page, "A13_anthropic_key_added")
-        table_text = (
-            page.locator("table").first.text_content() if page.locator("table").count() > 0 else ""
-        )
+        table_text = page.locator("table").first.text_content() if page.locator("table").count() > 0 else ""
         assert "anthropic" in table_text.lower(), f"Anthropic key 未显示: {table_text[:200]}"
         keys = api_list_keys(admin_token)
         key_count = len([k for k in keys if k["key_name"].startswith("e2e-")])
@@ -673,8 +576,10 @@ def run_tests():
         shot(page2, "A15_normal_user_no_remote")
         # 普通用户访问管理页面应该被重定向到 work
         current_url = page2.url
+        redirected_to_work = "/work" in current_url
         ctx2.close()
-        passed("A15 普通用户不可访问管理页面", f"访问 /manage/dashboard → {current_url}")
+        passed("A15 普通用户不可访问管理页面",
+               f"访问 /manage/dashboard → {current_url}")
 
         # ══════════════════════════════════════════════════
         # Part B: 普通用户操作
@@ -716,7 +621,8 @@ def run_tests():
 
         # B4: 查询可用机器
         print("\n── B4: 查询可用机器（浏览器 fetch）──")
-        result = browser_fetch(page, "查询可用远程机器", "GET", "/api/remote/machines/available")
+        result = browser_fetch(page, "查询可用远程机器", "GET",
+                               "/api/remote/machines/available")
         machines = result.get("data", {}).get("machines", [])
         assert len(machines) >= 1, f"应有可用机器，实际 {len(machines)}"
         pause(2)
@@ -725,19 +631,14 @@ def run_tests():
 
         # B5: 创建远程会话
         print("\n── B5: 创建远程会话 ──")
-        result = browser_fetch(
-            page,
-            "创建远程会话",
-            "POST",
-            "/api/remote/sessions",
-            {
-                "machine_id": mid1,
-                "project_path": "/home/user/demo-project",
-                "cli_tool": "qwen-code-cli",
-                "model": "qwen3-coder-plus",
-                "title": "E2E 远程会话 - 完整测试",
-            },
-        )
+        result = browser_fetch(page, "创建远程会话", "POST",
+                               "/api/remote/sessions", {
+                                   "machine_id": mid1,
+                                   "project_path": "/home/user/demo-project",
+                                   "cli_tool": "qwen-code-cli",
+                                   "model": "qwen3-coder-plus",
+                                   "title": "E2E 远程会话 - 完整测试",
+                               })
         assert result["ok"], f"创建会话失败: {result}"
         global session_id
         session_id = result["data"]["session"]["session_id"]
@@ -747,15 +648,10 @@ def run_tests():
 
         # B6: 发送消息
         print("\n── B6: 发送消息给远程 AI ──")
-        result = browser_fetch(
-            page,
-            "发送消息",
-            "POST",
-            f"/api/remote/sessions/{session_id}/chat",
-            {
-                "content": "请帮我审查 main.py 的代码，找出并修复所有问题。",
-            },
-        )
+        result = browser_fetch(page, "发送消息", "POST",
+                               f"/api/remote/sessions/{session_id}/chat", {
+                                   "content": "请帮我审查 main.py 的代码，找出并修复所有问题。",
+                               })
         assert result["ok"], f"发送消息失败: {result}"
         pause(2)
         shot(page, "B6_message_sent")
@@ -764,33 +660,31 @@ def run_tests():
         # B7: 模拟 AI 回复（5 步）
         print("\n── B7: 模拟远程 AI 回复（5 步）──")
         steps = [
-            ("thinking", False, "AI 正在思考..."),
-            ("response", False, "AI 生成回复"),
+            ("thinking",  False, "AI 正在思考..."),
+            ("response",  False, "AI 生成回复"),
             ("tool_call", False, "AI 调用工具"),
             ("tool_done", False, "工具返回结果"),
-            ("final", True, "AI 最终回复"),
+            ("final",     True,  "AI 最终回复"),
         ]
-        for i, (step, done, _label) in enumerate(steps):
+        for i, (step, done, label) in enumerate(steps):
             api_agent_output(mid1, session_id, step, is_complete=done)
             pause(2)
             shot(page, f"B7_step{i+1}_{step}")
 
         # 上报用量
-        requests.post(
-            f"{BASE_URL}/api/remote/agent/message",
-            json={
-                "type": "usage_report",
-                "machine_id": mid1,
-                "session_id": session_id,
-                "tokens": {"input": 1500, "output": 800},
-                "requests": 2,
-            },
-        )
+        requests.post(f"{BASE_URL}/api/remote/agent/message", json={
+            "type": "usage_report",
+            "machine_id": mid1,
+            "session_id": session_id,
+            "tokens": {"input": 1500, "output": 800},
+            "requests": 2,
+        })
         passed("B7 AI 回复完成（5 步）", "含 thinking/response/tool_call/tool_done/final")
 
         # B8: 验证会话数据
         print("\n── B8: 验证会话数据 ──")
-        result = browser_fetch(page, "查询会话详情", "GET", f"/api/remote/sessions/{session_id}")
+        result = browser_fetch(page, "查询会话详情", "GET",
+                               f"/api/remote/sessions/{session_id}")
         assert result["ok"]
         sess = result["data"]["session"]
         output_count = len(sess.get("output", []))
@@ -808,7 +702,7 @@ def run_tests():
         pause(2)
         shot(page, "B9_sessions_list")
         # 查找远程会话
-        session_items = page.locator(".session-item, .session-card, .list-group-item, tr")
+        session_items = page.locator('.session-item, .session-card, .list-group-item, tr')
         found = False
         for i in range(session_items.count()):
             text = session_items.nth(i).text_content()
@@ -824,18 +718,20 @@ def run_tests():
 
         # B10: 暂停 / 恢复会话
         print("\n── B10: 暂停/恢复会话 ──")
-        result = browser_fetch(page, "暂停会话", "POST", f"/api/remote/sessions/{session_id}/pause")
+        result = browser_fetch(page, "暂停会话", "POST",
+                               f"/api/remote/sessions/{session_id}/pause")
         pause(1)
-        result2 = browser_fetch(
-            page, "恢复会话", "POST", f"/api/remote/sessions/{session_id}/resume"
-        )
+        result2 = browser_fetch(page, "恢复会话", "POST",
+                                f"/api/remote/sessions/{session_id}/resume")
         pause(1)
         shot(page, "B10_pause_resume")
-        passed("B10 暂停/恢复会话", f"pause={result.get('ok')}, resume={result2.get('ok')}")
+        passed("B10 暂停/恢复会话",
+               f"pause={result.get('ok')}, resume={result2.get('ok')}")
 
         # B11: 停止会话
         print("\n── B11: 停止会话 ──")
-        result = browser_fetch(page, "停止会话", "POST", f"/api/remote/sessions/{session_id}/stop")
+        result = browser_fetch(page, "停止会话", "POST",
+                               f"/api/remote/sessions/{session_id}/stop")
         assert result["ok"], f"停止会话失败: {result}"
         pause(1)
         shot(page, "B11_session_stopped")
@@ -851,9 +747,8 @@ def run_tests():
         # C1: 注销所有测试机器
         print("\n── C1: 注销所有测试机器 ──")
         for mid in machine_ids:
-            r = requests.delete(
-                f"{BASE_URL}/api/remote/machines/{mid}", cookies={"session_token": admin_token}
-            )
+            r = requests.delete(f"{BASE_URL}/api/remote/machines/{mid}",
+                                cookies={"session_token": admin_token})
             status = "OK" if r.status_code == 200 else f"FAIL({r.status_code})"
             print(f"    注销 {mid[:8]}... → {status}")
         passed("C1 注销所有测试机器", f"共 {len(machine_ids)} 台")
@@ -872,8 +767,10 @@ def run_tests():
         print("\n── C3: 登出 ──")
         page.goto(f"{BASE_URL}/logout", wait_until="domcontentloaded")
         pause(1)
-        with contextlib.suppress(Exception):
+        try:
             page.wait_for_url("**/login**", timeout=5000)
+        except Exception:
+            pass
         shot(page, "C3_logout")
         passed("C3 登出成功")
 

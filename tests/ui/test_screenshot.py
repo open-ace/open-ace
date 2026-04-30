@@ -2,7 +2,6 @@
 """Test screenshot for Session History resizable columns."""
 
 import asyncio
-
 from playwright.async_api import async_playwright
 
 

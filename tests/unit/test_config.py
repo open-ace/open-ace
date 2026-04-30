@@ -3,6 +3,7 @@
 Unit tests for config.py module.
 """
 
+import pytest
 import os
 import sys
 

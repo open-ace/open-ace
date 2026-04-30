@@ -19,16 +19,14 @@ Checkpoints:
 - No tab is pushed to the second row
 """
 
-import os
-import sys
-
 import pytest
+import sys
+import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from playwright.async_api import async_playwright, expect
 import time
-
-from playwright.async_api import async_playwright
 
 # Test Configuration
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000")
@@ -200,7 +198,7 @@ async def test_work_right_panel_tabs_layout():
 
             if same_row and len(tab_positions) == 3:
                 print("  ✓ 所有 3 个 Tab 在同一行上")
-                results.append(("Tab 在同一行", True, "Y 位置差异 < 5px"))
+                results.append(("Tab 在同一行", True, f"Y 位置差异 < 5px"))
             elif len(tab_positions) < 3:
                 print(f"  ✗ 无法验证，只有 {len(tab_positions)} 个 tab 可测量")
                 results.append(("Tab 在同一行", False, f"只有 {len(tab_positions)} 个 tab"))
@@ -268,7 +266,8 @@ async def test_work_right_panel_tabs_layout():
             print("Step 10: 保存最终状态截图...")
 
             # Highlight tabs with bounding boxes
-            await page.evaluate("""
+            await page.evaluate(
+                """
                 () => {
                     const tabs = document.querySelectorAll('.assist-panel .nav-tabs .nav-link');
                     tabs.forEach((tab, index) => {
@@ -286,7 +285,8 @@ async def test_work_right_panel_tabs_layout():
                         document.body.appendChild(highlight);
                     });
                 }
-            """)
+            """
+            )
 
             time.sleep(0.5)
             screenshot_path = os.path.join(SCREENSHOT_DIR, "work_tabs", "work_tabs_layout.png")

@@ -12,6 +12,7 @@ Tests:
 
 import hashlib
 import secrets
+import subprocess
 import time
 import urllib.parse
 
@@ -105,10 +106,9 @@ def main():
     # Check if webui is running
     try:
         import socket
-
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(5)
-        result = sock.connect_ex(("127.0.0.1", port))
+        result = sock.connect_ex(('127.0.0.1', port))
         sock.close()
         if result != 0:
             print(f"ERROR: WebUI not listening on port {port}")
@@ -156,7 +156,7 @@ def main():
     try:
         response = requests.get(valid_token_url, timeout=10)
         if response.status_code == 200:
-            print("✓ Valid token accepted (200)")
+            print(f"✓ Valid token accepted (200)")
             data = response.json()
             print(f"✓ Projects returned: {len(data.get('projects', []))} projects")
         else:
@@ -174,11 +174,11 @@ def main():
     try:
         response = requests.get(static_url, timeout=10)
         if response.status_code == 200:
-            print("✓ Static page loaded (200)")
+            print(f"✓ Static page loaded (200)")
             if "qwen" in response.text.lower() or "project" in response.text.lower():
-                print("✓ Page content looks correct")
+                print(f"✓ Page content looks correct")
             else:
-                print("WARNING: Page content may not be correct")
+                print(f"WARNING: Page content may not be correct")
         else:
             print(f"ERROR: Static page should load, got status {response.status_code}")
             return False

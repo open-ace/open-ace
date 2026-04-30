@@ -10,9 +10,9 @@ Usage:
 """
 
 import asyncio
+import time
 import os
 import sys
-import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -151,11 +151,7 @@ async def test_tab_focus_input():
 
             # Get active tab before switch
             active_tab_before = await page.locator(".workspace-tab.active").element_handle()
-            tab_id_before = (
-                await active_tab_before.evaluate("el => el.getAttribute('data-tab-id')")
-                if active_tab_before
-                else ""
-            )
+            tab_id_before = await active_tab_before.evaluate("el => el.getAttribute('data-tab-id')") if active_tab_before else ""
             print(f"   Active tab before: {tab_id_before[:20] if tab_id_before else 'N/A'}")
 
             # Click second tab
@@ -164,16 +160,12 @@ async def test_tab_focus_input():
 
             # Verify tab switch
             active_tab_after = await page.locator(".workspace-tab.active").element_handle()
-            tab_id_after = (
-                await active_tab_after.evaluate("el => el.getAttribute('data-tab-id')")
-                if active_tab_after
-                else ""
-            )
+            tab_id_after = await active_tab_after.evaluate("el => el.getAttribute('data-tab-id')") if active_tab_after else ""
             print(f"   Active tab after: {tab_id_after[:20] if tab_id_after else 'N/A'}")
 
             if tab_id_before != tab_id_after:
                 print("   ✓ Tab switched successfully")
-                test_results.append(("Tab Switch", "PASS", "Switched to tab 2"))
+                test_results.append(("Tab Switch", "PASS", f"Switched to tab 2"))
             else:
                 print("   ✗ Tab did not switch")
                 test_results.append(("Tab Switch", "FAIL", "Same tab still active"))
@@ -188,11 +180,7 @@ async def test_tab_focus_input():
 
             # Verify tab switch
             active_tab_final = await page.locator(".workspace-tab.active").element_handle()
-            tab_id_final = (
-                await active_tab_final.evaluate("el => el.getAttribute('data-tab-id')")
-                if active_tab_final
-                else ""
-            )
+            tab_id_final = await active_tab_final.evaluate("el => el.getAttribute('data-tab-id')") if active_tab_final else ""
             print(f"   Active tab final: {tab_id_final[:20] if tab_id_final else 'N/A'}")
 
             if tab_id_final == tab_id_before:
@@ -200,11 +188,9 @@ async def test_tab_focus_input():
                 test_results.append(("Switch Back", "PASS", ""))
             else:
                 print("   ✗ Did not switch back correctly")
-                test_results.append(("Switch Back", "FAIL", "Expected first tab"))
+                test_results.append(("Switch Back", "FAIL", f"Expected first tab"))
 
-            await page.screenshot(
-                path=f"{SCREENSHOT_DIR}/05_after_first_tab_switch_{timestamp}.png"
-            )
+            await page.screenshot(path=f"{SCREENSHOT_DIR}/05_after_first_tab_switch_{timestamp}.png")
 
             # Step 8: Verify input focus inside iframe
             print("\n[Step 8] Verifying input focus inside iframe...")
@@ -216,35 +202,23 @@ async def test_tab_focus_input():
                 # Check if textarea is focused
                 textarea_locator = iframe_content.locator("textarea").first
                 if await textarea_locator.count() > 0:
-                    is_focused = await textarea_locator.evaluate(
-                        "el => document.activeElement === el"
-                    )
+                    is_focused = await textarea_locator.evaluate("el => document.activeElement === el")
 
                     if is_focused:
                         print("   ✓ Textarea is focused after tab switch!")
                         test_results.append(("Input Focused", "PASS", "Textarea focused"))
                     else:
                         # Check active element
-                        active_element_tag = await iframe_content.evaluate(
-                            "document.activeElement.tagName"
-                        )
-                        active_element_type = await iframe_content.evaluate(
-                            "document.activeElement.type || 'N/A'"
-                        )
-                        print(
-                            f"   Active element: {active_element_tag} (type: {active_element_type})"
-                        )
+                        active_element_tag = await iframe_content.evaluate("document.activeElement.tagName")
+                        active_element_type = await iframe_content.evaluate("document.activeElement.type || 'N/A'")
+                        print(f"   Active element: {active_element_tag} (type: {active_element_type})")
 
                         if active_element_tag.lower() in ["textarea", "input"]:
                             print("   ✓ Some input element is focused")
-                            test_results.append(
-                                ("Input Focused", "PASS", f"Active: {active_element_tag}")
-                            )
+                            test_results.append(("Input Focused", "PASS", f"Active: {active_element_tag}"))
                         else:
                             print("   ✗ Input is NOT focused")
-                            test_results.append(
-                                ("Input Focused", "FAIL", f"Active element: {active_element_tag}")
-                            )
+                            test_results.append(("Input Focused", "FAIL", f"Active element: {active_element_tag}"))
                 else:
                     print("   ⚠ Textarea not visible for focus check")
                     test_results.append(("Input Focused", "WARN", "Textarea not found"))
@@ -284,7 +258,6 @@ async def test_tab_focus_input():
         except Exception as e:
             print(f"\n✗ Test failed with error: {e}")
             import traceback
-
             traceback.print_exc()
             await page.screenshot(path=f"{SCREENSHOT_DIR}/error_{timestamp}.png")
             print(f"Error screenshot saved to {SCREENSHOT_DIR}")

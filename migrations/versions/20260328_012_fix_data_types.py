@@ -27,6 +27,7 @@ Tables affected:
 from typing import Union
 
 from alembic import op
+import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "012_fix_data_types"
@@ -47,7 +48,8 @@ def upgrade() -> None:
     # ============================================
     # daily_messages: timestamp -> TIMESTAMP
     # ============================================
-    op.execute(r"""
+    op.execute(
+        """
         ALTER TABLE daily_messages
         ALTER COLUMN timestamp TYPE TIMESTAMP
         USING CASE
@@ -58,39 +60,47 @@ def upgrade() -> None:
                 REPLACE(timestamp, ' ', 'T')::TIMESTAMP
             ELSE NULL
         END
-    """)
+    """
+    )
 
     # ============================================
     # daily_usage: date -> DATE
     # ============================================
-    op.execute("""
+    op.execute(
+        """
         ALTER TABLE daily_usage
         ALTER COLUMN date TYPE DATE
         USING date::DATE
-    """)
+    """
+    )
 
     # ============================================
     # tenant_usage: date -> DATE
     # ============================================
-    op.execute("""
+    op.execute(
+        """
         ALTER TABLE tenant_usage
         ALTER COLUMN date TYPE DATE
         USING date::DATE
-    """)
+    """
+    )
 
     # ============================================
     # quota_usage: date -> DATE
     # ============================================
-    op.execute("""
+    op.execute(
+        """
         ALTER TABLE quota_usage
         ALTER COLUMN date TYPE DATE
         USING date::DATE
-    """)
+    """
+    )
 
     # ============================================
     # content_filter_rules: fix types
     # ============================================
-    op.execute(r"""
+    op.execute(
+        """
         ALTER TABLE content_filter_rules
         ALTER COLUMN created_at TYPE TIMESTAMP
         USING CASE
@@ -101,9 +111,11 @@ def upgrade() -> None:
                 REPLACE(created_at, ' ', 'T')::TIMESTAMP
             ELSE NULL
         END
-    """)
+    """
+    )
 
-    op.execute(r"""
+    op.execute(
+        """
         ALTER TABLE content_filter_rules
         ALTER COLUMN updated_at TYPE TIMESTAMP
         USING CASE
@@ -114,37 +126,44 @@ def upgrade() -> None:
                 REPLACE(updated_at, ' ', 'T')::TIMESTAMP
             ELSE NULL
         END
-    """)
+    """
+    )
 
     # For is_enabled, we need to drop the default first, then change type
     op.execute("ALTER TABLE content_filter_rules ALTER COLUMN is_enabled DROP DEFAULT")
-    op.execute("""
+    op.execute(
+        """
         ALTER TABLE content_filter_rules
         ALTER COLUMN is_enabled TYPE BOOLEAN
         USING CASE WHEN is_enabled = 1 THEN TRUE ELSE FALSE END
-    """)
+    """
+    )
     op.execute("ALTER TABLE content_filter_rules ALTER COLUMN is_enabled SET DEFAULT TRUE")
 
     # ============================================
     # users: is_active -> BOOLEAN
     # ============================================
     op.execute("ALTER TABLE users ALTER COLUMN is_active DROP DEFAULT")
-    op.execute("""
+    op.execute(
+        """
         ALTER TABLE users
         ALTER COLUMN is_active TYPE BOOLEAN
         USING CASE WHEN is_active = 1 THEN TRUE ELSE FALSE END
-    """)
+    """
+    )
     op.execute("ALTER TABLE users ALTER COLUMN is_active SET DEFAULT TRUE")
 
     # ============================================
     # sessions: is_active -> BOOLEAN
     # ============================================
     op.execute("ALTER TABLE sessions ALTER COLUMN is_active DROP DEFAULT")
-    op.execute("""
+    op.execute(
+        """
         ALTER TABLE sessions
         ALTER COLUMN is_active TYPE BOOLEAN
         USING CASE WHEN is_active = 1 THEN TRUE ELSE FALSE END
-    """)
+    """
+    )
     op.execute("ALTER TABLE sessions ALTER COLUMN is_active SET DEFAULT TRUE")
 
     # ============================================
@@ -156,35 +175,43 @@ def upgrade() -> None:
     # tenant_settings: boolean fields
     # ============================================
     op.execute("ALTER TABLE tenant_settings ALTER COLUMN content_filter_enabled DROP DEFAULT")
-    op.execute("""
+    op.execute(
+        """
         ALTER TABLE tenant_settings
         ALTER COLUMN content_filter_enabled TYPE BOOLEAN
         USING CASE WHEN content_filter_enabled = 1 THEN TRUE ELSE FALSE END
-    """)
+    """
+    )
     op.execute("ALTER TABLE tenant_settings ALTER COLUMN content_filter_enabled SET DEFAULT TRUE")
 
     op.execute("ALTER TABLE tenant_settings ALTER COLUMN audit_log_enabled DROP DEFAULT")
-    op.execute("""
+    op.execute(
+        """
         ALTER TABLE tenant_settings
         ALTER COLUMN audit_log_enabled TYPE BOOLEAN
         USING CASE WHEN audit_log_enabled = 1 THEN TRUE ELSE FALSE END
-    """)
+    """
+    )
     op.execute("ALTER TABLE tenant_settings ALTER COLUMN audit_log_enabled SET DEFAULT TRUE")
 
     op.execute("ALTER TABLE tenant_settings ALTER COLUMN sso_enabled DROP DEFAULT")
-    op.execute("""
+    op.execute(
+        """
         ALTER TABLE tenant_settings
         ALTER COLUMN sso_enabled TYPE BOOLEAN
         USING CASE WHEN sso_enabled = 1 THEN TRUE ELSE FALSE END
-    """)
+    """
+    )
     op.execute("ALTER TABLE tenant_settings ALTER COLUMN sso_enabled SET DEFAULT FALSE")
 
     op.execute("ALTER TABLE tenant_settings ALTER COLUMN custom_branding DROP DEFAULT")
-    op.execute("""
+    op.execute(
+        """
         ALTER TABLE tenant_settings
         ALTER COLUMN custom_branding TYPE BOOLEAN
         USING CASE WHEN custom_branding = 1 THEN TRUE ELSE FALSE END
-    """)
+    """
+    )
     op.execute("ALTER TABLE tenant_settings ALTER COLUMN custom_branding SET DEFAULT FALSE")
 
 
@@ -198,98 +225,124 @@ def downgrade() -> None:
 
     # Revert tenant_settings boolean fields
     op.execute("ALTER TABLE tenant_settings ALTER COLUMN custom_branding DROP DEFAULT")
-    op.execute("""
+    op.execute(
+        """
         ALTER TABLE tenant_settings
         ALTER COLUMN custom_branding TYPE INTEGER
         USING CASE WHEN custom_branding THEN 1 ELSE 0 END
-    """)
+    """
+    )
     op.execute("ALTER TABLE tenant_settings ALTER COLUMN custom_branding SET DEFAULT 0")
 
     op.execute("ALTER TABLE tenant_settings ALTER COLUMN sso_enabled DROP DEFAULT")
-    op.execute("""
+    op.execute(
+        """
         ALTER TABLE tenant_settings
         ALTER COLUMN sso_enabled TYPE INTEGER
         USING CASE WHEN sso_enabled THEN 1 ELSE 0 END
-    """)
+    """
+    )
     op.execute("ALTER TABLE tenant_settings ALTER COLUMN sso_enabled SET DEFAULT 0")
 
     op.execute("ALTER TABLE tenant_settings ALTER COLUMN audit_log_enabled DROP DEFAULT")
-    op.execute("""
+    op.execute(
+        """
         ALTER TABLE tenant_settings
         ALTER COLUMN audit_log_enabled TYPE INTEGER
         USING CASE WHEN audit_log_enabled THEN 1 ELSE 0 END
-    """)
+    """
+    )
     op.execute("ALTER TABLE tenant_settings ALTER COLUMN audit_log_enabled SET DEFAULT 1")
 
     op.execute("ALTER TABLE tenant_settings ALTER COLUMN content_filter_enabled DROP DEFAULT")
-    op.execute("""
+    op.execute(
+        """
         ALTER TABLE tenant_settings
         ALTER COLUMN content_filter_enabled TYPE INTEGER
         USING CASE WHEN content_filter_enabled THEN 1 ELSE 0 END
-    """)
+    """
+    )
     op.execute("ALTER TABLE tenant_settings ALTER COLUMN content_filter_enabled SET DEFAULT 1")
 
     # Revert sessions is_active
     op.execute("ALTER TABLE sessions ALTER COLUMN is_active DROP DEFAULT")
-    op.execute("""
+    op.execute(
+        """
         ALTER TABLE sessions
         ALTER COLUMN is_active TYPE INTEGER
         USING CASE WHEN is_active THEN 1 ELSE 0 END
-    """)
+    """
+    )
     op.execute("ALTER TABLE sessions ALTER COLUMN is_active SET DEFAULT 1")
 
     # Revert users is_active
     op.execute("ALTER TABLE users ALTER COLUMN is_active DROP DEFAULT")
-    op.execute("""
+    op.execute(
+        """
         ALTER TABLE users
         ALTER COLUMN is_active TYPE INTEGER
         USING CASE WHEN is_active THEN 1 ELSE 0 END
-    """)
+    """
+    )
     op.execute("ALTER TABLE users ALTER COLUMN is_active SET DEFAULT 1")
 
     # Revert content_filter_rules
     op.execute("ALTER TABLE content_filter_rules ALTER COLUMN is_enabled DROP DEFAULT")
-    op.execute("""
+    op.execute(
+        """
         ALTER TABLE content_filter_rules
         ALTER COLUMN is_enabled TYPE INTEGER
         USING CASE WHEN is_enabled THEN 1 ELSE 0 END
-    """)
+    """
+    )
     op.execute("ALTER TABLE content_filter_rules ALTER COLUMN is_enabled SET DEFAULT 1")
-    op.execute("""
+    op.execute(
+        """
         ALTER TABLE content_filter_rules
         ALTER COLUMN updated_at TYPE TEXT
         USING COALESCE(updated_at::TEXT, NULL)
-    """)
-    op.execute("""
+    """
+    )
+    op.execute(
+        """
         ALTER TABLE content_filter_rules
         ALTER COLUMN created_at TYPE TEXT
         USING COALESCE(created_at::TEXT, NULL)
-    """)
+    """
+    )
 
     # Revert quota_usage date
-    op.execute("""
+    op.execute(
+        """
         ALTER TABLE quota_usage
         ALTER COLUMN date TYPE TEXT
         USING date::TEXT
-    """)
+    """
+    )
 
     # Revert tenant_usage date
-    op.execute("""
+    op.execute(
+        """
         ALTER TABLE tenant_usage
         ALTER COLUMN date TYPE TEXT
         USING date::TEXT
-    """)
+    """
+    )
 
     # Revert daily_usage date
-    op.execute("""
+    op.execute(
+        """
         ALTER TABLE daily_usage
         ALTER COLUMN date TYPE VARCHAR
         USING date::VARCHAR
-    """)
+    """
+    )
 
     # Revert daily_messages timestamp
-    op.execute("""
+    op.execute(
+        """
         ALTER TABLE daily_messages
         ALTER COLUMN timestamp TYPE VARCHAR
         USING COALESCE(timestamp::TEXT, NULL)
-    """)
+    """
+    )

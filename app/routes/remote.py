@@ -15,14 +15,13 @@ import logging
 import os
 import time
 import uuid
+from datetime import datetime
 
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
-from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
+from app.modules.workspace.api_key_proxy import APIKeyProxyService
 from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
-from app.modules.workspace.remote_session_manager import (
-    get_remote_session_manager,
-)
+from app.modules.workspace.remote_session_manager import RemoteSessionManager
 from app.services.auth_service import AuthService
 
 logger = logging.getLogger(__name__)
@@ -75,12 +74,10 @@ def load_user():
                 # Fall back to WebUI token validation
                 try:
                     from app.services.webui_manager import WebUIManager
-
                     webui_manager = WebUIManager()
                     is_valid, user_id, error = webui_manager.validate_token(url_token)
                     if is_valid and user_id:
                         from app.repositories.user_repo import UserRepository
-
                         user_repo = UserRepository()
                         user = user_repo.get_user_by_id(user_id)
                         if user:
@@ -131,7 +128,7 @@ def _require_machine_admin(machine_id):
 
 def _check_session_access(session_id):
     """Check session access: owner, system admin, or machine admin. Returns (session_status, error)."""
-    session_mgr = get_remote_session_manager()
+    session_mgr = RemoteSessionManager()
     status = session_mgr.get_session_status(session_id)
     if not status:
         return None, (jsonify({"error": "Session not found"}), 404)
@@ -176,13 +173,11 @@ def register_machine():
         created_by=g.user["id"],
     )
 
-    return jsonify(
-        {
-            "success": True,
-            "registration_token": token,
-            "message": "Use this token to register a remote agent. It is valid for one use.",
-        }
-    )
+    return jsonify({
+        "success": True,
+        "registration_token": token,
+        "message": "Use this token to register a remote agent. It is valid for one use.",
+    })
 
 
 @remote_bp.route("/machines", methods=["GET"])
@@ -199,12 +194,10 @@ def list_machines():
     else:
         machines = agent_mgr.list_machines(user_id=g.user["id"])
 
-    return jsonify(
-        {
-            "success": True,
-            "machines": machines,
-        }
-    )
+    return jsonify({
+        "success": True,
+        "machines": machines,
+    })
 
 
 @remote_bp.route("/machines/<machine_id>", methods=["GET"])
@@ -225,12 +218,10 @@ def get_machine(machine_id):
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
 
-    return jsonify(
-        {
-            "success": True,
-            "machine": machine,
-        }
-    )
+    return jsonify({
+        "success": True,
+        "machine": machine,
+    })
 
 
 @remote_bp.route("/machines/<machine_id>", methods=["DELETE"])
@@ -320,15 +311,13 @@ def list_api_keys():
     data = request.args
     tenant_id = int(data.get("tenant_id", 1))
 
-    api_proxy = get_api_key_proxy_service()
+    api_proxy = APIKeyProxyService()
     keys = api_proxy.list_api_keys(tenant_id)
 
-    return jsonify(
-        {
-            "success": True,
-            "keys": keys,
-        }
-    )
+    return jsonify({
+        "success": True,
+        "keys": keys,
+    })
 
 
 @remote_bp.route("/api-keys", methods=["POST"])
@@ -348,7 +337,7 @@ def store_api_key():
     if not provider or not key_name or not api_key:
         return jsonify({"error": "provider, key_name, and api_key are required"}), 400
 
-    api_proxy = get_api_key_proxy_service()
+    api_proxy = APIKeyProxyService()
     result = api_proxy.store_api_key(
         tenant_id=tenant_id,
         provider=provider,
@@ -373,7 +362,7 @@ def delete_api_key(key_id):
     data = request.get_json() or {}
     tenant_id = int(data.get("tenant_id", 1))
 
-    api_proxy = get_api_key_proxy_service()
+    api_proxy = APIKeyProxyService()
     success = api_proxy.delete_api_key_by_id(key_id, tenant_id)
 
     if success:
@@ -397,12 +386,10 @@ def get_machine_users(machine_id):
     agent_mgr = get_remote_agent_manager()
     assignments = agent_mgr.get_machine_assignments(machine_id)
 
-    return jsonify(
-        {
-            "success": True,
-            "users": assignments,
-        }
-    )
+    return jsonify({
+        "success": True,
+        "users": assignments,
+    })
 
 
 # ==================== Session Management (User) ====================
@@ -421,12 +408,10 @@ def get_available_machines():
     # Filter to only show online machines
     available = [m for m in machines if m.get("status") == "online"]
 
-    return jsonify(
-        {
-            "success": True,
-            "machines": available,
-        }
-    )
+    return jsonify({
+        "success": True,
+        "machines": available,
+    })
 
 
 @remote_bp.route("/sessions", methods=["POST"])
@@ -449,7 +434,7 @@ def create_remote_session():
     if not project_path:
         return jsonify({"error": "project_path is required"}), 400
 
-    session_mgr = get_remote_session_manager()
+    session_mgr = RemoteSessionManager()
     result = session_mgr.create_remote_session(
         user_id=g.user["id"],
         machine_id=machine_id,
@@ -462,12 +447,7 @@ def create_remote_session():
 
     if result:
         return jsonify({"success": True, "session": result})
-    return (
-        jsonify(
-            {"error": "Failed to create remote session. Check machine availability and access."}
-        ),
-        400,
-    )
+    return jsonify({"error": "Failed to create remote session. Check machine availability and access."}), 400
 
 
 @remote_bp.route("/sessions/<session_id>", methods=["GET"])
@@ -504,7 +484,7 @@ def send_remote_message(session_id):
     if not content:
         return jsonify({"error": "content is required"}), 400
 
-    session_mgr = get_remote_session_manager()
+    session_mgr = RemoteSessionManager()
 
     # If permission_mode changed, send update command to agent
     if permission_mode:
@@ -518,10 +498,7 @@ def send_remote_message(session_id):
 
     if success:
         return jsonify({"success": True})
-    return (
-        jsonify({"error": "Failed to send message. Session may not be active.", "reconnect": True}),
-        400,
-    )
+    return jsonify({"error": "Failed to send message. Session may not be active.", "reconnect": True}), 400
 
 
 @remote_bp.route("/sessions/<session_id>/model", methods=["PUT"])
@@ -540,7 +517,7 @@ def update_remote_session_model(session_id):
     if not model:
         return jsonify({"error": "model is required"}), 400
 
-    session_mgr = get_remote_session_manager()
+    session_mgr = RemoteSessionManager()
     success = session_mgr.update_model(session_id, model)
 
     if success:
@@ -559,7 +536,7 @@ def abort_remote_request(session_id):
     if access_error:
         return access_error
 
-    session_mgr = get_remote_session_manager()
+    session_mgr = RemoteSessionManager()
     success = session_mgr.abort_request(session_id)
 
     if success:
@@ -578,7 +555,7 @@ def stop_remote_session(session_id):
     if access_error:
         return access_error
 
-    session_mgr = get_remote_session_manager()
+    session_mgr = RemoteSessionManager()
     success = session_mgr.stop_session(session_id)
 
     if success:
@@ -597,7 +574,7 @@ def pause_remote_session(session_id):
     if access_error:
         return access_error
 
-    session_mgr = get_remote_session_manager()
+    session_mgr = RemoteSessionManager()
     success = session_mgr.pause_session(session_id)
 
     if success:
@@ -616,7 +593,7 @@ def resume_remote_session(session_id):
     if access_error:
         return access_error
 
-    session_mgr = get_remote_session_manager()
+    session_mgr = RemoteSessionManager()
     success = session_mgr.resume_session(session_id)
 
     if success:
@@ -690,7 +667,9 @@ def stream_session_output(session_id):
             last_index = 0
             idle_count = 0
             while True:
-                new_output = agent_mgr.get_buffered_output(session_id, after_index=last_index)
+                new_output = agent_mgr.get_buffered_output(
+                    session_id, after_index=last_index
+                )
                 if new_output:
                     idle_count = 0
                     for entry in new_output:
@@ -728,7 +707,7 @@ def stream_session_output(session_id):
                 session_id[:8],
             )
             try:
-                session_mgr = get_remote_session_manager()
+                session_mgr = RemoteSessionManager()
                 session_mgr.abort_request(session_id)
             except Exception:
                 pass
@@ -746,9 +725,7 @@ def stream_session_output(session_id):
 
 # ==================== Agent Installation ====================
 
-AGENT_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "remote-agent"
-)
+AGENT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "remote-agent")
 
 
 @remote_bp.route("/agent/install.sh", methods=["GET"])
@@ -846,15 +823,10 @@ def agent_register():
 @remote_bp.route("/agent/ws", methods=["GET"])
 def agent_websocket():
     """Deprecated. Use HTTP polling via /api/remote/agent/message instead."""
-    return (
-        jsonify(
-            {
-                "error": "WebSocket no longer supported",
-                "endpoint": "/api/remote/agent/message",
-            }
-        ),
-        410,
-    )
+    return jsonify({
+        "error": "WebSocket no longer supported",
+        "endpoint": "/api/remote/agent/message",
+    }), 410
 
 
 @remote_bp.route("/agent/message", methods=["POST"])
@@ -880,7 +852,7 @@ def agent_message():
     if msg_type == "register":
         # Agent re-registering on reconnect
         agent_mgr.register_connection(machine_id, None)
-        data.get("capabilities", {})
+        capabilities = data.get("capabilities", {})
         pending = agent_mgr.get_pending_commands(machine_id)
         return jsonify({"success": True, "type": "register_ack", "pending_commands": pending})
 
@@ -891,12 +863,6 @@ def agent_message():
         pending = agent_mgr.get_pending_commands(machine_id)
         return jsonify({"success": True, "type": "heartbeat_ack", "pending_commands": pending})
 
-    elif msg_type == "poll":
-        # Lightweight poll — no DB write, just return pending commands
-        agent_mgr.ensure_agent_tracked(machine_id)
-        pending = agent_mgr.get_pending_commands(machine_id)
-        return jsonify({"success": True, "type": "poll_ack", "pending_commands": pending})
-
     elif msg_type == "session_output":
         session_id = data.get("session_id")
         output_data = data.get("data", "")
@@ -904,7 +870,7 @@ def agent_message():
         is_complete = data.get("is_complete", False)
 
         if session_id:
-            session_mgr = get_remote_session_manager()
+            session_mgr = RemoteSessionManager()
             session_mgr.process_session_output(
                 session_id=session_id,
                 data=output_data,
@@ -920,7 +886,7 @@ def agent_message():
         pid = data.get("pid")
 
         if session_id and status:
-            session_mgr = get_remote_session_manager()
+            session_mgr = RemoteSessionManager()
             session_mgr.process_session_status_update(
                 session_id=session_id,
                 status=status,
@@ -935,7 +901,7 @@ def agent_message():
         requests_count = data.get("requests", 1)
 
         if session_id:
-            session_mgr = get_remote_session_manager()
+            session_mgr = RemoteSessionManager()
             session_mgr.process_usage_report(
                 session_id=session_id,
                 tokens=tokens,
@@ -949,7 +915,7 @@ def agent_message():
         control_request = data.get("control_request", {})
 
         if session_id:
-            session_mgr = get_remote_session_manager()
+            session_mgr = RemoteSessionManager()
             session_mgr.process_permission_request(
                 session_id=session_id,
                 control_request=control_request,
@@ -985,20 +951,14 @@ def llm_proxy(path=""):
     proxy_token = auth_header.replace("Bearer ", "").strip()
 
     if not proxy_token:
-        return (
-            jsonify({"error": {"message": "Missing authorization token", "type": "auth_error"}}),
-            401,
-        )
+        return jsonify({"error": {"message": "Missing authorization token", "type": "auth_error"}}), 401
 
     # Validate proxy token
-    api_proxy = get_api_key_proxy_service()
+    api_proxy = APIKeyProxyService()
     token_payload = api_proxy.validate_proxy_token(proxy_token)
 
     if not token_payload:
-        return (
-            jsonify({"error": {"message": "Invalid or expired proxy token", "type": "auth_error"}}),
-            401,
-        )
+        return jsonify({"error": {"message": "Invalid or expired proxy token", "type": "auth_error"}}), 401
 
     user_id = token_payload["user_id"]
     tenant_id = token_payload["tenant_id"]
@@ -1008,49 +968,33 @@ def llm_proxy(path=""):
     # Check quota
     try:
         from app.modules.governance.quota_manager import QuotaManager
-
         quota_mgr = QuotaManager()
         quota_result = quota_mgr.check_quota(user_id)
         if not quota_result["allowed"]:
-            return (
-                jsonify(
-                    {
-                        "error": {
-                            "message": f"Quota exceeded: {quota_result['reason']}",
-                            "type": "quota_exceeded",
-                        }
-                    }
-                ),
-                429,
-            )
+            return jsonify({
+                "error": {
+                    "message": f"Quota exceeded: {quota_result['reason']}",
+                    "type": "quota_exceeded",
+                }
+            }), 429
     except Exception as e:
         logger.error(f"Quota check failed, denying request for safety: {e}")
-        return (
-            jsonify(
-                {
-                    "error": {
-                        "message": "Quota check unavailable - request denied for safety",
-                        "type": "quota_check_error",
-                    }
-                }
-            ),
-            429,
-        )
+        return jsonify({
+            "error": {
+                "message": "Quota check unavailable - request denied for safety",
+                "type": "quota_check_error",
+            }
+        }), 429
 
     # Resolve real API key
     key_result = api_proxy.resolve_api_key(tenant_id, provider)
     if not key_result:
-        return (
-            jsonify(
-                {
-                    "error": {
-                        "message": f"No API key configured for provider '{provider}'",
-                        "type": "config_error",
-                    }
-                }
-            ),
-            500,
-        )
+        return jsonify({
+            "error": {
+                "message": f"No API key configured for provider '{provider}'",
+                "type": "config_error",
+            }
+        }), 500
 
     api_key, base_url = key_result
 
@@ -1153,22 +1097,16 @@ def llm_proxy(path=""):
 
     except Exception as e:
         logger.error(f"LLM proxy error: {e}")
-        return (
-            jsonify(
-                {
-                    "error": {
-                        "message": f"Proxy error: {str(e)}",
-                        "type": "proxy_error",
-                    }
-                }
-            ),
-            502,
-        )
+        return jsonify({
+            "error": {
+                "message": f"Proxy error: {str(e)}",
+                "type": "proxy_error",
+            }
+        }), 502
 
 
-def _record_llm_usage(
-    content: bytes, session_id: str, user_id: int, provider: str, content_type: str
-) -> None:
+def _record_llm_usage(content: bytes, session_id: str, user_id: int,
+                       provider: str, content_type: str) -> None:
     """Extract and record token usage from LLM response."""
     try:
         if b"usage" not in content:
@@ -1186,7 +1124,7 @@ def _record_llm_usage(
                 line = line.strip()
                 if not line or not line.startswith(b"data:"):
                     continue
-                payload = line[len(b"data:") :].strip()
+                payload = line[len(b"data:"):].strip()
                 if payload == b"[DONE]":
                     continue
                 try:
@@ -1205,7 +1143,6 @@ def _record_llm_usage(
 
         if input_tokens or output_tokens:
             from app.modules.governance.quota_manager import QuotaManager
-
             quota_mgr = QuotaManager()
             quota_mgr.record_usage(
                 user_id=user_id,
@@ -1214,9 +1151,8 @@ def _record_llm_usage(
             )
 
             # Update session token counts
-            from app.modules.workspace.session_manager import get_session_manager
-
-            sm = get_session_manager()
+            from app.modules.workspace.session_manager import SessionManager
+            sm = SessionManager()
             session = sm.get_session(session_id)
             if session:
                 session.total_input_tokens += input_tokens
@@ -1227,7 +1163,6 @@ def _record_llm_usage(
             # Refresh user_daily_stats so quota checks see up-to-date data
             try:
                 from app.repositories.daily_stats_repo import DailyStatsRepository
-
                 daily_stats_repo = DailyStatsRepository()
                 daily_stats_repo.refresh_stats()
             except Exception:
@@ -1246,12 +1181,12 @@ def usage_report():
     session_id = data.get("session_id")
     tokens = data.get("tokens", {})
     requests = data.get("requests", 1)
-    data.get("machine_id")
+    machine_id = data.get("machine_id")
 
     if not session_id:
         return jsonify({"error": "session_id is required"}), 400
 
-    session_mgr = get_remote_session_manager()
+    session_mgr = RemoteSessionManager()
     session_mgr.process_usage_report(
         session_id=session_id,
         tokens=tokens,
@@ -1278,7 +1213,7 @@ def browse_remote_directory(machine_id):
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
 
-    request.args.get("path")
+    path = request.args.get("path")
 
     # Send browse command to agent and wait for response
     # For now, return machine info with work_dir
@@ -1286,10 +1221,8 @@ def browse_remote_directory(machine_id):
     if not machine:
         return jsonify({"error": "Machine not found"}), 404
 
-    return jsonify(
-        {
-            "success": True,
-            "machine": machine,
-            "message": "File browsing requires WebSocket connection for real-time response",
-        }
-    )
+    return jsonify({
+        "success": True,
+        "machine": machine,
+        "message": "File browsing requires WebSocket connection for real-time response",
+    })

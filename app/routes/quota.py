@@ -9,6 +9,7 @@ Used by Work mode to check if user can continue using workspace.
 import logging
 import time
 from datetime import datetime
+from functools import lru_cache
 from typing import Optional
 
 from flask import Blueprint, g, jsonify, request
@@ -38,7 +39,7 @@ _CACHE_TTL = 600  # 10 minutes
 def _get_cached_user_usage(user_id: int, start_date: str, end_date: str):
     """
     Get cached user usage data with improved caching strategy.
-
+    
     Uses user_id directly for cache key and leverages pre-aggregated
     user_daily_stats table for fast queries.
     """
@@ -52,11 +53,11 @@ def _get_cached_user_usage(user_id: int, start_date: str, end_date: str):
 
     # Fetch fresh data using optimized method (user_daily_stats table)
     request_trend = usage_repo.get_user_request_trend_by_user_id(user_id, start_date, end_date)
-
+    
     # Only cache if we got data
     if request_trend:
         _usage_cache[cache_key] = (request_trend, now)
-
+    
     return request_trend
 
 
@@ -66,7 +67,10 @@ def _clear_user_usage_cache(user_id: Optional[int] = None):
     if user_id is None:
         _usage_cache = {}
     else:
-        _usage_cache = {k: v for k, v in _usage_cache.items() if not k.startswith(f"{user_id}:")}
+        _usage_cache = {
+            k: v for k, v in _usage_cache.items()
+            if not k.startswith(f"{user_id}:")
+        }
 
 
 @quota_bp.before_request
@@ -127,10 +131,8 @@ def check_quota():
         # Get today's usage combining local CLI and remote proxy
         today = datetime.now().strftime("%Y-%m-%d")
         today_combined = usage_repo.get_combined_usage(
-            user_id=user_id,
-            system_account=system_account,
-            start_date=today,
-            end_date=today,
+            user_id=user_id, system_account=system_account,
+            start_date=today, end_date=today,
         )
         today_requests = today_combined["requests"]
         today_tokens = today_combined["tokens"]
@@ -139,10 +141,8 @@ def check_quota():
         now = datetime.now()
         month_start = now.replace(day=1).strftime("%Y-%m-%d")
         monthly_combined = usage_repo.get_combined_usage(
-            user_id=user_id,
-            system_account=system_account,
-            start_date=month_start,
-            end_date=today,
+            user_id=user_id, system_account=system_account,
+            start_date=month_start, end_date=today,
         )
         monthly_requests = monthly_combined["requests"]
         monthly_tokens = monthly_combined["tokens"]
@@ -155,13 +155,8 @@ def check_quota():
 
         over_daily_token = today_tokens >= daily_token_limit
         over_daily_request = today_requests >= daily_request_limit
-        over_monthly_token = (
-            monthly_token_quota is not None
-            and monthly_tokens >= monthly_token_quota * TOKEN_QUOTA_MULTIPLIER
-        )
-        over_monthly_request = (
-            monthly_request_quota is not None and monthly_requests >= monthly_request_quota
-        )
+        over_monthly_token = monthly_token_quota is not None and monthly_tokens >= monthly_token_quota * TOKEN_QUOTA_MULTIPLIER
+        over_monthly_request = monthly_request_quota is not None and monthly_requests >= monthly_request_quota
 
         response = {
             "user_id": user_id,
@@ -170,56 +165,33 @@ def check_quota():
                 "tokens": {
                     "used": today_tokens,
                     "limit": daily_token_limit,
-                    "percentage": (
-                        round((today_tokens / daily_token_limit * 100), 2)
-                        if daily_token_limit
-                        else 0
-                    ),
+                    "percentage": round((today_tokens / daily_token_limit * 100), 2) if daily_token_limit else 0,
                     "over_quota": over_daily_token,
                 },
                 "requests": {
                     "used": today_requests,
                     "limit": daily_request_limit,
-                    "percentage": (
-                        round((today_requests / daily_request_limit * 100), 2)
-                        if daily_request_limit
-                        else 0
-                    ),
+                    "percentage": round((today_requests / daily_request_limit * 100), 2) if daily_request_limit else 0,
                     "over_quota": over_daily_request,
                 },
             },
             "monthly": {
                 "tokens": {
                     "used": monthly_tokens,
-                    "limit": (
-                        monthly_token_quota * TOKEN_QUOTA_MULTIPLIER
-                        if monthly_token_quota
-                        else None
-                    ),
-                    "percentage": (
-                        round(
-                            (monthly_tokens / (monthly_token_quota * TOKEN_QUOTA_MULTIPLIER) * 100),
-                            2,
-                        )
-                        if monthly_token_quota and monthly_token_quota > 0
-                        else 0
-                    ),
+                    "limit": monthly_token_quota * TOKEN_QUOTA_MULTIPLIER if monthly_token_quota else None,
+                    "percentage": round((monthly_tokens / (monthly_token_quota * TOKEN_QUOTA_MULTIPLIER) * 100), 2)
+                    if monthly_token_quota and monthly_token_quota > 0 else 0,
                     "over_quota": over_monthly_token,
                 },
                 "requests": {
                     "used": monthly_requests,
                     "limit": monthly_request_quota,
-                    "percentage": (
-                        round((monthly_requests / monthly_request_quota * 100), 2)
-                        if monthly_request_quota and monthly_request_quota > 0
-                        else 0
-                    ),
+                    "percentage": round((monthly_requests / monthly_request_quota * 100), 2)
+                    if monthly_request_quota and monthly_request_quota > 0 else 0,
                     "over_quota": over_monthly_request,
                 },
             },
-            "can_use": not (
-                over_daily_token or over_daily_request or over_monthly_token or over_monthly_request
-            ),
+            "can_use": not (over_daily_token or over_daily_request or over_monthly_token or over_monthly_request),
             "alerts": [],
         }
 
@@ -258,10 +230,8 @@ def get_quota_status():
         # Get today's usage combining local CLI and remote proxy
         today = datetime.now().strftime("%Y-%m-%d")
         today_combined = usage_repo.get_combined_usage(
-            user_id=user_id,
-            system_account=system_account,
-            start_date=today,
-            end_date=today,
+            user_id=user_id, system_account=system_account,
+            start_date=today, end_date=today,
         )
         today_requests = today_combined["requests"]
         today_tokens = today_combined["tokens"]
@@ -270,10 +240,8 @@ def get_quota_status():
         now = datetime.now()
         month_start = now.replace(day=1).strftime("%Y-%m-%d")
         monthly_combined = usage_repo.get_combined_usage(
-            user_id=user_id,
-            system_account=system_account,
-            start_date=month_start,
-            end_date=today,
+            user_id=user_id, system_account=system_account,
+            start_date=month_start, end_date=today,
         )
         monthly_requests = monthly_combined["requests"]
         monthly_tokens = monthly_combined["tokens"]
@@ -291,9 +259,7 @@ def get_quota_status():
             "daily": {
                 "tokens": {
                     "used": today_tokens,
-                    "limit": (
-                        daily_token_quota * TOKEN_QUOTA_MULTIPLIER if daily_token_quota else None
-                    ),
+                    "limit": daily_token_quota * TOKEN_QUOTA_MULTIPLIER if daily_token_quota else None,
                 },
                 "requests": {
                     "used": today_requests,
@@ -303,11 +269,7 @@ def get_quota_status():
             "monthly": {
                 "tokens": {
                     "used": monthly_tokens,
-                    "limit": (
-                        monthly_token_quota * TOKEN_QUOTA_MULTIPLIER
-                        if monthly_token_quota
-                        else None
-                    ),
+                    "limit": monthly_token_quota * TOKEN_QUOTA_MULTIPLIER if monthly_token_quota else None,
                 },
                 "requests": {
                     "used": monthly_requests,
@@ -322,13 +284,9 @@ def get_quota_status():
         monthly_token_limit = user.get("monthly_token_quota")
         monthly_request_limit = user.get("monthly_request_quota")
 
-        over_daily_token = (
-            daily_token_limit and today_tokens >= daily_token_limit * TOKEN_QUOTA_MULTIPLIER
-        )
+        over_daily_token = daily_token_limit and today_tokens >= daily_token_limit * TOKEN_QUOTA_MULTIPLIER
         over_daily_request = daily_request_limit and today_requests >= daily_request_limit
-        over_monthly_token = (
-            monthly_token_limit and monthly_tokens > monthly_token_limit * TOKEN_QUOTA_MULTIPLIER
-        )
+        over_monthly_token = monthly_token_limit and monthly_tokens > monthly_token_limit * TOKEN_QUOTA_MULTIPLIER
         over_monthly_request = monthly_request_limit and monthly_requests > monthly_request_limit
 
         response["over_quota"] = {
@@ -336,14 +294,12 @@ def get_quota_status():
             "daily_request": over_daily_request,
             "monthly_token": over_monthly_token,
             "monthly_request": over_monthly_request,
-            "any": any(
-                [
-                    over_daily_token,
-                    over_daily_request,
-                    over_monthly_token,
-                    over_monthly_request,
-                ]
-            ),
+            "any": any([
+                over_daily_token,
+                over_daily_request,
+                over_monthly_token,
+                over_monthly_request,
+            ]),
         }
 
         return jsonify(response)
@@ -360,7 +316,7 @@ def get_my_usage():
 
     This provides historical usage data for the user to view
     their usage patterns in Work mode.
-
+    
     Optimizations:
     - Uses pre-aggregated user_daily_stats table for fast queries
     - Implements 10-minute caching to reduce database load
@@ -387,7 +343,6 @@ def get_my_usage():
         if not start_date or not end_date:
             # Default to last 7 days (faster than 30 days)
             from datetime import timedelta
-
             end = datetime.now()
             start = end - timedelta(days=7)
             start_date = start.strftime("%Y-%m-%d")
@@ -402,16 +357,8 @@ def get_my_usage():
                 "username": username,
             },
             "limits": {
-                "daily_token": (
-                    user.get("daily_token_quota") * TOKEN_QUOTA_MULTIPLIER
-                    if user.get("daily_token_quota")
-                    else None
-                ),
-                "monthly_token": (
-                    user.get("monthly_token_quota") * TOKEN_QUOTA_MULTIPLIER
-                    if user.get("monthly_token_quota")
-                    else None
-                ),
+                "daily_token": user.get("daily_token_quota") * TOKEN_QUOTA_MULTIPLIER if user.get("daily_token_quota") else None,
+                "monthly_token": user.get("monthly_token_quota") * TOKEN_QUOTA_MULTIPLIER if user.get("monthly_token_quota") else None,
                 "daily_request": user.get("daily_request_quota"),
                 "monthly_request": user.get("monthly_request_quota"),
             },
@@ -448,7 +395,6 @@ def webui_quota_check():
         return jsonify({"error": "Missing webui token"}), 401
 
     from app.services.webui_manager import get_webui_manager
-
     manager = get_webui_manager()
     valid, user_id, error = manager.validate_token(webui_token)
 
@@ -466,10 +412,8 @@ def webui_quota_check():
         # Get today's usage combining local CLI and remote proxy
         today = datetime.now().strftime("%Y-%m-%d")
         today_combined = usage_repo.get_combined_usage(
-            user_id=user_id,
-            system_account=system_account,
-            start_date=today,
-            end_date=today,
+            user_id=user_id, system_account=system_account,
+            start_date=today, end_date=today,
         )
         today_requests = today_combined["requests"]
         today_tokens = today_combined["tokens"]
@@ -478,10 +422,8 @@ def webui_quota_check():
         now = datetime.now()
         month_start = now.replace(day=1).strftime("%Y-%m-%d")
         monthly_combined = usage_repo.get_combined_usage(
-            user_id=user_id,
-            system_account=system_account,
-            start_date=month_start,
-            end_date=today,
+            user_id=user_id, system_account=system_account,
+            start_date=month_start, end_date=today,
         )
         monthly_requests = monthly_combined["requests"]
         monthly_tokens = monthly_combined["tokens"]
@@ -494,13 +436,8 @@ def webui_quota_check():
 
         over_daily_token = today_tokens >= daily_token_limit
         over_daily_request = today_requests >= daily_request_limit
-        over_monthly_token = (
-            monthly_token_quota is not None
-            and monthly_tokens >= monthly_token_quota * TOKEN_QUOTA_MULTIPLIER
-        )
-        over_monthly_request = (
-            monthly_request_quota is not None and monthly_requests >= monthly_request_quota
-        )
+        over_monthly_token = monthly_token_quota is not None and monthly_tokens >= monthly_token_quota * TOKEN_QUOTA_MULTIPLIER
+        over_monthly_request = monthly_request_quota is not None and monthly_requests >= monthly_request_quota
 
         response = {
             "user_id": user_id,
@@ -508,43 +445,21 @@ def webui_quota_check():
                 "tokens": {
                     "used": today_tokens,
                     "limit": daily_token_limit,
-                    "percentage": (
-                        round((today_tokens / daily_token_limit * 100), 2)
-                        if daily_token_limit
-                        else 0
-                    ),
+                    "percentage": round((today_tokens / daily_token_limit * 100), 2) if daily_token_limit else 0,
                     "over_quota": over_daily_token,
                 },
                 "requests": {
                     "used": today_requests,
                     "limit": daily_request_limit,
-                    "percentage": (
-                        round((today_requests / daily_request_limit * 100), 2)
-                        if daily_request_limit
-                        else 0
-                    ),
+                    "percentage": round((today_requests / daily_request_limit * 100), 2) if daily_request_limit else 0,
                     "over_quota": over_daily_request,
                 },
             },
             "monthly": {
-                "tokens": {
-                    "used": monthly_tokens,
-                    "limit": (
-                        monthly_token_quota * TOKEN_QUOTA_MULTIPLIER
-                        if monthly_token_quota
-                        else None
-                    ),
-                    "over_quota": over_monthly_token,
-                },
-                "requests": {
-                    "used": monthly_requests,
-                    "limit": monthly_request_quota,
-                    "over_quota": over_monthly_request,
-                },
+                "tokens": {"used": monthly_tokens, "limit": monthly_token_quota * TOKEN_QUOTA_MULTIPLIER if monthly_token_quota else None, "over_quota": over_monthly_token},
+                "requests": {"used": monthly_requests, "limit": monthly_request_quota, "over_quota": over_monthly_request},
             },
-            "can_use": not (
-                over_daily_token or over_daily_request or over_monthly_token or over_monthly_request
-            ),
+            "can_use": not (over_daily_token or over_daily_request or over_monthly_token or over_monthly_request),
         }
         return jsonify(response)
     except Exception as e:

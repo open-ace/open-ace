@@ -95,7 +95,7 @@ def get_remote_config() -> dict:
                     "user": host_info.get("user", "openclaw"),
                     "dir": host_info.get("base_dir", "/home/openclaw/open-ace"),
                 }
-        except (OSError, json.JSONDecodeError) as e:
+        except (json.JSONDecodeError, IOError) as e:
             print_error(f"Failed to load config: {e}")
 
     return {"host": "", "user": "openclaw", "dir": "/home/openclaw/open-ace"}
@@ -163,7 +163,7 @@ def show_config():
 
     config_file = CONFIG_DIR / "config.json"
     if config_file.exists():
-        print("\nCurrent configuration:")
+        print(f"\nCurrent configuration:")
         with open(config_file) as f:
             print(f.read())
     else:
@@ -225,7 +225,7 @@ def deploy_local():
     print("\n" + "=" * 60)
     print("Local deployment completed!")
     print(f"Deploy directory: {DEPLOY_DIR}")
-    print("To start: python3 scripts/manage.py start")
+    print(f"To start: python3 scripts/manage.py start")
     print("=" * 60)
 
 
@@ -316,7 +316,7 @@ def start_service(dev_mode: bool = False):
 def stop_webui_processes():
     """Stop all qwen-code-webui processes."""
     stopped_pids = []
-
+    
     # Method 1: Find by process name
     result = run_command("pgrep -f 'qwen-code-webui'", capture=True, check=False)
     if result and result.stdout.strip():
@@ -325,7 +325,7 @@ def stop_webui_processes():
             if pid:
                 run_command(f"kill -9 {pid}", check=False)
                 stopped_pids.append(pid)
-
+    
     # Method 2: Find by node processes running webui backend
     result = run_command("pgrep -f 'node.*webui.*backend'", capture=True, check=False)
     if result and result.stdout.strip():
@@ -334,7 +334,7 @@ def stop_webui_processes():
             if pid and pid not in stopped_pids:
                 run_command(f"kill -9 {pid}", check=False)
                 stopped_pids.append(pid)
-
+    
     # Method 3: Find by node processes with qwen-code-webui in command line
     result = run_command("pgrep -f 'node.*cli.*node\\.js'", capture=True, check=False)
     if result and result.stdout.strip():
@@ -343,7 +343,7 @@ def stop_webui_processes():
             if pid and pid not in stopped_pids:
                 run_command(f"kill -9 {pid}", check=False)
                 stopped_pids.append(pid)
-
+    
     return stopped_pids
 
 

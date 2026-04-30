@@ -10,35 +10,31 @@ Tests the tab title default value and rename functionality in Workspace:
 5. Verify title is updated
 """
 
-import os
 import sys
+import os
 import time
 
 # Add skill scripts to path
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-skill_dir = os.path.join(PROJECT_ROOT, ".qwen", "skills", "ui-test", "scripts")
+skill_dir = '/Users/rhuang/workspace/open-ace/.qwen/skills/ui-test/scripts'
 if os.path.exists(skill_dir):
     sys.path.insert(0, skill_dir)
 
 try:
-    from playwright.sync_api import expect, sync_playwright
+    from playwright.sync_api import sync_playwright, expect
 except ImportError:
-    print(
-        "Error: playwright not installed. Run: pip install playwright && playwright install chromium"
-    )
+    print("Error: playwright not installed. Run: pip install playwright && playwright install chromium")
     sys.exit(1)
 
 # Configuration
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
-USERNAME = os.environ.get("USERNAME", "admin")
-PASSWORD = os.environ.get("PASSWORD", "admin123")
-HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
+BASE_URL = "http://localhost:5001"
+USERNAME = "admin"
+PASSWORD = "admin123"
+HEADLESS = True
 VIEWPORT = {"width": 1280, "height": 800}
-SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "issues", "9")
+SCREENSHOT_DIR = "/Users/rhuang/workspace/open-ace/screenshots/issues/9"
 
 # Ensure screenshot directory exists
 os.makedirs(SCREENSHOT_DIR, exist_ok=True)
-
 
 def take_screenshot(page, name):
     """Take screenshot and save to screenshot directory"""
@@ -46,7 +42,6 @@ def take_screenshot(page, name):
     page.screenshot(path=path, full_page=False)
     print(f"  Screenshot saved: {path}")
     return path
-
 
 def login(page):
     """Login to the system"""
@@ -58,7 +53,6 @@ def login(page):
     page.wait_for_load_state("networkidle")
     # Wait for redirect to home
     time.sleep(1)
-
 
 def test_tab_title_rename():
     """Test tab title default value and rename functionality"""
@@ -144,9 +138,7 @@ def test_tab_title_rename():
             time.sleep(0.5)
 
             # Look for rename button (pencil icon)
-            rename_btn = first_tab.locator(
-                ".rename-btn, .tab-action-btn:has(.bi-pencil), button:has(.bi-pencil-fill)"
-            )
+            rename_btn = first_tab.locator(".rename-btn, .tab-action-btn:has(.bi-pencil), button:has(.bi-pencil-fill)")
 
             if rename_btn.count() > 0:
                 print("  ✓ Rename button found")
@@ -231,9 +223,7 @@ def test_tab_title_rename():
 
             # Step 10: Click Save button
             print("\nStep 10: Click Save button")
-            save_btn = modal.locator(
-                "button:has-text('Save'), button.btn-primary, button:has-text('保存')"
-            )
+            save_btn = modal.locator("button:has-text('Save'), button.btn-primary, button:has-text('保存')")
             if save_btn.count() > 0:
                 save_btn.click()
                 print("  Clicked Save button")
@@ -278,9 +268,7 @@ def test_tab_title_rename():
                     test_results.append(("Title Updated", "PASS", updated_title))
                 else:
                     print(f"  ✗ Title not updated - expected '{new_name}', got '{updated_title}'")
-                    test_results.append(
-                        ("Title Updated", "FAIL", f"Expected '{new_name}', got '{updated_title}'")
-                    )
+                    test_results.append(("Title Updated", "FAIL", f"Expected '{new_name}', got '{updated_title}'"))
             else:
                 print("  ? Cannot verify - title element not found")
                 test_results.append(("Title Updated", "INFO", "Cannot verify"))
@@ -289,9 +277,7 @@ def test_tab_title_rename():
 
             # Step 13: Create new tab and check title
             print("\nStep 13: Create new tab and check title")
-            new_tab_btn = page.locator(
-                ".workspace-new-tab-btn, button:has(.bi-plus-lg), button:has(.bi-plus)"
-            )
+            new_tab_btn = page.locator(".workspace-new-tab-btn, button:has(.bi-plus-lg), button:has(.bi-plus)")
             if new_tab_btn.count() > 0:
                 new_tab_btn.click()
                 time.sleep(3)
@@ -315,9 +301,7 @@ def test_tab_title_rename():
                             test_results.append(("New Tab Default Title", "PASS", new_title))
                         elif new_title.lower() == "session" or new_title == "会话":
                             print("  ✗ New tab title is plain 'session' - bug!")
-                            test_results.append(
-                                ("New Tab Default Title", "FAIL", f"Title is '{new_title}'")
-                            )
+                            test_results.append(("New Tab Default Title", "FAIL", f"Title is '{new_title}'"))
                         else:
                             print(f"  New tab title: '{new_title}'")
                             test_results.append(("New Tab Default Title", "INFO", new_title))
@@ -343,11 +327,7 @@ def test_tab_title_rename():
             skipped = sum(1 for r in test_results if r[1] in ("SKIP", "INFO"))
 
             for name, status, *details in test_results:
-                icon = (
-                    "✓"
-                    if status == "PASS"
-                    else "✗" if status == "FAIL" else "?" if status == "INFO" else "-"
-                )
+                icon = "✓" if status == "PASS" else "✗" if status == "FAIL" else "?" if status == "INFO" else "-"
                 detail = details[0] if details else ""
                 print(f"  {icon} {name}: {status}" + (f" - {detail}" if detail else ""))
 
@@ -363,13 +343,11 @@ def test_tab_title_rename():
         except Exception as e:
             print(f"\nError during test: {e}")
             import traceback
-
             traceback.print_exc()
             screenshots.append(take_screenshot(page, "error.png"))
             return False
         finally:
             browser.close()
-
 
 if __name__ == "__main__":
     success = test_tab_title_rename()

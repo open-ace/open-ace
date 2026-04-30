@@ -9,12 +9,11 @@
 - 点击 Page Size 后，表格应按照新的每页显示数量重新加载数据
 """
 
+import pytest
 import asyncio
+from playwright.async_api import async_playwright
 import os
 from datetime import datetime
-
-import pytest
-from playwright.async_api import async_playwright
 
 # 配置
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000/")
@@ -63,22 +62,27 @@ async def test_issue38():
 
             # 3. 先设置日期范围（在点击 Tab 之前）
             print("3. 设置日期范围...")
-            await page.evaluate("""() => {
+            await page.evaluate(
+                """() => {
                 document.getElementById('analysis-start-date').value = '2026-03-01';
                 document.getElementById('analysis-end-date').value = '2026-03-13';
-            }""")
+            }"""
+            )
             await asyncio.sleep(1)
 
             # 4. 点击 Conversation History Tab
             print("4. 点击 Conversation History Tab...")
-            await page.evaluate("""() => {
+            await page.evaluate(
+                """() => {
                 const tab = document.getElementById('conversation-history-tab');
                 if (tab) tab.click();
-            }""")
+            }"""
+            )
             await asyncio.sleep(3)  # Wait for data to load
 
             # 检查表格状态
-            table_info = await page.evaluate("""() => {
+            table_info = await page.evaluate(
+                """() => {
                 const table = document.getElementById('conversation-history-table');
                 const rows = document.querySelectorAll('#conversation-history-table .tabulator-row');
                 const placeholder = document.querySelector('#conversation-history-table .tabulator-placeholder');
@@ -88,7 +92,8 @@ async def test_issue38():
                     placeholderExists: !!placeholder,
                     tableHTML: table ? table.innerHTML.substring(0, 200) : 'no table'
                 };
-            }""")
+            }"""
+            )
             print(f"   表格信息: {table_info}")
 
             try:
@@ -109,9 +114,11 @@ async def test_issue38():
 
             # 5. 获取初始表格行数
             print("4. 获取初始表格行数...")
-            initial_rows = await page.evaluate("""() => {
+            initial_rows = await page.evaluate(
+                """() => {
                 return document.querySelectorAll('#conversation-history-table .tabulator-row').length;
-            }""")
+            }"""
+            )
             print(f"   初始行数: {initial_rows}")
             results.append(("初始表格数据", True, f"行数: {initial_rows}"))
 
@@ -153,9 +160,11 @@ async def test_issue38():
                 return False
 
             # 获取新的表格行数
-            new_rows = await page.evaluate("""() => {
+            new_rows = await page.evaluate(
+                """() => {
                 return document.querySelectorAll('#conversation-history-table .tabulator-row').length;
-            }""")
+            }"""
+            )
             print(f"   ✓ 表格数据仍然存在，当前行数: {new_rows}")
             results.append(("Page Size 变更后数据保留", True, f"新行数: {new_rows}"))
 
@@ -177,9 +186,11 @@ async def test_issue38():
                 print("   ✗ 失败: 再次切换后数据消失")
                 results.append(("再次切换 Page Size", False, "数据消失"))
             else:
-                final_rows = await page.evaluate("""() => {
+                final_rows = await page.evaluate(
+                    """() => {
                     return document.querySelectorAll('#conversation-history-table .tabulator-row').length;
-                }""")
+                }"""
+                )
                 print(f"   ✓ 数据仍然存在，行数: {final_rows}")
                 results.append(("再次切换 Page Size", True, f"行数: {final_rows}"))
 

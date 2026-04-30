@@ -15,11 +15,10 @@ Tables affected:
 
 """
 
-from collections.abc import Sequence
-from typing import Union
+from typing import Sequence, Union
 
-import sqlalchemy as sa
 from alembic import op
+import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "006_add_foreign_keys"
@@ -53,10 +52,12 @@ def upgrade() -> None:
         sa.Column("is_active", sa.Integer(), server_default="1"),
     )
 
-    op.execute("""
+    op.execute(
+        """
         INSERT INTO sessions_new (id, token, user_id, created_at, expires_at, is_active)
         SELECT id, token, user_id, created_at, expires_at, is_active FROM sessions
-    """)
+    """
+    )
 
     op.drop_table("sessions")
     op.rename_table("sessions_new", "sessions")
@@ -92,10 +93,12 @@ def upgrade() -> None:
         sa.UniqueConstraint("tenant_id", "date", name="uq_tenant_usage_tenant_date_new"),
     )
 
-    op.execute("""
+    op.execute(
+        """
         INSERT INTO tenant_usage_new (id, tenant_id, date, tokens_used, requests_made, active_users, new_users, created_at)
         SELECT id, tenant_id, date, tokens_used, requests_made, active_users, new_users, created_at FROM tenant_usage
-    """)
+    """
+    )
 
     op.drop_table("tenant_usage")
     op.rename_table("tenant_usage_new", "tenant_usage")
@@ -130,10 +133,12 @@ def upgrade() -> None:
         ),
     )
 
-    op.execute("""
+    op.execute(
+        """
         INSERT INTO quota_usage_new (id, user_id, date, period, tokens_used, requests_used, created_at, updated_at)
         SELECT id, user_id, date, period, tokens_used, requests_used, created_at, updated_at FROM quota_usage
-    """)
+    """
+    )
 
     op.drop_table("quota_usage")
     op.rename_table("quota_usage_new", "quota_usage")
@@ -165,13 +170,15 @@ def upgrade() -> None:
         sa.Column("acknowledged_by", sa.Integer()),
     )
 
-    op.execute("""
+    op.execute(
+        """
         INSERT INTO quota_alerts_new (id, user_id, alert_type, quota_type, period, threshold,
             current_usage, quota_limit, percentage, message, created_at, acknowledged, acknowledged_at, acknowledged_by)
         SELECT id, user_id, alert_type, quota_type, period, threshold,
             current_usage, quota_limit, percentage, message, created_at, acknowledged, acknowledged_at, acknowledged_by
         FROM quota_alerts
-    """)
+    """
+    )
 
     op.drop_table("quota_alerts")
     op.rename_table("quota_alerts_new", "quota_alerts")
@@ -205,9 +212,11 @@ def downgrade() -> None:
         sa.Column("acknowledged_at", sa.TIMESTAMP()),
         sa.Column("acknowledged_by", sa.Integer()),
     )
-    op.execute("""
+    op.execute(
+        """
         INSERT INTO quota_alerts_old SELECT * FROM quota_alerts
-    """)
+    """
+    )
     op.drop_table("quota_alerts")
     op.rename_table("quota_alerts_old", "quota_alerts")
     op.create_index("idx_quota_alerts_user", "quota_alerts", ["user_id"])
@@ -226,9 +235,11 @@ def downgrade() -> None:
         sa.Column("updated_at", sa.TIMESTAMP(), server_default=sa.text("CURRENT_TIMESTAMP")),
         sa.UniqueConstraint("user_id", "date", "period", name="uq_quota_usage_user_date_period"),
     )
-    op.execute("""
+    op.execute(
+        """
         INSERT INTO quota_usage_old SELECT * FROM quota_usage
-    """)
+    """
+    )
     op.drop_table("quota_usage")
     op.rename_table("quota_usage_old", "quota_usage")
     op.create_index("idx_quota_usage_user", "quota_usage", ["user_id"])
@@ -247,9 +258,11 @@ def downgrade() -> None:
         sa.Column("created_at", sa.TIMESTAMP(), server_default=sa.text("CURRENT_TIMESTAMP")),
         sa.UniqueConstraint("tenant_id", "date", name="uq_tenant_usage_tenant_date"),
     )
-    op.execute("""
+    op.execute(
+        """
         INSERT INTO tenant_usage_old SELECT * FROM tenant_usage
-    """)
+    """
+    )
     op.drop_table("tenant_usage")
     op.rename_table("tenant_usage_old", "tenant_usage")
     op.create_index("idx_tenant_usage_tenant", "tenant_usage", ["tenant_id"])
@@ -265,9 +278,11 @@ def downgrade() -> None:
         sa.Column("expires_at", sa.TIMESTAMP(), nullable=False),
         sa.Column("is_active", sa.Integer(), server_default="1"),
     )
-    op.execute("""
+    op.execute(
+        """
         INSERT INTO sessions_old SELECT * FROM sessions
-    """)
+    """
+    )
     op.drop_table("sessions")
     op.rename_table("sessions_old", "sessions")
     op.create_index("idx_sessions_user_id", "sessions", ["user_id"])

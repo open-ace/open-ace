@@ -22,16 +22,7 @@ logger = logging.getLogger(__name__)
 sso_bp = Blueprint("sso", __name__, url_prefix="/api/sso")
 
 # Services
-_sso_manager = None
-
-
-def get_sso_manager():
-    global _sso_manager
-    if _sso_manager is None:
-        _sso_manager = SSOManager()
-    return _sso_manager
-
-
+sso_manager = SSOManager()
 user_repo = UserRepository()
 auth_service = AuthService()
 
@@ -41,7 +32,7 @@ def list_sso_providers():
     """List available SSO providers."""
     tenant_id = request.args.get("tenant_id", type=int)
 
-    providers = get_sso_manager().list_providers(tenant_id=tenant_id)
+    providers = sso_manager.list_providers(tenant_id=tenant_id)
 
     # Also include predefined providers
     predefined = list_providers()
@@ -58,9 +49,7 @@ def list_sso_providers():
 def register_provider():
     """Register a new SSO provider (admin only)."""
     # Check admin auth
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
+    token = request.cookies.get("session_token") or request.headers.get("Authorization", "").replace("Bearer ", "")
     is_admin, result = auth_service.require_admin(token)
 
     if not is_admin:
@@ -84,7 +73,7 @@ def register_provider():
 
     # Check if it's a predefined provider
     if data.get("predefined"):
-        success = get_sso_manager().register_predefined_provider(
+        success = sso_manager.register_predefined_provider(
             provider_name=provider_name,
             client_id=client_id,
             client_secret=client_secret,
@@ -94,7 +83,7 @@ def register_provider():
         )
     else:
         # Custom provider
-        success = get_sso_manager().register_provider(
+        success = sso_manager.register_provider(
             name=provider_name,
             provider_type=data.get("provider_type", "oauth2"),
             client_id=client_id,
@@ -118,15 +107,13 @@ def register_provider():
 @sso_bp.route("/providers/<provider_name>", methods=["DELETE"])
 def disable_provider(provider_name: str):
     """Disable an SSO provider (admin only)."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
+    token = request.cookies.get("session_token") or request.headers.get("Authorization", "").replace("Bearer ", "")
     is_admin, result = auth_service.require_admin(token)
 
     if not is_admin:
         return jsonify({"error": result.get("error", "Admin access required")}), 403
 
-    success = get_sso_manager().disable_provider(provider_name)
+    success = sso_manager.disable_provider(provider_name)
 
     if success:
         return jsonify({"message": f"Provider {provider_name} disabled"})
@@ -148,7 +135,7 @@ def start_login(provider_name: str):
         # Build default callback URL
         redirect_uri = url_for("sso.callback", provider_name=provider_name, _external=True)
 
-    result = get_sso_manager().start_authentication(provider_name, redirect_uri)
+    result = sso_manager.start_authentication(provider_name, redirect_uri)
 
     if not result:
         return jsonify({"error": f"Failed to start authentication for {provider_name}"}), 500
@@ -195,7 +182,7 @@ def callback(provider_name: str):
     )
 
     # Complete authentication
-    auth_result = get_sso_manager().complete_authentication(
+    auth_result = sso_manager.complete_authentication(
         provider_name=provider_name,
         code=code,
         state=state,
@@ -216,7 +203,7 @@ def callback(provider_name: str):
     # Get or create local user
     user_id = None
     if auth_result.user:
-        user_id = get_sso_manager().get_user_by_sso_identity(
+        user_id = sso_manager.get_user_by_sso_identity(
             provider_name,
             auth_result.user.provider_user_id,
         )
@@ -234,7 +221,7 @@ def callback(provider_name: str):
 
             # Link identity
             if user_id:
-                get_sso_manager().link_identity(
+                sso_manager.link_identity(
                     user_id=user_id,
                     provider_name=provider_name,
                     provider_user_id=auth_result.user.provider_user_id,
@@ -244,7 +231,7 @@ def callback(provider_name: str):
     # Create session
     session_token = None
     if user_id and auth_result.token:
-        session_token = get_sso_manager().create_sso_session(
+        session_token = sso_manager.create_sso_session(
             user_id=user_id,
             provider_name=provider_name,
             access_token=auth_result.token.access_token,
@@ -253,7 +240,7 @@ def callback(provider_name: str):
         )
 
         # Also create local session
-        auth_service.user_repo.create_session(
+        local_token = auth_service.user_repo.create_session(
             user_id=user_id,
             token=session_token,
             expires_at=datetime.utcnow(),
@@ -272,14 +259,12 @@ def callback(provider_name: str):
 @sso_bp.route("/session", methods=["GET"])
 def get_session():
     """Get current SSO session info."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
+    token = request.cookies.get("session_token") or request.headers.get("Authorization", "").replace("Bearer ", "")
 
     if not token:
         return jsonify({"error": "No session token provided"}), 401
 
-    session_data = get_sso_manager().get_sso_session(token)
+    session_data = sso_manager.get_sso_session(token)
 
     if not session_data:
         return jsonify({"error": "Invalid or expired session"}), 401
@@ -290,12 +275,10 @@ def get_session():
 @sso_bp.route("/session", methods=["DELETE"])
 def logout():
     """Logout from SSO session."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
+    token = request.cookies.get("session_token") or request.headers.get("Authorization", "").replace("Bearer ", "")
 
     if token:
-        get_sso_manager().delete_sso_session(token)
+        sso_manager.delete_sso_session(token)
 
     return jsonify({"message": "Logged out successfully"})
 
@@ -303,9 +286,7 @@ def logout():
 @sso_bp.route("/identities/<int:user_id>", methods=["GET"])
 def get_user_identities(user_id: int):
     """Get SSO identities for a user."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
+    token = request.cookies.get("session_token") or request.headers.get("Authorization", "").replace("Bearer ", "")
     is_auth, result = auth_service.require_auth(token)
 
     if not is_auth:
@@ -319,7 +300,7 @@ def get_user_identities(user_id: int):
         return jsonify({"error": "Access denied"}), 403
 
     # Get identities from database
-    identities = get_sso_manager().db.fetch_all(
+    identities = sso_manager.db.fetch_all(
         """
         SELECT provider_name, provider_user_id, created_at, last_used_at
         FROM sso_identities
@@ -339,9 +320,7 @@ def get_user_identities(user_id: int):
 @sso_bp.route("/identities/<int:user_id>/<provider_name>", methods=["DELETE"])
 def unlink_identity(user_id: int, provider_name: str):
     """Unlink an SSO identity from a user."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
+    token = request.cookies.get("session_token") or request.headers.get("Authorization", "").replace("Bearer ", "")
     is_auth, result = auth_service.require_auth(token)
 
     if not is_auth:
@@ -355,7 +334,7 @@ def unlink_identity(user_id: int, provider_name: str):
         return jsonify({"error": "Access denied"}), 403
 
     try:
-        with get_sso_manager().db.connection() as conn:
+        with sso_manager.db.connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 """

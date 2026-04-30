@@ -19,9 +19,9 @@ Usage::
 import logging
 
 from .base import BaseCLIAdapter
+from .qwen_code import QwenCodeAdapter
 from .claude_code import ClaudeCodeAdapter
 from .openclaw import OpenClawAdapter
-from .qwen_code import QwenCodeAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,6 @@ def get_adapter(cli_tool: str) -> BaseCLIAdapter:
 
         def check_installed(self):
             import shutil
-
             return shutil.which(cli_tool) is not None
 
         def get_env_vars(self, proxy_url: str, proxy_token: str):

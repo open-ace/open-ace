@@ -6,11 +6,10 @@ Tests:
 2. Session Management section visibility and functionality
 """
 
-import asyncio
-import os
-import sys
-
 import pytest
+import sys
+import os
+import asyncio
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -122,7 +121,7 @@ async def _test_sessions_section(page):
     try:
         # Check if Sessions nav exists (for non-admin users)
         print("  - 检查 Sessions 导航项")
-        await page.query_selector('.sidebar .nav-link:has-text("Sessions")')
+        sessions_nav = await page.query_selector('.sidebar .nav-link:has-text("Sessions")')
 
         # For admin user, Sessions might not be visible
         # Let's check if we can navigate to it directly

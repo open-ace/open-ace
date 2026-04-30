@@ -186,9 +186,8 @@ def api_user_request_trend(user_name):
 @usage_bp.route("/request/monthly")
 def api_request_monthly():
     """Get monthly request statistics grouped by user."""
-    from datetime import datetime
-
     from app.repositories.usage_repo import UsageRepository
+    from datetime import datetime
 
     year = int(request.args.get("year", datetime.now().year))
     month = int(request.args.get("month", datetime.now().month))

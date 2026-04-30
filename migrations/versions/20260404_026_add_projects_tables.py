@@ -13,8 +13,8 @@ This migration creates tables for project management and statistics:
 
 from typing import Union
 
-import sqlalchemy as sa
 from alembic import op
+import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "026_add_projects"
@@ -54,7 +54,9 @@ def _column_exists(conn, table_name: str, column_name: str) -> bool:
         return result.fetchone()[0]
     else:
         result = conn.execute(
-            sa.text("SELECT name FROM pragma_table_info(:table_name) WHERE name = :column_name"),
+            sa.text(
+                "SELECT name FROM pragma_table_info(:table_name) WHERE name = :column_name"
+            ),
             {"table_name": table_name, "column_name": column_name},
         )
         return result.fetchone() is not None
@@ -155,7 +157,9 @@ def upgrade() -> None:
             op.add_column("daily_stats", sa.Column("project_id", sa.Integer, nullable=True))
 
         if not _column_exists(conn, "daily_stats", "project_path"):
-            op.add_column("daily_stats", sa.Column("project_path", sa.String(500), nullable=True))
+            op.add_column(
+                "daily_stats", sa.Column("project_path", sa.String(500), nullable=True)
+            )
 
         # Create index for project_id
         if not _column_exists(conn, "daily_stats", "project_id"):

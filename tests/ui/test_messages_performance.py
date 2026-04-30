@@ -9,6 +9,7 @@ This script tests the query performance for different filter combinations.
 import os
 import sys
 import time
+from datetime import datetime
 
 # Add shared directory to path
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -24,7 +25,7 @@ def test_query_performance():
     """Test query performance for different filter combinations."""
     today = utils.get_today()
 
-    print("Testing Messages API query performance")
+    print(f"Testing Messages API query performance")
     print(f"Today's date: {today}")
     print("=" * 60)
 
@@ -75,13 +76,13 @@ def test_query_performance():
 
         # Performance rating
         if query_time_ms < 100:
-            print("  Rating: ✓ Excellent (< 100ms)")
+            print(f"  Rating: ✓ Excellent (< 100ms)")
         elif query_time_ms < 500:
-            print("  Rating: ✓ Good (< 500ms)")
+            print(f"  Rating: ✓ Good (< 500ms)")
         elif query_time_ms < 1000:
-            print("  Rating: ⚠ Acceptable (< 1s)")
+            print(f"  Rating: ⚠ Acceptable (< 1s)")
         else:
-            print("  Rating: ✗ Slow (> 1s) - Needs optimization!")
+            print(f"  Rating: ✗ Slow (> 1s) - Needs optimization!")
 
     print("\n" + "=" * 60)
     print("Summary:")

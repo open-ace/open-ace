@@ -13,9 +13,8 @@ Usage:
 """
 
 import asyncio
-import os
 import time
-
+import os
 from playwright.async_api import async_playwright
 
 # Test configuration
@@ -76,7 +75,7 @@ async def test_workspace_fullscreen():
             # Take screenshot of initial state
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             await page.screenshot(path=f"{SCREENSHOT_DIR}/01_initial_state_{timestamp}.png")
-            print("   ✓ Initial screenshot saved")
+            print(f"   ✓ Initial screenshot saved")
 
             # Step 3: Check fullscreen toggle button
             print("\n[Step 3] Checking fullscreen toggle button...")
@@ -102,14 +101,10 @@ async def test_workspace_fullscreen():
 
             if left_width > 60 and right_width > 60:
                 print("   ✓ Both panels are expanded")
-                test_results.append(
-                    ("Initial Panels Expanded", "PASS", f"Left:{left_width}, Right:{right_width}")
-                )
+                test_results.append(("Initial Panels Expanded", "PASS", f"Left:{left_width}, Right:{right_width}"))
             else:
                 print("   ⚠ Panels may already be collapsed")
-                test_results.append(
-                    ("Initial Panels State", "WARN", f"Left:{left_width}, Right:{right_width}")
-                )
+                test_results.append(("Initial Panels State", "WARN", f"Left:{left_width}, Right:{right_width}"))
 
             # Step 5: Click fullscreen button
             print("\n[Step 5] Clicking fullscreen button...")
@@ -118,7 +113,7 @@ async def test_workspace_fullscreen():
 
             # Take screenshot after fullscreen
             await page.screenshot(path=f"{SCREENSHOT_DIR}/02_fullscreen_mode_{timestamp}.png")
-            print("   ✓ Fullscreen screenshot saved")
+            print(f"   ✓ Fullscreen screenshot saved")
 
             # Step 6: Verify fullscreen mode activated
             print("\n[Step 6] Verifying fullscreen mode...")
@@ -145,9 +140,7 @@ async def test_workspace_fullscreen():
                 test_results.append(("Panels Collapsed", "PASS", ""))
             else:
                 print(f"   ✗ Panels not fully collapsed (L:{left_width_fs}, R:{right_width_fs})")
-                test_results.append(
-                    ("Panels Collapsed", "FAIL", f"L:{left_width_fs}, R:{right_width_fs}")
-                )
+                test_results.append(("Panels Collapsed", "FAIL", f"L:{left_width_fs}, R:{right_width_fs}"))
 
             # Step 7: Test ESC key to exit fullscreen
             print("\n[Step 7] Testing ESC key to exit fullscreen...")
@@ -156,7 +149,7 @@ async def test_workspace_fullscreen():
 
             # Take screenshot after ESC
             await page.screenshot(path=f"{SCREENSHOT_DIR}/03_after_esc_{timestamp}.png")
-            print("   ✓ After ESC screenshot saved")
+            print(f"   ✓ After ESC screenshot saved")
 
             # Verify fullscreen mode exited
             has_fullscreen_after_esc = await work_layout.evaluate(
@@ -182,13 +175,7 @@ async def test_workspace_fullscreen():
                 test_results.append(("Panel State Restored", "PASS", ""))
             else:
                 print("   ⚠ Panel state may have changed")
-                test_results.append(
-                    (
-                        "Panel State Restored",
-                        "WARN",
-                        f"Original L:{left_width},R:{right_width} vs Restored L:{left_width_restored},R:{right_width_restored}",
-                    )
-                )
+                test_results.append(("Panel State Restored", "WARN", f"Original L:{left_width},R:{right_width} vs Restored L:{left_width_restored},R:{right_width_restored}"))
 
             # Step 9: Test toggle fullscreen again (exit via button)
             print("\n[Step 9] Testing fullscreen button toggle again...")
@@ -240,7 +227,6 @@ async def test_workspace_fullscreen():
         except Exception as e:
             print(f"\n✗ Test failed with error: {e}")
             import traceback
-
             traceback.print_exc()
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             await page.screenshot(path=f"{SCREENSHOT_DIR}/error_{timestamp}.png")

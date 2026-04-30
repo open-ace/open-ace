@@ -144,11 +144,12 @@ class AlertNotifier:
 
         # Use SERIAL for PostgreSQL, AUTOINCREMENT for SQLite
         id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
-        "BOOLEAN DEFAULT TRUE" if is_postgresql() else "INTEGER DEFAULT 1"
+        bool_true = "BOOLEAN DEFAULT TRUE" if is_postgresql() else "INTEGER DEFAULT 1"
         bool_false = "BOOLEAN DEFAULT FALSE" if is_postgresql() else "INTEGER DEFAULT 0"
 
         # Create alerts table
-        cursor.execute(f"""
+        cursor.execute(
+            f"""
             CREATE TABLE IF NOT EXISTS alerts (
                 id {id_type},
                 alert_id TEXT UNIQUE NOT NULL,
@@ -165,10 +166,12 @@ class AlertNotifier:
                 action_url TEXT,
                 action_text TEXT
             )
-        """)
+        """
+        )
 
         # Create notification_preferences table
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS notification_preferences (
                 user_id INTEGER PRIMARY KEY,
                 email_enabled {bool_true},
@@ -177,21 +180,28 @@ class AlertNotifier:
                 alert_types TEXT,
                 min_severity TEXT DEFAULT 'warning'
             )
-        """)
+        """
+        )
 
         # Create indexes
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_alerts_user_id
             ON alerts(user_id)
-        """)
-        cursor.execute("""
+        """
+        )
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_alerts_created_at
             ON alerts(created_at)
-        """)
-        cursor.execute("""
+        """
+        )
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_alerts_read
             ON alerts(read)
-        """)
+        """
+        )
 
         conn.commit()
         conn.close()
@@ -315,12 +325,14 @@ class AlertNotifier:
         cursor = conn.cursor()
 
         cursor.execute(
-            adapt_sql("""
+            adapt_sql(
+                """
             INSERT INTO alerts
             (alert_id, alert_type, severity, title, message, user_id, username,
              tool_name, metadata, created_at, read, action_url, action_text)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """),
+        """
+            ),
             (
                 alert.alert_id,
                 alert.alert_type,
@@ -426,12 +438,14 @@ class AlertNotifier:
         where_clause = " AND ".join(conditions) if conditions else "1=1"
 
         cursor.execute(
-            adapt_sql(f"""
+            adapt_sql(
+                f"""
             SELECT * FROM alerts
             WHERE {where_clause}
             ORDER BY created_at DESC
             LIMIT ? OFFSET ?
-        """),
+        """
+            ),
             params + [limit, offset],
         )
 
@@ -455,15 +469,11 @@ class AlertNotifier:
 
         if user_id is not None:
             cursor.execute(
-                adapt_sql(
-                    f"SELECT COUNT(*) as count FROM alerts WHERE user_id = ? AND {adapt_boolean_condition('read', False)}"
-                ),
+                adapt_sql(f"SELECT COUNT(*) as count FROM alerts WHERE user_id = ? AND {adapt_boolean_condition('read', False)}"),
                 (user_id,),
             )
         else:
-            cursor.execute(
-                f"SELECT COUNT(*) as count FROM alerts WHERE {adapt_boolean_condition('read', False)}"
-            )
+            cursor.execute(f"SELECT COUNT(*) as count FROM alerts WHERE {adapt_boolean_condition('read', False)}")
 
         count = cursor.fetchone()["count"]
         conn.close()
@@ -483,10 +493,7 @@ class AlertNotifier:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        cursor.execute(
-            adapt_sql("UPDATE alerts SET read = ? WHERE alert_id = ?"),
-            (adapt_boolean_value(True), alert_id),
-        )
+        cursor.execute(adapt_sql("UPDATE alerts SET read = ? WHERE alert_id = ?"), (adapt_boolean_value(True), alert_id))
 
         success = cursor.rowcount > 0
         conn.commit()
@@ -509,16 +516,11 @@ class AlertNotifier:
 
         if user_id is not None:
             cursor.execute(
-                adapt_sql(
-                    f"UPDATE alerts SET read = ? WHERE user_id = ? AND {adapt_boolean_condition('read', False)}"
-                ),
+                adapt_sql(f"UPDATE alerts SET read = ? WHERE user_id = ? AND {adapt_boolean_condition('read', False)}"),
                 (adapt_boolean_value(True), user_id),
             )
         else:
-            cursor.execute(
-                f"UPDATE alerts SET read = ? WHERE {adapt_boolean_condition('read', False)}",
-                (adapt_boolean_value(True),),
-            )
+            cursor.execute(f"UPDATE alerts SET read = ? WHERE {adapt_boolean_condition('read', False)}", (adapt_boolean_value(True),))
 
         count = cursor.rowcount
         conn.commit()
@@ -560,12 +562,7 @@ class AlertNotifier:
         cursor = conn.cursor()
 
         cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
-        cursor.execute(
-            adapt_sql(
-                f"DELETE FROM alerts WHERE created_at < ? AND {adapt_boolean_condition('read', True)}"
-            ),
-            (cutoff,),
-        )
+        cursor.execute(adapt_sql(f"DELETE FROM alerts WHERE created_at < ? AND {adapt_boolean_condition('read', True)}"), (cutoff,))
 
         count = cursor.rowcount
         conn.commit()
@@ -682,11 +679,9 @@ class AlertNotifier:
             created_at=(
                 row["created_at"]
                 if isinstance(row["created_at"], datetime)
-                else (
-                    datetime.fromisoformat(row["created_at"])
-                    if row["created_at"]
-                    else datetime.utcnow()
-                )
+                else datetime.fromisoformat(row["created_at"])
+                if row["created_at"]
+                else datetime.utcnow()
             ),
             read=bool(row["read"]),
             action_url=row["action_url"],

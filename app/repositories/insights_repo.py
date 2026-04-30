@@ -7,7 +7,7 @@ Repository for insights report CRUD operations.
 
 import json
 import logging
-from typing import Optional
+from typing import Dict, List, Optional
 
 from app.repositories.database import Database, is_postgresql
 
@@ -25,7 +25,7 @@ class InsightsReportRepository:
         user_id: int,
         start_date: str,
         end_date: str,
-        report_data: dict,
+        report_data: Dict,
         model: str,
     ) -> Optional[int]:
         """
@@ -59,9 +59,7 @@ class InsightsReportRepository:
                         report_data.get("overall_score"),
                         report_data.get("overall_assessment"),
                         json.dumps(report_data.get("strengths", []), ensure_ascii=False),
-                        json.dumps(
-                            report_data.get("areas_for_improvement", []), ensure_ascii=False
-                        ),
+                        json.dumps(report_data.get("areas_for_improvement", []), ensure_ascii=False),
                         json.dumps(report_data.get("suggestions", []), ensure_ascii=False),
                         json.dumps(report_data.get("usage_summary", {}), ensure_ascii=False),
                         model,
@@ -86,9 +84,7 @@ class InsightsReportRepository:
                         report_data.get("overall_score"),
                         report_data.get("overall_assessment"),
                         json.dumps(report_data.get("strengths", []), ensure_ascii=False),
-                        json.dumps(
-                            report_data.get("areas_for_improvement", []), ensure_ascii=False
-                        ),
+                        json.dumps(report_data.get("areas_for_improvement", []), ensure_ascii=False),
                         json.dumps(report_data.get("suggestions", []), ensure_ascii=False),
                         json.dumps(report_data.get("usage_summary", {}), ensure_ascii=False),
                         model,
@@ -102,7 +98,9 @@ class InsightsReportRepository:
             logger.error(f"Error saving insights report: {e}")
             return None
 
-    def get_report(self, user_id: int, start_date: str, end_date: str) -> Optional[dict]:
+    def get_report(
+        self, user_id: int, start_date: str, end_date: str
+    ) -> Optional[Dict]:
         """
         Get an existing report for the given user and date range.
 
@@ -122,7 +120,7 @@ class InsightsReportRepository:
         """
         return self.db.fetch_one(query, (user_id, start_date, end_date))
 
-    def get_user_reports(self, user_id: int, limit: int = 10) -> list[dict]:
+    def get_user_reports(self, user_id: int, limit: int = 10) -> List[Dict]:
         """
         Get user's report history.
 
@@ -163,7 +161,7 @@ class InsightsReportRepository:
             logger.error(f"Error deleting insights report {report_id}: {e}")
             return False
 
-    def get_report_by_id(self, report_id: int, user_id: int) -> Optional[dict]:
+    def get_report_by_id(self, report_id: int, user_id: int) -> Optional[Dict]:
         """
         Get a specific report by ID with user ownership verification.
 

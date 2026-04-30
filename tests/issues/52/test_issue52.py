@@ -8,11 +8,12 @@ Test script for Issue 52: Management页面Users tab增加Linux Account功能
 3. 前端层面：表格显示 Linux Account 列，编辑和密码重置功能
 """
 
-import hashlib
-import os
-import shutil
 import sys
+import os
+import hashlib
+import sqlite3
 import tempfile
+import shutil
 
 # Add project root to path
 sys.path.insert(
@@ -69,7 +70,7 @@ def test_update_user_with_linux_account():
         db_module.init_database()
 
         # 创建测试用户
-        password_hash = hashlib.sha256(b"test123").hexdigest()
+        password_hash = hashlib.sha256("test123".encode()).hexdigest()
         result = db_module.create_user(
             username="testuser", password_hash=password_hash, email="test@example.com", role="user"
         )
@@ -114,7 +115,7 @@ def test_update_user_password():
         db_module.init_database()
 
         # 创建测试用户
-        old_password_hash = hashlib.sha256(b"oldpassword").hexdigest()
+        old_password_hash = hashlib.sha256("oldpassword".encode()).hexdigest()
         result = db_module.create_user(
             username="passwordtest",
             password_hash=old_password_hash,
@@ -130,7 +131,7 @@ def test_update_user_password():
         user_id = user["id"]
 
         # 更新密码
-        new_password_hash = hashlib.sha256(b"newpassword").hexdigest()
+        new_password_hash = hashlib.sha256("newpassword".encode()).hexdigest()
         result = db_module.update_user_password(user_id, new_password_hash)
         assert result, "更新密码失败"
         print("✓ 更新密码成功")
@@ -163,7 +164,7 @@ def test_get_all_users_includes_linux_account():
         db_module.init_database()
 
         # 创建测试用户
-        password_hash = hashlib.sha256(b"test123").hexdigest()
+        password_hash = hashlib.sha256("test123".encode()).hexdigest()
         db_module.create_user(
             username="user1", password_hash=password_hash, email="user1@example.com", role="user"
         )

@@ -12,12 +12,11 @@ Test script for issue #71: Real-time cross-tab message isolation test
 - Tab 1 的消息列表不应该包含 Tab 2 的工具调用显示
 """
 
+import sys
 import os
 import subprocess
-import sys
+from playwright.sync_api import sync_playwright, TimeoutError
 import time
-
-from playwright.sync_api import sync_playwright
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, project_root)
@@ -42,9 +41,9 @@ def ensure_service_running():
             ["python3", "web.py"],
             cwd="/Users/rhuang/workspace/open-ace",
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
         )
-        for _i in range(30):
+        for i in range(30):
             time.sleep(1)
             result = subprocess.run(["lsof", "-i", ":5001"], capture_output=True, text=True)
             if result.stdout.strip():
@@ -60,7 +59,7 @@ def find_chat_frame_by_index(page, index):
         url = frame.url
         if "token=" in url or "127.0.0.1:310" in url:
             webui_frames.append((i, frame, url))
-
+    
     if index < len(webui_frames):
         return webui_frames[index][1]
     return None
@@ -106,13 +105,13 @@ def check_for_tool_execution(frame):
             "animate-spin",
             "Thinking",
         ]
-
+        
         body_text = frame.locator("body").text_content() or ""
         found = []
         for ind in indicators:
             if ind in body_text:
                 found.append(ind)
-
+        
         return found
     except:
         return []
@@ -133,7 +132,7 @@ def test_realtime_cross_tab():
 
     ensure_service_running()
     test_results = []
-
+    
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=HEADLESS, slow_mo=100)  # 减少延迟以便更快切换
         context = browser.new_context(viewport=VIEWPORT_SIZE)
@@ -201,10 +200,10 @@ def test_realtime_cross_tab():
                     textarea.fill(complex_task)
                     textarea.press("Enter")
                     print(f"    发送: '{complex_task}'")
-
+                    
                     # 等待一小段时间让 AI 开始处理（但不要等完成）
                     page.wait_for_timeout(3000)
-
+                    
                     # 检查是否开始执行工具
                     tools_found = check_for_tool_execution(tab2_frame)
                     print(f"    [Tab 2] 检测到的工具执行指示: {tools_found}")
@@ -218,21 +217,21 @@ def test_realtime_cross_tab():
             page.screenshot(path=f"{OUTPUT_DIR}/realtime_switch_to_tab1.png")
 
             tab1_frame = find_chat_frame_by_index(page, 0)
-
+            
             # 检查 Tab 1 当前状态（应该在 Tab 2 执行时）
             print("\n[Tab 1] 检查当前内容（Tab 2 正在执行时）...")
             if tab1_frame:
                 try:
                     body_text = tab1_frame.locator("body").text_content() or ""
                     print(f"    内容长度: {len(body_text)}")
-
+                    
                     # 检查是否有 Tab 2 的工具内容泄露
                     tab2_tools = ["list_directory", "glob", "read_file", "app.ts", "backend"]
                     leaked_content = []
                     for tool in tab2_tools:
                         if tool.lower() in body_text.lower():
                             leaked_content.append(tool)
-
+                    
                     if leaked_content:
                         print(f"    ✗ 发现 Tab 2 内容泄露: {leaked_content}")
                         test_results.append(("切换时内容泄露", False))
@@ -251,59 +250,52 @@ def test_realtime_cross_tab():
                     textarea.fill(simple_question)
                     textarea.press("Enter")
                     print(f"    发送: '{simple_question}'")
-
+                    
                     # 等待一小段时间
                     page.wait_for_timeout(2000)
-
+                    
                     # 截图记录发送后状态
                     page.screenshot(path=f"{OUTPUT_DIR}/realtime_tab1_sent.png")
 
             # ========== 多次检查 Tab 1 的实时内容 ==========
             print("\n[Tab 1] 多次检查内容变化（监控是否有 Tab 2 内容出现）...")
-
+            
             for check_round in range(5):
                 page.wait_for_timeout(3000)
-
+                
                 tab1_frame = find_chat_frame_by_index(page, 0)
                 if tab1_frame:
                     try:
                         body_text = tab1_frame.locator("body").text_content() or ""
-
+                        
                         # 检查工具执行内容
-                        tab2_tools = [
-                            "list_directory",
-                            "glob",
-                            "read_file",
-                            "app.ts",
-                            "backend",
-                            "tool_result",
-                        ]
+                        tab2_tools = ["list_directory", "glob", "read_file", "app.ts", "backend", "tool_result"]
                         leaked = []
                         for tool in tab2_tools:
                             if tool.lower() in body_text.lower():
                                 leaked.append(tool)
-
+                        
                         # 检查正确回复
                         expected = ["sky", "blue", "color"]
                         found_expected = []
                         for exp in expected:
                             if exp.lower() in body_text.lower():
                                 found_expected.append(exp)
-
+                        
                         print(f"    [检查 {check_round+1}] 内容长度: {len(body_text)}")
                         print(f"    [检查 {check_round+1}] Tab 2 工具泄露: {leaked}")
                         print(f"    [检查 {check_round+1}] 预期内容: {found_expected}")
-
+                        
                         if leaked and check_round > 0:  # 第一次可能有历史消息
                             print(f"    ✗ 检查 {check_round+1}: 发现 Tab 2 工具内容泄露!")
                             test_results.append((f"检查{check_round+1}-泄露", False))
                         elif not leaked:
                             print(f"    ✓ 检查 {check_round+1}: 正常，无泄露")
                             test_results.append((f"检查{check_round+1}-泄露", True))
-
+                        
                         # 截图
                         page.screenshot(path=f"{OUTPUT_DIR}/realtime_check_{check_round+1}.png")
-
+                        
                     except Exception as e:
                         print(f"    [检查 {check_round+1}] 失败: {e}")
 
@@ -320,24 +312,24 @@ def test_realtime_cross_tab():
             tab1_frame = find_chat_frame_by_index(page, 0)
             if tab1_frame:
                 body_text = tab1_frame.locator("body").text_content() or ""
-
+                
                 # 统计工具相关词出现次数
                 tool_words = ["list_directory", "glob", "read_file", "✓", "tool_result"]
                 tool_count = 0
                 for word in tool_words:
                     if word in body_text:
                         tool_count += body_text.count(word)
-
+                
                 print(f"    内容长度: {len(body_text)}")
                 print(f"    工具相关词出现次数: {tool_count}")
-
+                
                 # 显示内容摘要
-                print("\n    内容摘要:")
+                print(f"\n    内容摘要:")
                 # 提取消息部分
                 if "What color" in body_text:
                     start = body_text.find("What color")
                     print(f"    {body_text[start:start+300]}...")
-
+                
                 if tool_count > 5:
                     print("    ✗ Tab 1 包含大量工具执行内容，可能来自 Tab 2")
                     test_results.append(("最终-工具内容", False))
@@ -349,21 +341,21 @@ def test_realtime_cross_tab():
             print("\n[Tab 2] 最终内容检查...")
             tabs.nth(1).click()
             page.wait_for_timeout(3000)
-
+            
             tab2_frame = find_chat_frame_by_index(page, 1)
             if tab2_frame:
                 body_text = tab2_frame.locator("body").text_content() or ""
-
+                
                 # 检查是否包含 Tab 1 的内容
                 tab1_words = ["sky", "blue", "What color"]
                 found_tab1 = []
                 for word in tab1_words:
                     if word.lower() in body_text.lower():
                         found_tab1.append(word)
-
+                
                 print(f"    内容长度: {len(body_text)}")
                 print(f"    Tab 1 内容泄露: {found_tab1}")
-
+                
                 if found_tab1:
                     print("    ✗ Tab 2 包含 Tab 1 内容")
                     test_results.append(("Tab2-泄露", False))
@@ -399,7 +391,6 @@ def test_realtime_cross_tab():
         except Exception as e:
             print(f"\n✗ 测试错误: {e}")
             import traceback
-
             traceback.print_exc()
             page.screenshot(path=f"{OUTPUT_DIR}/realtime_error.png")
             return False

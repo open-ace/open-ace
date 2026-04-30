@@ -7,6 +7,9 @@ Issue: Clicking the Create button in the Add Prompt dialog causes an error.
 
 import os
 import sys
+import time
+import json
+from datetime import datetime
 
 # Add project root to path
 sys.path.insert(
@@ -14,7 +17,7 @@ sys.path.insert(
 )
 
 try:
-    from playwright.sync_api import expect, sync_playwright
+    from playwright.sync_api import sync_playwright, expect
 except ImportError:
     print(
         "Error: playwright not installed. Run: pip install playwright && playwright install chromium"

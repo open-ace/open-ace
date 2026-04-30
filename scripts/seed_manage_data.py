@@ -10,20 +10,15 @@ Populates empty tables with sample data so all management pages show content:
 """
 
 import os
-import random
 import sys
+import random
 from datetime import datetime, timedelta
 
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
 from app import create_app
-from app.repositories.database import (
-    adapt_sql,
-    get_connection,
-    get_param_placeholder,
-    is_postgresql,
-)
+from app.repositories.database import get_connection, is_postgresql, adapt_sql, get_param_placeholder
 
 
 def seed_audit_logs(conn):
@@ -32,7 +27,7 @@ def seed_audit_logs(conn):
 
     # Check if already has data
     ph = get_param_placeholder()
-    cur.execute("SELECT COUNT(*) as cnt FROM audit_logs")
+    cur.execute(f"SELECT COUNT(*) as cnt FROM audit_logs")
     count = cur.fetchone()["cnt"] if is_postgresql() else cur.fetchone()[0]
     if count > 0:
         print(f"  audit_logs already has {count} rows, skipping")
@@ -82,44 +77,23 @@ def seed_audit_logs(conn):
         success = 1 if action != "login_failed" else random.choice([0, 1])
         detail = f"Action performed by {username}"
 
-        logs.append(
-            (
-                ts,
-                user_id,
-                username,
-                action,
-                severity,
-                resource_type,
-                resource_type + "_1",
-                detail,
-                ip,
-                "Mozilla/5.0",
-                "sess_" + str(i),
-                success,
-                None,
-            )
-        )
+        logs.append((ts, user_id, username, action, severity, resource_type,
+                      resource_type + "_1", detail, ip, "Mozilla/5.0", "sess_" + str(i), success, None))
 
-    cur.execute(
-        adapt_sql(f"""
+    cur.execute(adapt_sql(f"""
         INSERT INTO audit_logs
         (timestamp, user_id, username, action, severity, resource_type,
          resource_id, details, ip_address, user_agent, session_id, success, error_message)
         VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph})
-    """),
-        logs[0],
-    )
+    """), logs[0])
 
     for log in logs[1:]:
-        cur.execute(
-            adapt_sql(f"""
+        cur.execute(adapt_sql(f"""
             INSERT INTO audit_logs
             (timestamp, user_id, username, action, severity, resource_type,
              resource_id, details, ip_address, user_agent, session_id, success, error_message)
             VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph})
-        """),
-            log,
-        )
+        """), log)
 
     conn.commit()
     print(f"  Inserted {len(logs)} audit logs")
@@ -137,54 +111,29 @@ def seed_filter_rules(conn):
 
     ph = get_param_placeholder()
     rules = [
-        (
-            "PII Email Detection",
-            "regex",
-            r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
-            "medium",
-            "mask",
-            True,
-        ),
-        (
-            "PII Phone Detection",
-            "regex",
-            r"\b(\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b",
-            "medium",
-            "mask",
-            True,
-        ),
-        (
-            "Credit Card Detection",
-            "regex",
-            r"\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b",
-            "high",
-            "block",
-            True,
-        ),
-        ("Password Exposure", "keyword", r"\bpassword\b", "high", "block", True),
-        ("API Key Exposure", "keyword", r"\bapi[_-]?key\b", "high", "block", True),
-        ("Secret Exposure", "keyword", r"\bsecret\b", "medium", "mask", True),
-        ("SSN Detection", "regex", r"\b\d{3}-\d{2}-\d{4}\b", "high", "block", True),
+        ("PII Email Detection", "regex",
+         r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", "medium", "mask", True),
+        ("PII Phone Detection", "regex",
+         r"\b(\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b", "medium", "mask", True),
+        ("Credit Card Detection", "regex",
+         r"\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b", "high", "block", True),
+        ("Password Exposure", "keyword",
+         r"\bpassword\b", "high", "block", True),
+        ("API Key Exposure", "keyword",
+         r"\bapi[_-]?key\b", "high", "block", True),
+        ("Secret Exposure", "keyword",
+         r"\bsecret\b", "medium", "mask", True),
+        ("SSN Detection", "regex",
+         r"\b\d{3}-\d{2}-\d{4}\b", "high", "block", True),
     ]
 
     for desc, rule_type, pattern, severity, action, enabled in rules:
-        cur.execute(
-            adapt_sql(f"""
+        cur.execute(adapt_sql(f"""
             INSERT INTO content_filter_rules
             (pattern, type, severity, action, is_enabled, description, created_at, updated_at)
             VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph})
-        """),
-            (
-                pattern,
-                rule_type,
-                severity,
-                action,
-                enabled,
-                desc,
-                datetime.utcnow(),
-                datetime.utcnow(),
-            ),
-        )
+        """), (pattern, rule_type, severity, action, enabled, desc,
+               datetime.utcnow(), datetime.utcnow()))
 
     conn.commit()
     print(f"  Inserted {len(rules)} filter rules")
@@ -202,51 +151,16 @@ def seed_alerts(conn):
 
     ph = get_param_placeholder()
     alerts_data = [
-        (
-            "quota",
-            "medium",
-            "Quota Warning",
-            "User rhuang has used 80% of daily token quota",
-            89,
-            "rhuang",
-            "qwen",
-        ),
-        (
-            "quota",
-            "high",
-            "Quota Exceeded",
-            "User rhuang has exceeded daily request quota",
-            89,
-            "rhuang",
-            "claude",
-        ),
-        (
-            "system",
-            "low",
-            "Data Fetch Completed",
-            "Daily usage data refresh completed successfully",
-            1,
-            "admin",
-            None,
-        ),
-        (
-            "security",
-            "medium",
-            "Failed Login Attempts",
-            "Multiple failed login attempts detected from 10.0.0.50",
-            None,
-            None,
-            None,
-        ),
-        (
-            "system",
-            "info",
-            "New Machine Registered",
-            "Machine 'openace' registered successfully",
-            1,
-            "admin",
-            None,
-        ),
+        ("quota", "medium", "Quota Warning",
+         "User rhuang has used 80% of daily token quota", 89, "rhuang", "qwen"),
+        ("quota", "high", "Quota Exceeded",
+         "User rhuang has exceeded daily request quota", 89, "rhuang", "claude"),
+        ("system", "low", "Data Fetch Completed",
+         "Daily usage data refresh completed successfully", 1, "admin", None),
+        ("security", "medium", "Failed Login Attempts",
+         "Multiple failed login attempts detected from 10.0.0.50", None, None, None),
+        ("system", "info", "New Machine Registered",
+         "Machine 'openace' registered successfully", 1, "admin", None),
     ]
 
     now = datetime.utcnow()
@@ -255,29 +169,13 @@ def seed_alerts(conn):
         ts = now - timedelta(hours=hours_ago)
         alert_id = f"alert_{random.randint(10000, 99999)}"
         read_flag = 1 if hours_ago > 24 else 0
-        cur.execute(
-            adapt_sql(f"""
+        cur.execute(adapt_sql(f"""
             INSERT INTO alerts
             (alert_id, alert_type, severity, title, message, user_id, username,
              tool_name, metadata, created_at, read, action_url, action_text)
             VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph})
-        """),
-            (
-                alert_id,
-                alert_type,
-                severity,
-                title,
-                message,
-                user_id,
-                username,
-                tool_name,
-                None,
-                ts,
-                read_flag,
-                None,
-                None,
-            ),
-        )
+        """), (alert_id, alert_type, severity, title, message, user_id, username,
+               tool_name, None, ts, read_flag, None, None))
 
     conn.commit()
     print(f"  Inserted {len(alerts_data)} alerts")
@@ -298,7 +196,7 @@ def seed_hourly_stats(conn):
     ph = get_param_placeholder()
 
     # Get recent daily_usage data to know which dates/tools/hosts have data
-    cur.execute(adapt_sql("""
+    cur.execute(adapt_sql(f"""
         SELECT date, tool_name, host_name,
                SUM(input_tokens) as input_tokens,
                SUM(output_tokens) as output_tokens,
@@ -313,7 +211,7 @@ def seed_hourly_stats(conn):
 
     if not is_postgresql():
         # SQLite fallback
-        cur.execute(adapt_sql("""
+        cur.execute(adapt_sql(f"""
             SELECT date, tool_name, host_name,
                    SUM(input_tokens) as input_tokens,
                    SUM(output_tokens) as output_tokens,
@@ -336,53 +234,22 @@ def seed_hourly_stats(conn):
         for tool in tools:
             for host in hosts:
                 for hour in range(24):
-                    base_tokens = (
-                        random.randint(100000, 5000000)
-                        if tool == "qwen"
-                        else random.randint(50000, 500000)
-                    )
+                    base_tokens = random.randint(100000, 5000000) if tool == "qwen" else random.randint(50000, 500000)
                     out_tokens = int(base_tokens * 0.04)
                     in_tokens = base_tokens - out_tokens
                     reqs = random.randint(5, 100)
-                    cur.execute(
-                        adapt_sql(f"""
+                    cur.execute(adapt_sql(f"""
                         INSERT INTO hourly_stats
                         (date, hour, tool_name, host_name, total_tokens, input_tokens, output_tokens, request_count)
                         VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph})
-                    """),
-                        (today, hour, tool, host, base_tokens, in_tokens, out_tokens, reqs),
-                    )
+                    """), (today, hour, tool, host, base_tokens, in_tokens, out_tokens, reqs))
         conn.commit()
-        print("  Generated synthetic hourly stats for today")
+        print(f"  Generated synthetic hourly stats for today")
         return
 
     # Distribute daily totals across hours with realistic patterns
-    business_hours_weight = [
-        0.1,
-        0.05,
-        0.05,
-        0.05,
-        0.05,
-        0.1,
-        0.3,
-        0.6,
-        0.8,
-        1.0,
-        1.0,
-        1.0,
-        0.9,
-        0.8,
-        1.0,
-        1.0,
-        0.9,
-        0.7,
-        0.5,
-        0.3,
-        0.2,
-        0.15,
-        0.1,
-        0.1,
-    ]
+    business_hours_weight = [0.1, 0.05, 0.05, 0.05, 0.05, 0.1, 0.3, 0.6, 0.8, 1.0, 1.0, 1.0,
+                              0.9, 0.8, 1.0, 1.0, 0.9, 0.7, 0.5, 0.3, 0.2, 0.15, 0.1, 0.1]
 
     inserted = 0
     for row in rows:
@@ -405,14 +272,11 @@ def seed_hourly_stats(conn):
             h_output = int(output_tokens * w / total_weight)
             h_reqs = max(1, int(request_count * w / total_weight))
 
-            cur.execute(
-                adapt_sql(f"""
+            cur.execute(adapt_sql(f"""
                 INSERT INTO hourly_stats
                 (date, hour, tool_name, host_name, total_tokens, input_tokens, output_tokens, request_count)
                 VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph})
-            """),
-                (date, hour, tool, host, h_tokens, h_input, h_output, h_reqs),
-            )
+            """), (date, hour, tool, host, h_tokens, h_input, h_output, h_reqs))
             inserted += 1
 
     conn.commit()
@@ -435,37 +299,24 @@ def seed_retention_history(conn):
     now = datetime.utcnow()
     for i in range(3):
         ts = now - timedelta(days=i * 7)
-        report = json.dumps(
-            {
-                "timestamp": ts.isoformat(),
-                "rules_applied": [
-                    {
-                        "data_type": "sessions",
-                        "action": "delete",
-                        "records_affected": random.randint(5, 20),
-                    },
-                    {
-                        "data_type": "audit_logs",
-                        "action": "archive",
-                        "records_affected": random.randint(50, 200),
-                    },
-                ],
-                "records_deleted": random.randint(10, 50),
-                "records_archived": random.randint(50, 200),
-                "records_anonymized": 0,
-                "errors": [],
-            }
-        )
-        cur.execute(
-            adapt_sql(f"""
+        report = json.dumps({
+            "timestamp": ts.isoformat(),
+            "rules_applied": [
+                {"data_type": "sessions", "action": "delete", "records_affected": random.randint(5, 20)},
+                {"data_type": "audit_logs", "action": "archive", "records_affected": random.randint(50, 200)},
+            ],
+            "records_deleted": random.randint(10, 50),
+            "records_archived": random.randint(50, 200),
+            "records_anonymized": 0,
+            "errors": [],
+        })
+        cur.execute(adapt_sql(f"""
             INSERT INTO retention_history (timestamp, report_data)
             VALUES ({ph}, {ph})
-        """),
-            (ts, report),
-        )
+        """), (ts, report))
 
     conn.commit()
-    print("  Inserted 3 retention history records")
+    print(f"  Inserted 3 retention history records")
 
 
 def main():

@@ -21,16 +21,14 @@ Checkpoints:
 - Navigation to /work/prompts works
 """
 
-import os
-import sys
-
 import pytest
+import sys
+import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from playwright.async_api import async_playwright, expect
 import time
-
-from playwright.async_api import async_playwright
 
 # Test Configuration
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000")

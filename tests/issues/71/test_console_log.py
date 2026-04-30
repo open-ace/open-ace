@@ -3,10 +3,10 @@
 Test that captures browser console logs to verify tab notification message handling.
 """
 
-import os
 import sys
-
-from playwright.sync_api import sync_playwright
+import os
+from playwright.sync_api import sync_playwright, TimeoutError
+import time
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, project_root)
@@ -29,12 +29,12 @@ def select_project(chat_frame, page):
         project_rows = chat_frame.locator("div[class*='rounded-lg'][class*='p-4']")
         if project_rows.count() == 0:
             project_rows = chat_frame.locator("div.font-mono")
-
+        
         if project_rows.count() > 0:
             project_rows.first.click()
             page.wait_for_timeout(3000)
             return True
-
+        
         return False
     except Exception as e:
         print(f"    [ERROR] select_project: {e}")
@@ -67,7 +67,7 @@ def test_console_logs():
                 console_logs.append(f"[PAGE WARN] {text}")
             else:
                 console_logs.append(f"[PAGE {log_type}] {text}")
-
+        
         page.on("console", handle_console)
 
         try:
@@ -142,7 +142,7 @@ def test_console_logs():
                 textarea.fill("Read the file /etc/hosts and show me first 2 lines")
                 textarea.press("Enter")
                 print("    发送: 'Read the file /etc/hosts...'")
-
+                
                 # Wait for AI response and potential permission request
                 print("\n[7] 等待 AI 响应或权限请求...")
                 page.wait_for_timeout(20000)
@@ -158,14 +158,14 @@ def test_console_logs():
                 tab2 = tabs.nth(1)
                 bell = tab2.locator(".bi-bell-fill")
                 badge = tab2.locator(".waiting-badge")
-
+                
                 print(f"    Bell count: {bell.count()}")
                 print(f"    Badge count: {badge.count()}")
-
+                
                 if bell.count() > 0:
                     bell_classes = bell.get_attribute("class")
                     print(f"    Bell classes: {bell_classes}")
-
+                
                 if badge.count() > 0:
                     badge_classes = badge.get_attribute("class")
                     badge_content = badge.text_content()
@@ -181,15 +181,9 @@ def test_console_logs():
             print("\n" + "=" * 60)
             print("Console Logs (Notification Related)")
             print("=" * 60)
-
-            notification_logs = [
-                log
-                for log in console_logs
-                if "notification" in log.lower()
-                or "workspace" in log.lower()
-                or "waiting" in log.lower()
-            ]
-
+            
+            notification_logs = [log for log in console_logs if "notification" in log.lower() or "workspace" in log.lower() or "waiting" in log.lower()]
+            
             if notification_logs:
                 for log in notification_logs:
                     print(log)
@@ -204,7 +198,6 @@ def test_console_logs():
         except Exception as e:
             print(f"\n    ✗ 测试错误: {e}")
             import traceback
-
             traceback.print_exc()
             return False
         finally:

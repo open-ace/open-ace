@@ -4,9 +4,8 @@
 2. Search、Date 框和 Host 下拉列表高度一致
 """
 
-import time
-
 from playwright.sync_api import sync_playwright
+import time
 
 BASE_URL = "http://localhost:5000/"
 USERNAME = "admin"

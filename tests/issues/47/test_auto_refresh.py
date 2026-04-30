@@ -8,10 +8,9 @@ This test verifies that:
 3. currentMessageCount is updated correctly after loadMessages()
 """
 
-import time
-
 import pytest
-from playwright.async_api import async_playwright
+import time
+from playwright.async_api import async_playwright, expect
 
 # Test configuration
 BASE_URL = "http://localhost:5000"

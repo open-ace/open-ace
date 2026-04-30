@@ -2,7 +2,6 @@
 """Test screenshot for Issue 15 - Session History row click to show conversation modal."""
 
 import asyncio
-
 from playwright.async_api import async_playwright
 
 
@@ -40,11 +39,13 @@ async def main():
         # Set date range to ensure data is loaded
         print("Setting date range...")
         # Use JavaScript to set dates and trigger change
-        await page.evaluate("""() => {
+        await page.evaluate(
+            """() => {
             document.getElementById('analysis-start-date').value = '2026-03-01';
             document.getElementById('analysis-end-date').value = '2026-03-12';
             onAnalysisDateChange();
-        }""")
+        }"""
+        )
         await asyncio.sleep(2)
 
         # Click on Conversation History tab
@@ -69,15 +70,18 @@ async def main():
         first_row = await page.query_selector("#conversation-history-table .tabulator-row")
         if first_row:
             # Get session_id from the row
-            session_id = await first_row.evaluate("""el => {
+            session_id = await first_row.evaluate(
+                """el => {
                 const cell = el.querySelector('.tabulator-cell');
                 return cell ? cell.textContent : 'N/A';
-            }""")
+            }"""
+            )
             print(f"First row session_id: {session_id[:50]}...")
 
             # Use JavaScript to dispatch a click event on the row
             # This simulates a real click that Tabulator will catch
-            await page.evaluate("""() => {
+            await page.evaluate(
+                """() => {
                 const row = document.querySelector('#conversation-history-table .tabulator-row');
                 if (row) {
                     const event = new MouseEvent('click', {
@@ -87,18 +91,21 @@ async def main():
                     });
                     row.dispatchEvent(event);
                 }
-            }""")
+            }"""
+            )
             await asyncio.sleep(2)
 
             # Check modal state
-            modal_state = await page.evaluate("""() => {
+            modal_state = await page.evaluate(
+                """() => {
                 const modal = document.getElementById('conversationModal');
                 return {
                     display: modal?.style.display,
                     hasShowClass: modal?.classList.contains('show'),
                     ariaHidden: modal?.getAttribute('aria-hidden')
                 };
-            }""")
+            }"""
+            )
             print(f"Modal state after click: {modal_state}")
 
             # Take screenshot of modal
@@ -115,20 +122,24 @@ async def main():
             modal = await page.query_selector("#conversationModal.show")
             if not modal:
                 # Try alternative check
-                modal_style = await page.evaluate("""() => {
+                modal_style = await page.evaluate(
+                    """() => {
                     const modal = document.getElementById('conversationModal');
                     return {
                         display: modal?.style.display,
                         hasShowClass: modal?.classList.contains('show'),
                         ariaHidden: modal?.getAttribute('aria-hidden')
                     };
-                }""")
+                }"""
+                )
                 print(f"Modal state: {modal_style}")
 
                 # Check for JavaScript errors
-                errors = await page.evaluate("""() => {
+                errors = await page.evaluate(
+                    """() => {
                     return window.lastError || 'No error captured';
-                }""")
+                }"""
+                )
                 print(f"JS errors: {errors}")
 
             if modal:

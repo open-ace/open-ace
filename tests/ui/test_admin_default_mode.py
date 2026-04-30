@@ -7,7 +7,6 @@ Tests:
 """
 
 import asyncio
-
 from playwright.async_api import async_playwright
 
 
@@ -65,7 +64,7 @@ async def test_normal_user_default_mode():
             await page.wait_for_load_state("networkidle")
             await page.fill("input#username", "testuser")
             await page.fill("input#password", "testuser")
-
+            
             # Try to login, but handle potential timeout if user doesn't exist
             try:
                 async with page.expect_navigation(timeout=10000):
@@ -134,17 +133,13 @@ async def main():
     if admin_result.get("is_manage_mode"):
         print("✓ Admin user: Redirected to Manage mode (/manage/dashboard) after login")
     else:
-        print(
-            f"✗ Admin user: Should be redirected to Manage mode, but got: {admin_result.get('url')}"
-        )
+        print(f"✗ Admin user: Should be redirected to Manage mode, but got: {admin_result.get('url')}")
         all_passed = False
 
     if user_result.get("is_work_mode"):
         print("✓ Normal user: Redirected to Work mode after login")
     else:
-        print(
-            f"✗ Normal user: Should be redirected to Work mode, but got: {user_result.get('url')}"
-        )
+        print(f"✗ Normal user: Should be redirected to Work mode, but got: {user_result.get('url')}")
         all_passed = False
 
     print("\n" + "=" * 60)

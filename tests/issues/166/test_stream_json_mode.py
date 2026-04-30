@@ -8,10 +8,10 @@ Tests:
 3. Receiving result/response in stream-json format
 """
 
-import contextlib
 import json
 import os
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -48,11 +48,10 @@ def test_stream_json_mode(env_name: str, env_mods: dict) -> dict:
 
     # Find qwen executable
     import shutil
-
     qwen_path = shutil.which("qwen")
-
+    
     if not qwen_path:
-        print("ERROR: qwen CLI not found")
+        print(f"ERROR: qwen CLI not found")
         return {"success": False, "error": "qwen not found"}
 
     print(f"qwen path: {qwen_path}")
@@ -61,22 +60,18 @@ def test_stream_json_mode(env_name: str, env_mods: dict) -> dict:
     # Build command - use stream-json format
     cmd = [
         qwen_path,
-        "--auth-type",
-        "openai",
-        "--input-format",
-        "stream-json",
-        "--output-format",
-        "stream-json",
+        "--auth-type", "openai",
+        "--input-format", "stream-json",
+        "--output-format", "stream-json",
         "--channel=SDK",
-        "--approval-mode",
-        "yolo",  # Avoid permission prompts
+        "--approval-mode", "yolo",  # Avoid permission prompts
     ]
 
     print(f"Command: {' '.join(cmd)}")
 
     results = {
         "env_name": env_name,
-        "term_value": env.get("TERM", "NOT SET"),
+        "term_value": env.get('TERM', 'NOT SET'),
         "stdout_lines": [],
         "stderr_lines": [],
         "sdk_init_sent": False,
@@ -108,32 +103,32 @@ def test_stream_json_mode(env_name: str, env_mods: dict) -> dict:
                 if text_stripped:
                     results["stdout_lines"].append(text_stripped)
                     print(f"[STDOUT] {text_stripped[:150]}...")
-
+                    
                     try:
                         parsed = json.loads(text_stripped)
                         results["json_output_count"] += 1
                         msg_type = parsed.get("type")
-
+                        
                         if msg_type == "control_response":
                             resp = parsed.get("response", {})
                             if resp.get("subtype") == "success":
                                 results["sdk_init_response"] = True
                                 sdk_init_received.set()
                                 print("[STDOUT] SDK init SUCCESS!")
-
+                        
                         elif msg_type == "result":
                             results["user_msg_response"] = True
                             user_response_received.set()
                             print("[STDOUT] User message RESULT received!")
-
+                        
                         elif msg_type == "assistant":
                             # Stream message from assistant
                             print("[STDOUT] Assistant message streaming...")
-
-                    except json.JSONDecodeError:
+                        
+                    except json.JSONDecodeError as e:
                         results["non_json_output"].append(text_stripped)
                         print(f"[STDOUT] NON-JSON OUTPUT: {text_stripped[:100]}")
-
+                        
         except Exception as e:
             print(f"[STDOUT ERROR] {e}")
 
@@ -180,11 +175,11 @@ def test_stream_json_mode(env_name: str, env_mods: dict) -> dict:
 
     # Wait 1s to check if any initial non-JSON output (indicates interactive mode)
     time.sleep(1)
-
+    
     # Check for non-JSON output before sending anything
     if results["non_json_output"]:
-        print("\nWARNING: Non-JSON output detected before SDK init!")
-        print("This suggests CLI entered interactive mode instead of stream-json mode")
+        print(f"\nWARNING: Non-JSON output detected before SDK init!")
+        print(f"This suggests CLI entered interactive mode instead of stream-json mode")
         for line in results["non_json_output"][:5]:
             print(f"  {line[:80]}")
 
@@ -195,8 +190,8 @@ def test_stream_json_mode(env_name: str, env_mods: dict) -> dict:
         "request_id": init_request_id,
         "request": {"subtype": "initialize"},
     }
-
-    print("\n[STEP 1] Sending SDK init...")
+    
+    print(f"\n[STEP 1] Sending SDK init...")
     try:
         payload = json.dumps(init_msg) + "\n"
         process.stdin.write(payload.encode("utf-8"))
@@ -234,8 +229,8 @@ def test_stream_json_mode(env_name: str, env_mods: dict) -> dict:
         },
         "parent_tool_use_id": None,
     }
-
-    print("\n[STEP 2] Sending user message...")
+    
+    print(f"\n[STEP 2] Sending user message...")
     try:
         payload = json.dumps(user_msg) + "\n"
         process.stdin.write(payload.encode("utf-8"))
@@ -260,8 +255,10 @@ def test_stream_json_mode(env_name: str, env_mods: dict) -> dict:
 
     # Cleanup
     stop_readers.set()
-    with contextlib.suppress(BaseException):
+    try:
         process.stdin.close()
+    except:
+        pass
     process.terminate()
     try:
         process.wait(timeout=5)
@@ -274,9 +271,9 @@ def test_stream_json_mode(env_name: str, env_mods: dict) -> dict:
 
     # Determine success
     results["success"] = (
-        results["sdk_init_sent"]
-        and results["sdk_init_response"]
-        and results["user_msg_sent"]
+        results["sdk_init_sent"] 
+        and results["sdk_init_response"] 
+        and results["user_msg_sent"] 
         and results["user_msg_response"]
         and len(results["non_json_output"]) == 0  # No non-JSON output
     )
@@ -291,7 +288,7 @@ def test_stream_json_mode(env_name: str, env_mods: dict) -> dict:
     print(f"  JSON output count: {results['json_output_count']}")
     print(f"  Non-JSON output:   {len(results['non_json_output'])} lines")
     if results["non_json_output"]:
-        print("    (Non-JSON lines indicate interactive mode)")
+        print(f"    (Non-JSON lines indicate interactive mode)")
     print(f"  Timeout:           {results['timeout']}")
     print(f"  SUCCESS:           {results['success']}")
 
@@ -315,22 +312,18 @@ def main():
     print("\n" + "=" * 70)
     print("SUMMARY")
     print("=" * 70)
-
-    print(
-        f"\n{'Environment':<35} {'SDK Init':<12} {'User Msg':<12} {'Non-JSON':<10} {'Success':<10}"
-    )
+    
+    print(f"\n{'Environment':<35} {'SDK Init':<12} {'User Msg':<12} {'Non-JSON':<10} {'Success':<10}")
     print("-" * 70)
     for r in all_results:
         non_json = len(r.get("non_json_output", []))
-        print(
-            f"{r['env_name']:<35} {str(r['sdk_init_response']):<12} {str(r['user_msg_response']):<12} {non_json:<10} {str(r['success']):<10}"
-        )
+        print(f"{r['env_name']:<35} {str(r['sdk_init_response']):<12} {str(r['user_msg_response']):<12} {non_json:<10} {str(r['success']):<10}")
 
     # Diagnosis
     print("\n" + "=" * 70)
     print("DIAGNOSIS")
     print("=" * 70)
-
+    
     for r in all_results:
         if r["non_json_output"]:
             print(f"\n{r['env_name']}: CLI produced non-JSON output!")

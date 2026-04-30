@@ -11,12 +11,11 @@ Test script for issue #70: Workspace restore error - 404 Not Found
 6. 检查各个 tab 是否正常加载，是否有 404 错误
 """
 
-import json
-import os
 import sys
+import os
+import json
+from playwright.sync_api import sync_playwright, expect, TimeoutError
 import time
-
-from playwright.sync_api import TimeoutError, sync_playwright
 
 # Add project root to path
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -88,9 +87,7 @@ def test_workspace_restore():
 
             # 查找"新对话"或"New Chat"按钮
             try:
-                new_chat_btn = page.locator(
-                    "button:has-text('新对话'), button:has-text('New Chat'), button:has-text('New'), .btn-new-chat, .new-conversation-btn"
-                )
+                new_chat_btn = page.locator("button:has-text('新对话'), button:has-text('New Chat'), button:has-text('New'), .btn-new-chat, .new-conversation-btn")
                 if new_chat_btn.count() > 0:
                     print("    找到新对话按钮，点击...")
                     new_chat_btn.first.click()
@@ -169,9 +166,7 @@ def test_workspace_restore():
             # Check main page
             error_found = False
             try:
-                error_locator = page.locator(
-                    "text=/Error Loading|Failed to load|404 Not Found|Not Found/i"
-                )
+                error_locator = page.locator("text=/Error Loading|Failed to load|404 Not Found|Not Found/i")
                 if error_locator.count() > 0:
                     for i in range(error_locator.count()):
                         error_text = error_locator.nth(i).text_content()
@@ -197,18 +192,18 @@ def test_workspace_restore():
 
                     # 检查 iframe 中的错误
                     try:
-                        error_locator = frame.locator(
-                            "text=/Error Loading|Failed to load|404|Not Found/i"
-                        )
+                        error_locator = frame.locator("text=/Error Loading|Failed to load|404|Not Found/i")
                         if error_locator.count() > 0:
                             for j in range(error_locator.count()):
                                 error_text = error_locator.nth(j).text_content()
                                 print(f"      ✗ Frame 错误: {error_text}")
-                                iframe_errors.append(
-                                    {"frame": i, "url": frame_url, "error": error_text}
-                                )
+                                iframe_errors.append({
+                                    "frame": i,
+                                    "url": frame_url,
+                                    "error": error_text
+                                })
                         else:
-                            print("      ✓ 无错误")
+                            print(f"      ✓ 无错误")
                     except Exception as e:
                         print(f"      检查错误时出错: {e}")
 
@@ -220,7 +215,7 @@ def test_workspace_restore():
             if iframe_errors:
                 print(f"\n    ⚠️  发现 {len(iframe_errors)} 个 iframe 错误")
             else:
-                print("\n    ✓ 所有 iframe 正常加载")
+                print(f"\n    ✓ 所有 iframe 正常加载")
 
             # Step 12: Check workspace tabs UI
             print("\n[12] 检查工作区 tabs UI...")
@@ -258,7 +253,6 @@ def test_workspace_restore():
         except Exception as e:
             print(f"\n    ✗ 测试错误：{e}")
             import traceback
-
             traceback.print_exc()
             test_results.append(("测试执行", False))
             page.screenshot(path=f"{OUTPUT_DIR}/full_error_exception.png")

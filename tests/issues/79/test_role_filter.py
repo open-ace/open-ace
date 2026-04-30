@@ -19,7 +19,7 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
-from playwright.async_api import async_playwright
+from playwright.async_api import async_playwright, expect
 
 
 async def test_role_filter():

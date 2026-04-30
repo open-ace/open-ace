@@ -26,7 +26,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
 import requests
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, expect
 
 # ── Config ──
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
@@ -72,9 +72,8 @@ def pause(seconds):
 
 
 def api_login(username=TEST_USER, password=TEST_PASS):
-    r = requests.post(
-        f"{BASE_URL}/api/auth/login", json={"username": username, "password": password}
-    )
+    r = requests.post(f"{BASE_URL}/api/auth/login",
+                      json={"username": username, "password": password})
     assert r.status_code == 200, f"Login failed: {r.status_code}"
     token = r.cookies.get("session_token")
     assert token, "No session_token cookie"
@@ -85,9 +84,8 @@ def wait_for_remote_agent(token, timeout=40):
     """Wait until at least one remote machine is online."""
     start = time.time()
     while time.time() - start < timeout:
-        r = requests.get(
-            f"{BASE_URL}/api/remote/machines/available", cookies={"session_token": token}
-        )
+        r = requests.get(f"{BASE_URL}/api/remote/machines/available",
+                         cookies={"session_token": token})
         if r.status_code == 200:
             machines = r.json().get("machines", [])
             for m in machines:
@@ -99,7 +97,8 @@ def wait_for_remote_agent(token, timeout=40):
 
 def find_remote_machine(token):
     """Find an available remote machine."""
-    r = requests.get(f"{BASE_URL}/api/remote/machines/available", cookies={"session_token": token})
+    r = requests.get(f"{BASE_URL}/api/remote/machines/available",
+                     cookies={"session_token": token})
     assert r.status_code == 200, f"Failed to list machines: {r.status_code}"
     machines = r.json().get("machines", [])
     for m in machines:
@@ -119,9 +118,9 @@ def cleanup_remote_agent():
     try:
         # Kill stale CLI processes only (not the agent itself)
         subprocess.run(
-            ["ssh"] + ssh_opts + [remote, "killall -9 node qwen 2>/dev/null; echo done"],
-            capture_output=True,
-            timeout=15,
+            ["ssh"] + ssh_opts + [remote,
+             "killall -9 node qwen 2>/dev/null; echo done"],
+            capture_output=True, timeout=15,
         )
         time.sleep(1)
     except Exception as e:
@@ -131,7 +130,6 @@ def cleanup_remote_agent():
 # ════════════════════════════════════════════
 #  Main Test
 # ════════════════════════════════════════════
-
 
 def run_tests():
     global session_id, machine_id
@@ -152,7 +150,8 @@ def run_tests():
 
     # Get webui token for ChatPage access
     webui_info = requests.get(
-        f"{BASE_URL}/api/workspace/user-url", cookies={"session_token": token}
+        f"{BASE_URL}/api/workspace/user-url",
+        cookies={"session_token": token}
     ).json()
     webui_token = webui_info.get("token", "")
     effective_webui_url = webui_info.get("url", WEBUI_URL)
@@ -171,17 +170,15 @@ def run_tests():
 
         try:
             _run_all(page, token, effective_webui_url, webui_token)
-        except Exception:
+        except Exception as e:
             shot(page, "ERROR_final")
             traceback.print_exc()
             raise
         finally:
             # Cleanup
             if session_id:
-                requests.post(
-                    f"{BASE_URL}/api/remote/sessions/{session_id}/stop",
-                    cookies={"session_token": token},
-                )
+                requests.post(f"{BASE_URL}/api/remote/sessions/{session_id}/stop",
+                              cookies={"session_token": token})
             context.close()
             browser.close()
 
@@ -200,11 +197,7 @@ def _run_all(page, token, webui_url, webui_token):
     def on_request(request):
         if "/api/remote/sessions" in request.url and request.method == "POST":
             # Only count creates (not /chat or /stop sub-paths)
-            if (
-                "/chat" not in request.url
-                and "/stop" not in request.url
-                and "/stream" not in request.url
-            ):
+            if "/chat" not in request.url and "/stop" not in request.url and "/stream" not in request.url:
                 session_post_count[0] += 1
                 try:
                     body = json.loads(request.post_data or "{}")
@@ -215,7 +208,6 @@ def _run_all(page, token, webui_url, webui_token):
 
     # Track console errors
     console_errors = []
-
     def on_console(msg):
         if msg.type in ("error", "warning"):
             console_errors.append(f"[{msg.type}] {msg.text[:200]}")

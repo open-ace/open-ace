@@ -11,11 +11,10 @@ UI Test for Issue 54: Management页面User Management的Add User页面没有Linu
 7. 验证密码不匹配时显示错误提示
 """
 
-import os
-import sys
-
 import pytest
 from playwright.sync_api import expect
+import sys
+import os
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))

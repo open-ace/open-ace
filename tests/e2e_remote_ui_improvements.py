@@ -18,8 +18,8 @@ Run:
 import os
 import sys
 import time
-import traceback
 import uuid
+import traceback
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
@@ -80,9 +80,8 @@ def do_login(page, username, password):
 
 
 def api_login(username, password):
-    r = requests.post(
-        f"{BASE_URL}/api/auth/login", json={"username": username, "password": password}
-    )
+    r = requests.post(f"{BASE_URL}/api/auth/login",
+                      json={"username": username, "password": password})
     assert r.status_code == 200, f"Login failed for {username}: {r.status_code}"
     token = r.cookies.get("session_token")
     assert token, "No session_token cookie"
@@ -91,41 +90,34 @@ def api_login(username, password):
 
 def register_machine():
     global machine_id
-    r = requests.post(
-        f"{BASE_URL}/api/remote/machines/register",
-        json={"tenant_id": 1},
-        cookies={"session_token": admin_token},
-    )
+    r = requests.post(f"{BASE_URL}/api/remote/machines/register",
+                      json={"tenant_id": 1},
+                      cookies={"session_token": admin_token})
     assert r.status_code == 200
     reg_token = r.json()["registration_token"]
 
     machine_id = str(uuid.uuid4())
-    r = requests.post(
-        f"{BASE_URL}/api/remote/agent/register",
-        json={
-            "registration_token": reg_token,
-            "machine_id": machine_id,
-            "machine_name": "E2E UI Test Server",
-            "hostname": "ui-test.local",
-            "os_type": "linux",
-            "os_version": "Ubuntu 24.04",
-            "capabilities": {"cpu_cores": 8, "memory_gb": 32},
-            "agent_version": "1.0.0-e2e",
-        },
-    )
+    r = requests.post(f"{BASE_URL}/api/remote/agent/register", json={
+        "registration_token": reg_token,
+        "machine_id": machine_id,
+        "machine_name": "E2E UI Test Server",
+        "hostname": "ui-test.local",
+        "os_type": "linux",
+        "os_version": "Ubuntu 24.04",
+        "capabilities": {"cpu_cores": 8, "memory_gb": 32},
+        "agent_version": "1.0.0-e2e",
+    })
     assert r.status_code == 200
 
-    r = requests.post(
-        f"{BASE_URL}/api/remote/agent/message",
-        json={
-            "type": "register",
-            "machine_id": machine_id,
-            "capabilities": {"cpu_cores": 8, "memory_gb": 32},
-        },
-    )
+    r = requests.post(f"{BASE_URL}/api/remote/agent/message", json={
+        "type": "register",
+        "machine_id": machine_id,
+        "capabilities": {"cpu_cores": 8, "memory_gb": 32},
+    })
     assert r.status_code == 200
 
-    r = requests.get(f"{BASE_URL}/api/admin/users", cookies={"session_token": admin_token})
+    r = requests.get(f"{BASE_URL}/api/admin/users",
+                     cookies={"session_token": admin_token})
     user_id = None
     for u in r.json():
         if u.get("username") == TEST_USER:
@@ -133,34 +125,28 @@ def register_machine():
             break
     assert user_id, f"User '{TEST_USER}' not found"
 
-    r = requests.post(
-        f"{BASE_URL}/api/remote/machines/{machine_id}/assign",
-        json={"user_id": int(user_id), "permission": "admin"},
-        cookies={"session_token": admin_token},
-    )
+    r = requests.post(f"{BASE_URL}/api/remote/machines/{machine_id}/assign",
+                      json={"user_id": int(user_id), "permission": "admin"},
+                      cookies={"session_token": admin_token})
     assert r.status_code == 200
 
 
 def send_agent_output(session_id, data, is_complete=False):
-    requests.post(
-        f"{BASE_URL}/api/remote/agent/message",
-        json={
-            "type": "session_output",
-            "machine_id": machine_id,
-            "session_id": session_id,
-            "data": data,
-            "stream": "stdout",
-            "is_complete": is_complete,
-        },
-    )
+    requests.post(f"{BASE_URL}/api/remote/agent/message", json={
+        "type": "session_output",
+        "machine_id": machine_id,
+        "session_id": session_id,
+        "data": data,
+        "stream": "stdout",
+        "is_complete": is_complete,
+    })
 
 
 def cleanup():
     global machine_id
     if machine_id and admin_token:
-        requests.delete(
-            f"{BASE_URL}/api/remote/machines/{machine_id}", cookies={"session_token": admin_token}
-        )
+        requests.delete(f"{BASE_URL}/api/remote/machines/{machine_id}",
+                        cookies={"session_token": admin_token})
         machine_id = None
 
 
@@ -200,7 +186,6 @@ def _find_remote_tab_close_btn(page):
 #  Main Test
 # ════════════════════════════════════════════
 
-
 def run_tests():
     global auth_token, admin_token, webui_token, effective_webui_url, machine_id
 
@@ -211,7 +196,8 @@ def run_tests():
     log("Setup", f"Machine registered: {machine_id[:8]}...")
 
     webui_info = requests.get(
-        f"{BASE_URL}/api/workspace/user-url", cookies={"session_token": auth_token}
+        f"{BASE_URL}/api/workspace/user-url",
+        cookies={"session_token": auth_token}
     ).json()
     webui_token = webui_info.get("token", "")
     effective_webui_url = webui_info.get("url", WEBUI_URL)
@@ -230,7 +216,7 @@ def run_tests():
 
         try:
             _run_all(page)
-        except Exception:
+        except Exception as e:
             shot(page, "ERROR_final")
             traceback.print_exc()
             raise
@@ -263,16 +249,13 @@ def _run_all(page):
     print("\n══════ B1. Open Remote ChatPage ══════")
 
     console_errors = []
-
     def on_console(msg):
         if msg.type in ("error", "warning"):
             console_errors.append(f"[{msg.type}] {msg.text}")
-
     page.on("console", on_console)
 
     # Capture session creation responses
     captured_sessions = []
-
     def on_response(response):
         url = response.url
         if "/api/remote/sessions" in url and response.request.method == "POST":
@@ -286,7 +269,6 @@ def _run_all(page):
                         log("API", f"Session created: {sid[:8]}...")
                 except Exception:
                     pass
-
     page.on("response", on_response)
 
     chat_url = (
@@ -384,15 +366,9 @@ def _run_all(page):
 
                     # Verify a new session was created (captured_sessions grows)
                     if len(captured_sessions) >= 2:
-                        log(
-                            "Pass",
-                            f"✓ New session created after model switch: {captured_sessions[-1][:8]}...",
-                        )
+                        log("Pass", f"✓ New session created after model switch: {captured_sessions[-1][:8]}...")
                     else:
-                        log(
-                            "Info",
-                            f"Captured sessions: {len(captured_sessions)} (may need more wait)",
-                        )
+                        log("Info", f"Captured sessions: {len(captured_sessions)} (may need more wait)")
                     break
         else:
             log("Info", f"Only {options.count()} model option(s) available, cannot test switching")
@@ -417,7 +393,6 @@ def _run_all(page):
 
     # Capture session ID from modal creation
     remote_session_id = [None]
-
     def capture_session_resp(response):
         url = response.url
         if "/api/remote/sessions" in url and response.request.method == "POST":
@@ -431,7 +406,6 @@ def _run_all(page):
                         log("API", f"Remote session from modal: {sid[:8]}...")
                 except Exception:
                     pass
-
     page.on("response", capture_session_resp)
 
     # Click "+" button to open NewSessionModal
@@ -450,9 +424,7 @@ def _run_all(page):
         raise AssertionError("New Session modal did not open")
 
     # Click "Remote" workspace type
-    remote_btn = page.locator(
-        ".modal.show button:has-text('Remote'), .modal.show button:has-text('远程')"
-    )
+    remote_btn = page.locator(".modal.show button:has-text('Remote'), .modal.show button:has-text('远程')")
     if remote_btn.count() > 0:
         remote_btn.first.click()
         pause(2)
@@ -467,9 +439,7 @@ def _run_all(page):
             log("Select", "✓ Machine selected")
 
             # Click Create
-            create_btn = page.locator(
-                ".modal.show button:has-text('Create'), .modal.show button:has-text('创建')"
-            )
+            create_btn = page.locator(".modal.show button:has-text('Create'), .modal.show button:has-text('创建')")
             if create_btn.count() > 0:
                 create_btn.first.click()
                 pause(5)  # Wait for session creation and tab to appear
@@ -516,9 +486,7 @@ def _run_all(page):
             try:
                 page.wait_for_selector(".modal.show", timeout=3000)
                 # Default is local, just click Create
-                create_btn = page.locator(
-                    ".modal.show button:has-text('Create'), .modal.show button:has-text('创建')"
-                )
+                create_btn = page.locator(".modal.show button:has-text('Create'), .modal.show button:has-text('创建')")
                 if create_btn.count() > 0:
                     create_btn.first.click()
                     pause(3)
@@ -631,9 +599,7 @@ def _run_all(page):
             pause(1)
             try:
                 page.wait_for_selector(".modal.show", timeout=3000)
-                create_btn = page.locator(
-                    ".modal.show button:has-text('Create'), .modal.show button:has-text('创建')"
-                )
+                create_btn = page.locator(".modal.show button:has-text('Create'), .modal.show button:has-text('创建')")
                 if create_btn.count() > 0:
                     create_btn.first.click()
                     pause(3)
@@ -670,9 +636,7 @@ def _run_all(page):
             pause(1)
             shot(page, "C7_local_close_fallback")
             remote_dialog = page.locator(".modal.show button:has-text('停止会话并关闭')")
-            assert (
-                remote_dialog.count() == 0
-            ), "Remote close dialog should NOT appear for local tabs"
+            assert remote_dialog.count() == 0, "Remote close dialog should NOT appear for local tabs"
             log("Pass", "✓ Tab closed without remote confirmation dialog (fallback)")
         else:
             log("Skip", "Not enough tabs to test local close")

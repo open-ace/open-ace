@@ -57,10 +57,8 @@ import traceback
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
-import contextlib
-
 import requests
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, expect
 
 # ── Config ──
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
@@ -128,9 +126,8 @@ def wait_for_modal(page, timeout=5000):
 
 def lookup_user_ids():
     """Look up test user IDs via the admin API."""
-    r = requests.post(
-        f"{BASE_URL}/api/auth/login", json={"username": ADMIN_USER, "password": ADMIN_PASS}
-    )
+    r = requests.post(f"{BASE_URL}/api/auth/login",
+                      json={"username": ADMIN_USER, "password": ADMIN_PASS})
     if r.status_code != 200:
         return None, None, None
     token = None
@@ -140,7 +137,8 @@ def lookup_user_ids():
             break
     if not token:
         return None, None, None
-    r2 = requests.get(f"{BASE_URL}/api/admin/users", cookies={"session_token": token})
+    r2 = requests.get(f"{BASE_URL}/api/admin/users",
+                      cookies={"session_token": token})
     if r2.status_code != 200:
         return None, None, None
     users = r2.json()
@@ -169,7 +167,6 @@ def do_login(page, username, password):
 # ══════════════════════════════════════════════════
 #  Main Test
 # ══════════════════════════════════════════════════
-
 
 def run_tests():
     global machine_id, session_id, registration_token
@@ -205,7 +202,7 @@ def run_tests():
 
         try:
             _run_all_steps(page)
-        except Exception:
+        except Exception as e:
             shot(page, "ERROR_final")
             traceback.print_exc()
             raise
@@ -264,20 +261,14 @@ def _run_all_steps(page):
 
     # ── A4. Read Token from Modal ──
     print("\n══════ A4. Copy Token from Modal ══════")
-    token_input = page.locator(
-        ".modal.show input[readonly], .modal input[readonly], .modal.show .font-monospace, .modal .font-monospace"
-    ).first
+    token_input = page.locator(".modal.show input[readonly], .modal input[readonly], .modal.show .font-monospace, .modal .font-monospace").first
     registration_token = token_input.input_value()
-    assert (
-        registration_token and len(registration_token) > 10
-    ), f"Invalid token: {registration_token}"
+    assert registration_token and len(registration_token) > 10, f"Invalid token: {registration_token}"
     log("Token", f"✓ Captured: {registration_token[:16]}...")
     shot(page, "A4_token_displayed")
 
     # Close modal
-    close_btn = page.locator(
-        ".modal.show button:has-text('Close'), .modal.show button:has-text('关闭'), .modal button:has-text('Close'), .modal button:has-text('关闭')"
-    )
+    close_btn = page.locator(".modal.show button:has-text('Close'), .modal.show button:has-text('关闭'), .modal button:has-text('Close'), .modal button:has-text('关闭')")
     close_btn.first.click()
     pause(1)
 
@@ -287,17 +278,11 @@ def _run_all_steps(page):
 
     # Clean any previous install
     subprocess.run(
-        [
-            "ssh",
-            "-o",
-            "StrictHostKeyChecking=no",
-            VM_HOST,
-            "systemctl stop open-ace-agent 2>/dev/null; systemctl disable open-ace-agent 2>/dev/null; "
-            "rm -f /etc/systemd/system/open-ace-agent.service; systemctl daemon-reload 2>/dev/null; "
-            "rm -rf /root/.open-ace-agent",
-        ],
-        capture_output=True,
-        timeout=30,
+        ["ssh", "-o", "StrictHostKeyChecking=no", VM_HOST,
+         "systemctl stop open-ace-agent 2>/dev/null; systemctl disable open-ace-agent 2>/dev/null; "
+         "rm -f /etc/systemd/system/open-ace-agent.service; systemctl daemon-reload 2>/dev/null; "
+         "rm -rf /root/.open-ace-agent"],
+        capture_output=True, timeout=30,
     )
 
     server_addr = SERVER_URL_FOR_VM.replace("http://", "").replace("https://", "")
@@ -308,38 +293,29 @@ def _run_all_steps(page):
     )
     result = subprocess.run(
         ["ssh", "-o", "StrictHostKeyChecking=no", VM_HOST, install_cmd],
-        capture_output=True,
-        text=True,
-        timeout=180,
+        capture_output=True, text=True, timeout=180,
     )
     log("Install", result.stdout.strip()[-300:] if result.stdout else "(no stdout)")
     if result.returncode != 0:
         log("Error", result.stderr.strip()[-300:] if result.stderr else "(no stderr)")
         print(f"  FULL STDOUT:\n{result.stdout}")
         print(f"  FULL STDERR:\n{result.stderr}")
-        raise AssertionError(f"Agent install failed (exit {result.returncode})")
+        assert False, f"Agent install failed (exit {result.returncode})"
 
     # Strip ANSI codes from combined output
     combined = (result.stdout or "") + (result.stderr or "")
-    ansi_clean = re.sub(r"\x1b\[[0-9;]*m", "", combined)
+    ansi_clean = re.sub(r'\x1b\[[0-9;]*m', '', combined)
 
     # Extract machine_id from output
-    m = re.search(r"Machine ID:\s*([\w-]+)", ansi_clean)
+    m = re.search(r'Machine ID:\s*([\w-]+)', ansi_clean)
     if m:
         machine_id = m.group(1)
     else:
         # Fallback: read from config.json on VM
         cfg = subprocess.run(
-            [
-                "ssh",
-                "-o",
-                "StrictHostKeyChecking=no",
-                VM_HOST,
-                "cat /root/.open-ace-agent/config.json 2>/dev/null || echo '{}'",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=15,
+            ["ssh", "-o", "StrictHostKeyChecking=no", VM_HOST,
+             "cat /root/.open-ace-agent/config.json 2>/dev/null || echo '{}'"],
+            capture_output=True, text=True, timeout=15,
         )
         try:
             machine_id = json.loads(cfg.stdout).get("machine_id", "")
@@ -353,18 +329,13 @@ def _run_all_steps(page):
     agent_src = os.path.join(PROJECT_ROOT, "remote-agent", "agent.py")
     if os.path.exists(agent_src):
         subprocess.run(
-            [
-                "bash",
-                "-c",
-                f"cat {agent_src} | ssh -o StrictHostKeyChecking=no {VM_HOST} 'cat > /root/.open-ace-agent/agent.py'",
-            ],
-            capture_output=True,
-            timeout=15,
+            ["bash", "-c", f"cat {agent_src} | ssh -o StrictHostKeyChecking=no {VM_HOST} 'cat > /root/.open-ace-agent/agent.py'"],
+            capture_output=True, timeout=15,
         )
         subprocess.run(
-            ["ssh", "-o", "StrictHostKeyChecking=no", VM_HOST, "systemctl restart open-ace-agent"],
-            capture_output=True,
-            timeout=15,
+            ["ssh", "-o", "StrictHostKeyChecking=no", VM_HOST,
+             "systemctl restart open-ace-agent"],
+            capture_output=True, timeout=15,
         )
         log("Patch", "✓ Applied WS→HTTP fallback fix, restarted agent")
 
@@ -401,37 +372,28 @@ def _run_all_steps(page):
     # (UI-based assign tested separately in Part C)
 
     # Assign machine admin: 黄迎春 with 'admin' permission
-    requests.post(
-        f"{BASE_URL}/api/remote/machines/{machine_id}/assign",
-        json={"user_id": int(machine_admin_user_id), "permission": "admin"},
-        cookies={
-            "session_token": page.context.cookies()[0]["value"] if page.context.cookies() else ""
-        },
-    )
+    r = requests.post(f"{BASE_URL}/api/remote/machines/{machine_id}/assign",
+                      json={"user_id": int(machine_admin_user_id), "permission": "admin"},
+                      cookies={"session_token": page.context.cookies()[0]["value"] if page.context.cookies() else ""})
     # We need the admin cookie — use direct API call
-    admin_r = requests.post(
-        f"{BASE_URL}/api/auth/login", json={"username": ADMIN_USER, "password": ADMIN_PASS}
-    )
+    admin_r = requests.post(f"{BASE_URL}/api/auth/login",
+                            json={"username": ADMIN_USER, "password": ADMIN_PASS})
     admin_token = None
     for cookie in admin_r.cookies:
         if cookie.name == "session_token":
             admin_token = cookie.value
             break
 
-    r1 = requests.post(
-        f"{BASE_URL}/api/remote/machines/{machine_id}/assign",
-        json={"user_id": int(machine_admin_user_id), "permission": "admin"},
-        cookies={"session_token": admin_token},
-    )
+    r1 = requests.post(f"{BASE_URL}/api/remote/machines/{machine_id}/assign",
+                       json={"user_id": int(machine_admin_user_id), "permission": "admin"},
+                       cookies={"session_token": admin_token})
     assert r1.status_code == 200, f"Assign machine admin failed: {r1.json()}"
     log("Assign", f"✓ {MACHINE_ADMIN_USER} (id={machine_admin_user_id}) assigned as machine admin")
 
     # Assign regular user: 韩成凤 with 'user' permission
-    r2 = requests.post(
-        f"{BASE_URL}/api/remote/machines/{machine_id}/assign",
-        json={"user_id": int(regular_user_id), "permission": "user"},
-        cookies={"session_token": admin_token},
-    )
+    r2 = requests.post(f"{BASE_URL}/api/remote/machines/{machine_id}/assign",
+                       json={"user_id": int(regular_user_id), "permission": "user"},
+                       cookies={"session_token": admin_token})
     assert r2.status_code == 200, f"Assign regular user failed: {r2.json()}"
     log("Assign", f"✓ {REGULAR_USER} (id={regular_user_id}) assigned as regular user")
 
@@ -468,9 +430,7 @@ def _run_all_steps(page):
     log("Name", "Key name: production")
 
     # Fill API key (password field)
-    key_input = page.locator(
-        ".modal.show input[type='password'], .modal input[type='password']"
-    ).first
+    key_input = page.locator(".modal.show input[type='password'], .modal input[type='password']").first
     key_input.fill(OPENAI_API_KEY)
     log("Key", f"API Key: {OPENAI_API_KEY[:8]}..." if OPENAI_API_KEY else "API Key: (empty)")
 
@@ -488,9 +448,7 @@ def _run_all_steps(page):
     shot(page, "A9_form_filled")
 
     # Click Save
-    save_btn = page.locator(
-        ".modal.show button:has-text('Save'), .modal.show button:has-text('保存'), .modal button:has-text('Save'), .modal button:has-text('保存')"
-    )
+    save_btn = page.locator(".modal.show button:has-text('Save'), .modal.show button:has-text('保存'), .modal button:has-text('Save'), .modal button:has-text('保存')")
     save_btn.first.click()
     pause(2)
     shot(page, "A9_key_saved")
@@ -529,24 +487,24 @@ def _run_all_steps(page):
 
     # ── B3. Create Remote Session ──
     print("\n══════ B3. Create Remote Session ══════")
-    create_result = page.evaluate(f"""
-    async () => {{
-        const resp = await fetch('/api/remote/sessions', {{
+    create_result = page.evaluate("""
+    async () => {
+        const resp = await fetch('/api/remote/sessions', {
             method: 'POST',
-            headers: {{ 'Content-Type': 'application/json' }},
+            headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
-            body: JSON.stringify({{
-                machine_id: '{machine_id}',
+            body: JSON.stringify({
+                machine_id: '%s',
                 project_path: '/root/workspace/demo-project',
                 cli_tool: 'qwen-code-cli',
                 model: 'qwen3-coder-plus',
                 title: 'Remote E2E Session',
-            }}),
-        }});
+            }),
+        });
         const data = await resp.json().catch(() => null);
-        return {{ status: resp.status, ok: resp.ok, data }};
-    }}
-    """)
+        return { status: resp.status, ok: resp.ok, data };
+    }
+    """ % machine_id)
     assert create_result["ok"], f"Create session failed: {create_result}"
     session_id = create_result["data"]["session"]["session_id"]
     log("Session", f"✓ Created: {session_id[:8]}...")
@@ -555,8 +513,7 @@ def _run_all_steps(page):
 
     # ── B4. Send Message ──
     print("\n══════ B4. Send User Message ══════")
-    chat_result = page.evaluate(
-        """
+    chat_result = page.evaluate("""
     async (args) => {
         const resp = await fetch(`/api/remote/sessions/${args.sid}/chat`, {
             method: 'POST',
@@ -566,9 +523,7 @@ def _run_all_steps(page):
         });
         return { status: resp.status, ok: resp.ok };
     }
-    """,
-        {"sid": session_id},
-    )
+    """, {"sid": session_id})
     assert chat_result["ok"], f"Send message failed: {chat_result}"
     log("Chat", "✓ Message sent")
     pause(2)
@@ -585,47 +540,40 @@ def _run_all_steps(page):
         ("final", True, "AI final reply (all fixed)"),
     ]
     outputs = {
-        "thinking": '{"type":"thinking","content":"Analyzing code structure..."}',
-        "response": '{"type":"assistant","content":"Found 3 issues:\\n1. Missing error handling\\n2. SQL injection risk\\n3. Unused imports"}',
+        "thinking":  '{"type":"thinking","content":"Analyzing code structure..."}',
+        "response":  '{"type":"assistant","content":"Found 3 issues:\\n1. Missing error handling\\n2. SQL injection risk\\n3. Unused imports"}',
         "tool_call": '{"type":"tool_use","tool":"read_file","input":{"path":"/root/workspace/demo-project/main.py"}}',
         "tool_done": '{"type":"tool_result","tool":"read_file","output":"Read 142 lines of code"}',
-        "final": '{"type":"assistant","content":"All 3 issues fixed:\\n- Added try/except\\n- Parameterized SQL\\n- Removed unused imports"}',
+        "final":     '{"type":"assistant","content":"All 3 issues fixed:\\n- Added try/except\\n- Parameterized SQL\\n- Removed unused imports"}',
     }
 
     for i, (step, done, label) in enumerate(steps):
         log(f"Step {i+1}/5", label)
-        requests.post(
-            f"{BASE_URL}/api/remote/agent/message",
-            json={
-                "type": "session_output",
-                "machine_id": machine_id,
-                "session_id": session_id,
-                "data": outputs[step],
-                "stream": "stdout",
-                "is_complete": done,
-            },
-        )
+        requests.post(f"{BASE_URL}/api/remote/agent/message", json={
+            "type": "session_output",
+            "machine_id": machine_id,
+            "session_id": session_id,
+            "data": outputs[step],
+            "stream": "stdout",
+            "is_complete": done,
+        })
         pause(2)
         shot(page, f"B5_{i+1}_{step}")
 
     # Send usage report
-    requests.post(
-        f"{BASE_URL}/api/remote/agent/message",
-        json={
-            "type": "usage_report",
-            "machine_id": machine_id,
-            "session_id": session_id,
-            "tokens": {"input": 1500, "output": 800},
-            "requests": 2,
-        },
-    )
+    requests.post(f"{BASE_URL}/api/remote/agent/message", json={
+        "type": "usage_report",
+        "machine_id": machine_id,
+        "session_id": session_id,
+        "tokens": {"input": 1500, "output": 800},
+        "requests": 2,
+    })
     log("Usage", "Token usage reported")
     print("  ✓ AI reply completed (5 steps)")
 
     # ── B6. Verify Session Data ──
     print("\n══════ B6. Verify Session Data ══════")
-    verify_result = page.evaluate(
-        """
+    verify_result = page.evaluate("""
     async (args) => {
         const resp = await fetch(`/api/remote/sessions/${args.sid}`, {
             credentials: 'include',
@@ -633,9 +581,7 @@ def _run_all_steps(page):
         const data = await resp.json().catch(() => null);
         return { status: resp.status, ok: resp.ok, data };
     }
-    """,
-        {"sid": session_id},
-    )
+    """, {"sid": session_id})
     assert verify_result["ok"], f"Verify failed: {verify_result}"
 
     sess = verify_result["data"]["session"]
@@ -662,10 +608,8 @@ def _run_all_steps(page):
     shot(page, "C1_machine_admin_logged_in")
 
     # Get machine admin API token (used by C3-C5)
-    admin_r = requests.post(
-        f"{BASE_URL}/api/auth/login",
-        json={"username": MACHINE_ADMIN_USER, "password": MACHINE_ADMIN_PASS},
-    )
+    admin_r = requests.post(f"{BASE_URL}/api/auth/login",
+                            json={"username": MACHINE_ADMIN_USER, "password": MACHINE_ADMIN_PASS})
     machine_admin_token = None
     for cookie in admin_r.cookies:
         if cookie.name == "session_token":
@@ -673,8 +617,7 @@ def _run_all_steps(page):
             break
     assert machine_admin_token, "Failed to get machine admin API token"
 
-    view_result = page.evaluate(
-        """
+    view_result = page.evaluate("""
     async (args) => {
         const resp = await fetch(`/api/remote/sessions/${args.sid}`, {
             credentials: 'include',
@@ -682,20 +625,14 @@ def _run_all_steps(page):
         const data = await resp.json().catch(() => null);
         return { status: resp.status, ok: resp.ok, data };
     }
-    """,
-        {"sid": session_id},
-    )
+    """, {"sid": session_id})
     assert view_result["ok"], f"Machine admin should be able to view session: {view_result}"
-    log(
-        "ViewSession",
-        f"✓ Machine admin can view {REGULAR_USER}'s session (status={view_result['status']})",
-    )
+    log("ViewSession", f"✓ Machine admin can view {REGULAR_USER}'s session (status={view_result['status']})")
     shot(page, "C1_viewed_others_session")
 
     # ── C2. Machine Admin Can Stop Others' Session ──
     print("\n══════ C2. Machine Admin Stops Others' Session ══════")
-    stop_result = page.evaluate(
-        """
+    stop_result = page.evaluate("""
     async (args) => {
         const resp = await fetch(`/api/remote/sessions/${args.sid}/stop`, {
             method: 'POST',
@@ -703,14 +640,9 @@ def _run_all_steps(page):
         });
         return { status: resp.status, ok: resp.ok };
     }
-    """,
-        {"sid": session_id},
-    )
+    """, {"sid": session_id})
     assert stop_result["ok"], f"Machine admin should be able to stop session: {stop_result}"
-    log(
-        "StopSession",
-        f"✓ Machine admin stopped {REGULAR_USER}'s session (status={stop_result['status']})",
-    )
+    log("StopSession", f"✓ Machine admin stopped {REGULAR_USER}'s session (status={stop_result['status']})")
     shot(page, "C2_stopped_others_session")
 
     # ── C3. Machine Admin Can Get Machine Users (API) ──
@@ -721,18 +653,15 @@ def _run_all_steps(page):
         f"{BASE_URL}/api/remote/machines",
         cookies={"session_token": machine_admin_token},
     )
-    assert (
-        machines_resp.status_code == 200
-    ), f"Machine admin should list machines: {machines_resp.json()}"
+    assert machines_resp.status_code == 200, f"Machine admin should list machines: {machines_resp.json()}"
     machines_list = machines_resp.json().get("machines", [])
     assert len(machines_list) > 0, "Machine admin should see assigned machines"
     # Verify current_user_permission is attached
     for m in machines_list:
         if m["machine_id"] == machine_id:
-            assert (
-                m.get("current_user_permission") == "admin"
-            ), f"Expected 'admin' permission, got '{m.get('current_user_permission')}'"
-            log("Permission", "✓ Machine admin has 'admin' permission on target machine")
+            assert m.get("current_user_permission") == "admin", \
+                f"Expected 'admin' permission, got '{m.get('current_user_permission')}'"
+            log("Permission", f"✓ Machine admin has 'admin' permission on target machine")
             break
     log("Machines", f"✓ Machine admin can list {len(machines_list)} assigned machines")
     shot(page, "C3_machine_admin_api_machines")
@@ -765,10 +694,9 @@ def _run_all_steps(page):
     )
     assigned_users = verify_assign.json().get("users", [])
     unassigned_entry = [u for u in assigned_users if u["user_id"] == int(unassigned_user_id)]
-    assert len(unassigned_entry) == 1, "Unassigned user not found in list"
-    assert (
-        unassigned_entry[0]["permission"] == "user"
-    ), f"Expected 'user' (forced), got '{unassigned_entry[0]['permission']}'"
+    assert len(unassigned_entry) == 1, f"Unassigned user not found in list"
+    assert unassigned_entry[0]["permission"] == "user", \
+        f"Expected 'user' (forced), got '{unassigned_entry[0]['permission']}'"
     log("AssignUser", f"✓ Machine admin assigned {UNASSIGNED_USER} — permission forced to 'user'")
     shot(page, "C4_user_assigned")
 
@@ -780,9 +708,8 @@ def _run_all_steps(page):
         f"{BASE_URL}/api/remote/machines/{machine_id}/assign/{machine_admin_user_id}",
         cookies={"session_token": machine_admin_token},
     )
-    assert (
-        revoke_self.status_code == 403
-    ), f"Machine admin should NOT be able to revoke admin user, got {revoke_self.status_code}"
+    assert revoke_self.status_code == 403, \
+        f"Machine admin should NOT be able to revoke admin user, got {revoke_self.status_code}"
     log("RevokeAdmin", f"✓ Machine admin cannot revoke admin (403: {revoke_self.json()['error']})")
     shot(page, "C5_cannot_revoke_admin")
 
@@ -793,10 +720,9 @@ def _run_all_steps(page):
         json={"tenant_id": 1},
         cookies={"session_token": machine_admin_token},
     )
-    assert (
-        token_resp.status_code == 403
-    ), f"Machine admin should NOT generate token, got {token_resp.status_code}"
-    log("NoToken", "✓ Machine admin denied token generation (403)")
+    assert token_resp.status_code == 403, \
+        f"Machine admin should NOT generate token, got {token_resp.status_code}"
+    log("NoToken", f"✓ Machine admin denied token generation (403)")
 
     # ── C7. Machine Admin Cannot Deregister Machine (API) ──
     print("\n══════ C7. Machine Admin Cannot Deregister Machine ══════")
@@ -804,19 +730,16 @@ def _run_all_steps(page):
         f"{BASE_URL}/api/remote/machines/{machine_id}",
         cookies={"session_token": machine_admin_token},
     )
-    assert (
-        dereg_resp.status_code == 403
-    ), f"Machine admin should NOT deregister machine, got {dereg_resp.status_code}"
-    log("NoDereg", "✓ Machine admin denied deregister (403)")
+    assert dereg_resp.status_code == 403, \
+        f"Machine admin should NOT deregister machine, got {dereg_resp.status_code}"
+    log("NoDereg", f"✓ Machine admin denied deregister (403)")
 
     # ── C8. Unassigned User Cannot Access Session (API) ──
     print("\n══════ C8. Unassigned User Cannot Access Session ══════")
 
     # Login as unassigned user
-    unassigned_r = requests.post(
-        f"{BASE_URL}/api/auth/login",
-        json={"username": UNASSIGNED_USER, "password": UNASSIGNED_PASS},
-    )
+    unassigned_r = requests.post(f"{BASE_URL}/api/auth/login",
+                                 json={"username": UNASSIGNED_USER, "password": UNASSIGNED_PASS})
     unassigned_token = None
     for cookie in unassigned_r.cookies:
         if cookie.name == "session_token":
@@ -829,30 +752,27 @@ def _run_all_steps(page):
         f"{BASE_URL}/api/remote/sessions/{session_id}",
         cookies={"session_token": unassigned_token},
     )
-    assert (
-        access_result.status_code == 403
-    ), f"Unassigned user should NOT access session, got {access_result.status_code}"
-    log("DeniedAccess", "✓ Unassigned user denied session access (403)")
+    assert access_result.status_code == 403, \
+        f"Unassigned user should NOT access session, got {access_result.status_code}"
+    log("DeniedAccess", f"✓ Unassigned user denied session access (403)")
 
     # Try to stop session — should be 403
     stop_denied = requests.post(
         f"{BASE_URL}/api/remote/sessions/{session_id}/stop",
         cookies={"session_token": unassigned_token},
     )
-    assert (
-        stop_denied.status_code == 403
-    ), f"Unassigned user should NOT stop session, got {stop_denied.status_code}"
-    log("DeniedStop", "✓ Unassigned user denied stop session (403)")
+    assert stop_denied.status_code == 403, \
+        f"Unassigned user should NOT stop session, got {stop_denied.status_code}"
+    log("DeniedStop", f"✓ Unassigned user denied stop session (403)")
 
     # Try to get machine users — should be 403
     users_denied = requests.get(
         f"{BASE_URL}/api/remote/machines/{machine_id}/users",
         cookies={"session_token": unassigned_token},
     )
-    assert (
-        users_denied.status_code == 403
-    ), f"Unassigned user should NOT get machine users, got {users_denied.status_code}"
-    log("DeniedUsers", "✓ Unassigned user denied machine users list (403)")
+    assert users_denied.status_code == 403, \
+        f"Unassigned user should NOT get machine users, got {users_denied.status_code}"
+    log("DeniedUsers", f"✓ Unassigned user denied machine users list (403)")
     shot(page, "C8_unassigned_denied")
 
     # ════════════════════════════════════════════
@@ -878,9 +798,7 @@ def _run_all_steps(page):
     shot(page, "D1_delete_confirm")
 
     # Confirm delete
-    confirm_btn = page.locator(
-        ".modal.show button:has-text('Delete'), .modal.show button:has-text('删除'), .modal button:has-text('Delete'), .modal button:has-text('删除')"
-    )
+    confirm_btn = page.locator(".modal.show button:has-text('Delete'), .modal.show button:has-text('删除'), .modal button:has-text('Delete'), .modal button:has-text('删除')")
     confirm_btn.first.click()
     pause(2)
     shot(page, "D1_key_deleted")
@@ -901,9 +819,7 @@ def _run_all_steps(page):
     shot(page, "D2_deregister_confirm")
 
     # Confirm deregister
-    confirm_dereg = page.locator(
-        ".modal.show button:has-text('Deregister'), .modal.show button:has-text('注销'), .modal button:has-text('Deregister'), .modal button:has-text('注销')"
-    )
+    confirm_dereg = page.locator(".modal.show button:has-text('Deregister'), .modal.show button:has-text('注销'), .modal button:has-text('Deregister'), .modal button:has-text('注销')")
     confirm_dereg.first.click()
     pause(2)
     shot(page, "D2_machine_deregistered")
@@ -912,8 +828,10 @@ def _run_all_steps(page):
     # ── D3. Logout ──
     print("\n══════ D3. Logout ══════")
     page.goto(f"{BASE_URL}/logout", wait_until="domcontentloaded")
-    with contextlib.suppress(Exception):
+    try:
         page.wait_for_selector("#username", state="visible", timeout=10000)
+    except Exception:
+        pass
     shot(page, "D3_logout")
     log("Logout", "✓ Logged out")
 

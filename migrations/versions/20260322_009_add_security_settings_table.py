@@ -12,11 +12,10 @@ in the database instead of JSON file, enabling:
 
 """
 
-from collections.abc import Sequence
-from typing import Union
+from typing import Sequence, Union
 
-import sqlalchemy as sa
 from alembic import op
+import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "009_add_security_settings_table"
@@ -40,7 +39,8 @@ def upgrade() -> None:
     op.create_index("idx_security_settings_key", "security_settings", ["setting_key"])
 
     # Insert default security settings
-    op.execute("""
+    op.execute(
+        """
         INSERT INTO security_settings (setting_key, setting_value, description) VALUES
         ('session_timeout', '30', 'Session timeout in minutes'),
         ('max_login_attempts', '5', 'Maximum failed login attempts before lockout'),
@@ -51,7 +51,8 @@ def upgrade() -> None:
         ('password_require_special', 'false', 'Require special character in password'),
         ('two_factor_enabled', 'false', 'Enable two-factor authentication'),
         ('ip_whitelist', '[]', 'JSON array of allowed IP addresses')
-    """)
+    """
+    )
 
 
 def downgrade() -> None:

@@ -11,10 +11,10 @@ Tests:
 This test verifies that the icons are consistent between SessionList and Workspace tabs.
 """
 
-import os
 import sys
-
-from playwright.sync_api import TimeoutError, sync_playwright
+import os
+from playwright.sync_api import sync_playwright, expect, TimeoutError
+import time
 
 # Add project root to path
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -31,7 +31,6 @@ OUTPUT_DIR = "./screenshots"
 
 # Ensure output directory exists
 os.makedirs(OUTPUT_DIR, exist_ok=True)
-
 
 def test_remote_workspace_icon_consistency():
     """Test Remote Workspace Tab Icon consistency with SessionList"""
@@ -64,7 +63,7 @@ def test_remote_workspace_icon_consistency():
             # Step 2: Navigate to Work mode
             print("[2] 导航到 Work 模式...")
             page.goto(f"{BASE_URL}/work", timeout=DEFAULT_TIMEOUT)
-            page.wait_for_load_state("networkidle")
+            page.wait_for_load_state('networkidle')
             page.wait_for_timeout(3000)  # Wait for session list to load
 
             page.screenshot(path=f"{OUTPUT_DIR}/remote_icon_02_work_mode.png")
@@ -73,21 +72,21 @@ def test_remote_workspace_icon_consistency():
 
             # Test 1: Check Session List icons
             print("[3] 检查 Session List 图标...")
-            session_items = page.locator(".session-item")
-            session_items.count()
+            session_items = page.locator('.session-item')
+            session_count = session_items.count()
 
             # Check icons in session list
-            session_id_spans = page.locator(".session-id")
+            session_id_spans = page.locator('.session-id')
 
             # Find remote and local icons in session list
-            remote_icon_session_list = session_id_spans.locator("i.bi-cloud-fill.text-primary")
-            local_icon_session_list = session_id_spans.locator("i.bi-laptop.text-success")
+            remote_icon_session_list = session_id_spans.locator('i.bi-cloud-fill.text-primary')
+            local_icon_session_list = session_id_spans.locator('i.bi-laptop.text-success')
 
             print(f"    Session List 远程图标数量: {remote_icon_session_list.count()}")
             print(f"    Session List 本地图标数量: {local_icon_session_list.count()}")
 
             # Take screenshot of session list
-            session_list = page.locator(".session-list")
+            session_list = page.locator('.session-list')
             if session_list.count() > 0:
                 session_list.screenshot(path=f"{OUTPUT_DIR}/remote_icon_03_session_list.png")
                 screenshots.append("session_list.png")
@@ -98,55 +97,57 @@ def test_remote_workspace_icon_consistency():
             # Wait for workspace to load
             page.wait_for_timeout(2000)
 
-            workspace_tabs = page.locator(".workspace-tab")
+            workspace_tabs = page.locator('.workspace-tab')
             tab_count = workspace_tabs.count()
 
             print(f"    Workspace Tab 数量: {tab_count}")
 
             if tab_count > 0:
                 # Take screenshot of workspace tabs
-                tabs_container = page.locator(".workspace-tabs")
+                tabs_container = page.locator('.workspace-tabs')
                 if tabs_container.count() > 0:
-                    tabs_container.screenshot(
-                        path=f"{OUTPUT_DIR}/remote_icon_04_workspace_tabs.png"
-                    )
+                    tabs_container.screenshot(path=f"{OUTPUT_DIR}/remote_icon_04_workspace_tabs.png")
                     screenshots.append("workspace_tabs.png")
 
                 # Check for remote icon in workspace tabs (bi-cloud-fill text-primary)
                 # The icon is inside the span after the waiting bell icon
-                workspace_remote_icon = workspace_tabs.locator("i.bi-cloud-fill.text-primary")
-                workspace_local_icon = workspace_tabs.locator("i.bi-laptop.text-success")
+                workspace_remote_icon = workspace_tabs.locator('i.bi-cloud-fill.text-primary')
+                workspace_local_icon = workspace_tabs.locator('i.bi-laptop.text-success')
 
                 print(f"    Workspace 远程图标数量: {workspace_remote_icon.count()}")
                 print(f"    Workspace 本地图标数量: {workspace_local_icon.count()}")
 
                 # Test consistency
+                remote_consistent = True
+                local_consistent = True
 
                 # For each remote tab, check if it uses correct icon
                 if workspace_remote_icon.count() > 0:
                     # Check icon class matches session list
-                    icon_class = workspace_remote_icon.first.get_attribute("class")
-                    expected_class = "bi bi-cloud-fill text-primary"
+                    icon_class = workspace_remote_icon.first.get_attribute('class')
+                    expected_class = 'bi bi-cloud-fill text-primary'
                     if icon_class and expected_class in icon_class:
                         print(f"    ✓ 远程 Tab 图标正确: {icon_class}")
                         test_results.append(("远程 Tab 图标使用 bi-cloud-fill text-primary", True))
                     else:
                         print(f"    ✗ 远程 Tab 图标错误: {icon_class} (期望: {expected_class})")
                         test_results.append(("远程 Tab 图标使用 bi-cloud-fill text-primary", False))
+                        remote_consistent = False
                 else:
                     print("    - 没有远程 Tab 可测试")
                     test_results.append(("远程 Tab 图标使用 bi-cloud-fill text-primary", None))
 
                 # For each local tab, check if it uses correct icon
                 if workspace_local_icon.count() > 0:
-                    icon_class = workspace_local_icon.first.get_attribute("class")
-                    expected_class = "bi bi-laptop text-success"
+                    icon_class = workspace_local_icon.first.get_attribute('class')
+                    expected_class = 'bi bi-laptop text-success'
                     if icon_class and expected_class in icon_class:
                         print(f"    ✓ 本地 Tab 图标正确: {icon_class}")
                         test_results.append(("本地 Tab 图标使用 bi-laptop text-success", True))
                     else:
                         print(f"    ✗ 本地 Tab 图标错误: {icon_class} (期望: {expected_class})")
                         test_results.append(("本地 Tab 图标使用 bi-laptop text-success", False))
+                        local_consistent = False
                 else:
                     print("    - 没有本地 Tab 可测试")
                     test_results.append(("本地 Tab 图标使用 bi-laptop text-success", None))
@@ -205,7 +206,6 @@ def test_remote_workspace_icon_consistency():
         print("=" * 60)
 
         return failed == 0
-
 
 if __name__ == "__main__":
     success = test_remote_workspace_icon_consistency()

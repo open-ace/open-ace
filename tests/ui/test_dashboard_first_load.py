@@ -6,10 +6,10 @@ Measures the actual first-time dashboard load after login.
 Tracks all API requests and their timing.
 """
 
-import asyncio
-import os
 import sys
+import os
 import time
+import asyncio
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, project_root)
@@ -30,7 +30,7 @@ os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
 async def test_dashboard_first_load():
     """Test dashboard first load with detailed timing."""
-
+    
     print("=" * 70)
     print("Dashboard First Load Analysis")
     print("=" * 70)
@@ -48,23 +48,21 @@ async def test_dashboard_first_load():
         all_requests = []
         api_requests = []
         static_requests = []
-
+        
         request_start_times = {}
 
         def on_request(request):
             url = request.url
             req_type = request.resource_type
             request_start_times[url] = time.time()
-            all_requests.append(
-                {
-                    "url": url,
-                    "type": req_type,
-                    "start": time.time(),
-                    "end": None,
-                    "status": None,
-                    "size": None,
-                }
-            )
+            all_requests.append({
+                "url": url,
+                "type": req_type,
+                "start": time.time(),
+                "end": None,
+                "status": None,
+                "size": None,
+            })
 
         def on_response(response):
             url = response.url
@@ -92,49 +90,49 @@ async def test_dashboard_first_load():
             await page.fill("#password", PASSWORD)
             await page.click('button[type="submit"]')
             await page.wait_for_load_state("networkidle")
-
+            
             # Wait for auth to be fully established
             await asyncio.sleep(1)
-
+            
             # Check if we're logged in by checking URL
             current_url = page.url
             print(f"  After login URL: {current_url}")
-
+            
             # If still on login page, wait more
             if "login" in current_url:
                 await asyncio.sleep(2)
                 current_url = page.url
                 print(f"  After wait URL: {current_url}")
-
+            
             login_time = time.time() - login_start
             print(f"  Login completed: {login_time:.2f}s")
 
             # Step 2: Clear request log (keep only login requests for reference)
-            [r for r in all_requests if r["end"]]
+            login_requests = [r for r in all_requests if r["end"]]
             all_requests = []
-
+            
             # Step 3: Navigate to Dashboard (first visit after login)
             print("\n[Step 2] Navigate to Dashboard")
             dashboard_start = time.time()
-
+            
             # Navigate and wait for network idle
             await page.goto(f"{BASE_URL}manage/dashboard", wait_until="domcontentloaded")
             dom_time = time.time() - dashboard_start
             print(f"  DOM loaded: {dom_time:.3f}s")
-
+            
             await page.wait_for_load_state("networkidle")
             network_idle_time = time.time() - dashboard_start
             print(f"  Network idle: {network_idle_time:.3f}s")
-
+            
             # Wait for React Query to complete all fetches
             await asyncio.sleep(3)
-
+            
             # Check page content
             page_url = page.url
             page_title = await page.title()
             print(f"  Current URL: {page_url}")
             print(f"  Page title: {page_title}")
-
+            
             # Check if dashboard is visible (try multiple selectors)
             dashboard_visible = False
             for selector in [".dashboard", "h2", ".card", ".usage-card"]:
@@ -146,7 +144,7 @@ async def test_dashboard_first_load():
                         break
                 except:
                     pass
-
+            
             render_time = time.time() - dashboard_start
             print(f"  Dashboard rendered: {render_time:.3f}s (visible: {dashboard_visible})")
 
@@ -157,7 +155,7 @@ async def test_dashboard_first_load():
 
             # Step 5: Analyze requests
             print("\n[Step 3] Analyze Requests")
-
+            
             # Categorize requests
             for req in all_requests:
                 url = req["url"]
@@ -173,16 +171,12 @@ async def test_dashboard_first_load():
                 if req["end"]:
                     duration = req["end"] - req["start"]
                     api_times.append(duration)
-                    url_path = (
-                        req["url"].split("/api/")[-1] if "/api/" in req["url"] else req["url"]
-                    )
-                    api_details.append(
-                        {
-                            "path": url_path,
-                            "time": duration,
-                            "status": req["status"],
-                        }
-                    )
+                    url_path = req["url"].split("/api/")[-1] if "/api/" in req["url"] else req["url"]
+                    api_details.append({
+                        "path": url_path,
+                        "time": duration,
+                        "status": req["status"],
+                    })
 
             static_times = []
             static_sizes = []
@@ -204,9 +198,7 @@ async def test_dashboard_first_load():
                 # Sort by time descending
                 api_details.sort(key=lambda x: x["time"], reverse=True)
                 for api in api_details:
-                    print(
-                        f"    - /api/{api['path']}: {api['time']*1000:.1f}ms (status: {api['status']})"
-                    )
+                    print(f"    - /api/{api['path']}: {api['time']*1000:.1f}ms (status: {api['status']})")
                 print(f"\n  Total API time: {sum(api_times)*1000:.1f}ms")
                 print(f"  Max API time:   {max(api_times)*1000:.1f}ms")
 
@@ -217,21 +209,21 @@ async def test_dashboard_first_load():
             if static_sizes:
                 total_kb = sum(static_sizes) / 1024
                 print(f"  Total size: {total_kb:.1f} KB")
-
+            
             # Show JS files loaded
-            js_files = [r for r in static_requests if ".js" in r["url"]]
+            js_files = [r for r in static_requests if '.js' in r['url']]
             if js_files:
                 print(f"\n  JS files loaded ({len(js_files)}):")
-                for js in sorted(js_files, key=lambda x: x["size"] or 0, reverse=True)[:10]:
-                    url_short = js["url"].split("/")[-1]
-                    size_kb = js["size"] / 1024 if js["size"] else 0
+                for js in sorted(js_files, key=lambda x: x['size'] or 0, reverse=True)[:10]:
+                    url_short = js['url'].split('/')[-1]
+                    size_kb = js['size'] / 1024 if js['size'] else 0
                     print(f"    - {url_short}: {size_kb:.1f} KB")
 
             print("\n[Timing Breakdown]")
             print(f"  DOM Content Loaded:  {dom_time*1000:.1f}ms")
             print(f"  Network Idle:        {network_idle_time*1000:.1f}ms")
             print(f"  Dashboard Rendered:  {render_time*1000:.1f}ms")
-
+            
             # Calculate overhead
             if api_times and static_times:
                 resource_time = sum(static_times) + sum(api_times)

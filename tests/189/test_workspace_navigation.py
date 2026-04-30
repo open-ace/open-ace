@@ -12,11 +12,12 @@ Run:
   python tests/189/test_workspace_navigation.py
 """
 
+import json
 import os
 import signal
 import sys
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, PropertyMock
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, PROJECT_ROOT)
@@ -82,7 +83,6 @@ class TestProcessExecutorInterruptSession(unittest.TestCase):
 
     def _make_executor(self, sessions=None):
         from executor import ProcessExecutor
-
         ex = ProcessExecutor.__new__(ProcessExecutor)
         ex._sessions = sessions or {}
         ex._lock = MagicMock()
@@ -152,8 +152,10 @@ class TestSSEDisconnectDetection(unittest.TestCase):
 
     def test_generator_abort_on_disconnect(self):
         """Simulate GeneratorExit during SSE streaming and verify abort is called."""
+        from app.routes.remote import stream_session_output
         # We test the generate() function's behavior by simulating the scenario
         # that when the generator is closed (client disconnect), it calls abort_request.
+
         # Import the blueprint module to get the generate function
         import app.routes.remote as remote_module
 
@@ -165,18 +167,12 @@ class TestSSEDisconnectDetection(unittest.TestCase):
         mock_session_mgr = MagicMock()
         mock_session_mgr.abort_request.return_value = True
 
-        with (
-            patch.object(remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr),
-            patch.object(remote_module, "RemoteSessionManager", return_value=mock_session_mgr),
-            patch.object(remote_module, "_require_auth", return_value=None),
-            patch.object(remote_module, "_check_session_access", return_value=(None, None)),
-        ):
+        with patch.object(remote_module, 'get_remote_agent_manager', return_value=mock_agent_mgr), \
+             patch.object(remote_module, 'RemoteSessionManager', return_value=mock_session_mgr), \
+             patch.object(remote_module, '_require_auth', return_value=None), \
+             patch.object(remote_module, '_check_session_access', return_value=(None, None)):
 
-            with (
-                remote_module.remote_bp.app_context()
-                if hasattr(remote_module.remote_bp, "app_context")
-                else MagicMock()
-            ):
+            with remote_module.remote_bp.app_context() if hasattr(remote_module.remote_bp, 'app_context') else MagicMock():
                 pass  # Flask blueprint context not available in unit test
 
         # Instead, test the generate function directly

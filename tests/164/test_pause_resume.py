@@ -15,11 +15,12 @@ Run:
   HEADLESS=false python tests/164/test_pause_resume.py
 """
 
+import json
 import os
 import sys
 import time
-import traceback
 import uuid
+import traceback
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, PROJECT_ROOT)
@@ -42,7 +43,6 @@ auth_token = None
 admin_token = None
 
 # ── 工具函数 ──
-
 
 def ensure_dir():
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
@@ -68,11 +68,9 @@ def pause(seconds):
 
 # ── API 函数 ──
 
-
 def api_login_as(username=TEST_USER, password=TEST_PASS):
-    r = requests.post(
-        f"{BASE_URL}/api/auth/login", json={"username": username, "password": password}
-    )
+    r = requests.post(f"{BASE_URL}/api/auth/login",
+                      json={"username": username, "password": password})
     assert r.status_code == 200, f"Login failed: {r.status_code}"
     token = r.cookies.get("session_token")
     assert token, "No session_token cookie"
@@ -86,64 +84,52 @@ def api_admin_login():
 def api_register_machine(admin_tok):
     global machine_id
     # Generate registration token
-    r = requests.post(
-        f"{BASE_URL}/api/remote/machines/register",
-        json={"tenant_id": 1},
-        cookies={"session_token": admin_tok},
-    )
+    r = requests.post(f"{BASE_URL}/api/remote/machines/register",
+                      json={"tenant_id": 1},
+                      cookies={"session_token": admin_tok})
     assert r.status_code == 200
     reg_token = r.json()["registration_token"]
 
     # Register machine
     machine_id = str(uuid.uuid4())
-    r = requests.post(
-        f"{BASE_URL}/api/remote/agent/register",
-        json={
-            "registration_token": reg_token,
-            "machine_id": machine_id,
-            "machine_name": "Pause/Resume Test Server",
-            "hostname": "pause-test.local",
-            "os_type": "linux",
-            "os_version": "Ubuntu 24.04",
-            "capabilities": {"cpu_cores": 8, "memory_gb": 32, "cli_installed": True},
-            "agent_version": "1.0.0-e2e-164",
-        },
-    )
+    r = requests.post(f"{BASE_URL}/api/remote/agent/register", json={
+        "registration_token": reg_token,
+        "machine_id": machine_id,
+        "machine_name": "Pause/Resume Test Server",
+        "hostname": "pause-test.local",
+        "os_type": "linux",
+        "os_version": "Ubuntu 24.04",
+        "capabilities": {"cpu_cores": 8, "memory_gb": 32, "cli_installed": True},
+        "agent_version": "1.0.0-e2e-164",
+    })
     assert r.status_code == 200
 
     # HTTP long-poll register
-    r = requests.post(
-        f"{BASE_URL}/api/remote/agent/message",
-        json={
-            "type": "register",
-            "machine_id": machine_id,
-            "capabilities": {"cpu_cores": 8, "memory_gb": 32, "cli_installed": True},
-        },
-    )
+    r = requests.post(f"{BASE_URL}/api/remote/agent/message", json={
+        "type": "register",
+        "machine_id": machine_id,
+        "capabilities": {"cpu_cores": 8, "memory_gb": 32, "cli_installed": True},
+    })
     assert r.status_code == 200
 
     # Assign to test user
-    r = requests.post(
-        f"{BASE_URL}/api/remote/machines/{machine_id}/assign",
-        json={"user_id": 89, "permission": "admin"},
-        cookies={"session_token": admin_tok},
-    )
+    r = requests.post(f"{BASE_URL}/api/remote/machines/{machine_id}/assign",
+                      json={"user_id": 89, "permission": "admin"},
+                      cookies={"session_token": admin_tok})
     assert r.status_code == 200
 
 
 def api_create_session(token):
     global session_id
-    r = requests.post(
-        f"{BASE_URL}/api/remote/sessions",
-        json={
-            "machine_id": machine_id,
-            "project_path": "/home/user/test-project",
-            "cli_tool": "qwen-code-cli",
-            "model": "qwen3-coder-plus",
-            "title": "E2E Pause/Resume Test",
-        },
-        cookies={"session_token": token},
-    )
+    r = requests.post(f"{BASE_URL}/api/remote/sessions",
+                      json={
+                          "machine_id": machine_id,
+                          "project_path": "/home/user/test-project",
+                          "cli_tool": "qwen-code-cli",
+                          "model": "qwen3-coder-plus",
+                          "title": "E2E Pause/Resume Test",
+                      },
+                      cookies={"session_token": token})
     assert r.status_code == 200, f"Create session failed: {r.status_code} {r.text}"
     session_id = r.json()["session"]["session_id"]
 
@@ -152,56 +138,45 @@ def api_send_agent_output(step, is_complete=False, sid=None):
     outputs = {
         "thinking": '{"type":"thinking","content":"Analyzing project structure..."}',
         "response": '{"type":"assistant","content":"I found 2 issues in the code:\\n1. Missing error handling\\n2. Unused imports"}',
-        "final": '{"type":"assistant","content":"All issues have been fixed. Ready for review."}',
+        "final":    '{"type":"assistant","content":"All issues have been fixed. Ready for review."}',
     }
-    r = requests.post(
-        f"{BASE_URL}/api/remote/agent/message",
-        json={
-            "type": "session_output",
-            "machine_id": machine_id,
-            "session_id": sid or session_id,
-            "data": outputs[step],
-            "stream": "stdout",
-            "is_complete": is_complete,
-        },
-    )
+    r = requests.post(f"{BASE_URL}/api/remote/agent/message", json={
+        "type": "session_output",
+        "machine_id": machine_id,
+        "session_id": sid or session_id,
+        "data": outputs[step],
+        "stream": "stdout",
+        "is_complete": is_complete,
+    })
     return r.status_code == 200
 
 
 def api_send_usage():
-    requests.post(
-        f"{BASE_URL}/api/remote/agent/message",
-        json={
-            "type": "usage_report",
-            "machine_id": machine_id,
-            "session_id": session_id,
-            "tokens": {"input": 1000, "output": 500},
-            "requests": 1,
-        },
-    )
+    requests.post(f"{BASE_URL}/api/remote/agent/message", json={
+        "type": "usage_report",
+        "machine_id": machine_id,
+        "session_id": session_id,
+        "tokens": {"input": 1000, "output": 500},
+        "requests": 1,
+    })
 
 
 def api_get_session(token, sid=None):
-    r = requests.get(
-        f"{BASE_URL}/api/remote/sessions/{sid or session_id}", cookies={"session_token": token}
-    )
+    r = requests.get(f"{BASE_URL}/api/remote/sessions/{sid or session_id}",
+                     cookies={"session_token": token})
     assert r.status_code == 200
     return r.json()["session"]
 
 
 def api_pause_session(token, sid=None):
-    r = requests.post(
-        f"{BASE_URL}/api/remote/sessions/{sid or session_id}/pause",
-        cookies={"session_token": token},
-    )
+    r = requests.post(f"{BASE_URL}/api/remote/sessions/{sid or session_id}/pause",
+                      cookies={"session_token": token})
     return r.status_code == 200, r.json()
 
 
 def api_resume_session(token, sid=None):
-    r = requests.post(
-        f"{BASE_URL}/api/remote/sessions/{sid or session_id}/resume",
-        cookies={"session_token": token},
-    )
+    r = requests.post(f"{BASE_URL}/api/remote/sessions/{sid or session_id}/resume",
+                      cookies={"session_token": token})
     return r.status_code == 200, r.json()
 
 
@@ -232,21 +207,18 @@ def browser_fetch(page, label, method, url, body=None):
 def api_cleanup(token, admin_tok):
     global session_id, machine_id
     if session_id:
-        requests.post(
-            f"{BASE_URL}/api/remote/sessions/{session_id}/stop", cookies={"session_token": token}
-        )
+        requests.post(f"{BASE_URL}/api/remote/sessions/{session_id}/stop",
+                      cookies={"session_token": token})
         session_id = None
     if machine_id:
-        requests.delete(
-            f"{BASE_URL}/api/remote/machines/{machine_id}", cookies={"session_token": admin_tok}
-        )
+        requests.delete(f"{BASE_URL}/api/remote/machines/{machine_id}",
+                        cookies={"session_token": admin_tok})
         machine_id = None
 
 
 # ══════════════════════════════════════════════════════
 #  Main Test Flow
 # ══════════════════════════════════════════════════════
-
 
 def run_tests():
     global auth_token, admin_token, session_id
@@ -307,7 +279,8 @@ def run_tests():
             # Show session details in browser
             page.goto(f"{BASE_URL}/work", wait_until="domcontentloaded")
             pause(2)
-            browser_fetch(page, "Get session details", "GET", f"/api/remote/sessions/{session_id}")
+            browser_fetch(page, "Get session details", "GET",
+                         f"/api/remote/sessions/{session_id}")
             shot(page, "03_session_active")
             print("  Initial state verified: active, paused_at=null")
 
@@ -326,9 +299,8 @@ def run_tests():
             assert sess["paused_at"] is not None, "paused_at should be set after pause"
 
             # Show in browser
-            browser_fetch(
-                page, "Verify paused session", "GET", f"/api/remote/sessions/{session_id}"
-            )
+            browser_fetch(page, "Verify paused session", "GET",
+                         f"/api/remote/sessions/{session_id}")
             pause(2)
             shot(page, "04_session_paused")
             print(f"  Session paused successfully. paused_at={sess['paused_at']}")
@@ -360,9 +332,8 @@ def run_tests():
             assert sess["status"] == "active", f"Expected active, got {sess['status']}"
             assert sess["paused_at"] is None, "paused_at should be cleared after resume"
 
-            browser_fetch(
-                page, "Verify resumed session", "GET", f"/api/remote/sessions/{session_id}"
-            )
+            browser_fetch(page, "Verify resumed session", "GET",
+                         f"/api/remote/sessions/{session_id}")
             pause(2)
             shot(page, "06_session_resumed")
             print("  Session resumed successfully. paused_at=null")
@@ -401,7 +372,6 @@ def run_tests():
             print("\n══════ 9. ChatPage Remote UI Test ══════")
 
             captured_sid = [None]
-
             def on_response(response):
                 url = response.url
                 if "/api/remote/sessions" in url and "/chat" not in url and "/stop" not in url:
@@ -417,15 +387,14 @@ def run_tests():
             page.on("response", on_response)
 
             console_errors = []
-
             def on_console(msg):
                 if msg.type in ("error", "warning"):
                     console_errors.append(f"[{msg.type}] {msg.text}")
-
             page.on("console", on_console)
 
             webui_info = requests.get(
-                f"{BASE_URL}/api/workspace/user-url", cookies={"session_token": auth_token}
+                f"{BASE_URL}/api/workspace/user-url",
+                cookies={"session_token": auth_token}
             ).json()
             webui_token = webui_info.get("token", "")
             effective_webui_url = webui_info.get("url", WEBUI_URL)
@@ -472,10 +441,7 @@ def run_tests():
 
                     # Verify status dot or paused indicator
                     page_text = page.locator("body").text_content() or ""
-                    log_step(
-                        "UI",
-                        f"Page contains 'paused': {'paused' in page_text.lower() or '暂停' in page_text}",
-                    )
+                    log_step("UI", f"Page contains 'paused': {'paused' in page_text.lower() or '暂停' in page_text}")
 
                     # Resume
                     ok, _ = api_resume_session(auth_token, sid=chat_sid)
@@ -484,10 +450,8 @@ def run_tests():
                     shot(page, "09_chatpage_resumed")
 
                     # Cleanup chatpage session
-                    requests.post(
-                        f"{BASE_URL}/api/remote/sessions/{chat_sid}/stop",
-                        cookies={"session_token": auth_token},
-                    )
+                    requests.post(f"{BASE_URL}/api/remote/sessions/{chat_sid}/stop",
+                                 cookies={"session_token": auth_token})
 
                 else:
                     log_step("Session", "No session captured, sending message manually")
@@ -512,10 +476,8 @@ def run_tests():
                             pause(2)
                             shot(page, "09_manual_resumed")
 
-                            requests.post(
-                                f"{BASE_URL}/api/remote/sessions/{chat_sid}/stop",
-                                cookies={"session_token": auth_token},
-                            )
+                            requests.post(f"{BASE_URL}/api/remote/sessions/{chat_sid}/stop",
+                                         cookies={"session_token": auth_token})
 
                 print("  ChatPage remote UI test completed")
                 page.remove_listener("response", on_response)
@@ -535,7 +497,7 @@ def run_tests():
             context.close()
             browser.close()
 
-        except Exception:
+        except Exception as e:
             shot(page, "ERROR")
             traceback.print_exc()
             context.close()

@@ -159,7 +159,7 @@ def get_database_url() -> str:
         if url:
             return url
         # If type is postgresql but no url, fall back to SQLite
-        print("Warning: database type is postgresql but no url configured, using SQLite")
+        print(f"Warning: database type is postgresql but no url configured, using SQLite")
         db_path = db_config.get("path", DB_PATH)
         return f"sqlite:///{db_path}"
 

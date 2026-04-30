@@ -12,12 +12,11 @@ Test script for issue #71: Cross-tab message isolation test
 - Tab 2 的消息流应该独立，不应该显示 Tab 1 的 AI 回复
 """
 
+import sys
 import os
 import subprocess
-import sys
+from playwright.sync_api import sync_playwright, TimeoutError
 import time
-
-from playwright.sync_api import sync_playwright
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, project_root)
@@ -42,9 +41,9 @@ def ensure_service_running():
             ["python3", "web.py"],
             cwd="/Users/rhuang/workspace/open-ace",
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
         )
-        for _i in range(30):
+        for i in range(30):
             time.sleep(1)
             result = subprocess.run(["lsof", "-i", ":5001"], capture_output=True, text=True)
             if result.stdout.strip():
@@ -61,11 +60,11 @@ def find_chat_frame_by_index(page, index):
         url = frame.url
         if "token=" in url or "127.0.0.1:310" in url:
             webui_frames.append((i, frame, url))
-
+    
     print(f"    [DEBUG] 找到 {len(webui_frames)} 个 webui frames")
-    for idx, (_fi, _f, url) in enumerate(webui_frames):
+    for idx, (fi, f, url) in enumerate(webui_frames):
         print(f"    [DEBUG] WebUI Frame {idx}: {url[:70]}...")
-
+    
     if index < len(webui_frames):
         return webui_frames[index][1]
     return None
@@ -76,12 +75,10 @@ def get_all_messages(frame):
     messages = []
     try:
         # 查找消息元素 - 通常在聊天容器中
-        msg_elements = frame.locator(
-            "[class*='message'], [class*='chat-message'], div[class*='prose']"
-        )
+        msg_elements = frame.locator("[class*='message'], [class*='chat-message'], div[class*='prose']")
         count = msg_elements.count()
         print(f"    [DEBUG] 找到 {count} 个消息元素")
-
+        
         for i in range(min(count, 20)):  # 最多取 20 条
             try:
                 text = msg_elements.nth(i).text_content() or ""
@@ -91,7 +88,7 @@ def get_all_messages(frame):
                 pass
     except Exception as e:
         print(f"    [DEBUG] 获取消息失败: {e}")
-
+    
     return messages
 
 
@@ -107,7 +104,7 @@ def get_assistant_response(frame):
             "div.message-content",
             "div[class*='bg-slate']",
         ]
-
+        
         for sel in selectors:
             elements = frame.locator(sel)
             if elements.count() > 0:
@@ -119,17 +116,17 @@ def get_assistant_response(frame):
                         return text[:500]
                 except:
                     pass
-
+        
         # 如果上面都没找到，尝试获取页面上所有可见文本
         body = frame.locator("body")
         text = body.text_content() or ""
         # 提取关键部分
         if "tool_result" in text or "permission" in text:
             return text[:500]
-
+        
     except Exception as e:
         print(f"    [DEBUG] 获取响应失败: {e}")
-
+    
     return ""
 
 
@@ -171,7 +168,7 @@ def test_cross_tab_message_isolation():
     print("=" * 70)
 
     ensure_service_running()
-
+    
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=HEADLESS, slow_mo=300)
         context = browser.new_context(viewport=VIEWPORT_SIZE)
@@ -244,7 +241,7 @@ def test_cross_tab_message_isolation():
                     textarea.fill(complex_task)
                     textarea.press("Enter")
                     print(f"    发送: '{complex_task[:60]}...'")
-
+                    
                     # 等待 AI 开始处理
                     page.wait_for_timeout(5000)
                     print("    [Tab 2] AI 开始处理...")
@@ -268,7 +265,7 @@ def test_cross_tab_message_isolation():
                     textarea.fill(simple_question)
                     textarea.press("Enter")
                     print(f"    发送: '{simple_question}'")
-
+                    
                     # 等待响应
                     page.wait_for_timeout(8000)
                     print("    [Tab 1] 等待 AI 响应...")
@@ -283,11 +280,11 @@ def test_cross_tab_message_isolation():
             tab1_frame = find_chat_frame_by_index(page, 0)
             if tab1_frame:
                 print("\n[Tab 1] 获取 AI 响应内容...")
-
+                
                 # 获取页面文本
                 try:
                     body_text = tab1_frame.locator("body").text_content() or ""
-
+                    
                     # 检查是否有来自 Tab 2 的内容
                     # Tab 2 的任务涉及：Python files, backend directory, code structure
                     cross_content_indicators = [
@@ -299,40 +296,40 @@ def test_cross_tab_message_isolation():
                         "glob",
                         "read_file",
                         "grep",
-                        "tool_result",
+                        "tool_result"
                     ]
-
+                    
                     found_cross_content = []
                     for indicator in cross_content_indicators:
                         if indicator.lower() in body_text.lower():
                             found_cross_content.append(indicator)
-
+                    
                     # 检查是否有正确的回复（巴黎相关）
                     expected_content = ["Paris", "France", "capital"]
                     found_expected = []
                     for exp in expected_content:
                         if exp.lower() in body_text.lower():
                             found_expected.append(exp)
-
+                    
                     print(f"    [Tab 1] 页面文本长度: {len(body_text)}")
                     print(f"    [Tab 1] 找到预期内容（巴黎相关）: {found_expected}")
                     print(f"    [Tab 1] 找到跨 tab 内容（Tab 2 任务相关）: {found_cross_content}")
-
+                    
                     # 截取最后 500 字符作为摘要
-                    print("\n    [Tab 1] 内容摘要（最后部分）:")
+                    print(f"\n    [Tab 1] 内容摘要（最后部分）:")
                     print(f"    {body_text[-500:]}")
-
+                    
                     if found_cross_content:
                         print("\n    ✗ 问题：Tab 1 显示了 Tab 2 的任务内容！")
                         print(f"    发现的跨 tab 内容: {found_cross_content}")
                     else:
                         print("\n    ✓ 正常：Tab 1 没有显示 Tab 2 的任务内容")
-
+                    
                     if found_expected:
                         print("    ✓ 正常：Tab 1 显示了正确的回复（巴黎相关）")
                     else:
                         print("    ✗ 问题：Tab 1 没有显示正确的回复")
-
+                    
                 except Exception as e:
                     print(f"    [Tab 1] 获取内容失败: {e}")
 
@@ -350,36 +347,36 @@ def test_cross_tab_message_isolation():
             tab2_frame = find_chat_frame_by_index(page, 1)
             if tab2_frame:
                 print("\n[Tab 2] 获取内容...")
-
+                
                 try:
                     body_text = tab2_frame.locator("body").text_content() or ""
-
+                    
                     # 检查是否有来自 Tab 1 的内容（巴黎、法国）
                     tab1_indicators = ["Paris", "France", "capital of France"]
                     found_tab1_content = []
                     for ind in tab1_indicators:
                         if ind.lower() in body_text.lower():
                             found_tab1_content.append(ind)
-
+                    
                     # 检查是否有正确的任务内容
                     task_indicators = ["code", "Python", "backend", "quality"]
                     found_task_content = []
                     for ind in task_indicators:
                         if ind.lower() in body_text.lower():
                             found_task_content.append(ind)
-
+                    
                     print(f"    [Tab 2] 页面文本长度: {len(body_text)}")
                     print(f"    [Tab 2] 找到 Tab 1 内容（巴黎相关）: {found_tab1_content}")
                     print(f"    [Tab 2] 找到任务内容（代码质量相关）: {found_task_content}")
-
-                    print("\n    [Tab 2] 内容摘要（最后部分）:")
+                    
+                    print(f"\n    [Tab 2] 内容摘要（最后部分）:")
                     print(f"    {body_text[-500:]}")
-
+                    
                     if found_tab1_content:
                         print("\n    ✗ 问题：Tab 2 显示了 Tab 1 的消息内容！")
                     else:
                         print("\n    ✓ 正常：Tab 2 没有显示 Tab 1 的消息内容")
-
+                    
                 except Exception as e:
                     print(f"    [Tab 2] 获取内容失败: {e}")
 
@@ -400,7 +397,6 @@ def test_cross_tab_message_isolation():
         except Exception as e:
             print(f"\n✗ 测试错误: {e}")
             import traceback
-
             traceback.print_exc()
             page.screenshot(path=f"{OUTPUT_DIR}/cross_tab_error.png")
             return False

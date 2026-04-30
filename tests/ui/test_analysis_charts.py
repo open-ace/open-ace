@@ -11,16 +11,15 @@ Test that Analysis page charts display data correctly:
 - Token Distribution
 """
 
-import os
 import sys
+import os
 
 # Add the project root to the path
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, project_root)
 
-import time
-
 from playwright.sync_api import sync_playwright
+import time
 
 # Configuration
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000/")

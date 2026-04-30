@@ -13,16 +13,14 @@ Issue 86: 菜单栏用户名称移到 Logout 按钮上悬停显示
 6. 验证移开鼠标后恢复 "Logout"
 """
 
-import os
-import sys
-
 import pytest
+import sys
+import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-import time
-
 from playwright.async_api import async_playwright, expect
+import time
 
 # 测试配置
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000")

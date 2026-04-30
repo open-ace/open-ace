@@ -7,8 +7,8 @@ Tests:
 3. Non-admin users should land on /work after login
 """
 
+import pytest
 import asyncio
-
 from playwright.async_api import async_playwright
 
 

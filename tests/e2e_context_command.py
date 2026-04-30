@@ -84,19 +84,15 @@ def run_tests():
                 openace_item.click()
                 pause(1)
                 # Then click Enter or Select button to enter the project
-                enter_btn = (
-                    page.locator("button", has_text="Enter")
-                    .or_(page.locator("button", has_text="Select"))
-                    .first
-                )
+                enter_btn = page.locator("button", has_text="Enter").or_(
+                    page.locator("button", has_text="Select")
+                ).first
                 if enter_btn.count() > 0:
                     enter_btn.click()
                     pause(2)
             else:
                 # Fallback: directly navigate to a project chat URL
-                page.goto(
-                    f"{WEBUI_URL}/?project=open-ace", wait_until="domcontentloaded", timeout=10000
-                )
+                page.goto(f"{WEBUI_URL}/?project=open-ace", wait_until="domcontentloaded", timeout=10000)
                 pause(2)
 
             # Wait for textarea to appear (indicates we're on the chat page)
@@ -107,19 +103,13 @@ def run_tests():
                 shot(page, "01-no-textarea")
                 log_step("INFO", "No textarea found, trying direct URL navigation")
                 # Direct URL to a specific project
-                page.goto(
-                    f"{WEBUI_URL}/chat/open-ace", wait_until="domcontentloaded", timeout=10000
-                )
+                page.goto(f"{WEBUI_URL}/chat/open-ace", wait_until="domcontentloaded", timeout=10000)
                 pause(2)
                 try:
                     page.wait_for_selector("textarea", state="visible", timeout=10000)
                 except Exception:
                     # Last resort: try the work page
-                    page.goto(
-                        f"{WEBUI_URL}/work?project=/Users/rhuang/workspace/open-ace",
-                        wait_until="domcontentloaded",
-                        timeout=10000,
-                    )
+                    page.goto(f"{WEBUI_URL}/work?project=/Users/rhuang/workspace/open-ace", wait_until="domcontentloaded", timeout=10000)
                     pause(2)
                     page.wait_for_selector("textarea", state="visible", timeout=10000)
 
@@ -193,10 +183,7 @@ def run_tests():
                 shot(page, "03b-context-panel-visible")
                 passed += 1
             else:
-                log_step(
-                    "INFO",
-                    "ContextUsagePanel not shown (no token data yet - expected without API calls)",
-                )
+                log_step("INFO", "ContextUsagePanel not shown (no token data yet - expected without API calls)")
                 # This is expected behavior - no API calls = no token data
                 passed += 1
 
@@ -219,7 +206,9 @@ def run_tests():
             shot(page, "05-clear-confirm")
 
             # Should show confirm modal
-            confirm_modal = page.locator("text=Are you sure").or_(page.locator("text=确定要清空"))
+            confirm_modal = page.locator("text=Are you sure").or_(
+                page.locator("text=确定要清空")
+            )
             if confirm_modal.count() > 0:
                 log_step("OK", "/clear confirm modal shown")
                 passed += 1

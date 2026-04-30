@@ -9,10 +9,11 @@ Tests cover:
 """
 
 import os
-import sqlite3
 import sys
+import sqlite3
+import tempfile
 from datetime import datetime, timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch, MagicMock
 
 import pytest
 
@@ -71,9 +72,7 @@ def temp_db(tmp_path):
     conn.executescript(SCHEMA_SQL)
 
     # Insert test users
-    conn.execute(
-        "INSERT INTO users (id, username, system_account) VALUES (1, 'alice', 'alice-host')"
-    )
+    conn.execute("INSERT INTO users (id, username, system_account) VALUES (1, 'alice', 'alice-host')")
     conn.execute("INSERT INTO users (id, username, system_account) VALUES (2, 'bob', NULL)")
 
     # Insert test messages for the last 3 days
@@ -82,22 +81,16 @@ def temp_db(tmp_path):
         date_str = (today - timedelta(days=day_offset)).strftime("%Y-%m-%d")
         # Alice has messages
         for i in range(3):
-            conn.execute(
-                """
+            conn.execute("""
                 INSERT INTO daily_messages (date, role, tokens_used, input_tokens, output_tokens, sender_name)
                 VALUES (?, 'assistant', 100, 80, 20, ?)
-            """,
-                (date_str, f"alice-host-workspace-claude-{i}"),
-            )
+            """, (date_str, f"alice-host-workspace-claude-{i}"))
         # Bob has messages
         for i in range(2):
-            conn.execute(
-                """
+            conn.execute("""
                 INSERT INTO daily_messages (date, role, tokens_used, input_tokens, output_tokens, sender_name)
                 VALUES (?, 'assistant', 50, 40, 10, ?)
-            """,
-                (date_str, f"bob-laptop-claude-{i}"),
-            )
+            """, (date_str, f"bob-laptop-claude-{i}"))
     conn.commit()
     conn.close()
     return db_path
@@ -108,7 +101,6 @@ def mock_db_instance(temp_db):
     """Create a mock Database instance that uses the temp SQLite db."""
     with patch("app.services.user_stats_aggregator.is_postgresql", return_value=False):
         from app.repositories.database import Database
-
         db = Database(db_url=f"sqlite:///{temp_db}")
         yield db
 
@@ -146,25 +138,23 @@ class TestAggregatorSQLite:
         from app.services.user_stats_aggregator import UserDailyStatsAggregator
 
         aggregator = UserDailyStatsAggregator(db=mock_db_instance)
-        with (
-            patch("app.services.user_stats_aggregator.is_postgresql", return_value=False),
-            patch.object(
-                aggregator.user_repo,
-                "get_all_users",
-                return_value=[
-                    {"id": 1, "username": "alice", "system_account": "alice-host"},
-                    {"id": 2, "username": "bob", "system_account": None},
-                ],
-            ),
-        ):
+        with patch("app.services.user_stats_aggregator.is_postgresql", return_value=False), \
+             patch.object(aggregator.user_repo, "get_all_users", return_value=[
+                 {"id": 1, "username": "alice", "system_account": "alice-host"},
+                 {"id": 2, "username": "bob", "system_account": None},
+             ]):
             records = aggregator.aggregate_all_users(days=7)
 
         assert records >= 6  # 2 users * 3 days each
 
         conn = sqlite3.connect(temp_db)
         conn.row_factory = sqlite3.Row
-        alice_rows = conn.execute("SELECT * FROM user_daily_stats WHERE user_id = 1").fetchall()
-        bob_rows = conn.execute("SELECT * FROM user_daily_stats WHERE user_id = 2").fetchall()
+        alice_rows = conn.execute(
+            "SELECT * FROM user_daily_stats WHERE user_id = 1"
+        ).fetchall()
+        bob_rows = conn.execute(
+            "SELECT * FROM user_daily_stats WHERE user_id = 2"
+        ).fetchall()
         conn.close()
 
         assert len(alice_rows) >= 3
@@ -176,12 +166,8 @@ class TestAggregatorSQLite:
 
         aggregator = UserDailyStatsAggregator(db=mock_db_instance)
         with patch("app.services.user_stats_aggregator.is_postgresql", return_value=False):
-            aggregator.aggregate_user(
-                user_id=1, username="alice", days=7, system_account="alice-host"
-            )
-            aggregator.aggregate_user(
-                user_id=1, username="alice", days=7, system_account="alice-host"
-            )
+            aggregator.aggregate_user(user_id=1, username="alice", days=7, system_account="alice-host")
+            aggregator.aggregate_user(user_id=1, username="alice", days=7, system_account="alice-host")
 
         conn = sqlite3.connect(temp_db)
         count = conn.execute(
@@ -198,9 +184,7 @@ class TestAggregatorSQLite:
 
         aggregator = UserDailyStatsAggregator(db=mock_db_instance)
         with patch("app.services.user_stats_aggregator.is_postgresql", return_value=False):
-            aggregator.aggregate_user(
-                user_id=1, username="alice", days=30, system_account="alice-host"
-            )
+            aggregator.aggregate_user(user_id=1, username="alice", days=30, system_account="alice-host")
             deleted = aggregator.cleanup_old_data(days_to_keep=0)
 
         # All data is recent, so with days_to_keep=0 nothing should be deleted
@@ -219,16 +203,13 @@ class TestUserStatsHelper:
             (today - timedelta(days=1)).strftime("%Y-%m-%d"),
         }
 
-        with (
-            patch("app.services.user_stats_aggregator.is_postgresql", return_value=False),
-            patch("app.services.user_stats_aggregator.UserDailyStatsAggregator") as MockAggregator,
-        ):
+        with patch("app.services.user_stats_aggregator.is_postgresql", return_value=False), \
+             patch("app.services.user_stats_aggregator.UserDailyStatsAggregator") as MockAggregator:
             mock_instance = MagicMock()
             mock_instance.aggregate_all_users.return_value = 4
             MockAggregator.return_value = mock_instance
 
             from scripts.shared.user_stats_helper import _refresh_user_daily_stats_for_dates
-
             _refresh_user_daily_stats_for_dates(dates)
 
             MockAggregator.assert_called_once()
@@ -241,7 +222,6 @@ class TestUserStatsHelper:
         """Empty date set should return without calling aggregator."""
         with patch("app.services.user_stats_aggregator.UserDailyStatsAggregator") as MockAggregator:
             from scripts.shared.user_stats_helper import _refresh_user_daily_stats_for_dates
-
             _refresh_user_daily_stats_for_dates(set())
 
             MockAggregator.assert_not_called()
@@ -266,10 +246,8 @@ class TestSchedulerSafetyNet:
 
         scheduler = DataFetchScheduler()
 
-        with patch(
-            "app.services.user_stats_aggregator.aggregate_user_stats_background",
-            side_effect=RuntimeError("db error"),
-        ):
+        with patch("app.services.user_stats_aggregator.aggregate_user_stats_background",
+                   side_effect=RuntimeError("db error")):
             # Should not raise
             scheduler._aggregate_user_stats()
 
@@ -279,10 +257,8 @@ class TestSchedulerSafetyNet:
 
         scheduler = DataFetchScheduler()
 
-        with (
-            patch("app.routes.fetch.run_fetch_scripts"),
-            patch.object(scheduler, "_refresh_materialized_views"),
-            patch.object(scheduler, "_aggregate_user_stats") as mock_agg,
-        ):
+        with patch("app.routes.fetch.run_fetch_scripts"), \
+             patch.object(scheduler, "_refresh_materialized_views"), \
+             patch.object(scheduler, "_aggregate_user_stats") as mock_agg:
             scheduler._run_fetch()
             mock_agg.assert_called_once()

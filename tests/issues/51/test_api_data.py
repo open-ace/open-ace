@@ -6,9 +6,7 @@
 import os
 import sys
 
-sys.path.insert(
-    0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
 from playwright.sync_api import sync_playwright
 
@@ -16,7 +14,6 @@ BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
-
 
 def check_api_data():
     """检查 API 数据"""
@@ -32,13 +29,11 @@ def check_api_data():
             if "/api/" in response.url:
                 try:
                     body = response.text()
-                    api_responses.append(
-                        {
-                            "url": response.url,
-                            "status": response.status,
-                            "body": body[:2000],  # 只截取前 2000 字符
-                        }
-                    )
+                    api_responses.append({
+                        "url": response.url,
+                        "status": response.status,
+                        "body": body[:2000]  # 只截取前 2000 字符
+                    })
                 except:
                     pass
 
@@ -64,7 +59,6 @@ def check_api_data():
                 print(f"Body: {resp['body']}")
 
         browser.close()
-
 
 if __name__ == "__main__":
     check_api_data()

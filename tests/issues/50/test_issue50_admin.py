@@ -2,7 +2,6 @@
 """Test issue 50: Admin user should see all admin menus."""
 
 import asyncio
-
 from playwright.async_api import async_playwright
 
 # Test admin credentials

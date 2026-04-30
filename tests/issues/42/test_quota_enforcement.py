@@ -98,12 +98,8 @@ def test_webui_quota_check_valid_token():
         return False
 
     print(f"✓ Status 200, can_use={data['can_use']}")
-    print(
-        f"  Daily tokens: {data.get('daily', {}).get('tokens', {}).get('used', 0)} / {data.get('daily', {}).get('tokens', {}).get('limit', '∞')}"
-    )
-    print(
-        f"  Daily requests: {data.get('daily', {}).get('requests', {}).get('used', 0)} / {data.get('daily', {}).get('requests', {}).get('limit', '∞')}"
-    )
+    print(f"  Daily tokens: {data.get('daily', {}).get('tokens', {}).get('used', 0)} / {data.get('daily', {}).get('tokens', {}).get('limit', '∞')}")
+    print(f"  Daily requests: {data.get('daily', {}).get('requests', {}).get('used', 0)} / {data.get('daily', {}).get('requests', {}).get('limit', '∞')}")
     return True
 
 
@@ -171,7 +167,7 @@ def test_webui_quota_check_over_quota():
                 print(f"ERROR: Missing required fields in {period}.{metric}")
                 return False
 
-    print("✓ Response structure correct")
+    print(f"✓ Response structure correct")
     print(f"  can_use={data['can_use']}")
 
     if not data["can_use"]:
@@ -194,7 +190,7 @@ def test_webui_quota_check_missing_token():
         print(f"Response: {response.text}")
         return False
 
-    print("✓ Missing token rejected (401)")
+    print(f"✓ Missing token rejected (401)")
     return True
 
 

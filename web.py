@@ -18,12 +18,10 @@ import sys
 
 # gevent monkey-patch must be applied before any other imports
 from gevent import monkey
-
 monkey.patch_all()
 
 # Make psycopg2 cooperative with gevent (prevents blocking the event loop)
 import psycogreen.gevent
-
 psycogreen.gevent.patch_psycopg()
 
 # Add the project root to the path
@@ -36,10 +34,9 @@ from app import create_app
 
 app = create_app()
 
-from app.repositories.database import DB_PATH, get_database_url, is_postgresql
-
 # Get configuration
 from scripts.shared.config import WEB_HOST, WEB_PORT
+from app.repositories.database import DB_PATH, is_postgresql, get_database_url
 
 if __name__ == "__main__":
     print(f"Starting Open ACE on {WEB_HOST}:{WEB_PORT}")
@@ -56,7 +53,7 @@ if __name__ == "__main__":
             print(f"Database: {db_url}")
     else:
         print(f"Database: {DB_PATH}")
-    print("Config: ~/.open-ace/config.json")
+    print(f"Config: ~/.open-ace/config.json")
     print("-" * 50)
 
     # Check if running in production mode
@@ -73,7 +70,6 @@ if __name__ == "__main__":
         try:
             # Check if we have a proper TTY that supports termios operations
             import termios
-
             if sys.stdin.isatty() and sys.stdin.fileno() >= 0:
                 # Try to get terminal attributes - will fail if TTY is not fully functional
                 termios.tcgetattr(sys.stdin.fileno())

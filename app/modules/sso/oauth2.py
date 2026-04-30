@@ -11,7 +11,7 @@ import logging
 import secrets
 import urllib.parse
 from datetime import datetime, timedelta
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 from app.modules.sso.provider import (
     SSOAuthResult,
@@ -218,7 +218,7 @@ class OAuth2Provider(SSOProvider):
             logger.error(f"Failed to refresh token: {e}")
             return None
 
-    def _parse_token_response(self, data: dict[str, Any]) -> SSOToken:
+    def _parse_token_response(self, data: Dict[str, Any]) -> SSOToken:
         """
         Parse token response from provider.
 
@@ -241,7 +241,7 @@ class OAuth2Provider(SSOProvider):
             expires_at=expires_at,
         )
 
-    def _parse_user_info(self, data: dict[str, Any]) -> SSOUser:
+    def _parse_user_info(self, data: Dict[str, Any]) -> SSOUser:
         """
         Parse user info from provider response.
 
@@ -299,7 +299,7 @@ class OAuth2Provider(SSOProvider):
 class GitHubProvider(OAuth2Provider):
     """GitHub-specific OAuth2 provider."""
 
-    def _parse_user_info(self, data: dict[str, Any]) -> SSOUser:
+    def _parse_user_info(self, data: Dict[str, Any]) -> SSOUser:
         """Parse GitHub user info."""
         return SSOUser(
             provider=self.name,

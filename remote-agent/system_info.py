@@ -10,7 +10,7 @@ import os
 import platform
 import shutil
 import subprocess
-from typing import Any
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ KNOWN_CLI_TOOLS = [
 ]
 
 
-def get_system_info() -> dict[str, Any]:
+def get_system_info() -> Dict[str, Any]:
     """
     Gather system hardware and OS information.
 
@@ -32,7 +32,7 @@ def get_system_info() -> dict[str, Any]:
         Dict with os_type, os_version, hostname, cpu_cores, memory_mb,
         disk_free_gb, python_version.
     """
-    info: dict[str, Any] = {
+    info: Dict[str, Any] = {
         "os_type": platform.system(),
         "os_version": platform.release(),
         "os_platform": platform.platform(),
@@ -60,10 +60,13 @@ def get_system_info() -> dict[str, Any]:
 def _get_memory_mb() -> float:
     """Get total physical memory in megabytes."""
     try:
-        import importlib.util
+        import resource
 
-        importlib.util.find_spec("resource")
-    except (ImportError, ModuleNotFoundError):
+        # On macOS, resource.getrusage returns ru_maxrss in bytes
+        # On Linux it returns ru_maxrss in kilobytes
+        # But we want total system memory, not process usage
+        pass
+    except ImportError:
         pass
 
     sysname = platform.system().lower()
@@ -81,7 +84,7 @@ def _get_memory_mb() -> float:
 def _get_memory_mb_linux() -> float:
     """Read total memory from /proc/meminfo."""
     try:
-        with open("/proc/meminfo") as f:
+        with open("/proc/meminfo", "r") as f:
             for line in f:
                 if line.startswith("MemTotal:"):
                     parts = line.split()
@@ -142,12 +145,12 @@ def _get_disk_free_gb() -> float:
     try:
         home = os.path.expanduser("~")
         usage = shutil.disk_usage(home)
-        return usage.free / (1024**3)
+        return usage.free / (1024 ** 3)
     except OSError:
         return 0.0
 
 
-def check_cli_tool(name: str) -> dict[str, Any]:
+def check_cli_tool(name: str) -> Dict[str, Any]:
     """
     Check whether a CLI tool is installed and accessible.
 
@@ -161,7 +164,7 @@ def check_cli_tool(name: str) -> dict[str, Any]:
         Dict with 'installed' (bool), 'path' (str or None),
         and 'version' (str or None).
     """
-    result: dict[str, Any] = {
+    result: Dict[str, Any] = {
         "installed": False,
         "path": None,
         "version": None,
@@ -171,7 +174,6 @@ def check_cli_tool(name: str) -> dict[str, Any]:
     exe_name = name
     try:
         from cli_adapters import get_adapter
-
         adapter = get_adapter(name)
         exe_name = adapter.get_executable_name()
     except Exception:
@@ -206,7 +208,7 @@ def check_cli_tool(name: str) -> dict[str, Any]:
     return result
 
 
-def get_installed_tools() -> dict[str, dict[str, Any]]:
+def get_installed_tools() -> Dict[str, Dict[str, Any]]:
     """
     Check all known CLI tools and return their installation status.
 
@@ -221,7 +223,7 @@ def get_installed_tools() -> dict[str, dict[str, Any]]:
     return tools
 
 
-def get_capabilities() -> dict[str, Any]:
+def get_capabilities() -> Dict[str, Any]:
     """
     Build the full capabilities report to send to the server during
     registration and heartbeats.
@@ -232,7 +234,9 @@ def get_capabilities() -> dict[str, Any]:
     sys_info = get_system_info()
     tools = get_installed_tools()
 
-    installed_list = [name for name, info in tools.items() if info["installed"]]
+    installed_list = [
+        name for name, info in tools.items() if info["installed"]
+    ]
 
     return {
         "os_type": sys_info["os_type"],

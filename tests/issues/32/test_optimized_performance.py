@@ -3,9 +3,9 @@
 Test script to measure optimized query performance for trend analysis.
 """
 
-import os
-import sys
 import time
+import sys
+import os
 
 # Add project root to path
 sys.path.insert(
@@ -13,7 +13,7 @@ sys.path.insert(
 )
 
 from app.services.analysis_service import AnalysisService
-from app.utils.helpers import get_days_ago, get_today
+from app.utils.helpers import get_today, get_days_ago
 
 
 def main():
@@ -44,7 +44,7 @@ def main():
 
     # Show key metrics
     key_metrics = result.get("key_metrics", {})
-    print("\n  Key metrics:")
+    print(f"\n  Key metrics:")
     print(f"    total_tokens: {key_metrics.get('total_tokens', 0):,}")
     print(f"    total_messages: {key_metrics.get('total_messages', 0):,}")
     print(f"    total_requests: {key_metrics.get('total_requests', 0):,}")

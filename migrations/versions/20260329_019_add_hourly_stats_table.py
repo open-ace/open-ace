@@ -31,8 +31,8 @@ Table structure:
 
 from typing import Union
 
-import sqlalchemy as sa
 from alembic import op
+import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "019_add_hourly_stats"
@@ -98,7 +98,8 @@ def upgrade() -> None:
         # Populate initial data from daily_messages
         # Note: Convert UTC hour to CST (UTC+8)
         if conn.dialect.name == "postgresql":
-            conn.execute(sa.text("""
+            conn.execute(
+                sa.text("""
                     INSERT INTO hourly_stats
                     (date, hour, tool_name, host_name, total_tokens, total_input_tokens,
                      total_output_tokens, message_count, updated_at)
@@ -116,9 +117,11 @@ def upgrade() -> None:
                     WHERE timestamp IS NOT NULL
                     GROUP BY date, MOD(EXTRACT(HOUR FROM timestamp::timestamp)::INTEGER + 8, 24), tool_name, host_name
                     ON CONFLICT (date, hour, tool_name, host_name) DO NOTHING
-                """))
+                """)
+            )
         else:
-            conn.execute(sa.text("""
+            conn.execute(
+                sa.text("""
                     INSERT OR IGNORE INTO hourly_stats
                     (date, hour, tool_name, host_name, total_tokens, total_input_tokens,
                      total_output_tokens, message_count, updated_at)
@@ -135,7 +138,8 @@ def upgrade() -> None:
                     FROM daily_messages
                     WHERE timestamp IS NOT NULL
                     GROUP BY date, (CAST(strftime('%H', timestamp) AS INTEGER) + 8) % 24, tool_name, host_name
-                """))
+                """)
+            )
         conn.commit()
 
 

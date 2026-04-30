@@ -13,7 +13,6 @@ Usage:
 
 import asyncio
 import time
-
 from playwright.async_api import async_playwright
 
 # Test configuration

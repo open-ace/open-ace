@@ -8,7 +8,7 @@ Provides fast dashboard queries by maintaining a summary table.
 
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import Dict, List, Optional
 
 from app.repositories.database import Database, is_postgresql
 from app.repositories.usage_repo import UsageRepository
@@ -58,7 +58,7 @@ class SummaryService:
             logger.error(f"Failed to refresh summary: {e}")
             return False
 
-    def _calculate_aggregates(self, host_name: Optional[str] = None) -> list[dict]:
+    def _calculate_aggregates(self, host_name: Optional[str] = None) -> List[Dict]:
         """
         Calculate aggregate statistics from daily_messages.
 
@@ -134,7 +134,7 @@ class SummaryService:
 
         return self.db.fetch_all(query, params)
 
-    def _update_summary_table(self, aggregates: list[dict]) -> None:
+    def _update_summary_table(self, aggregates: List[Dict]) -> None:
         """
         Update usage_summary table with calculated aggregates.
 
@@ -221,7 +221,7 @@ class SummaryService:
 
             conn.commit()
 
-    def get_summary(self, host_name: Optional[str] = None) -> dict[str, dict]:
+    def get_summary(self, host_name: Optional[str] = None) -> Dict[str, Dict]:
         """
         Get summary data from usage_summary table.
 
@@ -265,7 +265,7 @@ class SummaryService:
 
         return results
 
-    def get_all_hosts_summary(self) -> dict[str, dict[str, dict]]:
+    def get_all_hosts_summary(self) -> Dict[str, Dict[str, Dict]]:
         """
         Get summary data for all hosts.
 
@@ -322,7 +322,7 @@ class SummaryService:
             return True
         return True  # No data, needs refresh
 
-    def get_all_hosts(self) -> list[str]:
+    def get_all_hosts(self) -> List[str]:
         """
         Get list of all hosts from usage_summary table.
 

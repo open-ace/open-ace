@@ -15,9 +15,9 @@ import secrets
 import sqlite3
 from base64 import b64decode, b64encode
 from datetime import datetime, timedelta
-from typing import Any, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
-from app.repositories.database import DB_PATH, get_database_url, is_postgresql
+from app.repositories.database import DB_PATH, is_postgresql, get_database_url
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +45,7 @@ class APIKeyProxyService:
     def __init__(self, db_path: Optional[str] = None):
         self.db_path = db_path or str(DB_PATH)
         self._encryption_key = self._get_encryption_key()
+        self._ensure_tables()
 
     def _get_encryption_key(self) -> bytes:
         """Get the AES encryption key from environment variable."""
@@ -83,7 +84,8 @@ class APIKeyProxyService:
 
         # api_key_store table is created by migration, but ensure it exists for
         # environments that don't run migrations
-        cursor.execute(f"""
+        cursor.execute(
+            f"""
             CREATE TABLE IF NOT EXISTS api_key_store (
                 id {id_type},
                 tenant_id INTEGER,
@@ -98,7 +100,8 @@ class APIKeyProxyService:
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(tenant_id, provider, key_name)
             )
-        """)
+        """
+        )
 
         conn.commit()
         conn.close()
@@ -106,26 +109,20 @@ class APIKeyProxyService:
     def _encrypt_key(self, api_key: str) -> str:
         """Encrypt an API key using AES-256-GCM."""
         try:
-            import base64
-
             from cryptography.fernet import Fernet
-
+            import base64
             f = Fernet(base64.urlsafe_b64encode(self._encryption_key))
             return f.encrypt(api_key.encode()).decode()
         except ImportError:
             # Fallback to simple base64 encoding if cryptography not available
-            logger.warning(
-                "cryptography package not installed, using base64 encoding (not secure for production)"
-            )
+            logger.warning("cryptography package not installed, using base64 encoding (not secure for production)")
             return b64encode(api_key.encode()).decode()
 
     def _decrypt_key(self, encrypted_key: str) -> str:
         """Decrypt an API key."""
         try:
-            import base64
-
             from cryptography.fernet import Fernet
-
+            import base64
             f = Fernet(base64.urlsafe_b64encode(self._encryption_key))
             return f.decrypt(encrypted_key.encode()).decode()
         except ImportError:
@@ -143,7 +140,7 @@ class APIKeyProxyService:
         api_key: str,
         base_url: Optional[str] = None,
         created_by: Optional[int] = None,
-    ) -> dict[str, Any]:
+    ) -> Dict[str, Any]:
         """
         Store an encrypted API key for a tenant/provider.
 
@@ -195,9 +192,7 @@ class APIKeyProxyService:
                 )
 
             conn.commit()
-            logger.info(
-                f"Stored API key for tenant {tenant_id}, provider {provider}, name {key_name}"
-            )
+            logger.info(f"Stored API key for tenant {tenant_id}, provider {provider}, name {key_name}")
 
             return {
                 "success": True,
@@ -211,7 +206,7 @@ class APIKeyProxyService:
         finally:
             conn.close()
 
-    def resolve_api_key(self, tenant_id: int, provider: str) -> Optional[tuple[str, Optional[str]]]:
+    def resolve_api_key(self, tenant_id: int, provider: str) -> Optional[Tuple[str, Optional[str]]]:
         """
         Resolve and decrypt an API key for a tenant/provider.
 
@@ -250,7 +245,7 @@ class APIKeyProxyService:
         finally:
             conn.close()
 
-    def list_api_keys(self, tenant_id: int) -> list[dict[str, Any]]:
+    def list_api_keys(self, tenant_id: int) -> List[Dict[str, Any]]:
         """List API keys for a tenant (without revealing the actual keys)."""
         conn = self._get_connection()
         cursor = conn.cursor()
@@ -270,17 +265,15 @@ class APIKeyProxyService:
 
         result = []
         for row in rows:
-            result.append(
-                {
-                    "id": row["id"],
-                    "provider": row["provider"],
-                    "key_name": row["key_name"],
-                    "base_url": row["base_url"],
-                    "is_active": bool(row["is_active"]),
-                    "created_at": row["created_at"],
-                    "updated_at": row["updated_at"],
-                }
-            )
+            result.append({
+                "id": row["id"],
+                "provider": row["provider"],
+                "key_name": row["key_name"],
+                "base_url": row["base_url"],
+                "is_active": bool(row["is_active"]),
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            })
         return result
 
     def delete_api_key(self, tenant_id: int, provider: str, key_name: str) -> bool:
@@ -319,14 +312,8 @@ class APIKeyProxyService:
         conn.close()
         return success
 
-    def generate_proxy_token(
-        self,
-        user_id: int,
-        session_id: str,
-        tenant_id: int,
-        provider: str,
-        expires_minutes: int = 1440,
-    ) -> str:
+    def generate_proxy_token(self, user_id: int, session_id: str, tenant_id: int,
+                             provider: str, expires_minutes: int = 1440) -> str:
         """
         Generate a proxy token for a remote agent session.
 
@@ -366,7 +353,7 @@ class APIKeyProxyService:
 
         return f"{payload_b64}.{signature}"
 
-    def validate_proxy_token(self, token: str) -> Optional[dict[str, Any]]:
+    def validate_proxy_token(self, token: str) -> Optional[Dict[str, Any]]:
         """
         Validate a proxy token and extract its payload.
 
@@ -409,7 +396,6 @@ class APIKeyProxyService:
             if session_id:
                 try:
                     from app.repositories.database import get_db_connection
-
                     with get_db_connection() as conn:
                         cursor = conn.cursor()
                         cursor.execute(
@@ -422,11 +408,7 @@ class APIKeyProxyService:
                             return None
                         status = row[0] if isinstance(row, (list, tuple)) else row.get("status")
                         if status not in ("active", "paused"):
-                            logger.warning(
-                                "Proxy token session not active: %s (status=%s)",
-                                session_id[:8],
-                                status,
-                            )
+                            logger.warning("Proxy token session not active: %s (status=%s)", session_id[:8], status)
                             return None
                 except Exception as e:
                     logger.warning("Failed to check session status for proxy token: %s", e)
@@ -444,39 +426,3 @@ class APIKeyProxyService:
             256-bit random hex token.
         """
         return secrets.token_hex(32)
-
-
-def get_ddl_statements() -> list[str]:
-    """Return DDL statements for API key proxy tables."""
-    id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
-    bool_true = "BOOLEAN DEFAULT TRUE" if is_postgresql() else "INTEGER DEFAULT 1"
-    return [
-        f"""
-        CREATE TABLE IF NOT EXISTS api_key_store (
-            id {id_type},
-            tenant_id INTEGER,
-            provider TEXT NOT NULL,
-            key_name TEXT NOT NULL,
-            encrypted_key TEXT NOT NULL,
-            key_hash TEXT NOT NULL,
-            base_url TEXT,
-            is_active {bool_true},
-            created_by INTEGER,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(tenant_id, provider, key_name)
-        )
-        """,
-    ]
-
-
-# Module-level singleton
-_instance: Optional[APIKeyProxyService] = None
-
-
-def get_api_key_proxy_service() -> APIKeyProxyService:
-    """Get the module-level APIKeyProxyService singleton."""
-    global _instance
-    if _instance is None:
-        _instance = APIKeyProxyService()
-    return _instance

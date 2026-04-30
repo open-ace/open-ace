@@ -6,7 +6,6 @@ API routes for message data operations.
 """
 
 import time
-
 from flask import Blueprint, jsonify, request
 
 from app.services.message_service import MessageService
@@ -58,10 +57,8 @@ def api_senders():
         senders = message_service.get_all_senders(host_name=host)
         return jsonify(senders)
 
-    if (
-        _senders_cache["data"] is not None
-        and (now - _senders_cache["timestamp"]) < _senders_cache_ttl
-    ):
+    cache_key = "all"
+    if _senders_cache["data"] is not None and (now - _senders_cache["timestamp"]) < _senders_cache_ttl:
         return jsonify(_senders_cache["data"])
 
     senders = message_service.get_all_senders()

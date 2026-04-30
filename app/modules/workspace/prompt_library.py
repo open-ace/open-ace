@@ -131,6 +131,7 @@ class PromptLibrary:
             db_path: Optional custom database path.
         """
         self.db_path = db_path or str(DB_PATH)
+        self._ensure_tables()
 
     def _get_connection(self) -> Union[sqlite3.Connection, Any]:
         """Get database connection (SQLite or PostgreSQL)."""
@@ -163,7 +164,8 @@ class PromptLibrary:
         bool_false = "BOOLEAN DEFAULT FALSE" if is_postgresql() else "INTEGER DEFAULT 0"
 
         # Create prompt_templates table
-        cursor.execute(f"""
+        cursor.execute(
+            f"""
             CREATE TABLE IF NOT EXISTS prompt_templates (
                 id {id_type},
                 name TEXT NOT NULL,
@@ -180,21 +182,28 @@ class PromptLibrary:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-        """)
+        """
+        )
 
         # Create index for faster queries
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_prompt_templates_category
             ON prompt_templates(category)
-        """)
-        cursor.execute("""
+        """
+        )
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_prompt_templates_author
             ON prompt_templates(author_id)
-        """)
-        cursor.execute("""
+        """
+        )
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_prompt_templates_public
             ON prompt_templates(is_public)
-        """)
+        """
+        )
 
         conn.commit()
         conn.close()
@@ -314,13 +323,15 @@ class PromptLibrary:
 
         now = datetime.utcnow().isoformat()
         cursor.execute(
-            adapt_sql("""
+            adapt_sql(
+                """
             UPDATE prompt_templates
             SET name = ?, description = ?, category = ?, content = ?,
                 variables = ?, tags = ?, is_public = ?, is_featured = ?,
                 updated_at = ?
             WHERE id = ?
-        """),
+        """
+            ),
             (
                 template.name,
                 template.description,
@@ -440,12 +451,14 @@ class PromptLibrary:
         # Get paginated results
         offset = (page - 1) * limit
         cursor.execute(
-            adapt_sql(f"""
+            adapt_sql(
+                f"""
             SELECT * FROM prompt_templates
             WHERE {where_clause}
             ORDER BY is_featured DESC, use_count DESC, created_at DESC
             LIMIT ? OFFSET ?
-        """),
+        """
+            ),
             params + [limit, offset],
         )
 
@@ -476,11 +489,13 @@ class PromptLibrary:
         cursor = conn.cursor()
 
         cursor.execute(
-            adapt_sql("""
+            adapt_sql(
+                """
             UPDATE prompt_templates
             SET use_count = use_count + 1
             WHERE id = ?
-        """),
+        """
+            ),
             (template_id,),
         )
 
@@ -504,12 +519,14 @@ class PromptLibrary:
         cursor = conn.cursor()
 
         cursor.execute(
-            adapt_sql(f"""
+            adapt_sql(
+                f"""
             SELECT * FROM prompt_templates
             WHERE {adapt_boolean_condition('is_featured', True)} AND {adapt_boolean_condition('is_public', True)}
             ORDER BY use_count DESC
             LIMIT ?
-        """),
+        """
+            ),
             (limit,),
         )
 
@@ -528,13 +545,15 @@ class PromptLibrary:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        cursor.execute(f"""
+        cursor.execute(
+            f"""
             SELECT category, COUNT(*) as count
             FROM prompt_templates
             WHERE {adapt_boolean_condition('is_public', True)}
             GROUP BY category
             ORDER BY count DESC
-        """)
+        """
+        )
 
         rows = cursor.fetchall()
         conn.close()
@@ -554,10 +573,12 @@ class PromptLibrary:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        cursor.execute(f"""
+        cursor.execute(
+            f"""
             SELECT tags FROM prompt_templates
             WHERE {adapt_boolean_condition('is_public', True)} AND tags IS NOT NULL
-        """)
+        """
+        )
 
         rows = cursor.fetchall()
         conn.close()
@@ -746,53 +767,3 @@ class PromptLibrary:
             if not exists:
                 self.create_template(template)
                 logger.info(f"Seeded default template: {template.name}")
-
-
-def get_ddl_statements() -> list[str]:
-    """Return DDL statements for prompt library tables."""
-    id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
-    bool_false = "BOOLEAN DEFAULT FALSE" if is_postgresql() else "INTEGER DEFAULT 0"
-    return [
-        f"""
-        CREATE TABLE IF NOT EXISTS prompt_templates (
-            id {id_type},
-            name TEXT NOT NULL,
-            description TEXT,
-            category TEXT DEFAULT 'general',
-            content TEXT NOT NULL,
-            variables TEXT,
-            tags TEXT,
-            author_id INTEGER,
-            author_name TEXT,
-            is_public {bool_false},
-            is_featured {bool_false},
-            use_count INTEGER DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """,
-        """
-        CREATE INDEX IF NOT EXISTS idx_prompt_templates_category
-        ON prompt_templates(category)
-        """,
-        """
-        CREATE INDEX IF NOT EXISTS idx_prompt_templates_author
-        ON prompt_templates(author_id)
-        """,
-        """
-        CREATE INDEX IF NOT EXISTS idx_prompt_templates_public
-        ON prompt_templates(is_public)
-        """,
-    ]
-
-
-# Module-level singleton
-_instance: Optional[PromptLibrary] = None
-
-
-def get_prompt_library() -> PromptLibrary:
-    """Get the module-level PromptLibrary singleton."""
-    global _instance
-    if _instance is None:
-        _instance = PromptLibrary()
-    return _instance

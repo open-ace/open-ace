@@ -13,11 +13,10 @@ Soft delete allows recovery of accidentally deleted data.
 
 """
 
-from collections.abc import Sequence
-from typing import Union
+from typing import Sequence, Union
 
-import sqlalchemy as sa
 from alembic import op
+import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "008_add_soft_delete"

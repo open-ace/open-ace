@@ -3,14 +3,13 @@
 Test Security Page - Verify Security Settings page functionality
 """
 
-import os
 import sys
+import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from playwright.sync_api import sync_playwright, expect
 import time
-
-from playwright.sync_api import sync_playwright
 
 # Configuration
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000")

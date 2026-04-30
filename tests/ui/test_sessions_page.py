@@ -8,15 +8,13 @@ Sessions 页面 UI 测试
 4. Session 列表显示
 """
 
-import os
 import sys
+import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-import contextlib
+from playwright.sync_api import sync_playwright, expect
 import time
-
-from playwright.sync_api import sync_playwright
 
 # 配置
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
@@ -75,7 +73,7 @@ def test_sessions_page():
             print("\n步骤 2: 导航到 Sessions 页面")
             # 直接导航到 work/sessions 页面
             page.goto(f"{BASE_URL}/work/sessions")
-            page.wait_for_load_state("networkidle", timeout=10000)
+            page.wait_for_load_state('networkidle', timeout=10000)
             time.sleep(2)  # 等待数据加载
             screenshots.append(save_screenshot(page, "01_page_loaded"))
             print("  ✓ Sessions 页面加载成功")
@@ -158,8 +156,10 @@ def test_sessions_page():
         except Exception as e:
             print(f"\n❌ 测试失败: {e}")
             results.append(("测试执行", False, str(e)))
-            with contextlib.suppress(BaseException):
+            try:
                 screenshots.append(save_screenshot(page, "error"))
+            except:
+                pass
 
         finally:
             browser.close()

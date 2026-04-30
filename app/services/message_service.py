@@ -7,7 +7,7 @@ Business logic for message data operations.
 
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import Dict, List, Optional
 
 from app.repositories.message_repo import MessageRepository
 from app.utils.cache import cached
@@ -39,7 +39,7 @@ class MessageService:
         search: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> dict:
+    ) -> Dict:
         """
         Get messages with pagination.
 
@@ -123,7 +123,7 @@ class MessageService:
         sender_name: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> list[dict]:
+    ) -> List[Dict]:
         """
         Get conversation history.
 
@@ -170,7 +170,7 @@ class MessageService:
             sender_name=sender_name,
         )
 
-    def get_conversation_timeline(self, session_id: str) -> list[dict]:
+    def get_conversation_timeline(self, session_id: str) -> List[Dict]:
         """
         Get timeline of messages for a conversation.
 
@@ -182,7 +182,7 @@ class MessageService:
         """
         return self.message_repo.get_conversation_timeline(session_id)
 
-    def get_conversation_details(self, session_id: str) -> Optional[dict]:
+    def get_conversation_details(self, session_id: str) -> Optional[Dict]:
         """
         Get details of a conversation.
 
@@ -195,7 +195,7 @@ class MessageService:
         return self.message_repo.get_conversation_details(session_id)
 
     @cached(ttl=300, key_prefix="message", skip_args=[0])
-    def get_all_senders(self, host_name: Optional[str] = None) -> list[str]:
+    def get_all_senders(self, host_name: Optional[str] = None) -> List[str]:
         """
         Get list of all senders.
 

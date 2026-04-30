@@ -4,11 +4,10 @@ Verify that the unread count card shows proper icon instead of a dot
 """
 
 import asyncio
-import os
-import traceback
-from datetime import datetime
-
 from playwright.async_api import async_playwright
+import os
+from datetime import datetime
+import traceback
 
 # Configuration
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000")

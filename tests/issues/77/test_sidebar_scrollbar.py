@@ -7,11 +7,10 @@ Issue: Sidebar menu shows scrollbar when content overflows.
 Fix: Add CSS to hide scrollbar while keeping scroll functionality.
 """
 
-import os
-import sys
-from datetime import datetime
-
 import pytest
+import sys
+import os
+from datetime import datetime
 
 # Get project root directory
 PROJECT_ROOT = os.path.dirname(
@@ -19,7 +18,7 @@ PROJECT_ROOT = os.path.dirname(
 )
 sys.path.insert(0, PROJECT_ROOT)
 
-from playwright.async_api import async_playwright
+from playwright.async_api import async_playwright, expect
 
 # Configuration
 BASE_URL = "http://localhost:5000"

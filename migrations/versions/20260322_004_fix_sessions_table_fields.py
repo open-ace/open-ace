@@ -14,11 +14,10 @@ so we recreate the table.
 
 """
 
-from collections.abc import Sequence
-from typing import Union
+from typing import Sequence, Union
 
-import sqlalchemy as sa
 from alembic import op
+import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "004_fix_sessions_table_fields"
@@ -42,10 +41,12 @@ def upgrade() -> None:
     )
 
     # Migrate data from old table (session_id -> token)
-    op.execute("""
+    op.execute(
+        """
         INSERT INTO sessions_new (id, token, user_id, created_at, expires_at, is_active)
         SELECT id, session_id, user_id, created_at, expires_at, is_active FROM sessions
-    """)
+    """
+    )
 
     # Drop old table and rename new one
     op.drop_table("sessions")
@@ -72,10 +73,12 @@ def downgrade() -> None:
     )
 
     # Migrate data back
-    op.execute("""
+    op.execute(
+        """
         INSERT INTO sessions_old (id, session_id, user_id, created_at, expires_at, is_active)
         SELECT id, token, user_id, created_at, expires_at, is_active FROM sessions
-    """)
+    """
+    )
 
     # Drop new table and rename old one back
     op.drop_table("sessions")

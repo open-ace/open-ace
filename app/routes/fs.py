@@ -14,8 +14,8 @@ from pathlib import Path
 
 from flask import Blueprint, jsonify, request
 
-from app.repositories.user_repo import UserRepository
 from app.services.auth_service import AuthService
+from app.repositories.user_repo import UserRepository
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +51,7 @@ def get_webui_user():
     """Get user from webui token (for iframe integration)."""
     from app.services.webui_manager import get_webui_manager
 
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
+    token = request.cookies.get("session_token") or request.headers.get("Authorization", "").replace("Bearer ", "")
     if not token:
         token = request.args.get("token")
 
@@ -217,19 +215,17 @@ def api_browse_directory():
     if not dir_info["exists"]:
         # Return home directory as fallback
         home = get_home_directory(user)
-        return jsonify(
-            {
-                "currentPath": path,
-                "error": "Directory does not exist",
-                "fallback": {
-                    "currentPath": home,
-                    "parentPath": str(Path(home).parent),
-                    "directories": list_subdirectories(home, system_account),
-                    "homePath": home,
-                    "canCreate": get_directory_info(home, system_account).get("is_writable", False),
-                },
+        return jsonify({
+            "currentPath": path,
+            "error": "Directory does not exist",
+            "fallback": {
+                "currentPath": home,
+                "parentPath": str(Path(home).parent),
+                "directories": list_subdirectories(home, system_account),
+                "homePath": home,
+                "canCreate": get_directory_info(home, system_account).get("is_writable", False),
             }
-        )
+        })
 
     if not dir_info["is_dir"]:
         return jsonify({"error": "Path is not a directory"}), 400
@@ -245,15 +241,13 @@ def api_browse_directory():
     if parent == path:  # Root directory
         parent = None
 
-    return jsonify(
-        {
-            "currentPath": path,
-            "parentPath": parent,
-            "directories": directories,
-            "homePath": get_home_directory(user),
-            "canCreate": dir_info["is_writable"],
-        }
-    )
+    return jsonify({
+        "currentPath": path,
+        "parentPath": parent,
+        "directories": directories,
+        "homePath": get_home_directory(user),
+        "canCreate": dir_info["is_writable"],
+    })
 
 
 def list_subdirectories(path: str, system_account: str = None) -> list:
@@ -286,14 +280,12 @@ def list_subdirectories(path: str, system_account: str = None) -> list:
                 readable_result = run_as_user(system_account, ["test", "-r", full_path])
                 writable_result = run_as_user(system_account, ["test", "-w", full_path])
 
-                directories.append(
-                    {
-                        "name": entry,
-                        "path": full_path,
-                        "isReadable": readable_result.returncode == 0,
-                        "isWritable": writable_result.returncode == 0,
-                    }
-                )
+                directories.append({
+                    "name": entry,
+                    "path": full_path,
+                    "isReadable": readable_result.returncode == 0,
+                    "isWritable": writable_result.returncode == 0,
+                })
         else:
             # Fallback to process user's permissions
             for entry in os.listdir(path):
@@ -309,14 +301,12 @@ def list_subdirectories(path: str, system_account: str = None) -> list:
                         is_readable = os.access(full_path, os.R_OK)
                         is_writable = os.access(full_path, os.W_OK)
 
-                        directories.append(
-                            {
-                                "name": entry,
-                                "path": full_path,
-                                "isReadable": is_readable,
-                                "isWritable": is_writable,
-                            }
-                        )
+                        directories.append({
+                            "name": entry,
+                            "path": full_path,
+                            "isReadable": is_readable,
+                            "isWritable": is_writable,
+                        })
                     except Exception:
                         # Skip directories we can't access
                         continue
@@ -349,18 +339,13 @@ def api_check_path():
 
     # Validate path format
     if not is_valid_path(path):
-        return (
-            jsonify(
-                {
-                    "valid": False,
-                    "error": "Invalid path format",
-                }
-            ),
-            400,
-        )
+        return jsonify({
+            "valid": False,
+            "error": "Invalid path format",
+        }), 400
 
     path = os.path.abspath(path)
-
+    
     # Get system account to check permissions as the correct user
     system_account = user.get("system_account") if user else None
 
@@ -369,50 +354,40 @@ def api_check_path():
 
     if dir_info["exists"]:
         if not dir_info["is_dir"]:
-            return jsonify(
-                {
-                    "valid": False,
-                    "exists": True,
-                    "error": "Path exists but is not a directory",
-                }
-            )
-        return jsonify(
-            {
-                "valid": True,
+            return jsonify({
+                "valid": False,
                 "exists": True,
-                "canWrite": dir_info["is_writable"],
-            }
-        )
+                "error": "Path exists but is not a directory",
+            })
+        return jsonify({
+            "valid": True,
+            "exists": True,
+            "canWrite": dir_info["is_writable"],
+        })
     else:
         # Check if parent directory is writable
         parent = str(Path(path).parent)
         parent_info = get_directory_info(parent, system_account)
 
         if not parent_info["exists"]:
-            return jsonify(
-                {
-                    "valid": False,
-                    "exists": False,
-                    "error": "Parent directory does not exist",
-                }
-            )
+            return jsonify({
+                "valid": False,
+                "exists": False,
+                "error": "Parent directory does not exist",
+            })
 
         if not parent_info["is_writable"]:
-            return jsonify(
-                {
-                    "valid": False,
-                    "exists": False,
-                    "error": "Cannot create directory (parent not writable)",
-                }
-            )
-
-        return jsonify(
-            {
-                "valid": True,
+            return jsonify({
+                "valid": False,
                 "exists": False,
-                "canCreate": True,
-            }
-        )
+                "error": "Cannot create directory (parent not writable)",
+            })
+
+        return jsonify({
+            "valid": True,
+            "exists": False,
+            "canCreate": True,
+        })
 
 
 @fs_bp.route("/fs/home", methods=["GET"])
@@ -428,9 +403,7 @@ def api_get_home():
     home = get_home_directory(user)
     dir_info = get_directory_info(home, system_account)
 
-    return jsonify(
-        {
-            "homePath": home,
-            "canCreate": dir_info["is_writable"],
-        }
-    )
+    return jsonify({
+        "homePath": home,
+        "canCreate": dir_info["is_writable"],
+    })

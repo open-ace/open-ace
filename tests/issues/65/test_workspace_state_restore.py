@@ -13,8 +13,7 @@ Test scenarios:
 
 import asyncio
 import os
-
-from playwright.async_api import async_playwright
+from playwright.async_api import async_playwright, expect
 
 OPENACE_URL = os.environ.get("OPENACE_URL", "http://localhost:5001")
 SCREENSHOT_DIR = "/Users/rhuang/workspace/open-ace/screenshots/issues/65"
@@ -62,14 +61,12 @@ async def test_workspace_state_restore():
             # Step 3: Check initial state - check if workspace container exists
             print("\nStep 3: Check initial workspace state")
             # Look for any workspace-related element
-            workspace_exists = (
-                await page.locator(".workspace, .work-layout, [class*='workspace']").count() > 0
-            )
+            workspace_exists = await page.locator(".workspace, .work-layout, [class*='workspace']").count() > 0
             if workspace_exists:
                 print("  ✓ Workspace container found")
             else:
                 print("  ⚠ Workspace container not found - checking page content")
-                await page.content()
+                content = await page.content()
                 print(f"  Page title: {await page.title()}")
                 # Take screenshot for debugging
                 await page.screenshot(path=f"{SCREENSHOT_DIR}/debug_workspace_not_found.png")
@@ -121,10 +118,8 @@ async def test_workspace_state_restore():
                 return null;
             }""")
             print(f"  Stored data: {stored_data}")
-            if stored_data and stored_data.get("hasWorkspaceTabs"):
-                print(
-                    f"  ✓ PASS: localStorage contains workspaceTabs with {stored_data['tabsCount']} tabs"
-                )
+            if stored_data and stored_data.get('hasWorkspaceTabs'):
+                print(f"  ✓ PASS: localStorage contains workspaceTabs with {stored_data['tabsCount']} tabs")
             else:
                 print("  ⚠ Warning: localStorage does not contain workspaceTabs yet")
 

@@ -8,7 +8,7 @@ Data models for user management.
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import List, Optional
 
 
 class UserRole(Enum):
@@ -39,7 +39,7 @@ class User:
     is_active: bool = True
     created_at: Optional[datetime] = None
     last_login: Optional[datetime] = None
-    permissions: list[Permission] = field(default_factory=list)
+    permissions: List[Permission] = field(default_factory=list)
 
     # Multi-tenant support
     tenant_id: Optional[int] = None

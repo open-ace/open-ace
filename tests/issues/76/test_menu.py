@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Test script for issue 76: Admin menu visibility."""
 
-import asyncio
-
 import pytest
+import asyncio
 from playwright.async_api import async_playwright
 
 
@@ -83,11 +82,13 @@ async def test_menu(username: str, password: str, user_type: str):
         # 获取用户信息
         print()
         print("检查用户信息...")
-        user_info = await page.evaluate("""() => {
+        user_info = await page.evaluate(
+            """() => {
             const user = localStorage.getItem("current_user");
             const token = localStorage.getItem("ai_token_session");
             return { user: user, token: token ? "exists" : "none" };
-        }""")
+        }"""
+        )
         print(f'localStorage user: {user_info["user"]}')
         print(f'localStorage token: {user_info["token"]}')
 

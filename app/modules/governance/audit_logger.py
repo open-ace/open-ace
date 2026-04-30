@@ -194,13 +194,15 @@ class AuditLogger:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    adapt_sql("""
+                    adapt_sql(
+                        """
                     INSERT INTO audit_logs
                     (timestamp, user_id, username, action, severity, resource_type,
                      resource_id, details, ip_address, user_agent, session_id,
                      success, error_message)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """),
+                """
+                    ),
                     (
                         datetime.utcnow(),
                         user_id,

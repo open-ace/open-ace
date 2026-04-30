@@ -6,24 +6,27 @@ Unit tests for prompt_library, session_manager, tool_connector,
 state_sync, and collaboration modules.
 """
 
-import os
-import tempfile
-from datetime import datetime
-
 import pytest
+import tempfile
+import os
+from datetime import datetime, timedelta
 
-from app.modules.workspace.collaboration import (
-    CollaborationManager,
-    SharePermission,
-)
-from app.modules.workspace.prompt_library import PromptCategory, PromptLibrary, PromptTemplate
+from app.modules.workspace.prompt_library import PromptLibrary, PromptTemplate, PromptCategory
 from app.modules.workspace.session_manager import (
     SessionManager,
-    SessionStatus,
+    AgentSession,
     SessionType,
+    SessionStatus,
 )
+from app.modules.workspace.tool_connector import ToolConnector, ToolInfo, ToolType, ToolStatus
 from app.modules.workspace.state_sync import StateSyncManager, SyncEvent, SyncEventType
-from app.modules.workspace.tool_connector import ToolConnector, ToolInfo, ToolType
+from app.modules.workspace.collaboration import (
+    CollaborationManager,
+    Team,
+    SharedSession,
+    SharePermission,
+)
+
 
 # ==================== Fixtures ====================
 
@@ -40,33 +43,25 @@ def temp_db():
 @pytest.fixture
 def prompt_library(temp_db):
     """Create a PromptLibrary instance with temp database."""
-    lib = PromptLibrary(db_path=temp_db)
-    lib._ensure_tables()
-    return lib
+    return PromptLibrary(db_path=temp_db)
 
 
 @pytest.fixture
 def session_manager(temp_db):
     """Create a SessionManager instance with temp database."""
-    mgr = SessionManager(db_path=temp_db)
-    mgr._ensure_tables()
-    return mgr
+    return SessionManager(db_path=temp_db)
 
 
 @pytest.fixture
 def state_sync(temp_db):
     """Create a StateSyncManager instance with temp database."""
-    mgr = StateSyncManager(db_path=temp_db)
-    mgr._ensure_tables()
-    return mgr
+    return StateSyncManager(db_path=temp_db)
 
 
 @pytest.fixture
 def collaboration(temp_db):
     """Create a CollaborationManager instance with temp database."""
-    mgr = CollaborationManager(db_path=temp_db)
-    mgr._ensure_tables()
-    return mgr
+    return CollaborationManager(db_path=temp_db)
 
 
 # ==================== Prompt Library Tests ====================
@@ -506,7 +501,7 @@ class TestWorkspaceIntegration:
         collab.add_team_member(team_id=team.team_id, user_id=2, username="member")
 
         # Share session
-        collab.share_session(
+        share = collab.share_session(
             session_id="session-1",
             shared_by=1,
             shared_by_name="Owner",
@@ -515,7 +510,7 @@ class TestWorkspaceIntegration:
         )
 
         # Add annotation
-        collab.add_annotation(
+        annotation = collab.add_annotation(
             session_id="session-1", user_id=2, username="member", content="Great session!"
         )
 

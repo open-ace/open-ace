@@ -10,12 +10,11 @@ Test script for issue #71: Tab notification in workspace with real chat
 5. 手动检查 tab 上的铃铛图标和徽章颜色是否为蓝色
 """
 
+import sys
 import os
 import subprocess
-import sys
+from playwright.sync_api import sync_playwright, TimeoutError
 import time
-
-from playwright.sync_api import sync_playwright
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, project_root)
@@ -42,9 +41,9 @@ def ensure_service_running():
             ["python3", "web.py"],
             cwd="/Users/rhuang/workspace/open-ace",
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
         )
-        for _i in range(30):
+        for i in range(30):
             time.sleep(1)
             result = subprocess.run(["lsof", "-i", ":5001"], capture_output=True, text=True)
             if result.stdout.strip():
@@ -73,11 +72,7 @@ def test_tab_notification_chat():
 
         # 收集控制台日志
         def handle_console(msg):
-            if (
-                "tab" in msg.text.lower()
-                or "notification" in msg.text.lower()
-                or "waiting" in msg.text.lower()
-            ):
+            if "tab" in msg.text.lower() or "notification" in msg.text.lower() or "waiting" in msg.text.lower():
                 print(f"    [控制台] {msg.text}")
 
         page.on("console", handle_console)
@@ -108,11 +103,7 @@ def test_tab_notification_chat():
             for i, frame in enumerate(frames):
                 frame_url = frame.url
                 print(f"    Frame {i}: {frame_url[:70]}...")
-                if (
-                    "token=" in frame_url
-                    or "localhost:3100" in frame_url
-                    or "localhost:3101" in frame_url
-                ):
+                if "token=" in frame_url or "localhost:3100" in frame_url or "localhost:3101" in frame_url:
                     chat_frame = frame
                     print(f"    ✓ 找到聊天 iframe (Frame {i})")
                     break
@@ -129,9 +120,7 @@ def test_tab_notification_chat():
 
             if textarea_count == 0:
                 # 查找项目列表
-                project_rows = chat_frame.locator(
-                    "div[class*='rounded-lg'][class*='p-4'], div[class*='rounded-lg'][class*='cursor-pointer']"
-                )
+                project_rows = chat_frame.locator("div[class*='rounded-lg'][class*='p-4'], div[class*='rounded-lg'][class*='cursor-pointer']")
                 project_count = project_rows.count()
                 print(f"    项目行数量: {project_count}")
 
@@ -148,7 +137,7 @@ def test_tab_notification_chat():
                     # 选择 open-ace 项目
                     target_project = 0
                     for i, name in enumerate(available_projects):
-                        if "open ace" in name.lower() or "open-ace" in name.lower():
+                        if 'open ace' in name.lower() or 'open-ace' in name.lower():
                             target_project = i
                             print(f"    → 选择项目: {name}")
                             break
@@ -184,9 +173,7 @@ def test_tab_notification_chat():
                 page.wait_for_timeout(1000)
 
                 # 检查是否有 loading indicator
-                loading = chat_frame.locator(
-                    ".spinner, .loading, [class*='animate-spin'], [class*='typing']"
-                )
+                loading = chat_frame.locator(".spinner, .loading, [class*='animate-spin'], [class*='typing']")
                 if loading.count() == 0:
                     # 可能已完成，等待一下确认
                     page.wait_for_timeout(2000)
@@ -227,7 +214,7 @@ def test_tab_notification_chat():
                         elif "text-warning" in icon_classes:
                             print("    ✗ 图标颜色是黄色 (text-warning) - 应该是蓝色!")
                         else:
-                            print("    ? 图标颜色未知")
+                            print(f"    ? 图标颜色未知")
                     else:
                         print(f"    Tab 使用普通图标: {icon_classes}")
 
@@ -337,7 +324,6 @@ def test_tab_notification_chat():
         except Exception as e:
             print(f"\n✗ 测试错误: {e}")
             import traceback
-
             traceback.print_exc()
             page.screenshot(path=f"{OUTPUT_DIR}/chat_error.png")
             return False

@@ -10,23 +10,20 @@ Fix: Use document.referrer as fallback when cross-origin iframe
      cannot access window.parent.location.origin
 """
 
-import os
 import sys
+import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-import time
-
 from playwright.sync_api import sync_playwright
+import time
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 USERNAME = os.environ.get("USERNAME", "admin")
 PASSWORD = os.environ.get("PASSWORD", "admin123")
 HEADLESS = True  # Use headless mode for automated testing
 
-SCREENSHOT_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "screenshots"
-)
+SCREENSHOT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "screenshots")
 
 
 def test_iframe_add_project_browse():
@@ -55,21 +52,11 @@ def test_iframe_add_project_browse():
 
         # Listen for network requests to track API calls
         api_requests = []
-        page.on(
-            "request",
-            lambda req: api_requests.append(req.url) if "/api/fs/browse" in req.url else None,
-        )
+        page.on("request", lambda req: api_requests.append(req.url) if "/api/fs/browse" in req.url else None)
 
         # Listen for network responses
         api_responses = []
-        page.on(
-            "response",
-            lambda res: (
-                api_responses.append({"url": res.url, "status": res.status})
-                if "/api/fs/browse" in res.url
-                else None
-            ),
-        )
+        page.on("response", lambda res: api_responses.append({"url": res.url, "status": res.status}) if "/api/fs/browse" in res.url else None)
 
         try:
             # Step 1: Login
@@ -103,7 +90,7 @@ def test_iframe_add_project_browse():
             if iframe_count > 0:
                 # Get the iframe frame - use the frame locator properly
                 iframe = page.frame_locator("iframe").first
-                print("  Got iframe frame locator")
+                print(f"  Got iframe frame locator")
 
                 # Get iframe src attribute to check if openace_url is included
                 iframe_src = iframe_element.first.get_attribute("src")
@@ -119,9 +106,7 @@ def test_iframe_add_project_browse():
 
                     # Listen for console messages to see if initTokenFromUrl is called
                     iframe_console = []
-                    iframe_page.on(
-                        "console", lambda msg: iframe_console.append(f"[{msg.type}] {msg.text}")
-                    )
+                    iframe_page.on("console", lambda msg: iframe_console.append(f"[{msg.type}] {msg.text}"))
 
                     iframe_page.goto(iframe_src, timeout=30000)
                     time.sleep(2)
@@ -131,25 +116,17 @@ def test_iframe_add_project_browse():
                     print(f"  window.location.search: {location_search}")
 
                     # Check if openace_url can be parsed correctly
-                    openace_url_param = iframe_page.evaluate(
-                        "() => new URLSearchParams(window.location.search).get('openace_url')"
-                    )
+                    openace_url_param = iframe_page.evaluate("() => new URLSearchParams(window.location.search).get('openace_url')")
                     print(f"  openace_url param value: {openace_url_param}")
 
                     # Check sessionStorage for openace_url
-                    openace_url_stored = iframe_page.evaluate(
-                        "() => sessionStorage.getItem('qwen-webui-openace-url')"
-                    )
-                    token_stored = iframe_page.evaluate(
-                        "() => sessionStorage.getItem('qwen-webui-token')"
-                    )
+                    openace_url_stored = iframe_page.evaluate("() => sessionStorage.getItem('qwen-webui-openace-url')")
+                    token_stored = iframe_page.evaluate("() => sessionStorage.getItem('qwen-webui-token')")
                     print(f"  sessionStorage openace_url: {openace_url_stored}")
                     print(f"  sessionStorage token: {token_stored}")
 
                     # Check for console log messages
-                    token_logs = [
-                        l for l in iframe_console if "Token" in l or "openace" in l.lower()
-                    ]
+                    token_logs = [l for l in iframe_console if "Token" in l or "openace" in l.lower()]
                     print(f"  Token-related console logs: {token_logs}")
 
                     iframe_page.close()
@@ -190,35 +167,27 @@ def test_iframe_add_project_browse():
                     print("\n[4] Click Add Project button...")
                     add_btn.click()
                     time.sleep(2)
-
-                    page.screenshot(
-                        path=os.path.join(SCREENSHOT_DIR, "test_iframe_02_modal_open.png")
-                    )
+                    
+                    page.screenshot(path=os.path.join(SCREENSHOT_DIR, "test_iframe_02_modal_open.png"))
 
                     # Step 5: Check if DirectoryBrowser loaded successfully
                     print("\n[5] Check DirectoryBrowser status...")
                     time.sleep(2)  # Wait for API call to complete
 
                     # Check for error messages
-                    error_locator = iframe.locator(
-                        "text=/Failed to browse directory|Error|Not Found/i"
-                    )
+                    error_locator = iframe.locator("text=/Failed to browse directory|Error|Not Found/i")
                     error_count = error_locator.count()
-
+                    
                     # Check for directory list (success indicator)
-                    dir_list_locator = iframe.locator(
-                        "button:has-text('Select'), [data-testid='directory-item'], .directory-browser"
-                    )
+                    dir_list_locator = iframe.locator("button:has-text('Select'), [data-testid='directory-item'], .directory-browser")
                     dir_list_count = dir_list_locator.count()
 
                     # Check console messages for errors
-                    console_errors = [
-                        m for m in console_messages if "error" in m.lower() or "failed" in m.lower()
-                    ]
-
+                    console_errors = [m for m in console_messages if "error" in m.lower() or "failed" in m.lower()]
+                    
                     # Check API responses
                     browse_api_calls = [r for r in api_responses if "/api/fs/browse" in r["url"]]
-
+                    
                     print(f"  API calls to /api/fs/browse: {len(browse_api_calls)}")
                     for call in browse_api_calls:
                         print(f"    - {call['url']} -> Status: {call['status']}")
@@ -226,7 +195,7 @@ def test_iframe_add_project_browse():
                     print(f"  Error elements found: {error_count}")
                     print(f"  Directory elements found: {dir_list_count}")
                     print(f"  Console errors: {len(console_errors)}")
-
+                    
                     for err in console_errors[:5]:  # Show first 5 errors
                         print(f"    - {err}")
 
@@ -238,10 +207,8 @@ def test_iframe_add_project_browse():
                         error_message = "Error message displayed in UI"
                         print(f"\n[RESULT] FAILED - {error_message}")
                     elif console_errors:
-                        error_message = (
-                            console_errors[0] if console_errors else "Unknown console error"
-                        )
-                        print("\n[RESULT] FAILED - Console error detected")
+                        error_message = console_errors[0] if console_errors else "Unknown console error"
+                        print(f"\n[RESULT] FAILED - Console error detected")
                     else:
                         print("\n[RESULT] Checking directory list...")
                         if dir_list_count > 0:
@@ -256,9 +223,7 @@ def test_iframe_add_project_browse():
                 else:
                     error_message = "Add Project button not found in iframe"
                     print(f"\n[RESULT] FAILED - {error_message}")
-                    page.screenshot(
-                        path=os.path.join(SCREENSHOT_DIR, "test_iframe_02_no_button.png")
-                    )
+                    page.screenshot(path=os.path.join(SCREENSHOT_DIR, "test_iframe_02_no_button.png"))
 
             else:
                 error_message = "iframe not found on work page"

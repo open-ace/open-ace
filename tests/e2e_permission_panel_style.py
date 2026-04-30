@@ -16,6 +16,7 @@ Run:
   HEADLESS=false python tests/e2e_permission_panel_style.py
 """
 
+import json
 import os
 import sys
 import time
@@ -48,7 +49,7 @@ def ensure_dir():
 
 def shot(page, name):
     ensure_dir()
-    path = os.path.join(SCREENSHOT_DIR, f"{name}.png")
+    path = os.path.join(SCREENSHOT_DIR, "%s.png" % name)
     try:
         page.screenshot(path=path, full_page=True, timeout=30000)
     except Exception:
@@ -56,11 +57,11 @@ def shot(page, name):
             page.screenshot(path=path, full_page=False, timeout=10000)
         except Exception:
             return
-    print(f"    📸 {name}.png")
+    print("    📸 %s.png" % name)
 
 
 def log(tag, msg):
-    print(f"    [{tag}] {msg}")
+    print("    [%s] %s" % (tag, msg))
 
 
 def pause(seconds):
@@ -72,7 +73,7 @@ def pause(seconds):
 
 def api_login():
     r = requests.post(
-        f"{BASE_URL}/api/auth/login",
+        "%s/api/auth/login" % BASE_URL,
         json={"username": TEST_USER, "password": TEST_PASS},
         proxies=PROXIES,
     )
@@ -84,7 +85,7 @@ def api_login():
 
 def get_webui_info(token):
     r = requests.get(
-        f"{BASE_URL}/api/workspace/user-url",
+        "%s/api/workspace/user-url" % BASE_URL,
         cookies={"session_token": token},
         proxies=PROXIES,
     )
@@ -129,7 +130,7 @@ def run_tests():
 
         try:
             _run_test(page, token, effective_webui_url, webui_token, captured_session_id)
-        except Exception:
+        except Exception as e:
             shot(page, "ERROR_final")
             traceback.print_exc()
             raise
@@ -137,16 +138,16 @@ def run_tests():
             sid = captured_session_id[0]
             if sid:
                 requests.post(
-                    f"{BASE_URL}/api/remote/sessions/{sid}/stop",
+                    "%s/api/remote/sessions/%s/stop" % (BASE_URL, sid),
                     cookies={"session_token": token},
                     proxies=PROXIES,
                 )
-                log("Cleanup", f"Stopped session {sid[:8]}...")
+                log("Cleanup", "Stopped session %s..." % sid[:8])
             context.close()
             browser.close()
 
     print("\n" + "=" * 60)
-    print(f"  ALL PASSED! Screenshots: {SCREENSHOT_DIR}")
+    print("  ALL PASSED! Screenshots: %s" % SCREENSHOT_DIR)
     print("=" * 60)
 
 
@@ -183,15 +184,15 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
     print("\n══════ STEP 1: Open ChatPage & Trigger Permission ══════")
 
     chat_url = (
-        f"{webui_url}/projects"
-        f"?token={webui_token}"
-        f"&openace_url={BASE_URL}"
+        "%s/projects"
+        "?token=%s"
+        "&openace_url=%s"
         "&workspaceType=remote"
-        f"&machineId={MACHINE_ID}"
+        "&machineId=%s"
         "&machineName=TestServer"
         "&encodedProjectName=-root"
         "&permissionMode=default"
-    )
+    ) % (webui_url, webui_token, BASE_URL, MACHINE_ID)
 
     page.goto(chat_url, wait_until="domcontentloaded", timeout=60000)
     page.wait_for_selector("textarea, .min-h-screen", timeout=30000)
@@ -204,7 +205,7 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
     for _ in range(30):
         try:
             r = requests.get(
-                f"{BASE_URL}/api/remote/sessions",
+                "%s/api/remote/sessions" % BASE_URL,
                 cookies={"session_token": token},
                 proxies=PROXIES,
             )
@@ -223,14 +224,14 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
     if not sid:
         sid = captured_session_id[0]
     assert sid, "Session not created"
-    log("Session", f"✓ {sid[:12]}...")
+    log("Session", "✓ %s..." % sid[:12])
 
     # Wait for CLI init
     time.sleep(8)
 
     # Send message to trigger write_file permission
     r = requests.post(
-        f"{BASE_URL}/api/remote/sessions/{sid}/chat",
+        "%s/api/remote/sessions/%s/chat" % (BASE_URL, sid),
         json={"content": TEST_MESSAGE},
         cookies={"session_token": token},
         proxies=PROXIES,
@@ -258,7 +259,7 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
     # Check for Enter hint
     hint = page.locator("text=按 Enter 确认").first
     if not hint.is_visible(timeout=2000):
-        page.locator("text=Enter to confirm").first
+        hint_en = page.locator("text=Enter to confirm").first
         log("i18n", "Hint text found (checking English fallback)")
     else:
         log("i18n", "✓ Enter hint displayed")
@@ -275,15 +276,13 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
 
     allow_bg = _get_button_bg(allow_btn)
     allow_text_color = _get_button_text_color(allow_btn)
-    log("Style", f"  bg={allow_bg} text={allow_text_color}")
+    log("Style", "  bg=%s text=%s" % (allow_bg, allow_text_color))
 
     # Selected = solid blue background (rgb(59, 130, 246) = blue-500) and white text
-    assert (
-        allow_bg != "rgba(0, 0, 0, 0)"
-    ), "Allow button should have colored background when selected, got transparent"
-    assert (
-        "255" in allow_text_color or "255, 255, 255" in allow_text_color
-    ), f"Allow button text should be white when selected, got {allow_text_color}"
+    assert allow_bg != "rgba(0, 0, 0, 0)", \
+        "Allow button should have colored background when selected, got transparent"
+    assert "255" in allow_text_color or "255, 255, 255" in allow_text_color, \
+        "Allow button text should be white when selected, got %s" % allow_text_color
     log("Style", "✓ '允许' has solid colored background + white text (selected)")
     shot(page, "S3_allow_selected")
 
@@ -301,26 +300,24 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
 
     # Debug: dump actual className
     permanent_class = permanent_btn.evaluate("el => el.className")
-    log("Debug", f"  permanent className: {permanent_class[:300]}")
+    log("Debug", "  permanent className: %s" % permanent_class[:300])
     permanent_style = permanent_btn.evaluate("el => el.getAttribute('style')")
-    log("Debug", f"  permanent style attr: {permanent_style}")
+    log("Debug", "  permanent style attr: %s" % permanent_style)
     shot(page, "S4_green_selected")
 
     permanent_bg = _get_button_bg(permanent_btn)
     permanent_text_color = _get_button_text_color(permanent_btn)
-    log("Style", f"  bg={permanent_bg} text={permanent_text_color}")
+    log("Style", "  bg=%s text=%s" % (permanent_bg, permanent_text_color))
 
-    assert (
-        permanent_bg != "rgba(0, 0, 0, 0)"
-    ), "Permanent button should have colored background when selected"
-    assert (
-        "255" in permanent_text_color or "255, 255, 255" in permanent_text_color
-    ), "Permanent button text should be white when selected"
+    assert permanent_bg != "rgba(0, 0, 0, 0)", \
+        "Permanent button should have colored background when selected"
+    assert "255" in permanent_text_color or "255, 255, 255" in permanent_text_color, \
+        "Permanent button text should be white when selected"
     log("Style", "✓ '允许，且不再询问' has solid colored background + white text (selected)")
 
     # Previous button should lose selection
     allow_bg_after = _get_button_bg(allow_btn)
-    log("Style", f"  allow bg after: {allow_bg_after}")
+    log("Style", "  allow bg after: %s" % allow_bg_after)
 
     # ════════════════════════════════════════════
     #  STEP 5: ArrowDown → "拒绝" (Red)
@@ -337,12 +334,12 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
 
     deny_bg = _get_button_bg(deny_btn)
     deny_text_color = _get_button_text_color(deny_btn)
-    log("Style", f"  bg={deny_bg} text={deny_text_color}")
+    log("Style", "  bg=%s text=%s" % (deny_bg, deny_text_color))
 
-    assert deny_bg != "rgba(0, 0, 0, 0)", "Deny button should have colored background when selected"
-    assert (
-        "255" in deny_text_color or "255, 255, 255" in deny_text_color
-    ), "Deny button text should be white when selected"
+    assert deny_bg != "rgba(0, 0, 0, 0)", \
+        "Deny button should have colored background when selected"
+    assert "255" in deny_text_color or "255, 255, 255" in deny_text_color, \
+        "Deny button text should be white when selected"
     log("Style", "✓ '拒绝' has solid colored background + white text (selected)")
 
     # ════════════════════════════════════════════
@@ -357,14 +354,12 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
 
     permanent_bg2 = _get_button_bg(permanent_btn)
     deny_bg2 = _get_button_bg(deny_btn)
-    log("Style", f"  permanent bg={permanent_bg2} deny bg={deny_bg2}")
+    log("Style", "  permanent bg=%s deny bg=%s" % (permanent_bg2, deny_bg2))
 
-    assert (
-        permanent_bg2 != "rgba(0, 0, 0, 0)"
-    ), "Permanent button should be selected again after ArrowUp"
-    assert (
-        deny_bg2 == "rgba(0, 0, 0, 0)" or deny_bg2 != permanent_bg2
-    ), "Deny button should not be selected after ArrowUp"
+    assert permanent_bg2 != "rgba(0, 0, 0, 0)", \
+        "Permanent button should be selected again after ArrowUp"
+    assert deny_bg2 == "rgba(0, 0, 0, 0)" or deny_bg2 != permanent_bg2, \
+        "Deny button should not be selected after ArrowUp"
     log("Style", "✓ ArrowUp correctly moves selection back")
 
     # ════════════════════════════════════════════
@@ -378,7 +373,8 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
     shot(page, "S7_back_to_blue")
 
     allow_bg2 = _get_button_bg(allow_btn)
-    assert allow_bg2 != "rgba(0, 0, 0, 0)", "Allow button should be selected again after ArrowUp"
+    assert allow_bg2 != "rgba(0, 0, 0, 0)", \
+        "Allow button should be selected again after ArrowUp"
     log("Style", "✓ ArrowUp cycles back to '允许'")
 
     # ════════════════════════════════════════════
@@ -394,9 +390,10 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
 
     if count > 1:
         texts = [command_spans.nth(i).text_content() for i in range(count)]
-        log("Dup", f"  Badge texts: {texts}")
+        log("Dup", "  Badge texts: %s" % texts)
         unique = set(texts)
-        assert len(unique) == len(texts), f"Duplicate tool names found: {texts}"
+        assert len(unique) == len(texts), \
+            "Duplicate tool names found: %s" % texts
     log("Dup", "✓ No duplicate tool names")
 
     # ════════════════════════════════════════════
@@ -406,8 +403,8 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
     print("\n══════ STEP 9: All 3 Buttons Always Visible ══════")
 
     for key in ["allow", "allowPermanent", "deny"]:
-        btn = page.locator(f'[data-permission-action="{key}"]').first
-        assert btn.is_visible(), f"Button '{key}' should always be visible"
+        btn = page.locator('[data-permission-action="%s"]' % key).first
+        assert btn.is_visible(), "Button '%s' should always be visible" % key
     log("Visible", "✓ All 3 buttons always visible during navigation")
 
     # ════════════════════════════════════════════

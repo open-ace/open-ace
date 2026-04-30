@@ -7,7 +7,7 @@ Business logic for usage data operations.
 
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import Dict, List, Optional
 
 from app.repositories.usage_repo import UsageRepository
 from app.utils.cache import cached
@@ -30,7 +30,7 @@ class UsageService:
     @cached(ttl=30, key_prefix="usage", skip_args=[0])
     def get_today_usage(
         self, tool_name: Optional[str] = None, host_name: Optional[str] = None
-    ) -> list[dict]:
+    ) -> List[Dict]:
         """
         Get today's usage data, merged by tool_name.
 
@@ -97,7 +97,7 @@ class UsageService:
         return result
 
     @cached(ttl=60, key_prefix="usage", skip_args=[0])
-    def get_usage_summary(self, host_name: Optional[str] = None) -> dict[str, dict]:
+    def get_usage_summary(self, host_name: Optional[str] = None) -> Dict[str, Dict]:
         """
         Get usage summary for all tools.
 
@@ -112,7 +112,7 @@ class UsageService:
     @cached(ttl=60, key_prefix="usage", skip_args=[0])
     def get_tool_usage(
         self, tool_name: str, days: int = 7, host_name: Optional[str] = None
-    ) -> list[dict]:
+    ) -> List[Dict]:
         """
         Get usage data for a specific tool.
 
@@ -128,7 +128,7 @@ class UsageService:
 
     def get_date_usage(
         self, date: str, tool_name: Optional[str] = None, host_name: Optional[str] = None
-    ) -> list[dict]:
+    ) -> List[Dict]:
         """
         Get usage data for a specific date.
 
@@ -148,7 +148,7 @@ class UsageService:
         end_date: str,
         tool_name: Optional[str] = None,
         host_name: Optional[str] = None,
-    ) -> list[dict]:
+    ) -> List[Dict]:
         """
         Get usage data for a date range.
 
@@ -164,7 +164,7 @@ class UsageService:
         return self.usage_repo.get_daily_range(start_date, end_date, tool_name, host_name)
 
     @cached(ttl=300, key_prefix="usage", skip_args=[0])
-    def get_all_tools(self) -> list[str]:
+    def get_all_tools(self) -> List[str]:
         """
         Get list of all tools.
 
@@ -174,7 +174,7 @@ class UsageService:
         return self.usage_repo.get_all_tools()
 
     @cached(ttl=300, key_prefix="usage", skip_args=[0])
-    def get_all_hosts(self) -> list[str]:
+    def get_all_hosts(self) -> List[str]:
         """
         Get list of all hosts.
 
@@ -192,7 +192,7 @@ class UsageService:
         output_tokens: int = 0,
         cache_tokens: int = 0,
         request_count: int = 0,
-        models_used: Optional[list[str]] = None,
+        models_used: Optional[List[str]] = None,
         host_name: str = "localhost",
     ) -> bool:
         """
@@ -227,7 +227,7 @@ class UsageService:
     @cached(ttl=60, key_prefix="usage", skip_args=[0])
     def get_trend_data(
         self, start_date: str, end_date: str, host_name: Optional[str] = None
-    ) -> list[dict]:
+    ) -> List[Dict]:
         """
         Get usage trend data aggregated by date and tool.
 

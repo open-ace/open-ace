@@ -9,13 +9,13 @@ import smtplib
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Optional
+from typing import Dict, List, Optional
 
 
 def send_email(
     subject: str,
     body: str,
-    smtp_config: dict,
+    smtp_config: Dict,
     to_email: str,
     from_email: Optional[str] = None,
     is_html: bool = False,
@@ -101,8 +101,8 @@ def format_tokens(tokens: int) -> str:
 
 
 def format_report_email(
-    summary: dict[str, dict],
-    daily_data: list[dict],
+    summary: Dict[str, Dict],
+    daily_data: List[Dict],
     tool_name: Optional[str] = None,
     report_date: Optional[str] = None,
 ) -> str:
@@ -125,7 +125,7 @@ def format_report_email(
     daily_tables = ""
     if daily_data:
         # Sort by tool name
-        sorted_tools = sorted({e["tool_name"] for e in daily_data})
+        sorted_tools = sorted(set(e["tool_name"] for e in daily_data))
         for tool in sorted_tools:
             tool_entries = [e for e in daily_data if e["tool_name"] == tool]
             # Sort by date descending (most recent first)
@@ -354,7 +354,7 @@ def format_report_email(
     return html
 
 
-def test_email_config(smtp_config: dict) -> bool:
+def test_email_config(smtp_config: Dict) -> bool:
     """
     Test if email configuration is valid by attempting to connect.
 

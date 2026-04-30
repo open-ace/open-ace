@@ -18,11 +18,12 @@ Run:
   HEADLESS=false python tests/e2e_remote_session_restore.py
 """
 
+import json
 import os
 import sys
 import time
-import traceback
 import uuid
+import traceback
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
@@ -93,67 +94,55 @@ def run_tests():
         shot(page, "01_logged_in")
         print("  ✓ 登录成功")
 
-        auth_token = requests.post(
-            f"{BASE_URL}/api/auth/login", json={"username": TEST_USER, "password": TEST_PASS}
-        ).cookies.get("session_token")
-        admin_token = requests.post(
-            f"{BASE_URL}/api/auth/login", json={"username": "admin", "password": TEST_PASS}
-        ).cookies.get("session_token")
+        auth_token = requests.post(f"{BASE_URL}/api/auth/login",
+                                   json={"username": TEST_USER, "password": TEST_PASS}
+                                   ).cookies.get("session_token")
+        admin_token = requests.post(f"{BASE_URL}/api/auth/login",
+                                    json={"username": "admin", "password": TEST_PASS}
+                                    ).cookies.get("session_token")
 
         # ══════ 2. Register remote machine ══════
         print("\n══════ 2. 注册远程机器 ══════")
-        r = requests.post(
-            f"{BASE_URL}/api/remote/machines/register",
-            json={"tenant_id": 1},
-            cookies={"session_token": admin_token},
-        )
+        r = requests.post(f"{BASE_URL}/api/remote/machines/register",
+                          json={"tenant_id": 1},
+                          cookies={"session_token": admin_token})
         assert r.status_code == 200
         reg_token = r.json()["registration_token"]
 
         machine_id = str(uuid.uuid4())
-        r = requests.post(
-            f"{BASE_URL}/api/remote/agent/register",
-            json={
-                "registration_token": reg_token,
-                "machine_id": machine_id,
-                "machine_name": "Restore Test Server",
-                "hostname": "restore-test.local",
-                "os_type": "linux",
-                "os_version": "Ubuntu 24.04",
-                "capabilities": {"cpu_cores": 8, "memory_gb": 32, "cli_installed": True},
-                "agent_version": "1.0.0-e2e",
-            },
-        )
+        r = requests.post(f"{BASE_URL}/api/remote/agent/register", json={
+            "registration_token": reg_token,
+            "machine_id": machine_id,
+            "machine_name": "Restore Test Server",
+            "hostname": "restore-test.local",
+            "os_type": "linux",
+            "os_version": "Ubuntu 24.04",
+            "capabilities": {"cpu_cores": 8, "memory_gb": 32, "cli_installed": True},
+            "agent_version": "1.0.0-e2e",
+        })
         assert r.status_code == 200
 
-        requests.post(
-            f"{BASE_URL}/api/remote/agent/message",
-            json={
-                "type": "register",
-                "machine_id": machine_id,
-                "capabilities": {"cpu_cores": 8, "memory_gb": 32, "cli_installed": True},
-            },
-        )
+        requests.post(f"{BASE_URL}/api/remote/agent/message", json={
+            "type": "register",
+            "machine_id": machine_id,
+            "capabilities": {"cpu_cores": 8, "memory_gb": 32, "cli_installed": True},
+        })
 
-        requests.post(
-            f"{BASE_URL}/api/remote/machines/{machine_id}/assign",
-            json={"user_id": 89, "permission": "admin"},
-            cookies={"session_token": admin_token},
-        )
+        requests.post(f"{BASE_URL}/api/remote/machines/{machine_id}/assign",
+                      json={"user_id": 89, "permission": "admin"},
+                      cookies={"session_token": admin_token})
         print("  ✓ 远程机器已注册")
 
         # ══════ 3. Create remote session via API ══════
         print("\n══════ 3. 创建远程会话 ══════")
-        r = requests.post(
-            f"{BASE_URL}/api/remote/sessions",
-            json={
-                "machine_id": machine_id,
-                "project_path": "/home/user/demo-project",
-                "cli_tool": "qwen-code-cli",
-                "model": "qwen3-coder-plus",
-            },
-            cookies={"session_token": auth_token},
-        )
+        r = requests.post(f"{BASE_URL}/api/remote/sessions",
+                          json={
+                              "machine_id": machine_id,
+                              "project_path": "/home/user/demo-project",
+                              "cli_tool": "qwen-code-cli",
+                              "model": "qwen3-coder-plus",
+                          },
+                          cookies={"session_token": auth_token})
         assert r.status_code == 200, f"Create session failed: {r.status_code} {r.text}"
         session_id = r.json()["session"]["session_id"]
         print(f"  ✓ 远程会话已创建: {session_id[:8]}...")
@@ -163,16 +152,15 @@ def run_tests():
 
         # Capture console errors
         console_errors = []
-
         def on_console(msg):
             if msg.type in ("error", "warning"):
                 console_errors.append(f"[{msg.type}] {msg.text}")
-
         page.on("console", on_console)
 
         # Get webui token
         webui_info = requests.get(
-            f"{BASE_URL}/api/workspace/user-url", cookies={"session_token": auth_token}
+            f"{BASE_URL}/api/workspace/user-url",
+            cookies={"session_token": auth_token}
         ).json()
         webui_token = webui_info.get("token", "")
         effective_webui_url = webui_info.get("url", WEBUI_URL)
@@ -203,11 +191,7 @@ def run_tests():
         print("\n══════ 5. 验证无 'Error Loading Conversation' 错误 ══════")
 
         page_text = page.locator("body").text_content() or ""
-        error_keywords = [
-            "Error Loading Conversation",
-            "Failed to load conversation",
-            "404 Not Found",
-        ]
+        error_keywords = ["Error Loading Conversation", "Failed to load conversation", "404 Not Found"]
         found_errors = [kw for kw in error_keywords if kw in page_text]
 
         if found_errors:
@@ -241,13 +225,10 @@ def run_tests():
 
         # ══════ 6. Cleanup ══════
         print("\n══════ 6. 清理 ══════")
-        requests.post(
-            f"{BASE_URL}/api/remote/sessions/{session_id}/stop",
-            cookies={"session_token": auth_token},
-        )
-        requests.delete(
-            f"{BASE_URL}/api/remote/machines/{machine_id}", cookies={"session_token": admin_token}
-        )
+        requests.post(f"{BASE_URL}/api/remote/sessions/{session_id}/stop",
+                      cookies={"session_token": auth_token})
+        requests.delete(f"{BASE_URL}/api/remote/machines/{machine_id}",
+                        cookies={"session_token": admin_token})
         print("  ✓ 清理完成")
 
         page.remove_listener("console", on_console)
@@ -255,7 +236,7 @@ def run_tests():
         browser.close()
 
     print(f"\n{'='*60}")
-    print("  测试通过! 远程会话恢复不再显示 'Error Loading Conversation'")
+    print(f"  测试通过! 远程会话恢复不再显示 'Error Loading Conversation'")
     print(f"  截图保存在: {SCREENSHOT_DIR}")
     print(f"{'='*60}")
 

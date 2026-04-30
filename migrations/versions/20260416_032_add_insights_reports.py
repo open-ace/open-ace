@@ -13,8 +13,8 @@ actionable suggestions.
 
 from typing import Union
 
-import sqlalchemy as sa
 from alembic import op
+import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "032_add_insights_reports"
@@ -27,18 +27,22 @@ def _table_exists(conn, table_name: str) -> bool:
     """Check if a table exists."""
     if conn.dialect.name == "postgresql":
         result = conn.execute(
-            sa.text("""
+            sa.text(
+                """
                 SELECT EXISTS (
                     SELECT FROM information_schema.tables
                     WHERE table_schema = 'public' AND table_name = :table_name
                 )
-                """),
+                """
+            ),
             {"table_name": table_name},
         )
         return result.fetchone()[0]
     else:
         result = conn.execute(
-            sa.text("SELECT name FROM sqlite_master WHERE type='table' AND name = :table_name"),
+            sa.text(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name = :table_name"
+            ),
             {"table_name": table_name},
         )
         return result.fetchone() is not None
@@ -66,7 +70,9 @@ def upgrade() -> None:
 
     if not _table_exists(conn, "insights_reports"):
         if is_postgresql:
-            op.execute(sa.text("""
+            op.execute(
+                sa.text(
+                    """
                     CREATE TABLE insights_reports (
                         id SERIAL PRIMARY KEY,
                         user_id INTEGER NOT NULL REFERENCES users(id),
@@ -82,9 +88,13 @@ def upgrade() -> None:
                         raw_response TEXT,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
-                    """))
+                    """
+                )
+            )
         else:
-            op.execute(sa.text("""
+            op.execute(
+                sa.text(
+                    """
                     CREATE TABLE insights_reports (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         user_id INTEGER NOT NULL,
@@ -100,7 +110,9 @@ def upgrade() -> None:
                         raw_response TEXT,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
-                    """))
+                    """
+                )
+            )
 
     if not _index_exists(conn, "insights_reports", "idx_insights_reports_user_date"):
         op.execute(

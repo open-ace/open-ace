@@ -15,7 +15,7 @@ import sys
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
 
 def get_default_sender_name(tool: str = "qwen") -> str:
@@ -219,7 +219,10 @@ def extract_content_from_entry(entry: dict) -> Optional[str]:
             for part in parts:
                 if isinstance(part, dict):
                     # Qwen format: {"text": "content"}
-                    if "text" in part or part.get("type") == "text":
+                    if "text" in part:
+                        texts.append(part.get("text", ""))
+                    # Also handle {type: "text", text: "content"} format
+                    elif part.get("type") == "text":
                         texts.append(part.get("text", ""))
                     elif part.get("type") == "image":
                         texts.append("[Image content]")
@@ -237,7 +240,10 @@ def extract_content_from_entry(entry: dict) -> Optional[str]:
             for part in parts:
                 if isinstance(part, dict):
                     # Qwen format: {"text": "content"} or {"thought": true, "text": "..."}
-                    if "text" in part or part.get("type") == "text":
+                    if "text" in part:
+                        texts.append(part.get("text", ""))
+                    # Also handle {type: "text", text: "content"} format
+                    elif part.get("type") == "text":
                         texts.append(part.get("text", ""))
                     elif part.get("type") == "tool":
                         # Handle tool response content
@@ -327,7 +333,7 @@ def process_jsonl_file(
     message_tree = {}
     root_messages = {}  # uuid -> entry for messages with no parent (conversation starters)
 
-    with open(filepath, encoding="utf-8") as f:
+    with open(filepath, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -367,7 +373,7 @@ def process_jsonl_file(
         return None
 
     # Second pass: process messages with conversation_id
-    with open(filepath, encoding="utf-8") as f:
+    with open(filepath, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -457,11 +463,9 @@ def process_jsonl_file(
                                     "model": model,
                                     "timestamp": ts,
                                     "sender_id": system_account or "qwen_user",
-                                    "sender_name": (
-                                        f"{system_account}-{hostname}-qwen"
-                                        if system_account
-                                        else get_default_sender_name("qwen")
-                                    ),
+                                    "sender_name": f"{system_account}-{hostname}-qwen"
+                                    if system_account
+                                    else get_default_sender_name("qwen"),
                                     "agent_session_id": agent_session_id,
                                     "conversation_id": conversation_id,
                                     "project_path": project_path,
@@ -543,7 +547,7 @@ def find_qwen_project_dir() -> Optional[Path]:
         elif len(subdirs_with_jsonl) > 1:
             # Multiple subdirectories with .jsonl files
             # Return the projects directory so all subdirs can be scanned and merged
-            print("Multiple Qwen project directories found, scanning all:")
+            print(f"Multiple Qwen project directories found, scanning all:")
             for subdir, files in sorted(subdirs_with_jsonl, key=lambda x: x[0].name.lower()):
                 print(f"  - {subdir.name} ({len(files)} files)")
             return projects_dir
@@ -637,20 +641,17 @@ def update_agent_sessions_stats(messages: list) -> int:
         Number of sessions updated
     """
     from collections import defaultdict
-
-    from shared.db import _execute, _placeholder, get_connection
+    from shared.db import get_connection, _execute, _placeholder, is_postgresql
 
     # Group messages by agent_session_id
-    session_stats = defaultdict(
-        lambda: {
-            "message_count": 0,
-            "total_tokens": 0,
-            "request_count": 0,
-            "models": set(),
-            "messages": [],  # Store messages for session_messages table
-            "last_timestamp": None,  # Track the latest message timestamp
-        }
-    )
+    session_stats = defaultdict(lambda: {
+        "message_count": 0,
+        "total_tokens": 0,
+        "request_count": 0,
+        "models": set(),
+        "messages": [],  # Store messages for session_messages table
+        "last_timestamp": None,  # Track the latest message timestamp
+    })
 
     for msg in messages:
         session_id = msg.get("agent_session_id")
@@ -699,9 +700,7 @@ def update_agent_sessions_stats(messages: list) -> int:
         for session_id, stats in session_stats.items():
             try:
                 # Check if session exists in agent_sessions table
-                check_session_sql = (
-                    f"SELECT id, user_id FROM agent_sessions WHERE session_id = {placeholder}"
-                )
+                check_session_sql = f"SELECT id, user_id FROM agent_sessions WHERE session_id = {placeholder}"
                 _execute(cursor, check_session_sql, (session_id,))
                 session_row = cursor.fetchone()
 
@@ -740,26 +739,11 @@ def update_agent_sessions_stats(messages: list) -> int:
                                 {placeholder}, {placeholder}, {placeholder}, {placeholder})
                     """
                     model = sorted(stats["models"])[0] if stats["models"] else None
-                    _execute(
-                        cursor,
-                        insert_sql,
-                        (
-                            session_id,
-                            "chat",
-                            title,
-                            tool_name,
-                            host_name,
-                            user_id,
-                            "completed",
-                            project_path,
-                            stats["message_count"],
-                            stats["total_tokens"],
-                            stats["request_count"],
-                            model,
-                            now,
-                            now,
-                        ),
-                    )
+                    _execute(cursor, insert_sql, (
+                        session_id, "chat", title, tool_name, host_name, user_id, "completed", project_path,
+                        stats["message_count"], stats["total_tokens"], stats["request_count"], model,
+                        now, now
+                    ))
                     updated += 1
                     continue
 
@@ -846,11 +830,7 @@ def update_agent_sessions_stats(messages: list) -> int:
 
                     except Exception as e:
                         # Ignore duplicate key and foreign key errors (session may not exist in agent_sessions)
-                        if (
-                            "duplicate" not in str(e).lower()
-                            and "foreign key" not in str(e).lower()
-                            and "not present" not in str(e).lower()
-                        ):
+                        if "duplicate" not in str(e).lower() and "foreign key" not in str(e).lower() and "not present" not in str(e).lower():
                             print(f"  Warning: Failed to insert message: {e}")
 
             except Exception as e:
@@ -942,7 +922,9 @@ def fetch_and_save(
             print("Error: Cannot find Qwen project/chats directory.")
             return False
 
-        total_files = _process_projects_dir(project_dir, hostname, None, aggregated, all_messages)
+        total_files = _process_projects_dir(
+            project_dir, hostname, None, aggregated, all_messages
+        )
 
     print(f"\nProcessed {total_files} files, {len(all_messages)} messages")
 

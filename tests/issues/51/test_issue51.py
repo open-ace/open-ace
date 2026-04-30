@@ -11,11 +11,10 @@ UI Test for Issue 51: 普通用户登录后应该直接进入 Workspace 页面
 6. 验证 admin-only 菜单隐藏
 """
 
-import os
-import sys
-import time
-
 import pytest
+import sys
+import os
+import time
 
 # Add skill scripts directory to path
 skill_dir = os.path.dirname(os.path.abspath(__file__))

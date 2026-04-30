@@ -13,8 +13,8 @@ This migration adds indexes to optimize request statistics queries:
 
 from typing import Union
 
-import sqlalchemy as sa
 from alembic import op
+import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "022_add_request_stats_indexes"
@@ -42,12 +42,14 @@ def _column_exists(conn, table_name: str, column_name: str) -> bool:
     """Check if a column exists in a table."""
     if conn.dialect.name == "postgresql":
         result = conn.execute(
-            sa.text("""
+            sa.text(
+                """
                 SELECT EXISTS (
                     SELECT FROM information_schema.columns
                     WHERE table_name = :table_name AND column_name = :column_name
                 )
-                """),
+                """
+            ),
             {"table_name": table_name, "column_name": column_name},
         )
         return result.fetchone()[0]
@@ -72,52 +74,64 @@ def upgrade() -> None:
     if _column_exists(conn, "daily_messages", "sender_name"):
         if not _index_exists(conn, "daily_messages", "idx_daily_messages_sender_date"):
             if is_postgresql:
-                op.execute("""
+                op.execute(
+                    """
                     CREATE INDEX idx_daily_messages_sender_date
                     ON daily_messages (sender_name, date, role)
                     WHERE role = 'assistant'
-                    """)
+                    """
+                )
             else:
                 # SQLite doesn't support partial indexes with WHERE in the same way
-                op.execute("""
+                op.execute(
+                    """
                     CREATE INDEX idx_daily_messages_sender_date
                     ON daily_messages (sender_name, date, role)
-                    """)
+                    """
+                )
 
     # Index for user request trend queries
     if _column_exists(conn, "daily_messages", "sender_name"):
         if not _index_exists(conn, "daily_messages", "idx_daily_messages_sender_timestamp"):
-            op.execute("""
+            op.execute(
+                """
                 CREATE INDEX idx_daily_messages_sender_timestamp
                 ON daily_messages (sender_name, timestamp)
-                """)
+                """
+            )
 
     # ============================================
     # 2. Indexes for daily_usage (request trend queries)
     # ============================================
     if _column_exists(conn, "daily_usage", "request_count"):
         if not _index_exists(conn, "daily_usage", "idx_daily_usage_date_requests"):
-            op.execute("""
+            op.execute(
+                """
                 CREATE INDEX idx_daily_usage_date_requests
                 ON daily_usage (date, request_count)
-                """)
+                """
+            )
 
     # Index for request trend by tool
     if not _index_exists(conn, "daily_usage", "idx_daily_usage_tool_date"):
-        op.execute("""
+        op.execute(
+            """
             CREATE INDEX idx_daily_usage_tool_date
             ON daily_usage (tool_name, date)
-            """)
+            """
+        )
 
     # ============================================
     # 3. Indexes for quota_usage (user quota status queries)
     # ============================================
     # Index for getting user's current quota status
     if not _index_exists(conn, "quota_usage", "idx_quota_usage_user_period_date"):
-        op.execute("""
+        op.execute(
+            """
             CREATE INDEX idx_quota_usage_user_period_date
             ON quota_usage (user_id, period, date DESC)
-            """)
+            """
+        )
 
     # ============================================
     # 4. Add monthly_request_quota to users if not exists
@@ -125,10 +139,12 @@ def upgrade() -> None:
     # This should already exist from migration 003, but check just in case
     if not _column_exists(conn, "users", "monthly_request_quota"):
         if is_postgresql:
-            op.execute("""
+            op.execute(
+                """
                 ALTER TABLE users
                 ADD COLUMN monthly_request_quota INTEGER DEFAULT 30000
-                """)
+                """
+            )
         else:
             op.add_column(
                 "users",

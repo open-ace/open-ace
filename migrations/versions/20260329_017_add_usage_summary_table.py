@@ -33,8 +33,8 @@ Table structure:
 
 from typing import Union
 
-import sqlalchemy as sa
 from alembic import op
+import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "017_add_usage_summary"

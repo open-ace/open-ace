@@ -6,7 +6,6 @@
 import asyncio
 import os
 import time
-
 from playwright.async_api import async_playwright
 
 BASE_URL = "http://117.72.38.96:5000"
@@ -34,28 +33,23 @@ async def test_manual_create():
         page = await context.new_page()
 
         # 记录所有控制台消息
-        page.on("console", lambda msg: log(f"[Console {msg.type}] {msg.text[:150]}"))
+        page.on('console', lambda msg: log(f"[Console {msg.type}] {msg.text[:150]}"))
 
         # 记录所有网络请求
-        page.on(
-            "request", lambda r: log(f"[Request] {r.method} {r.url}") if "/api/" in r.url else None
-        )
-        page.on(
-            "response",
-            lambda r: log(f"[Response] {r.status} {r.url}") if "/api/" in r.url else None,
-        )
+        page.on('request', lambda r: log(f"[Request] {r.method} {r.url}") if '/api/' in r.url else None)
+        page.on('response', lambda r: log(f"[Response] {r.status} {r.url}") if '/api/' in r.url else None)
 
         log("\n=== 登录 ===")
         await page.goto(f"{BASE_URL}/login", wait_until="networkidle")
-        await page.fill('input[type="text"]', "rhuang")
-        await page.fill('input[type="password"]', "admin123")
+        await page.fill('input[type="text"]', 'rhuang')
+        await page.fill('input[type="password"]', 'admin123')
         await page.click('button[type="submit"]')
         await page.wait_for_url("**/work", timeout=10000)
         log("登录成功")
 
         log("\n=== 打开 Add Project Modal ===")
-        await page.wait_for_selector("iframe", timeout=15000)
-        iframe = page.frame_locator("iframe").first
+        await page.wait_for_selector('iframe', timeout=15000)
+        iframe = page.frame_locator('iframe').first
         await page.wait_for_timeout(5000)
 
         add_btn = iframe.locator('button:has-text("Add Project")')
@@ -71,14 +65,14 @@ async def test_manual_create():
 
         log("\n=== 输入文件夹名称 ===")
         new_dir_input = iframe.locator('input[placeholder*="name"]').first
-        await new_dir_input.fill("test-folder-" + str(int(time.time()) % 10000))
+        await new_dir_input.fill('test-folder-' + str(int(time.time()) % 10000))
         log("输入完成")
 
         await page.screenshot(path=os.path.join(SCREENSHOT_DIR, "manual_01_ready.png"))
         log("截图: manual_01_ready.png - 请现在手工点击 Create 按钮")
 
         # 注入详细的事件监听
-        await iframe.locator("body").evaluate("""() => {
+        await iframe.locator('body').evaluate('''() => {
             document.addEventListener('click', (e) => {
                 const btn = e.target.closest('button');
                 if (btn) {
@@ -86,7 +80,7 @@ async def test_manual_create():
                 }
             }, true);
             console.log('[EVENT MONITOR] Active');
-        }""")
+        }''')
 
         log("\n=== 等待用户手工点击 Create 按钮 (60秒) ===")
         log("请在浏览器中手工点击蓝色的 Create 按钮")
@@ -100,7 +94,7 @@ async def test_manual_create():
         await page.screenshot(path=os.path.join(SCREENSHOT_DIR, "manual_02_final.png"))
 
         # 检查日志中是否有用户点击
-        with open(LOG_FILE) as f:
+        with open(LOG_FILE, "r") as f:
             content = f.read()
             if "[CLICK EVENT]" in content and "Create" in content:
                 log("\n检测到用户点击 Create 按钮")

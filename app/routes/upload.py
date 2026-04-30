@@ -149,7 +149,7 @@ def api_upload_messages():
 
             daily_stats_repo = DailyStatsRepository()
             # Get unique dates from uploaded messages
-            dates = {msg.get("date") for msg in messages if msg.get("date")}
+            dates = set(msg.get("date") for msg in messages if msg.get("date"))
             for date in dates:
                 daily_stats_repo.refresh_stats(date)
                 daily_stats_repo.refresh_hourly_stats(date)
@@ -233,7 +233,7 @@ def api_upload_batch():
 
             daily_stats_repo = DailyStatsRepository()
             # Get unique dates from uploaded messages
-            dates = {m.get("date") for m in messages_data if m.get("date")}
+            dates = set(m.get("date") for m in messages_data if m.get("date"))
             for date in dates:
                 daily_stats_repo.refresh_stats(date)
                 daily_stats_repo.refresh_hourly_stats(date)

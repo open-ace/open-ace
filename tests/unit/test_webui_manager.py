@@ -7,12 +7,11 @@ Unit tests for WorkspaceConfig auth fields and _launch_webui_process env injecti
 
 import json
 import os
-import tempfile
-from unittest.mock import MagicMock, patch
-
 import pytest
+import tempfile
+from unittest.mock import patch, MagicMock
 
-from app.services.webui_manager import WebUIManager, WorkspaceConfig
+from app.services.webui_manager import WorkspaceConfig, WebUIManager
 
 
 class TestWorkspaceConfigAuth:
@@ -60,10 +59,7 @@ class TestLoadConfigAuth:
         config = WorkspaceConfig(
             enabled=True,
             auth_type="openai",
-            auth_env={
-                "OPENAI_API_KEY": "sk-test123",
-                "OPENAI_BASE_URL": "https://api.openai.com/v1",
-            },
+            auth_env={"OPENAI_API_KEY": "sk-test123", "OPENAI_BASE_URL": "https://api.openai.com/v1"},
         )
         mock_load.return_value = config
 
@@ -87,10 +83,7 @@ class TestLoadConfigAuth:
         """Test loading config with anthropic auth type."""
         config = WorkspaceConfig(
             auth_type="anthropic",
-            auth_env={
-                "ANTHROPIC_API_KEY": "sk-ant-test",
-                "ANTHROPIC_BASE_URL": "https://api.anthropic.com",
-            },
+            auth_env={"ANTHROPIC_API_KEY": "sk-ant-test", "ANTHROPIC_BASE_URL": "https://api.anthropic.com"},
         )
         mock_load.return_value = config
 
@@ -123,7 +116,7 @@ class TestLoadConfigAuth:
             with patch("app.repositories.database.CONFIG_DIR", tmpdir):
                 manager = WebUIManager.__new__(WebUIManager)
                 # Manually call _load_config with patched CONFIG_DIR
-
+                from app.repositories.database import CONFIG_DIR
                 config_path = os.path.join(tmpdir, "config.json")
                 with open(config_path, "w") as f:
                     json.dump(config_data, f)
@@ -137,10 +130,7 @@ class TestLoadConfigAuth:
                         token_secret="test-secret",
                         webui_path="/tmp/webui",
                         auth_type="openai",
-                        auth_env={
-                            "OPENAI_API_KEY": "sk-file-test",
-                            "OPENAI_BASE_URL": "https://api.openai.com/v1",
-                        },
+                        auth_env={"OPENAI_API_KEY": "sk-file-test", "OPENAI_BASE_URL": "https://api.openai.com/v1"},
                     )
                     manager.config = mock_load.return_value
 
@@ -168,15 +158,9 @@ class TestLaunchWebuiProcessAuth:
         manager._platform = "linux"
 
         # Mock _find_webui_executable and _load_server_config
-        with (
-            patch.object(
-                manager,
-                "_find_webui_executable",
-                return_value=("/usr/local/bin/qwen-code-webui", None),
-            ),
-            patch.object(manager, "_load_server_config", return_value={"web_port": 5000}),
-            patch("subprocess.Popen") as mock_popen,
-        ):
+        with patch.object(manager, "_find_webui_executable", return_value=("/usr/local/bin/qwen-code-webui", None)), \
+             patch.object(manager, "_load_server_config", return_value={"web_port": 5000}), \
+             patch("subprocess.Popen") as mock_popen:
 
             mock_popen.return_value = MagicMock(pid=12345)
 
@@ -205,15 +189,9 @@ class TestLaunchWebuiProcessAuth:
         manager = WebUIManager()
         manager._platform = "linux"
 
-        with (
-            patch.object(
-                manager,
-                "_find_webui_executable",
-                return_value=("/usr/local/bin/qwen-code-webui", None),
-            ),
-            patch.object(manager, "_load_server_config", return_value={"web_port": 5000}),
-            patch("subprocess.Popen") as mock_popen,
-        ):
+        with patch.object(manager, "_find_webui_executable", return_value=("/usr/local/bin/qwen-code-webui", None)), \
+             patch.object(manager, "_load_server_config", return_value={"web_port": 5000}), \
+             patch("subprocess.Popen") as mock_popen:
 
             mock_popen.return_value = MagicMock(pid=12345)
 
@@ -240,15 +218,9 @@ class TestLaunchWebuiProcessAuth:
         manager = WebUIManager()
         manager._platform = "linux"
 
-        with (
-            patch.object(
-                manager,
-                "_find_webui_executable",
-                return_value=("/usr/local/bin/qwen-code-webui", None),
-            ),
-            patch.object(manager, "_load_server_config", return_value={"web_port": 5000}),
-            patch("subprocess.Popen") as mock_popen,
-        ):
+        with patch.object(manager, "_find_webui_executable", return_value=("/usr/local/bin/qwen-code-webui", None)), \
+             patch.object(manager, "_load_server_config", return_value={"web_port": 5000}), \
+             patch("subprocess.Popen") as mock_popen:
 
             mock_popen.return_value = MagicMock(pid=12345)
 
@@ -274,15 +246,9 @@ class TestLaunchWebuiProcessAuth:
         manager._platform = "linux"
 
         try:
-            with (
-                patch.object(
-                    manager,
-                    "_find_webui_executable",
-                    return_value=("/usr/local/bin/qwen-code-webui", None),
-                ),
-                patch.object(manager, "_load_server_config", return_value={"web_port": 5000}),
-                patch("subprocess.Popen") as mock_popen,
-            ):
+            with patch.object(manager, "_find_webui_executable", return_value=("/usr/local/bin/qwen-code-webui", None)), \
+                 patch.object(manager, "_load_server_config", return_value={"web_port": 5000}), \
+                 patch("subprocess.Popen") as mock_popen:
 
                 mock_popen.return_value = MagicMock(pid=12345)
 
@@ -311,15 +277,9 @@ class TestLaunchWebuiProcessAuth:
         manager._platform = "linux"
 
         try:
-            with (
-                patch.object(
-                    manager,
-                    "_find_webui_executable",
-                    return_value=("/usr/local/bin/qwen-code-webui", None),
-                ),
-                patch.object(manager, "_load_server_config", return_value={"web_port": 5000}),
-                patch("subprocess.Popen") as mock_popen,
-            ):
+            with patch.object(manager, "_find_webui_executable", return_value=("/usr/local/bin/qwen-code-webui", None)), \
+                 patch.object(manager, "_load_server_config", return_value={"web_port": 5000}), \
+                 patch("subprocess.Popen") as mock_popen:
 
                 mock_popen.return_value = MagicMock(pid=12345)
 

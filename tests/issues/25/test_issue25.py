@@ -2,9 +2,8 @@
 Test script for Issue 25: 测试全屏按钮和版本号
 """
 
-import asyncio
-
 import pytest
+import asyncio
 from playwright.async_api import async_playwright
 
 
@@ -25,10 +24,12 @@ async def test_issue25():
             await page.wait_for_load_state("networkidle")
 
         # Check version number
-        version_text = await page.evaluate("""() => {
+        version_text = await page.evaluate(
+            """() => {
             const versionEl = document.evaluate("//small[contains(text(), 'Version:')]", document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
             return versionEl ? versionEl.textContent : 'NOT FOUND';
-        }""")
+        }"""
+        )
         print(f"Version: {version_text}")
 
         # Click Analysis tab
@@ -37,10 +38,12 @@ async def test_issue25():
         await asyncio.sleep(1)
 
         # Click Conversation History tab
-        await page.evaluate("""() => {
+        await page.evaluate(
+            """() => {
             const tab = document.getElementById('conversation-history-tab');
             if (tab) tab.click();
-        }""")
+        }"""
+        )
         await asyncio.sleep(2)
 
         # Check fullscreen button

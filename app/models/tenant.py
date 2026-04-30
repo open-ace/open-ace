@@ -8,7 +8,7 @@ Data models for multi-tenant support.
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import List, Optional
 
 
 class TenantStatus(Enum):
@@ -59,7 +59,7 @@ class QuotaConfig:
 class TenantSettings:
     """Tenant-specific settings."""
 
-    allowed_tools: list[str] = field(default_factory=lambda: ["claude", "qwen", "openclaw"])
+    allowed_tools: List[str] = field(default_factory=lambda: ["claude", "qwen", "openclaw"])
     content_filter_enabled: bool = True
     audit_log_enabled: bool = True
     audit_log_retention_days: int = 90

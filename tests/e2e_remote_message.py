@@ -32,8 +32,6 @@ import traceback
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
-import contextlib
-
 import requests
 from playwright.sync_api import sync_playwright
 
@@ -62,17 +60,16 @@ def cleanup_remote_agent():
     try:
         # Step 1: Kill stale CLI processes only (not the agent itself)
         subprocess.run(
-            ["ssh"] + ssh_opts + [remote, "killall -9 node qwen 2>/dev/null; echo done"],
-            capture_output=True,
-            timeout=15,
+            ["ssh"] + ssh_opts + [remote,
+             "killall -9 node qwen 2>/dev/null; echo done"],
+            capture_output=True, timeout=15,
         )
         time.sleep(1)
 
         # Step 2: Check if agent is already online; if so, skip restart
         try:
-            r = requests.get(
-                f"{BASE_URL}/api/remote/machines/available", cookies={"session_token": api_login()}
-            )
+            r = requests.get(f"{BASE_URL}/api/remote/machines/available",
+                             cookies={"session_token": api_login()})
             machines = r.json().get("machines", [])
             if any(m.get("status") == "online" for m in machines):
                 log("Cleanup", "✓ Remote agent already online, skipping restart")
@@ -84,27 +81,20 @@ def cleanup_remote_agent():
         log("Cleanup", "Agent offline, restarting...")
         # Use -t to force PTY allocation, then detach properly
         subprocess.run(
-            ["ssh"]
-            + ssh_opts
-            + [
-                remote,
-                "killall -9 python3 node qwen 2>/dev/null; sleep 1; "
-                "bash -c 'cd /root/.open-ace-agent && nohup python3 agent.py "
-                "> /tmp/openace-agent.log 2>&1 & "
-                "disown'",
-            ],
-            capture_output=True,
-            timeout=15,
+            ["ssh"] + ssh_opts + [remote,
+             "killall -9 python3 node qwen 2>/dev/null; sleep 1; "
+             "bash -c 'cd /root/.open-ace-agent && nohup python3 agent.py "
+             "> /tmp/openace-agent.log 2>&1 & "
+             "disown'"],
+            capture_output=True, timeout=15,
         )
 
         # Wait for agent to come online
         for _ in range(20):
             time.sleep(2)
             try:
-                r = requests.get(
-                    f"{BASE_URL}/api/remote/machines/available",
-                    cookies={"session_token": api_login()},
-                )
+                r = requests.get(f"{BASE_URL}/api/remote/machines/available",
+                                 cookies={"session_token": api_login()})
                 machines = r.json().get("machines", [])
                 if any(m.get("status") == "online" for m in machines):
                     log("Cleanup", "✓ Remote agent online")
@@ -145,9 +135,8 @@ def pause(seconds):
 
 
 def api_login(username=TEST_USER, password=TEST_PASS):
-    r = requests.post(
-        f"{BASE_URL}/api/auth/login", json={"username": username, "password": password}
-    )
+    r = requests.post(f"{BASE_URL}/api/auth/login",
+                      json={"username": username, "password": password})
     assert r.status_code == 200, f"Login failed: {r.status_code}"
     token = r.cookies.get("session_token")
     assert token, "No session_token cookie"
@@ -168,7 +157,6 @@ def do_login(page, username, password):
 # ════════════════════════════════════════════
 #  Main Test
 # ════════════════════════════════════════════
-
 
 def run_tests():
     global session_id, machine_id
@@ -193,7 +181,7 @@ def run_tests():
 
         try:
             _run_all(page, token)
-        except Exception:
+        except Exception as e:
             shot(page, "ERROR_final")
             traceback.print_exc()
             raise
@@ -214,7 +202,8 @@ def _run_all(page, token):
     # ════════════════════════════════════════════
 
     print("\n══════ A1. Find Available Remote Machine ══════")
-    r = requests.get(f"{BASE_URL}/api/remote/machines/available", cookies={"session_token": token})
+    r = requests.get(f"{BASE_URL}/api/remote/machines/available",
+                     cookies={"session_token": token})
     assert r.status_code == 200, f"Failed to list machines: {r.status_code}"
     machines = r.json().get("machines", [])
     log("Machines", f"Found {len(machines)} available machines")
@@ -223,19 +212,15 @@ def _run_all(page, token):
     target = None
     for m in machines:
         name = m.get("machine_name", "")
-        log(
-            "Machine",
-            f"  - {name} (id={m.get('machine_id', '')[:8]}..., status={m.get('status')}, connected={m.get('connected')})",
-        )
+        log("Machine", f"  - {name} (id={m.get('machine_id', '')[:8]}..., status={m.get('status')}, connected={m.get('connected')})")
         if "openace" in name.lower() or m.get("hostname") == "openace":
             target = m
 
     assert target, f"Could not find 'openace' machine among {len(machines)} machines"
     machine_id = target["machine_id"]
     log("Target", f"Using machine: {target['machine_name']} ({machine_id[:8]}...)")
-    assert (
-        target.get("connected") or target.get("status") == "online"
-    ), f"Machine {target['machine_name']} is not connected!"
+    assert target.get("connected") or target.get("status") == "online", \
+        f"Machine {target['machine_name']} is not connected!"
 
     # ════════════════════════════════════════════
     #  PART B: Browser UI - Login and navigate first
@@ -266,17 +251,15 @@ def _run_all(page, token):
     # ════════════════════════════════════════════
 
     print("\n══════ C1. Create Remote Session ══════")
-    r = requests.post(
-        f"{BASE_URL}/api/remote/sessions",
-        json={
-            "machine_id": machine_id,
-            "project_path": "/root",
-            "cli_tool": "qwen-code-cli",
-            "model": "qwen3.5-plus",
-            "title": "E2E Remote Message Test",
-        },
-        cookies={"session_token": token},
-    )
+    r = requests.post(f"{BASE_URL}/api/remote/sessions",
+                      json={
+                          "machine_id": machine_id,
+                          "project_path": "/root",
+                          "cli_tool": "qwen-code-cli",
+                          "model": "qwen3.5-plus",
+                          "title": "E2E Remote Message Test",
+                      },
+                      cookies={"session_token": token})
     assert r.status_code == 200, f"Create session failed: {r.status_code} {r.text}"
     session_id = r.json()["session"]["session_id"]
     log("Session", f"✓ Created: {session_id[:8]}...")
@@ -287,11 +270,9 @@ def _run_all(page, token):
     # ════════════════════════════════════════════
 
     print("\n══════ D1. Send Message to Remote Session ══════")
-    r = requests.post(
-        f"{BASE_URL}/api/remote/sessions/{session_id}/chat",
-        json={"content": "回复 hello"},
-        cookies={"session_token": token},
-    )
+    r = requests.post(f"{BASE_URL}/api/remote/sessions/{session_id}/chat",
+                      json={"content": "回复 hello"},
+                      cookies={"session_token": token})
     assert r.status_code == 200, f"Send message failed: {r.status_code} {r.text}"
     log("Message", "✓ Message sent: '回复 hello'")
 
@@ -302,9 +283,8 @@ def _run_all(page, token):
     last_output_len = 0
 
     while time.time() - start < RESPONSE_TIMEOUT:
-        r = requests.get(
-            f"{BASE_URL}/api/remote/sessions/{session_id}", cookies={"session_token": token}
-        )
+        r = requests.get(f"{BASE_URL}/api/remote/sessions/{session_id}",
+                         cookies={"session_token": token})
         if r.status_code == 200:
             sess = r.json().get("session", {})
             output = sess.get("output", [])
@@ -341,13 +321,8 @@ def _run_all(page, token):
                                     if isinstance(r_item, dict) and r_item.get("type") == "text":
                                         content_summary = r_item.get("text", "")[:80]
 
-                        parsed_events.append(
-                            (parsed.get("type"), parsed.get("subtype", ""), content_summary)
-                        )
-                        log(
-                            "Event",
-                            f"type={parsed.get('type')}/{parsed.get('subtype', '')} {content_summary[:60] if content_summary else ''}",
-                        )
+                        parsed_events.append((parsed.get("type"), parsed.get("subtype", ""), content_summary))
+                        log("Event", f"type={parsed.get('type')}/{parsed.get('subtype', '')} {content_summary[:60] if content_summary else ''}")
 
                         if parsed.get("type") == "result":
                             got_result = True
@@ -359,15 +334,13 @@ def _run_all(page, token):
 
         elapsed = int(time.time() - start)
         if elapsed % 15 == 0 and elapsed > 0:
-            log(
-                "Polling",
-                f"Still waiting... ({elapsed}s elapsed, {len(parsed_events)} events, {last_output_len} lines)",
-            )
+            log("Polling", f"Still waiting... ({elapsed}s elapsed, {len(parsed_events)} events, {last_output_len} lines)")
 
         time.sleep(3)
 
     elapsed = time.time() - start
-    assert len(parsed_events) > 0, f"No parsed events from remote agent after {elapsed:.0f}s"
+    assert len(parsed_events) > 0, \
+        f"No parsed events from remote agent after {elapsed:.0f}s"
     log("Timing", f"✓ Response received in {elapsed:.0f}s ({len(parsed_events)} events)")
 
     # ════════════════════════════════════════════
@@ -407,11 +380,9 @@ def _run_all(page, token):
     # Test that the SSE endpoint returns claude_json wrapped events
 
     # Send a second message for a clean SSE test
-    r = requests.post(
-        f"{BASE_URL}/api/remote/sessions/{session_id}/chat",
-        json={"content": "说 ok"},
-        cookies={"session_token": token},
-    )
+    r = requests.post(f"{BASE_URL}/api/remote/sessions/{session_id}/chat",
+                      json={"content": "说 ok"},
+                      cookies={"session_token": token})
     assert r.status_code == 200, f"Second message failed: {r.status_code}"
 
     # Wait for output to buffer
@@ -447,9 +418,8 @@ def _run_all(page, token):
     for line in sse_lines[:5]:
         try:
             wrapper = json.loads(line)
-            assert (
-                wrapper.get("type") == "claude_json"
-            ), f"Expected claude_json wrapper, got: {wrapper.get('type')}"
+            assert wrapper.get("type") == "claude_json", \
+                f"Expected claude_json wrapper, got: {wrapper.get('type')}"
             inner = wrapper.get("data", {})
             sse_types.add(inner.get("type"))
             log("SSE", f"  claude_json → type={inner.get('type')}/{inner.get('subtype', '')}")
@@ -473,12 +443,7 @@ def _run_all(page, token):
     found = False
     for i in range(min(session_items.count(), 20)):
         text = session_items.nth(i).text_content() or ""
-        if (
-            "E2E" in text
-            or "Remote" in text
-            or "远程" in text
-            or (session_id and session_id[:6] in text)
-        ):
+        if "E2E" in text or "Remote" in text or "远程" in text or (session_id and session_id[:6] in text):
             session_items.nth(i).click()
             found = True
             log("Click", f"Found session item #{i}")
@@ -488,31 +453,27 @@ def _run_all(page, token):
         # Try to find by remote badge (cloud icon)
         cloud_items = page.locator(".bi-cloud-fill, .bi-cloud")
         if cloud_items.count() > 0:
-            cloud_items.first.evaluate(
-                "el => el.closest('.session-item, .card, .list-group-item')?.click()"
-            )
+            cloud_items.first.evaluate("el => el.closest('.session-item, .card, .list-group-item')?.click()")
             found = True
             log("Click", "Found session by cloud icon")
 
     if found:
         pause(2)
-        with contextlib.suppress(Exception):
+        try:
             page.wait_for_selector(".modal.show", timeout=5000)
+        except Exception:
+            pass
         shot(page, "E1_session_detail")
 
         # Check for remote output in detail
-        output_area = page.locator(
-            ".modal .bg-dark, .modal pre, .modal :has-text('Remote Output'), .modal :has-text('远程输出')"
-        )
+        output_area = page.locator(".modal .bg-dark, .modal pre, .modal :has-text('Remote Output'), .modal :has-text('远程输出')")
         if output_area.count() > 0:
             log("Detail", "✓ Remote output section visible in session detail")
         else:
             log("Detail", "⚠ Remote output section not found")
 
         # Close modal
-        close_btn = page.locator(
-            ".modal.show button:has-text('Close'), .modal.show button:has-text('关闭'), .modal.show .btn-close"
-        )
+        close_btn = page.locator(".modal.show button:has-text('Close'), .modal.show button:has-text('关闭'), .modal.show .btn-close")
         if close_btn.count() > 0:
             close_btn.first.click()
             pause(1)
@@ -551,9 +512,8 @@ def _run_all(page, token):
 
     print("\n══════ G1. Stop Session ══════")
     if session_id:
-        r = requests.post(
-            f"{BASE_URL}/api/remote/sessions/{session_id}/stop", cookies={"session_token": token}
-        )
+        r = requests.post(f"{BASE_URL}/api/remote/sessions/{session_id}/stop",
+                          cookies={"session_token": token})
         log("Stop", f"Session {session_id[:8]}... → {r.status_code}")
 
     shot(page, "G_cleanup_done")

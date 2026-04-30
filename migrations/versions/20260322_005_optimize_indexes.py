@@ -11,8 +11,7 @@ This migration optimizes indexes:
 
 """
 
-from collections.abc import Sequence
-from typing import Union
+from typing import Sequence, Union
 
 from alembic import op
 

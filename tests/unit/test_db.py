@@ -5,11 +5,11 @@ Unit tests for db.py module.
 Uses monkeypatch to properly isolate database operations.
 """
 
+import pytest
 import os
 import sys
+import tempfile
 from datetime import datetime, timedelta
-
-import pytest
 
 # Add scripts/shared to path for imports
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

@@ -12,10 +12,9 @@ Usage:
     python3 tests/issues/72/test_issue72.py
 """
 
-import os
-import time
-
 import pytest
+import time
+import os
 from playwright.async_api import async_playwright
 
 # Test configuration
@@ -77,7 +76,7 @@ async def test_fullscreen():
         time.sleep(3)
 
         # Wait for table to initialize
-        for _i in range(10):
+        for i in range(10):
             table_exists = await page.evaluate('typeof conversationHistoryTable !== "undefined"')
             if table_exists:
                 break

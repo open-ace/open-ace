@@ -8,14 +8,15 @@ Manages conversation history, state, and context across sessions.
 
 import json
 import logging
+import os
 import sqlite3
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
-from app.repositories.database import DB_PATH, get_database_url, is_postgresql
+from app.repositories.database import DB_PATH, is_postgresql, get_database_url
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,7 @@ class SessionMessage:
     tokens_used: int = 0
     model: Optional[str] = None
     timestamp: Optional[datetime] = None
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -116,20 +117,20 @@ class AgentSession:
     project_id: Optional[int] = None  # Project association for statistics
     project_path: Optional[str] = None  # Project path for quick reference
     status: str = SessionStatus.ACTIVE.value
-    context: dict[str, Any] = field(default_factory=dict)
-    settings: dict[str, Any] = field(default_factory=dict)
+    context: Dict[str, Any] = field(default_factory=dict)
+    settings: Dict[str, Any] = field(default_factory=dict)
     total_tokens: int = 0
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     message_count: int = 0
     request_count: int = 0  # Number of API requests (assistant/toolResult messages)
     model: Optional[str] = None
-    tags: list[str] = field(default_factory=list)
+    tags: List[str] = field(default_factory=list)
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
-    messages: list[SessionMessage] = field(default_factory=list)
+    messages: List[SessionMessage] = field(default_factory=list)
     workspace_type: str = "local"  # local or remote
     remote_machine_id: Optional[str] = None
     paused_at: Optional[datetime] = None
@@ -243,6 +244,7 @@ class SessionManager:
             db_path: Optional custom database path.
         """
         self.db_path = db_path or str(DB_PATH)
+        self._ensure_tables()
 
     def _get_connection(self) -> Union[sqlite3.Connection, Any]:
         """Get database connection (SQLite or PostgreSQL)."""
@@ -273,7 +275,8 @@ class SessionManager:
         id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
 
         # Create agent_sessions table
-        cursor.execute(f"""
+        cursor.execute(
+            f"""
             CREATE TABLE IF NOT EXISTS agent_sessions (
                 id {id_type},
                 session_id TEXT NOT NULL UNIQUE,
@@ -296,10 +299,12 @@ class SessionManager:
                 completed_at TIMESTAMP,
                 expires_at TIMESTAMP
             )
-        """)
+        """
+        )
 
         # Create session_messages table
-        cursor.execute(f"""
+        cursor.execute(
+            f"""
             CREATE TABLE IF NOT EXISTS session_messages (
                 id {id_type},
                 session_id TEXT NOT NULL,
@@ -311,29 +316,40 @@ class SessionManager:
                 metadata TEXT,
                 FOREIGN KEY (session_id) REFERENCES agent_sessions(session_id)
             )
-        """)
+        """
+        )
 
         # Create indexes
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_agent_sessions_session_id
             ON agent_sessions(session_id)
-        """)
-        cursor.execute("""
+        """
+        )
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_agent_sessions_user_id
             ON agent_sessions(user_id)
-        """)
-        cursor.execute("""
+        """
+        )
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_agent_sessions_status
             ON agent_sessions(status)
-        """)
-        cursor.execute("""
+        """
+        )
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_agent_sessions_tool_name
             ON agent_sessions(tool_name)
-        """)
-        cursor.execute("""
+        """
+        )
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_session_messages_session_id
             ON session_messages(session_id)
-        """)
+        """
+        )
 
         # Add remote workspace columns if not present
         try:
@@ -344,17 +360,23 @@ class SessionManager:
             pass  # Column already exists
 
         try:
-            cursor.execute("ALTER TABLE agent_sessions ADD COLUMN remote_machine_id TEXT")
+            cursor.execute(
+                "ALTER TABLE agent_sessions ADD COLUMN remote_machine_id TEXT"
+            )
         except Exception:
             pass  # Column already exists
 
         try:
-            cursor.execute("ALTER TABLE agent_sessions ADD COLUMN request_count INTEGER DEFAULT 0")
+            cursor.execute(
+                "ALTER TABLE agent_sessions ADD COLUMN request_count INTEGER DEFAULT 0"
+            )
         except Exception:
             pass  # Column already exists
 
         try:
-            cursor.execute("ALTER TABLE agent_sessions ADD COLUMN paused_at TIMESTAMP")
+            cursor.execute(
+                "ALTER TABLE agent_sessions ADD COLUMN paused_at TIMESTAMP"
+            )
         except Exception:
             pass  # Column already exists
 
@@ -368,8 +390,8 @@ class SessionManager:
         session_type: str = SessionType.CHAT.value,
         title: str = "",
         host_name: str = "localhost",
-        context: Optional[dict[str, Any]] = None,
-        settings: Optional[dict[str, Any]] = None,
+        context: Optional[Dict[str, Any]] = None,
+        settings: Optional[Dict[str, Any]] = None,
         model: Optional[str] = None,
         expires_in_hours: Optional[int] = None,
         project_id: Optional[int] = None,
@@ -568,7 +590,7 @@ class SessionManager:
 
     def get_messages(
         self, session_id: str, limit: Optional[int] = None, before_id: Optional[int] = None
-    ) -> list[SessionMessage]:
+    ) -> List[SessionMessage]:
         """
         Get messages for a session.
 
@@ -609,7 +631,7 @@ class SessionManager:
         content: str,
         tokens_used: int = 0,
         model: Optional[str] = None,
-        metadata: Optional[dict[str, Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[SessionMessage]:
         """
         Add a message to a session.
@@ -665,7 +687,7 @@ class SessionManager:
         )
 
         # Update session message count, request count and token count
-        request_count_increment = 1 if role in ("assistant", "toolResult") else 0
+        request_count_increment = 1 if role in ('assistant', 'toolResult') else 0
         cursor.execute(
             f"""
             UPDATE agent_sessions
@@ -757,17 +779,8 @@ class SessionManager:
                             total_requests = user_projects.total_requests + 1,
                             total_duration_seconds = user_projects.total_duration_seconds + {_param()}
                     """,
-                        (
-                            user_id,
-                            project_id,
-                            now_iso,
-                            now_iso,
-                            total_tokens,
-                            duration_seconds,
-                            now_iso,
-                            total_tokens,
-                            duration_seconds,
-                        ),
+                        (user_id, project_id, now_iso, now_iso, total_tokens, duration_seconds,
+                         now_iso, total_tokens, duration_seconds),
                     )
                     conn.commit()
                     logger.info(
@@ -851,7 +864,7 @@ class SessionManager:
         search: Optional[str] = None,
         page: int = 1,
         limit: int = 20,
-    ) -> dict[str, Any]:
+    ) -> Dict[str, Any]:
         """
         List sessions with filters.
 
@@ -925,7 +938,7 @@ class SessionManager:
             "total_pages": total_pages,
         }
 
-    def get_active_sessions(self, user_id: Optional[int] = None) -> list[AgentSession]:
+    def get_active_sessions(self, user_id: Optional[int] = None) -> List[AgentSession]:
         """
         Get all active sessions.
 
@@ -1036,7 +1049,7 @@ class SessionManager:
 
         return len(session_ids)
 
-    def get_session_stats(self, user_id: Optional[int] = None) -> dict[str, Any]:
+    def get_session_stats(self, user_id: Optional[int] = None) -> Dict[str, Any]:
         """
         Get session statistics.
 
@@ -1064,7 +1077,8 @@ class SessionManager:
                 (user_id,),
             )
         else:
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT
                     COUNT(*) as total_sessions,
                     SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active_sessions,
@@ -1072,7 +1086,8 @@ class SessionManager:
                     SUM(total_tokens) as total_tokens,
                     SUM(message_count) as total_messages
                 FROM agent_sessions
-            """)
+            """
+            )
 
         row = cursor.fetchone()
         conn.close()
@@ -1085,7 +1100,7 @@ class SessionManager:
             "total_messages": row["total_messages"] or 0,
         }
 
-    def _row_to_session(self, row: Union[sqlite3.Row, dict]) -> AgentSession:
+    def _row_to_session(self, row: Union[sqlite3.Row, Dict]) -> AgentSession:
         """Convert a database row to AgentSession."""
 
         # Handle both sqlite3.Row and dict (PostgreSQL)
@@ -1134,7 +1149,7 @@ class SessionManager:
             paused_at=parse_datetime(get_value("paused_at")),
         )
 
-    def _row_to_message(self, row: Union[sqlite3.Row, dict]) -> SessionMessage:
+    def _row_to_message(self, row: Union[sqlite3.Row, Dict]) -> SessionMessage:
         """Convert a database row to SessionMessage."""
 
         # Handle both sqlite3.Row and dict (PostgreSQL)
@@ -1161,83 +1176,3 @@ class SessionManager:
             timestamp=parse_datetime(get_value("timestamp")),
             metadata=json.loads(get_value("metadata")) if get_value("metadata") else {},
         )
-
-
-def get_ddl_statements() -> list[str]:
-    """Return DDL statements for session manager tables."""
-    id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
-    return [
-        f"""
-        CREATE TABLE IF NOT EXISTS agent_sessions (
-            id {id_type},
-            session_id TEXT NOT NULL UNIQUE,
-            session_type TEXT DEFAULT 'chat',
-            title TEXT,
-            tool_name TEXT NOT NULL,
-            host_name TEXT DEFAULT 'localhost',
-            user_id INTEGER,
-            status TEXT DEFAULT 'active',
-            context TEXT,
-            settings TEXT,
-            total_tokens INTEGER DEFAULT 0,
-            total_input_tokens INTEGER DEFAULT 0,
-            total_output_tokens INTEGER DEFAULT 0,
-            message_count INTEGER DEFAULT 0,
-            model TEXT,
-            tags TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            completed_at TIMESTAMP,
-            expires_at TIMESTAMP
-        )
-        """,
-        f"""
-        CREATE TABLE IF NOT EXISTS session_messages (
-            id {id_type},
-            session_id TEXT NOT NULL,
-            role TEXT NOT NULL,
-            content TEXT,
-            tokens_used INTEGER DEFAULT 0,
-            model TEXT,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            metadata TEXT,
-            FOREIGN KEY (session_id) REFERENCES agent_sessions(session_id)
-        )
-        """,
-        """
-        CREATE INDEX IF NOT EXISTS idx_agent_sessions_session_id
-        ON agent_sessions(session_id)
-        """,
-        """
-        CREATE INDEX IF NOT EXISTS idx_agent_sessions_user_id
-        ON agent_sessions(user_id)
-        """,
-        """
-        CREATE INDEX IF NOT EXISTS idx_agent_sessions_status
-        ON agent_sessions(status)
-        """,
-        """
-        CREATE INDEX IF NOT EXISTS idx_agent_sessions_tool_name
-        ON agent_sessions(tool_name)
-        """,
-        """
-        CREATE INDEX IF NOT EXISTS idx_session_messages_session_id
-        ON session_messages(session_id)
-        """,
-        "ALTER TABLE agent_sessions ADD COLUMN workspace_type TEXT DEFAULT 'local'",
-        "ALTER TABLE agent_sessions ADD COLUMN remote_machine_id TEXT",
-        "ALTER TABLE agent_sessions ADD COLUMN request_count INTEGER DEFAULT 0",
-        "ALTER TABLE agent_sessions ADD COLUMN paused_at TIMESTAMP",
-    ]
-
-
-# Module-level singleton
-_instance: Optional[SessionManager] = None
-
-
-def get_session_manager() -> SessionManager:
-    """Get the module-level SessionManager singleton."""
-    global _instance
-    if _instance is None:
-        _instance = SessionManager()
-    return _instance

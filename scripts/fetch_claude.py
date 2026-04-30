@@ -15,7 +15,7 @@ import sys
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional
 
 
 def get_default_sender_name(tool: str = "claude") -> str:
@@ -185,9 +185,7 @@ def extract_content_from_entry(entry: dict) -> Optional[str]:
     return None
 
 
-def process_jsonl_file(
-    filepath: Path, hostname: str = "localhost", system_account: Optional[str] = None
-) -> tuple:
+def process_jsonl_file(filepath: Path, hostname: str = "localhost", system_account: Optional[str] = None) -> tuple:
     """Process a single JSONL file and return daily token aggregates and messages.
 
     Args:
@@ -234,7 +232,7 @@ def process_jsonl_file(
     message_tree = {}
     root_messages = {}  # uuid -> entry for messages with no parent (conversation starters)
 
-    with open(filepath, encoding="utf-8") as f:
+    with open(filepath, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -274,7 +272,7 @@ def process_jsonl_file(
         return None
 
     # Second pass: process messages with conversation_id
-    with open(filepath, encoding="utf-8") as f:
+    with open(filepath, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -368,11 +366,7 @@ def process_jsonl_file(
                                     "model": model,
                                     "timestamp": ts,
                                     "sender_id": "claude_user",
-                                    "sender_name": (
-                                        f"{system_account}-{hostname}-claude"
-                                        if system_account
-                                        else get_default_sender_name("claude")
-                                    ),
+                                    "sender_name": f"{system_account}-{hostname}-claude" if system_account else get_default_sender_name("claude"),
                                     "agent_session_id": agent_session_id,
                                     "conversation_id": conversation_id,
                                     "project_path": project_path,
@@ -406,7 +400,7 @@ def process_jsonl_file(
                 if tokens["model"]:
                     daily[date_key]["models_used"].add(tokens["model"])
 
-            except (json.JSONDecodeError, KeyError, TypeError):
+            except (json.JSONDecodeError, KeyError, TypeError) as e:
                 # Silently skip problematic entries
                 continue
 
@@ -437,10 +431,7 @@ def find_all_claude_project_dirs() -> list:
     else:
         # Windows or other - just use current user
         home = Path.home()
-        for potential_dir in [
-            home / ".claude" / "projects",
-            home / ".config" / "claude" / "projects",
-        ]:
+        for potential_dir in [home / ".claude" / "projects", home / ".config" / "claude" / "projects"]:
             if potential_dir.is_dir():
                 user = getpass.getuser()
                 results.append((user, potential_dir))
@@ -525,7 +516,7 @@ def find_claude_project_dir() -> Optional[Path]:
         elif len(subdirs) > 1:
             # Multiple subdirectories with .jsonl files
             # Return the parent projects directory so all subdirs can be scanned and merged
-            print("Multiple Claude project directories found, scanning all:")
+            print(f"Multiple Claude project directories found, scanning all:")
             for d in sorted(subdirs, key=lambda x: x.name.lower()):
                 files = list(d.glob("*.jsonl"))
                 print(f"  - {d.name} ({len(files)} files)")
@@ -599,9 +590,7 @@ def fetch_and_save(
             if direct_files:
                 projects_to_scan = [claude_projects]
             else:
-                subdirs = [
-                    d for d in claude_projects.iterdir() if d.is_dir() and list(d.glob("*.jsonl"))
-                ]
+                subdirs = [d for d in claude_projects.iterdir() if d.is_dir() and list(d.glob("*.jsonl"))]
                 if subdirs:
                     projects_to_scan = sorted(subdirs, key=lambda x: x.name.lower())
 

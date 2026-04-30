@@ -179,27 +179,24 @@ class QuotaEnforcementScheduler:
         try:
             req_key = f"{month_prefix}requests" if month_prefix else "today_requests"
             tok_key = f"{month_prefix}tokens" if month_prefix else "today_tokens"
-            req_quota_key = (
-                f"{month_prefix}request_quota" if month_prefix else "daily_request_quota"
-            )
+            req_quota_key = f"{month_prefix}request_quota" if month_prefix else "daily_request_quota"
             tok_quota_key = f"{month_prefix}token_quota" if month_prefix else "daily_token_quota"
 
             tokens_pct = (
                 row[tok_key] / (row[tok_quota_key] * 1_000_000) * 100
-                if row.get(tok_quota_key)
-                else 0
+                if row.get(tok_quota_key) else 0
             )
-            requests_pct = row[req_key] / row[req_quota_key] * 100 if row.get(req_quota_key) else 0
+            requests_pct = (
+                row[req_key] / row[req_quota_key] * 100
+                if row.get(req_quota_key) else 0
+            )
             max_pct = max(tokens_pct, requests_pct)
             from app.modules.governance.alert_notifier import create_quota_alert
-
             create_quota_alert(
                 user_id=user_id,
                 username=username,
                 usage_percent=max_pct,
-                quota_type=(
-                    f"{period}_requests" if requests_pct >= tokens_pct else f"{period}_tokens"
-                ),
+                quota_type=f"{period}_requests" if requests_pct >= tokens_pct else f"{period}_tokens",
             )
         except Exception as e:
             logger.warning(f"Failed to create quota alert for user {user_id}: {e}")
@@ -207,7 +204,6 @@ class QuotaEnforcementScheduler:
         # Terminate active sessions
         try:
             from app.modules.workspace.session_manager import SessionManager
-
             sm = SessionManager()
             active_sessions = sm.get_active_sessions(user_id)
             for session in active_sessions:
@@ -231,8 +227,8 @@ enforcement_scheduler = QuotaEnforcementScheduler()
 
 def init_quota_enforcement():
     """Initialize and start the quota enforcement scheduler."""
-    import os
     import sys
+    import os
 
     scripts_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "scripts", "shared"
@@ -242,7 +238,6 @@ def init_quota_enforcement():
 
     try:
         from config import get_quota_enforcement_config
-
         config = get_quota_enforcement_config()
         enforcement_scheduler.configure(
             interval=config.get("interval", 60),

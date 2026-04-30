@@ -9,7 +9,6 @@
 
 import asyncio
 import re
-
 from playwright.async_api import async_playwright
 
 
@@ -43,7 +42,7 @@ async def main():
 
         # Test 1: Check that "Last updated" is NOT present
         print("\n--- Test 1: Verify 'Last updated' is removed ---")
-        await page.content()
+        page_content = await page.content()
         last_updated_label = await page.query_selector("#last-updated-label")
         sidebar_updated = await page.query_selector("#sidebar-updated")
 

@@ -7,11 +7,11 @@ Identifies opportunities for cost savings and efficiency improvements.
 """
 
 import logging
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional
 
 from app.repositories.database import Database
 from app.utils.cache import cached
@@ -51,9 +51,9 @@ class OptimizationSuggestion:
     description: str
     potential_savings: float
     priority: str
-    action_items: list[str] = field(default_factory=list)
-    affected_users: list[int] = field(default_factory=list)
-    affected_tools: list[str] = field(default_factory=list)
+    action_items: List[str] = field(default_factory=list)
+    affected_users: List[int] = field(default_factory=list)
+    affected_tools: List[str] = field(default_factory=list)
     implementation_effort: str = "medium"  # low, medium, high
     current_cost: float = 0.0
     optimized_cost: float = 0.0
@@ -87,7 +87,7 @@ class UsagePattern:
     description: str
     frequency: int
     impact: str
-    details: dict[str, Any] = field(default_factory=dict)
+    details: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -147,7 +147,7 @@ class CostOptimizer:
         self.db = db or Database()
 
     @cached(ttl=120, key_prefix="cost", skip_args=[0])
-    def analyze(self, days: int = 30) -> list[OptimizationSuggestion]:
+    def analyze(self, days: int = 30) -> List[OptimizationSuggestion]:
         """
         Analyze usage and generate optimization suggestions.
 
@@ -177,7 +177,7 @@ class CostOptimizer:
 
         return suggestions
 
-    def _get_usage_data(self, start_date: str, end_date: str) -> dict[str, Any]:
+    def _get_usage_data(self, start_date: str, end_date: str) -> Dict[str, Any]:
         """Get comprehensive usage data.
 
         Optimized: Uses a single query to fetch all data, then aggregates in Python.
@@ -206,7 +206,7 @@ class CostOptimizer:
         }
 
         # By model aggregation
-        model_stats: dict[tuple, dict] = {}
+        model_stats: Dict[tuple, Dict] = {}
         for row in all_data:
             key = (row.get("tool_name"), row.get("model"))
             if key not in model_stats:
@@ -244,15 +244,15 @@ class CostOptimizer:
         }
 
     def _analyze_model_usage(
-        self, data: dict, start_date: str, end_date: str
-    ) -> list[OptimizationSuggestion]:
+        self, data: Dict, start_date: str, end_date: str
+    ) -> List[OptimizationSuggestion]:
         """Analyze model usage for optimization opportunities."""
         suggestions = []
 
         for row in data["by_model"]:
             model = row.get("model") or "unknown"
             avg_tokens = row.get("avg_tokens_per_request") or 0
-            row.get("requests") or 0
+            requests = row.get("requests") or 0
             input_tokens = row.get("input_tokens") or 0
             output_tokens = row.get("output_tokens") or 0
 
@@ -296,7 +296,7 @@ class CostOptimizer:
 
         return suggestions
 
-    def _analyze_usage_patterns(self, data: dict) -> list[OptimizationSuggestion]:
+    def _analyze_usage_patterns(self, data: Dict) -> List[OptimizationSuggestion]:
         """Analyze usage patterns for optimization."""
         suggestions = []
 
@@ -329,7 +329,7 @@ class CostOptimizer:
 
         return suggestions
 
-    def _analyze_quota_efficiency(self, data: dict) -> list[OptimizationSuggestion]:
+    def _analyze_quota_efficiency(self, data: Dict) -> List[OptimizationSuggestion]:
         """Analyze quota allocation efficiency."""
         suggestions = []
 
@@ -366,11 +366,11 @@ class CostOptimizer:
 
         return suggestions
 
-    def _analyze_tool_usage(self, data: dict) -> list[OptimizationSuggestion]:
+    def _analyze_tool_usage(self, data: Dict) -> List[OptimizationSuggestion]:
         """Analyze tool usage patterns."""
         suggestions = []
 
-        tools = {row.get("tool_name") for row in data["by_model"] if row.get("tool_name")}
+        tools = set(row.get("tool_name") for row in data["by_model"] if row.get("tool_name"))
 
         if len(tools) > 2:
             suggestions.append(
@@ -393,7 +393,7 @@ class CostOptimizer:
 
         return suggestions
 
-    def _analyze_token_efficiency(self, data: dict) -> list[OptimizationSuggestion]:
+    def _analyze_token_efficiency(self, data: Dict) -> List[OptimizationSuggestion]:
         """Analyze token usage efficiency."""
         suggestions = []
 
@@ -467,7 +467,7 @@ class CostOptimizer:
         return (savings / cost * 100) if cost > 0 else 0
 
     @cached(ttl=60, key_prefix="cost", skip_args=[0])
-    def get_cost_trend(self, days: int = 30) -> list[dict[str, Any]]:
+    def get_cost_trend(self, days: int = 30) -> List[Dict[str, Any]]:
         """
         Get daily cost trend.
 
@@ -513,7 +513,7 @@ class CostOptimizer:
         return trend
 
     @cached(ttl=120, key_prefix="cost", skip_args=[0])
-    def get_efficiency_report(self, days: int = 30) -> dict[str, Any]:
+    def get_efficiency_report(self, days: int = 30) -> Dict[str, Any]:
         """
         Get efficiency analysis report.
 
@@ -554,6 +554,6 @@ class CostOptimizer:
             "model_distribution": model_distribution,
             "unique_models": len(model_distribution),
             "unique_tools": len(
-                {r.get("tool_name") for r in data["by_model"] if r.get("tool_name")}
+                set(r.get("tool_name") for r in data["by_model"] if r.get("tool_name"))
             ),
         }

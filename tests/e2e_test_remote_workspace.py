@@ -10,8 +10,11 @@ usage reporting, and cleanup.
 Run: python tests/e2e_test_remote_workspace.py
 """
 
+import json
 import os
 import sys
+import time
+import traceback
 import uuid
 
 # Add project root to path
@@ -75,7 +78,6 @@ def assert_in(key, d, label=""):
 # Phase 0: Prerequisites
 # ============================================================
 
-
 def check_server():
     """Check the server is running."""
     test("Server health check")
@@ -95,19 +97,14 @@ def check_server():
 # Phase 1: Authentication
 # ============================================================
 
-
 def authenticate():
     """Login as admin user."""
     test("Admin login")
     try:
-        r = requests.post(
-            f"{BASE_URL}/api/auth/login",
-            json={
-                "username": "admin",
-                "password": "admin123",
-            },
-            timeout=10,
-        )
+        r = requests.post(f"{BASE_URL}/api/auth/login", json={
+            "username": "admin",
+            "password": "admin123",
+        }, timeout=10)
         assert_eq(r.status_code, 200, "login status")
         data = r.json()
         assert_true(data.get("success"), "login success")
@@ -130,7 +127,6 @@ def authenticate():
 # ============================================================
 # Phase 2: Machine Registration
 # ============================================================
-
 
 def generate_registration_token(auth_token):
     """Admin generates a registration token."""
@@ -268,7 +264,6 @@ def get_machine_detail(auth_token, machine_id):
 # Phase 3: Agent Connection via HTTP
 # ============================================================
 
-
 def agent_connect(machine_id):
     """Simulate agent connecting via HTTP (re-register)."""
     test("Agent HTTP connect (register)")
@@ -324,7 +319,6 @@ def agent_heartbeat(machine_id):
 # Phase 4: API Key Management
 # ============================================================
 
-
 def store_api_key(auth_token):
     """Store an API key for testing via REST endpoint."""
     test("Store API key (encrypted)")
@@ -364,7 +358,6 @@ def store_api_key(auth_token):
 
         # Resolve key via service (still needed for proxy)
         from app.modules.workspace.api_key_proxy import APIKeyProxyService
-
         service = APIKeyProxyService()
         resolved = service.resolve_api_key(tenant_id=1, provider="openai")
         assert_true(resolved is not None, "resolve result")
@@ -396,7 +389,6 @@ def test_proxy_token_flow(auth_token):
     test("Proxy token generate + validate")
     try:
         from app.modules.workspace.api_key_proxy import APIKeyProxyService
-
         service = APIKeyProxyService()
 
         # Generate proxy token
@@ -433,7 +425,6 @@ def test_proxy_token_expiry():
     test("Expired proxy token rejected")
     try:
         from app.modules.workspace.api_key_proxy import APIKeyProxyService
-
         service = APIKeyProxyService()
 
         # Generate token that already expired (-1 minutes)
@@ -459,7 +450,6 @@ def test_proxy_token_tampered():
     test("Tampered proxy token rejected")
     try:
         from app.modules.workspace.api_key_proxy import APIKeyProxyService
-
         service = APIKeyProxyService()
 
         token = service.generate_proxy_token(
@@ -484,7 +474,6 @@ def test_proxy_token_tampered():
 # ============================================================
 # Phase 5: Remote Session Lifecycle
 # ============================================================
-
 
 def create_remote_session(auth_token, machine_id):
     """Create a remote session on the machine."""
@@ -663,7 +652,6 @@ def agent_sends_status(machine_id, session_id):
 # Phase 6: Usage Reporting
 # ============================================================
 
-
 def agent_sends_usage(machine_id, session_id):
     """Simulate agent sending usage report."""
     test("Agent sends usage report")
@@ -741,7 +729,6 @@ def usage_report_endpoint(machine_id, session_id):
 # Phase 7: Session Control
 # ============================================================
 
-
 def test_session_pause_resume(auth_token, session_id, machine_id):
     """Test session pause and resume."""
     test("Pause remote session")
@@ -787,7 +774,6 @@ def stop_remote_session(auth_token, session_id):
 # ============================================================
 # Phase 8: Access Control
 # ============================================================
-
 
 def test_unauthenticated_access():
     """Test that unauthenticated requests are rejected."""
@@ -877,7 +863,6 @@ def test_machine_users_list(auth_token, machine_id):
 # Phase 9: Available Machines
 # ============================================================
 
-
 def test_available_machines(auth_token):
     """Test available machines endpoint."""
     test("Get available machines for user")
@@ -907,7 +892,6 @@ def test_available_machines(auth_token):
 # ============================================================
 # Phase 10: LLM Proxy Token Validation
 # ============================================================
-
 
 def test_llm_proxy_no_token():
     """Test LLM proxy rejects requests without token."""
@@ -953,7 +937,6 @@ def test_llm_proxy_valid_token_no_key():
     test("LLM proxy with valid token, no API key configured")
     try:
         from app.modules.workspace.api_key_proxy import APIKeyProxyService
-
         service = APIKeyProxyService()
 
         # Generate a valid token
@@ -988,7 +971,6 @@ def test_llm_proxy_valid_token_no_key():
 # ============================================================
 # Phase 11: Cleanup
 # ============================================================
-
 
 def deregister_machine(auth_token, machine_id):
     """Deregister the test machine."""
@@ -1032,13 +1014,11 @@ def verify_machine_removed(auth_token, machine_id):
 # Phase 12: Direct Module Tests
 # ============================================================
 
-
 def test_session_manager_direct():
     """Test SessionManager directly for workspace_type support."""
     test("SessionManager workspace_type support")
     try:
         from app.modules.workspace.session_manager import SessionManager
-
         sm = SessionManager()
 
         # Create a session with workspace_type
@@ -1072,7 +1052,7 @@ def test_session_manager_direct():
         # Cleanup
         sm.delete_session(session.session_id)
 
-        ok("workspace_type=remote, messages=2, session CRUD works")
+        ok(f"workspace_type=remote, messages=2, session CRUD works")
         return True
     except Exception as e:
         fail(str(e))
@@ -1084,7 +1064,6 @@ def test_agent_manager_direct():
     test("RemoteAgentManager direct operations")
     try:
         from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
-
         mgr = get_remote_agent_manager()
 
         # Create registration token
@@ -1183,27 +1162,20 @@ def test_database_tables():
     test("Database tables and schema")
     try:
         from app.repositories.database import get_database_url, is_postgresql
-
         if is_postgresql():
             import psycopg2
-
             conn = psycopg2.connect(get_database_url())
         else:
             import sqlite3
-
             conn = sqlite3.connect(os.path.expanduser("~/.open-ace/ace.db"))
 
         cur = conn.cursor()
 
         # Check remote_machines table
-        cur.execute(
-            """
+        cur.execute("""
             SELECT column_name FROM information_schema.columns
             WHERE table_name = 'remote_machines'
-        """
-            if is_postgresql()
-            else "PRAGMA table_info(remote_machines)"
-        )
+        """ if is_postgresql() else "PRAGMA table_info(remote_machines)")
 
         if is_postgresql():
             columns = [r[0] for r in cur.fetchall()]
@@ -1215,14 +1187,10 @@ def test_database_tables():
         assert_true(len(found) >= 4, f"remote_machines columns: {found}")
 
         # Check machine_assignments table
-        cur.execute(
-            """
+        cur.execute("""
             SELECT column_name FROM information_schema.columns
             WHERE table_name = 'machine_assignments'
-        """
-            if is_postgresql()
-            else "PRAGMA table_info(machine_assignments)"
-        )
+        """ if is_postgresql() else "PRAGMA table_info(machine_assignments)")
         if is_postgresql():
             cols2 = [r[0] for r in cur.fetchall()]
         else:
@@ -1231,14 +1199,10 @@ def test_database_tables():
         assert_true("user_id" in cols2, "machine_assignments.user_id")
 
         # Check api_key_store table
-        cur.execute(
-            """
+        cur.execute("""
             SELECT column_name FROM information_schema.columns
             WHERE table_name = 'api_key_store'
-        """
-            if is_postgresql()
-            else "PRAGMA table_info(api_key_store)"
-        )
+        """ if is_postgresql() else "PRAGMA table_info(api_key_store)")
         if is_postgresql():
             cols3 = [r[0] for r in cur.fetchall()]
         else:
@@ -1257,7 +1221,6 @@ def test_database_tables():
 # ============================================================
 # Main runner
 # ============================================================
-
 
 def main():
     header("Open ACE Remote Workspace - End-to-End Test")

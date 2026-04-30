@@ -15,16 +15,14 @@ import time
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from playwright.sync_api import expect, sync_playwright
+from playwright.sync_api import sync_playwright, expect
 
 # Configuration
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
-SCREENSHOT_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "screenshots"
-)
+SCREENSHOT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "screenshots")
 
 
 def test_work_usage_page():
@@ -37,10 +35,10 @@ def test_work_usage_page():
         browser = p.chromium.launch(headless=HEADLESS)
         context = browser.new_context(viewport={"width": 1280, "height": 900})
         page = context.new_page()
-
+        
         # 监听控制台日志
         page.on("console", lambda msg: console_messages.append(f"{msg.type}: {msg.text}"))
-
+        
         # 监听页面错误
         page.on("pageerror", lambda err: console_messages.append(f"error: {err}"))
 
@@ -64,31 +62,31 @@ def test_work_usage_page():
             load_time = time.time() - start_time
             results.append(("页面加载", "通过", f"加载时间: {load_time:.2f}s"))
             print(f"  ✓ 页面加载成功，耗时 {load_time:.2f}s")
-
+            
             # 等待页面内容加载
             page.wait_for_timeout(5000)  # 等待 React 组件渲染
-
+            
             # 检查页面 HTML 内容
             html_content = page.content()
             print(f"  页面 HTML 长度: {len(html_content)} 字符")
-
+            
             # 打印页面 body 内容
             body_content = page.locator("body").inner_html()
             print(f"  Body 内容前 500 字符: {body_content[:500]}...")
-
+            
             # 打印控制台日志
             if console_messages:
                 print(f"  控制台日志 ({len(console_messages)} 条):")
                 for msg in console_messages[:10]:
                     print(f"    {msg}")
-
+            
             # 检查是否有错误元素
             error_elements = page.locator(".error, .alert-danger, [class*='error']").count()
             if error_elements > 0:
                 print(f"  发现 {error_elements} 个错误元素")
                 error_text = page.locator(".error, .alert-danger").first.text_content()
                 print(f"  错误内容: {error_text}")
-
+            
             # 截图
             screenshot_path = os.path.join(SCREENSHOT_DIR, "work_usage_page.png")
             page.screenshot(path=screenshot_path)
@@ -110,9 +108,7 @@ def test_work_usage_page():
             # 检查刷新按钮
             try:
                 # 尝试中文和英文两种文本
-                refresh_btn = page.locator(
-                    "button:has-text('刷新'), button:has-text('Refresh')"
-                ).first
+                refresh_btn = page.locator("button:has-text('刷新'), button:has-text('Refresh')").first
                 expect(refresh_btn).to_be_visible(timeout=5000)
                 results.append(("刷新按钮可见", "通过", ""))
                 print("  ✓ 刷新按钮可见")
@@ -152,9 +148,7 @@ def test_work_usage_page():
             print("Step 4: 测试刷新功能...")
             try:
                 # 尝试中文和英文两种文本
-                refresh_btn = page.locator(
-                    "button:has-text('刷新'), button:has-text('Refresh')"
-                ).first
+                refresh_btn = page.locator("button:has-text('刷新'), button:has-text('Refresh')").first
                 refresh_btn.click()
                 page.wait_for_timeout(2000)  # 等待刷新完成
                 results.append(("刷新功能", "通过", ""))
@@ -191,7 +185,7 @@ def test_work_usage_page():
             symbol = "✓" if status == "通过" else "✗"
             print(f"{symbol} {name}: {status} - {detail}")
         print("=" * 50)
-
+        
         # 打印所有控制台日志
         if console_messages:
             print("\n控制台日志:")

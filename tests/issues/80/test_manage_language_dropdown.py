@@ -3,10 +3,9 @@
 验证下拉列表文字是否可见
 """
 
-import os
+from playwright.sync_api import sync_playwright, expect
 import time
-
-from playwright.sync_api import expect, sync_playwright
+import os
 
 BASE_URL = "http://localhost:5000/"
 USERNAME = "admin"
@@ -145,7 +144,7 @@ def test_manage_language_dropdown():
             # 获取背景颜色
             bg_color = item.evaluate("el => getComputedStyle(el).backgroundColor")
             # 获取文本颜色值
-            item.evaluate("el => getComputedStyle(el).color")
+            text_color = item.evaluate("el => getComputedStyle(el).color")
 
             print(f"   语言项 {i+1}: '{text}'")
             print(f"      文字颜色：{color}")
@@ -156,18 +155,18 @@ def test_manage_language_dropdown():
             if "rgb(255, 255, 255)" in color and (
                 "rgb(14, 165, 233)" in bg_color or "rgb(2, 132, 199)" in bg_color
             ):
-                print("      ✓ 白色文字在蓝色背景上可见")
+                print(f"      ✓ 白色文字在蓝色背景上可见")
             # 深色文字在透明/浅色背景上应该可见
             elif "rgb(15, 23, 42)" in color or "rgb(0, 0, 0)" in color:
-                print("      ✓ 深色文字可见")
+                print(f"      ✓ 深色文字可见")
             # 白色文字在白色背景上不可见
             elif "rgb(255, 255, 255)" in color and (
                 "rgb(255, 255, 255)" in bg_color or "rgba(0, 0, 0, 0)" in bg_color
             ):
-                print("      ✗ 失败：白色文字在白色/透明背景上不可见")
+                print(f"      ✗ 失败：白色文字在白色/透明背景上不可见")
                 all_pass = False
             else:
-                print("      ? 无法确定可见性")
+                print(f"      ? 无法确定可见性")
 
         # Step 9: 截图
         print("\n9. 截图...")

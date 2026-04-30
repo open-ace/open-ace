@@ -185,14 +185,16 @@ class QuotaManager:
 
                 # Use db.execute with adapt_sql for cross-DB compatibility (? → %s for PostgreSQL)
                 cursor.execute(
-                    adapt_sql("""
+                    adapt_sql(
+                        """
                     INSERT INTO quota_usage (user_id, date, period, tokens_used, requests_used)
                     VALUES (?, ?, 'daily', ?, ?)
                     ON CONFLICT(user_id, date, period) DO UPDATE SET
                         tokens_used = quota_usage.tokens_used + ?,
                         requests_used = quota_usage.requests_used + ?,
                         updated_at = CURRENT_TIMESTAMP
-                """),
+                """
+                    ),
                     (user_id, date, tokens, requests, tokens, requests),
                 )
 
@@ -224,18 +226,10 @@ class QuotaManager:
 
         # Get quota limits based on period
         if period == "monthly":
-            token_limit = (
-                user.get("monthly_token_quota") * TOKEN_QUOTA_MULTIPLIER
-                if user and user.get("monthly_token_quota")
-                else None
-            )
+            token_limit = user.get("monthly_token_quota") * TOKEN_QUOTA_MULTIPLIER if user and user.get("monthly_token_quota") else None
             request_limit = user.get("monthly_request_quota") if user else None
         else:
-            token_limit = (
-                user.get("daily_token_quota") * TOKEN_QUOTA_MULTIPLIER
-                if user and user.get("daily_token_quota")
-                else None
-            )
+            token_limit = user.get("daily_token_quota") * TOKEN_QUOTA_MULTIPLIER if user and user.get("daily_token_quota") else None
             request_limit = user.get("daily_request_quota") if user else None
 
         # Default limits if not set
@@ -312,20 +306,13 @@ class QuotaManager:
             monthly_request_quota = user.get("monthly_request_quota")
             if monthly_token_quota or monthly_request_quota:
                 monthly_status = self.get_user_quota_status(user_id, period="monthly")
-                if (
-                    monthly_token_quota
-                    and monthly_status.tokens_used + tokens
-                    >= monthly_token_quota * TOKEN_QUOTA_MULTIPLIER
-                ):
+                if monthly_token_quota and monthly_status.tokens_used + tokens >= monthly_token_quota * TOKEN_QUOTA_MULTIPLIER:
                     return {
                         "allowed": False,
                         "reason": f"Monthly token quota exceeded. Used: {monthly_status.tokens_used}/{monthly_token_quota * TOKEN_QUOTA_MULTIPLIER}",
                         "status": monthly_status.to_dict(),
                     }
-                if (
-                    monthly_request_quota
-                    and monthly_status.requests_used + requests >= monthly_request_quota
-                ):
+                if monthly_request_quota and monthly_status.requests_used + requests >= monthly_request_quota:
                     return {
                         "allowed": False,
                         "reason": f"Monthly request quota exceeded. Used: {monthly_status.requests_used}/{monthly_request_quota}",
@@ -367,16 +354,11 @@ class QuotaManager:
             max_pct = max(status.token_percentage, status.request_percentage)
             if max_pct >= 80:
                 from app.modules.governance.alert_notifier import create_quota_alert
-
                 create_quota_alert(
                     user_id=user_id,
                     username=username,
                     usage_percent=max_pct,
-                    quota_type=(
-                        "tokens"
-                        if status.token_percentage >= status.request_percentage
-                        else "requests"
-                    ),
+                    quota_type="tokens" if status.token_percentage >= status.request_percentage else "requests",
                 )
         except Exception as e:
             logger.warning(f"Failed to push quota alert to notifier: {e}")
@@ -480,9 +462,7 @@ class QuotaManager:
 
         return start, end
 
-    def _get_usage_from_daily_stats(
-        self, user_id: int, start_date: str, end_date: str
-    ) -> dict[str, int]:
+    def _get_usage_from_daily_stats(self, user_id: int, start_date: str, end_date: str) -> dict[str, int]:
         """Get usage from pre-aggregated user_daily_stats table (fast path)."""
         result = self.db.fetch_one(
             """
@@ -607,13 +587,15 @@ class QuotaManager:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    adapt_sql("""
+                    adapt_sql(
+                        """
                     UPDATE quota_alerts
                     SET acknowledged = ?,
                         acknowledged_at = ?,
                         acknowledged_by = ?
                     WHERE id = ?
-                """),
+                """
+                    ),
                     (adapt_boolean_value(True), datetime.utcnow(), acknowledged_by, alert_id),
                 )
                 conn.commit()
@@ -647,7 +629,9 @@ class QuotaManager:
             WHERE user_id IN ({}) AND workspace_type = 'remote'
               AND CAST(created_at AS DATE) >= ? AND CAST(created_at AS DATE) <= ?
             GROUP BY user_id
-        """.format(",".join(["?"] * len(user_ids))),
+        """.format(
+                ",".join(["?"] * len(user_ids))
+            ),
             tuple(user_ids) + (start_date, end_date),
         )
 
@@ -679,7 +663,9 @@ class QuotaManager:
                   AND role = 'assistant'
                   AND (message_source IS NULL OR message_source != 'remote_workspace')
                 GROUP BY sender_name
-            """.format(" OR ".join(sender_conditions)),
+            """.format(
+                    " OR ".join(sender_conditions)
+                ),
                 tuple(sender_params) + (start_date, end_date),
             )
 
@@ -703,7 +689,9 @@ class QuotaManager:
             SELECT * FROM quota_alerts
             WHERE user_id IN ({})
             ORDER BY created_at DESC
-        """.format(",".join(["?"] * len(user_ids))),
+        """.format(
+                ",".join(["?"] * len(user_ids))
+            ),
             tuple(user_ids),
         )
 
@@ -749,17 +737,13 @@ class QuotaManager:
                 continue
 
             username = user.get("username", "")
-            token_limit = (
-                user.get("daily_token_quota") or 1
-            ) * TOKEN_QUOTA_MULTIPLIER  # Convert M units to actual tokens
+            token_limit = (user.get("daily_token_quota") or 1) * TOKEN_QUOTA_MULTIPLIER  # Convert M units to actual tokens
             request_limit = user.get("daily_request_quota") or 1000
 
             remote_usage = remote_usage_lookup.get(user_id, {"tokens": 0, "requests": 0})
             local_usage = local_usage_lookup.get(user_id, {"tokens": 0, "requests": 0})
             tokens_used = int(remote_usage.get("tokens", 0)) + int(local_usage.get("tokens", 0))
-            requests_used = int(remote_usage.get("requests", 0)) + int(
-                local_usage.get("requests", 0)
-            )
+            requests_used = int(remote_usage.get("requests", 0)) + int(local_usage.get("requests", 0))
 
             token_pct = (tokens_used / token_limit * 100) if token_limit > 0 else 0
             request_pct = (requests_used / request_limit * 100) if request_limit > 0 else 0
@@ -791,12 +775,14 @@ class QuotaManager:
         """Get all quota alerts."""
         if unacknowledged_only:
             rows = self.db.fetch_all(
-                adapt_sql(f"""
+                adapt_sql(
+                    f"""
                 SELECT * FROM quota_alerts
                 WHERE {adapt_boolean_condition('acknowledged', False)}
                 ORDER BY created_at DESC
                 LIMIT ?
-            """),
+            """
+                ),
                 (limit,),
             )
         else:
@@ -846,10 +832,12 @@ class QuotaManager:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    adapt_sql(f"""
+                    adapt_sql(
+                        f"""
                     DELETE FROM quota_alerts
                     WHERE {adapt_boolean_condition('acknowledged', True)} AND created_at < ?
-                """),
+                """
+                    ),
                     (cutoff,),
                 )
                 deleted = cursor.rowcount

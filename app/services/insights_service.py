@@ -9,7 +9,7 @@ Calls GLM-5 model (OpenAI-compatible API) to produce structured analysis.
 import json
 import logging
 import os
-from typing import Optional
+from typing import Dict, Optional, Tuple
 
 import requests
 
@@ -34,17 +34,17 @@ class InsightsService:
         self.message_repo = message_repo or MessageRepository()
         self.insights_repo = insights_repo or InsightsReportRepository()
 
-    def _load_config(self) -> dict:
+    def _load_config(self) -> Dict:
         """Load insights configuration from config.json."""
         config_path = os.path.join(CONFIG_DIR, "config.json")
         try:
-            with open(config_path) as f:
+            with open(config_path, "r") as f:
                 return json.load(f)
         except Exception as e:
             logger.warning(f"Could not load config.json: {e}")
             return {}
 
-    def _get_api_credentials(self, config: dict) -> tuple[str, str]:
+    def _get_api_credentials(self, config: Dict) -> Tuple[str, str]:
         """
         Get API credentials from config and environment.
 
@@ -71,7 +71,7 @@ class InsightsService:
 
     def generate_insights(
         self, user_id: int, start_date: str, end_date: str
-    ) -> tuple[Optional[dict], Optional[str]]:
+    ) -> Tuple[Optional[Dict], Optional[str]]:
         """
         Generate insights report for a user's conversations.
 
@@ -100,7 +100,9 @@ class InsightsService:
             return None, "Cannot determine user identity"
 
         # 3. Query statistics
-        stats = self.message_repo.get_user_messages_stats(start_date, end_date, sender_prefix)
+        stats = self.message_repo.get_user_messages_stats(
+            start_date, end_date, sender_prefix
+        )
 
         # 4. Check data volume
         if stats.get("total_messages", 0) < 5:
@@ -205,7 +207,7 @@ class InsightsService:
 - 建议包含可操作的示例
 - 使用中文输出"""
 
-    def _build_user_prompt(self, stats: dict, conversations: list) -> str:
+    def _build_user_prompt(self, stats: Dict, conversations: list) -> str:
         """Build the user prompt with conversation data."""
         stats_summary = f"""## 用户对话统计（分析周期内）
 
@@ -282,18 +284,13 @@ class InsightsService:
                     text = text[first_newline + 1 : last_backticks].strip()
         return text
 
-    def _parse_ai_response(self, response_text: str, stats: dict) -> dict:
+    def _parse_ai_response(self, response_text: str, stats: Dict) -> Dict:
         """Parse AI response into structured report data."""
         clean_text = self._extract_json(response_text)
         parsed = json.loads(clean_text)
 
         # Validate required fields
-        required_fields = [
-            "overall_score",
-            "overall_assessment",
-            "strengths",
-            "areas_for_improvement",
-        ]
+        required_fields = ["overall_score", "overall_assessment", "strengths", "areas_for_improvement"]
         for field in required_fields:
             if field not in parsed:
                 raise ValueError(f"Missing required field: {field}")
@@ -313,7 +310,7 @@ class InsightsService:
             "raw_response": response_text,
         }
 
-    def _format_report(self, report: dict) -> dict:
+    def _format_report(self, report: Dict) -> Dict:
         """Format a database report record for API response."""
         return {
             "id": report.get("id"),

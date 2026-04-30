@@ -7,7 +7,7 @@ accumulated per-turn and stored to the database as complete assistant messages.
 
 import json
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, PropertyMock
 
 
 class TestAssistantMessageAccumulation(unittest.TestCase):
@@ -20,7 +20,6 @@ class TestAssistantMessageAccumulation(unittest.TestCase):
 
         # Clear the class-level buffer before each test
         from app.modules.workspace.remote_session_manager import RemoteSessionManager
-
         RemoteSessionManager._assistant_text_buffer.clear()
 
         self.patcher_sm = patch(
@@ -39,7 +38,6 @@ class TestAssistantMessageAccumulation(unittest.TestCase):
         self.patcher_proxy.start()
 
         from app.modules.workspace.remote_session_manager import RemoteSessionManager
-
         self.manager = RemoteSessionManager()
 
     def tearDown(self):
@@ -55,32 +53,23 @@ class TestAssistantMessageAccumulation(unittest.TestCase):
     def _get_stored_assistant_messages(self):
         """Return all add_message calls with role='assistant'."""
         return [
-            call
-            for call in self.mock_session_mgr.add_message.call_args_list
-            if call.kwargs.get("role") == "assistant"
-            or (len(call.args) > 1 and call.args[1] == "assistant")
+            call for call in self.mock_session_mgr.add_message.call_args_list
+            if call.kwargs.get("role") == "assistant" or
+               (len(call.args) > 1 and call.args[1] == "assistant")
         ]
 
     # --- Tests ---
 
     def test_single_assistant_turn_accumulated_and_flushed(self):
         """Text from multiple assistant chunks is combined and stored on result."""
-        self._send_output(
-            json.dumps(
-                {
-                    "type": "assistant",
-                    "message": {"content": [{"type": "text", "text": "Hello"}]},
-                }
-            )
-        )
-        self._send_output(
-            json.dumps(
-                {
-                    "type": "assistant",
-                    "message": {"content": [{"type": "text", "text": " world"}]},
-                }
-            )
-        )
+        self._send_output(json.dumps({
+            "type": "assistant",
+            "message": {"content": [{"type": "text", "text": "Hello"}]},
+        }))
+        self._send_output(json.dumps({
+            "type": "assistant",
+            "message": {"content": [{"type": "text", "text": " world"}]},
+        }))
         # No message stored yet — still accumulating
         self.mock_session_mgr.add_message.assert_not_called()
 
@@ -95,31 +84,19 @@ class TestAssistantMessageAccumulation(unittest.TestCase):
 
     def test_tool_use_blocks_ignored(self):
         """tool_use and thinking blocks should not appear in stored text."""
-        self._send_output(
-            json.dumps(
-                {
-                    "type": "assistant",
-                    "message": {
-                        "content": [
-                            {"type": "text", "text": "Let me check "},
-                            {"type": "tool_use", "id": "tu1", "name": "read_file", "input": {}},
-                        ]
-                    },
-                }
-            )
-        )
-        self._send_output(
-            json.dumps(
-                {
-                    "type": "assistant",
-                    "message": {
-                        "content": [
-                            {"type": "text", "text": "the file."},
-                        ]
-                    },
-                }
-            )
-        )
+        self._send_output(json.dumps({
+            "type": "assistant",
+            "message": {"content": [
+                {"type": "text", "text": "Let me check "},
+                {"type": "tool_use", "id": "tu1", "name": "read_file", "input": {}},
+            ]},
+        }))
+        self._send_output(json.dumps({
+            "type": "assistant",
+            "message": {"content": [
+                {"type": "text", "text": "the file."},
+            ]},
+        }))
         self._send_output(json.dumps({"type": "result", "subtype": "success"}))
 
         msgs = self._get_stored_assistant_messages()
@@ -129,15 +106,11 @@ class TestAssistantMessageAccumulation(unittest.TestCase):
 
     def test_openai_message_format(self):
         """OpenAI-compatible message format is also accumulated."""
-        self._send_output(
-            json.dumps(
-                {
-                    "type": "message",
-                    "role": "assistant",
-                    "content": "OpenAI response text",
-                }
-            )
-        )
+        self._send_output(json.dumps({
+            "type": "message",
+            "role": "assistant",
+            "content": "OpenAI response text",
+        }))
         self._send_output(json.dumps({"type": "result", "subtype": "success"}))
 
         msgs = self._get_stored_assistant_messages()
@@ -147,14 +120,10 @@ class TestAssistantMessageAccumulation(unittest.TestCase):
 
     def test_is_complete_flushes_buffer(self):
         """is_complete=True also flushes accumulated text."""
-        self._send_output(
-            json.dumps(
-                {
-                    "type": "assistant",
-                    "message": {"content": [{"type": "text", "text": "Final output"}]},
-                }
-            )
-        )
+        self._send_output(json.dumps({
+            "type": "assistant",
+            "message": {"content": [{"type": "text", "text": "Final output"}]},
+        }))
         self._send_output("", is_complete=True)
 
         msgs = self._get_stored_assistant_messages()
@@ -165,25 +134,17 @@ class TestAssistantMessageAccumulation(unittest.TestCase):
     def test_multiple_turns(self):
         """Multiple turns produce separate assistant messages."""
         # Turn 1
-        self._send_output(
-            json.dumps(
-                {
-                    "type": "assistant",
-                    "message": {"content": [{"type": "text", "text": "First reply"}]},
-                }
-            )
-        )
+        self._send_output(json.dumps({
+            "type": "assistant",
+            "message": {"content": [{"type": "text", "text": "First reply"}]},
+        }))
         self._send_output(json.dumps({"type": "result", "subtype": "success"}))
 
         # Turn 2
-        self._send_output(
-            json.dumps(
-                {
-                    "type": "assistant",
-                    "message": {"content": [{"type": "text", "text": "Second reply"}]},
-                }
-            )
-        )
+        self._send_output(json.dumps({
+            "type": "assistant",
+            "message": {"content": [{"type": "text", "text": "Second reply"}]},
+        }))
         self._send_output(json.dumps({"type": "result", "subtype": "success"}))
 
         msgs = self._get_stored_assistant_messages()
@@ -219,16 +180,10 @@ class TestAssistantMessageAccumulation(unittest.TestCase):
     def test_empty_text_not_stored(self):
         """Empty accumulated text should not produce a DB record."""
         # Only tool_use blocks — no text
-        self._send_output(
-            json.dumps(
-                {
-                    "type": "assistant",
-                    "message": {
-                        "content": [{"type": "tool_use", "id": "tu1", "name": "bash", "input": {}}]
-                    },
-                }
-            )
-        )
+        self._send_output(json.dumps({
+            "type": "assistant",
+            "message": {"content": [{"type": "tool_use", "id": "tu1", "name": "bash", "input": {}}]},
+        }))
         self._send_output(json.dumps({"type": "result", "subtype": "success"}))
 
         msgs = self._get_stored_assistant_messages()

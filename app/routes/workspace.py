@@ -14,20 +14,9 @@ import logging
 
 from flask import Blueprint, g, jsonify, request
 
-from app.modules.workspace.collaboration import (
-    SharePermission,
-    get_collaboration_manager,
-)
-from app.modules.workspace.prompt_library import (
-    PromptCategory,
-    PromptTemplate,
-    get_prompt_library,
-)
-from app.modules.workspace.session_manager import (
-    SessionType,
-    _param,
-    get_session_manager,
-)
+from app.modules.workspace.collaboration import CollaborationManager, SharePermission
+from app.modules.workspace.prompt_library import PromptCategory, PromptLibrary, PromptTemplate
+from app.modules.workspace.session_manager import SessionManager, SessionType, _param
 from app.modules.workspace.state_sync import get_state_sync_manager
 from app.modules.workspace.tool_connector import get_tool_connector
 from app.services.auth_service import AuthService
@@ -59,7 +48,6 @@ def format_datetime(dt):
         return iso_str
     return dt
 
-
 workspace_bp = Blueprint("workspace", __name__)
 auth_service = AuthService()
 
@@ -88,13 +76,11 @@ def load_user():
         if url_token:
             try:
                 from app.services.webui_manager import WebUIManager
-
                 webui_manager = WebUIManager()
                 is_valid, user_id, error = webui_manager.validate_token(url_token)
                 if is_valid and user_id:
                     # Get user info from database
                     from app.repositories.user_repo import UserRepository
-
                     user_repo = UserRepository()
                     user = user_repo.get_user_by_id(user_id)
                     if user:
@@ -122,7 +108,7 @@ def load_user():
 def list_prompts():
     """List prompt templates."""
     try:
-        library = get_prompt_library()
+        library = PromptLibrary()
 
         category = request.args.get("category")
         search = request.args.get("search")
@@ -181,7 +167,7 @@ def create_prompt():
             is_public=data.get("is_public", False),
         )
 
-        library = get_prompt_library()
+        library = PromptLibrary()
         template_id = library.create_template(template)
 
         return jsonify({"success": True, "data": {"id": template_id}}), 201
@@ -194,7 +180,7 @@ def create_prompt():
 def get_prompt(template_id):
     """Get a prompt template."""
     try:
-        library = get_prompt_library()
+        library = PromptLibrary()
         template = library.get_template(template_id)
 
         if not template:
@@ -214,7 +200,7 @@ def update_prompt(template_id):
         if not data:
             return jsonify({"success": False, "error": "No data provided"}), 400
 
-        library = get_prompt_library()
+        library = PromptLibrary()
         template = library.get_template(template_id)
 
         if not template:
@@ -243,7 +229,7 @@ def delete_prompt(template_id):
     try:
         user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
 
-        library = get_prompt_library()
+        library = PromptLibrary()
         success = library.delete_template(template_id, user_id)
 
         if not success:
@@ -262,7 +248,7 @@ def render_prompt(template_id):
         data = request.get_json() or {}
         variables = data.get("variables", {})
 
-        library = get_prompt_library()
+        library = PromptLibrary()
         template = library.get_template(template_id)
 
         if not template:
@@ -294,7 +280,7 @@ def render_prompt(template_id):
 def get_prompt_categories():
     """Get prompt categories with counts."""
     try:
-        library = get_prompt_library()
+        library = PromptLibrary()
         categories = library.get_categories()
 
         return jsonify({"success": True, "data": categories})
@@ -308,7 +294,7 @@ def get_featured_prompts():
     """Get featured prompt templates."""
     try:
         limit = int(request.args.get("limit", 10))
-        library = get_prompt_library()
+        library = PromptLibrary()
         templates = library.get_featured_templates(limit)
 
         return jsonify({"success": True, "data": [t.to_dict() for t in templates]})
@@ -328,7 +314,7 @@ def list_sessions():
     enrichment from session_stats (historical message data from fetch).
     """
     try:
-        from app.repositories.database import Database, adapt_sql, is_postgresql
+        from app.repositories.database import Database, is_postgresql, adapt_sql
 
         db = Database()
 
@@ -351,12 +337,12 @@ def list_sessions():
 
         if tool_name:
             TOOL_NAME_ALIASES = {
-                "qwen": ["qwen", "qwen-code", "qwen-code-cli"],
-                "claude": ["claude", "claude-code"],
-                "openclaw": ["openclaw"],
+                'qwen': ['qwen', 'qwen-code', 'qwen-code-cli'],
+                'claude': ['claude', 'claude-code'],
+                'openclaw': ['openclaw'],
             }
             aliases = TOOL_NAME_ALIASES.get(tool_name, [tool_name])
-            placeholders = ",".join(["?" for _ in aliases])
+            placeholders = ','.join(['?' for _ in aliases])
             conditions.append(f"tool_name IN ({placeholders})")
             params.extend(aliases)
 
@@ -425,13 +411,13 @@ def list_sessions():
             )
 
         # Enrich remote sessions with machine names
-        remote_machine_ids = list(
-            {s["remote_machine_id"] for s in formatted_sessions if s.get("remote_machine_id")}
-        )
+        remote_machine_ids = list(set(
+            s["remote_machine_id"] for s in formatted_sessions
+            if s.get("remote_machine_id")
+        ))
         if remote_machine_ids:
             try:
                 from app.repositories.database import get_param_placeholder
-
                 p = get_param_placeholder()
                 machine_name_map = {}
                 if is_postgresql():
@@ -488,7 +474,6 @@ def create_session():
         if project_path and not project_id:
             try:
                 from app.repositories.project_repo import ProjectRepository
-
                 project_repo = ProjectRepository()
                 project = project_repo.get_project_by_path(project_path)
                 if project:
@@ -499,7 +484,7 @@ def create_session():
             except Exception as e:
                 logger.warning(f"Failed to look up project by path: {e}")
 
-        manager = get_session_manager()
+        manager = SessionManager()
         session = manager.create_session(
             tool_name=tool_name,
             user_id=user_id,
@@ -528,14 +513,14 @@ def get_session(session_id):
         include_messages = request.args.get("include_messages", "false").lower() == "true"
 
         # First try to get from SessionManager (agent_sessions table)
-        manager = get_session_manager()
+        manager = SessionManager()
         session = manager.get_session(session_id, include_messages=include_messages)
 
         if session:
             # Calculate request_count from messages if available
             if include_messages and session.messages:
                 session.request_count = sum(
-                    1 for m in session.messages if m.role in ("assistant", "toolResult")
+                    1 for m in session.messages if m.role in ('assistant', 'toolResult')
                 )
             else:
                 # Query request_count from session_messages table
@@ -548,22 +533,21 @@ def get_session(session_id):
                     WHERE session_id = {_param()}
                     AND role IN ('assistant', 'toolResult')
                     """,
-                    (session_id,),
+                    (session_id,)
                 )
                 row = cursor.fetchone()
-                session.request_count = row["request_count"] if row else 0
+                session.request_count = row['request_count'] if row else 0
                 conn.close()
             return jsonify({"success": True, "data": session.to_dict()})
 
         # If not found in agent_sessions, try to get from daily_messages
-        from scripts.shared.db import _execute, get_connection
+        from scripts.shared.db import get_connection, _execute
 
         conn = get_connection()
         cursor = conn.cursor()
 
         # Get session info from daily_messages
         from app.repositories.database import get_param_placeholder
-
         p = get_param_placeholder()
         session_query = f"""
             SELECT
@@ -666,7 +650,7 @@ def get_session(session_id):
 def complete_session(session_id):
     """Mark a session as completed."""
     try:
-        manager = get_session_manager()
+        manager = SessionManager()
         success = manager.complete_session(session_id)
 
         if not success:
@@ -682,7 +666,7 @@ def complete_session(session_id):
 def delete_session(session_id):
     """Delete a session."""
     try:
-        manager = get_session_manager()
+        manager = SessionManager()
         success = manager.delete_session(session_id)
 
         if not success:
@@ -709,8 +693,8 @@ def restore_session(session_id):
         - url: The workspace URL to access this session
     """
     try:
+        from scripts.shared.db import get_connection, _execute
         from app.repositories.database import get_param_placeholder
-        from scripts.shared.db import _execute, get_connection
 
         # Get session info from agent_sessions table (now contains all sessions)
         conn = get_connection()
@@ -765,15 +749,10 @@ def restore_session(session_id):
             encoded_project_name = project_path
 
         if not encoded_project_name:
-            return (
-                jsonify(
-                    {
-                        "success": False,
-                        "error": "Project path not found. Cannot restore session without project information.",
-                    }
-                ),
-                404,
-            )
+            return jsonify({
+                "success": False,
+                "error": "Project path not found. Cannot restore session without project information."
+            }), 404
 
         # Build workspace URL with sessionId, encodedProjectName, and toolName
         workspace_url = f"/work/workspace?sessionId={session_id}&encodedProjectName={encoded_project_name}&toolName={tool_name}"
@@ -784,12 +763,9 @@ def restore_session(session_id):
             # Look up machine name
             try:
                 from app.repositories.database import Database, get_param_placeholder
-
                 db = Database()
                 p2 = get_param_placeholder()
-                machine_query = (
-                    f"SELECT machine_name FROM remote_machines WHERE machine_id = {p2} LIMIT 1"
-                )
+                machine_query = f"SELECT machine_name FROM remote_machines WHERE machine_id = {p2} LIMIT 1"
                 machine_row = db.fetch_one(machine_query, [remote_machine_id])
                 if machine_row:
                     machine_name = machine_row["machine_name"]
@@ -800,9 +776,7 @@ def restore_session(session_id):
             if machine_name:
                 workspace_url += f"&machineName={machine_name}"
 
-        logger.info(
-            f"Restored session {session_id} (tool={tool_name}, project={encoded_project_name}, type={workspace_type})"
-        )
+        logger.info(f"Restored session {session_id} (tool={tool_name}, project={encoded_project_name}, type={workspace_type})")
 
         result = {
             "session_id": session_id,
@@ -815,12 +789,10 @@ def restore_session(session_id):
             result["remote_machine_id"] = remote_machine_id
             result["machine_name"] = machine_name
 
-        return jsonify(
-            {
-                "success": True,
-                "data": result,
-            }
-        )
+        return jsonify({
+            "success": True,
+            "data": result,
+        })
     except Exception as e:
         logger.error(f"Error restoring session: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -842,7 +814,7 @@ def rename_session(session_id):
         if not new_name:
             return jsonify({"success": False, "error": "Session name cannot be empty"}), 400
 
-        manager = get_session_manager()
+        manager = SessionManager()
         session = manager.get_session(session_id)
 
         if not session:
@@ -866,7 +838,7 @@ def get_session_stats():
     try:
         user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
 
-        manager = get_session_manager()
+        manager = SessionManager()
         stats = manager.get_session_stats(user_id)
 
         return jsonify({"success": True, "data": stats})
@@ -986,7 +958,7 @@ def list_teams():
         if not user_id:
             return jsonify({"success": False, "error": "Authentication required"}), 401
 
-        manager = get_collaboration_manager()
+        manager = CollaborationManager()
         teams = manager.list_user_teams(user_id)
 
         return jsonify({"success": True, "data": [t.to_dict() for t in teams]})
@@ -1011,7 +983,7 @@ def create_team():
         if not name:
             return jsonify({"success": False, "error": "name is required"}), 400
 
-        manager = get_collaboration_manager()
+        manager = CollaborationManager()
         team = manager.create_team(
             name=name,
             owner_id=user_id,
@@ -1033,7 +1005,7 @@ def list_shares():
         if not user_id:
             return jsonify({"success": False, "error": "Authentication required"}), 401
 
-        manager = get_collaboration_manager()
+        manager = CollaborationManager()
         shares = manager.get_user_shared_sessions(user_id)
 
         return jsonify({"success": True, "data": [s.to_dict() for s in shares]})
@@ -1060,7 +1032,7 @@ def create_share():
         if not session_id:
             return jsonify({"success": False, "error": "session_id is required"}), 400
 
-        manager = get_collaboration_manager()
+        manager = CollaborationManager()
         share = manager.share_session(
             session_id=session_id,
             shared_by=user_id,
@@ -1086,7 +1058,7 @@ def revoke_share(share_id):
     try:
         user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
 
-        manager = get_collaboration_manager()
+        manager = CollaborationManager()
         success = manager.revoke_share(share_id, user_id)
 
         if not success:
@@ -1106,7 +1078,7 @@ def get_annotations():
         if not session_id:
             return jsonify({"success": False, "error": "session_id is required"}), 400
 
-        manager = get_collaboration_manager()
+        manager = CollaborationManager()
         annotations = manager.get_session_annotations(session_id)
 
         return jsonify({"success": True, "data": [a.to_dict() for a in annotations]})
@@ -1135,7 +1107,7 @@ def create_annotation():
         if not session_id or not content:
             return jsonify({"success": False, "error": "session_id and content are required"}), 400
 
-        manager = get_collaboration_manager()
+        manager = CollaborationManager()
         annotation = manager.add_annotation(
             session_id=session_id,
             user_id=user_id,
@@ -1160,7 +1132,7 @@ def create_annotation():
 def list_knowledge():
     """List knowledge base entries."""
     try:
-        manager = get_collaboration_manager()
+        manager = CollaborationManager()
 
         team_id = request.args.get("team_id")
         category = request.args.get("category")
@@ -1208,7 +1180,7 @@ def create_knowledge():
         if not title or not content:
             return jsonify({"success": False, "error": "title and content are required"}), 400
 
-        manager = get_collaboration_manager()
+        manager = CollaborationManager()
         entry = manager.create_knowledge_entry(
             title=title,
             content=content,
@@ -1230,7 +1202,7 @@ def create_knowledge():
 def get_knowledge(entry_id):
     """Get a knowledge base entry."""
     try:
-        manager = get_collaboration_manager()
+        manager = CollaborationManager()
         entry = manager.get_knowledge_entry(entry_id)
 
         if not entry:
@@ -1267,7 +1239,7 @@ def get_workspace_config():
         }
 
         if os.path.exists(config_path):
-            with open(config_path) as f:
+            with open(config_path, "r") as f:
                 config = json.load(f)
                 workspace = config.get("workspace", {})
                 workspace_config["enabled"] = workspace.get("enabled", False)
@@ -1297,8 +1269,8 @@ def get_user_webui_url():
     Returns:
         JSON with url and token fields.
     """
-    from app.repositories.user_repo import UserRepository
     from app.services.webui_manager import get_webui_manager
+    from app.repositories.user_repo import UserRepository
 
     # Check if user is logged in
     if not hasattr(g, "user") or not g.user:
@@ -1327,43 +1299,30 @@ def get_user_webui_url():
         # Build Open-ACE API URL for iframe integration
         # This is needed so qwen-code-webui can call Open-ACE APIs
         from flask import request as flask_request
+        openace_url = flask_request.host_url.rstrip('/')
 
-        openace_url = flask_request.host_url.rstrip("/")
-
-        return jsonify(
-            {
-                "success": True,
-                "url": url,
-                "token": token,
-                "system_account": system_account,
-                "multi_user_mode": manager.config.multi_user_mode,
-                "openace_url": openace_url,
-            }
-        )
+        return jsonify({
+            "success": True,
+            "url": url,
+            "token": token,
+            "system_account": system_account,
+            "multi_user_mode": manager.config.multi_user_mode,
+            "openace_url": openace_url,
+        })
 
     except ValueError as e:
         logger.error(f"Error getting user webui URL: {e}")
-        return (
-            jsonify(
-                {
-                    "success": False,
-                    "error": str(e),
-                }
-            ),
-            503,
-        )  # Service Unavailable (e.g., max instances reached)
+        return jsonify({
+            "success": False,
+            "error": str(e),
+        }), 503  # Service Unavailable (e.g., max instances reached)
 
     except Exception as e:
         logger.error(f"Error getting user webui URL: {e}")
-        return (
-            jsonify(
-                {
-                    "success": False,
-                    "error": str(e),
-                }
-            ),
-            500,
-        )
+        return jsonify({
+            "success": False,
+            "error": str(e),
+        }), 500
 
 
 @workspace_bp.route("/instances", methods=["GET"])
@@ -1382,14 +1341,12 @@ def list_webui_instances():
         manager = get_webui_manager()
         instances = manager.get_all_instances()
 
-        return jsonify(
-            {
-                "success": True,
-                "instances": instances,
-                "active_count": manager.get_instance_count(),
-                "max_instances": manager.config.max_instances,
-            }
-        )
+        return jsonify({
+            "success": True,
+            "instances": instances,
+            "active_count": manager.get_instance_count(),
+            "max_instances": manager.config.max_instances,
+        })
 
     except Exception as e:
         logger.error(f"Error listing webui instances: {e}")
@@ -1412,12 +1369,10 @@ def stop_user_webui_instance(user_id):
         manager = get_webui_manager()
         manager.stop_user_webui(user_id)
 
-        return jsonify(
-            {
-                "success": True,
-                "message": f"Stopped webui instance for user {user_id}",
-            }
-        )
+        return jsonify({
+            "success": True,
+            "message": f"Stopped webui instance for user {user_id}",
+        })
 
     except Exception as e:
         logger.error(f"Error stopping webui instance: {e}")
@@ -1440,12 +1395,10 @@ def stop_all_webui_instances():
         manager = get_webui_manager()
         manager.stop_all_instances()
 
-        return jsonify(
-            {
-                "success": True,
-                "message": "All webui instances stopped",
-            }
-        )
+        return jsonify({
+            "success": True,
+            "message": "All webui instances stopped",
+        })
 
     except Exception as e:
         logger.error(f"Error stopping all webui instances: {e}")
@@ -1459,7 +1412,6 @@ def stop_all_webui_instances():
 def get_workspace_status():
     """Get workspace status including today's token and request usage for current user."""
     from datetime import datetime
-
     from app.repositories.usage_repo import UsageRepository
     from app.repositories.user_repo import UserRepository
 

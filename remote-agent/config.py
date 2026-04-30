@@ -10,10 +10,11 @@ Environment variables take precedence over the config file.
 import json
 import logging
 import os
+import platform
 import socket
 import uuid
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ class AgentConfig:
 
     def __init__(self, config_path: Optional[str] = None):
         self._config_path = Path(config_path) if config_path else CONFIG_FILE
-        self._data: dict[str, Any] = {}
+        self._data: Dict[str, Any] = {}
         self._load()
 
     def _load(self) -> None:
@@ -55,7 +56,7 @@ class AgentConfig:
         # Load config file if it exists
         if self._config_path.exists():
             try:
-                with open(self._config_path) as f:
+                with open(self._config_path, "r") as f:
                     file_config = json.load(f)
                 self._data.update(file_config)
                 logger.info("Loaded config from %s", self._config_path)
@@ -215,11 +216,11 @@ class AgentConfig:
         except OSError as e:
             logger.warning("Failed to create config directory: %s", e)
 
-    def update(self, values: dict[str, Any]) -> None:
+    def update(self, values: Dict[str, Any]) -> None:
         """Update multiple config values at once."""
         self._data.update(values)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> Dict[str, Any]:
         """Return a copy of the current configuration."""
         return dict(self._data)
 

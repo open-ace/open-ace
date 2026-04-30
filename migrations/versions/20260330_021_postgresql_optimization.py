@@ -22,11 +22,10 @@ Expected benefits:
 
 """
 
-import contextlib
 from typing import Union
 
-import sqlalchemy as sa
 from alembic import op
+import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "021_postgresql_optimization"
@@ -39,12 +38,14 @@ def _column_exists(conn, table_name: str, column_name: str) -> bool:
     """Check if a column exists in a table."""
     if conn.dialect.name == "postgresql":
         result = conn.execute(
-            sa.text("""
+            sa.text(
+                """
                 SELECT EXISTS (
                     SELECT FROM information_schema.columns
                     WHERE table_name = :table_name AND column_name = :column_name
                 )
-                """),
+                """
+            ),
             {"table_name": table_name, "column_name": column_name},
         )
         return result.fetchone()[0]
@@ -76,13 +77,15 @@ def _constraint_exists(conn, table_name: str, constraint_name: str) -> bool:
     if conn.dialect.name == "postgresql":
         # Use string formatting for regclass cast, as parameter binding doesn't work with type casts
         result = conn.execute(
-            sa.text(f"""
+            sa.text(
+                f"""
                 SELECT EXISTS (
                     SELECT FROM pg_constraint
                     WHERE conname = :constraint_name
                     AND conrelid = '{table_name}'::regclass
                 )
-                """),
+                """
+            ),
             {"constraint_name": constraint_name},
         )
         return result.fetchone()[0]
@@ -211,12 +214,16 @@ def upgrade() -> None:
 
     if _column_exists(conn, "daily_messages", "role"):
         # Skip if role is already message_role
-        result = conn.execute(sa.text("""
+        result = conn.execute(
+            sa.text(
+                """
                 SELECT data_type FROM information_schema.columns
                 WHERE table_name = 'daily_messages' AND column_name = 'role'
-                """))
+                """
+            )
+        )
         data_type = result.fetchone()
-        if not data_type or data_type[0] != "message_role":
+        if not data_type or data_type[0] != 'message_role':
             op.execute("""
                 ALTER TABLE daily_messages
                 ALTER COLUMN role TYPE message_role
@@ -238,22 +245,24 @@ def upgrade() -> None:
             END
         """)
         # Set new default
-        op.execute(
-            "ALTER TABLE audit_logs ALTER COLUMN severity SET DEFAULT 'info'::audit_severity"
-        )
+        op.execute("ALTER TABLE audit_logs ALTER COLUMN severity SET DEFAULT 'info'::audit_severity")
 
     # ============================================
     # 2. Convert JSON fields to JSONB
     # ============================================
     if _column_exists(conn, "tenants", "quota"):
         # Check if already JSONB
-        result = conn.execute(sa.text("""
+        result = conn.execute(
+            sa.text(
+                """
                 SELECT data_type FROM information_schema.columns
                 WHERE table_name = 'tenants' AND column_name = 'quota'
-                """))
+                """
+            )
+        )
         data_type = result.fetchone()
-        if data_type and data_type[0] not in ("jsonb", "JSONB"):
-            op.execute(r"""
+        if data_type and data_type[0] not in ('jsonb', 'JSONB'):
+            op.execute("""
                 ALTER TABLE tenants
                 ALTER COLUMN quota TYPE JSONB
                 USING CASE
@@ -264,13 +273,17 @@ def upgrade() -> None:
             """)
 
     if _column_exists(conn, "tenants", "settings"):
-        result = conn.execute(sa.text("""
+        result = conn.execute(
+            sa.text(
+                """
                 SELECT data_type FROM information_schema.columns
                 WHERE table_name = 'tenants' AND column_name = 'settings'
-                """))
+                """
+            )
+        )
         data_type = result.fetchone()
-        if data_type and data_type[0] not in ("jsonb", "JSONB"):
-            op.execute(r"""
+        if data_type and data_type[0] not in ('jsonb', 'JSONB'):
+            op.execute("""
                 ALTER TABLE tenants
                 ALTER COLUMN settings TYPE JSONB
                 USING CASE
@@ -294,25 +307,25 @@ def upgrade() -> None:
     # Now that role is converted to message_role ENUM
     if not _index_exists(conn, "daily_messages", "idx_messages_sender_date_role_covering"):
         op.execute("""
-            CREATE INDEX idx_messages_sender_date_role_covering ON daily_messages
-            USING btree (sender_id, date, role)
-            INCLUDE (tokens_used)
+            CREATE INDEX idx_messages_sender_date_role_covering ON daily_messages 
+            USING btree (sender_id, date, role) 
+            INCLUDE (tokens_used) 
             WHERE ((sender_id IS NOT NULL) AND (role = 'assistant'::message_role))
         """)
 
     if not _index_exists(conn, "daily_messages", "idx_messages_session_list_covering"):
         op.execute("""
-            CREATE INDEX idx_messages_session_list_covering ON daily_messages
-            USING btree (agent_session_id, tool_name, host_name, sender_name)
-            INCLUDE (timestamp, tokens_used, input_tokens, output_tokens, sender_id, date)
+            CREATE INDEX idx_messages_session_list_covering ON daily_messages 
+            USING btree (agent_session_id, tool_name, host_name, sender_name) 
+            INCLUDE (timestamp, tokens_used, input_tokens, output_tokens, sender_id, date) 
             WHERE (agent_session_id IS NOT NULL)
         """)
 
     if not _index_exists(conn, "daily_messages", "idx_messages_usage_trend_covering"):
         op.execute("""
-            CREATE INDEX idx_messages_usage_trend_covering ON daily_messages
-            USING btree (date, role, sender_name)
-            INCLUDE (tokens_used)
+            CREATE INDEX idx_messages_usage_trend_covering ON daily_messages 
+            USING btree (date, role, sender_name) 
+            INCLUDE (tokens_used) 
             WHERE (role = 'assistant'::message_role)
         """)
 
@@ -351,7 +364,7 @@ def upgrade() -> None:
     """)
 
     # Apply trigger to tables with updated_at column
-    for table in ["tenants", "tenant_usage", "quota_usage", "tenant_quotas", "tenant_settings"]:
+    for table in ['tenants', 'tenant_usage', 'quota_usage', 'tenant_quotas', 'tenant_settings']:
         if _column_exists(conn, table, "updated_at"):
             trigger_name = f"{table}_updated_at_trigger"
             # Drop existing trigger if exists
@@ -514,7 +527,7 @@ def downgrade() -> None:
     # ============================================
     # 4. Drop triggers
     # ============================================
-    for table in ["tenants", "tenant_usage", "quota_usage", "tenant_quotas", "tenant_settings"]:
+    for table in ['tenants', 'tenant_usage', 'quota_usage', 'tenant_quotas', 'tenant_settings']:
         trigger_name = f"{table}_updated_at_trigger"
         op.execute(f"DROP TRIGGER IF EXISTS {trigger_name} ON {table}")
 
@@ -537,12 +550,16 @@ def downgrade() -> None:
     # 2. Convert JSONB back to TEXT
     # ============================================
     if _column_exists(conn, "tenants", "quota"):
-        result = conn.execute(sa.text("""
+        result = conn.execute(
+            sa.text(
+                """
                 SELECT data_type FROM information_schema.columns
                 WHERE table_name = 'tenants' AND column_name = 'quota'
-                """))
+                """
+            )
+        )
         data_type = result.fetchone()
-        if data_type and data_type[0] in ("jsonb", "JSONB"):
+        if data_type and data_type[0] in ('jsonb', 'JSONB'):
             op.execute("""
                 ALTER TABLE tenants
                 ALTER COLUMN quota TYPE TEXT
@@ -550,12 +567,16 @@ def downgrade() -> None:
             """)
 
     if _column_exists(conn, "tenants", "settings"):
-        result = conn.execute(sa.text("""
+        result = conn.execute(
+            sa.text(
+                """
                 SELECT data_type FROM information_schema.columns
                 WHERE table_name = 'tenants' AND column_name = 'settings'
-                """))
+                """
+            )
+        )
         data_type = result.fetchone()
-        if data_type and data_type[0] in ("jsonb", "JSONB"):
+        if data_type and data_type[0] in ('jsonb', 'JSONB'):
             op.execute("""
                 ALTER TABLE tenants
                 ALTER COLUMN settings TYPE TEXT
@@ -635,25 +656,25 @@ def downgrade() -> None:
     # Recreate indexes that were dropped at the beginning
     if not _index_exists(conn, "daily_messages", "idx_messages_sender_date_role_covering"):
         op.execute("""
-            CREATE INDEX idx_messages_sender_date_role_covering ON daily_messages
-            USING btree (sender_id, date, role)
-            INCLUDE (tokens_used)
+            CREATE INDEX idx_messages_sender_date_role_covering ON daily_messages 
+            USING btree (sender_id, date, role) 
+            INCLUDE (tokens_used) 
             WHERE ((sender_id IS NOT NULL) AND (role = 'assistant'))
         """)
 
     if not _index_exists(conn, "daily_messages", "idx_messages_session_list_covering"):
         op.execute("""
-            CREATE INDEX idx_messages_session_list_covering ON daily_messages
-            USING btree (agent_session_id, tool_name, host_name, sender_name)
-            INCLUDE (timestamp, tokens_used, input_tokens, output_tokens, sender_id, date)
+            CREATE INDEX idx_messages_session_list_covering ON daily_messages 
+            USING btree (agent_session_id, tool_name, host_name, sender_name) 
+            INCLUDE (timestamp, tokens_used, input_tokens, output_tokens, sender_id, date) 
             WHERE (agent_session_id IS NOT NULL)
         """)
 
     if not _index_exists(conn, "daily_messages", "idx_messages_usage_trend_covering"):
         op.execute("""
-            CREATE INDEX idx_messages_usage_trend_covering ON daily_messages
-            USING btree (date, role, sender_name)
-            INCLUDE (tokens_used)
+            CREATE INDEX idx_messages_usage_trend_covering ON daily_messages 
+            USING btree (date, role, sender_name) 
+            INCLUDE (tokens_used) 
             WHERE (role = 'assistant')
         """)
 
@@ -670,7 +691,9 @@ def _downgrade_sqlite_indexes(conn) -> None:
     ]
 
     for index_name in fk_indexes:
-        with contextlib.suppress(Exception):
+        try:
             conn.execute(sa.text(f"DROP INDEX IF EXISTS {index_name}"))
+        except Exception:
+            pass
 
     conn.commit()
