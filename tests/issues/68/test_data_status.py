@@ -14,10 +14,11 @@ UI 测试: Issue 68 - Data Status 远程机器状态检查功能
 5. 验证远程机器状态更新
 """
 
-import pytest
-import sys
 import os
+import sys
 import time
+
+import pytest
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))

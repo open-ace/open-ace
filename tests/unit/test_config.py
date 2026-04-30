@@ -3,9 +3,10 @@
 Unit tests for config.py module.
 """
 
-import pytest
 import os
 import sys
+
+import pytest
 
 # Add scripts/shared to path for imports
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

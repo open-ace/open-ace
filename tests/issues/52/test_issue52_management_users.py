@@ -10,10 +10,11 @@ UI Test for Issue 52: Management页面Users tab增加Linux Account功能
 5. 测试密码重置功能
 """
 
-import pytest
-import sys
 import os
+import sys
 import time
+
+import pytest
 
 # Add skill scripts directory to path
 skill_dir = os.path.dirname(os.path.abspath(__file__))

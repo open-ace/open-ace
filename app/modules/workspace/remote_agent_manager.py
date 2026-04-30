@@ -17,7 +17,7 @@ from contextlib import suppress
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional, Union
 
-from app.repositories.database import DB_PATH, Database, is_postgresql, get_database_url
+from app.repositories.database import DB_PATH, Database, get_database_url, is_postgresql
 
 logger = logging.getLogger(__name__)
 

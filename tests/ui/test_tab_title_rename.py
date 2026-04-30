@@ -10,8 +10,8 @@ Tests the tab title default value and rename functionality in Workspace:
 5. Verify title is updated
 """
 
-import sys
 import os
+import sys
 import time
 
 # Add skill scripts to path
@@ -21,7 +21,7 @@ if os.path.exists(skill_dir):
     sys.path.insert(0, skill_dir)
 
 try:
-    from playwright.sync_api import sync_playwright, expect
+    from playwright.sync_api import expect, sync_playwright
 except ImportError:
     print(
         "Error: playwright not installed. Run: pip install playwright && playwright install chromium"

@@ -11,8 +11,8 @@ Tests the complete tab notification flow with multiple tabs:
 6. Verify badge color is blue for all notification types
 """
 
-import sys
 import os
+import sys
 import time
 
 # Add skill scripts to path

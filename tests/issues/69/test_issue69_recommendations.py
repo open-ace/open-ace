@@ -12,8 +12,9 @@ Usage:
     python3 tests/ui/test_issue69_recommendations.py
 """
 
-import pytest
 import time
+
+import pytest
 from playwright.async_api import async_playwright, expect
 
 # Test configuration

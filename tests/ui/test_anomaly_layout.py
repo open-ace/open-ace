@@ -11,15 +11,16 @@ Usage:
     python3 tests/ui/test_anomaly_layout.py
 """
 
-import sys
 import os
+import sys
 
 # Add the project root to the path
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, project_root)
 
-from playwright.sync_api import sync_playwright
 import time
+
+from playwright.sync_api import sync_playwright
 
 # Test configuration
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000/")

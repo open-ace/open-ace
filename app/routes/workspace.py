@@ -331,7 +331,7 @@ def list_sessions():
     enrichment from session_stats (historical message data from fetch).
     """
     try:
-        from app.repositories.database import Database, is_postgresql, adapt_sql
+        from app.repositories.database import Database, adapt_sql, is_postgresql
 
         db = Database()
 
@@ -559,7 +559,7 @@ def get_session(session_id):
             return jsonify({"success": True, "data": session.to_dict()})
 
         # If not found in agent_sessions, try to get from daily_messages
-        from scripts.shared.db import get_connection, _execute
+        from scripts.shared.db import _execute, get_connection
 
         conn = get_connection()
         cursor = conn.cursor()
@@ -712,8 +712,8 @@ def restore_session(session_id):
         - url: The workspace URL to access this session
     """
     try:
-        from scripts.shared.db import get_connection, _execute
         from app.repositories.database import get_param_placeholder
+        from scripts.shared.db import _execute, get_connection
 
         # Get session info from agent_sessions table (now contains all sessions)
         conn = get_connection()
@@ -1300,8 +1300,8 @@ def get_user_webui_url():
     Returns:
         JSON with url and token fields.
     """
-    from app.services.webui_manager import get_webui_manager
     from app.repositories.user_repo import UserRepository
+    from app.services.webui_manager import get_webui_manager
 
     # Check if user is logged in
     if not hasattr(g, "user") or not g.user:
@@ -1462,6 +1462,7 @@ def stop_all_webui_instances():
 def get_workspace_status():
     """Get workspace status including today's token and request usage for current user."""
     from datetime import datetime
+
     from app.repositories.usage_repo import UsageRepository
     from app.repositories.user_repo import UserRepository
 

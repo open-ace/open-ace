@@ -11,11 +11,12 @@ UI Test: User Management - Enter key to save user
 6. 验证对话框关闭（保存成功）
 """
 
-import pytest
-import sys
 import os
-import time
 import random
+import sys
+import time
+
+import pytest
 
 # Add skill scripts directory to path
 skill_dir = os.path.dirname(os.path.abspath(__file__))

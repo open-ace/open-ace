@@ -3,9 +3,9 @@
 Test script to measure optimized query performance for trend analysis.
 """
 
-import time
-import sys
 import os
+import sys
+import time
 
 # Add project root to path
 sys.path.insert(
@@ -13,7 +13,7 @@ sys.path.insert(
 )
 
 from app.services.analysis_service import AnalysisService
-from app.utils.helpers import get_today, get_days_ago
+from app.utils.helpers import get_days_ago, get_today
 
 
 def main():

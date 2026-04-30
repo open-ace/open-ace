@@ -11,10 +11,10 @@ Tests the tab notification feature in Workspace:
 6. Verify clicking tab clears notification
 """
 
-import sys
-import os
-import time
 import json
+import os
+import sys
+import time
 
 # Add skill scripts to path
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -23,7 +23,7 @@ if os.path.exists(skill_dir):
     sys.path.insert(0, skill_dir)
 
 try:
-    from playwright.sync_api import sync_playwright, expect
+    from playwright.sync_api import expect, sync_playwright
 except ImportError:
     print(
         "Error: playwright not installed. Run: pip install playwright && playwright install chromium"

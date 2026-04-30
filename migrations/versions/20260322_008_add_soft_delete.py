@@ -15,8 +15,8 @@ Soft delete allows recovery of accidentally deleted data.
 
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "008_add_soft_delete"

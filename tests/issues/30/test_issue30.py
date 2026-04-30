@@ -2,10 +2,11 @@
 测试 Issue 30: 验证工具标签显示逻辑
 """
 
-import pytest
 import asyncio
-from playwright.async_api import async_playwright
 import os
+
+import pytest
+from playwright.async_api import async_playwright
 
 BASE_URL = "http://127.0.0.1:5000"
 USERNAME = "admin"

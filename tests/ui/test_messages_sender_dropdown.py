@@ -7,8 +7,9 @@ This test verifies that:
 2. Sender dropdown is not covered by message cards when expanded
 """
 
-import pytest
 import time
+
+import pytest
 from playwright.async_api import async_playwright, expect
 
 # Test configuration

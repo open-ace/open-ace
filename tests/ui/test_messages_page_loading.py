@@ -8,8 +8,9 @@ This test verifies that:
 [Commented out] 3. Manual refresh button works correctly
 """
 
-import pytest
 import time
+
+import pytest
 from playwright.async_api import async_playwright, expect
 
 # Test configuration

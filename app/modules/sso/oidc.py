@@ -210,9 +210,9 @@ class OIDCProvider(OAuth2Provider):
         Returns:
             str: Public key in PEM format.
         """
+        from cryptography.hazmat.backends import default_backend
         from cryptography.hazmat.primitives import serialization
         from cryptography.hazmat.primitives.asymmetric import rsa
-        from cryptography.hazmat.backends import default_backend
 
         # Extract RSA components
         n = int.from_bytes(base64.urlsafe_b64decode(jwk["n"] + "=="), byteorder="big")

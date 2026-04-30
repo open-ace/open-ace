@@ -11,10 +11,11 @@ UI Test for Issue 53: Management页面User Management的Add User按钮点不了
 6. 检查模态框中的表单字段是否完整
 """
 
-import pytest
-import sys
 import os
+import sys
 import time
+
+import pytest
 
 # Add skill scripts directory to path
 skill_dir = os.path.dirname(os.path.abspath(__file__))

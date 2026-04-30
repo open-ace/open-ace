@@ -6,12 +6,13 @@ IMPORTANT: All database tests use isolated temporary databases.
 NO test data should ever be written to the production database.
 """
 
-import pytest
 import asyncio
-import tempfile
 import os
-import sys
 import sqlite3
+import sys
+import tempfile
+
+import pytest
 
 # Add scripts/shared to path for imports
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -51,6 +52,7 @@ def isolated_db(tmp_path):
 
     # Import db module and override its paths
     import db as db_module
+
     import config as config_module
 
     # Store original values

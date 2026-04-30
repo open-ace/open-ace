@@ -3,8 +3,9 @@
 验证下拉列表文字是否可见
 """
 
-from playwright.sync_api import sync_playwright, expect, Page
 import time
+
+from playwright.sync_api import Page, expect, sync_playwright
 
 BASE_URL = "http://localhost:5000/"
 USERNAME = "admin"

@@ -38,9 +38,9 @@ def oidc_config():
 @pytest.fixture
 def rsa_key_pair():
     """Generate RSA key pair for testing."""
+    from cryptography.hazmat.backends import default_backend
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric import rsa
-    from cryptography.hazmat.backends import default_backend
 
     # Generate private key
     private_key = rsa.generate_private_key(
@@ -126,9 +126,9 @@ class TestOIDCSignatureVerification:
         provider = OIDCProvider(oidc_config)
 
         # Create a token signed with a different key
-        from cryptography.hazmat.primitives.asymmetric import rsa
         from cryptography.hazmat.backends import default_backend
         from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
 
         # Generate a different key
         different_key = rsa.generate_private_key(

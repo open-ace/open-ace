@@ -9,11 +9,11 @@ import logging
 
 from flask import Blueprint, jsonify, request
 
+from app.repositories.usage_repo import UsageRepository
+from app.repositories.user_repo import UserRepository
 from app.services.auth_service import AuthService
 from app.services.message_service import MessageService
 from app.services.usage_service import UsageService
-from app.repositories.usage_repo import UsageRepository
-from app.repositories.user_repo import UserRepository
 from app.utils.helpers import get_days_ago, get_today
 
 report_bp = Blueprint("report", __name__)

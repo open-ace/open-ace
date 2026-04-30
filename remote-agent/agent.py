@@ -16,10 +16,10 @@ import time
 from typing import Any, Dict, Optional
 
 import requests
-
-from config import AgentConfig
 from executor import ProcessExecutor
 from system_info import get_capabilities
+
+from config import AgentConfig
 
 logger = logging.getLogger("openace-agent")
 

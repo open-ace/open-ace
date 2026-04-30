@@ -21,8 +21,8 @@ shared_dir = os.path.join(script_dir, "shared")
 if shared_dir not in sys.path:
     sys.path.insert(0, shared_dir)
 
-from db import get_connection, get_usage_by_date, _db_url_cache
 import utils
+from db import _db_url_cache, get_connection, get_usage_by_date
 
 # Clear database URL cache to respect DATABASE_URL environment variable
 _db_url_cache = None

@@ -10,9 +10,10 @@ This script tests the enhanced conversation detail modal which includes:
 """
 
 import asyncio
-import aiohttp
 import json
 from datetime import datetime
+
+import aiohttp
 
 BASE_URL = "http://localhost:5000"
 

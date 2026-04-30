@@ -6,6 +6,7 @@
 import asyncio
 import os
 import time
+
 from playwright.async_api import async_playwright
 
 BASE_URL = "http://117.72.38.96:5000"

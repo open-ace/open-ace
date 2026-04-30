@@ -12,9 +12,10 @@ Usage:
     python3 tests/issues/72/test_issue72.py
 """
 
-import pytest
-import time
 import os
+import time
+
+import pytest
 from playwright.async_api import async_playwright
 
 # Test configuration

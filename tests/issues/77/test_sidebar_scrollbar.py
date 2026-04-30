@@ -7,10 +7,11 @@ Issue: Sidebar menu shows scrollbar when content overflows.
 Fix: Add CSS to hide scrollbar while keeping scroll functionality.
 """
 
-import pytest
-import sys
 import os
+import sys
 from datetime import datetime
+
+import pytest
 
 # Get project root directory
 PROJECT_ROOT = os.path.dirname(

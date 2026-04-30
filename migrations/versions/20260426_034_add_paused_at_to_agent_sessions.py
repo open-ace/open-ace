@@ -11,8 +11,8 @@ table to support session pause/resume functionality.
 
 from typing import Union
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "034_add_paused_at"

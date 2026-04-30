@@ -8,9 +8,10 @@ This test verifies that:
 3. Host filter shows simplified names
 """
 
-import pytest
-import time
 import re
+import time
+
+import pytest
 from playwright.async_api import async_playwright
 
 # Test configuration

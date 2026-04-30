@@ -14,8 +14,8 @@ This migration fixes the users table:
 
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "003_fix_users_table_fields"

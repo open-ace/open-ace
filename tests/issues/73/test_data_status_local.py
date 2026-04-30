@@ -7,11 +7,12 @@ Issue: Data Status panel shows local host status not updating.
 Fix: Use current time for local host last_updated since data is real-time.
 """
 
-import pytest
-import sys
 import os
+import sys
 import time
 from datetime import datetime
+
+import pytest
 
 # Get project root directory
 PROJECT_ROOT = os.path.dirname(

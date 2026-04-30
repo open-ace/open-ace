@@ -12,9 +12,10 @@ Usage:
     python3 tests/ui/test_anomaly_performance.py
 """
 
-import sys
 import os
+import sys
 import time
+
 import requests
 
 # Add the project root to the path

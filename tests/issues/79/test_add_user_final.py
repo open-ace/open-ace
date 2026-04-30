@@ -5,10 +5,11 @@ Final test: 验证错误提示和成功创建
 """
 
 import asyncio
-from playwright.async_api import async_playwright
 import os
 import sys
 import time
+
+from playwright.async_api import async_playwright
 
 # 配置
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000")

@@ -10,6 +10,7 @@ Test script for Issue #98: Messages 页面的 refresh 和 auto refresh 都不工
 
 import asyncio
 import time
+
 from playwright.async_api import async_playwright
 
 BASE_URL = "http://localhost:5000"

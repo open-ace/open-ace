@@ -17,7 +17,7 @@ from base64 import b64decode, b64encode
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from app.repositories.database import DB_PATH, is_postgresql, get_database_url
+from app.repositories.database import DB_PATH, get_database_url, is_postgresql
 
 logger = logging.getLogger(__name__)
 
@@ -106,8 +106,9 @@ class APIKeyProxyService:
     def _encrypt_key(self, api_key: str) -> str:
         """Encrypt an API key using AES-256-GCM."""
         try:
-            from cryptography.fernet import Fernet
             import base64
+
+            from cryptography.fernet import Fernet
 
             f = Fernet(base64.urlsafe_b64encode(self._encryption_key))
             return f.encrypt(api_key.encode()).decode()
@@ -121,8 +122,9 @@ class APIKeyProxyService:
     def _decrypt_key(self, encrypted_key: str) -> str:
         """Decrypt an API key."""
         try:
-            from cryptography.fernet import Fernet
             import base64
+
+            from cryptography.fernet import Fernet
 
             f = Fernet(base64.urlsafe_b64encode(self._encryption_key))
             return f.decrypt(encrypted_key.encode()).decode()
