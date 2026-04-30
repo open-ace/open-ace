@@ -22,6 +22,8 @@ import traceback
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
+import contextlib
+
 import requests
 from playwright.sync_api import sync_playwright
 
@@ -110,7 +112,7 @@ def wait_for_remote_agent(token, timeout=40):
     cleanup_remote_agent()
     remote = "root@192.168.64.4"
     ssh_opts = ["-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=no"]
-    try:
+    with contextlib.suppress(Exception):
         subprocess.run(
             ["ssh"]
             + ssh_opts
@@ -122,8 +124,6 @@ def wait_for_remote_agent(token, timeout=40):
             capture_output=True,
             timeout=15,
         )
-    except Exception:
-        pass
 
     for _ in range(timeout // 2):
         time.sleep(2)
@@ -248,13 +248,11 @@ def run_tests():
         finally:
             # Cleanup: stop all sessions
             for sid in session_ids:
-                try:
+                with contextlib.suppress(Exception):
                     requests.post(
                         f"{BASE_URL}/api/remote/sessions/{sid}/stop",
                         cookies={"session_token": token},
                     )
-                except Exception:
-                    pass
             context.close()
             browser.close()
 

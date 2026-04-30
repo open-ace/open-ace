@@ -15,7 +15,7 @@ import secrets
 import sqlite3
 from base64 import b64decode, b64encode
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Optional, Union
 
 from app.repositories.database import DB_PATH, get_database_url, is_postgresql
 
@@ -143,7 +143,7 @@ class APIKeyProxyService:
         api_key: str,
         base_url: Optional[str] = None,
         created_by: Optional[int] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Store an encrypted API key for a tenant/provider.
 
@@ -211,7 +211,7 @@ class APIKeyProxyService:
         finally:
             conn.close()
 
-    def resolve_api_key(self, tenant_id: int, provider: str) -> Optional[Tuple[str, Optional[str]]]:
+    def resolve_api_key(self, tenant_id: int, provider: str) -> Optional[tuple[str, Optional[str]]]:
         """
         Resolve and decrypt an API key for a tenant/provider.
 
@@ -250,7 +250,7 @@ class APIKeyProxyService:
         finally:
             conn.close()
 
-    def list_api_keys(self, tenant_id: int) -> List[Dict[str, Any]]:
+    def list_api_keys(self, tenant_id: int) -> list[dict[str, Any]]:
         """List API keys for a tenant (without revealing the actual keys)."""
         conn = self._get_connection()
         cursor = conn.cursor()
@@ -366,7 +366,7 @@ class APIKeyProxyService:
 
         return f"{payload_b64}.{signature}"
 
-    def validate_proxy_token(self, token: str) -> Optional[Dict[str, Any]]:
+    def validate_proxy_token(self, token: str) -> Optional[dict[str, Any]]:
         """
         Validate a proxy token and extract its payload.
 

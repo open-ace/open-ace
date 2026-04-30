@@ -110,7 +110,7 @@ async def test_dashboard_first_load():
             print(f"  Login completed: {login_time:.2f}s")
 
             # Step 2: Clear request log (keep only login requests for reference)
-            login_requests = [r for r in all_requests if r["end"]]
+            [r for r in all_requests if r["end"]]
             all_requests = []
 
             # Step 3: Navigate to Dashboard (first visit after login)

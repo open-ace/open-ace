@@ -9,7 +9,7 @@ Calls GLM-5 model (OpenAI-compatible API) to produce structured analysis.
 import json
 import logging
 import os
-from typing import Dict, Optional, Tuple
+from typing import Optional
 
 import requests
 
@@ -34,7 +34,7 @@ class InsightsService:
         self.message_repo = message_repo or MessageRepository()
         self.insights_repo = insights_repo or InsightsReportRepository()
 
-    def _load_config(self) -> Dict:
+    def _load_config(self) -> dict:
         """Load insights configuration from config.json."""
         config_path = os.path.join(CONFIG_DIR, "config.json")
         try:
@@ -44,7 +44,7 @@ class InsightsService:
             logger.warning(f"Could not load config.json: {e}")
             return {}
 
-    def _get_api_credentials(self, config: Dict) -> Tuple[str, str]:
+    def _get_api_credentials(self, config: dict) -> tuple[str, str]:
         """
         Get API credentials from config and environment.
 
@@ -71,7 +71,7 @@ class InsightsService:
 
     def generate_insights(
         self, user_id: int, start_date: str, end_date: str
-    ) -> Tuple[Optional[Dict], Optional[str]]:
+    ) -> tuple[Optional[dict], Optional[str]]:
         """
         Generate insights report for a user's conversations.
 
@@ -205,7 +205,7 @@ class InsightsService:
 - 建议包含可操作的示例
 - 使用中文输出"""
 
-    def _build_user_prompt(self, stats: Dict, conversations: list) -> str:
+    def _build_user_prompt(self, stats: dict, conversations: list) -> str:
         """Build the user prompt with conversation data."""
         stats_summary = f"""## 用户对话统计（分析周期内）
 
@@ -282,7 +282,7 @@ class InsightsService:
                     text = text[first_newline + 1 : last_backticks].strip()
         return text
 
-    def _parse_ai_response(self, response_text: str, stats: Dict) -> Dict:
+    def _parse_ai_response(self, response_text: str, stats: dict) -> dict:
         """Parse AI response into structured report data."""
         clean_text = self._extract_json(response_text)
         parsed = json.loads(clean_text)
@@ -313,7 +313,7 @@ class InsightsService:
             "raw_response": response_text,
         }
 
-    def _format_report(self, report: Dict) -> Dict:
+    def _format_report(self, report: dict) -> dict:
         """Format a database report record for API response."""
         return {
             "id": report.get("id"),

@@ -15,18 +15,15 @@ import logging
 from flask import Blueprint, g, jsonify, request
 
 from app.modules.workspace.collaboration import (
-    CollaborationManager,
     SharePermission,
     get_collaboration_manager,
 )
 from app.modules.workspace.prompt_library import (
     PromptCategory,
-    PromptLibrary,
     PromptTemplate,
     get_prompt_library,
 )
 from app.modules.workspace.session_manager import (
-    SessionManager,
     SessionType,
     _param,
     get_session_manager,
@@ -429,7 +426,7 @@ def list_sessions():
 
         # Enrich remote sessions with machine names
         remote_machine_ids = list(
-            set(s["remote_machine_id"] for s in formatted_sessions if s.get("remote_machine_id"))
+            {s["remote_machine_id"] for s in formatted_sessions if s.get("remote_machine_id")}
         )
         if remote_machine_ids:
             try:
@@ -1270,7 +1267,7 @@ def get_workspace_config():
         }
 
         if os.path.exists(config_path):
-            with open(config_path, "r") as f:
+            with open(config_path) as f:
                 config = json.load(f)
                 workspace = config.get("workspace", {})
                 workspace_config["enabled"] = workspace.get("enabled", False)

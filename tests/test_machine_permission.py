@@ -8,6 +8,7 @@ Tests the permission model:
   - Regular user: own sessions only
 """
 
+import contextlib
 import os
 import sys
 import tempfile
@@ -60,10 +61,8 @@ def make_manager():
     global _test_counter, TMP_DB
     _test_counter += 1
     # Clean previous temp DB
-    try:
+    with contextlib.suppress(OSError):
         os.unlink(TMP_DB)
-    except OSError:
-        pass
     TMP_DB = tempfile.mktemp(suffix=".db")
 
     # Patch is_postgresql to return False for testing
@@ -96,7 +95,7 @@ def setup_test_data(mgr):
     now = "2026-01-01T00:00:00"
 
     # 3 machines
-    for i, name in enumerate(["machine-a", "machine-b", "machine-c"]):
+    for _i, name in enumerate(["machine-a", "machine-b", "machine-c"]):
         mid = f"mid-{name}"
         cursor.execute(
             "INSERT INTO remote_machines (machine_id, machine_name, status, tenant_id, created_at, updated_at) "
@@ -152,7 +151,7 @@ def setup_test_data(mgr):
 
 
 def test_check_user_access_returns_permission():
-    t = test("check_user_access returns permission string")
+    test("check_user_access returns permission string")
     mgr = make_manager()
     setup_test_data(mgr)
 
@@ -165,7 +164,7 @@ def test_check_user_access_returns_permission():
 
 
 def test_check_user_access_returns_none_for_unassigned():
-    t = test("check_user_access returns None for unassigned user")
+    test("check_user_access returns None for unassigned user")
     mgr = make_manager()
     setup_test_data(mgr)
 
@@ -177,7 +176,7 @@ def test_check_user_access_returns_none_for_unassigned():
 
 
 def test_check_user_access_returns_user_permission():
-    t = test("check_user_access returns 'user' for regular user")
+    test("check_user_access returns 'user' for regular user")
     mgr = make_manager()
     setup_test_data(mgr)
 
@@ -189,7 +188,7 @@ def test_check_user_access_returns_user_permission():
 
 
 def test_get_user_permission():
-    t = test("get_user_permission delegates to check_user_access")
+    test("get_user_permission delegates to check_user_access")
     mgr = make_manager()
     setup_test_data(mgr)
 
@@ -201,7 +200,7 @@ def test_get_user_permission():
 
 
 def test_list_machines_with_user_id_has_permission():
-    t = test("list_machines with user_id attaches current_user_permission")
+    test("list_machines with user_id attaches current_user_permission")
     mgr = make_manager()
     setup_test_data(mgr)
 
@@ -220,7 +219,7 @@ def test_list_machines_with_user_id_has_permission():
 
 
 def test_list_machines_without_user_id_no_permission():
-    t = test("list_machines without user_id has no current_user_permission")
+    test("list_machines without user_id has no current_user_permission")
     mgr = make_manager()
     setup_test_data(mgr)
 
@@ -233,7 +232,7 @@ def test_list_machines_without_user_id_no_permission():
 
 
 def test_assign_user_as_machine_admin():
-    t = test("assign_user works for machine admin")
+    test("assign_user works for machine admin")
     mgr = make_manager()
     setup_test_data(mgr)
 
@@ -250,7 +249,7 @@ def test_assign_user_as_machine_admin():
 
 
 def test_revoke_user_as_machine_admin():
-    t = test("revoke_user works for regular user")
+    test("revoke_user works for regular user")
     mgr = make_manager()
     setup_test_data(mgr)
 
@@ -266,7 +265,7 @@ def test_revoke_user_as_machine_admin():
 def test_revoke_admin_by_machine_admin():
     """Verify that the route-level logic prevents machine admin from revoking admin.
     We test the data layer here; route logic is tested separately."""
-    t = test("revoke_user data layer allows revoking admin (route enforces)")
+    test("revoke_user data layer allows revoking admin (route enforces)")
     mgr = make_manager()
     setup_test_data(mgr)
 
@@ -281,7 +280,7 @@ def test_revoke_admin_by_machine_admin():
 
 
 def test_backwards_compat_truthiness():
-    t = test("check_user_access result is truthy for assigned, falsy for unassigned")
+    test("check_user_access result is truthy for assigned, falsy for unassigned")
     mgr = make_manager()
     setup_test_data(mgr)
 
@@ -295,7 +294,7 @@ def test_backwards_compat_truthiness():
 
 
 def test_permission_isolation_across_machines():
-    t = test("user permissions are isolated per machine")
+    test("user permissions are isolated per machine")
     mgr = make_manager()
     setup_test_data(mgr)
 
@@ -311,7 +310,7 @@ def test_permission_isolation_across_machines():
 
 
 def test_assign_user_with_admin_permission():
-    t = test("assign_user can assign admin permission (data layer)")
+    test("assign_user can assign admin permission (data layer)")
     mgr = make_manager()
     setup_test_data(mgr)
 
@@ -388,7 +387,7 @@ def _auth_delete(client, url, token, **kwargs):
 
 
 def test_route_assign_by_system_admin():
-    t = test("Route: system admin can assign user with admin permission")
+    test("Route: system admin can assign user with admin permission")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -411,7 +410,7 @@ def test_route_assign_by_system_admin():
 
 
 def test_route_assign_by_machine_admin():
-    t = test("Route: machine admin can assign user (forced to 'user')")
+    test("Route: machine admin can assign user (forced to 'user')")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -434,7 +433,7 @@ def test_route_assign_by_machine_admin():
 
 
 def test_route_assign_by_regular_user():
-    t = test("Route: regular user cannot assign users")
+    test("Route: regular user cannot assign users")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -453,7 +452,7 @@ def test_route_assign_by_regular_user():
 
 
 def test_route_assign_by_unassigned_user():
-    t = test("Route: unassigned user cannot assign users")
+    test("Route: unassigned user cannot assign users")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -472,7 +471,7 @@ def test_route_assign_by_unassigned_user():
 
 
 def test_route_revoke_by_machine_admin():
-    t = test("Route: machine admin can revoke regular user")
+    test("Route: machine admin can revoke regular user")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -492,7 +491,7 @@ def test_route_revoke_by_machine_admin():
 
 
 def test_route_revoke_admin_by_machine_admin():
-    t = test("Route: machine admin cannot revoke admin user")
+    test("Route: machine admin cannot revoke admin user")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -509,7 +508,7 @@ def test_route_revoke_admin_by_machine_admin():
 
 
 def test_route_revoke_admin_by_system_admin():
-    t = test("Route: system admin can revoke admin user")
+    test("Route: system admin can revoke admin user")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -529,7 +528,7 @@ def test_route_revoke_admin_by_system_admin():
 
 
 def test_route_get_users_by_machine_admin():
-    t = test("Route: machine admin can get machine users")
+    test("Route: machine admin can get machine users")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -544,7 +543,7 @@ def test_route_get_users_by_machine_admin():
 
 
 def test_route_get_users_by_regular_user():
-    t = test("Route: regular user cannot get machine users")
+    test("Route: regular user cannot get machine users")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -558,7 +557,7 @@ def test_route_get_users_by_regular_user():
 
 
 def test_route_list_machines_includes_permission():
-    t = test("Route: list machines for non-admin includes current_user_permission")
+    test("Route: list machines for non-admin includes current_user_permission")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -575,7 +574,7 @@ def test_route_list_machines_includes_permission():
 
 
 def test_route_deregister_system_admin_only():
-    t = test("Route: deregister machine is system admin only")
+    test("Route: deregister machine is system admin only")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -596,7 +595,7 @@ def test_route_deregister_system_admin_only():
 
 
 def test_route_generate_token_system_admin_only():
-    t = test("Route: generate token is system admin only")
+    test("Route: generate token is system admin only")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -641,7 +640,7 @@ def _create_session_for_test(mgr, user_id, machine_id):
 
 
 def test_route_session_access_owner():
-    t = test("Route: session owner can access own session")
+    test("Route: session owner can access own session")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -661,7 +660,7 @@ def test_route_session_access_owner():
 
 
 def test_route_session_access_machine_admin():
-    t = test("Route: machine admin can access others' session")
+    test("Route: machine admin can access others' session")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -681,7 +680,7 @@ def test_route_session_access_machine_admin():
 
 
 def test_route_session_access_denied_other_user():
-    t = test("Route: regular user cannot access others' session")
+    test("Route: regular user cannot access others' session")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -701,7 +700,7 @@ def test_route_session_access_denied_other_user():
 
 
 def test_route_session_access_unassigned_user():
-    t = test("Route: unassigned user cannot access session")
+    test("Route: unassigned user cannot access session")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -765,10 +764,8 @@ def main():
     all_passed = print_summary()
 
     # Cleanup
-    try:
+    with contextlib.suppress(OSError):
         os.unlink(TMP_DB)
-    except OSError:
-        pass
 
     sys.exit(0 if all_passed else 1)
 

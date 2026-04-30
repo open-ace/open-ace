@@ -7,7 +7,6 @@ Uses monkeypatch to properly isolate database operations.
 
 import os
 import sys
-import tempfile
 from datetime import datetime, timedelta
 
 import pytest

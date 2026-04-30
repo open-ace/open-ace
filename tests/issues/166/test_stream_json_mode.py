@@ -8,6 +8,7 @@ Tests:
 3. Receiving result/response in stream-json format
 """
 
+import contextlib
 import json
 import os
 import subprocess
@@ -259,10 +260,8 @@ def test_stream_json_mode(env_name: str, env_mods: dict) -> dict:
 
     # Cleanup
     stop_readers.set()
-    try:
+    with contextlib.suppress(BaseException):
         process.stdin.close()
-    except:
-        pass
     process.terminate()
     try:
         process.wait(timeout=5)

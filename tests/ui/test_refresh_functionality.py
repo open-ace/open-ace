@@ -180,7 +180,7 @@ def test_refresh_functionality():
                         (
                             "Refresh Speed",
                             "WARN",
-                            f"Refresh was fast but backend fetch was triggered",
+                            "Refresh was fast but backend fetch was triggered",
                         )
                     )
 

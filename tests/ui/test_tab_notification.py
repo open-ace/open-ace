@@ -11,7 +11,6 @@ Tests the tab notification feature in Workspace:
 6. Verify clicking tab clears notification
 """
 
-import json
 import os
 import sys
 import time
@@ -211,10 +210,8 @@ def test_tab_notification_colors():
             if badge_content.count() > 0:
                 text = badge_content.first.text_content()
                 if text == "●":
-                    print(f"  ✓ Badge content is '●' (dot)")
-                elif text == "!":
-                    print(f"  ✗ Badge content is '{text}' - should be '●'")
-                elif text == "⏳":
+                    print("  ✓ Badge content is '●' (dot)")
+                elif text == "!" or text == "⏳":
                     print(f"  ✗ Badge content is '{text}' - should be '●'")
                 else:
                     print(f"  Badge content: '{text}'")

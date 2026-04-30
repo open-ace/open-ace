@@ -8,7 +8,7 @@ Business logic for role-based access control (RBAC).
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional, Set
+from typing import Optional
 
 from app.repositories.database import Database
 from app.repositories.user_repo import UserRepository
@@ -63,7 +63,7 @@ class Role:
 
     name: str
     description: str
-    permissions: Set[str] = field(default_factory=set)
+    permissions: set[str] = field(default_factory=set)
 
     def has_permission(self, permission: str) -> bool:
         """Check if role has a permission."""
@@ -213,11 +213,11 @@ class PermissionService:
         """
         return self.roles.get(role_name)
 
-    def get_all_roles(self) -> Dict[str, Role]:
+    def get_all_roles(self) -> dict[str, Role]:
         """Get all role definitions."""
         return self.roles
 
-    def get_user_permissions(self, user_id: int) -> Set[str]:
+    def get_user_permissions(self, user_id: int) -> set[str]:
         """
         Get all permissions for a user.
 
@@ -347,7 +347,7 @@ class PermissionService:
             logger.error(f"Failed to revoke permission: {e}")
             return False
 
-    def create_role(self, role_name: str, description: str, permissions: Set[str]) -> bool:
+    def create_role(self, role_name: str, description: str, permissions: set[str]) -> bool:
         """
         Create a new role.
 
@@ -389,7 +389,7 @@ class PermissionService:
             logger.error(f"Failed to create role: {e}")
             return False
 
-    def update_role_permissions(self, role_name: str, permissions: Set[str]) -> bool:
+    def update_role_permissions(self, role_name: str, permissions: set[str]) -> bool:
         """
         Update permissions for a role.
 
@@ -466,7 +466,7 @@ class PermissionService:
             logger.error(f"Failed to delete role: {e}")
             return False
 
-    def get_users_with_permission(self, permission: str) -> List[Dict]:
+    def get_users_with_permission(self, permission: str) -> list[dict]:
         """
         Get all users who have a specific permission.
 
@@ -486,7 +486,7 @@ class PermissionService:
 
         return result
 
-    def get_permission_audit_log(self, user_id: Optional[int] = None) -> List[Dict]:
+    def get_permission_audit_log(self, user_id: Optional[int] = None) -> list[dict]:
         """
         Get audit log of permission changes.
 

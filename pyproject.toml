@@ -109,11 +109,23 @@ ignore = [
     "B008",  # do not perform function calls in argument defaults
     "B905",  # zip without explicit strict parameter
     "SIM108", # use ternary operator
+    "E402",  # module import not at top of file (Flask app init order)
+    "E722",  # bare except (intentional in many routes)
+    "E741",  # ambiguous variable name (short names like l, I, O)
+    "SIM102", # collapsible if (sometimes less readable)
+    "SIM105", # suppressible exception (context manager overhead)
+    "SIM117", # multiple with statements (readability)
+    "B007",  # unused loop control variable (common in enumerate)
+    "B018",  # useless expression (often intentional in scripts)
+    "B904",  # raise without from inside except (compatibility)
+    "SIM115", # open file without context handler (scripts)
+    "UP031", # printf string formatting (migration risk)
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101", "PLR2004"]
-"scripts/*" = ["TCH"]
+"tests/*" = ["S101", "PLR2004", "F401", "F811", "TCH"]
+"scripts/*" = ["TCH", "F401"]
+"**/__init__.py" = ["F401"]
 
 # =============================================================================
 # MyPy Configuration

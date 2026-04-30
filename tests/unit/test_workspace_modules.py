@@ -498,7 +498,7 @@ class TestWorkspaceIntegration:
         collab.add_team_member(team_id=team.team_id, user_id=2, username="member")
 
         # Share session
-        share = collab.share_session(
+        collab.share_session(
             session_id="session-1",
             shared_by=1,
             shared_by_name="Owner",
@@ -507,7 +507,7 @@ class TestWorkspaceIntegration:
         )
 
         # Add annotation
-        annotation = collab.add_annotation(
+        collab.add_annotation(
             session_id="session-1", user_id=2, username="member", content="Great session!"
         )
 

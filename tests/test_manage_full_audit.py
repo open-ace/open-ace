@@ -9,6 +9,8 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import contextlib
+
 from playwright.sync_api import sync_playwright
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
@@ -24,10 +26,8 @@ issues = []
 def screenshot(page, name):
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
     path = os.path.join(SCREENSHOT_DIR, f"{name}.png")
-    try:
+    with contextlib.suppress(BaseException):
         page.screenshot(path=path, timeout=10000)
-    except:
-        pass
     return path
 
 
@@ -187,7 +187,7 @@ def run_all_tests():
             screenshot(page, "07_messages_before_filter")
 
             # Test sender filter exists
-            sender_input = page.locator(
+            page.locator(
                 "input[placeholder*='Search'], input[placeholder*='搜索'], input[placeholder*='Sender']"
             )
             filter_controls = page.locator(

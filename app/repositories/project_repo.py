@@ -7,7 +7,7 @@ Repository for project data access operations.
 
 import logging
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 
 from app.models.project import Project, ProjectDailyStats, ProjectStats, UserProject
 from app.repositories.database import Database
@@ -119,7 +119,7 @@ class ProjectRepository:
         self,
         include_inactive: bool = False,
         created_by: Optional[int] = None,
-    ) -> List[Project]:
+    ) -> list[Project]:
         """
         Get all projects.
 
@@ -146,7 +146,7 @@ class ProjectRepository:
         results = self.db.fetch_all(query, tuple(params))
         return [Project.from_dict(r) for r in results]
 
-    def get_user_projects(self, user_id: int) -> List[Project]:
+    def get_user_projects(self, user_id: int) -> list[Project]:
         """
         Get projects accessible by a user.
 
@@ -374,7 +374,7 @@ class ProjectRepository:
         result = self.db.fetch_one(query, (user_id, project_id))
         return UserProject.from_dict(result) if result else None
 
-    def get_project_users(self, project_id: int) -> List[UserProject]:
+    def get_project_users(self, project_id: int) -> list[UserProject]:
         """
         Get all users associated with a project.
 
@@ -447,7 +447,7 @@ class ProjectRepository:
             user_stats=user_stats,
         )
 
-    def get_all_project_stats(self) -> List[ProjectStats]:
+    def get_all_project_stats(self) -> list[ProjectStats]:
         """
         Get statistics for all active projects.
 
@@ -512,7 +512,7 @@ class ProjectRepository:
         project_id: int,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
-    ) -> List[ProjectDailyStats]:
+    ) -> list[ProjectDailyStats]:
         """
         Get daily statistics for a project from daily_stats table.
 

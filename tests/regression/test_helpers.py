@@ -6,9 +6,8 @@
 """
 
 import os
-import sys
 
-from playwright.sync_api import BrowserContext, Page, sync_playwright
+from playwright.sync_api import Page
 
 # 配置
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000")

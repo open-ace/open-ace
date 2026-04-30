@@ -187,7 +187,7 @@ def test_multi_tab_notification():
             if badge_content.count() > 0:
                 text = badge_content.first.text_content()
                 if text == "●":
-                    print(f"  ✓ Badge content is '●' (dot)")
+                    print("  ✓ Badge content is '●' (dot)")
                 elif text in ["!", "⏳"]:
                     print(f"  ✗ Badge content is '{text}' - should be '●'")
                 else:

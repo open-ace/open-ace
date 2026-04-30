@@ -5,10 +5,11 @@ Open ACE - Tenant Repository
 Data access layer for tenant management.
 """
 
+import contextlib
 import json
 import logging
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 
 from app.models.tenant import QuotaConfig, Tenant, TenantSettings, TenantUsage
 from app.repositories.database import Database
@@ -201,7 +202,7 @@ class TenantRepository:
         include_deleted: bool = False,
         limit: int = 100,
         offset: int = 0,
-    ) -> List[Tenant]:
+    ) -> list[Tenant]:
         """
         Get all tenants with optional filters.
 
@@ -429,7 +430,7 @@ class TenantRepository:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         limit: int = 30,
-    ) -> List[TenantUsage]:
+    ) -> list[TenantUsage]:
         """
         Get usage history for a tenant.
 
@@ -567,16 +568,12 @@ class TenantRepository:
 
         # Fallback to JSON fields if dedicated tables don't have data
         if quota == QuotaConfig() and row.get("quota"):
-            try:
+            with contextlib.suppress(json.JSONDecodeError, TypeError):
                 quota = QuotaConfig.from_dict(json.loads(row["quota"]))
-            except (json.JSONDecodeError, TypeError):
-                pass
 
         if settings == TenantSettings() and row.get("settings"):
-            try:
+            with contextlib.suppress(json.JSONDecodeError, TypeError):
                 settings = TenantSettings.from_dict(json.loads(row["settings"]))
-            except (json.JSONDecodeError, TypeError):
-                pass
 
         return Tenant(
             id=row.get("id"),

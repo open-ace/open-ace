@@ -44,7 +44,7 @@ def test_tenant_quota_dialog_close():
             page.fill("#password", PASSWORD)
             page.click(".login-form button.btn-primary")
 
-            for i in range(10):
+            for _i in range(10):
                 time.sleep(1)
                 if "/login" not in page.url:
                     break

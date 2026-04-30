@@ -19,7 +19,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from threading import RLock
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +68,7 @@ class WorkspaceConfig:
     token_secret: str = ""
     webui_path: str = ""  # Path to qwen-code-webui project directory
     auth_type: str = ""  # Authentication type: openai, anthropic, gemini etc.
-    auth_env: Dict[str, str] = field(default_factory=dict)  # Environment variables for auth
+    auth_env: dict[str, str] = field(default_factory=dict)  # Environment variables for auth
 
 
 class WebUIManager:
@@ -95,8 +95,8 @@ class WebUIManager:
             config: Workspace configuration. If None, loads from config.json.
         """
         self.config = config or self._load_config()
-        self._instances: Dict[int, WebUIInstance] = {}  # user_id -> instance
-        self._port_allocations: Dict[int, int] = {}  # port -> user_id
+        self._instances: dict[int, WebUIInstance] = {}  # user_id -> instance
+        self._port_allocations: dict[int, int] = {}  # port -> user_id
         self._lock = RLock()  # Use reentrant lock to avoid deadlock
         self._cleanup_thread: Optional[threading.Thread] = None
         self._running = False
@@ -300,7 +300,7 @@ class WebUIManager:
         ).hexdigest()[:16]
         return f"{user_id}:{port}:{random_part}:{signature}"
 
-    def validate_token(self, token: str) -> Tuple[bool, Optional[int], Optional[str]]:
+    def validate_token(self, token: str) -> tuple[bool, Optional[int], Optional[str]]:
         """
         Validate an authentication token.
 
@@ -335,7 +335,7 @@ class WebUIManager:
         except (ValueError, TypeError) as e:
             return False, None, f"Token parse error: {e}"
 
-    def get_user_webui_url(self, user_id: int, system_account: str) -> Tuple[str, str]:
+    def get_user_webui_url(self, user_id: int, system_account: str) -> tuple[str, str]:
         """
         Get or create the webui URL for a user.
 
@@ -559,7 +559,7 @@ class WebUIManager:
             logger.error(f"Failed to launch webui process: {e}")
             return None
 
-    def _find_webui_executable(self) -> Tuple[Optional[str], Optional[str]]:
+    def _find_webui_executable(self) -> tuple[Optional[str], Optional[str]]:
         """
         Find the qwen-code-webui executable.
 
@@ -687,7 +687,7 @@ class WebUIManager:
         with self._lock:
             return self._instances.get(user_id)
 
-    def get_all_instances(self) -> List[Dict[str, Any]]:
+    def get_all_instances(self) -> list[dict[str, Any]]:
         """Get information about all instances."""
         with self._lock:
             return [

@@ -77,7 +77,7 @@ async def test_fullscreen():
         time.sleep(3)
 
         # Wait for table to initialize
-        for i in range(10):
+        for _i in range(10):
             table_exists = await page.evaluate('typeof conversationHistoryTable !== "undefined"')
             if table_exists:
                 break

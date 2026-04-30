@@ -9,7 +9,7 @@ import json
 import logging
 from datetime import datetime, timedelta
 from functools import lru_cache
-from typing import Dict, List, Optional
+from typing import Optional
 
 from app.repositories.database import Database
 
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 # Cache for JSON parsing to avoid repeated parsing of same strings
 @lru_cache(maxsize=256)
-def _parse_json_cached(json_str: Optional[str]) -> Optional[List[str]]:
+def _parse_json_cached(json_str: Optional[str]) -> Optional[list[str]]:
     """
     Parse JSON string with caching for performance.
 
@@ -57,7 +57,7 @@ class UsageRepository:
         output_tokens: int = 0,
         cache_tokens: int = 0,
         request_count: int = 0,
-        models_used: Optional[List[str]] = None,
+        models_used: Optional[list[str]] = None,
         host_name: str = "localhost",
     ) -> bool:
         """
@@ -138,7 +138,7 @@ class UsageRepository:
 
     def get_usage_by_date(
         self, date: str, tool_name: Optional[str] = None, host_name: Optional[str] = None
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Get usage data for a specific date from daily_messages joined with daily_usage.
         """
@@ -181,7 +181,7 @@ class UsageRepository:
         days: int = 7,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Get usage data for a specific tool over a date range.
 
@@ -230,7 +230,7 @@ class UsageRepository:
         end_date: str,
         tool_name: Optional[str] = None,
         host_name: Optional[str] = None,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Get usage data for a date range.
 
@@ -270,7 +270,7 @@ class UsageRepository:
 
         return results
 
-    def get_summary_by_tool(self, host_name: Optional[str] = None) -> Dict[str, Dict]:
+    def get_summary_by_tool(self, host_name: Optional[str] = None) -> dict[str, dict]:
         """
         Get summary statistics for all tools.
 
@@ -323,7 +323,7 @@ class UsageRepository:
 
         return results
 
-    def get_all_tools(self) -> List[str]:
+    def get_all_tools(self) -> list[str]:
         """
         Get list of all tools.
 
@@ -339,7 +339,7 @@ class UsageRepository:
         rows = self.db.fetch_all(query)
         return [row["tool_name"] for row in rows]
 
-    def get_all_hosts(self) -> List[str]:
+    def get_all_hosts(self) -> list[str]:
         """
         Get list of all hosts.
 
@@ -357,7 +357,7 @@ class UsageRepository:
 
     def get_daily_aggregated(
         self, start_date: str, end_date: str, host_name: Optional[str] = None
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Get usage data aggregated by date for trend charts.
 
@@ -408,7 +408,7 @@ class UsageRepository:
 
     def get_daily_by_tool(
         self, start_date: str, end_date: str, host_name: Optional[str] = None
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Get usage data aggregated by date and tool for trend charts.
 
@@ -487,7 +487,7 @@ class UsageRepository:
 
     def get_request_trend_data(
         self, start_date: str, end_date: str, host_name: Optional[str] = None
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Get request count trend data aggregated by date.
 
@@ -538,7 +538,7 @@ class UsageRepository:
 
     def get_request_trend_by_tool(
         self, start_date: str, end_date: str, host_name: Optional[str] = None
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Get request count trend data aggregated by date and tool.
 
@@ -589,7 +589,7 @@ class UsageRepository:
 
         return results
 
-    def get_today_request_stats(self, host_name: Optional[str] = None) -> Dict:
+    def get_today_request_stats(self, host_name: Optional[str] = None) -> dict:
         """
         Get today's request statistics.
 
@@ -644,7 +644,7 @@ class UsageRepository:
         date: Optional[str] = None,
         host_name: Optional[str] = None,
         user_name: Optional[str] = None,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Get request statistics grouped by user (sender_name).
 
@@ -705,7 +705,7 @@ class UsageRepository:
 
     def get_user_request_trend(
         self, user_name: str, start_date: str, end_date: str, host_name: Optional[str] = None
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Get request trend for a specific user.
 
@@ -808,7 +808,7 @@ class UsageRepository:
         user_id: int,
         start_date: str,
         end_date: str,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Get request trend for a specific user by user ID.
 
@@ -863,7 +863,7 @@ class UsageRepository:
         month: int,
         host_name: Optional[str] = None,
         user_name: Optional[str] = None,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Get monthly request statistics grouped by user.
 
@@ -927,7 +927,7 @@ class UsageRepository:
         system_account: str,
         start_date: str,
         end_date: str,
-    ) -> Dict:
+    ) -> dict:
         """
         Get combined usage from daily_messages (local CLI) and agent_sessions (remote).
 
@@ -996,7 +996,7 @@ class UsageRepository:
         system_account: str,
         start_date: str,
         end_date: str,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Get daily usage detail for a specific user, combining local and remote sessions.
 

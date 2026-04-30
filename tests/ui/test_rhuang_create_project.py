@@ -12,6 +12,8 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+import contextlib
+
 from playwright.sync_api import sync_playwright
 
 # Configuration
@@ -136,14 +138,12 @@ def test_rhuang_create_project():
             ]
 
             add_btn = None
-            add_btn_selector = None
             for selector in add_btn_selectors:
                 try:
                     locator = frame.locator(selector)
                     count = locator.count()
                     if count > 0:
                         add_btn = locator.first
-                        add_btn_selector = selector
                         print(f"  Found button with selector: {selector} ({count} elements)")
                         break
                 except Exception as e:
@@ -291,10 +291,8 @@ def test_rhuang_create_project():
             import traceback
 
             traceback.print_exc()
-            try:
+            with contextlib.suppress(BaseException):
                 page.screenshot(path=os.path.join(SCREENSHOT_DIR, "rhuang_exception.png"))
-            except:
-                pass
 
         finally:
             browser.close()

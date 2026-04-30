@@ -22,6 +22,7 @@ Expected benefits:
 
 """
 
+import contextlib
 from typing import Union
 
 import sqlalchemy as sa
@@ -669,9 +670,7 @@ def _downgrade_sqlite_indexes(conn) -> None:
     ]
 
     for index_name in fk_indexes:
-        try:
+        with contextlib.suppress(Exception):
             conn.execute(sa.text(f"DROP INDEX IF EXISTS {index_name}"))
-        except Exception:
-            pass
 
     conn.commit()

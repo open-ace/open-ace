@@ -58,7 +58,6 @@ def api_senders():
         senders = message_service.get_all_senders(host_name=host)
         return jsonify(senders)
 
-    cache_key = "all"
     if (
         _senders_cache["data"] is not None
         and (now - _senders_cache["timestamp"]) < _senders_cache_ttl

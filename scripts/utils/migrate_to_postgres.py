@@ -18,7 +18,7 @@ import logging
 import os
 import sqlite3
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 # Add project root to path
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -54,13 +54,13 @@ def get_postgresql_connection():
         raise ImportError("psycopg2 is required. Install with: pip install psycopg2-binary")
 
 
-def get_table_columns(cursor, table_name: str) -> List[str]:
+def get_table_columns(cursor, table_name: str) -> list[str]:
     """Get column names for a table."""
     cursor.execute(f"PRAGMA table_info({table_name})")
     return [row["name"] for row in cursor.fetchall()]
 
 
-def get_pg_column_types(pg_cur, table_name: str) -> Dict[str, str]:
+def get_pg_column_types(pg_cur, table_name: str) -> dict[str, str]:
     """Get column data types for a PostgreSQL table."""
     pg_cur.execute(
         """
@@ -78,7 +78,7 @@ def migrate_table(
     sqlite_conn: sqlite3.Connection,
     pg_conn: Any,
     table_name: str,
-    columns: Optional[List[str]] = None,
+    columns: Optional[list[str]] = None,
     batch_size: int = 5000,
 ) -> int:
     """

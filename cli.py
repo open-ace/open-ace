@@ -213,7 +213,7 @@ def cmd_config(action: str) -> None:
         # Copy sample config
         sample_path = os.path.join(script_dir, "config", "settings.json.sample")
         if os.path.exists(sample_path):
-            with open(sample_path, "r") as src:
+            with open(sample_path) as src:
                 config = json.load(src)
             with open(config_path, "w") as dst:
                 json.dump(config, dst, indent=2)

@@ -358,7 +358,7 @@ def test_remote_quota_usage_me():
     if r.status_code != 200:
         fail("Usage/me endpoint", f"status={r.status_code} {r.text[:200]}")
         return
-    data = r.json()
+    r.json()
     ok("Usage/me endpoint returns data")
 
 

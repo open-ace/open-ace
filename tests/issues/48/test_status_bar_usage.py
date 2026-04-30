@@ -51,7 +51,6 @@ def take_screenshot(page, name: str):
 
 def test_status_bar_usage():
     """Test status bar displays today's usage and quota."""
-    screenshots = []
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=HEADLESS)

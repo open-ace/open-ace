@@ -15,13 +15,10 @@ import os
 import sys
 import time
 
-import pytest
-
 sys.path.insert(
     0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 )
 
-from datetime import datetime
 
 from playwright.sync_api import expect, sync_playwright
 

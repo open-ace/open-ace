@@ -7,7 +7,7 @@ Data models for project management and statistics.
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 
 
 @dataclass
@@ -145,7 +145,7 @@ class ProjectStats:
     total_duration_seconds: int = 0
     first_access: Optional[datetime] = None
     last_access: Optional[datetime] = None
-    user_stats: List[UserProject] = field(default_factory=list)
+    user_stats: list[UserProject] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""

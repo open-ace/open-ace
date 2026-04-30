@@ -424,9 +424,8 @@ class TestInsightsService:
                 "auth": {"env": {"OPENAI_API_KEY": "test-key"}},
                 "insights": {"model": "glm-5"},
             },
-        ):
-            with patch.object(service, "_call_ai_api", return_value=ai_response):
-                result, error = service.generate_insights(1, "2026-04-09", "2026-04-16")
+        ), patch.object(service, "_call_ai_api", return_value=ai_response):
+            result, error = service.generate_insights(1, "2026-04-09", "2026-04-16")
 
         assert error is None
         assert result is not None

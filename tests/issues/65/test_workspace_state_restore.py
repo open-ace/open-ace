@@ -69,7 +69,7 @@ async def test_workspace_state_restore():
                 print("  ✓ Workspace container found")
             else:
                 print("  ⚠ Workspace container not found - checking page content")
-                content = await page.content()
+                await page.content()
                 print(f"  Page title: {await page.title()}")
                 # Take screenshot for debugging
                 await page.screenshot(path=f"{SCREENSHOT_DIR}/debug_workspace_not_found.png")

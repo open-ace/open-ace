@@ -51,7 +51,7 @@ def annotate_image(image_path, output_path, annotations):
             label_font = font
 
     # Draw annotations
-    for i, (label, bbox, label_pos) in enumerate(annotations):
+    for _i, (label, bbox, label_pos) in enumerate(annotations):
         x1, y1, x2, y2 = bbox
 
         # Draw red rectangle with thicker border
@@ -180,7 +180,7 @@ def main():
 
     # Print annotation details
     print("\n标注位置:")
-    for label, bbox, pos in annotations:
+    for label, bbox, _pos in annotations:
         print(f"  - {label}: ({bbox[0]}, {bbox[1]}) -> ({bbox[2]}, {bbox[3]})")
 
     print(f"\n✓ 带标注的截图已保存到: {output_image}")

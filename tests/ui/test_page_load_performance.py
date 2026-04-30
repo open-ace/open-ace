@@ -39,9 +39,7 @@ def is_external_domain(url: str) -> bool:
         if pattern in url:
             return False
     # Check if it's a relative URL
-    if url.startswith("/") or url.startswith("./"):
-        return False
-    return True
+    return not (url.startswith("/") or url.startswith("./"))
 
 
 async def test_page_load():

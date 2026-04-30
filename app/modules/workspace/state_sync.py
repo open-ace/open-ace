@@ -15,7 +15,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set, Union
+from typing import Any, Callable, Optional, Union
 
 from app.repositories.database import DB_PATH, get_database_url, is_postgresql
 
@@ -49,8 +49,8 @@ class SyncEvent:
     session_id: Optional[str] = None
     user_id: Optional[int] = None
     tool_name: Optional[str] = None
-    data: Dict[str, Any] = field(default_factory=dict)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    data: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -102,10 +102,10 @@ class SyncState:
     client_id: str
     connected_at: datetime
     last_activity: datetime
-    subscriptions: Set[str] = field(default_factory=set)
+    subscriptions: set[str] = field(default_factory=set)
     user_id: Optional[int] = None
     session_id: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -143,8 +143,8 @@ class StateSyncManager:
             db_path: Optional custom database path.
         """
         self.db_path = db_path or str(DB_PATH)
-        self._clients: Dict[str, SyncState] = {}
-        self._handlers: Dict[str, List[Callable]] = defaultdict(list)
+        self._clients: dict[str, SyncState] = {}
+        self._handlers: dict[str, list[Callable]] = defaultdict(list)
         self._event_queue: asyncio.Queue = asyncio.Queue()
         self._running = False
         self._ensure_tables()
@@ -215,7 +215,7 @@ class StateSyncManager:
         self,
         client_id: Optional[str] = None,
         user_id: Optional[int] = None,
-        subscriptions: Optional[List[str]] = None,
+        subscriptions: Optional[list[str]] = None,
     ) -> SyncState:
         """
         Register a new client connection.
@@ -286,7 +286,7 @@ class StateSyncManager:
             return True
         return False
 
-    def subscribe(self, client_id: str, event_types: List[str]) -> bool:
+    def subscribe(self, client_id: str, event_types: list[str]) -> bool:
         """
         Subscribe a client to specific event types.
 
@@ -305,7 +305,7 @@ class StateSyncManager:
         logger.debug(f"Client {client_id} subscribed to: {event_types}")
         return True
 
-    def unsubscribe(self, client_id: str, event_types: List[str]) -> bool:
+    def unsubscribe(self, client_id: str, event_types: list[str]) -> bool:
         """
         Unsubscribe a client from specific event types.
 
@@ -386,7 +386,7 @@ class StateSyncManager:
         user_id: Optional[int] = None,
         since: Optional[datetime] = None,
         limit: int = 100,
-    ) -> List[SyncEvent]:
+    ) -> list[SyncEvent]:
         """
         Get events from the persistence store.
 
@@ -497,7 +497,7 @@ class StateSyncManager:
         """
         return self._clients.get(client_id)
 
-    def get_active_clients(self, user_id: Optional[int] = None) -> List[SyncState]:
+    def get_active_clients(self, user_id: Optional[int] = None) -> list[SyncState]:
         """
         Get all active clients.
 
@@ -584,7 +584,7 @@ class StateSyncManager:
 
         return deleted
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """
         Get synchronization statistics.
 

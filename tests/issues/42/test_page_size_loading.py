@@ -172,8 +172,6 @@ async def test_page_size_loading():
             print("\n[Step 7] Changing Page Size...")
 
             # Set up a listener to detect if "No sessions found" appears
-            no_sessions_found = False
-            loading_shown = False
 
             # Take a quick screenshot right after clicking
             # We'll use JavaScript to monitor the placeholder content

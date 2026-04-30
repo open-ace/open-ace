@@ -59,7 +59,7 @@ def test_quota_enter_save():
 
             # Wait for login to complete
             print("  Waiting for login to complete...")
-            for i in range(10):
+            for _i in range(10):
                 time.sleep(1)
                 current_url = page.url
                 if "/login" not in current_url:

@@ -8,7 +8,7 @@ Business logic for multi-tenant management.
 import logging
 import re
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from app.models.tenant import QuotaConfig, Tenant, TenantSettings, TenantUsage
 from app.repositories.tenant_repo import TenantRepository
@@ -161,7 +161,7 @@ class TenantService:
         plan: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
-    ) -> List[Tenant]:
+    ) -> list[Tenant]:
         """
         List tenants with optional filters.
 
@@ -176,7 +176,7 @@ class TenantService:
         """
         return self.tenant_repo.get_all(status=status, plan=plan, limit=limit, offset=offset)
 
-    def update_tenant(self, tenant_id: int, updates: Dict[str, Any]) -> bool:
+    def update_tenant(self, tenant_id: int, updates: dict[str, Any]) -> bool:
         """
         Update tenant fields.
 
@@ -195,7 +195,7 @@ class TenantService:
 
         return self.tenant_repo.update(tenant_id, updates)
 
-    def update_quota(self, tenant_id: int, quota_updates: Dict[str, int]) -> bool:
+    def update_quota(self, tenant_id: int, quota_updates: dict[str, int]) -> bool:
         """
         Update tenant quota configuration.
 
@@ -215,7 +215,7 @@ class TenantService:
 
         return self.tenant_repo.update(tenant_id, {"quota": current_quota})
 
-    def update_settings(self, tenant_id: int, settings_updates: Dict[str, Any]) -> bool:
+    def update_settings(self, tenant_id: int, settings_updates: dict[str, Any]) -> bool:
         """
         Update tenant settings.
 
@@ -292,7 +292,7 @@ class TenantService:
         """
         return self.tenant_repo.record_usage(tenant_id, tokens, requests)
 
-    def get_usage_history(self, tenant_id: int, days: int = 30) -> List[TenantUsage]:
+    def get_usage_history(self, tenant_id: int, days: int = 30) -> list[TenantUsage]:
         """
         Get usage history for a tenant.
 
@@ -306,7 +306,7 @@ class TenantService:
         start_date = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
         return self.tenant_repo.get_usage(tenant_id, start_date=start_date)
 
-    def check_quota(self, tenant_id: int, tokens: int = 0, requests: int = 1) -> Dict[str, Any]:
+    def check_quota(self, tenant_id: int, tokens: int = 0, requests: int = 1) -> dict[str, Any]:
         """
         Check if tenant has quota available.
 
@@ -393,7 +393,7 @@ class TenantService:
         """
         return self.tenant_repo.update_user_count(tenant_id, -1)
 
-    def get_tenant_stats(self, tenant_id: int) -> Dict[str, Any]:
+    def get_tenant_stats(self, tenant_id: int) -> dict[str, Any]:
         """
         Get statistics for a tenant.
 
@@ -481,7 +481,7 @@ class TenantService:
 
         return slug
 
-    def get_plan_quotas(self) -> Dict[str, Dict[str, Any]]:
+    def get_plan_quotas(self) -> dict[str, dict[str, Any]]:
         """
         Get quota configurations for all plans.
 

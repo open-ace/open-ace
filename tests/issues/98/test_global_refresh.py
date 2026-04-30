@@ -9,7 +9,6 @@ Test script for Issue #98: 全局 refresh 和 auto-refresh 功能
 """
 
 import asyncio
-import time
 
 from playwright.async_api import async_playwright
 

@@ -8,7 +8,7 @@ Business logic for authentication and authorization.
 import logging
 import secrets
 from datetime import datetime, timedelta
-from typing import Dict, Optional, Tuple
+from typing import Optional
 
 from app.repositories.user_repo import UserRepository
 
@@ -32,7 +32,7 @@ class AuthService:
 
     def login(
         self, username: str, password: str, password_verify_func
-    ) -> Tuple[Optional[Dict], Optional[str]]:
+    ) -> tuple[Optional[dict], Optional[str]]:
         """
         Authenticate a user and create a session.
 
@@ -103,7 +103,7 @@ class AuthService:
         new_password: str,
         password_verify_func,
         password_hash_func,
-    ) -> Tuple[bool, Optional[str]]:
+    ) -> tuple[bool, Optional[str]]:
         """
         Change user password.
 
@@ -141,7 +141,7 @@ class AuthService:
         logger.info(f"Password changed for user ID: {user_id}")
         return True, None
 
-    def get_session(self, token: str) -> Optional[Dict]:
+    def get_session(self, token: str) -> Optional[dict]:
         """
         Get session data by token.
 
@@ -153,7 +153,7 @@ class AuthService:
         """
         return self.user_repo.get_session_by_token(token)
 
-    def validate_session(self, token: str) -> Tuple[bool, Optional[Dict]]:
+    def validate_session(self, token: str) -> tuple[bool, Optional[dict]]:
         """
         Validate a session token and return session data.
 
@@ -180,7 +180,7 @@ class AuthService:
 
         return True, session
 
-    def get_user_profile(self, user_id: int) -> Optional[Dict]:
+    def get_user_profile(self, user_id: int) -> Optional[dict]:
         """
         Get user profile.
 
@@ -209,7 +209,7 @@ class AuthService:
         session = self.get_session(token)
         return session and session.get("role") == "admin"
 
-    def require_auth(self, token: str) -> Tuple[bool, Optional[Dict]]:
+    def require_auth(self, token: str) -> tuple[bool, Optional[dict]]:
         """
         Require authentication and return session data.
 
@@ -228,7 +228,7 @@ class AuthService:
 
         return True, session
 
-    def require_admin(self, token: str) -> Tuple[bool, Optional[Dict]]:
+    def require_admin(self, token: str) -> tuple[bool, Optional[dict]]:
         """
         Require admin role and return session data.
 

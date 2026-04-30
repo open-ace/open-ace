@@ -14,7 +14,8 @@ This migration adds tables that were dynamically created in code:
 
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
+from typing import Union
 
 import sqlalchemy as sa
 from alembic import op

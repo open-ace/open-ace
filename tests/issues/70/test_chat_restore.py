@@ -12,6 +12,7 @@ Test script for issue #70: Workspace restore error - 404 Not Found
 7. 检查消息是否恢复
 """
 
+import contextlib
 import json
 import os
 import subprocess
@@ -62,7 +63,7 @@ def restart_service():
     )
 
     # 等待服务就绪
-    for i in range(30):
+    for _i in range(30):
         time.sleep(1)
         result = subprocess.run(["lsof", "-i", ":5001"], capture_output=True, text=True)
         if result.stdout.strip():
@@ -266,7 +267,7 @@ def test_chat_restore():
             print("\n[9] 重启服务（保持浏览器上下文）...")
 
             # 保存当前的 localStorage 状态
-            saved_storage = page.evaluate("JSON.stringify(localStorage)")
+            page.evaluate("JSON.stringify(localStorage)")
             print("    已保存 localStorage 状态")
 
             # Kill 旧服务
@@ -412,10 +413,8 @@ def test_chat_restore():
                         except Exception as e:
                             print(f"    Frame {i} 内容获取失败: {e}")
                             # 尝试截图
-                            try:
+                            with contextlib.suppress(BaseException):
                                 frame.screenshot(path=f"{OUTPUT_DIR}/frame_{i}_error.png")
-                            except:
-                                pass
                 except Exception as e:
                     print(f"    Frame {i} 检查失败: {e}")
 
@@ -438,10 +437,8 @@ def test_chat_restore():
             traceback.print_exc()
             page.screenshot(path=f"{OUTPUT_DIR}/test_error.png")
         finally:
-            try:
+            with contextlib.suppress(BaseException):
                 browser.close()
-            except:
-                pass
 
         # Print results
         print("\n" + "=" * 60)

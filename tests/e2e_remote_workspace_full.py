@@ -56,6 +56,8 @@ import uuid
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
+import contextlib
+
 import requests
 from playwright.sync_api import sync_playwright
 
@@ -305,7 +307,7 @@ def browser_fetch(page, label, method, url, body=None):
 
 def run_tests():
     admin_token = api_login(ADMIN_USER, ADMIN_PASS)
-    normal_token = api_login(NORMAL_USER, NORMAL_PASS)
+    api_login(NORMAL_USER, NORMAL_PASS)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(
@@ -526,7 +528,6 @@ def run_tests():
             if page.locator(".remote-machine-management").count() > 0
             else ""
         )
-        has_2 = "2" in all_text
         passed("A9 第二台机器注册成功", f"统计卡片: {all_text[:100]}")
 
         # A10: 注销机器
@@ -672,7 +673,6 @@ def run_tests():
         shot(page2, "A15_normal_user_no_remote")
         # 普通用户访问管理页面应该被重定向到 work
         current_url = page2.url
-        redirected_to_work = "/work" in current_url
         ctx2.close()
         passed("A15 普通用户不可访问管理页面", f"访问 /manage/dashboard → {current_url}")
 
@@ -770,7 +770,7 @@ def run_tests():
             ("tool_done", False, "工具返回结果"),
             ("final", True, "AI 最终回复"),
         ]
-        for i, (step, done, label) in enumerate(steps):
+        for i, (step, done, _label) in enumerate(steps):
             api_agent_output(mid1, session_id, step, is_complete=done)
             pause(2)
             shot(page, f"B7_step{i+1}_{step}")
@@ -872,10 +872,8 @@ def run_tests():
         print("\n── C3: 登出 ──")
         page.goto(f"{BASE_URL}/logout", wait_until="domcontentloaded")
         pause(1)
-        try:
+        with contextlib.suppress(Exception):
             page.wait_for_url("**/login**", timeout=5000)
-        except Exception:
-            pass
         shot(page, "C3_logout")
         passed("C3 登出成功")
 

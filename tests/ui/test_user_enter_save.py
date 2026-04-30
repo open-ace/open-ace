@@ -122,7 +122,7 @@ async def test_user_enter_save():
             # Step 7: Fill in user form
             print("\n[Step 7] Fill in user form")
             # Find all text inputs in the modal
-            inputs = await modal.locator(
+            await modal.locator(
                 'input[type="text"], input[type="email"], input[type="password"]'
             ).all()
 

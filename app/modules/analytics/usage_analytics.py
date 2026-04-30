@@ -7,11 +7,11 @@ Analyzes trends, detects anomalies, and generates reports.
 """
 
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from app.repositories.database import Database
 from app.repositories.usage_repo import UsageRepository
@@ -105,10 +105,10 @@ class UsageReport:
     daily_average_requests: float = 0.0
     peak_day: Optional[str] = None
     peak_tokens: int = 0
-    trends: List[TrendAnalysis] = field(default_factory=list)
-    anomalies: List[Anomaly] = field(default_factory=list)
-    breakdown_by_tool: Dict[str, Dict] = field(default_factory=dict)
-    breakdown_by_host: Dict[str, Dict] = field(default_factory=dict)
+    trends: list[TrendAnalysis] = field(default_factory=list)
+    anomalies: list[Anomaly] = field(default_factory=list)
+    breakdown_by_tool: dict[str, dict] = field(default_factory=dict)
+    breakdown_by_host: dict[str, dict] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -204,7 +204,7 @@ class UsageAnalytics:
 
         return report
 
-    def _get_usage_data(self, start_date: str, end_date: str) -> List[Dict]:
+    def _get_usage_data(self, start_date: str, end_date: str) -> list[dict]:
         """Get usage data for date range."""
         query = """
             SELECT
@@ -222,7 +222,7 @@ class UsageAnalytics:
         """
         return self.db.fetch_all(query, (start_date, end_date))
 
-    def _calculate_summary(self, usage_data: List[Dict]) -> Dict[str, Any]:
+    def _calculate_summary(self, usage_data: list[dict]) -> dict[str, Any]:
         """Calculate summary statistics from usage data in a single pass."""
         if not usage_data:
             return {
@@ -245,7 +245,7 @@ class UsageAnalytics:
         total_requests = 0
         tools = set()
         hosts = set()
-        daily_totals: Dict[str, int] = {}
+        daily_totals: dict[str, int] = {}
 
         for d in usage_data:
             # Accumulate totals
@@ -290,7 +290,7 @@ class UsageAnalytics:
             "peak_tokens": peak_tokens,
         }
 
-    def _analyze_trends(self, start_date: str, end_date: str) -> List[TrendAnalysis]:
+    def _analyze_trends(self, start_date: str, end_date: str) -> list[TrendAnalysis]:
         """Analyze usage trends."""
         trends = []
 
@@ -352,7 +352,7 @@ class UsageAnalytics:
 
         return trends
 
-    def _get_daily_totals(self, start_date: str, end_date: str) -> List[Dict]:
+    def _get_daily_totals(self, start_date: str, end_date: str) -> list[dict]:
         """Get daily totals for a period."""
         query = """
             SELECT
@@ -366,7 +366,7 @@ class UsageAnalytics:
         """
         return self.db.fetch_all(query, (start_date, end_date))
 
-    def _detect_anomalies(self, start_date: str, end_date: str) -> List[Anomaly]:
+    def _detect_anomalies(self, start_date: str, end_date: str) -> list[Anomaly]:
         """Detect usage anomalies."""
         anomalies = []
 
@@ -429,7 +429,7 @@ class UsageAnalytics:
 
         return anomalies
 
-    def _get_tool_breakdown(self, start_date: str, end_date: str) -> Dict[str, Dict]:
+    def _get_tool_breakdown(self, start_date: str, end_date: str) -> dict[str, dict]:
         """Get usage breakdown by tool."""
         query = """
             SELECT
@@ -458,7 +458,7 @@ class UsageAnalytics:
             if row.get("tool_name")
         }
 
-    def _get_host_breakdown(self, start_date: str, end_date: str) -> Dict[str, Dict]:
+    def _get_host_breakdown(self, start_date: str, end_date: str) -> dict[str, dict]:
         """Get usage breakdown by host."""
         query = """
             SELECT
@@ -484,7 +484,7 @@ class UsageAnalytics:
         }
 
     @cached(ttl=120, key_prefix="analytics", skip_args=[0])
-    def get_forecast(self, days: int = 7) -> Dict[str, Any]:
+    def get_forecast(self, days: int = 7) -> dict[str, Any]:
         """
         Get usage forecast based on historical data.
 
@@ -535,7 +535,7 @@ class UsageAnalytics:
         }
 
     @cached(ttl=60, key_prefix="analytics", skip_args=[0])
-    def get_efficiency_metrics(self, start_date: str, end_date: str) -> Dict[str, Any]:
+    def get_efficiency_metrics(self, start_date: str, end_date: str) -> dict[str, Any]:
         """
         Calculate efficiency metrics.
 

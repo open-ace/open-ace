@@ -32,6 +32,8 @@ import traceback
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
+import contextlib
+
 import requests
 from playwright.sync_api import sync_playwright
 
@@ -494,10 +496,8 @@ def _run_all(page, token):
 
     if found:
         pause(2)
-        try:
+        with contextlib.suppress(Exception):
             page.wait_for_selector(".modal.show", timeout=5000)
-        except Exception:
-            pass
         shot(page, "E1_session_detail")
 
         # Check for remote output in detail

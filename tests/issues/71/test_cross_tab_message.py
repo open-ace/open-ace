@@ -44,7 +44,7 @@ def ensure_service_running():
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        for i in range(30):
+        for _i in range(30):
             time.sleep(1)
             result = subprocess.run(["lsof", "-i", ":5001"], capture_output=True, text=True)
             if result.stdout.strip():
@@ -63,7 +63,7 @@ def find_chat_frame_by_index(page, index):
             webui_frames.append((i, frame, url))
 
     print(f"    [DEBUG] 找到 {len(webui_frames)} 个 webui frames")
-    for idx, (fi, f, url) in enumerate(webui_frames):
+    for idx, (_fi, _f, url) in enumerate(webui_frames):
         print(f"    [DEBUG] WebUI Frame {idx}: {url[:70]}...")
 
     if index < len(webui_frames):

@@ -8,13 +8,12 @@ Manages conversation history, state, and context across sessions.
 
 import json
 import logging
-import os
 import sqlite3
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional, Union
 
 from app.repositories.database import DB_PATH, get_database_url, is_postgresql
 
@@ -63,7 +62,7 @@ class SessionMessage:
     tokens_used: int = 0
     model: Optional[str] = None
     timestamp: Optional[datetime] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -117,20 +116,20 @@ class AgentSession:
     project_id: Optional[int] = None  # Project association for statistics
     project_path: Optional[str] = None  # Project path for quick reference
     status: str = SessionStatus.ACTIVE.value
-    context: Dict[str, Any] = field(default_factory=dict)
-    settings: Dict[str, Any] = field(default_factory=dict)
+    context: dict[str, Any] = field(default_factory=dict)
+    settings: dict[str, Any] = field(default_factory=dict)
     total_tokens: int = 0
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     message_count: int = 0
     request_count: int = 0  # Number of API requests (assistant/toolResult messages)
     model: Optional[str] = None
-    tags: List[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
-    messages: List[SessionMessage] = field(default_factory=list)
+    messages: list[SessionMessage] = field(default_factory=list)
     workspace_type: str = "local"  # local or remote
     remote_machine_id: Optional[str] = None
     paused_at: Optional[datetime] = None
@@ -369,8 +368,8 @@ class SessionManager:
         session_type: str = SessionType.CHAT.value,
         title: str = "",
         host_name: str = "localhost",
-        context: Optional[Dict[str, Any]] = None,
-        settings: Optional[Dict[str, Any]] = None,
+        context: Optional[dict[str, Any]] = None,
+        settings: Optional[dict[str, Any]] = None,
         model: Optional[str] = None,
         expires_in_hours: Optional[int] = None,
         project_id: Optional[int] = None,
@@ -569,7 +568,7 @@ class SessionManager:
 
     def get_messages(
         self, session_id: str, limit: Optional[int] = None, before_id: Optional[int] = None
-    ) -> List[SessionMessage]:
+    ) -> list[SessionMessage]:
         """
         Get messages for a session.
 
@@ -610,7 +609,7 @@ class SessionManager:
         content: str,
         tokens_used: int = 0,
         model: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: Optional[dict[str, Any]] = None,
     ) -> Optional[SessionMessage]:
         """
         Add a message to a session.
@@ -852,7 +851,7 @@ class SessionManager:
         search: Optional[str] = None,
         page: int = 1,
         limit: int = 20,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         List sessions with filters.
 
@@ -926,7 +925,7 @@ class SessionManager:
             "total_pages": total_pages,
         }
 
-    def get_active_sessions(self, user_id: Optional[int] = None) -> List[AgentSession]:
+    def get_active_sessions(self, user_id: Optional[int] = None) -> list[AgentSession]:
         """
         Get all active sessions.
 
@@ -1037,7 +1036,7 @@ class SessionManager:
 
         return len(session_ids)
 
-    def get_session_stats(self, user_id: Optional[int] = None) -> Dict[str, Any]:
+    def get_session_stats(self, user_id: Optional[int] = None) -> dict[str, Any]:
         """
         Get session statistics.
 
@@ -1086,7 +1085,7 @@ class SessionManager:
             "total_messages": row["total_messages"] or 0,
         }
 
-    def _row_to_session(self, row: Union[sqlite3.Row, Dict]) -> AgentSession:
+    def _row_to_session(self, row: Union[sqlite3.Row, dict]) -> AgentSession:
         """Convert a database row to AgentSession."""
 
         # Handle both sqlite3.Row and dict (PostgreSQL)
@@ -1135,7 +1134,7 @@ class SessionManager:
             paused_at=parse_datetime(get_value("paused_at")),
         )
 
-    def _row_to_message(self, row: Union[sqlite3.Row, Dict]) -> SessionMessage:
+    def _row_to_message(self, row: Union[sqlite3.Row, dict]) -> SessionMessage:
         """Convert a database row to SessionMessage."""
 
         # Handle both sqlite3.Row and dict (PostgreSQL)

@@ -10,7 +10,7 @@ import logging
 import secrets
 import threading
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from app.modules.sso.oauth2 import OAuth2Provider
 from app.modules.sso.oidc import (
@@ -50,7 +50,7 @@ class SSOManager:
             db: Optional Database instance.
         """
         self.db = db or Database()
-        self._providers: Dict[str, SSOProvider] = {}
+        self._providers: dict[str, SSOProvider] = {}
         self._providers_lock = threading.Lock()
 
     def _ensure_tables(self) -> None:
@@ -134,10 +134,10 @@ class SSOManager:
         token_url: str,
         userinfo_url: Optional[str] = None,
         redirect_uri: Optional[str] = None,
-        scope: Optional[List[str]] = None,
+        scope: Optional[list[str]] = None,
         issuer_url: Optional[str] = None,
         tenant_id: Optional[int] = None,
-        extra_params: Optional[Dict[str, Any]] = None,
+        extra_params: Optional[dict[str, Any]] = None,
     ) -> bool:
         """
         Register a new SSO provider.
@@ -220,7 +220,7 @@ class SSOManager:
         client_secret: str,
         redirect_uri: str,
         tenant_id: Optional[int] = None,
-        extra_params: Optional[Dict[str, Any]] = None,
+        extra_params: Optional[dict[str, Any]] = None,
     ) -> bool:
         """
         Register a predefined SSO provider (e.g., 'google', 'github').
@@ -310,7 +310,7 @@ class SSOManager:
             logger.error(f"Failed to load SSO provider {name}: {e}")
             return None
 
-    def list_providers(self, tenant_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    def list_providers(self, tenant_id: Optional[int] = None) -> list[dict[str, Any]]:
         """
         List all registered SSO providers.
 
@@ -366,7 +366,7 @@ class SSOManager:
 
     def start_authentication(
         self, provider_name: str, redirect_uri: str
-    ) -> Optional[Dict[str, str]]:
+    ) -> Optional[dict[str, str]]:
         """
         Start the SSO authentication flow.
 
@@ -440,7 +440,7 @@ class SSOManager:
             )
 
         # Get PKCE code verifier
-        code_verifier = auth_state.get("code_verifier")
+        auth_state.get("code_verifier")
 
         # Exchange code for tokens
         result = provider.authenticate(code, redirect_uri)
@@ -455,7 +455,7 @@ class SSOManager:
         user_id: int,
         provider_name: str,
         provider_user_id: str,
-        provider_data: Optional[Dict[str, Any]] = None,
+        provider_data: Optional[dict[str, Any]] = None,
     ) -> bool:
         """
         Link an SSO identity to a local user.
@@ -575,7 +575,7 @@ class SSOManager:
             logger.error(f"Failed to create SSO session: {e}")
             return None
 
-    def get_sso_session(self, session_token: str) -> Optional[Dict[str, Any]]:
+    def get_sso_session(self, session_token: str) -> Optional[dict[str, Any]]:
         """
         Get SSO session by token.
 
@@ -657,7 +657,7 @@ class SSOManager:
         except Exception as e:
             logger.error(f"Failed to store auth state: {e}")
 
-    def _get_auth_state(self, state: str) -> Optional[Dict[str, Any]]:
+    def _get_auth_state(self, state: str) -> Optional[dict[str, Any]]:
         """Get authentication state."""
         try:
             row = self.db.fetch_one("SELECT * FROM sso_auth_states WHERE state = ?", (state,))

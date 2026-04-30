@@ -69,14 +69,12 @@ def test_workspace_restore():
             print(f"    LocalStorage keys: {list(storage_data.keys())}")
 
             tabs_info = []
-            has_workspace_state = False
 
             if "open-ace-store" in storage_data:
                 store_data = json.loads(storage_data["open-ace-store"])
                 tabs = store_data.get("state", {}).get("workspaceTabs", [])
 
                 if tabs and len(tabs) > 0:
-                    has_workspace_state = True
                     print(f"\n    === 发现 {len(tabs)} 个保存的 Workspace Tabs ===")
                     for i, tab in enumerate(tabs):
                         tab_info = {

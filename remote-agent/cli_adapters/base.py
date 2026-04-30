@@ -8,7 +8,7 @@ CLI coding tool (e.g., qwen-code, claude-code, openclaw).
 """
 
 import abc
-from typing import Dict, List, Optional
+from typing import Optional
 
 
 class BaseCLIAdapter(abc.ABC):
@@ -25,7 +25,7 @@ class BaseCLIAdapter(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def get_env_vars(self, proxy_url: str, proxy_token: str) -> Dict[str, str]:
+    def get_env_vars(self, proxy_url: str, proxy_token: str) -> dict[str, str]:
         """Get environment variables to set when spawning the CLI."""
         pass
 
@@ -36,9 +36,9 @@ class BaseCLIAdapter(abc.ABC):
         project_path: str,
         model: Optional[str] = None,
         permission_mode: Optional[str] = None,
-        allowed_tools: Optional[List[str]] = None,
+        allowed_tools: Optional[list[str]] = None,
         resume: bool = False,
-    ) -> List[str]:
+    ) -> list[str]:
         """Build the command-line arguments to start the CLI."""
         pass
 
@@ -58,6 +58,6 @@ class BaseCLIAdapter(abc.ABC):
 
     def build_single_shot_args(
         self, prompt: str, project_path: str, model: Optional[str] = None
-    ) -> List[str]:
+    ) -> list[str]:
         """Build args for a single-shot prompt execution (used when stdin is not supported)."""
         return [self.get_executable_name(), prompt]

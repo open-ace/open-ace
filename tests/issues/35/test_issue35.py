@@ -16,6 +16,8 @@ sys.path.insert(
     0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 )
 
+import contextlib
+
 from playwright.async_api import async_playwright
 
 from scripts.shared import utils
@@ -218,12 +220,10 @@ async def test_timeline_no_toolresult():
             results.append(("测试执行", False, str(e)))
 
             # 异常时截图
-            try:
+            with contextlib.suppress(BaseException):
                 await page.screenshot(
                     path=f"{SCREENSHOT_DIR}/error_{timestamp}.png", full_page=True
                 )
-            except:
-                pass
 
         finally:
             await browser.close()

@@ -57,6 +57,8 @@ import traceback
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
+import contextlib
+
 import requests
 from playwright.sync_api import sync_playwright
 
@@ -315,7 +317,7 @@ def _run_all_steps(page):
         log("Error", result.stderr.strip()[-300:] if result.stderr else "(no stderr)")
         print(f"  FULL STDOUT:\n{result.stdout}")
         print(f"  FULL STDERR:\n{result.stderr}")
-        assert False, f"Agent install failed (exit {result.returncode})"
+        raise AssertionError(f"Agent install failed (exit {result.returncode})")
 
     # Strip ANSI codes from combined output
     combined = (result.stdout or "") + (result.stderr or "")
@@ -399,7 +401,7 @@ def _run_all_steps(page):
     # (UI-based assign tested separately in Part C)
 
     # Assign machine admin: 黄迎春 with 'admin' permission
-    r = requests.post(
+    requests.post(
         f"{BASE_URL}/api/remote/machines/{machine_id}/assign",
         json={"user_id": int(machine_admin_user_id), "permission": "admin"},
         cookies={
@@ -527,24 +529,24 @@ def _run_all_steps(page):
 
     # ── B3. Create Remote Session ──
     print("\n══════ B3. Create Remote Session ══════")
-    create_result = page.evaluate("""
-    async () => {
-        const resp = await fetch('/api/remote/sessions', {
+    create_result = page.evaluate(f"""
+    async () => {{
+        const resp = await fetch('/api/remote/sessions', {{
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {{ 'Content-Type': 'application/json' }},
             credentials: 'include',
-            body: JSON.stringify({
-                machine_id: '%s',
+            body: JSON.stringify({{
+                machine_id: '{machine_id}',
                 project_path: '/root/workspace/demo-project',
                 cli_tool: 'qwen-code-cli',
                 model: 'qwen3-coder-plus',
                 title: 'Remote E2E Session',
-            }),
-        });
+            }}),
+        }});
         const data = await resp.json().catch(() => null);
-        return { status: resp.status, ok: resp.ok, data };
-    }
-    """ % machine_id)
+        return {{ status: resp.status, ok: resp.ok, data }};
+    }}
+    """)
     assert create_result["ok"], f"Create session failed: {create_result}"
     session_id = create_result["data"]["session"]["session_id"]
     log("Session", f"✓ Created: {session_id[:8]}...")
@@ -910,10 +912,8 @@ def _run_all_steps(page):
     # ── D3. Logout ──
     print("\n══════ D3. Logout ══════")
     page.goto(f"{BASE_URL}/logout", wait_until="domcontentloaded")
-    try:
+    with contextlib.suppress(Exception):
         page.wait_for_selector("#username", state="visible", timeout=10000)
-    except Exception:
-        pass
     shot(page, "D3_logout")
     log("Logout", "✓ Logged out")
 

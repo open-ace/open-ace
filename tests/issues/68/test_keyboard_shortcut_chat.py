@@ -46,7 +46,7 @@ def ensure_service_running():
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        for i in range(30):
+        for _i in range(30):
             time.sleep(1)
             result = subprocess.run(["lsof", "-i", ":5001"], capture_output=True, text=True)
             if result.stdout.strip():

@@ -5,6 +5,7 @@ Test script to diagnose qwen CLI stdin/stdout behavior in launchd-like environme
 Issue: SDK initialization times out when agent runs under launchd on Mac.
 """
 
+import contextlib
 import json
 import os
 import subprocess
@@ -221,10 +222,8 @@ def test_qwen_cli(env_name: str, env_mods: dict) -> dict:
 
     # Cleanup
     stop_readers.set()
-    try:
+    with contextlib.suppress(BaseException):
         process.stdin.close()
-    except:
-        pass
     process.terminate()
     try:
         process.wait(timeout=5)

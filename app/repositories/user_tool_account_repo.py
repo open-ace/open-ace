@@ -6,7 +6,7 @@ Repository for user_tool_accounts table operations.
 """
 
 import logging
-from typing import Dict, List, Optional
+from typing import Optional
 
 from app.models.user_tool_account import UserToolAccount
 from app.repositories.database import Database
@@ -20,7 +20,7 @@ class UserToolAccountRepository:
     def __init__(self, db: Optional[Database] = None):
         self.db = db or Database()
 
-    def get_all(self) -> List[UserToolAccount]:
+    def get_all(self) -> list[UserToolAccount]:
         """Get all tool account mappings."""
         query = """
             SELECT * FROM user_tool_accounts
@@ -29,7 +29,7 @@ class UserToolAccountRepository:
         rows = self.db.fetch_all(query)
         return [self._row_to_model(row) for row in rows]
 
-    def get_by_user_id(self, user_id: int) -> List[UserToolAccount]:
+    def get_by_user_id(self, user_id: int) -> list[UserToolAccount]:
         """Get all tool accounts for a specific user."""
         query = """
             SELECT * FROM user_tool_accounts
@@ -45,7 +45,7 @@ class UserToolAccountRepository:
         row = self.db.fetch_one(query, (tool_account,))
         return self._row_to_model(row) if row else None
 
-    def get_unmapped_tool_accounts(self) -> List[Dict]:
+    def get_unmapped_tool_accounts(self) -> list[dict]:
         """Get sender_names from daily_messages that are not mapped to any user."""
         query = """
             SELECT DISTINCT dm.sender_name,
@@ -173,7 +173,7 @@ class UserToolAccountRepository:
         row = self.db.fetch_one(query, (id,))
         return self._row_to_model(row) if row else None
 
-    def _row_to_model(self, row: Dict) -> UserToolAccount:
+    def _row_to_model(self, row: dict) -> UserToolAccount:
         """Convert database row to model."""
         return UserToolAccount(
             id=row.get("id"),
@@ -209,8 +209,8 @@ class UserToolAccountRepository:
             return 0
 
     def batch_create_for_user(
-        self, user_id: int, tool_accounts: List[Dict]
-    ) -> List[UserToolAccount]:
+        self, user_id: int, tool_accounts: list[dict]
+    ) -> list[UserToolAccount]:
         """Batch create tool account mappings for a user."""
         results = []
         for account in tool_accounts:

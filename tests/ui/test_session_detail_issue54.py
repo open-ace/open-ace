@@ -103,7 +103,6 @@ def test_session_detail_modal():
                     modal_content = page.locator(
                         ".modal.show .session-meta, .modal.show .modal-body"
                     )
-                    model_text = ""
                     if modal_content.count() > 0:
                         # 找到包含 Model 标签的 div
                         model_divs = modal_content.locator(
@@ -112,7 +111,6 @@ def test_session_detail_modal():
                         if model_divs.count() > 0:
                             # 获取 Model 的值
                             model_value = model_divs.first.locator("span").inner_text()
-                            model_text = model_value
                             print(f"  Model 值: {model_value}")
                             if model_value and model_value != "-":
                                 print("  ✓ Model 显示正确")

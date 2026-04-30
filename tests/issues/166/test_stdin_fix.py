@@ -8,6 +8,7 @@ Tests:
 3. Invalid stdin fd
 """
 
+import contextlib
 import json
 import os
 import subprocess
@@ -180,10 +181,8 @@ def test_with_closed_stdin() -> dict:
 
         # Cleanup
         stop_readers.set()
-        try:
+        with contextlib.suppress(BaseException):
             process.stdin.close()
-        except:
-            pass
         process.terminate()
         try:
             process.wait(timeout=5)
@@ -375,10 +374,8 @@ def test_with_fixed_stdin() -> dict:
             results["timeout"] = True
 
         stop_readers.set()
-        try:
+        with contextlib.suppress(BaseException):
             process.stdin.close()
-        except:
-            pass
         process.terminate()
         try:
             process.wait(timeout=5)

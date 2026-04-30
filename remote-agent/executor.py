@@ -10,6 +10,7 @@ Uses CLI adapters from cli_adapters to build per-tool command lines and
 environment variables.
 """
 
+import contextlib
 import json
 import logging
 import os
@@ -19,7 +20,7 @@ import subprocess
 import threading
 import uuid
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Optional
 
 from cli_adapters import get_adapter
 from cli_adapters.base import BaseCLIAdapter
@@ -43,11 +44,11 @@ class SessionProcess:
         cli_tool: str,
         output_callback: Callable[[str, str, str, bool], None],
         permission_callback: Optional[Callable[[str, dict], None]] = None,
-        usage_callback: Optional[Callable[[str, Dict[str, int]], None]] = None,
-        env: Optional[Dict[str, str]] = None,
+        usage_callback: Optional[Callable[[str, dict[str, int]], None]] = None,
+        env: Optional[dict[str, str]] = None,
         model: Optional[str] = None,
         permission_mode: Optional[str] = None,
-        allowed_tools: Optional[List[str]] = None,
+        allowed_tools: Optional[list[str]] = None,
     ):
         self.session_id = session_id
         self.process = process
@@ -59,7 +60,7 @@ class SessionProcess:
         self.env = env
         self.model = model
         self.permission_mode = permission_mode
-        self.allowed_tools: List[str] = list(allowed_tools) if allowed_tools else []
+        self.allowed_tools: list[str] = list(allowed_tools) if allowed_tools else []
 
         self._stdout_thread: Optional[threading.Thread] = None
         self._stderr_thread: Optional[threading.Thread] = None
@@ -235,7 +236,7 @@ class SessionProcess:
             )
             return False
 
-        response_inner: Dict[str, Any] = {"behavior": behavior}
+        response_inner: dict[str, Any] = {"behavior": behavior}
         if message:
             response_inner["message"] = message
 
@@ -534,7 +535,7 @@ class ProcessExecutor:
         self._output_callback = output_callback or self._default_output_callback
         self._permission_callback = permission_callback
         self._usage_callback = usage_callback
-        self._sessions: Dict[str, SessionProcess] = {}
+        self._sessions: dict[str, SessionProcess] = {}
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
@@ -548,7 +549,7 @@ class ProcessExecutor:
             return sum(1 for s in self._sessions.values() if s.is_running)
 
     @property
-    def active_sessions(self) -> List[str]:
+    def active_sessions(self) -> list[str]:
         """List of active session IDs."""
         with self._lock:
             return [sid for sid, s in self._sessions.items() if s.is_running]
@@ -571,7 +572,7 @@ class ProcessExecutor:
         cli_tool: str,
         proxy_token: str,
         model: Optional[str] = None,
-    ) -> Dict[str, str]:
+    ) -> dict[str, str]:
         """
         Build environment variables for the CLI subprocess.
 
@@ -691,9 +692,9 @@ class ProcessExecutor:
         project_path: str,
         model: Optional[str] = None,
         permission_mode: Optional[str] = None,
-        allowed_tools: Optional[List[str]] = None,
+        allowed_tools: Optional[list[str]] = None,
         resume: bool = False,
-    ) -> List[str]:
+    ) -> list[str]:
         adapter = get_adapter(cli_tool)
         # Use the resolved executable path (may have .cmd/.bat on Windows)
         adapter_args = adapter.build_start_args(
@@ -718,8 +719,8 @@ class ProcessExecutor:
         proxy_token: str,
         model: Optional[str] = None,
         permission_mode: Optional[str] = None,
-        allowed_tools: Optional[List[str]] = None,
-    ) -> Dict[str, Any]:
+        allowed_tools: Optional[list[str]] = None,
+    ) -> dict[str, Any]:
         with self._lock:
             if session_id in self._sessions and self._sessions[session_id].is_running:
                 return {"success": False, "error": "Session already running"}
@@ -879,7 +880,7 @@ class ProcessExecutor:
         self._save_sessions_meta()
         return {"success": True, "pid": process.pid}
 
-    def send_message(self, session_id: str, content: str) -> Dict[str, Any]:
+    def send_message(self, session_id: str, content: str) -> dict[str, Any]:
         """
         Send a message to a running session.
 
@@ -942,7 +943,7 @@ class ProcessExecutor:
 
     def _run_single_shot(
         self, session: "SessionProcess", content: str, adapter: BaseCLIAdapter
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Run a single-shot CLI command for tools that don't support stdin."""
         args = adapter.build_single_shot_args(content, session.project_path)
         logger.info("Single-shot %s: %s", session.session_id[:8], " ".join(args))
@@ -975,7 +976,7 @@ class ProcessExecutor:
 
         return {"success": True}
 
-    def _restart_session(self, session_id: str) -> Dict[str, Any]:
+    def _restart_session(self, session_id: str) -> dict[str, Any]:
         """
         Restart the CLI subprocess for a session that has exited.
 
@@ -1113,7 +1114,7 @@ class ProcessExecutor:
             logger.info("Restarted session %s (pid %d)", session_id[:8], process.pid)
             return {"success": True, "pid": process.pid}
 
-    def add_allowed_tool_and_restart(self, session_id: str, tool_name: str) -> Dict[str, Any]:
+    def add_allowed_tool_and_restart(self, session_id: str, tool_name: str) -> dict[str, Any]:
         """Add a tool to the allowed list and restart the CLI process."""
         with self._lock:
             session = self._sessions.get(session_id)
@@ -1158,7 +1159,7 @@ class ProcessExecutor:
 
         return {"success": True}
 
-    def update_permission_mode(self, session_id: str, permission_mode: str) -> Dict[str, Any]:
+    def update_permission_mode(self, session_id: str, permission_mode: str) -> dict[str, Any]:
         """Update the permission mode and restart the CLI process if changed."""
         with self._lock:
             session = self._sessions.get(session_id)
@@ -1182,7 +1183,7 @@ class ProcessExecutor:
         )
         return self._restart_session(session_id)
 
-    def update_model(self, session_id: str, model: str) -> Dict[str, Any]:
+    def update_model(self, session_id: str, model: str) -> dict[str, Any]:
         """Update the model and restart the CLI process."""
         with self._lock:
             session = self._sessions.get(session_id)
@@ -1200,7 +1201,7 @@ class ProcessExecutor:
         )
         return self._restart_session(session_id)
 
-    def interrupt_session(self, session_id: str) -> Dict[str, Any]:
+    def interrupt_session(self, session_id: str) -> dict[str, Any]:
         """Interrupt the current request in a session without stopping it."""
         session = self._sessions.get(session_id)
         if not session:
@@ -1210,7 +1211,7 @@ class ProcessExecutor:
             logger.info("Interrupted request in session %s", session_id[:8])
         return {"success": result}
 
-    def stop_session(self, session_id: str) -> Dict[str, Any]:
+    def stop_session(self, session_id: str) -> dict[str, Any]:
         """
         Stop a running session.
 
@@ -1233,7 +1234,7 @@ class ProcessExecutor:
 
     def send_permission_response(
         self, session_id: str, request_id: str, behavior: str, message: Optional[str] = None
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Send a permission response to a CLI subprocess.
 
@@ -1257,7 +1258,7 @@ class ProcessExecutor:
             return {"success": True}
         return {"success": False, "error": "Failed to write permission response to stdin"}
 
-    def pause_session(self, session_id: str) -> Dict[str, Any]:
+    def pause_session(self, session_id: str) -> dict[str, Any]:
         """Pause a session by suspending its subprocess."""
         with self._lock:
             session = self._sessions.get(session_id)
@@ -1267,7 +1268,7 @@ class ProcessExecutor:
         self._save_sessions_meta()
         return {"success": ok, "paused": session._paused, "pid": session.pid}
 
-    def resume_session(self, session_id: str) -> Dict[str, Any]:
+    def resume_session(self, session_id: str) -> dict[str, Any]:
         """Resume a paused session. If the process died while paused, restart with --resume."""
         with self._lock:
             session = self._sessions.get(session_id)
@@ -1284,7 +1285,7 @@ class ProcessExecutor:
         self._save_sessions_meta()
         return {"success": True, "paused": session._paused, "pid": session.pid}
 
-    def get_session_info(self, session_id: str) -> Optional[Dict[str, Any]]:
+    def get_session_info(self, session_id: str) -> Optional[dict[str, Any]]:
         """Get information about a session."""
         with self._lock:
             session = self._sessions.get(session_id)
@@ -1301,7 +1302,7 @@ class ProcessExecutor:
             "paused": session._paused,
         }
 
-    def cleanup_stopped(self) -> List[str]:
+    def cleanup_stopped(self) -> list[str]:
         """
         Remove sessions whose processes have exited.
 
@@ -1369,7 +1370,7 @@ class ProcessExecutor:
         except Exception as e:
             logger.warning("Failed to save session metadata: %s", e)
 
-    def restore_sessions(self) -> List[str]:
+    def restore_sessions(self) -> list[str]:
         """
         Restore sessions from persisted metadata after a crash.
 
@@ -1483,10 +1484,8 @@ class ProcessExecutor:
             )
 
         # Clear metadata file after successful restore
-        try:
+        with contextlib.suppress(OSError):
             self._META_FILE.write_text("{}", encoding="utf-8")
-        except OSError:
-            pass
 
         self._save_sessions_meta()
         return restored

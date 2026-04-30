@@ -85,7 +85,7 @@ async def test_issue30_v4():
                     print(f"   - {text}: {count} 个")
 
                 # 检查是否有组合格式
-                combined_labels = [t for t in badge_texts.keys() if "(" in t and ")" in t]
+                combined_labels = [t for t in badge_texts if "(" in t and ")" in t]
                 if combined_labels:
                     print(f"\n   ✓ 发现组合格式标签: {combined_labels}")
                     results.append(("组合格式标签", "通过"))

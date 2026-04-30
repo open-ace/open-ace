@@ -12,7 +12,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from app.modules.governance.audit_logger import AuditLogger
 from app.repositories.database import Database
@@ -54,7 +54,7 @@ class ReportMetadata:
     period_end: datetime
     generated_by: Optional[int] = None
     tenant_id: Optional[int] = None
-    filters: Dict[str, Any] = field(default_factory=dict)
+    filters: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -75,10 +75,10 @@ class ComplianceReport:
     """Compliance report data structure."""
 
     metadata: ReportMetadata
-    summary: Dict[str, Any]
-    details: List[Dict[str, Any]]
-    compliance_checks: List[Dict[str, Any]]
-    recommendations: List[str]
+    summary: dict[str, Any]
+    details: list[dict[str, Any]]
+    compliance_checks: list[dict[str, Any]]
+    recommendations: list[str]
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -146,7 +146,7 @@ class ReportGenerator:
         period_end: datetime,
         generated_by: Optional[int] = None,
         tenant_id: Optional[int] = None,
-        filters: Optional[Dict[str, Any]] = None,
+        filters: Optional[dict[str, Any]] = None,
     ) -> ComplianceReport:
         """
         Generate a compliance report.
@@ -239,7 +239,7 @@ class ReportGenerator:
         # Calculate summary
         total_tokens = sum(r.get("total_tokens", 0) or 0 for r in usage_data)
         total_requests = sum(r.get("total_requests", 0) or 0 for r in usage_data)
-        unique_tools = set(r.get("tool_name") for r in usage_data if r.get("tool_name"))
+        unique_tools = {r.get("tool_name") for r in usage_data if r.get("tool_name")}
 
         summary = {
             "period": {
@@ -523,8 +523,8 @@ class ReportGenerator:
         return summary, audit_details
 
     def _run_compliance_checks(
-        self, report_type: str, summary: Dict[str, Any], details: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
+        self, report_type: str, summary: dict[str, Any], details: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
         """Run compliance checks on the report data."""
         checks = []
 
@@ -602,7 +602,7 @@ class ReportGenerator:
 
         return checks
 
-    def _generate_recommendations(self, compliance_checks: List[Dict[str, Any]]) -> List[str]:
+    def _generate_recommendations(self, compliance_checks: list[dict[str, Any]]) -> list[str]:
         """Generate recommendations based on compliance checks."""
         recommendations = []
 
@@ -617,7 +617,7 @@ class ReportGenerator:
 
         return recommendations
 
-    def _group_by_role(self, user_activity: List[Dict]) -> Dict[str, int]:
+    def _group_by_role(self, user_activity: list[dict]) -> dict[str, int]:
         """Group user activity by role."""
         by_role = {}
         for user in user_activity:
@@ -681,7 +681,7 @@ class ReportGenerator:
 
     def get_saved_reports(
         self, report_type: Optional[str] = None, tenant_id: Optional[int] = None, limit: int = 50
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Get saved reports."""
         try:
             conditions = []

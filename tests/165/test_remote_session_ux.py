@@ -31,6 +31,8 @@ import uuid
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, PROJECT_ROOT)
 
+import contextlib
+
 import requests
 from playwright.sync_api import sync_playwright
 
@@ -851,10 +853,8 @@ def test_b3_permission_permanent_ui():
 
     def on_request(request):
         if "/permission" in request.url and request.method == "POST":
-            try:
+            with contextlib.suppress(Exception):
                 perm_requests.append(json.loads(request.post_data or "{}"))
-            except Exception:
-                pass
 
     page.on("request", on_request)
 
@@ -938,7 +938,6 @@ def test_b3_permission_permanent_ui():
 def test_b6_error_i18n():
     """B6: 错误消息国际化"""
     print("\n  ── B6: 错误消息国际化 ──")
-    page = _page
 
     webui_url, webui_token = _get_webui_url_and_token()
     if not _check_webui_available(webui_url):

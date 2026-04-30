@@ -12,7 +12,7 @@ import logging
 import secrets
 import urllib.parse
 from datetime import datetime, timedelta
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import jwt
 import requests
@@ -132,7 +132,7 @@ class OIDCProvider(OAuth2Provider):
 
         return user
 
-    def _get_jwks(self) -> Dict[str, Any]:
+    def _get_jwks(self) -> dict[str, Any]:
         """
         Fetch JWKS (JSON Web Key Set) from the provider's well-known endpoint.
 
@@ -200,7 +200,7 @@ class OIDCProvider(OAuth2Provider):
             logger.error(f"Error getting signing key: {e}")
             return None
 
-    def _jwk_to_pem(self, jwk: Dict[str, Any]) -> str:
+    def _jwk_to_pem(self, jwk: dict[str, Any]) -> str:
         """
         Convert a JWK (JSON Web Key) to PEM format.
 
@@ -229,7 +229,7 @@ class OIDCProvider(OAuth2Provider):
 
         return pem.decode("utf-8")
 
-    def _verify_id_token(self, id_token: str) -> Optional[Dict[str, Any]]:
+    def _verify_id_token(self, id_token: str) -> Optional[dict[str, Any]]:
         """
         Verify and decode the ID token with proper signature verification.
 
@@ -298,7 +298,7 @@ class OIDCProvider(OAuth2Provider):
             logger.error(f"Unexpected error during ID token verification: {e}")
             return None
 
-    def _parse_user_info(self, data: Dict[str, Any]) -> SSOUser:
+    def _parse_user_info(self, data: dict[str, Any]) -> SSOUser:
         """
         Parse user info from OIDC provider response.
 
@@ -336,7 +336,7 @@ class OIDCProvider(OAuth2Provider):
 class GoogleProvider(OIDCProvider):
     """Google-specific OIDC provider."""
 
-    def _parse_user_info(self, data: Dict[str, Any]) -> SSOUser:
+    def _parse_user_info(self, data: dict[str, Any]) -> SSOUser:
         """Parse Google user info."""
         return SSOUser(
             provider=self.name,
@@ -356,7 +356,7 @@ class GoogleProvider(OIDCProvider):
 class MicrosoftProvider(OIDCProvider):
     """Microsoft-specific OIDC provider."""
 
-    def _parse_user_info(self, data: Dict[str, Any]) -> SSOUser:
+    def _parse_user_info(self, data: dict[str, Any]) -> SSOUser:
         """Parse Microsoft user info."""
         return SSOUser(
             provider=self.name,
@@ -376,7 +376,7 @@ class MicrosoftProvider(OIDCProvider):
 class OktaProvider(OIDCProvider):
     """Okta-specific OIDC provider."""
 
-    def _parse_user_info(self, data: Dict[str, Any]) -> SSOUser:
+    def _parse_user_info(self, data: dict[str, Any]) -> SSOUser:
         """Parse Okta user info."""
         return SSOUser(
             provider=self.name,
@@ -396,7 +396,7 @@ class OktaProvider(OIDCProvider):
 class Auth0Provider(OIDCProvider):
     """Auth0-specific OIDC provider."""
 
-    def _parse_user_info(self, data: Dict[str, Any]) -> SSOUser:
+    def _parse_user_info(self, data: dict[str, Any]) -> SSOUser:
         """Parse Auth0 user info."""
         return SSOUser(
             provider=self.name,

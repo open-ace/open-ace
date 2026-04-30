@@ -48,7 +48,7 @@ def ensure_dir():
 
 def shot(page, name):
     ensure_dir()
-    path = os.path.join(SCREENSHOT_DIR, "%s.png" % name)
+    path = os.path.join(SCREENSHOT_DIR, f"{name}.png")
     try:
         page.screenshot(path=path, full_page=True, timeout=30000)
     except Exception:
@@ -56,11 +56,11 @@ def shot(page, name):
             page.screenshot(path=path, full_page=False, timeout=10000)
         except Exception:
             return
-    print("    📸 %s.png" % name)
+    print(f"    📸 {name}.png")
 
 
 def log(tag, msg):
-    print("    [%s] %s" % (tag, msg))
+    print(f"    [{tag}] {msg}")
 
 
 def pause(seconds):
@@ -72,7 +72,7 @@ def pause(seconds):
 
 def api_login():
     r = requests.post(
-        "%s/api/auth/login" % BASE_URL,
+        f"{BASE_URL}/api/auth/login",
         json={"username": TEST_USER, "password": TEST_PASS},
         proxies=PROXIES,
     )
@@ -84,7 +84,7 @@ def api_login():
 
 def get_webui_info(token):
     r = requests.get(
-        "%s/api/workspace/user-url" % BASE_URL,
+        f"{BASE_URL}/api/workspace/user-url",
         cookies={"session_token": token},
         proxies=PROXIES,
     )
@@ -137,16 +137,16 @@ def run_tests():
             sid = captured_session_id[0]
             if sid:
                 requests.post(
-                    "%s/api/remote/sessions/%s/stop" % (BASE_URL, sid),
+                    f"{BASE_URL}/api/remote/sessions/{sid}/stop",
                     cookies={"session_token": token},
                     proxies=PROXIES,
                 )
-                log("Cleanup", "Stopped session %s..." % sid[:8])
+                log("Cleanup", f"Stopped session {sid[:8]}...")
             context.close()
             browser.close()
 
     print("\n" + "=" * 60)
-    print("  ALL PASSED! Screenshots: %s" % SCREENSHOT_DIR)
+    print(f"  ALL PASSED! Screenshots: {SCREENSHOT_DIR}")
     print("=" * 60)
 
 
@@ -183,15 +183,15 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
     print("\n══════ STEP 1: Open ChatPage & Trigger Permission ══════")
 
     chat_url = (
-        "%s/projects"
-        "?token=%s"
-        "&openace_url=%s"
+        f"{webui_url}/projects"
+        f"?token={webui_token}"
+        f"&openace_url={BASE_URL}"
         "&workspaceType=remote"
-        "&machineId=%s"
+        f"&machineId={MACHINE_ID}"
         "&machineName=TestServer"
         "&encodedProjectName=-root"
         "&permissionMode=default"
-    ) % (webui_url, webui_token, BASE_URL, MACHINE_ID)
+    )
 
     page.goto(chat_url, wait_until="domcontentloaded", timeout=60000)
     page.wait_for_selector("textarea, .min-h-screen", timeout=30000)
@@ -204,7 +204,7 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
     for _ in range(30):
         try:
             r = requests.get(
-                "%s/api/remote/sessions" % BASE_URL,
+                f"{BASE_URL}/api/remote/sessions",
                 cookies={"session_token": token},
                 proxies=PROXIES,
             )
@@ -223,14 +223,14 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
     if not sid:
         sid = captured_session_id[0]
     assert sid, "Session not created"
-    log("Session", "✓ %s..." % sid[:12])
+    log("Session", f"✓ {sid[:12]}...")
 
     # Wait for CLI init
     time.sleep(8)
 
     # Send message to trigger write_file permission
     r = requests.post(
-        "%s/api/remote/sessions/%s/chat" % (BASE_URL, sid),
+        f"{BASE_URL}/api/remote/sessions/{sid}/chat",
         json={"content": TEST_MESSAGE},
         cookies={"session_token": token},
         proxies=PROXIES,
@@ -258,7 +258,7 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
     # Check for Enter hint
     hint = page.locator("text=按 Enter 确认").first
     if not hint.is_visible(timeout=2000):
-        hint_en = page.locator("text=Enter to confirm").first
+        page.locator("text=Enter to confirm").first
         log("i18n", "Hint text found (checking English fallback)")
     else:
         log("i18n", "✓ Enter hint displayed")
@@ -275,14 +275,14 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
 
     allow_bg = _get_button_bg(allow_btn)
     allow_text_color = _get_button_text_color(allow_btn)
-    log("Style", "  bg=%s text=%s" % (allow_bg, allow_text_color))
+    log("Style", f"  bg={allow_bg} text={allow_text_color}")
 
     # Selected = solid blue background (rgb(59, 130, 246) = blue-500) and white text
     assert (
         allow_bg != "rgba(0, 0, 0, 0)"
     ), "Allow button should have colored background when selected, got transparent"
     assert "255" in allow_text_color or "255, 255, 255" in allow_text_color, (
-        "Allow button text should be white when selected, got %s" % allow_text_color
+        f"Allow button text should be white when selected, got {allow_text_color}"
     )
     log("Style", "✓ '允许' has solid colored background + white text (selected)")
     shot(page, "S3_allow_selected")
@@ -301,14 +301,14 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
 
     # Debug: dump actual className
     permanent_class = permanent_btn.evaluate("el => el.className")
-    log("Debug", "  permanent className: %s" % permanent_class[:300])
+    log("Debug", f"  permanent className: {permanent_class[:300]}")
     permanent_style = permanent_btn.evaluate("el => el.getAttribute('style')")
-    log("Debug", "  permanent style attr: %s" % permanent_style)
+    log("Debug", f"  permanent style attr: {permanent_style}")
     shot(page, "S4_green_selected")
 
     permanent_bg = _get_button_bg(permanent_btn)
     permanent_text_color = _get_button_text_color(permanent_btn)
-    log("Style", "  bg=%s text=%s" % (permanent_bg, permanent_text_color))
+    log("Style", f"  bg={permanent_bg} text={permanent_text_color}")
 
     assert (
         permanent_bg != "rgba(0, 0, 0, 0)"
@@ -320,7 +320,7 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
 
     # Previous button should lose selection
     allow_bg_after = _get_button_bg(allow_btn)
-    log("Style", "  allow bg after: %s" % allow_bg_after)
+    log("Style", f"  allow bg after: {allow_bg_after}")
 
     # ════════════════════════════════════════════
     #  STEP 5: ArrowDown → "拒绝" (Red)
@@ -337,7 +337,7 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
 
     deny_bg = _get_button_bg(deny_btn)
     deny_text_color = _get_button_text_color(deny_btn)
-    log("Style", "  bg=%s text=%s" % (deny_bg, deny_text_color))
+    log("Style", f"  bg={deny_bg} text={deny_text_color}")
 
     assert deny_bg != "rgba(0, 0, 0, 0)", "Deny button should have colored background when selected"
     assert (
@@ -357,7 +357,7 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
 
     permanent_bg2 = _get_button_bg(permanent_btn)
     deny_bg2 = _get_button_bg(deny_btn)
-    log("Style", "  permanent bg=%s deny bg=%s" % (permanent_bg2, deny_bg2))
+    log("Style", f"  permanent bg={permanent_bg2} deny bg={deny_bg2}")
 
     assert (
         permanent_bg2 != "rgba(0, 0, 0, 0)"
@@ -394,9 +394,9 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
 
     if count > 1:
         texts = [command_spans.nth(i).text_content() for i in range(count)]
-        log("Dup", "  Badge texts: %s" % texts)
+        log("Dup", f"  Badge texts: {texts}")
         unique = set(texts)
-        assert len(unique) == len(texts), "Duplicate tool names found: %s" % texts
+        assert len(unique) == len(texts), f"Duplicate tool names found: {texts}"
     log("Dup", "✓ No duplicate tool names")
 
     # ════════════════════════════════════════════
@@ -406,8 +406,8 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
     print("\n══════ STEP 9: All 3 Buttons Always Visible ══════")
 
     for key in ["allow", "allowPermanent", "deny"]:
-        btn = page.locator('[data-permission-action="%s"]' % key).first
-        assert btn.is_visible(), "Button '%s' should always be visible" % key
+        btn = page.locator(f'[data-permission-action="{key}"]').first
+        assert btn.is_visible(), f"Button '{key}' should always be visible"
     log("Visible", "✓ All 3 buttons always visible during navigation")
 
     # ════════════════════════════════════════════

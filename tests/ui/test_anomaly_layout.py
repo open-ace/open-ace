@@ -95,7 +95,7 @@ def test_anomaly_detection_layout():
             anomaly_section = page.locator(".anomaly-detection")
             if anomaly_section.count() == 0:
                 print("⚠ .anomaly-detection section not found, checking page content...")
-                page_content = page.content()
+                page.content()
                 print(f"  Page URL: {page.url}")
                 # Check for any error messages
                 error_msg = page.locator(".alert-danger, .error-message")
@@ -171,7 +171,7 @@ def test_anomaly_detection_layout():
                         print("✓ overflow-x is hidden - no visible scrollbar")
                         results["no_horizontal_scrollbar"] = True
                     else:
-                        print(f"✗ Horizontal scrollbar may be visible")
+                        print("✗ Horizontal scrollbar may be visible")
             else:
                 print("⚠ Table container not found (may be empty state)")
                 # If no table, consider it passed (no scrollbar needed)

@@ -9,7 +9,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from app.repositories.database import Database
 
@@ -49,11 +49,11 @@ class RetentionReport:
     """Report of retention cleanup."""
 
     timestamp: datetime
-    rules_applied: List[Dict[str, Any]]
+    rules_applied: list[dict[str, Any]]
     records_deleted: int
     records_archived: int
     records_anonymized: int
-    errors: List[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -91,7 +91,7 @@ class DataRetentionManager:
     }
 
     def __init__(
-        self, db: Optional[Database] = None, custom_rules: Optional[Dict[str, RetentionRule]] = None
+        self, db: Optional[Database] = None, custom_rules: Optional[dict[str, RetentionRule]] = None
     ):
         """
         Initialize retention manager.
@@ -159,7 +159,7 @@ class DataRetentionManager:
         """
         return self.rules.get(data_type)
 
-    def get_all_rules(self) -> Dict[str, RetentionRule]:
+    def get_all_rules(self) -> dict[str, RetentionRule]:
         """
         Get all retention rules.
 
@@ -382,7 +382,7 @@ class DataRetentionManager:
         except Exception as e:
             logger.error(f"Failed to save retention report: {e}")
 
-    def get_retention_history(self, limit: int = 30) -> List[Dict[str, Any]]:
+    def get_retention_history(self, limit: int = 30) -> list[dict[str, Any]]:
         """
         Get retention cleanup history.
 
@@ -425,7 +425,7 @@ class DataRetentionManager:
 
         return history
 
-    def estimate_storage(self) -> Dict[str, Any]:
+    def estimate_storage(self) -> dict[str, Any]:
         """
         Estimate storage usage by data type.
 
@@ -457,7 +457,7 @@ class DataRetentionManager:
             "timestamp": datetime.utcnow().isoformat(),
         }
 
-    def get_compliance_status(self) -> Dict[str, Any]:
+    def get_compliance_status(self) -> dict[str, Any]:
         """
         Get data retention compliance status.
 

@@ -7,17 +7,18 @@ output collection, and session lifecycle. Integrates with existing
 SessionManager for persistence and QuotaManager for enforcement.
 """
 
+import contextlib
 import json
 import logging
 import threading
 import time
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from app.modules.workspace.api_key_proxy import APIKeyProxyService
 from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
-from app.modules.workspace.session_manager import SessionManager, SessionType
+from app.modules.workspace.session_manager import SessionManager
 from app.repositories.message_repo import MessageRepository
 from app.repositories.user_repo import UserRepository
 
@@ -38,7 +39,7 @@ class RemoteSessionManager:
     """
 
     # Class-level buffer for accumulating assistant text across requests
-    _assistant_text_buffer: Dict[str, str] = {}
+    _assistant_text_buffer: dict[str, str] = {}
     _buffer_lock = threading.Lock()
 
     def __init__(self):
@@ -46,11 +47,11 @@ class RemoteSessionManager:
         self._agent_manager = get_remote_agent_manager()
         self._api_key_proxy = APIKeyProxyService()
         # Cache of session permission modes to avoid unnecessary updates
-        self._session_permission_modes: Dict[str, str] = {}
+        self._session_permission_modes: dict[str, str] = {}
         self._message_repo = MessageRepository()
         self._user_repo = UserRepository()
         # Cache user names to avoid repeated lookups
-        self._user_name_cache: Dict[int, str] = {}
+        self._user_name_cache: dict[int, str] = {}
 
     def create_remote_session(
         self,
@@ -62,7 +63,7 @@ class RemoteSessionManager:
         title: str = "",
         tenant_id: Optional[int] = None,
         permission_mode: Optional[str] = None,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> Optional[dict[str, Any]]:
         """
         Create a new remote session.
 
@@ -413,7 +414,7 @@ class RemoteSessionManager:
 
         return success
 
-    def get_session_status(self, session_id: str) -> Optional[Dict[str, Any]]:
+    def get_session_status(self, session_id: str) -> Optional[dict[str, Any]]:
         """Get remote session status and recent output."""
         session = self._session_manager.get_session(session_id)
         if not session:
@@ -424,10 +425,8 @@ class RemoteSessionManager:
 
         # Include DB-stored messages for frontend replay on reconnect
         messages = []
-        try:
+        with contextlib.suppress(Exception):
             messages = self._session_manager.get_messages(session_id) or []
-        except Exception:
-            pass
 
         return {
             "session_id": session_id,
@@ -546,7 +545,7 @@ class RemoteSessionManager:
             self._save_to_daily_messages(session_id, "assistant", text)
 
     def process_usage_report(
-        self, session_id: str, tokens: Dict[str, int], requests: int = 1
+        self, session_id: str, tokens: dict[str, int], requests: int = 1
     ) -> None:
         """Process usage report from a remote agent."""
         session = self._session_manager.get_session(session_id)

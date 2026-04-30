@@ -47,7 +47,7 @@ def check_notification_state(page, tab_index=0):
 def find_visible_chat_frame(page):
     """Find the visible chat iframe."""
     frames = page.frames
-    for i, f in enumerate(frames):
+    for _i, f in enumerate(frames):
         if "token=" in f.url or "127.0.0.1:310" in f.url:
             try:
                 ta = f.locator("textarea")

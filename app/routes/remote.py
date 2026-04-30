@@ -15,14 +15,12 @@ import logging
 import os
 import time
 import uuid
-from datetime import datetime
 
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
-from app.modules.workspace.api_key_proxy import APIKeyProxyService, get_api_key_proxy_service
+from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
 from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
 from app.modules.workspace.remote_session_manager import (
-    RemoteSessionManager,
     get_remote_session_manager,
 )
 from app.services.auth_service import AuthService
@@ -882,7 +880,7 @@ def agent_message():
     if msg_type == "register":
         # Agent re-registering on reconnect
         agent_mgr.register_connection(machine_id, None)
-        capabilities = data.get("capabilities", {})
+        data.get("capabilities", {})
         pending = agent_mgr.get_pending_commands(machine_id)
         return jsonify({"success": True, "type": "register_ack", "pending_commands": pending})
 
@@ -1248,7 +1246,7 @@ def usage_report():
     session_id = data.get("session_id")
     tokens = data.get("tokens", {})
     requests = data.get("requests", 1)
-    machine_id = data.get("machine_id")
+    data.get("machine_id")
 
     if not session_id:
         return jsonify({"error": "session_id is required"}), 400
@@ -1280,7 +1278,7 @@ def browse_remote_directory(machine_id):
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
 
-    path = request.args.get("path")
+    request.args.get("path")
 
     # Send browse command to agent and wait for response
     # For now, return machine info with work_dir

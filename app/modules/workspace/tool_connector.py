@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -46,16 +46,16 @@ class ToolInfo:
     version: str = ""
     endpoint: str = ""
     status: str = ToolStatus.UNKNOWN.value
-    capabilities: List[str] = field(default_factory=list)
-    models: List[str] = field(default_factory=list)
+    capabilities: list[str] = field(default_factory=list)
+    models: list[str] = field(default_factory=list)
     default_model: Optional[str] = None
     max_tokens: int = 4096
     supports_streaming: bool = False
     supports_vision: bool = False
     supports_tools: bool = False
-    config: Dict[str, Any] = field(default_factory=dict)
+    config: dict[str, Any] = field(default_factory=dict)
     last_check: Optional[datetime] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -111,7 +111,7 @@ class ToolAdapter(ABC):
     @abstractmethod
     async def send_message(
         self, message: str, session_id: Optional[str] = None, model: Optional[str] = None, **kwargs
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Send a message to the tool.
 
@@ -155,7 +155,7 @@ class MockToolAdapter(ToolAdapter):
 
     async def send_message(
         self, message: str, session_id: Optional[str] = None, model: Optional[str] = None, **kwargs
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Send a mock message."""
         return {
             "success": True,
@@ -186,9 +186,9 @@ class ToolConnector:
 
     def __init__(self):
         """Initialize the tool connector."""
-        self._tools: Dict[str, ToolInfo] = {}
-        self._adapters: Dict[str, ToolAdapter] = {}
-        self._handlers: Dict[str, Callable] = {}
+        self._tools: dict[str, ToolInfo] = {}
+        self._adapters: dict[str, ToolAdapter] = {}
+        self._handlers: dict[str, Callable] = {}
         self._register_default_tools()
 
     def _register_default_tools(self) -> None:
@@ -299,7 +299,7 @@ class ToolConnector:
 
     def list_tools(
         self, tool_type: Optional[str] = None, status: Optional[str] = None
-    ) -> List[ToolInfo]:
+    ) -> list[ToolInfo]:
         """
         List all registered tools.
 
@@ -349,7 +349,7 @@ class ToolConnector:
         session_id: Optional[str] = None,
         model: Optional[str] = None,
         **kwargs,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Send a message to a tool.
 
@@ -452,7 +452,7 @@ class ToolConnector:
         self._tools[tool_name].last_check = datetime.utcnow()
         return True
 
-    async def check_all_health(self) -> Dict[str, bool]:
+    async def check_all_health(self) -> dict[str, bool]:
         """
         Check health of all tools.
 
@@ -464,7 +464,7 @@ class ToolConnector:
             results[tool_name] = await self.check_tool_health(tool_name)
         return results
 
-    def get_available_models(self, tool_name: Optional[str] = None) -> List[Dict[str, Any]]:
+    def get_available_models(self, tool_name: Optional[str] = None) -> list[dict[str, Any]]:
         """
         Get available models.
 
@@ -492,7 +492,7 @@ class ToolConnector:
 
         return models
 
-    def get_tool_capabilities(self, tool_name: str) -> List[str]:
+    def get_tool_capabilities(self, tool_name: str) -> list[str]:
         """
         Get capabilities of a tool.
 
@@ -505,7 +505,7 @@ class ToolConnector:
         tool = self._tools.get(tool_name)
         return tool.capabilities if tool else []
 
-    def find_tools_by_capability(self, capability: str) -> List[ToolInfo]:
+    def find_tools_by_capability(self, capability: str) -> list[ToolInfo]:
         """
         Find tools that have a specific capability.
 
@@ -536,7 +536,7 @@ class ToolConnector:
         logger.info(f"Updated status for {tool_name}: {status}")
         return True
 
-    def get_tool_stats(self) -> Dict[str, Any]:
+    def get_tool_stats(self) -> dict[str, Any]:
         """
         Get statistics about registered tools.
 
@@ -550,7 +550,7 @@ class ToolConnector:
             1 for t in self._tools.values() if t.status == ToolStatus.MAINTENANCE.value
         )
 
-        by_type: Dict[str, int] = {}
+        by_type: dict[str, int] = {}
         for tool in self._tools.values():
             by_type[tool.tool_type] = by_type.get(tool.tool_type, 0) + 1
 

@@ -104,7 +104,7 @@ def test_issue73():
 
             # Look for the notification toggle button in page-header
             # It should have bi-bell or bi-bell-slash icon
-            bell_btn = page.locator(
+            page.locator(
                 "button:has(.bi-bell), button:has(.bi-bell-slash), button:has(.bi-bell-fill)"
             ).first
 
@@ -204,7 +204,7 @@ def test_issue73():
 
                 # Check tooltip validity
                 if tooltip_fs and not (
-                    "TabNotifications" in tooltip_fs and not "通知" in tooltip_fs
+                    "TabNotifications" in tooltip_fs and "通知" not in tooltip_fs
                 ):
                     print("  ✓ Tooltip text is valid in fullscreen mode")
                     test_results.append(("Tooltip Fullscreen Valid", "PASS", tooltip_fs))

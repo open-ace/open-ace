@@ -14,7 +14,7 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional, TypeVar
+from typing import Any, Callable, Optional, TypeVar
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +79,7 @@ class MemoryCache(CacheBackend):
         """
         self.max_size = max_size
         self.default_ttl = default_ttl
-        self._cache: Dict[str, CacheEntry] = {}
+        self._cache: dict[str, CacheEntry] = {}
         self._lock = threading.RLock()
         self._hits = 0
         self._misses = 0
@@ -165,7 +165,7 @@ class MemoryCache(CacheBackend):
             lru_key = min(self._cache.keys(), key=lambda k: self._cache[k].hits)
             del self._cache[lru_key]
 
-    def stats(self) -> Dict[str, Any]:
+    def stats(self) -> dict[str, Any]:
         """Get cache statistics."""
         with self._lock:
             total_requests = self._hits + self._misses
@@ -385,7 +385,7 @@ class CacheManager:
         """Check if key exists."""
         return self._backend.exists(key)
 
-    def stats(self) -> Dict[str, Any]:
+    def stats(self) -> dict[str, Any]:
         """Get cache statistics."""
         if isinstance(self._backend, MemoryCache):
             return self._backend.stats()

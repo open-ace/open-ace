@@ -12,7 +12,7 @@ import os
 import subprocess
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 # Add shared modules
@@ -21,11 +21,11 @@ shared_dir = os.path.join(script_dir, "shared")
 if shared_dir not in sys.path:
     sys.path.insert(0, shared_dir)
 
-import utils
-from db import _db_url_cache, get_connection, get_usage_by_date
-
 # Clear database URL cache to respect DATABASE_URL environment variable
-_db_url_cache = None
+import db
+from db import get_connection
+
+db._db_url_cache = None
 
 # Marker file for tracking sync state
 MARKER_FILE = Path.home() / ".open-ace" / "sync_state.json"
@@ -194,7 +194,7 @@ def get_new_messages_count(hostname: str, last_sync_time: str = None) -> int:
         # Count messages created after last sync
         cursor.execute(
             """
-            SELECT COUNT(*) as count FROM daily_messages 
+            SELECT COUNT(*) as count FROM daily_messages
             WHERE host_name = ? AND created_at > ?
         """,
             (hostname, last_sync_time),
@@ -204,7 +204,7 @@ def get_new_messages_count(hostname: str, last_sync_time: str = None) -> int:
         today = datetime.now().strftime("%Y-%m-%d")
         cursor.execute(
             """
-            SELECT COUNT(*) as count FROM daily_messages 
+            SELECT COUNT(*) as count FROM daily_messages
             WHERE host_name = ? AND date >= ?
         """,
             (hostname, today),
@@ -234,7 +234,7 @@ def upload_incremental(
     if last_sync_time:
         cursor.execute(
             """
-            SELECT * FROM daily_messages 
+            SELECT * FROM daily_messages
             WHERE host_name = ? AND created_at > ?
             ORDER BY created_at ASC
             LIMIT 1000
@@ -246,7 +246,7 @@ def upload_incremental(
         today = datetime.now().strftime("%Y-%m-%d")
         cursor.execute(
             """
-            SELECT * FROM daily_messages 
+            SELECT * FROM daily_messages
             WHERE host_name = ? AND date >= ?
             ORDER BY created_at ASC
             LIMIT 1000
@@ -287,7 +287,6 @@ def upload_incremental(
                 "is_group_chat": message.get("is_group_chat"),
                 "agent_session_id": message.get("agent_session_id"),
                 "conversation_id": message.get("conversation_id"),
-                "host_name": message.get("host_name"),
             }
         )
 
@@ -336,7 +335,7 @@ def sync_data(
 
     # Step 1: Fetch data from all tools
     print(f"--- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---")
-    fetch_results = fetch_all_tools(hostname, days)
+    fetch_all_tools(hostname, days)
 
     # Step 2: Check for new messages
     new_count = get_new_messages_count(hostname, last_sync_time)
@@ -403,11 +402,11 @@ def run_daemon(
         print("Error: server_url and auth_key are required")
         sys.exit(1)
 
-    print(f"Starting sync daemon")
+    print("Starting sync daemon")
     print(f"  Server: {server_url}")
     print(f"  Hostname: {hostname}")
     print(f"  Interval: {interval}s ({interval // 60} min)")
-    print(f"  Mode: incremental sync")
+    print("  Mode: incremental sync")
     print()
 
     while True:

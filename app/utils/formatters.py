@@ -6,10 +6,10 @@ Data formatting functions.
 """
 
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Optional
 
 
-def format_usage_data(usage: Dict) -> Dict:
+def format_usage_data(usage: dict) -> dict:
     """
     Format usage data for API response.
 
@@ -32,7 +32,7 @@ def format_usage_data(usage: Dict) -> Dict:
     }
 
 
-def format_message_data(message: Dict) -> Dict:
+def format_message_data(message: dict) -> dict:
     """
     Format message data for API response.
 
@@ -57,7 +57,7 @@ def format_message_data(message: Dict) -> Dict:
     }
 
 
-def format_user_data(user: Dict, include_sensitive: bool = False) -> Dict:
+def format_user_data(user: dict, include_sensitive: bool = False) -> dict:
     """
     Format user data for API response.
 

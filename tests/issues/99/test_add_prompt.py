@@ -5,11 +5,8 @@ Test script to reproduce the "Add Prompt" dialog error in work mode.
 Issue: Clicking the Create button in the Add Prompt dialog causes an error.
 """
 
-import json
 import os
 import sys
-import time
-from datetime import datetime
 
 # Add project root to path
 sys.path.insert(

@@ -18,7 +18,7 @@ import uuid
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Optional
 
 try:
     import websockets
@@ -36,7 +36,6 @@ if shared_dir not in sys.path:
 import feishu_group_cache
 import feishu_user_cache
 import utils
-
 from shared import db
 
 
@@ -140,7 +139,7 @@ def get_openclaw_gateway_token() -> Optional[str]:
 # ============================================================================
 
 
-async def get_openclaw_usage(gateway_url: str, token: str, days: int = 7) -> Optional[Dict]:
+async def get_openclaw_usage(gateway_url: str, token: str, days: int = 7) -> Optional[dict]:
     """
     Fetch daily usage data from OpenClaw gateway.
 
@@ -199,7 +198,7 @@ async def get_openclaw_usage(gateway_url: str, token: str, days: int = 7) -> Opt
                 print(f"Unexpected initial message: {response}")
                 return None
 
-            nonce = response.get("payload", {}).get("nonce")
+            response.get("payload", {}).get("nonce")
 
             # Connect with cli client (not openclaw-control-ui which requires device identity)
             # Using "cli" client id with "probe" mode for API access
@@ -290,7 +289,7 @@ async def get_openclaw_usage(gateway_url: str, token: str, days: int = 7) -> Opt
         return None
 
 
-def parse_usage_response(response: dict) -> Dict:
+def parse_usage_response(response: dict) -> dict:
     """Parse the usage cost response and extract daily token usage."""
     result = response.get("payload", {})
 
@@ -647,7 +646,7 @@ def extract_content_from_entry(entry: dict) -> tuple:
                     if thinking:
                         texts.append(f"[Thinking]\n{thinking}")
                 elif item_type == "toolCall":
-                    tool_id = item.get("id", "")
+                    item.get("id", "")
                     tool_name = item.get("name", "unknown")
                     args = item.get("arguments", {})
                     args_str = json.dumps(args, ensure_ascii=False) if args else ""
@@ -1088,8 +1087,8 @@ def process_jsonl_file(
                             # Get token counts
                             input_tokens = tokens.get("input_tokens", 0)
                             output_tokens = tokens.get("output_tokens", 0)
-                            cache_read = tokens.get("cache_read_tokens", 0)
-                            cache_write = tokens.get("cache_write_tokens", 0)
+                            tokens.get("cache_read_tokens", 0)
+                            tokens.get("cache_write_tokens", 0)
                             total_tokens = input_tokens + output_tokens
 
                             # Get model info

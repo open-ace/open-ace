@@ -122,7 +122,7 @@ async def _test_sessions_section(page):
     try:
         # Check if Sessions nav exists (for non-admin users)
         print("  - 检查 Sessions 导航项")
-        sessions_nav = await page.query_selector('.sidebar .nav-link:has-text("Sessions")')
+        await page.query_selector('.sidebar .nav-link:has-text("Sessions")')
 
         # For admin user, Sessions might not be visible
         # Let's check if we can navigate to it directly

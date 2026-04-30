@@ -324,7 +324,7 @@ def run_tests():
             assert loaded_meta[session_id]["cli_tool"] == "qwen-code-cli"
             assert loaded_meta[session_id]["project_path"] == "/home/user/crash-test-project"
             assert loaded_meta[session_id]["model"] == "qwen3-coder-plus"
-            assert loaded_meta[session_id]["paused"] == False
+            assert not loaded_meta[session_id]["paused"]
             log_step("Verify", f"Session {session_id[:8]} metadata correct")
             log_step("cli_tool", loaded_meta[session_id]["cli_tool"])
             log_step("model", loaded_meta[session_id]["model"])
@@ -354,7 +354,7 @@ def run_tests():
             log_step("Post-crash", "Metadata file still exists with session data")
 
             # New ProcessExecutor instance simulates agent restart
-            pe2 = ProcessExecutor("http://localhost:5001")
+            ProcessExecutor("http://localhost:5001")
             log_step("New executor", "Created to simulate agent restart")
             shot(page, "06_crash_simulation")
             print("  Crash simulation: metadata persists on disk")

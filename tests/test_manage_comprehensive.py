@@ -10,6 +10,7 @@
 5. 前端-后端路由匹配
 """
 
+import contextlib
 import os
 from datetime import datetime
 
@@ -335,10 +336,8 @@ def run_all_tests():
         page.fill("#password", PASSWORD)
         page.click('button[type="submit"]')
         page.wait_for_timeout(3000)
-        try:
+        with contextlib.suppress(Exception):
             page.wait_for_url(lambda url: "/login" not in url, timeout=15000)
-        except Exception:
-            pass
 
         ui = UITester(page, ui_results)
 
@@ -381,12 +380,10 @@ def run_all_tests():
                 page.wait_for_timeout(3000)
 
                 # Wait for main content
-                try:
+                with contextlib.suppress(Exception):
                     page.wait_for_selector(
                         "main, .manage-content, h1, h2, h3, .card", timeout=10000
                     )
-                except Exception:
-                    pass
 
                 # Screenshot
                 safe_name = page_name.lower().replace(" ", "_").replace("&", "and")

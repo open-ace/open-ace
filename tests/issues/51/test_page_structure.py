@@ -37,7 +37,7 @@ def check_page_structure():
         page.wait_for_timeout(5000)
 
         # 获取页面内容
-        html = page.content()
+        page.content()
 
         # 查找所有卡片标题
         card_titles = page.locator(".card-title, .card h5").all_text_contents()

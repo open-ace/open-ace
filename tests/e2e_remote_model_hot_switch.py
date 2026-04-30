@@ -23,6 +23,8 @@ import traceback
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
+import contextlib
+
 import requests
 
 # ── Config ──
@@ -127,12 +129,10 @@ def wait_for_response(tok, sid, timeout=RESPONSE_TIMEOUT):
 
 def cleanup_session(tok, sid):
     if sid:
-        try:
+        with contextlib.suppress(Exception):
             requests.post(
                 f"{BASE_URL}/api/remote/sessions/{sid}/stop", cookies={"session_token": tok}
             )
-        except Exception:
-            pass
 
 
 # ════════════════════════════════════════════

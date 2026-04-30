@@ -7,7 +7,7 @@ Provides utility functions for the ai_token_usage project.
 
 import os
 import sys
-from typing import Dict, List, Optional
+from typing import Optional
 
 # Ensure scripts directory is in path for standalone script execution
 _script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -46,7 +46,7 @@ def parse_date(date_str: str) -> Optional[str]:
         return None
 
 
-def load_config(config_path: str = None) -> Dict:
+def load_config(config_path: str = None) -> dict:
     """Load configuration from JSON file."""
     import json
     import os
@@ -67,7 +67,7 @@ def load_config(config_path: str = None) -> Dict:
     return config
 
 
-def save_config(config: Dict, config_path: str = None) -> None:
+def save_config(config: dict, config_path: str = None) -> None:
     """Save configuration to JSON file."""
     import json
     import os
@@ -94,7 +94,7 @@ def get_days_ago(days: int) -> str:
     return (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
 
-def aggregate_daily_stats(entries: List[Dict]) -> Dict:
+def aggregate_daily_stats(entries: list[dict]) -> dict:
     """Aggregate daily statistics from multiple entries."""
     total = sum(e.get("tokens_used", 0) for e in entries)
     input_total = sum(e.get("input_tokens", 0) for e in entries)

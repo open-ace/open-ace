@@ -364,7 +364,6 @@ def test_4_sse_latency():
     ).json()
     webui_token = webui_info.get("token", "")
 
-    sse_url = f"{BASE_URL}/api/remote/sessions/{sid}/stream?token={webui_token}"
 
     import http.client
 

@@ -8,7 +8,7 @@ Business logic for usage analysis and reporting.
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Optional
 
 from app.repositories.daily_stats_repo import DailyStatsRepository
 from app.repositories.message_repo import MessageRepository
@@ -50,7 +50,7 @@ class AnalysisService:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
-    ) -> Dict:
+    ) -> dict:
         """
         Get all analysis data in a single optimized call.
 
@@ -274,7 +274,7 @@ class AnalysisService:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
-    ) -> Dict:
+    ) -> dict:
         """
         Get key metrics for the dashboard.
 
@@ -351,7 +351,7 @@ class AnalysisService:
             )[:5]
 
         # Calculate sessions and averages
-        total_sessions = len(set((u.get("date"), u.get("tool_name")) for u in usage_data))
+        total_sessions = len({(u.get("date"), u.get("tool_name")) for u in usage_data})
 
         # Count total messages from user_tokens
         total_messages = (
@@ -381,7 +381,7 @@ class AnalysisService:
         date: Optional[str] = None,
         tool_name: Optional[str] = None,
         host_name: Optional[str] = None,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Get hourly usage breakdown from hourly_stats table.
         """
@@ -415,7 +415,7 @@ class AnalysisService:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
-    ) -> Dict:
+    ) -> dict:
         """
         Get daily and hourly usage patterns.
 
@@ -476,7 +476,7 @@ class AnalysisService:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
-    ) -> Dict:
+    ) -> dict:
         """
         Get peak usage periods.
 
@@ -537,7 +537,7 @@ class AnalysisService:
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
         limit: int = 10,
-    ) -> Dict:
+    ) -> dict:
         """
         Get user ranking by token usage.
 
@@ -581,7 +581,7 @@ class AnalysisService:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
-    ) -> Dict:
+    ) -> dict:
         """
         Get conversation statistics.
 
@@ -618,7 +618,7 @@ class AnalysisService:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
-    ) -> Dict:
+    ) -> dict:
         """
         Get tool comparison data.
 
@@ -659,7 +659,7 @@ class AnalysisService:
         return {"tools": tools}
 
     @cached(ttl=300, key_prefix="analysis", skip_args=[0])
-    def get_recommendations(self, host_name: Optional[str] = None) -> List[Dict]:
+    def get_recommendations(self, host_name: Optional[str] = None) -> list[dict]:
         """
         Get usage optimization recommendations.
 
@@ -725,7 +725,7 @@ class AnalysisService:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
-    ) -> Dict:
+    ) -> dict:
         """
         Get user segmentation based on token usage.
 
@@ -775,7 +775,7 @@ class AnalysisService:
         host_name: Optional[str] = None,
         anomaly_type: Optional[str] = None,
         severity: Optional[str] = None,
-    ) -> Dict:
+    ) -> dict:
         """
         Detect usage anomalies.
 
@@ -890,7 +890,7 @@ class AnalysisService:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
-    ) -> Dict:
+    ) -> dict:
         """
         Get anomaly trend over time.
 

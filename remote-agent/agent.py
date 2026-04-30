@@ -13,7 +13,7 @@ import os
 import signal
 import sys
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import requests
 from executor import ProcessExecutor
@@ -159,7 +159,7 @@ class RemoteAgent:
                 except Exception as e:
                     logger.error("Error handling command: %s", e)
 
-    def _http_send(self, message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _http_send(self, message: dict[str, Any]) -> Optional[dict[str, Any]]:
         """
         POST a message to the server's HTTP fallback endpoint.
 
@@ -282,7 +282,7 @@ class RemoteAgent:
             logger.warning("Failed to send session_status for session %s", session_id[:8])
 
     def _send_usage_report(
-        self, session_id: str, tokens: Dict[str, int], requests: int = 1
+        self, session_id: str, tokens: dict[str, int], requests: int = 1
     ) -> None:
         """Send a usage_report message to the server."""
         self._http_send(
@@ -295,7 +295,7 @@ class RemoteAgent:
             }
         )
 
-    def _handle_command(self, data: Dict[str, Any]) -> None:
+    def _handle_command(self, data: dict[str, Any]) -> None:
         """Dispatch a command from the server."""
         command = data.get("command")
         session_id = data.get("session_id")
@@ -339,7 +339,7 @@ class RemoteAgent:
         else:
             logger.warning("Unknown command: %s", command)
 
-    def _cmd_start_session(self, data: Dict[str, Any]) -> None:
+    def _cmd_start_session(self, data: dict[str, Any]) -> None:
         """Handle a start_session command."""
         session_id = data.get("session_id", "")
         project_path = data.get("project_path", os.path.expanduser("~"))
@@ -377,7 +377,7 @@ class RemoteAgent:
                 is_complete=True,
             )
 
-    def _cmd_send_message(self, data: Dict[str, Any]) -> None:
+    def _cmd_send_message(self, data: dict[str, Any]) -> None:
         """Handle a send_message command."""
         session_id = data.get("session_id", "")
         content = data.get("content", "")
@@ -392,7 +392,7 @@ class RemoteAgent:
                 result.get("error"),
             )
 
-    def _cmd_stop_session(self, data: Dict[str, Any]) -> None:
+    def _cmd_stop_session(self, data: dict[str, Any]) -> None:
         """Handle a stop_session command."""
         session_id = data.get("session_id", "")
 
@@ -400,7 +400,7 @@ class RemoteAgent:
         self._executor.stop_session(session_id)
         self._send_session_status(session_id, "stopped")
 
-    def _cmd_permission_response(self, data: Dict[str, Any]) -> None:
+    def _cmd_permission_response(self, data: dict[str, Any]) -> None:
         """Handle a permission_response command from the frontend.
 
         Sends a ``control_response`` to the CLI subprocess stdin so the
@@ -429,7 +429,7 @@ class RemoteAgent:
                 result.get("error"),
             )
 
-    def _cmd_update_permission_mode(self, data: Dict[str, Any]) -> None:
+    def _cmd_update_permission_mode(self, data: dict[str, Any]) -> None:
         """Handle update_permission_mode command from the frontend."""
         session_id = data.get("session_id", "")
         permission_mode = data.get("permission_mode", "default")
@@ -447,7 +447,7 @@ class RemoteAgent:
                 result.get("error"),
             )
 
-    def _cmd_update_model(self, data: Dict[str, Any]) -> None:
+    def _cmd_update_model(self, data: dict[str, Any]) -> None:
         """Handle update_model command from the frontend."""
         session_id = data.get("session_id", "")
         model = data.get("model", "")
@@ -495,16 +495,16 @@ def fix_stdin_for_service() -> None:
     null_dev = os.devnull  # '/dev/null' on Unix, 'nul' on Windows
 
     if sys.stdin is None or sys.stdin.closed:
-        sys.stdin = open(null_dev, "r")
+        sys.stdin = open(null_dev)
         logger.info("Fixed stdin for service environment: stdin was None/closed")
     else:
         try:
             fd = sys.stdin.fileno()
             if fd < 0:
-                sys.stdin = open(null_dev, "r")
+                sys.stdin = open(null_dev)
                 logger.info("Fixed stdin for service environment: invalid fd (%d)", fd)
         except (ValueError, OSError):
-            sys.stdin = open(null_dev, "r")
+            sys.stdin = open(null_dev)
             logger.info("Fixed stdin for service environment: no valid fileno")
 
 

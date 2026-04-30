@@ -10,7 +10,6 @@ import os
 from flask import (
     Blueprint,
     make_response,
-    redirect,
     request,
     send_from_directory,
 )
@@ -45,7 +44,7 @@ def serve_react_app():
     index_path = os.path.join(dist_dir, "index.html")
 
     if os.path.exists(index_path):
-        with open(index_path, "r") as f:
+        with open(index_path) as f:
             content = f.read()
         response = make_response(content)
         response.headers["Content-Type"] = "text/html"

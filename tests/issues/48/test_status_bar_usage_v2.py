@@ -54,7 +54,6 @@ def take_screenshot(page, name: str):
 
 def test_status_bar_improvements():
     """Test status bar improvements for Issue 48."""
-    screenshots = []
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=HEADLESS)

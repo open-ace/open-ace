@@ -26,6 +26,8 @@ import uuid
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
+import contextlib
+
 import requests
 from playwright.sync_api import sync_playwright
 
@@ -751,17 +753,13 @@ def run_tests():
         traceback.print_exc()
 
         # Cleanup on failure
-        try:
+        with contextlib.suppress(Exception):
             api_cleanup(auth_token, admin_token)
-        except Exception:
-            pass
         sys.exit(1)
 
     # Cleanup on success
-    try:
+    with contextlib.suppress(Exception):
         api_cleanup(auth_token, admin_token)
-    except Exception:
-        pass
 
 
 if __name__ == "__main__":

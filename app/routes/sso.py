@@ -253,7 +253,7 @@ def callback(provider_name: str):
         )
 
         # Also create local session
-        local_token = auth_service.user_repo.create_session(
+        auth_service.user_repo.create_session(
             user_id=user_id,
             token=session_token,
             expires_at=datetime.utcnow(),

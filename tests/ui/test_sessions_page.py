@@ -13,6 +13,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+import contextlib
 import time
 
 from playwright.sync_api import sync_playwright
@@ -157,10 +158,8 @@ def test_sessions_page():
         except Exception as e:
             print(f"\n❌ 测试失败: {e}")
             results.append(("测试执行", False, str(e)))
-            try:
+            with contextlib.suppress(BaseException):
                 screenshots.append(save_screenshot(page, "error"))
-            except:
-                pass
 
         finally:
             browser.close()

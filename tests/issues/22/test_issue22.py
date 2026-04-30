@@ -7,9 +7,7 @@ using JWKS (JSON Web Key Set).
 """
 
 import base64
-import json
 import time
-from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import jwt

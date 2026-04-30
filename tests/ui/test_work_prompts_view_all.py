@@ -30,7 +30,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 import time
 
-from playwright.async_api import async_playwright, expect
+from playwright.async_api import async_playwright
 
 # Test Configuration
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000")

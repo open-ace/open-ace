@@ -99,7 +99,7 @@ async def test_project_selector_keyboard_navigation():
             if item_count == 0:
                 print("  ! 没有项目，无法测试键盘导航")
                 results.append(("有可测试的项目", False, "项目数量为 0"))
-                assert False, "没有项目进行测试"
+                raise AssertionError("没有项目进行测试")
 
             # Step 4: **关键测试** - 不点击，直接按 ↓ 键
             print("\nStep 4: 关键测试 - 不点击 iframe，直接按 ↓ 键...")

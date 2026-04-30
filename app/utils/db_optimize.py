@@ -6,7 +6,7 @@ Provides database indexing and optimization utilities.
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from app.repositories.database import Database
 
@@ -98,7 +98,7 @@ class DatabaseOptimizer:
         """
         self.db = db or Database()
 
-    def create_indexes(self, tables: Optional[List[str]] = None) -> Dict[str, Any]:
+    def create_indexes(self, tables: Optional[list[str]] = None) -> dict[str, Any]:
         """
         Create recommended indexes.
 
@@ -155,7 +155,7 @@ class DatabaseOptimizer:
         logger.info(f"Created {len(results['created'])} indexes, {len(results['errors'])} errors")
         return results
 
-    def drop_indexes(self, tables: Optional[List[str]] = None) -> Dict[str, Any]:
+    def drop_indexes(self, tables: Optional[list[str]] = None) -> dict[str, Any]:
         """
         Drop all custom indexes.
 
@@ -195,7 +195,7 @@ class DatabaseOptimizer:
 
         return results
 
-    def analyze_table(self, table_name: str) -> Dict[str, Any]:
+    def analyze_table(self, table_name: str) -> dict[str, Any]:
         """
         Analyze a table for optimization opportunities.
 
@@ -258,7 +258,7 @@ class DatabaseOptimizer:
 
         return analysis
 
-    def get_table_stats(self) -> List[Dict[str, Any]]:
+    def get_table_stats(self) -> list[dict[str, Any]]:
         """
         Get statistics for all tables.
 
@@ -340,7 +340,7 @@ class DatabaseOptimizer:
             logger.error(f"ANALYZE failed: {e}")
             return False
 
-    def optimize(self) -> Dict[str, Any]:
+    def optimize(self) -> dict[str, Any]:
         """
         Run full optimization.
 
@@ -356,7 +356,7 @@ class DatabaseOptimizer:
 
         return results
 
-    def get_query_plan(self, query: str, params: tuple = ()) -> List[Dict[str, Any]]:
+    def get_query_plan(self, query: str, params: tuple = ()) -> list[dict[str, Any]]:
         """
         Get query execution plan.
 
@@ -375,7 +375,7 @@ class DatabaseOptimizer:
         return [dict(row) if hasattr(row, "keys") else {"detail": row[0]} for row in rows]
 
 
-def optimize_database() -> Dict[str, Any]:
+def optimize_database() -> dict[str, Any]:
     """
     Run database optimization.
 
@@ -386,7 +386,7 @@ def optimize_database() -> Dict[str, Any]:
     return optimizer.optimize()
 
 
-def create_all_indexes() -> Dict[str, Any]:
+def create_all_indexes() -> dict[str, Any]:
     """
     Create all recommended indexes.
 

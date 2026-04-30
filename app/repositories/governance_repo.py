@@ -11,7 +11,7 @@ import json
 import logging
 import os
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from app.repositories.database import CONFIG_DIR, Database
 
@@ -42,7 +42,7 @@ class GovernanceRepository:
     # Content Filter Rules
     # =========================================================================
 
-    def get_filter_rules(self) -> List[Dict]:
+    def get_filter_rules(self) -> list[dict]:
         """
         Get all content filter rules.
 
@@ -58,7 +58,7 @@ class GovernanceRepository:
 
         return rules
 
-    def get_filter_rule(self, rule_id: int) -> Optional[Dict]:
+    def get_filter_rule(self, rule_id: int) -> Optional[dict]:
         """
         Get a specific filter rule.
 
@@ -235,7 +235,7 @@ class GovernanceRepository:
     # Security Settings
     # =========================================================================
 
-    def get_security_settings(self) -> Dict[str, Any]:
+    def get_security_settings(self) -> dict[str, Any]:
         """
         Get security settings from database.
 
@@ -290,7 +290,7 @@ class GovernanceRepository:
 
         return default_settings
 
-    def update_security_settings(self, settings: Dict[str, Any]) -> bool:
+    def update_security_settings(self, settings: dict[str, Any]) -> bool:
         """
         Update security settings in database.
 

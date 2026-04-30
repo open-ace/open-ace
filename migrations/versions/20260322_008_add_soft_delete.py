@@ -13,7 +13,8 @@ Soft delete allows recovery of accidentally deleted data.
 
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
+from typing import Union
 
 import sqlalchemy as sa
 from alembic import op

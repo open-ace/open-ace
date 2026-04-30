@@ -166,7 +166,7 @@ class UserDailyStatsAggregator:
         Returns:
             Number of records created/updated.
         """
-        today = datetime.now().strftime("%Y-%m-%d")
+        datetime.now().strftime("%Y-%m-%d")
 
         if user_id:
             user = self.user_repo.get_user_by_id(user_id)

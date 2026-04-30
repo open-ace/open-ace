@@ -105,7 +105,6 @@ def wait_for_server(timeout=30):
 def wait_for_ai_response(page, timeout=RESPONSE_TIMEOUT):
     """Wait for AI to respond in ChatPage by monitoring page content."""
     start = time.time()
-    got_response = False
 
     while time.time() - start < timeout:
         # Auto-approve permission panel if it appears
@@ -130,7 +129,6 @@ def wait_for_ai_response(page, timeout=RESPONSE_TIMEOUT):
         if assistant_msg.count() > 0:
             msg_text = assistant_msg.last.text_content() or ""
             if msg_text and not msg_text.strip().startswith("{") and "Thinking" not in msg_text:
-                got_response = True
                 log("Response", f"AI replied: {msg_text[:80]}")
                 return True
 
@@ -241,15 +239,14 @@ def _run_all(page, token, webui_url, webui_token, console_errors):
             and "/chat" not in url
             and "/stop" not in url
             and "/stream" not in url
-        ):
-            if response.request.method == "POST":
-                try:
-                    data = response.json()
-                    sid = data.get("session", {}).get("session_id")
-                    if sid:
-                        captured_sid[0] = sid
-                except Exception:
-                    pass
+        ) and response.request.method == "POST":
+            try:
+                data = response.json()
+                sid = data.get("session", {}).get("session_id")
+                if sid:
+                    captured_sid[0] = sid
+            except Exception:
+                pass
 
     page.on("response", on_response)
 

@@ -6,8 +6,6 @@ Unit tests for config.py module.
 import os
 import sys
 
-import pytest
-
 # Add scripts/shared to path for imports
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 shared_path = os.path.join(project_root, "scripts", "shared")

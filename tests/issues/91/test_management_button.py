@@ -9,7 +9,6 @@ Tests:
 
 import asyncio
 
-import pytest
 from playwright.async_api import async_playwright
 
 

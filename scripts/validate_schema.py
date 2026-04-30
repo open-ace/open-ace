@@ -62,10 +62,7 @@ def is_boolean_field(column_name: str) -> bool:
             return True
 
     # Check special words
-    if column_name in BOOLEAN_SPECIAL_WORDS:
-        return True
-
-    return False
+    return column_name in BOOLEAN_SPECIAL_WORDS
 
 
 def validate_schema(schema_file: Path) -> list:

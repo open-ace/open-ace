@@ -10,7 +10,7 @@ import os
 import platform
 import shutil
 import subprocess
-from typing import Any, Dict
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ KNOWN_CLI_TOOLS = [
 ]
 
 
-def get_system_info() -> Dict[str, Any]:
+def get_system_info() -> dict[str, Any]:
     """
     Gather system hardware and OS information.
 
@@ -32,7 +32,7 @@ def get_system_info() -> Dict[str, Any]:
         Dict with os_type, os_version, hostname, cpu_cores, memory_mb,
         disk_free_gb, python_version.
     """
-    info: Dict[str, Any] = {
+    info: dict[str, Any] = {
         "os_type": platform.system(),
         "os_version": platform.release(),
         "os_platform": platform.platform(),
@@ -60,13 +60,10 @@ def get_system_info() -> Dict[str, Any]:
 def _get_memory_mb() -> float:
     """Get total physical memory in megabytes."""
     try:
-        import resource
+        import importlib.util
 
-        # On macOS, resource.getrusage returns ru_maxrss in bytes
-        # On Linux it returns ru_maxrss in kilobytes
-        # But we want total system memory, not process usage
-        pass
-    except ImportError:
+        importlib.util.find_spec("resource")
+    except (ImportError, ModuleNotFoundError):
         pass
 
     sysname = platform.system().lower()
@@ -150,7 +147,7 @@ def _get_disk_free_gb() -> float:
         return 0.0
 
 
-def check_cli_tool(name: str) -> Dict[str, Any]:
+def check_cli_tool(name: str) -> dict[str, Any]:
     """
     Check whether a CLI tool is installed and accessible.
 
@@ -164,7 +161,7 @@ def check_cli_tool(name: str) -> Dict[str, Any]:
         Dict with 'installed' (bool), 'path' (str or None),
         and 'version' (str or None).
     """
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "installed": False,
         "path": None,
         "version": None,
@@ -209,7 +206,7 @@ def check_cli_tool(name: str) -> Dict[str, Any]:
     return result
 
 
-def get_installed_tools() -> Dict[str, Dict[str, Any]]:
+def get_installed_tools() -> dict[str, dict[str, Any]]:
     """
     Check all known CLI tools and return their installation status.
 
@@ -224,7 +221,7 @@ def get_installed_tools() -> Dict[str, Dict[str, Any]]:
     return tools
 
 
-def get_capabilities() -> Dict[str, Any]:
+def get_capabilities() -> dict[str, Any]:
     """
     Build the full capabilities report to send to the server during
     registration and heartbeats.

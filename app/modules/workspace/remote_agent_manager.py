@@ -8,16 +8,14 @@ command dispatching, and message routing for remote workspace sessions.
 
 import json
 import logging
-import os
-import sqlite3
 import threading
 import time
 import uuid
 from contextlib import suppress
 from datetime import datetime, timedelta
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Optional
 
-from app.repositories.database import DB_PATH, Database, get_database_url, is_postgresql
+from app.repositories.database import DB_PATH, Database, is_postgresql
 
 logger = logging.getLogger(__name__)
 
@@ -49,19 +47,19 @@ class RemoteAgentManager:
         self.db_path = db_path or str(DB_PATH)
         self.db = Database()
         # Active WebSocket connections: {machine_id: websocket_connection}
-        self._connections: Dict[str, Any] = {}
+        self._connections: dict[str, Any] = {}
         # Session to machine mapping: {session_id: machine_id}
-        self._session_machines: Dict[str, str] = {}
+        self._session_machines: dict[str, str] = {}
         # Output buffers: {session_id: [output_lines]}
-        self._output_buffers: Dict[str, List[Dict]] = {}
+        self._output_buffers: dict[str, list[dict]] = {}
         # Registration tokens: {token: {tenant_id, created_by, created_at}}
-        self._registration_tokens: Dict[str, Dict] = {}
+        self._registration_tokens: dict[str, dict] = {}
         # Command queues for HTTP-mode agents: {machine_id: [commands]}
-        self._command_queues: Dict[str, List[Dict]] = {}
+        self._command_queues: dict[str, list[dict]] = {}
         # Session end flags: {session_id: True} — set when session completes/stops/errors
-        self._session_end_flags: Dict[str, bool] = {}
+        self._session_end_flags: dict[str, bool] = {}
         # Heartbeat rate limiter: {machine_id: last_db_write_timestamp}
-        self._last_heartbeat_db_write: Dict[str, float] = {}
+        self._last_heartbeat_db_write: dict[str, float] = {}
         # Lock for thread safety
         self._lock = threading.Lock()
         self._restore_in_memory_state()
@@ -82,7 +80,7 @@ class RemoteAgentManager:
                 # Restore session → machine mapping for active/paused sessions
                 cursor.execute(
                     "SELECT session_id, remote_machine_id FROM agent_sessions "
-                    f"WHERE workspace_type = 'remote' AND status IN ('active', 'paused') "
+                    "WHERE workspace_type = 'remote' AND status IN ('active', 'paused') "
                     "AND remote_machine_id IS NOT NULL"
                 )
                 rows = cursor.fetchall()
@@ -262,10 +260,10 @@ class RemoteAgentManager:
         hostname: Optional[str] = None,
         os_type: Optional[str] = None,
         os_version: Optional[str] = None,
-        capabilities: Optional[Dict] = None,
+        capabilities: Optional[dict] = None,
         agent_version: Optional[str] = None,
         ip_address: Optional[str] = None,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> Optional[dict[str, Any]]:
         """
         Register a new remote machine using a registration token.
 
@@ -446,7 +444,7 @@ class RemoteAgentManager:
 
     # ==================== Command Dispatch ====================
 
-    def send_command(self, machine_id: str, command: Dict[str, Any]) -> bool:
+    def send_command(self, machine_id: str, command: dict[str, Any]) -> bool:
         """
         Queue a command for a remote agent (delivered via HTTP polling).
 
@@ -468,7 +466,7 @@ class RemoteAgentManager:
         logger.info(f"Queued command for agent {machine_id}")
         return True
 
-    def get_pending_commands(self, machine_id: str) -> List[Dict]:
+    def get_pending_commands(self, machine_id: str) -> list[dict]:
         """Get and clear pending commands for an HTTP-mode agent."""
         with self._lock:
             return self._command_queues.pop(machine_id, [])
@@ -493,14 +491,14 @@ class RemoteAgentManager:
 
     # ==================== Output Buffering ====================
 
-    def buffer_output(self, session_id: str, output: Dict[str, Any]) -> None:
+    def buffer_output(self, session_id: str, output: dict[str, Any]) -> None:
         """Buffer output from a remote session."""
         with self._lock:
             if session_id not in self._output_buffers:
                 self._output_buffers[session_id] = []
             self._output_buffers[session_id].append(output)
 
-    def get_buffered_output(self, session_id: str, after_index: int = 0) -> List[Dict]:
+    def get_buffered_output(self, session_id: str, after_index: int = 0) -> list[dict]:
         """Get buffered output for a session after a given index."""
         with self._lock:
             buf = self._output_buffers.get(session_id, [])
@@ -552,7 +550,7 @@ class RemoteAgentManager:
 
     # ==================== Machine Queries ====================
 
-    def get_machine(self, machine_id: str) -> Optional[Dict[str, Any]]:
+    def get_machine(self, machine_id: str) -> Optional[dict[str, Any]]:
         """Get machine details."""
         with self.db.connection() as conn:
             cursor = conn.cursor()
@@ -569,7 +567,7 @@ class RemoteAgentManager:
 
     def list_machines(
         self, tenant_id: Optional[int] = None, user_id: Optional[int] = None
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """List machines, optionally filtered by tenant or user assignments."""
         with self.db.connection() as conn:
             cursor = conn.cursor()
@@ -604,7 +602,7 @@ class RemoteAgentManager:
                 m["current_user_permission"] = self.check_user_access(m["machine_id"], user_id)
         return machines
 
-    def get_available_machines(self, user_id: int) -> List[Dict[str, Any]]:
+    def get_available_machines(self, user_id: int) -> list[dict[str, Any]]:
         """Get machines available to a specific user."""
         return self.list_machines(user_id=user_id)
 
@@ -694,7 +692,7 @@ class RemoteAgentManager:
         """Return user's machine permission: 'admin', 'user', or None."""
         return self.check_user_access(machine_id, user_id)
 
-    def get_machine_assignments(self, machine_id: str) -> List[Dict[str, Any]]:
+    def get_machine_assignments(self, machine_id: str) -> list[dict[str, Any]]:
         """Get list of users assigned to a machine."""
         with self.db.connection() as conn:
             cursor = conn.cursor()
@@ -733,7 +731,7 @@ class RemoteAgentManager:
                 logger.error(f"Failed to get machine assignments: {e}")
                 return []
 
-    def _row_to_machine(self, row) -> Dict[str, Any]:
+    def _row_to_machine(self, row) -> dict[str, Any]:
         """Convert a database row to machine dict."""
 
         def get_value(key: str):
