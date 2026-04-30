@@ -44,6 +44,9 @@ dev = [
 [project.scripts]
 openace = "cli:main"
 
+[tool.setuptools.packages.find]
+include = ["app*", "scripts*"]
+
 [project.urls]
 Homepage = "https://github.com/open-ace/open-ace"
 Documentation = "https://github.com/open-ace/open-ace#readme"
