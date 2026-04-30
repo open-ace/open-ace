@@ -64,11 +64,7 @@ class SSOManager:
                 if self.db.is_postgresql
                 else "INTEGER PRIMARY KEY AUTOINCREMENT"
             )
-            bool_true = (
-                "BOOLEAN DEFAULT TRUE"
-                if self.db.is_postgresql
-                else "INTEGER DEFAULT 1"
-            )
+            bool_true = "BOOLEAN DEFAULT TRUE" if self.db.is_postgresql else "INTEGER DEFAULT 1"
 
             # SSO providers table
             cursor.execute(

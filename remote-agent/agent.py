@@ -86,9 +86,7 @@ class RemoteAgent:
             delay = min(self._reconnect_delay, self.config.reconnect_max_delay)
             logger.info("Reconnecting in %.1f seconds...", delay)
             time.sleep(delay)
-            self._reconnect_delay = min(
-                self._reconnect_delay * 2, self.config.reconnect_max_delay
-            )
+            self._reconnect_delay = min(self._reconnect_delay * 2, self.config.reconnect_max_delay)
 
         self._shutdown()
 
@@ -107,11 +105,13 @@ class RemoteAgent:
         self._reconnect_delay = self.config.reconnect_base_delay
 
         # Register via HTTP first
-        resp = self._http_send({
-            "type": "register",
-            "machine_id": self.config.machine_id,
-            "capabilities": self._capabilities,
-        })
+        resp = self._http_send(
+            {
+                "type": "register",
+                "machine_id": self.config.machine_id,
+                "capabilities": self._capabilities,
+            }
+        )
         if resp and isinstance(resp, dict):
             pending = resp.get("pending_commands", [])
             if pending:
@@ -144,10 +144,12 @@ class RemoteAgent:
 
     def _poll_commands_via_http(self) -> None:
         """Fetch pending commands from server without triggering a DB write."""
-        resp = self._http_send({
-            "type": "poll",
-            "machine_id": self.config.machine_id,
-        })
+        resp = self._http_send(
+            {
+                "type": "poll",
+                "machine_id": self.config.machine_id,
+            }
+        )
 
         if resp and isinstance(resp, dict):
             pending = resp.get("pending_commands", [])
@@ -193,12 +195,14 @@ class RemoteAgent:
     def _send_heartbeat_via_http(self) -> None:
         """Send a heartbeat via HTTP and process any pending commands."""
         active = self._executor.active_sessions
-        resp = self._http_send({
-            "type": "heartbeat",
-            "machine_id": self.config.machine_id,
-            "status": "busy" if active else "idle",
-            "active_sessions": len(active),
-        })
+        resp = self._http_send(
+            {
+                "type": "heartbeat",
+                "machine_id": self.config.machine_id,
+                "status": "busy" if active else "idle",
+                "active_sessions": len(active),
+            }
+        )
 
         # Process pending commands from the server response
         if resp and isinstance(resp, dict):
@@ -234,41 +238,44 @@ class RemoteAgent:
             request_payload.get("subtype"),
             request_payload.get("tool_name"),
         )
-        self._http_send({
-            "type": "permission_request",
-            "session_id": session_id,
-            "machine_id": self.config.machine_id,
-            "control_request": control_request,
-        })
+        self._http_send(
+            {
+                "type": "permission_request",
+                "session_id": session_id,
+                "machine_id": self.config.machine_id,
+                "control_request": control_request,
+            }
+        )
 
     def _send_session_output(
         self, session_id: str, data: str, stream: str, is_complete: bool
     ) -> None:
         """Send a session_output message to the server."""
-        self._http_send({
-            "type": "session_output",
-            "session_id": session_id,
-            "data": data,
-            "stream": stream,
-            "is_complete": is_complete,
-            "machine_id": self.config.machine_id,
-        })
+        self._http_send(
+            {
+                "type": "session_output",
+                "session_id": session_id,
+                "data": data,
+                "stream": stream,
+                "is_complete": is_complete,
+                "machine_id": self.config.machine_id,
+            }
+        )
 
-    def _send_session_status(
-        self, session_id: str, status: str, pid: Optional[int] = None
-    ) -> None:
+    def _send_session_status(self, session_id: str, status: str, pid: Optional[int] = None) -> None:
         """Send a session_status message to the server."""
         logger.info(
-            "Sending session_status: session=%s status=%s pid=%s",
-            session_id[:8], status, pid
+            "Sending session_status: session=%s status=%s pid=%s", session_id[:8], status, pid
         )
-        result = self._http_send({
-            "type": "session_status",
-            "session_id": session_id,
-            "status": status,
-            "pid": pid,
-            "machine_id": self.config.machine_id,
-        })
+        result = self._http_send(
+            {
+                "type": "session_status",
+                "session_id": session_id,
+                "status": status,
+                "pid": pid,
+                "machine_id": self.config.machine_id,
+            }
+        )
         if result:
             logger.info("session_status sent successfully for session %s", session_id[:8])
         else:
@@ -278,13 +285,15 @@ class RemoteAgent:
         self, session_id: str, tokens: Dict[str, int], requests: int = 1
     ) -> None:
         """Send a usage_report message to the server."""
-        self._http_send({
-            "type": "usage_report",
-            "session_id": session_id,
-            "tokens": tokens,
-            "requests": requests,
-            "machine_id": self.config.machine_id,
-        })
+        self._http_send(
+            {
+                "type": "usage_report",
+                "session_id": session_id,
+                "tokens": tokens,
+                "requests": requests,
+                "machine_id": self.config.machine_id,
+            }
+        )
 
     def _handle_command(self, data: Dict[str, Any]) -> None:
         """Dispatch a command from the server."""
@@ -412,9 +421,7 @@ class RemoteAgent:
             tool_name,
         )
 
-        result = self._executor.send_permission_response(
-            session_id, request_id, behavior, message
-        )
+        result = self._executor.send_permission_response(session_id, request_id, behavior, message)
 
         if not result["success"]:
             logger.warning(
@@ -519,15 +526,12 @@ def setup_logging(level: str = "INFO") -> None:
     # On these platforms we skip the FileHandler to avoid duplicate logs.
     # On Windows, we ALWAYS write a log file because stdout is typically
     # invisible when running under Task Scheduler or Start-Process -Hidden.
-    is_unix_service = (
-        os.name != "nt"
-        and (
-            "INVOCATION_ID" in os.environ  # systemd sets this
-            or os.path.exists("/proc/self/cgroup")  # Linux container/systemd
-            or (
-                os.environ.get("TERM") is None
-                and os.environ.get("_LAUNCHD_SOCKET") is not None  # macOS launchd
-            )
+    is_unix_service = os.name != "nt" and (
+        "INVOCATION_ID" in os.environ  # systemd sets this
+        or os.path.exists("/proc/self/cgroup")  # Linux container/systemd
+        or (
+            os.environ.get("TERM") is None
+            and os.environ.get("_LAUNCHD_SOCKET") is not None  # macOS launchd
         )
     )
 

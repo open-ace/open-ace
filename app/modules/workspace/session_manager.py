@@ -359,23 +359,17 @@ class SessionManager:
             pass  # Column already exists
 
         try:
-            cursor.execute(
-                "ALTER TABLE agent_sessions ADD COLUMN remote_machine_id TEXT"
-            )
+            cursor.execute("ALTER TABLE agent_sessions ADD COLUMN remote_machine_id TEXT")
         except Exception:
             pass  # Column already exists
 
         try:
-            cursor.execute(
-                "ALTER TABLE agent_sessions ADD COLUMN request_count INTEGER DEFAULT 0"
-            )
+            cursor.execute("ALTER TABLE agent_sessions ADD COLUMN request_count INTEGER DEFAULT 0")
         except Exception:
             pass  # Column already exists
 
         try:
-            cursor.execute(
-                "ALTER TABLE agent_sessions ADD COLUMN paused_at TIMESTAMP"
-            )
+            cursor.execute("ALTER TABLE agent_sessions ADD COLUMN paused_at TIMESTAMP")
         except Exception:
             pass  # Column already exists
 
@@ -686,7 +680,7 @@ class SessionManager:
         )
 
         # Update session message count, request count and token count
-        request_count_increment = 1 if role in ('assistant', 'toolResult') else 0
+        request_count_increment = 1 if role in ("assistant", "toolResult") else 0
         cursor.execute(
             f"""
             UPDATE agent_sessions
@@ -778,8 +772,17 @@ class SessionManager:
                             total_requests = user_projects.total_requests + 1,
                             total_duration_seconds = user_projects.total_duration_seconds + {_param()}
                     """,
-                        (user_id, project_id, now_iso, now_iso, total_tokens, duration_seconds,
-                         now_iso, total_tokens, duration_seconds),
+                        (
+                            user_id,
+                            project_id,
+                            now_iso,
+                            now_iso,
+                            total_tokens,
+                            duration_seconds,
+                            now_iso,
+                            total_tokens,
+                            duration_seconds,
+                        ),
                     )
                     conn.commit()
                     logger.info(

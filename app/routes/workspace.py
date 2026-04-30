@@ -14,9 +14,23 @@ import logging
 
 from flask import Blueprint, g, jsonify, request
 
-from app.modules.workspace.collaboration import CollaborationManager, SharePermission, get_collaboration_manager
-from app.modules.workspace.prompt_library import PromptCategory, PromptLibrary, PromptTemplate, get_prompt_library
-from app.modules.workspace.session_manager import SessionManager, SessionType, _param, get_session_manager
+from app.modules.workspace.collaboration import (
+    CollaborationManager,
+    SharePermission,
+    get_collaboration_manager,
+)
+from app.modules.workspace.prompt_library import (
+    PromptCategory,
+    PromptLibrary,
+    PromptTemplate,
+    get_prompt_library,
+)
+from app.modules.workspace.session_manager import (
+    SessionManager,
+    SessionType,
+    _param,
+    get_session_manager,
+)
 from app.modules.workspace.state_sync import get_state_sync_manager
 from app.modules.workspace.tool_connector import get_tool_connector
 from app.services.auth_service import AuthService
@@ -48,6 +62,7 @@ def format_datetime(dt):
         return iso_str
     return dt
 
+
 workspace_bp = Blueprint("workspace", __name__)
 auth_service = AuthService()
 
@@ -76,11 +91,13 @@ def load_user():
         if url_token:
             try:
                 from app.services.webui_manager import WebUIManager
+
                 webui_manager = WebUIManager()
                 is_valid, user_id, error = webui_manager.validate_token(url_token)
                 if is_valid and user_id:
                     # Get user info from database
                     from app.repositories.user_repo import UserRepository
+
                     user_repo = UserRepository()
                     user = user_repo.get_user_by_id(user_id)
                     if user:
@@ -337,12 +354,12 @@ def list_sessions():
 
         if tool_name:
             TOOL_NAME_ALIASES = {
-                'qwen': ['qwen', 'qwen-code', 'qwen-code-cli'],
-                'claude': ['claude', 'claude-code'],
-                'openclaw': ['openclaw'],
+                "qwen": ["qwen", "qwen-code", "qwen-code-cli"],
+                "claude": ["claude", "claude-code"],
+                "openclaw": ["openclaw"],
             }
             aliases = TOOL_NAME_ALIASES.get(tool_name, [tool_name])
-            placeholders = ','.join(['?' for _ in aliases])
+            placeholders = ",".join(["?" for _ in aliases])
             conditions.append(f"tool_name IN ({placeholders})")
             params.extend(aliases)
 
@@ -357,24 +374,28 @@ def list_sessions():
         where_clause = " AND ".join(conditions)
 
         # Count query
-        count_query = adapt_sql(f"""
+        count_query = adapt_sql(
+            f"""
             SELECT COUNT(*) as count
             FROM agent_sessions
             WHERE {where_clause}
-        """)
+        """
+        )
         result = db.fetch_one(count_query, tuple(params))
         total = result["count"] if result else 0
         total_pages = (total + limit - 1) // limit if total > 0 else 1
 
         # Get paginated sessions
         offset = (page - 1) * limit
-        sessions_query = adapt_sql(f"""
+        sessions_query = adapt_sql(
+            f"""
             SELECT *
             FROM agent_sessions
             WHERE {where_clause}
             ORDER BY updated_at DESC
             LIMIT ? OFFSET ?
-        """)
+        """
+        )
         sessions = db.fetch_all(sessions_query, tuple(params + [limit, offset]))
 
         # Format sessions for response
@@ -411,13 +432,13 @@ def list_sessions():
             )
 
         # Enrich remote sessions with machine names
-        remote_machine_ids = list(set(
-            s["remote_machine_id"] for s in formatted_sessions
-            if s.get("remote_machine_id")
-        ))
+        remote_machine_ids = list(
+            set(s["remote_machine_id"] for s in formatted_sessions if s.get("remote_machine_id"))
+        )
         if remote_machine_ids:
             try:
                 from app.repositories.database import get_param_placeholder
+
                 p = get_param_placeholder()
                 machine_name_map = {}
                 if is_postgresql():
@@ -474,6 +495,7 @@ def create_session():
         if project_path and not project_id:
             try:
                 from app.repositories.project_repo import ProjectRepository
+
                 project_repo = ProjectRepository()
                 project = project_repo.get_project_by_path(project_path)
                 if project:
@@ -520,7 +542,7 @@ def get_session(session_id):
             # Calculate request_count from messages if available
             if include_messages and session.messages:
                 session.request_count = sum(
-                    1 for m in session.messages if m.role in ('assistant', 'toolResult')
+                    1 for m in session.messages if m.role in ("assistant", "toolResult")
                 )
             else:
                 # Query request_count from session_messages table
@@ -533,10 +555,10 @@ def get_session(session_id):
                     WHERE session_id = {_param()}
                     AND role IN ('assistant', 'toolResult')
                     """,
-                    (session_id,)
+                    (session_id,),
                 )
                 row = cursor.fetchone()
-                session.request_count = row['request_count'] if row else 0
+                session.request_count = row["request_count"] if row else 0
                 conn.close()
             return jsonify({"success": True, "data": session.to_dict()})
 
@@ -548,6 +570,7 @@ def get_session(session_id):
 
         # Get session info from daily_messages
         from app.repositories.database import get_param_placeholder
+
         p = get_param_placeholder()
         session_query = f"""
             SELECT
@@ -749,10 +772,15 @@ def restore_session(session_id):
             encoded_project_name = project_path
 
         if not encoded_project_name:
-            return jsonify({
-                "success": False,
-                "error": "Project path not found. Cannot restore session without project information."
-            }), 404
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "Project path not found. Cannot restore session without project information.",
+                    }
+                ),
+                404,
+            )
 
         # Build workspace URL with sessionId, encodedProjectName, and toolName
         workspace_url = f"/work/workspace?sessionId={session_id}&encodedProjectName={encoded_project_name}&toolName={tool_name}"
@@ -763,9 +791,12 @@ def restore_session(session_id):
             # Look up machine name
             try:
                 from app.repositories.database import Database, get_param_placeholder
+
                 db = Database()
                 p2 = get_param_placeholder()
-                machine_query = f"SELECT machine_name FROM remote_machines WHERE machine_id = {p2} LIMIT 1"
+                machine_query = (
+                    f"SELECT machine_name FROM remote_machines WHERE machine_id = {p2} LIMIT 1"
+                )
                 machine_row = db.fetch_one(machine_query, [remote_machine_id])
                 if machine_row:
                     machine_name = machine_row["machine_name"]
@@ -776,7 +807,9 @@ def restore_session(session_id):
             if machine_name:
                 workspace_url += f"&machineName={machine_name}"
 
-        logger.info(f"Restored session {session_id} (tool={tool_name}, project={encoded_project_name}, type={workspace_type})")
+        logger.info(
+            f"Restored session {session_id} (tool={tool_name}, project={encoded_project_name}, type={workspace_type})"
+        )
 
         result = {
             "session_id": session_id,
@@ -789,10 +822,12 @@ def restore_session(session_id):
             result["remote_machine_id"] = remote_machine_id
             result["machine_name"] = machine_name
 
-        return jsonify({
-            "success": True,
-            "data": result,
-        })
+        return jsonify(
+            {
+                "success": True,
+                "data": result,
+            }
+        )
     except Exception as e:
         logger.error(f"Error restoring session: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -1299,30 +1334,43 @@ def get_user_webui_url():
         # Build Open-ACE API URL for iframe integration
         # This is needed so qwen-code-webui can call Open-ACE APIs
         from flask import request as flask_request
-        openace_url = flask_request.host_url.rstrip('/')
 
-        return jsonify({
-            "success": True,
-            "url": url,
-            "token": token,
-            "system_account": system_account,
-            "multi_user_mode": manager.config.multi_user_mode,
-            "openace_url": openace_url,
-        })
+        openace_url = flask_request.host_url.rstrip("/")
+
+        return jsonify(
+            {
+                "success": True,
+                "url": url,
+                "token": token,
+                "system_account": system_account,
+                "multi_user_mode": manager.config.multi_user_mode,
+                "openace_url": openace_url,
+            }
+        )
 
     except ValueError as e:
         logger.error(f"Error getting user webui URL: {e}")
-        return jsonify({
-            "success": False,
-            "error": str(e),
-        }), 503  # Service Unavailable (e.g., max instances reached)
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": str(e),
+                }
+            ),
+            503,
+        )  # Service Unavailable (e.g., max instances reached)
 
     except Exception as e:
         logger.error(f"Error getting user webui URL: {e}")
-        return jsonify({
-            "success": False,
-            "error": str(e),
-        }), 500
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": str(e),
+                }
+            ),
+            500,
+        )
 
 
 @workspace_bp.route("/instances", methods=["GET"])
@@ -1341,12 +1389,14 @@ def list_webui_instances():
         manager = get_webui_manager()
         instances = manager.get_all_instances()
 
-        return jsonify({
-            "success": True,
-            "instances": instances,
-            "active_count": manager.get_instance_count(),
-            "max_instances": manager.config.max_instances,
-        })
+        return jsonify(
+            {
+                "success": True,
+                "instances": instances,
+                "active_count": manager.get_instance_count(),
+                "max_instances": manager.config.max_instances,
+            }
+        )
 
     except Exception as e:
         logger.error(f"Error listing webui instances: {e}")
@@ -1369,10 +1419,12 @@ def stop_user_webui_instance(user_id):
         manager = get_webui_manager()
         manager.stop_user_webui(user_id)
 
-        return jsonify({
-            "success": True,
-            "message": f"Stopped webui instance for user {user_id}",
-        })
+        return jsonify(
+            {
+                "success": True,
+                "message": f"Stopped webui instance for user {user_id}",
+            }
+        )
 
     except Exception as e:
         logger.error(f"Error stopping webui instance: {e}")
@@ -1395,10 +1447,12 @@ def stop_all_webui_instances():
         manager = get_webui_manager()
         manager.stop_all_instances()
 
-        return jsonify({
-            "success": True,
-            "message": "All webui instances stopped",
-        })
+        return jsonify(
+            {
+                "success": True,
+                "message": "All webui instances stopped",
+            }
+        )
 
     except Exception as e:
         logger.error(f"Error stopping all webui instances: {e}")

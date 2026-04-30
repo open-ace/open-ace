@@ -527,6 +527,7 @@ class PermissionService:
 def get_ddl_statements() -> list[str]:
     """Return DDL statements for permission service tables."""
     from app.repositories.database import is_postgresql
+
     id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
     return [
         f"""

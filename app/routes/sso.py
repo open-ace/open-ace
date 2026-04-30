@@ -58,7 +58,9 @@ def list_sso_providers():
 def register_provider():
     """Register a new SSO provider (admin only)."""
     # Check admin auth
-    token = request.cookies.get("session_token") or request.headers.get("Authorization", "").replace("Bearer ", "")
+    token = request.cookies.get("session_token") or request.headers.get(
+        "Authorization", ""
+    ).replace("Bearer ", "")
     is_admin, result = auth_service.require_admin(token)
 
     if not is_admin:
@@ -116,7 +118,9 @@ def register_provider():
 @sso_bp.route("/providers/<provider_name>", methods=["DELETE"])
 def disable_provider(provider_name: str):
     """Disable an SSO provider (admin only)."""
-    token = request.cookies.get("session_token") or request.headers.get("Authorization", "").replace("Bearer ", "")
+    token = request.cookies.get("session_token") or request.headers.get(
+        "Authorization", ""
+    ).replace("Bearer ", "")
     is_admin, result = auth_service.require_admin(token)
 
     if not is_admin:
@@ -268,7 +272,9 @@ def callback(provider_name: str):
 @sso_bp.route("/session", methods=["GET"])
 def get_session():
     """Get current SSO session info."""
-    token = request.cookies.get("session_token") or request.headers.get("Authorization", "").replace("Bearer ", "")
+    token = request.cookies.get("session_token") or request.headers.get(
+        "Authorization", ""
+    ).replace("Bearer ", "")
 
     if not token:
         return jsonify({"error": "No session token provided"}), 401
@@ -284,7 +290,9 @@ def get_session():
 @sso_bp.route("/session", methods=["DELETE"])
 def logout():
     """Logout from SSO session."""
-    token = request.cookies.get("session_token") or request.headers.get("Authorization", "").replace("Bearer ", "")
+    token = request.cookies.get("session_token") or request.headers.get(
+        "Authorization", ""
+    ).replace("Bearer ", "")
 
     if token:
         get_sso_manager().delete_sso_session(token)
@@ -295,7 +303,9 @@ def logout():
 @sso_bp.route("/identities/<int:user_id>", methods=["GET"])
 def get_user_identities(user_id: int):
     """Get SSO identities for a user."""
-    token = request.cookies.get("session_token") or request.headers.get("Authorization", "").replace("Bearer ", "")
+    token = request.cookies.get("session_token") or request.headers.get(
+        "Authorization", ""
+    ).replace("Bearer ", "")
     is_auth, result = auth_service.require_auth(token)
 
     if not is_auth:
@@ -329,7 +339,9 @@ def get_user_identities(user_id: int):
 @sso_bp.route("/identities/<int:user_id>/<provider_name>", methods=["DELETE"])
 def unlink_identity(user_id: int, provider_name: str):
     """Unlink an SSO identity from a user."""
-    token = request.cookies.get("session_token") or request.headers.get("Authorization", "").replace("Bearer ", "")
+    token = request.cookies.get("session_token") or request.headers.get(
+        "Authorization", ""
+    ).replace("Bearer ", "")
     is_auth, result = auth_service.require_auth(token)
 
     if not is_auth:

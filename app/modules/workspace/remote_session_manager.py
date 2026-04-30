@@ -139,7 +139,9 @@ class RemoteSessionManager:
         if not success:
             for attempt in range(3):
                 time.sleep(2)
-                logger.info(f"Retrying start_session (attempt {attempt+1}/3) for {machine_id[:8]}...")
+                logger.info(
+                    f"Retrying start_session (attempt {attempt+1}/3) for {machine_id[:8]}..."
+                )
                 success = self._agent_manager.send_command(machine_id, command)
                 if success:
                     break
@@ -158,6 +160,7 @@ class RemoteSessionManager:
         # Also update the dedicated columns (list_sessions reads from columns, not context JSON)
         try:
             from app.repositories.database import get_db_connection
+
             with get_db_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
@@ -202,6 +205,7 @@ class RemoteSessionManager:
         if not machine_id:
             try:
                 from app.repositories.database import get_db_connection
+
                 with get_db_connection() as conn:
                     cursor = conn.cursor()
                     cursor.execute(
@@ -210,7 +214,11 @@ class RemoteSessionManager:
                     )
                     row = cursor.fetchone()
                     if row:
-                        machine_id = row[0] if isinstance(row, (list, tuple)) else row.get("remote_machine_id")
+                        machine_id = (
+                            row[0]
+                            if isinstance(row, (list, tuple))
+                            else row.get("remote_machine_id")
+                        )
             except Exception as e:
                 logger.warning(f"DB fallback failed for session {session_id}: {e}")
 
@@ -220,8 +228,7 @@ class RemoteSessionManager:
 
         return machine_id
 
-    def send_message(self, session_id: str, content: str,
-                     user_id: Optional[int] = None) -> bool:
+    def send_message(self, session_id: str, content: str, user_id: Optional[int] = None) -> bool:
         """
         Forward a user message to the remote CLI process.
 
@@ -276,7 +283,9 @@ class RemoteSessionManager:
         current_mode = cached_mode or "default"
 
         if current_mode == new_mode:
-            logger.debug(f"Skipping permission_mode update for {session_id[:8]}: unchanged ({new_mode})")
+            logger.debug(
+                f"Skipping permission_mode update for {session_id[:8]}: unchanged ({new_mode})"
+            )
             return True  # No change needed, consider it successful
 
         machine_id = self._get_machine_id(session_id)
@@ -437,9 +446,9 @@ class RemoteSessionManager:
             "paused_at": session.paused_at.isoformat() if session.paused_at else None,
         }
 
-    def process_session_output(self, session_id: str, data: str,
-                                stream: str = "stdout",
-                                is_complete: bool = False) -> None:
+    def process_session_output(
+        self, session_id: str, data: str, stream: str = "stdout", is_complete: bool = False
+    ) -> None:
         """Process output received from a remote session."""
         output_entry = {
             "session_id": session_id,
@@ -536,9 +545,9 @@ class RemoteSessionManager:
             )
             self._save_to_daily_messages(session_id, "assistant", text)
 
-    def process_usage_report(self, session_id: str,
-                             tokens: Dict[str, int],
-                             requests: int = 1) -> None:
+    def process_usage_report(
+        self, session_id: str, tokens: Dict[str, int], requests: int = 1
+    ) -> None:
         """Process usage report from a remote agent."""
         session = self._session_manager.get_session(session_id)
         if not session:
@@ -559,6 +568,7 @@ class RemoteSessionManager:
         if session.user_id:
             try:
                 from app.modules.governance.quota_manager import QuotaManager
+
                 quota_mgr = QuotaManager()
                 quota_mgr.record_usage(
                     user_id=session.user_id,
@@ -571,13 +581,13 @@ class RemoteSessionManager:
             # Refresh user_daily_stats so quota checks see up-to-date data
             try:
                 from app.repositories.daily_stats_repo import DailyStatsRepository
+
                 daily_stats_repo = DailyStatsRepository()
                 daily_stats_repo.refresh_stats()
             except Exception as e:
                 logger.warning(f"Failed to refresh daily stats after usage report: {e}")
 
-    def process_permission_request(self, session_id: str,
-                                    control_request: dict) -> None:
+    def process_permission_request(self, session_id: str, control_request: dict) -> None:
         """
         Process a permission request from the remote agent.
 
@@ -600,8 +610,9 @@ class RemoteSessionManager:
             control_request.get("request", {}).get("subtype"),
         )
 
-    def process_session_status_update(self, session_id: str, status: str,
-                                      pid: Optional[int] = None) -> None:
+    def process_session_status_update(
+        self, session_id: str, status: str, pid: Optional[int] = None
+    ) -> None:
         """Process a session status update from a remote agent."""
         session = self._session_manager.get_session(session_id)
         if not session:

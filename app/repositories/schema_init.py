@@ -30,7 +30,17 @@ def ensure_all_tables() -> None:
     from app.repositories.database import Database
 
     all_ddl = []
-    for ddl_fn in [sm_ddl, collab_ddl, pl_ddl, akp_ddl, ram_ddl, sso_ddl, ret_ddl, ps_ddl, report_ddl]:
+    for ddl_fn in [
+        sm_ddl,
+        collab_ddl,
+        pl_ddl,
+        akp_ddl,
+        ram_ddl,
+        sso_ddl,
+        ret_ddl,
+        ps_ddl,
+        report_ddl,
+    ]:
         try:
             all_ddl.extend(ddl_fn())
         except Exception as e:

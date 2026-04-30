@@ -29,9 +29,7 @@ def upgrade() -> None:
     """Remove redundant idx_messages_query_optimized index."""
     bind = op.get_bind()
     if bind.dialect.name == "postgresql":
-        bind.execute(
-            sa.text("DROP INDEX IF EXISTS idx_messages_query_optimized")
-        )
+        bind.execute(sa.text("DROP INDEX IF EXISTS idx_messages_query_optimized"))
 
 
 def downgrade() -> None:

@@ -147,14 +147,13 @@ class RemoteAgentManager:
                 conn.commit()
 
             if offline:
-                logger.info(
-                    "Cleaned up %d remote sessions with offline machines", len(offline)
-                )
+                logger.info("Cleaned up %d remote sessions with offline machines", len(offline))
         except Exception as e:
             logger.warning("Failed to cleanup offline sessions: %s", e)
 
     def _start_heartbeat_monitor(self) -> None:
         """Start background thread for heartbeat monitoring."""
+
         def monitor():
             while True:
                 try:
@@ -214,19 +213,22 @@ class RemoteAgentManager:
             return
 
         from app.modules.workspace.remote_session_manager import get_remote_session_manager
+
         session_mgr = get_remote_session_manager()
 
         for session_id in stale_sessions:
             logger.info(
                 "Stopping stale paused session %s (paused > %dh)",
-                session_id[:8], PAUSE_TIMEOUT_HOURS,
+                session_id[:8],
+                PAUSE_TIMEOUT_HOURS,
             )
             try:
                 session_mgr.stop_session(session_id)
             except Exception as e:
                 logger.error(
                     "Failed to stop stale paused session %s: %s",
-                    session_id[:8], e,
+                    session_id[:8],
+                    e,
                 )
 
     # ==================== Registration ====================
@@ -329,7 +331,13 @@ class RemoteAgentManager:
                         VALUES ({_params(5)})
                         ON CONFLICT (machine_id, user_id) DO NOTHING
                     """,
-                        (machine_id, token_info["created_by"], "admin", token_info["created_by"], now),
+                        (
+                            machine_id,
+                            token_info["created_by"],
+                            "admin",
+                            token_info["created_by"],
+                            now,
+                        ),
                     )
                 else:
                     cursor.execute(
@@ -337,8 +345,14 @@ class RemoteAgentManager:
                         INSERT OR IGNORE INTO machine_assignments (machine_id, user_id, permission, granted_by, granted_at)
                         VALUES ({_params(5)})
                     """,
-                    (machine_id, token_info["created_by"], "admin", token_info["created_by"], now),
-                )
+                        (
+                            machine_id,
+                            token_info["created_by"],
+                            "admin",
+                            token_info["created_by"],
+                            now,
+                        ),
+                    )
                 conn.commit()
 
                 return {
@@ -357,8 +371,12 @@ class RemoteAgentManager:
         with self.db.connection() as conn:
             cursor = conn.cursor()
 
-            cursor.execute(f"DELETE FROM machine_assignments WHERE machine_id = {_param()}", (machine_id,))
-            cursor.execute(f"DELETE FROM remote_machines WHERE machine_id = {_param()}", (machine_id,))
+            cursor.execute(
+                f"DELETE FROM machine_assignments WHERE machine_id = {_param()}", (machine_id,)
+            )
+            cursor.execute(
+                f"DELETE FROM remote_machines WHERE machine_id = {_param()}", (machine_id,)
+            )
 
             success = cursor.rowcount > 0
             conn.commit()
@@ -498,8 +516,9 @@ class RemoteAgentManager:
 
     # ==================== Heartbeat ====================
 
-    def process_heartbeat(self, machine_id: str, status: str = "idle",
-                          active_sessions: int = 0) -> None:
+    def process_heartbeat(
+        self, machine_id: str, status: str = "idle", active_sessions: int = 0
+    ) -> None:
         """Process a heartbeat from a remote agent."""
         # Ensure HTTP polling agents are tracked in _connections
         # (needed after server restart, since _connections is in-memory)
@@ -536,7 +555,9 @@ class RemoteAgentManager:
         with self.db.connection() as conn:
             cursor = conn.cursor()
 
-            cursor.execute(f"SELECT * FROM remote_machines WHERE machine_id = {_param()}", (machine_id,))
+            cursor.execute(
+                f"SELECT * FROM remote_machines WHERE machine_id = {_param()}", (machine_id,)
+            )
             row = cursor.fetchone()
 
         if not row:
@@ -544,8 +565,9 @@ class RemoteAgentManager:
 
         return self._row_to_machine(row)
 
-    def list_machines(self, tenant_id: Optional[int] = None,
-                      user_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    def list_machines(
+        self, tenant_id: Optional[int] = None, user_id: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
         """List machines, optionally filtered by tenant or user assignments."""
         with self.db.connection() as conn:
             cursor = conn.cursor()
@@ -584,8 +606,9 @@ class RemoteAgentManager:
         """Get machines available to a specific user."""
         return self.list_machines(user_id=user_id)
 
-    def assign_user(self, machine_id: str, user_id: int, granted_by: int,
-                    permission: str = "user") -> bool:
+    def assign_user(
+        self, machine_id: str, user_id: int, granted_by: int, permission: str = "user"
+    ) -> bool:
         """Assign a user to a machine."""
         with self.db.connection() as conn:
             cursor = conn.cursor()
@@ -599,7 +622,13 @@ class RemoteAgentManager:
                         VALUES ({_params(5)})
                         ON CONFLICT (machine_id, user_id) DO NOTHING
                     """,
-                        (machine_id, user_id, permission, granted_by, datetime.utcnow().isoformat()),
+                        (
+                            machine_id,
+                            user_id,
+                            permission,
+                            granted_by,
+                            datetime.utcnow().isoformat(),
+                        ),
                     )
                 else:
                     cursor.execute(
@@ -608,7 +637,13 @@ class RemoteAgentManager:
                         (machine_id, user_id, permission, granted_by, granted_at)
                         VALUES ({_params(5)})
                     """,
-                        (machine_id, user_id, permission, granted_by, datetime.utcnow().isoformat()),
+                        (
+                            machine_id,
+                            user_id,
+                            permission,
+                            granted_by,
+                            datetime.utcnow().isoformat(),
+                        ),
                     )
                 conn.commit()
                 return True
@@ -677,12 +712,20 @@ class RemoteAgentManager:
                 rows = cursor.fetchall()
                 result = []
                 for row in rows:
-                    result.append({
-                        "user_id": row["user_id"] if isinstance(row, dict) else row["user_id"],
-                        "username": row["username"] if isinstance(row, dict) else row["username"],
-                        "permission": row["permission"] if isinstance(row, dict) else row["permission"],
-                        "granted_at": row["granted_at"] if isinstance(row, dict) else row["granted_at"],
-                    })
+                    result.append(
+                        {
+                            "user_id": row["user_id"] if isinstance(row, dict) else row["user_id"],
+                            "username": (
+                                row["username"] if isinstance(row, dict) else row["username"]
+                            ),
+                            "permission": (
+                                row["permission"] if isinstance(row, dict) else row["permission"]
+                            ),
+                            "granted_at": (
+                                row["granted_at"] if isinstance(row, dict) else row["granted_at"]
+                            ),
+                        }
+                    )
                 return result
             except Exception as e:
                 logger.error(f"Failed to get machine assignments: {e}")
@@ -690,6 +733,7 @@ class RemoteAgentManager:
 
     def _row_to_machine(self, row) -> Dict[str, Any]:
         """Convert a database row to machine dict."""
+
         def get_value(key: str):
             if isinstance(row, dict):
                 return row.get(key)

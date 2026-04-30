@@ -291,9 +291,7 @@ class DataRetentionManager:
         # Delete records
         with self.db.connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                f"DELETE FROM {table_name} WHERE {time_col} < ?", (cutoff,)
-            )
+            cursor.execute(f"DELETE FROM {table_name} WHERE {time_col} < ?", (cutoff,))
             conn.commit()
             deleted = cursor.rowcount
 
@@ -521,6 +519,7 @@ class DataRetentionManager:
 def get_ddl_statements() -> list[str]:
     """Return DDL statements for retention tables."""
     from app.repositories.database import is_postgresql
+
     id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
     return [
         f"""

@@ -110,11 +110,14 @@ class APIKeyProxyService:
         try:
             from cryptography.fernet import Fernet
             import base64
+
             f = Fernet(base64.urlsafe_b64encode(self._encryption_key))
             return f.encrypt(api_key.encode()).decode()
         except ImportError:
             # Fallback to simple base64 encoding if cryptography not available
-            logger.warning("cryptography package not installed, using base64 encoding (not secure for production)")
+            logger.warning(
+                "cryptography package not installed, using base64 encoding (not secure for production)"
+            )
             return b64encode(api_key.encode()).decode()
 
     def _decrypt_key(self, encrypted_key: str) -> str:
@@ -122,6 +125,7 @@ class APIKeyProxyService:
         try:
             from cryptography.fernet import Fernet
             import base64
+
             f = Fernet(base64.urlsafe_b64encode(self._encryption_key))
             return f.decrypt(encrypted_key.encode()).decode()
         except ImportError:
@@ -191,7 +195,9 @@ class APIKeyProxyService:
                 )
 
             conn.commit()
-            logger.info(f"Stored API key for tenant {tenant_id}, provider {provider}, name {key_name}")
+            logger.info(
+                f"Stored API key for tenant {tenant_id}, provider {provider}, name {key_name}"
+            )
 
             return {
                 "success": True,
@@ -264,15 +270,17 @@ class APIKeyProxyService:
 
         result = []
         for row in rows:
-            result.append({
-                "id": row["id"],
-                "provider": row["provider"],
-                "key_name": row["key_name"],
-                "base_url": row["base_url"],
-                "is_active": bool(row["is_active"]),
-                "created_at": row["created_at"],
-                "updated_at": row["updated_at"],
-            })
+            result.append(
+                {
+                    "id": row["id"],
+                    "provider": row["provider"],
+                    "key_name": row["key_name"],
+                    "base_url": row["base_url"],
+                    "is_active": bool(row["is_active"]),
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
+                }
+            )
         return result
 
     def delete_api_key(self, tenant_id: int, provider: str, key_name: str) -> bool:
@@ -311,8 +319,14 @@ class APIKeyProxyService:
         conn.close()
         return success
 
-    def generate_proxy_token(self, user_id: int, session_id: str, tenant_id: int,
-                             provider: str, expires_minutes: int = 1440) -> str:
+    def generate_proxy_token(
+        self,
+        user_id: int,
+        session_id: str,
+        tenant_id: int,
+        provider: str,
+        expires_minutes: int = 1440,
+    ) -> str:
         """
         Generate a proxy token for a remote agent session.
 
@@ -395,6 +409,7 @@ class APIKeyProxyService:
             if session_id:
                 try:
                     from app.repositories.database import get_db_connection
+
                     with get_db_connection() as conn:
                         cursor = conn.cursor()
                         cursor.execute(
@@ -407,7 +422,11 @@ class APIKeyProxyService:
                             return None
                         status = row[0] if isinstance(row, (list, tuple)) else row.get("status")
                         if status not in ("active", "paused"):
-                            logger.warning("Proxy token session not active: %s (status=%s)", session_id[:8], status)
+                            logger.warning(
+                                "Proxy token session not active: %s (status=%s)",
+                                session_id[:8],
+                                status,
+                            )
                             return None
                 except Exception as e:
                     logger.warning("Failed to check session status for proxy token: %s", e)
