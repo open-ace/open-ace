@@ -16,14 +16,16 @@ import time
 
 # Add skill scripts to path
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-skill_dir = os.path.join(PROJECT_ROOT, '.qwen', 'skills', 'ui-test', 'scripts')
+skill_dir = os.path.join(PROJECT_ROOT, ".qwen", "skills", "ui-test", "scripts")
 if os.path.exists(skill_dir):
     sys.path.insert(0, skill_dir)
 
 try:
     from playwright.sync_api import sync_playwright, expect
 except ImportError:
-    print("Error: playwright not installed. Run: pip install playwright && playwright install chromium")
+    print(
+        "Error: playwright not installed. Run: pip install playwright && playwright install chromium"
+    )
     sys.exit(1)
 
 # Configuration
@@ -37,12 +39,14 @@ SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "issues", "73")
 # Ensure screenshot directory exists
 os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
+
 def take_screenshot(page, name):
     """Take screenshot and save to screenshot directory"""
     path = os.path.join(SCREENSHOT_DIR, name)
     page.screenshot(path=path, full_page=False)
     print(f"  Screenshot saved: {path}")
     return path
+
 
 def login(page):
     """Login to the system"""
@@ -55,6 +59,7 @@ def login(page):
     # Wait for redirect to home
     page.wait_for_url(f"{BASE_URL}/", timeout=15000)
     time.sleep(2)
+
 
 def test_issue73():
     """Test Issue #73: Bell button in fullscreen mode"""
@@ -99,10 +104,14 @@ def test_issue73():
 
             # Look for the notification toggle button in page-header
             # It should have bi-bell or bi-bell-slash icon
-            bell_btn = page.locator("button:has(.bi-bell), button:has(.bi-bell-slash), button:has(.bi-bell-fill)").first
+            bell_btn = page.locator(
+                "button:has(.bi-bell), button:has(.bi-bell-slash), button:has(.bi-bell-fill)"
+            ).first
 
             # More specific selector for the notification toggle button
-            bell_btn_header = page.locator(".page-header button:has(.bi-bell), .page-header button:has(.bi-bell-slash), .page-header button:has(.bi-bell-fill)")
+            bell_btn_header = page.locator(
+                ".page-header button:has(.bi-bell), .page-header button:has(.bi-bell-slash), .page-header button:has(.bi-bell-fill)"
+            )
 
             if bell_btn_header.count() > 0:
                 print("  ✓ Bell button found in page-header (non-fullscreen mode)")
@@ -113,14 +122,20 @@ def test_issue73():
                 print(f"  Tooltip text: '{tooltip_text}'")
 
                 # Check if tooltip is a valid translation (not a key like 'enableTabNotifications')
-                if tooltip_text and not tooltip_text.startswith("enable") and not tooltip_text.startswith("disable"):
+                if (
+                    tooltip_text
+                    and not tooltip_text.startswith("enable")
+                    and not tooltip_text.startswith("disable")
+                ):
                     if "notification" in tooltip_text.lower() or "通知" in tooltip_text:
                         print("  ✓ Tooltip text is meaningful")
                         test_results.append(("Tooltip Text Valid", "PASS", tooltip_text))
                     else:
                         print(f"  ? Tooltip text: '{tooltip_text}'")
                         test_results.append(("Tooltip Text", "INFO", tooltip_text))
-                elif tooltip_text and (tooltip_text.startswith("enable") or tooltip_text.startswith("disable")):
+                elif tooltip_text and (
+                    tooltip_text.startswith("enable") or tooltip_text.startswith("disable")
+                ):
                     # Check if it's a translation key (bad)
                     if "TabNotifications" in tooltip_text:
                         print("  ✗ Tooltip text is a translation key, not translated text")
@@ -141,7 +156,9 @@ def test_issue73():
             print("\nStep 4: Enter fullscreen mode")
 
             # Find fullscreen toggle button
-            fullscreen_btn = page.locator(".fullscreen-toggle-btn, button:has(.bi-fullscreen)").first
+            fullscreen_btn = page.locator(
+                ".fullscreen-toggle-btn, button:has(.bi-fullscreen)"
+            ).first
             if fullscreen_btn.count() > 0:
                 print("  Found fullscreen toggle button")
                 fullscreen_btn.click()
@@ -149,7 +166,9 @@ def test_issue73():
                 screenshots.append(take_screenshot(page, "04_fullscreen_mode.png"))
 
                 # Verify fullscreen mode
-                workspace_fs = page.locator(".workspace.fullscreen-mode, .workspace .fullscreen-mode")
+                workspace_fs = page.locator(
+                    ".workspace.fullscreen-mode, .workspace .fullscreen-mode"
+                )
                 if workspace_fs.count() > 0:
                     print("  ✓ Fullscreen mode activated")
                     test_results.append(("Fullscreen Mode", "PASS"))
@@ -171,7 +190,9 @@ def test_issue73():
 
             # In fullscreen mode, the bell button should be in workspace-tabs
             # NOT in page-header (which is hidden)
-            bell_btn_fullscreen = page.locator(".workspace-tabs button:has(.bi-bell), .workspace-tabs button:has(.bi-bell-slash), .workspace-tabs button:has(.bi-bell-fill)")
+            bell_btn_fullscreen = page.locator(
+                ".workspace-tabs button:has(.bi-bell), .workspace-tabs button:has(.bi-bell-slash), .workspace-tabs button:has(.bi-bell-fill)"
+            )
 
             if bell_btn_fullscreen.count() > 0:
                 print("  ✓ Bell button found in fullscreen mode (workspace-tabs)")
@@ -182,7 +203,9 @@ def test_issue73():
                 print(f"  Tooltip text (fullscreen): '{tooltip_fs}'")
 
                 # Check tooltip validity
-                if tooltip_fs and not ("TabNotifications" in tooltip_fs and not "通知" in tooltip_fs):
+                if tooltip_fs and not (
+                    "TabNotifications" in tooltip_fs and not "通知" in tooltip_fs
+                ):
                     print("  ✓ Tooltip text is valid in fullscreen mode")
                     test_results.append(("Tooltip Fullscreen Valid", "PASS", tooltip_fs))
                 elif tooltip_fs and "TabNotifications" in tooltip_fs:
@@ -224,7 +247,9 @@ def test_issue73():
                     test_results.append(("Page-header Restored", "PASS"))
 
                     # Bell button should be back in header
-                    bell_btn_back = page.locator(".page-header button:has(.bi-bell), .page-header button:has(.bi-bell-slash)")
+                    bell_btn_back = page.locator(
+                        ".page-header button:has(.bi-bell), .page-header button:has(.bi-bell-slash)"
+                    )
                     if bell_btn_back.count() > 0:
                         print("  ✓ Bell button back in page-header")
                         test_results.append(("Bell Button Restored", "PASS"))
@@ -260,12 +285,14 @@ def test_issue73():
         except Exception as e:
             print(f"\nError during test: {e}")
             import traceback
+
             traceback.print_exc()
             screenshots.append(take_screenshot(page, "error.png"))
             return False
 
         finally:
             browser.close()
+
 
 if __name__ == "__main__":
     success = test_issue73()

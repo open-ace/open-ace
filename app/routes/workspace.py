@@ -374,28 +374,24 @@ def list_sessions():
         where_clause = " AND ".join(conditions)
 
         # Count query
-        count_query = adapt_sql(
-            f"""
+        count_query = adapt_sql(f"""
             SELECT COUNT(*) as count
             FROM agent_sessions
             WHERE {where_clause}
-        """
-        )
+        """)
         result = db.fetch_one(count_query, tuple(params))
         total = result["count"] if result else 0
         total_pages = (total + limit - 1) // limit if total > 0 else 1
 
         # Get paginated sessions
         offset = (page - 1) * limit
-        sessions_query = adapt_sql(
-            f"""
+        sessions_query = adapt_sql(f"""
             SELECT *
             FROM agent_sessions
             WHERE {where_clause}
             ORDER BY updated_at DESC
             LIMIT ? OFFSET ?
-        """
-        )
+        """)
         sessions = db.fetch_all(sessions_query, tuple(params + [limit, offset]))
 
         # Format sessions for response

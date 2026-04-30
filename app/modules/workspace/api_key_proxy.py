@@ -83,8 +83,7 @@ class APIKeyProxyService:
 
         # api_key_store table is created by migration, but ensure it exists for
         # environments that don't run migrations
-        cursor.execute(
-            f"""
+        cursor.execute(f"""
             CREATE TABLE IF NOT EXISTS api_key_store (
                 id {id_type},
                 tenant_id INTEGER,
@@ -99,8 +98,7 @@ class APIKeyProxyService:
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(tenant_id, provider, key_name)
             )
-        """
-        )
+        """)
 
         conn.commit()
         conn.close()

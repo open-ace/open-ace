@@ -274,8 +274,7 @@ class SessionManager:
         id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
 
         # Create agent_sessions table
-        cursor.execute(
-            f"""
+        cursor.execute(f"""
             CREATE TABLE IF NOT EXISTS agent_sessions (
                 id {id_type},
                 session_id TEXT NOT NULL UNIQUE,
@@ -298,12 +297,10 @@ class SessionManager:
                 completed_at TIMESTAMP,
                 expires_at TIMESTAMP
             )
-        """
-        )
+        """)
 
         # Create session_messages table
-        cursor.execute(
-            f"""
+        cursor.execute(f"""
             CREATE TABLE IF NOT EXISTS session_messages (
                 id {id_type},
                 session_id TEXT NOT NULL,
@@ -315,40 +312,29 @@ class SessionManager:
                 metadata TEXT,
                 FOREIGN KEY (session_id) REFERENCES agent_sessions(session_id)
             )
-        """
-        )
+        """)
 
         # Create indexes
-        cursor.execute(
-            """
+        cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_agent_sessions_session_id
             ON agent_sessions(session_id)
-        """
-        )
-        cursor.execute(
-            """
+        """)
+        cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_agent_sessions_user_id
             ON agent_sessions(user_id)
-        """
-        )
-        cursor.execute(
-            """
+        """)
+        cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_agent_sessions_status
             ON agent_sessions(status)
-        """
-        )
-        cursor.execute(
-            """
+        """)
+        cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_agent_sessions_tool_name
             ON agent_sessions(tool_name)
-        """
-        )
-        cursor.execute(
-            """
+        """)
+        cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_session_messages_session_id
             ON session_messages(session_id)
-        """
-        )
+        """)
 
         # Add remote workspace columns if not present
         try:
@@ -1079,8 +1065,7 @@ class SessionManager:
                 (user_id,),
             )
         else:
-            cursor.execute(
-                """
+            cursor.execute("""
                 SELECT
                     COUNT(*) as total_sessions,
                     SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active_sessions,
@@ -1088,8 +1073,7 @@ class SessionManager:
                     SUM(total_tokens) as total_tokens,
                     SUM(message_count) as total_messages
                 FROM agent_sessions
-            """
-            )
+            """)
 
         row = cursor.fetchone()
         conn.close()

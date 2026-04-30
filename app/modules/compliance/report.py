@@ -638,8 +638,7 @@ class ReportGenerator:
                     else "INTEGER PRIMARY KEY AUTOINCREMENT"
                 )
 
-                cursor.execute(
-                    f"""
+                cursor.execute(f"""
                     CREATE TABLE IF NOT EXISTS compliance_reports (
                         id {id_type},
                         report_id TEXT UNIQUE NOT NULL,
@@ -652,8 +651,7 @@ class ReportGenerator:
                         report_data TEXT NOT NULL,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
-                """
-                )
+                """)
                 cursor.execute(
                     """
                     INSERT INTO compliance_reports

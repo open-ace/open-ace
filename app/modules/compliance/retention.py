@@ -113,25 +113,21 @@ class DataRetentionManager:
             # Retention history table
             # Use SERIAL for PostgreSQL, AUTOINCREMENT for SQLite
             if self.db.is_postgresql:
-                cursor.execute(
-                    """
+                cursor.execute("""
                     CREATE TABLE IF NOT EXISTS retention_history (
                         id SERIAL PRIMARY KEY,
                         timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         report_data TEXT NOT NULL
                     )
-                """
-                )
+                """)
             else:
-                cursor.execute(
-                    """
+                cursor.execute("""
                     CREATE TABLE IF NOT EXISTS retention_history (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         report_data TEXT NOT NULL
                     )
-                """
-                )
+                """)
 
             conn.commit()
 
@@ -469,12 +465,10 @@ class DataRetentionManager:
             Dict with compliance status.
         """
         # Check if cleanup has been run recently
-        last_cleanup = self.db.fetch_one(
-            """
+        last_cleanup = self.db.fetch_one("""
             SELECT timestamp FROM retention_history
             ORDER BY timestamp DESC LIMIT 1
-        """
-        )
+        """)
 
         last_cleanup_time = None
         days_since_cleanup = None

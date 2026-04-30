@@ -285,8 +285,7 @@ class CollaborationManager:
         bool_false = "BOOLEAN DEFAULT FALSE" if is_postgresql() else "INTEGER DEFAULT 0"
 
         # Create teams table
-        cursor.execute(
-            f"""
+        cursor.execute(f"""
             CREATE TABLE IF NOT EXISTS teams (
                 id {id_type},
                 team_id TEXT NOT NULL UNIQUE,
@@ -297,12 +296,10 @@ class CollaborationManager:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-        """
-        )
+        """)
 
         # Create team_members table
-        cursor.execute(
-            f"""
+        cursor.execute(f"""
             CREATE TABLE IF NOT EXISTS team_members (
                 id {id_type},
                 team_id TEXT NOT NULL,
@@ -312,12 +309,10 @@ class CollaborationManager:
                 joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(team_id, user_id)
             )
-        """
-        )
+        """)
 
         # Create shared_sessions table
-        cursor.execute(
-            f"""
+        cursor.execute(f"""
             CREATE TABLE IF NOT EXISTS shared_sessions (
                 id {id_type},
                 share_id TEXT NOT NULL UNIQUE,
@@ -335,12 +330,10 @@ class CollaborationManager:
                 access_count INTEGER DEFAULT 0,
                 last_accessed TIMESTAMP
             )
-        """
-        )
+        """)
 
         # Create annotations table
-        cursor.execute(
-            f"""
+        cursor.execute(f"""
             CREATE TABLE IF NOT EXISTS annotations (
                 id {id_type},
                 annotation_id TEXT NOT NULL UNIQUE,
@@ -355,12 +348,10 @@ class CollaborationManager:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-        """
-        )
+        """)
 
         # Create knowledge_base table
-        cursor.execute(
-            f"""
+        cursor.execute(f"""
             CREATE TABLE IF NOT EXISTS knowledge_base (
                 id {id_type},
                 entry_id TEXT NOT NULL UNIQUE,
@@ -376,8 +367,7 @@ class CollaborationManager:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-        """
-        )
+        """)
 
         # Create indexes
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_teams_owner ON teams(owner_id)")
@@ -1103,14 +1093,12 @@ class CollaborationManager:
         from app.repositories.database import adapt_sql
 
         cursor.execute(
-            adapt_sql(
-                f"""
+            adapt_sql(f"""
             SELECT * FROM knowledge_base
             WHERE {where_clause}
             ORDER BY created_at DESC
             LIMIT ? OFFSET ?
-        """
-            ),
+        """),
             params + [limit, offset],
         )
 
