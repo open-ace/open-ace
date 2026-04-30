@@ -9,7 +9,8 @@ import time
 from playwright.async_api import async_playwright
 
 BASE_URL = "http://117.72.38.96:5000"
-SCREENSHOT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "screenshots")
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots")
 
 
 async def test_create_flow():

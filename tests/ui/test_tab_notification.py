@@ -17,7 +17,8 @@ import time
 import json
 
 # Add skill scripts to path
-skill_dir = '/Users/rhuang/workspace/open-ace/.qwen/skills/ui-test/scripts'
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+skill_dir = os.path.join(PROJECT_ROOT, '.qwen', 'skills', 'ui-test', 'scripts')
 if os.path.exists(skill_dir):
     sys.path.insert(0, skill_dir)
 
@@ -28,12 +29,12 @@ except ImportError:
     sys.exit(1)
 
 # Configuration
-BASE_URL = "http://localhost:5001"
-USERNAME = "admin"
-PASSWORD = "admin123"
-HEADLESS = True
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+USERNAME = os.environ.get("USERNAME", "admin")
+PASSWORD = os.environ.get("PASSWORD", "admin123")
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 VIEWPORT = {"width": 1280, "height": 800}
-SCREENSHOT_DIR = "/Users/rhuang/workspace/open-ace/screenshots/issues/71"
+SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "issues", "71")
 
 # Ensure screenshot directory exists
 os.makedirs(SCREENSHOT_DIR, exist_ok=True)
