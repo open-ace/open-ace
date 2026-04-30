@@ -9,7 +9,6 @@ This test verifies that:
 4. All filter elements are properly labeled and functional
 """
 
-
 import pytest
 from playwright.async_api import async_playwright, expect
 

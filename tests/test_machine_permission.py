@@ -78,9 +78,22 @@ def make_manager():
 
     ram_mod._agent_manager = None
 
-    from app.modules.workspace.remote_agent_manager import RemoteAgentManager
+    from app.modules.workspace.remote_agent_manager import RemoteAgentManager, get_ddl_statements
 
     mgr = RemoteAgentManager(db_path=TMP_DB)
+
+    # Create tables since __init__ no longer calls _ensure_tables()
+    from app.repositories.database import Database
+
+    db = Database(db_url=f"sqlite:///{TMP_DB}")
+    with db.connection() as conn:
+        cursor = conn.cursor()
+        for sql in get_ddl_statements():
+            try:
+                cursor.execute(sql)
+            except Exception:
+                pass
+        conn.commit()
 
     db_mod.is_postgresql = original_is_pg
     db_mod.DB_PATH = original_db_path
@@ -89,60 +102,60 @@ def make_manager():
 
 def setup_test_data(mgr):
     """Create test machines and user assignments."""
-    conn = mgr._get_connection()
-    cursor = conn.cursor()
+    with mgr.db.connection() as conn:
+        cursor = conn.cursor()
 
-    now = "2026-01-01T00:00:00"
+        now = "2026-01-01T00:00:00"
 
-    # 3 machines
-    for _i, name in enumerate(["machine-a", "machine-b", "machine-c"]):
-        mid = f"mid-{name}"
+        # 3 machines
+        for _i, name in enumerate(["machine-a", "machine-b", "machine-c"]):
+            mid = f"mid-{name}"
+            cursor.execute(
+                "INSERT INTO remote_machines (machine_id, machine_name, status, tenant_id, created_at, updated_at) "
+                "VALUES (?, ?, 'online', 1, ?, ?)",
+                (mid, name, now, now),
+            )
+
+        # Create a users table for the LEFT JOIN in get_machine_assignments
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY,
+                username TEXT NOT NULL
+            )
+        """)
+        for uid in [1, 2, 3, 4, 5, 99]:
+            cursor.execute(
+                "INSERT OR IGNORE INTO users (id, username) VALUES (?, ?)",
+                (uid, f"user{uid}"),
+            )
+
+        # User 1: system admin (not tracked in machine_assignments for admin check)
+        # User 2: machine admin on machine-a
         cursor.execute(
-            "INSERT INTO remote_machines (machine_id, machine_name, status, tenant_id, created_at, updated_at) "
-            "VALUES (?, ?, 'online', 1, ?, ?)",
-            (mid, name, now, now),
+            "INSERT INTO machine_assignments (machine_id, user_id, permission, granted_by, granted_at) "
+            "VALUES (?, ?, ?, 1, ?)",
+            ("mid-machine-a", 2, "admin", now),
         )
-
-    # Create a users table for the LEFT JOIN in get_machine_assignments
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY,
-            username TEXT NOT NULL
-        )
-    """)
-    for uid in [1, 2, 3, 4, 5, 99]:
+        # User 2: regular user on machine-b
         cursor.execute(
-            "INSERT OR IGNORE INTO users (id, username) VALUES (?, ?)", (uid, f"user{uid}")
+            "INSERT INTO machine_assignments (machine_id, user_id, permission, granted_by, granted_at) "
+            "VALUES (?, ?, ?, 1, ?)",
+            ("mid-machine-b", 2, "user", now),
+        )
+        # User 3: regular user on machine-a
+        cursor.execute(
+            "INSERT INTO machine_assignments (machine_id, user_id, permission, granted_by, granted_at) "
+            "VALUES (?, ?, ?, 1, ?)",
+            ("mid-machine-a", 3, "user", now),
+        )
+        # User 4: machine admin on machine-b
+        cursor.execute(
+            "INSERT INTO machine_assignments (machine_id, user_id, permission, granted_by, granted_at) "
+            "VALUES (?, ?, ?, 1, ?)",
+            ("mid-machine-b", 4, "admin", now),
         )
 
-    # User 1: system admin (not tracked in machine_assignments for admin check)
-    # User 2: machine admin on machine-a
-    cursor.execute(
-        "INSERT INTO machine_assignments (machine_id, user_id, permission, granted_by, granted_at) "
-        "VALUES (?, ?, ?, 1, ?)",
-        ("mid-machine-a", 2, "admin", now),
-    )
-    # User 2: regular user on machine-b
-    cursor.execute(
-        "INSERT INTO machine_assignments (machine_id, user_id, permission, granted_by, granted_at) "
-        "VALUES (?, ?, ?, 1, ?)",
-        ("mid-machine-b", 2, "user", now),
-    )
-    # User 3: regular user on machine-a
-    cursor.execute(
-        "INSERT INTO machine_assignments (machine_id, user_id, permission, granted_by, granted_at) "
-        "VALUES (?, ?, ?, 1, ?)",
-        ("mid-machine-a", 3, "user", now),
-    )
-    # User 4: machine admin on machine-b
-    cursor.execute(
-        "INSERT INTO machine_assignments (machine_id, user_id, permission, granted_by, granted_at) "
-        "VALUES (?, ?, ?, 1, ?)",
-        ("mid-machine-b", 4, "admin", now),
-    )
-
-    conn.commit()
-    conn.close()
+        conn.commit()
 
 
 # ════════════════════════════════════════════

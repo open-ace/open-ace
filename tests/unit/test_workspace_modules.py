@@ -40,25 +40,33 @@ def temp_db():
 @pytest.fixture
 def prompt_library(temp_db):
     """Create a PromptLibrary instance with temp database."""
-    return PromptLibrary(db_path=temp_db)
+    lib = PromptLibrary(db_path=temp_db)
+    lib._ensure_tables()
+    return lib
 
 
 @pytest.fixture
 def session_manager(temp_db):
     """Create a SessionManager instance with temp database."""
-    return SessionManager(db_path=temp_db)
+    mgr = SessionManager(db_path=temp_db)
+    mgr._ensure_tables()
+    return mgr
 
 
 @pytest.fixture
 def state_sync(temp_db):
     """Create a StateSyncManager instance with temp database."""
-    return StateSyncManager(db_path=temp_db)
+    mgr = StateSyncManager(db_path=temp_db)
+    mgr._ensure_tables()
+    return mgr
 
 
 @pytest.fixture
 def collaboration(temp_db):
     """Create a CollaborationManager instance with temp database."""
-    return CollaborationManager(db_path=temp_db)
+    mgr = CollaborationManager(db_path=temp_db)
+    mgr._ensure_tables()
+    return mgr
 
 
 # ==================== Prompt Library Tests ====================

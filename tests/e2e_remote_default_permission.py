@@ -436,7 +436,10 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
                             elif t == "result":
                                 result_content = str(msg.get("result", ""))
                                 result_found = not msg.get("is_error", False)
-                                log("Output", "  [result] error={}".format(msg.get("is_error", False)))
+                                log(
+                                    "Output",
+                                    "  [result] error={}".format(msg.get("is_error", False)),
+                                )
                         except Exception:
                             pass
                     last_output_len = len(outputs)
@@ -479,9 +482,9 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
         "Task did not complete successfully within %ds after approval!" % RESPONSE_TIMEOUT
     )
 
-    assert init_permission_mode == "default", (
-        f"Expected permission_mode=default, got {init_permission_mode}"
-    )
+    assert (
+        init_permission_mode == "default"
+    ), f"Expected permission_mode=default, got {init_permission_mode}"
 
     log("Verify", "✓ ALL CHECKS PASSED!")
     log("Verify", "✓ Permission confirmation panel works correctly in default mode!")

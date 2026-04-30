@@ -101,7 +101,11 @@ def register_error_handlers(app):
                     # Allow if:
                     # 1. localhost or 127.0.0.1
                     # 2. Same host as server but different port (workspace webui instances)
-                    if parsed.hostname in ("localhost", "127.0.0.1") or parsed.port and 3100 <= parsed.port <= 3200:
+                    if (
+                        parsed.hostname in ("localhost", "127.0.0.1")
+                        or parsed.port
+                        and 3100 <= parsed.port <= 3200
+                    ):
                         response.headers["Access-Control-Allow-Origin"] = origin
                         response.headers["Access-Control-Allow-Methods"] = (
                             "GET, POST, PUT, DELETE, OPTIONS"

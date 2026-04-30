@@ -281,9 +281,9 @@ def _run_test(page, token, webui_url, webui_token, captured_session_id):
     assert (
         allow_bg != "rgba(0, 0, 0, 0)"
     ), "Allow button should have colored background when selected, got transparent"
-    assert "255" in allow_text_color or "255, 255, 255" in allow_text_color, (
-        f"Allow button text should be white when selected, got {allow_text_color}"
-    )
+    assert (
+        "255" in allow_text_color or "255, 255, 255" in allow_text_color
+    ), f"Allow button text should be white when selected, got {allow_text_color}"
     log("Style", "✓ '允许' has solid colored background + white text (selected)")
     shot(page, "S3_allow_selected")
 

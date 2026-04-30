@@ -364,7 +364,6 @@ def test_4_sse_latency():
     ).json()
     webui_token = webui_info.get("token", "")
 
-
     import http.client
 
     start = time.time()
