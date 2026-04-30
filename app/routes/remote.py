@@ -865,10 +865,7 @@ def agent_message():
 
     elif msg_type == "poll":
         # Lightweight poll — no DB write, just return pending commands
-        with agent_mgr._lock:
-            if machine_id not in agent_mgr._connections:
-                agent_mgr._connections[machine_id] = None
-                logger.info(f"Re-registered HTTP polling agent via poll: {machine_id}")
+        agent_mgr.ensure_agent_tracked(machine_id)
         pending = agent_mgr.get_pending_commands(machine_id)
         return jsonify({"success": True, "type": "poll_ack", "pending_commands": pending})
 

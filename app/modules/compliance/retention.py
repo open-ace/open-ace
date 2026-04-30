@@ -463,21 +463,6 @@ class DataRetentionManager:
             "timestamp": datetime.utcnow().isoformat(),
         }
 
-
-def get_ddl_statements() -> list[str]:
-    """Return DDL statements for retention tables."""
-    from app.repositories.database import is_postgresql
-    id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
-    return [
-        f"""
-        CREATE TABLE IF NOT EXISTS retention_history (
-            id {id_type},
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            report_data TEXT NOT NULL
-        )
-        """,
-    ]
-
     def get_compliance_status(self) -> Dict[str, Any]:
         """
         Get data retention compliance status.
@@ -531,3 +516,18 @@ def get_ddl_statements() -> list[str]:
                 "Archive important data before deletion",
             ],
         }
+
+
+def get_ddl_statements() -> list[str]:
+    """Return DDL statements for retention tables."""
+    from app.repositories.database import is_postgresql
+    id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    return [
+        f"""
+        CREATE TABLE IF NOT EXISTS retention_history (
+            id {id_type},
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            report_data TEXT NOT NULL
+        )
+        """,
+    ]

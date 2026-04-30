@@ -331,6 +331,9 @@ class Database:
             yield conn
         finally:
             if self._is_postgresql:
+                # Rollback any aborted transaction before returning to pool
+                with suppress(Exception):
+                    conn.rollback()
                 release_postgresql_connection(conn)
             else:
                 conn.close()

@@ -13,6 +13,7 @@ import sqlite3
 import threading
 import time
 import uuid
+from contextlib import suppress
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional, Union
 
@@ -66,66 +67,6 @@ class RemoteAgentManager:
         self._restore_in_memory_state()
         self._cleanup_offline_sessions()
         self._start_heartbeat_monitor()
-
-    def _get_connection(self) -> Union[sqlite3.Connection, Any]:
-        """Get database connection from pool (PostgreSQL) or create new (SQLite).
-
-        Note: For PostgreSQL, the returned connection is from the pool.
-        Callers must call conn.close() to return it to the pool (not destroy it).
-        """
-        return self.db.get_connection()
-
-    def _ensure_tables(self) -> None:
-        """Ensure required tables exist."""
-        with self.db.connection() as conn:
-            cursor = conn.cursor()
-
-            id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
-
-            cursor.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS remote_machines (
-                    id {id_type},
-                    machine_id TEXT NOT NULL UNIQUE,
-                    machine_name TEXT NOT NULL,
-                    hostname TEXT,
-                    os_type TEXT,
-                    os_version TEXT,
-                    ip_address TEXT,
-                    status TEXT DEFAULT 'offline',
-                    agent_version TEXT,
-                    capabilities TEXT,
-                    cli_path TEXT,
-                    work_dir TEXT,
-                    tenant_id INTEGER,
-                    created_by INTEGER,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    last_heartbeat TIMESTAMP
-                )
-            """
-            )
-
-            cursor.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS machine_assignments (
-                    id {id_type},
-                    machine_id TEXT NOT NULL,
-                    user_id INTEGER NOT NULL,
-                    permission TEXT DEFAULT 'user',
-                    granted_by INTEGER,
-                    granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(machine_id, user_id)
-                )
-            """
-            )
-
-            # Indexes
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_remote_machines_machine_id ON remote_machines(machine_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_remote_machines_status ON remote_machines(status)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_machine_assignments_user_id ON machine_assignments(user_id)")
-
-            conn.commit()
 
     def _restore_in_memory_state(self) -> None:
         """Restore _session_machines and _session_end_flags from DB after restart.
@@ -472,6 +413,17 @@ class RemoteAgentManager:
         """Check if a machine has an active connection (HTTP polling)."""
         return machine_id in self._connections
 
+    def ensure_agent_tracked(self, machine_id: str) -> None:
+        """Ensure an HTTP polling agent is tracked in _connections.
+
+        Used by lightweight poll handlers to register agents without
+        triggering a full heartbeat DB write.
+        """
+        with self._lock:
+            if machine_id not in self._connections:
+                self._connections[machine_id] = None
+                logger.info(f"Registered HTTP polling agent: {machine_id}")
+
     # ==================== Command Dispatch ====================
 
     def send_command(self, machine_id: str, command: Dict[str, Any]) -> bool:
@@ -662,6 +614,8 @@ class RemoteAgentManager:
                 return True
             except Exception as e:
                 logger.error(f"Failed to assign user: {e}")
+                with suppress(Exception):
+                    conn.rollback()
                 return False
 
     def revoke_user(self, machine_id: str, user_id: int) -> bool:

@@ -45,8 +45,8 @@ def ensure_all_tables() -> None:
         for sql in all_ddl:
             try:
                 cursor.execute(sql)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("DDL skipped (expected for ALTER TABLE): %s — %s", sql[:80].strip(), e)
         conn.commit()
 
     logger.info("Schema initialization complete (%d DDL statements executed)", len(all_ddl))
