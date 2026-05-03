@@ -14,20 +14,9 @@ import logging
 
 from flask import Blueprint, g, jsonify, request
 
-from app.modules.workspace.collaboration import (
-    SharePermission,
-    get_collaboration_manager,
-)
-from app.modules.workspace.prompt_library import (
-    PromptCategory,
-    PromptTemplate,
-    get_prompt_library,
-)
-from app.modules.workspace.session_manager import (
-    SessionType,
-    _param,
-    get_session_manager,
-)
+from app.modules.workspace.collaboration import SharePermission, get_collaboration_manager
+from app.modules.workspace.prompt_library import PromptCategory, PromptTemplate, get_prompt_library
+from app.modules.workspace.session_manager import SessionType, _param, get_session_manager
 from app.modules.workspace.state_sync import get_state_sync_manager
 from app.modules.workspace.tool_connector import get_tool_connector
 from app.services.auth_service import AuthService
@@ -328,7 +317,12 @@ def list_sessions():
     enrichment from session_stats (historical message data from fetch).
     """
     try:
-        from app.repositories.database import Database, adapt_sql, is_postgresql
+        from app.repositories.database import (
+            Database,
+            adapt_sql,
+            get_param_placeholder,
+            is_postgresql,
+        )
 
         db = Database()
 
@@ -391,9 +385,38 @@ def list_sessions():
         """)
         sessions = db.fetch_all(sessions_query, tuple(params + [limit, offset]))
 
+        # Compute real-time stats from session_messages for accuracy
+        session_ids = [s["session_id"] for s in sessions]
+        session_stats_map = {}
+        if session_ids:
+            try:
+                p = get_param_placeholder()
+                sid_placeholders = ", ".join([p] * len(session_ids))
+                stats_query = f"""
+                    SELECT session_id,
+                           COUNT(*) as actual_message_count,
+                           SUM(CASE WHEN role IN ('assistant', 'toolResult') THEN 1 ELSE 0 END) as actual_request_count,
+                           SUM(tokens_used) as actual_total_tokens,
+                           MAX(timestamp) as actual_updated_at
+                    FROM session_messages
+                    WHERE session_id IN ({sid_placeholders})
+                    GROUP BY session_id
+                """
+                stats_rows = db.fetch_all(stats_query, tuple(session_ids))
+                for row in stats_rows:
+                    session_stats_map[row["session_id"]] = row
+            except Exception as e:
+                logger.warning(f"Failed to compute session stats from session_messages: {e}")
+
         # Format sessions for response
         formatted_sessions = []
         for s in sessions:
+            stats = session_stats_map.get(s["session_id"])
+            actual_message_count = stats["actual_message_count"] if stats else 0
+            actual_request_count = int(stats["actual_request_count"] or 0) if stats else 0
+            actual_total_tokens = int(stats["actual_total_tokens"] or 0) if stats else 0
+            actual_updated_at = stats["actual_updated_at"] if stats else None
+
             formatted_sessions.append(
                 {
                     "id": s.get("id"),
@@ -406,15 +429,15 @@ def list_sessions():
                     "status": s.get("status") or "active",
                     "context": {},
                     "settings": {},
-                    "total_tokens": s.get("total_tokens") or 0,
+                    "total_tokens": actual_total_tokens or (s.get("total_tokens") or 0),
                     "total_input_tokens": s.get("total_input_tokens") or 0,
                     "total_output_tokens": s.get("total_output_tokens") or 0,
-                    "message_count": s.get("message_count") or 0,
-                    "request_count": s.get("request_count") or 0,
+                    "message_count": actual_message_count or (s.get("message_count") or 0),
+                    "request_count": actual_request_count or (s.get("request_count") or 0),
                     "model": s.get("model"),
                     "tags": [],
                     "created_at": format_datetime(s["created_at"]),
-                    "updated_at": format_datetime(s["updated_at"]),
+                    "updated_at": format_datetime(actual_updated_at or s["updated_at"]),
                     "completed_at": format_datetime(s.get("completed_at")),
                     "expires_at": format_datetime(s.get("expires_at")),
                     "project_path": s.get("project_path"),
@@ -423,6 +446,55 @@ def list_sessions():
                     "messages": [],
                 }
             )
+
+        # Enrich sessions with stats from daily_messages when session_messages is insufficient
+        sessions_needing_enrichment = [
+            s for s in formatted_sessions if (s.get("message_count") or 0) == 0
+        ]
+        if sessions_needing_enrichment:
+            try:
+                p = get_param_placeholder()
+                enrich_ids = [s["session_id"] for s in sessions_needing_enrichment]
+                placeholders = ", ".join([p] * len(enrich_ids))
+                dm_stats_query = f"""
+                    SELECT
+                        agent_session_id,
+                        COUNT(*) as dm_msg_count,
+                        SUM(tokens_used) as dm_total_tokens,
+                        SUM(input_tokens) as dm_input_tokens,
+                        SUM(output_tokens) as dm_output_tokens,
+                        SUM(CASE WHEN role IN ('assistant', 'toolResult') THEN 1 ELSE 0 END) as dm_request_count,
+                        MAX(timestamp) as dm_last_active,
+                        MAX(model) as dm_model
+                    FROM daily_messages
+                    WHERE agent_session_id IN ({placeholders})
+                    GROUP BY agent_session_id
+                """
+                dm_rows = db.fetch_all(dm_stats_query, tuple(enrich_ids))
+                dm_stats_map = {r["agent_session_id"]: r for r in dm_rows}
+                for s in sessions_needing_enrichment:
+                    dm = dm_stats_map.get(s["session_id"])
+                    if dm and (dm["dm_msg_count"] or 0) > 0:
+                        # Take the larger value from either source
+                        dm_msg = dm["dm_msg_count"] or 0
+                        dm_req = dm["dm_request_count"] or 0
+                        dm_tokens = dm["dm_total_tokens"] or 0
+                        dm_input = dm["dm_input_tokens"] or 0
+                        dm_output = dm["dm_output_tokens"] or 0
+                        s["message_count"] = max(s.get("message_count") or 0, dm_msg)
+                        s["request_count"] = max(s.get("request_count") or 0, dm_req)
+                        s["total_tokens"] = max(s.get("total_tokens") or 0, dm_tokens)
+                        s["total_input_tokens"] = max(s.get("total_input_tokens") or 0, dm_input)
+                        s["total_output_tokens"] = max(s.get("total_output_tokens") or 0, dm_output)
+                        if dm["dm_last_active"]:
+                            existing_dt = s.get("updated_at")
+                            dm_dt = format_datetime(dm["dm_last_active"])
+                            if not existing_dt or dm_dt > existing_dt:
+                                s["updated_at"] = dm_dt
+                        if not s.get("model") and dm.get("dm_model"):
+                            s["model"] = dm["dm_model"]
+            except Exception as e:
+                logger.warning(f"Failed to enrich stats from daily_messages: {e}")
 
         # Enrich remote sessions with machine names
         remote_machine_ids = list(
@@ -532,6 +604,14 @@ def get_session(session_id):
         session = manager.get_session(session_id, include_messages=include_messages)
 
         if session:
+            from datetime import datetime as dt
+
+            from app.modules.workspace.session_manager import SessionMessage
+            from app.repositories.database import Database, get_param_placeholder
+
+            db = Database()
+            p = get_param_placeholder()
+
             # Calculate request_count from messages if available
             if include_messages and session.messages:
                 session.request_count = sum(
@@ -553,82 +633,155 @@ def get_session(session_id):
                 row = cursor.fetchone()
                 session.request_count = row["request_count"] if row else 0
                 conn.close()
+
+            # Enrich stats from daily_messages (take max across sources)
+            try:
+                dm_query = f"""
+                    SELECT
+                        COUNT(*) as dm_msg_count,
+                        SUM(tokens_used) as dm_total_tokens,
+                        SUM(input_tokens) as dm_input_tokens,
+                        SUM(output_tokens) as dm_output_tokens,
+                        SUM(CASE WHEN role IN ('assistant', 'toolResult') THEN 1 ELSE 0 END) as dm_request_count,
+                        MAX(timestamp) as dm_last_active,
+                        MAX(model) as dm_model
+                    FROM daily_messages
+                    WHERE agent_session_id = {p}
+                """
+                dm = db.fetch_one(dm_query, (session_id,))
+                if dm and (dm["dm_msg_count"] or 0) > 0:
+                    dm_msg = dm["dm_msg_count"] or 0
+                    dm_req = dm["dm_request_count"] or 0
+                    dm_tokens = dm["dm_total_tokens"] or 0
+                    dm_input = dm["dm_input_tokens"] or 0
+                    dm_output = dm["dm_output_tokens"] or 0
+                    session.message_count = max(session.message_count or 0, dm_msg)
+                    session.request_count = max(session.request_count or 0, dm_req)
+                    session.total_tokens = max(session.total_tokens or 0, dm_tokens)
+                    session.total_input_tokens = max(session.total_input_tokens or 0, dm_input)
+                    session.total_output_tokens = max(session.total_output_tokens or 0, dm_output)
+                    if dm["dm_last_active"]:
+                        if not session.updated_at or dm["dm_last_active"] > session.updated_at:
+                            session.updated_at = dm["dm_last_active"]
+                    if not session.model and dm.get("dm_model"):
+                        session.model = dm["dm_model"]
+            except Exception as e:
+                logger.warning(f"Failed to enrich session stats from daily_messages: {e}")
+
+            # If include_messages but session has no messages, try daily_messages
+            if include_messages and not session.messages:
+                try:
+                    msg_query = f"""
+                        SELECT id, agent_session_id as session_id, role, content,
+                               tokens_used, model, timestamp
+                        FROM daily_messages
+                        WHERE agent_session_id = {p}
+                        ORDER BY timestamp ASC
+                    """
+                    msg_rows = db.fetch_all(msg_query, (session_id,))
+                    if msg_rows:
+                        session.messages = [
+                            SessionMessage(
+                                id=m.get("id"),
+                                session_id=m.get("session_id", session_id),
+                                role=m.get("role", ""),
+                                content=m.get("content") or "",
+                                tokens_used=m.get("tokens_used") or 0,
+                                model=m.get("model"),
+                                timestamp=(
+                                    m.get("timestamp")
+                                    if isinstance(m.get("timestamp"), dt)
+                                    else (
+                                        dt.fromisoformat(str(m.get("timestamp")))
+                                        if m.get("timestamp")
+                                        else None
+                                    )
+                                ),
+                                metadata={},
+                            )
+                            for m in msg_rows
+                        ]
+                except Exception as e:
+                    logger.warning(f"Failed to enrich messages from daily_messages: {e}")
+
             return jsonify({"success": True, "data": session.to_dict()})
 
         # If not found in agent_sessions, try to get from daily_messages
         from scripts.shared.db import _execute, get_connection
 
         conn = get_connection()
-        cursor = conn.cursor()
+        try:
+            cursor = conn.cursor()
 
-        # Get session info from daily_messages
-        from app.repositories.database import get_param_placeholder
+            # Get session info from daily_messages
+            from app.repositories.database import get_param_placeholder
 
-        p = get_param_placeholder()
-        session_query = f"""
-            SELECT
-                agent_session_id as session_id,
-                tool_name,
-                host_name,
-                sender_name,
-                MAX(sender_id) as sender_id,
-                MAX(date) as date,
-                COUNT(*) as message_count,
-                SUM(CASE WHEN role IN ('assistant', 'toolResult') THEN 1 ELSE 0 END) as request_count,
-                SUM(tokens_used) as total_tokens,
-                SUM(input_tokens) as total_input_tokens,
-                SUM(output_tokens) as total_output_tokens,
-                MIN(timestamp) as created_at,
-                MAX(timestamp) as updated_at,
-                MAX(model) as model
-            FROM daily_messages
-            WHERE agent_session_id = {p}
-            GROUP BY agent_session_id, tool_name, host_name, sender_name
-        """
-        _execute(cursor, session_query, [session_id])
-        session_data = cursor.fetchone()
-
-        if not session_data:
-            conn.close()
-            return jsonify({"success": False, "error": "Session not found"}), 404
-
-        # Convert to dict if needed
-        if not isinstance(session_data, dict):
-            session_data = dict(session_data)
-
-        # Get messages if requested
-        messages = []
-        if include_messages:
-            messages_query = f"""
+            p = get_param_placeholder()
+            session_query = f"""
                 SELECT
-                    id,
                     agent_session_id as session_id,
-                    role,
-                    content,
-                    tokens_used,
-                    model,
-                    timestamp
+                    tool_name,
+                    host_name,
+                    sender_name,
+                    MAX(sender_id) as sender_id,
+                    MAX(date) as date,
+                    COUNT(*) as message_count,
+                    SUM(CASE WHEN role IN ('assistant', 'toolResult') THEN 1 ELSE 0 END) as request_count,
+                    SUM(tokens_used) as total_tokens,
+                    SUM(input_tokens) as total_input_tokens,
+                    SUM(output_tokens) as total_output_tokens,
+                    MIN(timestamp) as created_at,
+                    MAX(timestamp) as updated_at,
+                    MAX(model) as model
                 FROM daily_messages
                 WHERE agent_session_id = {p}
-                ORDER BY timestamp ASC
+                GROUP BY agent_session_id, tool_name, host_name, sender_name
             """
-            _execute(cursor, messages_query, [session_id])
-            messages_data = cursor.fetchall()
-            messages = [
-                {
-                    "id": m["id"] if isinstance(m, dict) else m[0],
-                    "session_id": m["session_id"] if isinstance(m, dict) else m[1],
-                    "role": m["role"] if isinstance(m, dict) else m[2],
-                    "content": m["content"] or "" if isinstance(m, dict) else (m[3] or ""),
-                    "tokens_used": m["tokens_used"] or 0 if isinstance(m, dict) else (m[4] or 0),
-                    "model": m["model"] if isinstance(m, dict) else m[5],
-                    "timestamp": m["timestamp"] if isinstance(m, dict) else m[6],
-                    "metadata": {},
-                }
-                for m in messages_data
-            ]
+            _execute(cursor, session_query, [session_id])
+            session_data = cursor.fetchone()
 
-        conn.close()
+            if not session_data:
+                return jsonify({"success": False, "error": "Session not found"}), 404
+
+            # Convert to dict if needed
+            if not isinstance(session_data, dict):
+                session_data = dict(session_data)
+
+            # Get messages if requested
+            messages = []
+            if include_messages:
+                messages_query = f"""
+                    SELECT
+                        id,
+                        agent_session_id as session_id,
+                        role,
+                        content,
+                        tokens_used,
+                        model,
+                        timestamp
+                    FROM daily_messages
+                    WHERE agent_session_id = {p}
+                    ORDER BY timestamp ASC
+                """
+                _execute(cursor, messages_query, [session_id])
+                messages_data = cursor.fetchall()
+                messages = [
+                    {
+                        "id": m["id"] if isinstance(m, dict) else m[0],
+                        "session_id": m["session_id"] if isinstance(m, dict) else m[1],
+                        "role": m["role"] if isinstance(m, dict) else m[2],
+                        "content": m["content"] or "" if isinstance(m, dict) else (m[3] or ""),
+                        "tokens_used": (
+                            m["tokens_used"] or 0 if isinstance(m, dict) else (m[4] or 0)
+                        ),
+                        "model": m["model"] if isinstance(m, dict) else m[5],
+                        "timestamp": m["timestamp"] if isinstance(m, dict) else m[6],
+                        "metadata": {},
+                    }
+                    for m in messages_data
+                ]
+        finally:
+            conn.close()
 
         # Format session for response
         formatted_session = {
