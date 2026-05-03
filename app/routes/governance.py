@@ -399,7 +399,7 @@ def api_add_pattern():
 
     except Exception as e:
         logger.error(f"Failed to add pattern: {e}")
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @governance_bp.route("/content/filter/keywords", methods=["POST"])

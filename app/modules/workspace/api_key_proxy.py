@@ -50,8 +50,12 @@ class APIKeyProxyService:
         """Get the AES encryption key from environment variable."""
         key_env = os.environ.get("OPENACE_ENCRYPTION_KEY")
         if not key_env:
-            # Generate a stable key from SECRET_KEY as fallback
-            secret = os.environ.get("SECRET_KEY", "dev-secret-key")
+            secret = os.environ.get("SECRET_KEY")
+            if not secret:
+                raise RuntimeError(
+                    "OPENACE_ENCRYPTION_KEY or SECRET_KEY must be set for API key encryption. "
+                    "Refusing to use default key in production."
+                )
             key_env = secret
         # Derive a 32-byte key using SHA-256
         return hashlib.sha256(key_env.encode()).digest()
@@ -104,7 +108,7 @@ class APIKeyProxyService:
         conn.close()
 
     def _encrypt_key(self, api_key: str) -> str:
-        """Encrypt an API key using AES-256-GCM."""
+        """Encrypt an API key using Fernet (requires cryptography package)."""
         try:
             import base64
 
@@ -113,14 +117,13 @@ class APIKeyProxyService:
             f = Fernet(base64.urlsafe_b64encode(self._encryption_key))
             return f.encrypt(api_key.encode()).decode()
         except ImportError:
-            # Fallback to simple base64 encoding if cryptography not available
-            logger.warning(
-                "cryptography package not installed, using base64 encoding (not secure for production)"
+            raise RuntimeError(
+                "cryptography package is required for API key encryption. "
+                "Install with: pip install cryptography"
             )
-            return b64encode(api_key.encode()).decode()
 
     def _decrypt_key(self, encrypted_key: str) -> str:
-        """Decrypt an API key."""
+        """Decrypt an API key (requires cryptography package)."""
         try:
             import base64
 
@@ -129,7 +132,10 @@ class APIKeyProxyService:
             f = Fernet(base64.urlsafe_b64encode(self._encryption_key))
             return f.decrypt(encrypted_key.encode()).decode()
         except ImportError:
-            return b64decode(encrypted_key.encode()).decode()
+            raise RuntimeError(
+                "cryptography package is required for API key encryption. "
+                "Install with: pip install cryptography"
+            )
 
     def _hash_key(self, api_key: str) -> str:
         """Create a SHA-256 hash of an API key for lookup."""

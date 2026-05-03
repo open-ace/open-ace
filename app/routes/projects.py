@@ -195,7 +195,7 @@ def api_create_project():
             return jsonify({"error": "Timeout creating directory"}), 500
         except Exception as e:
             logger.error(f"Error creating directory: {e}")
-            return jsonify({"error": f"Failed to create directory: {str(e)}"}), 500
+            return jsonify({"error": "Failed to create directory"}), 500
 
     # Create project in database
     project_id = project_repo.create_project(

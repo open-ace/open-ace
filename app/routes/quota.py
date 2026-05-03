@@ -71,24 +71,30 @@ def _clear_user_usage_cache(user_id: Optional[int] = None):
 
 @quota_bp.before_request
 def load_user():
-    """Load the current user from session token before each request."""
+    """Load the current user from session token before each request.
+
+    All quota endpoints require authentication. Returns 401 if no valid
+    session token is provided.
+    """
     token = request.cookies.get("session_token") or request.headers.get(
         "Authorization", ""
     ).replace("Bearer ", "")
 
     if token:
-        session = auth_service.get_session(token)
-        if session:
+        session = auth_service.validate_session(token)
+        if session[0]:
+            session_data = session[1]
             g.user = {
-                "id": session.get("user_id"),
-                "username": session.get("username"),
-                "email": session.get("email"),
-                "role": session.get("role"),
+                "id": session_data.get("user_id"),
+                "username": session_data.get("username"),
+                "email": session_data.get("email"),
+                "role": session_data.get("role"),
             }
+            return None  # Authenticated
         else:
-            g.user = None
+            return jsonify({"error": "Authentication required"}), 401
     else:
-        g.user = None
+        return jsonify({"error": "Authentication required"}), 401
 
 
 def require_auth():
@@ -227,7 +233,7 @@ def check_quota():
 
     except Exception as e:
         logger.error(f"Error checking quota for user {user_id}: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @quota_bp.route("/quota/status", methods=["GET"])
@@ -350,7 +356,7 @@ def get_quota_status():
 
     except Exception as e:
         logger.error(f"Error getting quota status for user {user_id}: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @quota_bp.route("/quota/usage/me", methods=["GET"])
@@ -429,7 +435,7 @@ def get_my_usage():
 
     except Exception as e:
         logger.error(f"Error getting usage for user {user_id}: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @quota_bp.route("/quota/webui-check", methods=["GET"])
@@ -549,4 +555,4 @@ def webui_quota_check():
         return jsonify(response)
     except Exception as e:
         logger.error(f"Error in webui quota check for user {user_id}: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500

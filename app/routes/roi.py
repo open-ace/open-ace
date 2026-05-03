@@ -41,7 +41,7 @@ def get_roi():
         return jsonify({"success": True, "data": roi.to_dict()})
     except Exception as e:
         logger.error(f"Error calculating ROI: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @roi_bp.route("/roi/trend", methods=["GET"])
@@ -57,7 +57,7 @@ def get_roi_trend():
         return jsonify({"success": True, "data": [t.to_dict() for t in trends]})
     except Exception as e:
         logger.error(f"Error getting ROI trend: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @roi_bp.route("/roi/by-tool", methods=["GET"])
@@ -77,7 +77,7 @@ def get_roi_by_tool():
         return jsonify({"success": True, "data": {k: v.to_dict() for k, v in roi_by_tool.items()}})
     except Exception as e:
         logger.error(f"Error getting ROI by tool: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @roi_bp.route("/roi/by-user", methods=["GET"])
@@ -99,7 +99,7 @@ def get_roi_by_user():
         )
     except Exception as e:
         logger.error(f"Error getting ROI by user: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @roi_bp.route("/roi/cost-breakdown", methods=["GET"])
@@ -128,7 +128,7 @@ def get_cost_breakdown():
         )
     except Exception as e:
         logger.error(f"Error getting cost breakdown: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @roi_bp.route("/roi/daily-costs", methods=["GET"])
@@ -149,7 +149,7 @@ def get_daily_costs():
         return jsonify({"success": True, "data": daily_costs})
     except Exception as e:
         logger.error(f"Error getting daily costs: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @roi_bp.route("/roi/summary", methods=["GET"])
@@ -170,7 +170,7 @@ def get_roi_summary():
         return jsonify({"success": True, "data": summary})
     except Exception as e:
         logger.error(f"Error getting ROI summary: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 # ==================== Cost Optimization ====================
@@ -188,7 +188,7 @@ def get_optimization_suggestions():
         return jsonify({"success": True, "data": [s.to_dict() for s in suggestions]})
     except Exception as e:
         logger.error(f"Error getting optimization suggestions: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @roi_bp.route("/optimization/cost-trend", methods=["GET"])
@@ -203,7 +203,7 @@ def get_optimization_cost_trend():
         return jsonify({"success": True, "data": trend})
     except Exception as e:
         logger.error(f"Error getting cost trend: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @roi_bp.route("/optimization/efficiency", methods=["GET"])
@@ -218,4 +218,4 @@ def get_efficiency_report():
         return jsonify({"success": True, "data": report})
     except Exception as e:
         logger.error(f"Error getting efficiency report: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500

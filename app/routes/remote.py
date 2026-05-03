@@ -20,9 +20,7 @@ from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
 from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
 from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
-from app.modules.workspace.remote_session_manager import (
-    get_remote_session_manager,
-)
+from app.modules.workspace.remote_session_manager import get_remote_session_manager
 from app.services.auth_service import AuthService
 
 logger = logging.getLogger(__name__)
@@ -33,7 +31,12 @@ auth_service = AuthService()
 
 @remote_bp.before_request
 def load_user():
-    """Load the current user from session token before each request."""
+    """Load the current user from session token before each request.
+
+    Most remote endpoints require authentication. Returns 401 if no valid
+    session token is provided. WebSocket, agent, and LLM-proxy endpoints
+    use their own auth (JWT tokens) and are exempted.
+    """
     # Skip auth for WebSocket upgrade and agent endpoints (they use JWT)
     if request.path.endswith("/agent/ws"):
         return
@@ -49,28 +52,32 @@ def load_user():
     ).replace("Bearer ", "")
 
     if token:
-        session = auth_service.get_session(token)
-        if session:
+        session = auth_service.validate_session(token)
+        if session[0]:
+            session_data = session[1]
             g.user = {
-                "id": session.get("user_id"),
-                "username": session.get("username"),
-                "email": session.get("email"),
-                "role": session.get("role"),
+                "id": session_data.get("user_id"),
+                "username": session_data.get("username"),
+                "email": session_data.get("email"),
+                "role": session_data.get("role"),
             }
+            return None  # Authenticated
         else:
-            g.user = None
+            return jsonify({"error": "Authentication required"}), 401
     else:
         url_token = request.args.get("token")
         if url_token:
             # First try as a session_token (for SSE / EventSource which can't send cookies)
-            session = auth_service.get_session(url_token)
-            if session:
+            session = auth_service.validate_session(url_token)
+            if session[0]:
+                session_data = session[1]
                 g.user = {
-                    "id": session.get("user_id"),
-                    "username": session.get("username"),
-                    "email": session.get("email"),
-                    "role": session.get("role"),
+                    "id": session_data.get("user_id"),
+                    "username": session_data.get("username"),
+                    "email": session_data.get("email"),
+                    "role": session_data.get("role"),
                 }
+                return None  # Authenticated
             else:
                 # Fall back to WebUI token validation
                 try:
@@ -90,15 +97,12 @@ def load_user():
                                 "email": user.get("email"),
                                 "role": user.get("role"),
                             }
-                        else:
-                            g.user = None
-                    else:
-                        g.user = None
+                            return None  # Authenticated
                 except Exception as e:
                     logger.warning(f"Failed to validate URL token: {e}")
-                    g.user = None
-        else:
-            g.user = None
+
+    # No valid authentication provided
+    return jsonify({"error": "Authentication required"}), 401
 
 
 def _require_auth():

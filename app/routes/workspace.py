@@ -55,22 +55,28 @@ auth_service = AuthService()
 
 @workspace_bp.before_request
 def load_user():
-    """Load the current user from session token before each request."""
+    """Load the current user from session token before each request.
+
+    All workspace endpoints require authentication. Returns 401 if no valid
+    session token is provided.
+    """
     token = request.cookies.get("session_token") or request.headers.get(
         "Authorization", ""
     ).replace("Bearer ", "")
 
     if token:
-        session = auth_service.get_session(token)
-        if session:
+        session = auth_service.validate_session(token)
+        if session[0]:
+            session_data = session[1]
             g.user = {
-                "id": session.get("user_id"),
-                "username": session.get("username"),
-                "email": session.get("email"),
-                "role": session.get("role"),
+                "id": session_data.get("user_id"),
+                "username": session_data.get("username"),
+                "email": session_data.get("email"),
+                "role": session_data.get("role"),
             }
+            return None  # Authenticated — proceed to route handler
         else:
-            g.user = None
+            return jsonify({"error": "Authentication required"}), 401
     else:
         # Check for URL token parameter (used by qwen-code-webui)
         url_token = request.args.get("token")
@@ -93,15 +99,12 @@ def load_user():
                             "email": user.get("email"),
                             "role": user.get("role"),
                         }
-                    else:
-                        g.user = None
-                else:
-                    g.user = None
+                        return None  # Authenticated
             except Exception as e:
                 logger.warning(f"Failed to validate URL token: {e}")
-                g.user = None
-        else:
-            g.user = None
+
+    # No valid authentication provided
+    return jsonify({"error": "Authentication required"}), 401
 
 
 # ==================== Prompt Templates ====================
@@ -144,7 +147,7 @@ def list_prompts():
         )
     except Exception as e:
         logger.error(f"Error listing prompts: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @workspace_bp.route("/prompts", methods=["POST"])
@@ -176,7 +179,7 @@ def create_prompt():
         return jsonify({"success": True, "data": {"id": template_id}}), 201
     except Exception as e:
         logger.error(f"Error creating prompt: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @workspace_bp.route("/prompts/<int:template_id>", methods=["GET"])
@@ -192,7 +195,7 @@ def get_prompt(template_id):
         return jsonify({"success": True, "data": template.to_dict()})
     except Exception as e:
         logger.error(f"Error getting prompt: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @workspace_bp.route("/prompts/<int:template_id>", methods=["PUT"])
@@ -223,7 +226,7 @@ def update_prompt(template_id):
         return jsonify({"success": success})
     except Exception as e:
         logger.error(f"Error updating prompt: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @workspace_bp.route("/prompts/<int:template_id>", methods=["DELETE"])
@@ -241,7 +244,7 @@ def delete_prompt(template_id):
         return jsonify({"success": True})
     except Exception as e:
         logger.error(f"Error deleting prompt: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @workspace_bp.route("/prompts/<int:template_id>/render", methods=["POST"])
@@ -276,7 +279,7 @@ def render_prompt(template_id):
         return jsonify({"success": True, "data": {"rendered": rendered}})
     except Exception as e:
         logger.error(f"Error rendering prompt: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @workspace_bp.route("/prompts/categories", methods=["GET"])
@@ -289,7 +292,7 @@ def get_prompt_categories():
         return jsonify({"success": True, "data": categories})
     except Exception as e:
         logger.error(f"Error getting categories: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @workspace_bp.route("/prompts/featured", methods=["GET"])
@@ -303,7 +306,7 @@ def get_featured_prompts():
         return jsonify({"success": True, "data": [t.to_dict() for t in templates]})
     except Exception as e:
         logger.error(f"Error getting featured prompts: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 # ==================== Sessions ====================
@@ -535,7 +538,7 @@ def list_sessions():
         )
     except Exception as e:
         logger.error(f"Error listing sessions: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @workspace_bp.route("/sessions", methods=["POST"])
@@ -590,7 +593,7 @@ def create_session():
         return jsonify({"success": True, "data": session.to_dict()}), 201
     except Exception as e:
         logger.error(f"Error creating session: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @workspace_bp.route("/sessions/<session_id>", methods=["GET"])
@@ -604,6 +607,12 @@ def get_session(session_id):
         session = manager.get_session(session_id, include_messages=include_messages)
 
         if session:
+            # Ownership check: only the session owner or admin can access
+            current_user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
+            current_role = g.user.get("role") if hasattr(g, "user") and g.user else None
+            if current_role != "admin":
+                if not current_user_id or not session.user_id or session.user_id != current_user_id:
+                    return jsonify({"success": False, "error": "Access denied"}), 403
             from datetime import datetime as dt
 
             from app.modules.workspace.session_manager import SessionMessage
@@ -812,7 +821,7 @@ def get_session(session_id):
         return jsonify({"success": True, "data": formatted_session})
     except Exception as e:
         logger.error(f"Error getting session: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @workspace_bp.route("/sessions/<session_id>/complete", methods=["POST"])
@@ -820,6 +829,16 @@ def complete_session(session_id):
     """Mark a session as completed."""
     try:
         manager = get_session_manager()
+
+        # Ownership check
+        session = manager.get_session(session_id, include_messages=False)
+        if session:
+            current_user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
+            current_role = g.user.get("role") if hasattr(g, "user") and g.user else None
+            if current_role != "admin":
+                if not current_user_id or not session.user_id or session.user_id != current_user_id:
+                    return jsonify({"success": False, "error": "Access denied"}), 403
+
         success = manager.complete_session(session_id)
 
         if not success:
@@ -828,7 +847,7 @@ def complete_session(session_id):
         return jsonify({"success": True})
     except Exception as e:
         logger.error(f"Error completing session: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @workspace_bp.route("/sessions/<session_id>", methods=["DELETE"])
@@ -836,6 +855,16 @@ def delete_session(session_id):
     """Delete a session."""
     try:
         manager = get_session_manager()
+
+        # Ownership check before deletion
+        session = manager.get_session(session_id, include_messages=False)
+        if session:
+            current_user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
+            current_role = g.user.get("role") if hasattr(g, "user") and g.user else None
+            if current_role != "admin":
+                if not current_user_id or not session.user_id or session.user_id != current_user_id:
+                    return jsonify({"success": False, "error": "Access denied"}), 403
+
         success = manager.delete_session(session_id)
 
         if not success:
@@ -844,7 +873,7 @@ def delete_session(session_id):
         return jsonify({"success": True})
     except Exception as e:
         logger.error(f"Error deleting session: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @workspace_bp.route("/sessions/<session_id>/restore", methods=["POST"])
@@ -876,7 +905,8 @@ def restore_session(session_id):
                 tool_name,
                 project_path,
                 workspace_type,
-                remote_machine_id
+                remote_machine_id,
+                user_id
             FROM agent_sessions
             WHERE session_id = {p}
             LIMIT 1
@@ -893,6 +923,14 @@ def restore_session(session_id):
             session_data = dict(session_data)
 
         conn.close()
+
+        # Ownership check: only the session owner or admin can restore
+        current_user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
+        current_role = g.user.get("role") if hasattr(g, "user") and g.user else None
+        session_user_id = session_data.get("user_id")
+        if current_role != "admin":
+            if not current_user_id or not session_user_id or session_user_id != current_user_id:
+                return jsonify({"success": False, "error": "Access denied"}), 403
 
         tool_name = session_data["tool_name"]
         project_path = session_data.get("project_path")
@@ -976,7 +1014,7 @@ def restore_session(session_id):
         )
     except Exception as e:
         logger.error(f"Error restoring session: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @workspace_bp.route("/sessions/<session_id>/rename", methods=["POST"])
@@ -1001,6 +1039,13 @@ def rename_session(session_id):
         if not session:
             return jsonify({"success": False, "error": "Session not found"}), 404
 
+        # Ownership check
+        current_user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
+        current_role = g.user.get("role") if hasattr(g, "user") and g.user else None
+        if current_role != "admin":
+            if not current_user_id or not session.user_id or session.user_id != current_user_id:
+                return jsonify({"success": False, "error": "Access denied"}), 403
+
         session.title = new_name
         success = manager.update_session(session)
 
@@ -1010,7 +1055,7 @@ def rename_session(session_id):
         return jsonify({"success": True, "data": {"session_id": session_id, "title": new_name}})
     except Exception as e:
         logger.error(f"Error renaming session: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @workspace_bp.route("/sessions/stats", methods=["GET"])
@@ -1025,7 +1070,7 @@ def get_session_stats():
         return jsonify({"success": True, "data": stats})
     except Exception as e:
         logger.error(f"Error getting session stats: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 # ==================== Tools ====================
@@ -1044,7 +1089,7 @@ def list_tools():
         return jsonify({"success": True, "data": [t.to_dict() for t in tools]})
     except Exception as e:
         logger.error(f"Error listing tools: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @workspace_bp.route("/tools/<tool_name>", methods=["GET"])
@@ -1060,7 +1105,7 @@ def get_tool(tool_name):
         return jsonify({"success": True, "data": tool.to_dict()})
     except Exception as e:
         logger.error(f"Error getting tool: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @workspace_bp.route("/tools/<tool_name>/models", methods=["GET"])
@@ -1073,7 +1118,7 @@ def get_tool_models(tool_name):
         return jsonify({"success": True, "data": models})
     except Exception as e:
         logger.error(f"Error getting tool models: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @workspace_bp.route("/tools/health", methods=["GET"])
@@ -1087,7 +1132,7 @@ def check_tools_health():
         return jsonify({"success": True, "data": stats})
     except Exception as e:
         logger.error(f"Error checking tools health: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 # ==================== State Sync ====================
@@ -1112,7 +1157,7 @@ def get_sync_events():
         return jsonify({"success": True, "data": [e.to_dict() for e in events]})
     except Exception as e:
         logger.error(f"Error getting sync events: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @workspace_bp.route("/sync/stats", methods=["GET"])
@@ -1125,7 +1170,7 @@ def get_sync_stats():
         return jsonify({"success": True, "data": stats})
     except Exception as e:
         logger.error(f"Error getting sync stats: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 # ==================== Collaboration ====================
@@ -1145,7 +1190,7 @@ def list_teams():
         return jsonify({"success": True, "data": [t.to_dict() for t in teams]})
     except Exception as e:
         logger.error(f"Error listing teams: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @workspace_bp.route("/teams", methods=["POST"])
@@ -1175,7 +1220,7 @@ def create_team():
         return jsonify({"success": True, "data": team.to_dict()}), 201
     except Exception as e:
         logger.error(f"Error creating team: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @workspace_bp.route("/shares", methods=["GET"])
@@ -1192,7 +1237,7 @@ def list_shares():
         return jsonify({"success": True, "data": [s.to_dict() for s in shares]})
     except Exception as e:
         logger.error(f"Error listing shares: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @workspace_bp.route("/shares", methods=["POST"])
@@ -1230,7 +1275,7 @@ def create_share():
         return jsonify({"success": True, "data": share.to_dict()}), 201
     except Exception as e:
         logger.error(f"Error creating share: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @workspace_bp.route("/shares/<share_id>", methods=["DELETE"])
@@ -1248,7 +1293,7 @@ def revoke_share(share_id):
         return jsonify({"success": True})
     except Exception as e:
         logger.error(f"Error revoking share: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @workspace_bp.route("/annotations", methods=["GET"])
@@ -1265,7 +1310,7 @@ def get_annotations():
         return jsonify({"success": True, "data": [a.to_dict() for a in annotations]})
     except Exception as e:
         logger.error(f"Error getting annotations: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @workspace_bp.route("/annotations", methods=["POST"])
@@ -1303,7 +1348,7 @@ def create_annotation():
         return jsonify({"success": True, "data": annotation.to_dict()}), 201
     except Exception as e:
         logger.error(f"Error creating annotation: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 # ==================== Knowledge Base ====================
@@ -1338,7 +1383,7 @@ def list_knowledge():
         )
     except Exception as e:
         logger.error(f"Error listing knowledge: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @workspace_bp.route("/knowledge", methods=["POST"])
@@ -1376,7 +1421,7 @@ def create_knowledge():
         return jsonify({"success": True, "data": entry.to_dict()}), 201
     except Exception as e:
         logger.error(f"Error creating knowledge: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @workspace_bp.route("/knowledge/<entry_id>", methods=["GET"])
@@ -1392,7 +1437,7 @@ def get_knowledge(entry_id):
         return jsonify({"success": True, "data": entry.to_dict()})
     except Exception as e:
         logger.error(f"Error getting knowledge: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 # ==================== Workspace Config ====================
@@ -1500,7 +1545,7 @@ def get_user_webui_url():
             jsonify(
                 {
                     "success": False,
-                    "error": str(e),
+                    "error": "Internal server error",
                 }
             ),
             503,
@@ -1512,7 +1557,7 @@ def get_user_webui_url():
             jsonify(
                 {
                     "success": False,
-                    "error": str(e),
+                    "error": "Internal server error",
                 }
             ),
             500,
@@ -1546,7 +1591,7 @@ def list_webui_instances():
 
     except Exception as e:
         logger.error(f"Error listing webui instances: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @workspace_bp.route("/instances/<int:user_id>/stop", methods=["POST"])
@@ -1574,7 +1619,7 @@ def stop_user_webui_instance(user_id):
 
     except Exception as e:
         logger.error(f"Error stopping webui instance: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @workspace_bp.route("/instances/stop-all", methods=["POST"])
@@ -1602,7 +1647,7 @@ def stop_all_webui_instances():
 
     except Exception as e:
         logger.error(f"Error stopping all webui instances: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 # ==================== Workspace Status ====================
