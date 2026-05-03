@@ -36,6 +36,21 @@ import sys
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
+# Project root – used for relative path normalization (#19)
+# ---------------------------------------------------------------------------
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+
+
+def _relative_path(filepath: str | Path) -> str:
+    """Convert an absolute path to a project-root-relative path."""
+    try:
+        return str(Path(filepath).relative_to(PROJECT_ROOT))
+    except ValueError:
+        return str(filepath)
+
+
+# ---------------------------------------------------------------------------
 # Boolean field detection – reuse definitions from generate_schema.py
 # ---------------------------------------------------------------------------
 
@@ -58,6 +73,7 @@ BOOLEAN_SPECIAL_WORDS = {
     "rejected",
     "completed",
     "active",
+    "enabled",  # #24: standalone 'enabled' should be treated as boolean
 }
 
 # Counter fields that look boolean but are NOT
@@ -94,7 +110,7 @@ _DYNAMIC_BOOL_FIELDS: set[str] = set()
 def _load_boolean_fields_from_schema() -> set[str]:
     """Parse the PostgreSQL schema to discover all BOOLEAN column names."""
     fields: set[str] = set()
-    schema_path = Path(__file__).resolve().parent.parent.parent / "schema" / "schema-postgres.sql"
+    schema_path = PROJECT_ROOT / "schema" / "schema-postgres.sql"
     if not schema_path.exists():
         return fields
     content = schema_path.read_text()
@@ -111,7 +127,6 @@ def _load_boolean_fields_from_schema() -> set[str]:
 # ---------------------------------------------------------------------------
 
 # Matches patterns like: is_active = 1, is_shared = 0, u.is_active = 1
-# Also matches intermediate variable pattern: xxx_int = 1 if ... else 0
 _BOOL_INT_SQL_RE = re.compile(
     r"(?:^|[\"']\s*|\s)"  # start boundary
     r"(\w+\.)?"  # optional table alias
@@ -120,10 +135,55 @@ _BOOL_INT_SQL_RE = re.compile(
     r"(?!\s*if\b)",  # NOT Python ternary
 )
 
-# Intermediate variable pattern: is_active_int = 1 if is_active else 0
+# Intermediate variable pattern: xxx_int = 1 if <any expr> else 0
+# #12: condition part uses .+? to match method calls like settings_dict.get(...)
 _INT_VAR_RE = re.compile(
-    r"(\w+)\s*=\s*[01]\s+if\s+\w+\s+else\s+[01]",
+    r"(\w+)\s*=\s*[01]\s+if\s+.+?\s+else\s+[01]",
 )
+
+
+def _is_var_used_in_sql(var_name: str, lines: list[str], assign_lineno: int) -> bool:
+    """#20/#27/#30: Check if a variable is referenced in SQL code below the assignment.
+
+    Uses word-boundary matching and checks for reassignment between the
+    assignment line and the SQL reference line.
+    """
+    var_pattern = re.compile(rf"\b{re.escape(var_name)}\b")
+    assign_pattern = re.compile(rf"\b{re.escape(var_name)}\s*=")
+
+    for i in range(assign_lineno, len(lines)):  # lines is 0-indexed, assign_lineno is 1-indexed
+        line = lines[i]
+        stripped = line.strip()
+
+        # Skip the original assignment line (0-indexed vs 1-indexed offset)
+        if i == assign_lineno - 1:
+            continue
+
+        # Check for reassignment (#30 boundary 1)
+        if assign_pattern.search(stripped) and "==" not in stripped:
+            return False  # Variable was reassigned — original int value no longer relevant
+
+        # Check if line has SQL keywords or execute call and references the variable
+        has_sql = bool(
+            re.search(
+                r"\b(SELECT|INSERT|UPDATE|DELETE|WHERE|FROM|SET|VALUES|AND|OR|execute)\b",
+                stripped,
+                re.IGNORECASE,
+            )
+        )
+        if has_sql and var_pattern.search(line):
+            return True
+
+    return False
+
+
+def _extract_base_name(var_name: str) -> str:
+    """#26: Extract base field name by removing _int/_val suffix from end only.
+
+    Uses re.sub instead of chained .replace() to avoid cascading replacement bugs
+    (e.g. is_valid_int -> is_valid, not isid).
+    """
+    return re.sub(r"(_int|_val)$", "", var_name)
 
 
 def _check_sql001(content: str, filepath: str) -> list[dict]:
@@ -140,23 +200,23 @@ def _check_sql001(content: str, filepath: str) -> list[dict]:
         if stripped.startswith("#"):
             continue
 
-        # Check intermediate variable pattern first (no SQL context needed)
+        # Check intermediate variable pattern
+        # #20/#27: Only report if the variable is later used in SQL context (#30: word boundary + reassignment check)
         for m in _INT_VAR_RE.finditer(line):
             var_name = m.group(1)
-            # Extract possible field name from var like is_active_int → is_active
-            base = var_name.replace("_int", "").replace("_val", "")
+            base = _extract_base_name(var_name)
             if base in _DYNAMIC_BOOL_FIELDS or _is_boolean_field(base):
-                violations.append(
-                    {
-                        "rule": "SQL001",
-                        "file": filepath,
-                        "line": lineno,
-                        "message": f"Boolean value converted to int variable '{var_name}' — use adapt_boolean_value() or adapt_boolean_condition()",
-                    }
-                )
+                if _is_var_used_in_sql(var_name, lines, lineno):
+                    violations.append(
+                        {
+                            "rule": "SQL001",
+                            "file": filepath,
+                            "line": lineno,
+                            "message": f"Boolean value converted to int variable '{var_name}' — use adapt_boolean_value() or adapt_boolean_condition()",
+                        }
+                    )
 
-        # Track SQL string boundaries (triple-quoted and single-quoted)
-        # Heuristic: if line contains SQL keywords + quote, it's likely SQL
+        # Track SQL string boundaries
         has_sql_keyword = bool(
             re.search(
                 r"\b(SELECT|INSERT|UPDATE|DELETE|WHERE|FROM|SET|AND|OR|JOIN|GROUP BY|ORDER BY|LIMIT)\b",
@@ -205,6 +265,9 @@ _LIKE_PATTERN_RE = re.compile(
     re.IGNORECASE,
 )
 
+# #22: Context window expanded from ±3 to ±5 lines
+_ESCAPE_LIKE_WINDOW = 5
+
 
 def _check_sql003(content: str, filepath: str) -> list[dict]:
     """SQL003: LIKE query without escape_like() — wildcard injection risk."""
@@ -219,17 +282,17 @@ def _check_sql003(content: str, filepath: str) -> list[dict]:
         if stripped.startswith("#"):
             continue
 
-        # Skip if escape_like is already used in this line or nearby
-        # Check a window of context around this line
-        start = max(0, lineno - 3)
-        end = min(len(lines), lineno + 2)
+        # Skip the check file itself
+        if "sql_compat_checker" in filepath:
+            continue
+
+        # Check if escape_like is used within the context window (#22: ±5 lines)
+        # lineno is 1-indexed, list slicing is 0-indexed
+        start = max(0, lineno - 1 - _ESCAPE_LIKE_WINDOW)
+        end = min(len(lines), lineno + _ESCAPE_LIKE_WINDOW)
         context = "\n".join(lines[start:end])
 
         if "escape_like" in context:
-            continue
-
-        # Skip the check file itself
-        if "sql_compat_checker" in filepath:
             continue
 
         for m in _LIKE_PATTERN_RE.finditer(line):
@@ -247,14 +310,14 @@ def _check_sql003(content: str, filepath: str) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Baseline management
+# Baseline management — all paths stored as relative to PROJECT_ROOT (#19)
 # ---------------------------------------------------------------------------
 
 BASELINE_PATH = Path(__file__).resolve().parent / ".sql_baseline"
 
 
 def _load_baseline() -> set[str]:
-    """Load baseline suppressions (JSONL format: one violation signature per line)."""
+    """Load baseline suppressions (JSONL format with relative paths)."""
     if not BASELINE_PATH.exists():
         return set()
     signatures: set[str] = set()
@@ -267,13 +330,13 @@ def _load_baseline() -> set[str]:
             sig = f"{entry.get('rule')}:{entry.get('file')}:{entry.get('line')}"
             signatures.add(sig)
         except json.JSONDecodeError:
-            # Legacy format: plain signature string
             signatures.add(line)
     return signatures
 
 
 def _violation_signature(v: dict) -> str:
-    return f"{v['rule']}:{v['file']}:{v['line']}"
+    """Generate signature using relative path (#19)."""
+    return f"{v['rule']}:{_relative_path(v['file'])}:{v['line']}"
 
 
 # ---------------------------------------------------------------------------
@@ -311,14 +374,12 @@ def main() -> None:
     _DYNAMIC_BOOL_FIELDS = _load_boolean_fields_from_schema()
 
     # Collect files to check
-    project_root = Path(__file__).resolve().parent.parent.parent
-
     if args.files:
         files: list[Path] = [Path(f).resolve() for f in args.files]
     else:
         files = []
         for pattern_dir in ("app", "scripts"):
-            base = project_root / pattern_dir
+            base = PROJECT_ROOT / pattern_dir
             if base.exists():
                 files.extend(base.rglob("*.py"))
 
@@ -329,9 +390,10 @@ def main() -> None:
             continue
         all_violations.extend(check_file(f))
 
-    # Baseline mode: dump all violations
+    # Baseline mode: dump all violations (with relative paths)
     if args.baseline:
         for v in all_violations:
+            v["file"] = _relative_path(v["file"])
             print(json.dumps(v, ensure_ascii=False))
         return
 
@@ -341,11 +403,7 @@ def main() -> None:
 
     # Report
     for v in new_violations:
-        # Make path relative to project root for readability
-        try:
-            rel_path = str(Path(v["file"]).relative_to(project_root))
-        except ValueError:
-            rel_path = v["file"]
+        rel_path = _relative_path(v["file"])
         print(f"{rel_path}:{v['line']}: {v['rule']} {v['message']}")
 
     if new_violations:
