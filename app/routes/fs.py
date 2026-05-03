@@ -11,7 +11,6 @@ import os
 import platform
 import subprocess
 from pathlib import Path
-
 from typing import List, Optional
 
 from flask import Blueprint, jsonify, request
