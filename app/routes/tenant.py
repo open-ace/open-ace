@@ -9,7 +9,7 @@ import logging
 
 from flask import Blueprint, jsonify, request
 
-from app.services.auth_service import AuthService
+from app.auth.decorators import admin_required
 from app.services.tenant_service import TenantService
 
 logger = logging.getLogger(__name__)
@@ -19,28 +19,12 @@ tenant_bp = Blueprint("tenant", __name__, url_prefix="/api/tenants")
 
 # Services
 tenant_service = TenantService()
-auth_service = AuthService()
-
-
-def _require_admin():
-    """Require admin authentication."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-    is_admin, result = auth_service.require_admin(token)
-
-    if not is_admin:
-        return False, jsonify({"error": result.get("error", "Admin access required")}), 403
-
-    return True, result, None
 
 
 @tenant_bp.route("", methods=["GET"])
+@admin_required
 def list_tenants():
     """List all tenants (admin only)."""
-    is_admin, result, error_response = _require_admin()
-    if not is_admin:
-        return error_response
 
     # Get query parameters
     status = request.args.get("status")
@@ -61,11 +45,9 @@ def list_tenants():
 
 
 @tenant_bp.route("/<int:tenant_id>", methods=["GET"])
+@admin_required
 def get_tenant(tenant_id: int):
     """Get tenant by ID (admin only)."""
-    is_admin, result, error_response = _require_admin()
-    if not is_admin:
-        return error_response
 
     tenant = tenant_service.get_tenant(tenant_id)
 
@@ -76,11 +58,9 @@ def get_tenant(tenant_id: int):
 
 
 @tenant_bp.route("/slug/<slug>", methods=["GET"])
+@admin_required
 def get_tenant_by_slug(slug: str):
     """Get tenant by slug (admin only)."""
-    is_admin, result, error_response = _require_admin()
-    if not is_admin:
-        return error_response
 
     tenant = tenant_service.get_tenant_by_slug(slug)
 
@@ -91,11 +71,9 @@ def get_tenant_by_slug(slug: str):
 
 
 @tenant_bp.route("", methods=["POST"])
+@admin_required
 def create_tenant():
     """Create a new tenant (admin only)."""
-    is_admin, result, error_response = _require_admin()
-    if not is_admin:
-        return error_response
 
     data = request.get_json()
 
@@ -122,11 +100,9 @@ def create_tenant():
 
 
 @tenant_bp.route("/<int:tenant_id>", methods=["PUT"])
+@admin_required
 def update_tenant(tenant_id: int):
     """Update tenant (admin only)."""
-    is_admin, result, error_response = _require_admin()
-    if not is_admin:
-        return error_response
 
     data = request.get_json()
 
@@ -161,11 +137,9 @@ def update_tenant(tenant_id: int):
 
 
 @tenant_bp.route("/<int:tenant_id>/quota", methods=["PUT"])
+@admin_required
 def update_tenant_quota(tenant_id: int):
     """Update tenant quota (admin only)."""
-    is_admin, result, error_response = _require_admin()
-    if not is_admin:
-        return error_response
 
     data = request.get_json()
 
@@ -182,11 +156,9 @@ def update_tenant_quota(tenant_id: int):
 
 
 @tenant_bp.route("/<int:tenant_id>/settings", methods=["PUT"])
+@admin_required
 def update_tenant_settings(tenant_id: int):
     """Update tenant settings (admin only)."""
-    is_admin, result, error_response = _require_admin()
-    if not is_admin:
-        return error_response
 
     data = request.get_json()
 
@@ -203,11 +175,9 @@ def update_tenant_settings(tenant_id: int):
 
 
 @tenant_bp.route("/<int:tenant_id>/suspend", methods=["POST"])
+@admin_required
 def suspend_tenant(tenant_id: int):
     """Suspend a tenant (admin only)."""
-    is_admin, result, error_response = _require_admin()
-    if not is_admin:
-        return error_response
 
     data = request.get_json() or {}
     reason = data.get("reason")
@@ -222,11 +192,9 @@ def suspend_tenant(tenant_id: int):
 
 
 @tenant_bp.route("/<int:tenant_id>/activate", methods=["POST"])
+@admin_required
 def activate_tenant(tenant_id: int):
     """Activate a suspended tenant (admin only)."""
-    is_admin, result, error_response = _require_admin()
-    if not is_admin:
-        return error_response
 
     success = tenant_service.activate_tenant(tenant_id)
 
@@ -238,11 +206,9 @@ def activate_tenant(tenant_id: int):
 
 
 @tenant_bp.route("/<int:tenant_id>", methods=["DELETE"])
+@admin_required
 def delete_tenant(tenant_id: int):
     """Delete a tenant (admin only)."""
-    is_admin, result, error_response = _require_admin()
-    if not is_admin:
-        return error_response
 
     hard = request.args.get("hard", "false").lower() == "true"
 
@@ -255,11 +221,9 @@ def delete_tenant(tenant_id: int):
 
 
 @tenant_bp.route("/<int:tenant_id>/usage", methods=["GET"])
+@admin_required
 def get_tenant_usage(tenant_id: int):
     """Get tenant usage history (admin only)."""
-    is_admin, result, error_response = _require_admin()
-    if not is_admin:
-        return error_response
 
     days = request.args.get("days", 30, type=int)
 
@@ -275,11 +239,9 @@ def get_tenant_usage(tenant_id: int):
 
 
 @tenant_bp.route("/<int:tenant_id>/stats", methods=["GET"])
+@admin_required
 def get_tenant_stats(tenant_id: int):
     """Get tenant statistics (admin only)."""
-    is_admin, result, error_response = _require_admin()
-    if not is_admin:
-        return error_response
 
     stats = tenant_service.get_tenant_stats(tenant_id)
 
@@ -290,11 +252,9 @@ def get_tenant_stats(tenant_id: int):
 
 
 @tenant_bp.route("/<int:tenant_id>/check-quota", methods=["POST"])
+@admin_required
 def check_tenant_quota(tenant_id: int):
     """Check if tenant has quota available."""
-    is_admin, result, error_response = _require_admin()
-    if not is_admin:
-        return error_response
 
     data = request.get_json() or {}
 
@@ -308,6 +268,7 @@ def check_tenant_quota(tenant_id: int):
 
 
 @tenant_bp.route("/plans", methods=["GET"])
+@admin_required
 def get_plan_quotas():
     """Get quota configurations for all plans."""
     quotas = tenant_service.get_plan_quotas()

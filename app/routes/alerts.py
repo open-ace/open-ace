@@ -17,41 +17,26 @@ from datetime import datetime
 
 from flask import Blueprint, g, jsonify, request
 
+from app.auth.decorators import _extract_token, _load_user_from_token
 from app.modules.governance.alert_notifier import NotificationPreference, get_alert_notifier
-from app.services.auth_service import AuthService
 
 logger = logging.getLogger(__name__)
 
 alerts_bp = Blueprint("alerts", __name__)
-auth_service = AuthService()
 
 
 @alerts_bp.before_request
 def load_user():
-    """Load the current user from session token before each request.
-
-    All alerts endpoints require authentication. Returns 401 if no valid
-    session token is provided.
-    """
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
+    """Load the current user from session token before each request."""
+    token = _extract_token()
     if token:
-        session = auth_service.validate_session(token)
-        if session[0]:
-            session_data = session[1]
-            g.user = {
-                "id": session_data.get("user_id"),
-                "username": session_data.get("username"),
-                "email": session_data.get("email"),
-                "role": session_data.get("role"),
-            }
-            return None  # Authenticated
-        else:
-            return jsonify({"error": "Authentication required"}), 401
-    else:
-        return jsonify({"error": "Authentication required"}), 401
+        user = _load_user_from_token(token)
+        if user:
+            g.user = user
+            g.user_id = user.get("id")
+            g.user_role = user.get("role")
+            return None
+    return jsonify({"error": "Authentication required"}), 401
 
 
 # ==================== REST API ====================

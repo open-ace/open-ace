@@ -10,17 +10,16 @@ from datetime import datetime, timedelta
 
 from flask import Blueprint, g, jsonify, request
 
+from app.auth.decorators import auth_required
 from app.repositories.insights_repo import InsightsReportRepository
 from app.repositories.message_repo import MessageRepository
 from app.repositories.user_repo import UserRepository
-from app.services.auth_service import AuthService
 from app.services.insights_service import InsightsService
 
 logger = logging.getLogger(__name__)
 
 insights_bp = Blueprint("insights", __name__)
 
-auth_service = AuthService()
 user_repo = UserRepository()
 message_repo = MessageRepository()
 insights_repo = InsightsReportRepository()
@@ -31,42 +30,8 @@ insights_service = InsightsService(
 )
 
 
-@insights_bp.before_request
-def load_user():
-    """Load the current user from session token before each request.
-
-    All insights endpoints require authentication. Returns 401 if no valid
-    session token is provided.
-    """
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
-    if token:
-        session = auth_service.validate_session(token)
-        if session[0]:
-            session_data = session[1]
-            g.user = {
-                "id": session_data.get("user_id"),
-                "username": session_data.get("username"),
-                "email": session_data.get("email"),
-                "role": session_data.get("role"),
-            }
-            return None  # Authenticated
-        else:
-            return jsonify({"error": "Authentication required"}), 401
-    else:
-        return jsonify({"error": "Authentication required"}), 401
-
-
-def require_auth():
-    """Require authentication and return user info."""
-    if not hasattr(g, "user") or not g.user:
-        return False, {"error": "Authentication required"}
-    return True, g.user
-
-
 @insights_bp.route("/insights/generate", methods=["POST"])
+@auth_required
 def generate_report():
     """
     Generate or retrieve a cached insights report.
@@ -80,11 +45,8 @@ def generate_report():
     Defaults to last 7 days if no dates provided.
     If a report already exists for the date range, returns cached version.
     """
-    is_auth, user_or_error = require_auth()
-    if not is_auth:
-        return jsonify(user_or_error), 401
 
-    user_id = user_or_error["id"]
+    user_id = g.user_id
 
     try:
         # Parse date range from request body
@@ -126,13 +88,11 @@ def generate_report():
 
 
 @insights_bp.route("/insights/history", methods=["GET"])
+@auth_required
 def get_history():
     """Get user's insights report history."""
-    is_auth, user_or_error = require_auth()
-    if not is_auth:
-        return jsonify(user_or_error), 401
 
-    user_id = user_or_error["id"]
+    user_id = g.user_id
 
     try:
         reports = insights_repo.get_user_reports(user_id, limit=10)
@@ -143,13 +103,11 @@ def get_history():
 
 
 @insights_bp.route("/insights/<int:report_id>", methods=["DELETE"])
+@auth_required
 def delete_report(report_id: int):
     """Delete an insights report."""
-    is_auth, user_or_error = require_auth()
-    if not is_auth:
-        return jsonify(user_or_error), 401
 
-    user_id = user_or_error["id"]
+    user_id = g.user_id
 
     try:
         # Verify ownership before deleting

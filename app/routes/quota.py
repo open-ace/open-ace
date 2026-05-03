@@ -13,10 +13,10 @@ from typing import Optional
 
 from flask import Blueprint, g, jsonify, request
 
+from app.auth.decorators import auth_required, public_endpoint
 from app.modules.governance.quota_manager import QuotaManager
 from app.repositories.usage_repo import UsageRepository
 from app.repositories.user_repo import UserRepository
-from app.services.auth_service import AuthService
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,6 @@ logger = logging.getLogger(__name__)
 TOKEN_QUOTA_MULTIPLIER = 1_000_000
 
 quota_bp = Blueprint("quota", __name__)
-auth_service = AuthService()
 user_repo = UserRepository()
 usage_repo = UsageRepository()
 quota_manager = QuotaManager()
@@ -69,42 +68,8 @@ def _clear_user_usage_cache(user_id: Optional[int] = None):
         _usage_cache = {k: v for k, v in _usage_cache.items() if not k.startswith(f"{user_id}:")}
 
 
-@quota_bp.before_request
-def load_user():
-    """Load the current user from session token before each request.
-
-    All quota endpoints require authentication. Returns 401 if no valid
-    session token is provided.
-    """
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
-    if token:
-        session = auth_service.validate_session(token)
-        if session[0]:
-            session_data = session[1]
-            g.user = {
-                "id": session_data.get("user_id"),
-                "username": session_data.get("username"),
-                "email": session_data.get("email"),
-                "role": session_data.get("role"),
-            }
-            return None  # Authenticated
-        else:
-            return jsonify({"error": "Authentication required"}), 401
-    else:
-        return jsonify({"error": "Authentication required"}), 401
-
-
-def require_auth():
-    """Require authentication and return user info."""
-    if not hasattr(g, "user") or not g.user:
-        return False, {"error": "Authentication required"}
-    return True, g.user
-
-
 @quota_bp.route("/quota/check", methods=["GET"])
+@auth_required
 def check_quota():
     """
     Check if the current user has quota available.
@@ -116,11 +81,8 @@ def check_quota():
 
     This is the main API for Work mode to determine if workspace should be disabled.
     """
-    is_auth, user_or_error = require_auth()
-    if not is_auth:
-        return jsonify(user_or_error), 401
 
-    user_id = user_or_error["id"]
+    user_id = g.user_id
 
     try:
         user = user_repo.get_user_by_id(user_id)
@@ -171,7 +133,7 @@ def check_quota():
 
         response = {
             "user_id": user_id,
-            "username": user_or_error.get("username"),
+            "username": g.user.get("username"),
             "daily": {
                 "tokens": {
                     "used": today_tokens,
@@ -237,6 +199,7 @@ def check_quota():
 
 
 @quota_bp.route("/quota/status", methods=["GET"])
+@auth_required
 def get_quota_status():
     """
     Get detailed quota status for the current user.
@@ -244,11 +207,8 @@ def get_quota_status():
     This is a simpler version that just returns the essential info
     for the user to see their usage in Work mode.
     """
-    is_auth, user_or_error = require_auth()
-    if not is_auth:
-        return jsonify(user_or_error), 401
 
-    user_id = user_or_error["id"]
+    user_id = g.user_id
 
     try:
         # Get user info
@@ -360,6 +320,7 @@ def get_quota_status():
 
 
 @quota_bp.route("/quota/usage/me", methods=["GET"])
+@auth_required
 def get_my_usage():
     """
     Get detailed usage data for the current user.
@@ -372,11 +333,8 @@ def get_my_usage():
     - Implements 10-minute caching to reduce database load
     - Defaults to 7 days instead of 30 for faster initial load
     """
-    is_auth, user_or_error = require_auth()
-    if not is_auth:
-        return jsonify(user_or_error), 401
 
-    user_id = user_or_error["id"]
+    user_id = g.user_id
 
     try:
         # Get user info for limits
@@ -439,13 +397,13 @@ def get_my_usage():
 
 
 @quota_bp.route("/quota/webui-check", methods=["GET"])
+@public_endpoint
 def webui_quota_check():
     """
     Check quota using webui token (called by webui backend middleware).
 
     This endpoint is similar to check_quota() but authenticates via webui token
-    instead of session token. The load_user before_request will set g.user=None
-    for webui tokens, but that's fine since we handle auth internally here.
+    instead of session token. This endpoint handles its own auth internally.
     """
     auth_header = request.headers.get("Authorization", "")
     webui_token = auth_header.replace("Bearer ", "") if auth_header.startswith("Bearer ") else ""

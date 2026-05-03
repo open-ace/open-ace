@@ -9,12 +9,12 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from flask import Blueprint, jsonify, redirect, request, url_for
+from flask import Blueprint, g, jsonify, redirect, request, url_for
 
+from app.auth.decorators import admin_required, auth_required
 from app.modules.sso.manager import SSOManager
 from app.modules.sso.provider import list_providers
 from app.repositories.user_repo import UserRepository
-from app.services.auth_service import AuthService
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,6 @@ def get_sso_manager():
 
 
 user_repo = UserRepository()
-auth_service = AuthService()
 
 
 @sso_bp.route("/providers", methods=["GET"])
@@ -55,16 +54,10 @@ def list_sso_providers():
 
 
 @sso_bp.route("/providers", methods=["POST"])
+@admin_required
 def register_provider():
     """Register a new SSO provider (admin only)."""
     # Check admin auth
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-    is_admin, result = auth_service.require_admin(token)
-
-    if not is_admin:
-        return jsonify({"error": result.get("error", "Admin access required")}), 403
 
     data = request.get_json()
 
@@ -116,15 +109,9 @@ def register_provider():
 
 
 @sso_bp.route("/providers/<provider_name>", methods=["DELETE"])
+@admin_required
 def disable_provider(provider_name: str):
     """Disable an SSO provider (admin only)."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-    is_admin, result = auth_service.require_admin(token)
-
-    if not is_admin:
-        return jsonify({"error": result.get("error", "Admin access required")}), 403
 
     success = get_sso_manager().disable_provider(provider_name)
 
@@ -253,7 +240,7 @@ def callback(provider_name: str):
         )
 
         # Also create local session
-        auth_service.user_repo.create_session(
+        UserRepository().create_session(
             user_id=user_id,
             token=session_token,
             expires_at=datetime.utcnow(),
@@ -301,19 +288,13 @@ def logout():
 
 
 @sso_bp.route("/identities/<int:user_id>", methods=["GET"])
+@auth_required
 def get_user_identities(user_id: int):
     """Get SSO identities for a user."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-    is_auth, result = auth_service.require_auth(token)
-
-    if not is_auth:
-        return jsonify({"error": result.get("error", "Authentication required")}), 401
 
     # Only allow users to see their own identities (or admins)
-    session_user_id = result.get("user_id")
-    is_admin = result.get("role") == "admin"
+    session_user_id = g.user_id
+    is_admin = g.user_role == "admin"
 
     if session_user_id != user_id and not is_admin:
         return jsonify({"error": "Access denied"}), 403
@@ -337,19 +318,13 @@ def get_user_identities(user_id: int):
 
 
 @sso_bp.route("/identities/<int:user_id>/<provider_name>", methods=["DELETE"])
+@auth_required
 def unlink_identity(user_id: int, provider_name: str):
     """Unlink an SSO identity from a user."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-    is_auth, result = auth_service.require_auth(token)
-
-    if not is_auth:
-        return jsonify({"error": result.get("error", "Authentication required")}), 401
 
     # Only allow users to unlink their own identities (or admins)
-    session_user_id = result.get("user_id")
-    is_admin = result.get("role") == "admin"
+    session_user_id = g.user_id
+    is_admin = g.user_role == "admin"
 
     if session_user_id != user_id and not is_admin:
         return jsonify({"error": "Access denied"}), 403

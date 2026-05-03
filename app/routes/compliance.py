@@ -8,12 +8,12 @@ API endpoints for compliance reporting and data retention management.
 import logging
 from datetime import datetime, timedelta
 
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, Response, g, jsonify, request
 
+from app.auth.decorators import admin_required
 from app.modules.compliance.audit import AuditAnalyzer
 from app.modules.compliance.report import ReportGenerator, ReportType
 from app.modules.compliance.retention import DataRetentionManager
-from app.services.auth_service import AuthService
 
 logger = logging.getLogger(__name__)
 
@@ -34,28 +34,13 @@ def get_retention_manager():
     return _retention_manager
 
 
-auth_service = AuthService()
-
-
-def _require_admin():
-    """Require admin authentication."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-    is_admin, result = auth_service.require_admin(token)
-
-    if not is_admin:
-        return False, jsonify({"error": result.get("error", "Admin access required")}), 403
-
-    return True, result, None
-
-
 # =============================================================================
 # Report Generation Endpoints
 # =============================================================================
 
 
 @compliance_bp.route("/reports", methods=["GET"])
+@admin_required
 def list_reports():
     """List available report types."""
     report_types = [
@@ -104,11 +89,9 @@ def list_reports():
 
 
 @compliance_bp.route("/reports", methods=["POST"])
+@admin_required
 def generate_report():
     """Generate a compliance report (admin only)."""
-    is_admin, result, error_response = _require_admin()
-    if not is_admin:
-        return error_response
 
     data = request.get_json()
 
@@ -138,7 +121,7 @@ def generate_report():
         report_type=report_type,
         period_start=period_start,
         period_end=period_end,
-        generated_by=result.get("user_id"),
+        generated_by=g.user_id,
         tenant_id=data.get("tenant_id"),
         filters=data.get("filters"),
     )
@@ -162,11 +145,9 @@ def generate_report():
 
 
 @compliance_bp.route("/reports/saved", methods=["GET"])
+@admin_required
 def list_saved_reports():
     """List saved reports (admin only)."""
-    is_admin, result, error_response = _require_admin()
-    if not is_admin:
-        return error_response
 
     report_type = request.args.get("report_type")
     tenant_id = request.args.get("tenant_id", type=int)
@@ -187,11 +168,9 @@ def list_saved_reports():
 
 
 @compliance_bp.route("/reports/<report_id>", methods=["GET"])
+@admin_required
 def get_saved_report(report_id: str):
     """Get a saved report (admin only)."""
-    is_admin, result, error_response = _require_admin()
-    if not is_admin:
-        return error_response
 
     report = report_generator.get_saved_report(report_id)
 
@@ -219,11 +198,9 @@ def get_saved_report(report_id: str):
 
 
 @compliance_bp.route("/audit/patterns", methods=["GET"])
+@admin_required
 def analyze_patterns():
     """Analyze audit patterns (admin only)."""
-    is_admin, result, error_response = _require_admin()
-    if not is_admin:
-        return error_response
 
     days = request.args.get("days", 30, type=int)
     start_time = datetime.utcnow() - timedelta(days=days)
@@ -234,11 +211,9 @@ def analyze_patterns():
 
 
 @compliance_bp.route("/audit/anomalies", methods=["GET"])
+@admin_required
 def detect_anomalies():
     """Detect audit anomalies (admin only)."""
-    is_admin, result, error_response = _require_admin()
-    if not is_admin:
-        return error_response
 
     days = request.args.get("days", 7, type=int)
     start_time = datetime.utcnow() - timedelta(days=days)
@@ -261,11 +236,9 @@ def detect_anomalies():
 
 
 @compliance_bp.route("/audit/user/<int:user_id>/profile", methods=["GET"])
+@admin_required
 def get_user_profile(user_id: int):
     """Get user behavior profile (admin only)."""
-    is_admin, result, error_response = _require_admin()
-    if not is_admin:
-        return error_response
 
     days = request.args.get("days", 30, type=int)
 
@@ -275,11 +248,9 @@ def get_user_profile(user_id: int):
 
 
 @compliance_bp.route("/audit/security-score", methods=["GET"])
+@admin_required
 def get_security_score():
     """Get security score (admin only)."""
-    is_admin, result, error_response = _require_admin()
-    if not is_admin:
-        return error_response
 
     days = request.args.get("days", 30, type=int)
     start_time = datetime.utcnow() - timedelta(days=days)
@@ -295,11 +266,9 @@ def get_security_score():
 
 
 @compliance_bp.route("/retention/rules", methods=["GET"])
+@admin_required
 def get_retention_rules():
     """Get data retention rules (admin only)."""
-    is_admin, result, error_response = _require_admin()
-    if not is_admin:
-        return error_response
 
     rules = get_retention_manager().get_all_rules()
 
@@ -311,11 +280,9 @@ def get_retention_rules():
 
 
 @compliance_bp.route("/retention/rules", methods=["PUT"])
+@admin_required
 def set_retention_rule():
     """Set a data retention rule (admin only)."""
-    is_admin, result, error_response = _require_admin()
-    if not is_admin:
-        return error_response
 
     data = request.get_json()
 
@@ -340,11 +307,9 @@ def set_retention_rule():
 
 
 @compliance_bp.route("/retention/cleanup", methods=["POST"])
+@admin_required
 def run_retention_cleanup():
     """Run data retention cleanup (admin only)."""
-    is_admin, result, error_response = _require_admin()
-    if not is_admin:
-        return error_response
 
     dry_run = request.args.get("dry_run", "false").lower() == "true"
 
@@ -354,11 +319,9 @@ def run_retention_cleanup():
 
 
 @compliance_bp.route("/retention/history", methods=["GET"])
+@admin_required
 def get_retention_history():
     """Get retention cleanup history (admin only)."""
-    is_admin, result, error_response = _require_admin()
-    if not is_admin:
-        return error_response
 
     limit = request.args.get("limit", 30, type=int)
 
@@ -373,11 +336,9 @@ def get_retention_history():
 
 
 @compliance_bp.route("/retention/storage", methods=["GET"])
+@admin_required
 def estimate_storage():
     """Estimate storage usage (admin only)."""
-    is_admin, result, error_response = _require_admin()
-    if not is_admin:
-        return error_response
 
     estimates = get_retention_manager().estimate_storage()
 
@@ -385,11 +346,9 @@ def estimate_storage():
 
 
 @compliance_bp.route("/retention/status", methods=["GET"])
+@admin_required
 def get_retention_status():
     """Get data retention compliance status (admin only)."""
-    is_admin, result, error_response = _require_admin()
-    if not is_admin:
-        return error_response
 
     status = get_retention_manager().get_compliance_status()
 
