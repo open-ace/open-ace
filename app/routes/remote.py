@@ -41,12 +41,12 @@ def load_user():
     _exact_exempt = {
         "/api/remote/agent/ws",
         "/api/remote/usage-report",
+        "/api/remote/agent/install.sh",
+        "/api/remote/agent/install.ps1",
     }
     if request.path in _exact_exempt:
         return
     if request.path.startswith("/api/remote/llm-proxy"):
-        return
-    if request.path.startswith("/api/remote/agent/install"):
         return
 
     token = request.cookies.get("session_token") or request.headers.get(
