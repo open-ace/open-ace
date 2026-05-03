@@ -24,13 +24,6 @@ usage_service = UsageService()
 message_service = MessageService()
 logger = logging.getLogger(__name__)
 
-
-@fetch_bp.before_request
-@auth_required
-def _require_auth():
-    pass
-
-
 # Global state for fetch status
 _fetch_status = {"is_running": False, "last_run": None, "last_result": None, "error": None}
 _fetch_lock = threading.Lock()
@@ -174,6 +167,7 @@ def run_fetch_scripts():
 
 
 @fetch_bp.route("/fetch/data", methods=["POST"])
+@auth_required
 def api_fetch_data():
     """Trigger data collection from all sources."""
     global _fetch_status
@@ -203,6 +197,7 @@ def api_fetch_data():
 
 
 @fetch_bp.route("/fetch/status")
+@auth_required
 def api_fetch_status():
     """Get data fetch status."""
     from app.services.data_fetch_scheduler import scheduler

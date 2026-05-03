@@ -14,7 +14,7 @@ import platform
 import subprocess
 from pathlib import Path
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify, request
 
 from app.auth.decorators import auth_required
 from app.repositories.user_repo import UserRepository
@@ -204,13 +204,7 @@ def get_directory_info(path: str, system_account: str = None):
 @auth_required
 def api_browse_directory():
     """Browse a directory and list subdirectories."""
-    # Try webui token first (for iframe integration)
-    user, error, code = get_webui_user()
-    if not user:
-        # Try regular session
-        user, error, code = get_current_user()
-        if not user:
-            return jsonify(error), code
+    user = g.user
 
     # Get system_account for sudo operations
     system_account = user.get("system_account") if user else None
@@ -353,11 +347,7 @@ def list_subdirectories(path: str, system_account: str = None) -> list:
 @auth_required
 def api_check_path():
     """Check if a path is valid and can be used for a project."""
-    user, error, code = get_webui_user()
-    if not user:
-        user, error, code = get_current_user()
-        if not user:
-            return jsonify(error), code
+    user = g.user
 
     data = request.get_json() or {}
     path = data.get("path")
@@ -438,11 +428,7 @@ def api_check_path():
 @auth_required
 def api_get_home():
     """Get user's home directory."""
-    user, error, code = get_webui_user()
-    if not user:
-        user, error, code = get_current_user()
-        if not user:
-            return jsonify(error), code
+    user = g.user
 
     system_account = user.get("system_account") if user else None
     home = get_home_directory(user)
