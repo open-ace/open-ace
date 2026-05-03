@@ -57,9 +57,11 @@ repos:
     rev: v1.9.0
     hooks:
       - id: mypy
-        args: [--config-file, pyproject.toml, --explicit-package-bases, --follow-imports=skip]
+        args: [--config-file, pyproject.toml]
         additional_dependencies:
           - types-requests
+        pass_filenames: false
+        entry: mypy scripts/shared web.py cli.py
 
   # =============================================================================
   # Security Checks
@@ -97,12 +99,11 @@ repos:
         args: [--branch, main, --branch, master]
 
   # =============================================================================
-  # Documentation (disabled - project has too many legacy violations)
+  # Documentation
   # =============================================================================
-  # - repo: https://github.com/pycqa/pydocstyle
-  #   rev: 6.3.0
-  #   hooks:
-  #     - id: pydocstyle
-  #       language_version: python3.12
-  #       args: [--ignore-decorators]
-  #       exclude: ^tests/|^scripts/|^migrations/|^frontend/|^node_modules/
+  - repo: https://github.com/pycqa/pydocstyle
+    rev: 6.3.0
+    hooks:
+      - id: pydocstyle
+        args: [--ignore-decorators]
+        exclude: ^tests/|^scripts/
