@@ -34,6 +34,9 @@ jobs:
       - name: SQL Compatibility Check
         run: python3 scripts/lint/sql_compat_checker.py
 
+      - name: API Security Scan
+        run: python3 scripts/lint/api_security_scanner.py
+
       - name: Run MyPy
         run: mypy scripts/shared web.py cli.py --config-file pyproject.toml
         continue-on-error: true
