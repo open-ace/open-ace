@@ -356,8 +356,11 @@ def list_sessions():
             params.append(host_name)
 
         if search:
+            from app.repositories.database import escape_like
+
+            safe_search = escape_like(search)
             conditions.append("(title LIKE ? OR session_id LIKE ?)")
-            params.extend([f"%{search}%", f"%{search}%"])
+            params.extend([f"%{safe_search}%", f"%{safe_search}%"])
 
         where_clause = " AND ".join(conditions)
 
