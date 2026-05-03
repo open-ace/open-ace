@@ -447,12 +447,15 @@ def list_sessions():
                 }
             )
 
-        # Enrich sessions with stats from daily_messages (take max across sources)
-        if formatted_sessions:
+        # Enrich sessions with stats from daily_messages when session_messages is insufficient
+        sessions_needing_enrichment = [
+            s for s in formatted_sessions if (s.get("message_count") or 0) == 0
+        ]
+        if sessions_needing_enrichment:
             try:
                 p = get_param_placeholder()
-                all_session_ids = [s["session_id"] for s in formatted_sessions]
-                placeholders = ", ".join([p] * len(all_session_ids))
+                enrich_ids = [s["session_id"] for s in sessions_needing_enrichment]
+                placeholders = ", ".join([p] * len(enrich_ids))
                 dm_stats_query = f"""
                     SELECT
                         agent_session_id,
@@ -467,9 +470,9 @@ def list_sessions():
                     WHERE agent_session_id IN ({placeholders})
                     GROUP BY agent_session_id
                 """
-                dm_rows = db.fetch_all(dm_stats_query, tuple(all_session_ids))
+                dm_rows = db.fetch_all(dm_stats_query, tuple(enrich_ids))
                 dm_stats_map = {r["agent_session_id"]: r for r in dm_rows}
-                for s in formatted_sessions:
+                for s in sessions_needing_enrichment:
                     dm = dm_stats_map.get(s["session_id"])
                     if dm and (dm["dm_msg_count"] or 0) > 0:
                         # Take the larger value from either source
