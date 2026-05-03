@@ -484,7 +484,10 @@ def list_sessions():
                         s["total_input_tokens"] = max(s.get("total_input_tokens") or 0, dm_input)
                         s["total_output_tokens"] = max(s.get("total_output_tokens") or 0, dm_output)
                         if dm["dm_last_active"]:
-                            s["updated_at"] = format_datetime(dm["dm_last_active"])
+                            existing_dt = s.get("updated_at")
+                            dm_dt = format_datetime(dm["dm_last_active"])
+                            if not existing_dt or dm_dt > existing_dt:
+                                s["updated_at"] = dm_dt
                         if not s.get("model") and dm.get("dm_model"):
                             s["model"] = dm["dm_model"]
             except Exception as e:
@@ -655,7 +658,8 @@ def get_session(session_id):
                     session.total_input_tokens = max(session.total_input_tokens or 0, dm_input)
                     session.total_output_tokens = max(session.total_output_tokens or 0, dm_output)
                     if dm["dm_last_active"]:
-                        session.updated_at = dm["dm_last_active"]
+                        if not session.updated_at or dm["dm_last_active"] > session.updated_at:
+                            session.updated_at = dm["dm_last_active"]
                     if not session.model and dm.get("dm_model"):
                         session.model = dm["dm_model"]
             except Exception as e:
