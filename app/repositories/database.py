@@ -160,6 +160,33 @@ def adapt_boolean_condition(column: str, value: bool) -> str:
     return f"{column} = {1 if value else 0}"
 
 
+def escape_like(value: str, escape_char: str = "\\") -> str:
+    """
+    Escape special characters in a LIKE pattern value.
+
+    Escapes %, _, and the escape character itself so that a LIKE query
+    matches the literal value rather than interpreting wildcards.
+
+    Usage::
+
+        query = "... WHERE name LIKE ? ESCAPE '\\\\'"
+        params = [escape_like(user_input) + "%"]
+
+    Args:
+        value: Raw string to use in a LIKE comparison.
+        escape_char: The ESCAPE character used in the SQL LIKE clause.
+            Defaults to backslash.
+
+    Returns:
+        str: Escaped value safe for LIKE patterns.
+    """
+    return (
+        value.replace(escape_char, escape_char + escape_char)
+        .replace("%", escape_char + "%")
+        .replace("_", escape_char + "_")
+    )
+
+
 def ensure_db_dir() -> None:
     """Ensure the database directory exists (for SQLite)."""
     os.makedirs(CONFIG_DIR, exist_ok=True)
