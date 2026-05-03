@@ -77,8 +77,8 @@ def run_fetch_scripts():
                 }
             except subprocess.TimeoutExpired:
                 results["qwen"] = {"success": False, "error": "Timeout after 5 minutes"}
-            except Exception as e:
-                results["qwen"] = {"success": False, "error": str(e)}
+            except Exception:
+                results["qwen"] = {"success": False, "error": "Internal server error"}
 
         # Run fetch_claude.py with sudo and --multi-user to scan all users' Claude directories
         # sudo is needed to read other users' .claude directories
@@ -110,8 +110,8 @@ def run_fetch_scripts():
                 }
             except subprocess.TimeoutExpired:
                 results["claude"] = {"success": False, "error": "Timeout after 5 minutes"}
-            except Exception as e:
-                results["claude"] = {"success": False, "error": str(e)}
+            except Exception:
+                results["claude"] = {"success": False, "error": "Internal server error"}
 
         # Run fetch_openclaw.py with sudo and --multi-user to scan all users' OpenClaw directories
         # sudo is needed to read other users' .openclaw directories
@@ -145,8 +145,8 @@ def run_fetch_scripts():
                 }
             except subprocess.TimeoutExpired:
                 results["openclaw"] = {"success": False, "error": "Timeout after 5 minutes"}
-            except Exception as e:
-                results["openclaw"] = {"success": False, "error": str(e)}
+            except Exception:
+                results["openclaw"] = {"success": False, "error": "Internal server error"}
 
         with _fetch_lock:
             _fetch_status["last_run"] = datetime.now().isoformat()
@@ -262,6 +262,6 @@ def api_data_status():
                 "date": today,
             }
         )
-    except Exception as e:
+    except Exception:
         logger.exception("Error getting data status")
-        return jsonify({"status": "error", "error": str(e)}), 500
+        return jsonify({"status": "error", "error": "Internal server error"}), 500

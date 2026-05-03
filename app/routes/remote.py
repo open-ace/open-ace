@@ -20,9 +20,7 @@ from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
 from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
 from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
-from app.modules.workspace.remote_session_manager import (
-    get_remote_session_manager,
-)
+from app.modules.workspace.remote_session_manager import get_remote_session_manager
 from app.services.auth_service import AuthService
 
 logger = logging.getLogger(__name__)
@@ -49,13 +47,14 @@ def load_user():
     ).replace("Bearer ", "")
 
     if token:
-        session = auth_service.get_session(token)
-        if session:
+        session = auth_service.validate_session(token)
+        if session[0]:
+            session_data = session[1]
             g.user = {
-                "id": session.get("user_id"),
-                "username": session.get("username"),
-                "email": session.get("email"),
-                "role": session.get("role"),
+                "id": session_data.get("user_id"),
+                "username": session_data.get("username"),
+                "email": session_data.get("email"),
+                "role": session_data.get("role"),
             }
         else:
             g.user = None
@@ -63,13 +62,14 @@ def load_user():
         url_token = request.args.get("token")
         if url_token:
             # First try as a session_token (for SSE / EventSource which can't send cookies)
-            session = auth_service.get_session(url_token)
-            if session:
+            session = auth_service.validate_session(url_token)
+            if session[0]:
+                session_data = session[1]
                 g.user = {
-                    "id": session.get("user_id"),
-                    "username": session.get("username"),
-                    "email": session.get("email"),
-                    "role": session.get("role"),
+                    "id": session_data.get("user_id"),
+                    "username": session_data.get("username"),
+                    "email": session_data.get("email"),
+                    "role": session_data.get("role"),
                 }
             else:
                 # Fall back to WebUI token validation

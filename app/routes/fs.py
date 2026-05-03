@@ -98,13 +98,13 @@ def is_valid_path(path: str) -> bool:
     if not path:
         return False
 
-    # Resolve to absolute path
+    # Resolve to absolute path, following symlinks to detect traversal
     try:
-        abs_path = os.path.abspath(path)
+        abs_path = os.path.realpath(path)
     except Exception:
         return False
 
-    # Check for path traversal
+    # Check for path traversal in the resolved path
     if ".." in path:
         return False
 
@@ -181,7 +181,7 @@ def get_directory_info(path: str, system_account: str = None):
             "is_dir": False,
             "is_readable": False,
             "is_writable": False,
-            "error": str(e),
+            "error": "Internal server error",
         }
 
 
@@ -210,7 +210,7 @@ def api_browse_directory():
         if not is_valid_path(path):
             return jsonify({"error": "Invalid path"}), 400
 
-        path = os.path.abspath(path)
+        path = os.path.realpath(path)
 
     # Check if path exists and is readable
     dir_info = get_directory_info(path, system_account)
@@ -359,7 +359,7 @@ def api_check_path():
             400,
         )
 
-    path = os.path.abspath(path)
+    path = os.path.realpath(path)
 
     # Get system account to check permissions as the correct user
     system_account = user.get("system_account") if user else None

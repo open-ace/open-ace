@@ -46,14 +46,17 @@ def api_login():
     user, token_or_error = auth_service.login(username, password, verify_password)
 
     if user:
+        from app.services.auth_service import _get_session_timeout_hours
+
+        timeout_seconds = int(_get_session_timeout_hours() * 3600)
         response = make_response(jsonify({"success": True, "user": user}))
         response.set_cookie(
             "session_token",
             token_or_error,
             httponly=True,
-            secure=False,  # Set to True in production with HTTPS
+            secure=request.is_secure,  # Auto-set based on HTTPS
             samesite="Lax",
-            max_age=24 * 60 * 60,  # 24 hours
+            max_age=timeout_seconds,
         )
 
         # Pre-start webui instance for user (in multi-user mode)

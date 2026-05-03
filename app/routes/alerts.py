@@ -17,10 +17,7 @@ from datetime import datetime
 
 from flask import Blueprint, g, jsonify, request
 
-from app.modules.governance.alert_notifier import (
-    NotificationPreference,
-    get_alert_notifier,
-)
+from app.modules.governance.alert_notifier import NotificationPreference, get_alert_notifier
 from app.services.auth_service import AuthService
 
 logger = logging.getLogger(__name__)
@@ -37,13 +34,14 @@ def load_user():
     ).replace("Bearer ", "")
 
     if token:
-        session = auth_service.get_session(token)
-        if session:
+        session = auth_service.validate_session(token)
+        if session[0]:
+            session_data = session[1]
             g.user = {
-                "id": session.get("user_id"),
-                "username": session.get("username"),
-                "email": session.get("email"),
-                "role": session.get("role"),
+                "id": session_data.get("user_id"),
+                "username": session_data.get("username"),
+                "email": session_data.get("email"),
+                "role": session_data.get("role"),
             }
         else:
             g.user = None
@@ -87,7 +85,7 @@ def list_alerts():
         )
     except Exception as e:
         logger.error(f"Error listing alerts: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @alerts_bp.route("/alerts/unread-count", methods=["GET"])
@@ -102,7 +100,7 @@ def get_unread_count():
         return jsonify({"success": True, "data": {"count": count}})
     except Exception as e:
         logger.error(f"Error getting unread count: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @alerts_bp.route("/alerts/<alert_id>/read", methods=["POST"])
@@ -118,7 +116,7 @@ def mark_alert_read(alert_id):
         return jsonify({"success": True})
     except Exception as e:
         logger.error(f"Error marking alert as read: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @alerts_bp.route("/alerts/read-all", methods=["POST"])
@@ -133,7 +131,7 @@ def mark_all_read():
         return jsonify({"success": True, "data": {"marked_count": count}})
     except Exception as e:
         logger.error(f"Error marking all alerts as read: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @alerts_bp.route("/alerts/<alert_id>", methods=["DELETE"])
@@ -149,7 +147,7 @@ def delete_alert(alert_id):
         return jsonify({"success": True})
     except Exception as e:
         logger.error(f"Error deleting alert: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @alerts_bp.route("/alerts/preferences", methods=["GET"])
@@ -177,7 +175,7 @@ def get_preferences():
         )
     except Exception as e:
         logger.error(f"Error getting preferences: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @alerts_bp.route("/alerts/preferences", methods=["PUT"])
@@ -207,7 +205,7 @@ def update_preferences():
         return jsonify({"success": success})
     except Exception as e:
         logger.error(f"Error updating preferences: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @alerts_bp.route("/alerts/test", methods=["POST"])
@@ -236,7 +234,7 @@ def create_test_alert():
         return jsonify({"success": True, "data": alert.to_dict()})
     except Exception as e:
         logger.error(f"Error creating test alert: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 # ==================== WebSocket Support ====================

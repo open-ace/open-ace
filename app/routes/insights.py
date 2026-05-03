@@ -39,13 +39,14 @@ def load_user():
     ).replace("Bearer ", "")
 
     if token:
-        session = auth_service.get_session(token)
-        if session:
+        session = auth_service.validate_session(token)
+        if session[0]:
+            session_data = session[1]
             g.user = {
-                "id": session.get("user_id"),
-                "username": session.get("username"),
-                "email": session.get("email"),
-                "role": session.get("role"),
+                "id": session_data.get("user_id"),
+                "username": session_data.get("username"),
+                "email": session_data.get("email"),
+                "role": session_data.get("role"),
             }
         else:
             g.user = None
@@ -116,7 +117,7 @@ def generate_report():
 
     except Exception as e:
         logger.error(f"Error generating insights for user {user_id}: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @insights_bp.route("/insights/history", methods=["GET"])
@@ -133,7 +134,7 @@ def get_history():
         return jsonify({"reports": reports})
     except Exception as e:
         logger.error(f"Error getting insights history for user {user_id}: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @insights_bp.route("/insights/<int:report_id>", methods=["DELETE"])
@@ -157,4 +158,4 @@ def delete_report(report_id: int):
         return jsonify({"error": "Failed to delete report"}), 500
     except Exception as e:
         logger.error(f"Error deleting insights report {report_id}: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500

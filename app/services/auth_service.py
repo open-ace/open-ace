@@ -14,8 +14,76 @@ from app.repositories.user_repo import UserRepository
 
 logger = logging.getLogger(__name__)
 
-# Session token expiration time (24 hours)
+# In-memory login attempt tracking (per-username)
+_login_attempts: dict[str, dict] = (
+    {}
+)  # {username: {"count": int, "locked_until": Optional[datetime]}}
+
+
+def _get_max_login_attempts() -> int:
+    """Get max login attempts from security_settings."""
+    try:
+        from app.repositories.governance_repo import GovernanceRepository
+
+        settings = GovernanceRepository().get_security_settings()
+        return int(settings.get("max_login_attempts", 5))
+    except Exception:
+        return 5
+
+
+def _check_login_lockout(username: str) -> tuple[bool, Optional[str]]:
+    """Check if account is temporarily locked. Returns (is_locked, error_message)."""
+    attempt_info = _login_attempts.get(username)
+
+    if not attempt_info:
+        return False, None
+
+    # Check if lockout has expired (15 minute lockout)
+    if attempt_info.get("locked_until") and attempt_info["locked_until"] > datetime.utcnow():
+        remaining = int((attempt_info["locked_until"] - datetime.utcnow()).total_seconds() / 60) + 1
+        return True, f"Account temporarily locked. Try again in {remaining} minutes."
+
+    # Reset if lockout expired
+    if attempt_info.get("locked_until") and attempt_info["locked_until"] <= datetime.utcnow():
+        _login_attempts.pop(username, None)
+        return False, None
+
+    return False, None
+
+
+def _record_failed_login(username: str) -> None:
+    """Record a failed login attempt and lock if threshold exceeded."""
+    max_attempts = _get_max_login_attempts()
+
+    if username not in _login_attempts:
+        _login_attempts[username] = {"count": 0, "locked_until": None}
+
+    _login_attempts[username]["count"] += 1
+
+    if _login_attempts[username]["count"] >= max_attempts:
+        _login_attempts[username]["locked_until"] = datetime.utcnow() + timedelta(minutes=15)
+        logger.warning(f"Account locked for {username} after {max_attempts} failed attempts")
+
+
+def _clear_failed_logins(username: str) -> None:
+    """Clear failed login attempts after successful login."""
+    _login_attempts.pop(username, None)
+
+
+# Session token expiration default (overridden by security_settings DB)
 SESSION_EXPIRATION_HOURS = 24
+
+
+def _get_session_timeout_hours() -> float:
+    """Get session timeout from security_settings, falling back to 24h."""
+    try:
+        from app.repositories.governance_repo import GovernanceRepository
+
+        settings = GovernanceRepository().get_security_settings()
+        timeout_minutes = settings.get("session_timeout", SESSION_EXPIRATION_HOURS * 60)
+        return float(timeout_minutes) / 60.0
+    except Exception:
+        return float(SESSION_EXPIRATION_HOURS)
 
 
 class AuthService:
@@ -44,25 +112,36 @@ class AuthService:
         Returns:
             Tuple[Optional[Dict], Optional[str]]: (User data, Session token) or (None, error message).
         """
+        # Check lockout before attempting login
+        is_locked, lockout_msg = _check_login_lockout(username)
+        if is_locked:
+            return None, lockout_msg
+
         # Get user by username
         user = self.user_repo.get_user_by_username(username)
 
         if not user:
-            logger.warning(f"Login failed: user not found - {username}")
+            logger.warning("Login failed: invalid credentials")
+            _record_failed_login(username)
             return None, "Invalid username or password"
 
         if not user.get("is_active"):
-            logger.warning(f"Login failed: user inactive - {username}")
+            logger.warning("Login failed: account disabled")
             return None, "Account is disabled"
 
         # Verify password
         if not password_verify_func(password, user.get("password_hash", "")):
-            logger.warning(f"Login failed: invalid password - {username}")
+            logger.warning("Login failed: invalid credentials")
+            _record_failed_login(username)
             return None, "Invalid username or password"
+
+        # Successful login — clear failed attempts
+        _clear_failed_logins(username)
 
         # Create session token
         token = secrets.token_hex(32)
-        expires_at = datetime.utcnow() + timedelta(hours=SESSION_EXPIRATION_HOURS)
+        timeout_hours = _get_session_timeout_hours()
+        expires_at = datetime.utcnow() + timedelta(hours=timeout_hours)
 
         if not self.user_repo.create_session(user["id"], token, expires_at):
             logger.error(f"Failed to create session for user - {username}")
@@ -225,6 +304,14 @@ class AuthService:
         session = self.get_session(token)
         if not session:
             return False, {"error": "Invalid or expired session"}
+
+        # Check if session is expired
+        expires_at = session.get("expires_at")
+        if expires_at:
+            if isinstance(expires_at, str):
+                expires_at = datetime.fromisoformat(expires_at)
+            if expires_at < datetime.utcnow():
+                return False, {"error": "Session expired"}
 
         return True, session
 

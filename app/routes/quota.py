@@ -77,13 +77,14 @@ def load_user():
     ).replace("Bearer ", "")
 
     if token:
-        session = auth_service.get_session(token)
-        if session:
+        session = auth_service.validate_session(token)
+        if session[0]:
+            session_data = session[1]
             g.user = {
-                "id": session.get("user_id"),
-                "username": session.get("username"),
-                "email": session.get("email"),
-                "role": session.get("role"),
+                "id": session_data.get("user_id"),
+                "username": session_data.get("username"),
+                "email": session_data.get("email"),
+                "role": session_data.get("role"),
             }
         else:
             g.user = None
@@ -227,7 +228,7 @@ def check_quota():
 
     except Exception as e:
         logger.error(f"Error checking quota for user {user_id}: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @quota_bp.route("/quota/status", methods=["GET"])
@@ -350,7 +351,7 @@ def get_quota_status():
 
     except Exception as e:
         logger.error(f"Error getting quota status for user {user_id}: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @quota_bp.route("/quota/usage/me", methods=["GET"])
@@ -429,7 +430,7 @@ def get_my_usage():
 
     except Exception as e:
         logger.error(f"Error getting usage for user {user_id}: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @quota_bp.route("/quota/webui-check", methods=["GET"])
@@ -549,4 +550,4 @@ def webui_quota_check():
         return jsonify(response)
     except Exception as e:
         logger.error(f"Error in webui quota check for user {user_id}: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
