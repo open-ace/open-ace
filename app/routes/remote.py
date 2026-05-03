@@ -40,11 +40,12 @@ def load_user():
     # Skip auth for endpoints that use their own authentication (JWT, API keys)
     _exact_exempt = {
         "/remote/agent/ws",
+        "/remote/llm-proxy",
         "/remote/usage-report",
     }
     if request.path in _exact_exempt:
         return
-    if request.path.startswith("/remote/llm-proxy"):
+    if request.path.startswith("/remote/llm-proxy/"):
         return
     if request.path.startswith("/remote/agent/install"):
         return
