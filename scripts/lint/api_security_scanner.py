@@ -71,6 +71,9 @@ AUTH_DECORATORS: set[str] = {
     "require_admin",
     "require_upload_auth",
     "login_required",
+    "auth_required",
+    "admin_required",
+    "public_endpoint",
 }
 
 AUTH_INLINE_CALLS: set[str] = {
@@ -375,8 +378,10 @@ class APISecurityScanner:
                 bp_has_before = self.blueprints[bp_var][1]
 
             for route in routes:
-                # Skip public endpoints
+                # Skip public endpoints (hardcoded list or @public_endpoint decorator)
                 if route.full_path in PUBLIC_ENDPOINTS:
+                    continue
+                if "public_endpoint" in route.decorators:
                     continue
 
                 has_decorator_auth = bool(AUTH_DECORATORS.intersection(route.decorators))
