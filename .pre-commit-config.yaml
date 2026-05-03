@@ -32,6 +32,14 @@ repos:
         files: ^(app|scripts)/.*\.py$
         pass_filenames: true
 
+      # API security scanner — detect routes missing authentication
+      - id: api-security-scan
+        name: API Security Scan
+        entry: python3 scripts/lint/api_security_scanner.py
+        language: system
+        files: ^app/routes/.*\.py$
+        pass_filenames: false
+
   # =============================================================================
   # Code Formatting
   # =============================================================================
