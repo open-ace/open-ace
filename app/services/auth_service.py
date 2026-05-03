@@ -15,18 +15,21 @@ from app.repositories.user_repo import UserRepository
 
 logger = logging.getLogger(__name__)
 
-# In-memory login attempt tracking (per-username).
-# LIMITATION: This dict is per-process. In multi-worker deployments (e.g. gunicorn
-# with multiple workers), each worker maintains an independent counter. Service
-# restarts also clear all lockouts. For production use, consider migrating to
-# Redis or a database-backed store to ensure consistent enforcement across workers.
-_login_attempts: dict[str, dict] = (
-    {}
-)  # {username: {"count": int, "locked_until": Optional[datetime]}}
-
 # Cache for security_settings queries (60 second TTL)
 _security_settings_cache: dict = {}  # {"settings": dict, "timestamp": float}
 _SECURITY_SETTINGS_TTL = 60  # seconds
+
+
+def get_ddl_statements():
+    """Return DDL statements for login_attempts table."""
+    return [
+        """CREATE TABLE IF NOT EXISTS login_attempts (
+            username VARCHAR(255) PRIMARY KEY,
+            attempt_count INTEGER NOT NULL DEFAULT 0,
+            locked_until TIMESTAMP
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_login_attempts_locked_until ON login_attempts(locked_until)",
+    ]
 
 
 def _get_security_settings() -> dict:
@@ -59,44 +62,69 @@ def _get_max_login_attempts() -> int:
 
 def _check_login_lockout(username: str) -> tuple[bool, Optional[str]]:
     """Check if account is temporarily locked. Returns (is_locked, error_message)."""
-    attempt_info = _login_attempts.get(username)
+    from app.repositories.database import Database
 
-    if not attempt_info:
+    db = Database()
+    row = db.fetch_one(
+        "SELECT attempt_count, locked_until FROM login_attempts WHERE username = %s",
+        (username,),
+    )
+
+    if not row:
         return False, None
 
-    # Check if lockout has expired (15 minute lockout)
-    if attempt_info.get("locked_until") and attempt_info["locked_until"] > datetime.utcnow():
-        remaining = int((attempt_info["locked_until"] - datetime.utcnow()).total_seconds() / 60) + 1
-        return True, f"Account temporarily locked. Try again in {remaining} minutes."
-
-    # Reset if lockout expired
-    if attempt_info.get("locked_until") and attempt_info["locked_until"] <= datetime.utcnow():
-        _login_attempts.pop(username, None)
-        return False, None
+    locked_until = row.get("locked_until")
+    if locked_until:
+        if isinstance(locked_until, str):
+            locked_until = datetime.fromisoformat(locked_until)
+        if locked_until > datetime.utcnow():
+            remaining = int((locked_until - datetime.utcnow()).total_seconds() / 60) + 1
+            return True, f"Account temporarily locked. Try again in {remaining} minutes."
+        else:
+            # Lockout expired — reset
+            db.execute("DELETE FROM login_attempts WHERE username = %s", (username,))
+            return False, None
 
     return False, None
 
 
 def _record_failed_login(username: str) -> None:
     """Record a failed login attempt and lock if threshold exceeded."""
+    from app.repositories.database import Database, get_param_placeholder
+
+    db = Database()
     max_attempts = _get_max_login_attempts()
     lockout_minutes = _get_lockout_duration_minutes()
+    p = get_param_placeholder()
 
-    if username not in _login_attempts:
-        _login_attempts[username] = {"count": 0, "locked_until": None}
+    # Upsert: increment attempt_count
+    db.execute(
+        f"""INSERT INTO login_attempts (username, attempt_count, locked_until)
+            VALUES ({p}, 1, NULL)
+            ON CONFLICT (username) DO UPDATE SET attempt_count = login_attempts.attempt_count + 1""",
+        (username,),
+    )
 
-    _login_attempts[username]["count"] += 1
-
-    if _login_attempts[username]["count"] >= max_attempts:
-        _login_attempts[username]["locked_until"] = datetime.utcnow() + timedelta(
-            minutes=lockout_minutes
+    # Check if threshold reached
+    row = db.fetch_one(
+        "SELECT attempt_count FROM login_attempts WHERE username = %s",
+        (username,),
+    )
+    if row and row["attempt_count"] >= max_attempts:
+        locked_until = datetime.utcnow() + timedelta(minutes=lockout_minutes)
+        db.execute(
+            "UPDATE login_attempts SET locked_until = %s WHERE username = %s",
+            (locked_until, username),
         )
         logger.warning(f"Account locked for {username} after {max_attempts} failed attempts")
 
 
 def _clear_failed_logins(username: str) -> None:
     """Clear failed login attempts after successful login."""
-    _login_attempts.pop(username, None)
+    from app.repositories.database import Database
+
+    db = Database()
+    db.execute("DELETE FROM login_attempts WHERE username = %s", (username,))
 
 
 # Session token expiration default (overridden by security_settings DB)
@@ -276,15 +304,20 @@ class AuthService:
         if not session:
             return False, {"error": "Invalid or expired session"}
 
-        # Check if session is expired
-        expires_at = session.get("expires_at")
-        if expires_at:
-            if isinstance(expires_at, str):
-                expires_at = datetime.fromisoformat(expires_at)
-            if expires_at < datetime.utcnow():
-                return False, {"error": "Session expired"}
+        if self._is_session_expired(session):
+            return False, {"error": "Session expired"}
 
         return True, session
+
+    @staticmethod
+    def _is_session_expired(session: dict) -> bool:
+        """Check if a session has expired. Shared by all auth methods."""
+        expires_at = session.get("expires_at")
+        if not expires_at:
+            return False
+        if isinstance(expires_at, str):
+            expires_at = datetime.fromisoformat(expires_at)
+        return expires_at < datetime.utcnow()
 
     def get_user_profile(self, user_id: int) -> Optional[dict]:
         """
@@ -319,28 +352,15 @@ class AuthService:
         """
         Require authentication and return session data.
 
+        Delegates to validate_session() to ensure consistent expiry logic.
+
         Args:
             token: Session token.
 
         Returns:
             Tuple[bool, Optional[Dict]]: (Is authenticated, Session data or error).
         """
-        if not token:
-            return False, {"error": "Authentication required"}
-
-        session = self.get_session(token)
-        if not session:
-            return False, {"error": "Invalid or expired session"}
-
-        # Check if session is expired
-        expires_at = session.get("expires_at")
-        if expires_at:
-            if isinstance(expires_at, str):
-                expires_at = datetime.fromisoformat(expires_at)
-            if expires_at < datetime.utcnow():
-                return False, {"error": "Session expired"}
-
-        return True, session
+        return self.validate_session(token)
 
     def require_admin(self, token: str) -> tuple[bool, Optional[dict]]:
         """

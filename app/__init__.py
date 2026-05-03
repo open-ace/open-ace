@@ -60,12 +60,14 @@ def create_app(config=None):
 
     ensure_all_tables()
 
-    # Pre-check API key encryption availability (warns if misconfigured)
+    # Pre-check API key encryption availability
     try:
         from app.modules.workspace.api_key_proxy import _get_encryption_key
 
         _get_encryption_key()
     except RuntimeError as e:
+        if os.environ.get("FLASK_ENV") == "production":
+            raise RuntimeError(f"API key encryption misconfigured: {e}")
         logger.warning(f"API key proxy unavailable: {e}. Storing API keys will fail.")
     except Exception:
         pass  # cryptography not installed — handled at encrypt/decrypt time

@@ -27,6 +27,7 @@ def ensure_all_tables() -> None:
     from app.modules.workspace.remote_agent_manager import get_ddl_statements as ram_ddl
     from app.modules.workspace.session_manager import get_ddl_statements as sm_ddl
     from app.repositories.database import Database
+    from app.services.auth_service import get_ddl_statements as auth_ddl
     from app.services.permission_service import get_ddl_statements as ps_ddl
 
     all_ddl = []
@@ -40,6 +41,7 @@ def ensure_all_tables() -> None:
         ret_ddl,
         ps_ddl,
         report_ddl,
+        auth_ddl,
     ]:
         try:
             all_ddl.extend(ddl_fn())
