@@ -11,31 +11,18 @@ API routes for enterprise governance features:
 import logging
 from datetime import datetime, timedelta
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify, request
 
+from app.auth.decorators import admin_required, auth_required
 from app.modules.governance.audit_logger import AuditAction, AuditLogger
 from app.modules.governance.content_filter import ContentFilter
 from app.modules.governance.quota_manager import QuotaManager
-from app.services.auth_service import AuthService
 
 governance_bp = Blueprint("governance", __name__)
-auth_service = AuthService()
 audit_logger = AuditLogger()
 quota_manager = QuotaManager()
 content_filter = ContentFilter()
 logger = logging.getLogger(__name__)
-
-
-def require_admin(token: str):
-    """Require admin role and return session data."""
-    is_admin, session_or_error = auth_service.require_admin(token)
-    return is_admin, session_or_error
-
-
-def require_auth(token: str):
-    """Require authentication and return session data."""
-    is_auth, session_or_error = auth_service.require_auth(token)
-    return is_auth, session_or_error
 
 
 def get_client_info():
@@ -52,17 +39,9 @@ def get_client_info():
 
 
 @governance_bp.route("/audit/logs", methods=["GET"])
+@admin_required
 def api_get_audit_logs():
     """Get audit logs with filters."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
-    is_admin, session_or_error = require_admin(token)
-    if not is_admin:
-        return jsonify(session_or_error), (
-            403 if "Admin" in session_or_error.get("error", "") else 401
-        )
 
     # Get query parameters
     user_id = request.args.get("user_id", type=int)
@@ -108,29 +87,23 @@ def api_get_audit_logs():
 
 
 @governance_bp.route("/audit-logs", methods=["GET"])
+@admin_required
 def api_audit_logs():
     """Get audit logs with filters (alias for /audit/logs)."""
     return api_get_audit_logs()
 
 
 @governance_bp.route("/governance/audit-logs", methods=["GET"])
+@admin_required
 def api_governance_audit_logs():
     """Get audit logs with filters (full path alias for /audit/logs)."""
     return api_get_audit_logs()
 
 
 @governance_bp.route("/audit/logs/export", methods=["GET"])
+@admin_required
 def api_export_audit_logs():
     """Export audit logs."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
-    is_admin, session_or_error = require_admin(token)
-    if not is_admin:
-        return jsonify(session_or_error), (
-            403 if "Admin" in session_or_error.get("error", "") else 401
-        )
 
     # Get date range
     start_date = request.args.get("start_date")
@@ -151,8 +124,8 @@ def api_export_audit_logs():
     client_info = get_client_info()
     audit_logger.log_action(
         action=AuditAction.DATA_EXPORT,
-        user_id=session_or_error.get("user_id"),
-        username=session_or_error.get("username"),
+        user_id=g.user_id,
+        username=g.user.get("username"),
         resource_type="audit_logs",
         details={"format": format_type, "start": start_date, "end": end_date},
         **client_info,
@@ -180,17 +153,9 @@ def api_export_audit_logs():
 
 
 @governance_bp.route("/audit/user/<int:user_id>/activity", methods=["GET"])
+@admin_required
 def api_user_activity(user_id):
     """Get activity summary for a user."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
-    is_admin, session_or_error = require_admin(token)
-    if not is_admin:
-        return jsonify(session_or_error), (
-            403 if "Admin" in session_or_error.get("error", "") else 401
-        )
 
     days = request.args.get("days", default=30, type=int)
 
@@ -208,17 +173,9 @@ def api_user_activity(user_id):
 
 
 @governance_bp.route("/quota/status/all", methods=["GET"])
+@admin_required
 def api_all_quota_status():
     """Get quota status for all users (admin only)."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
-    is_admin, session_or_error = require_admin(token)
-    if not is_admin:
-        return jsonify(session_or_error), (
-            403 if "Admin" in session_or_error.get("error", "") else 401
-        )
 
     statuses = quota_manager.get_all_quota_statuses()
 
@@ -226,17 +183,10 @@ def api_all_quota_status():
 
 
 @governance_bp.route("/quota/check", methods=["POST"])
+@auth_required
 def api_check_quota():
     """Check if user has quota available."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
-    is_auth, session_or_error = require_auth(token)
-    if not is_auth:
-        return jsonify(session_or_error), 401
-
-    user_id = session_or_error.get("user_id")
+    user_id = g.user_id
     data = request.get_json() or {}
 
     tokens = data.get("tokens", 0)
@@ -248,17 +198,9 @@ def api_check_quota():
 
 
 @governance_bp.route("/quota/alerts", methods=["GET"])
+@admin_required
 def api_get_quota_alerts():
     """Get quota alerts."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
-    is_admin, session_or_error = require_admin(token)
-    if not is_admin:
-        return jsonify(session_or_error), (
-            403 if "Admin" in session_or_error.get("error", "") else 401
-        )
 
     unacknowledged_only = request.args.get("unacknowledged_only", default=False, type=bool)
     limit = request.args.get("limit", default=100, type=int)
@@ -269,19 +211,11 @@ def api_get_quota_alerts():
 
 
 @governance_bp.route("/quota/alerts/<int:alert_id>/acknowledge", methods=["POST"])
+@admin_required
 def api_acknowledge_alert(alert_id):
     """Acknowledge a quota alert."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
 
-    is_admin, session_or_error = require_admin(token)
-    if not is_admin:
-        return jsonify(session_or_error), (
-            403 if "Admin" in session_or_error.get("error", "") else 401
-        )
-
-    user_id = session_or_error.get("user_id")
+    user_id = g.user_id
 
     success = quota_manager.acknowledge_alert(alert_id, user_id)
 
@@ -291,7 +225,7 @@ def api_acknowledge_alert(alert_id):
         audit_logger.log_action(
             action=AuditAction.QUOTA_ALERT,
             user_id=user_id,
-            username=session_or_error.get("username"),
+            username=g.user.get("username"),
             resource_type="quota_alert",
             resource_id=str(alert_id),
             details={"action": "acknowledged"},
@@ -309,16 +243,9 @@ def api_acknowledge_alert(alert_id):
 
 
 @governance_bp.route("/content/check", methods=["POST"])
+@auth_required
 def api_check_content():
     """Check content for sensitive information."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
-    is_auth, session_or_error = require_auth(token)
-    if not is_auth:
-        return jsonify(session_or_error), 401
-
     data = request.get_json() or {}
     content = data.get("content", "")
 
@@ -329,8 +256,8 @@ def api_check_content():
         client_info = get_client_info()
         audit_logger.log_action(
             action=AuditAction.CONTENT_BLOCKED,
-            user_id=session_or_error.get("user_id"),
-            username=session_or_error.get("username"),
+            user_id=g.user_id,
+            username=g.user.get("username"),
             resource_type="content",
             details={
                 "risk_level": result.risk_level,
@@ -343,17 +270,9 @@ def api_check_content():
 
 
 @governance_bp.route("/content/filter/stats", methods=["GET"])
+@admin_required
 def api_filter_stats():
     """Get content filter statistics."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
-    is_admin, session_or_error = require_admin(token)
-    if not is_admin:
-        return jsonify(session_or_error), (
-            403 if "Admin" in session_or_error.get("error", "") else 401
-        )
 
     stats = content_filter.get_stats()
 
@@ -361,17 +280,9 @@ def api_filter_stats():
 
 
 @governance_bp.route("/content/filter/patterns", methods=["POST"])
+@admin_required
 def api_add_pattern():
     """Add a custom content filter pattern."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
-    is_admin, session_or_error = require_admin(token)
-    if not is_admin:
-        return jsonify(session_or_error), (
-            403 if "Admin" in session_or_error.get("error", "") else 401
-        )
 
     data = request.get_json() or {}
     name = data.get("name")
@@ -388,8 +299,8 @@ def api_add_pattern():
         client_info = get_client_info()
         audit_logger.log_action(
             action=AuditAction.SYSTEM_CONFIG_CHANGE,
-            user_id=session_or_error.get("user_id"),
-            username=session_or_error.get("username"),
+            user_id=g.user_id,
+            username=g.user.get("username"),
             resource_type="content_filter",
             details={"action": "add_pattern", "name": name, "risk": risk},
             **client_info,
@@ -403,17 +314,9 @@ def api_add_pattern():
 
 
 @governance_bp.route("/content/filter/keywords", methods=["POST"])
+@admin_required
 def api_add_keyword():
     """Add a custom sensitive keyword."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
-    is_admin, session_or_error = require_admin(token)
-    if not is_admin:
-        return jsonify(session_or_error), (
-            403 if "Admin" in session_or_error.get("error", "") else 401
-        )
 
     data = request.get_json() or {}
     keyword = data.get("keyword")
@@ -427,8 +330,8 @@ def api_add_keyword():
     client_info = get_client_info()
     audit_logger.log_action(
         action=AuditAction.SYSTEM_CONFIG_CHANGE,
-        user_id=session_or_error.get("user_id"),
-        username=session_or_error.get("username"),
+        user_id=g.user_id,
+        username=g.user.get("username"),
         resource_type="content_filter",
         details={"action": "add_keyword", "keyword": keyword},
         **client_info,
@@ -447,17 +350,9 @@ governance_repo = GovernanceRepository()
 
 
 @governance_bp.route("/filter-rules", methods=["GET"])
+@admin_required
 def api_get_filter_rules():
     """Get all content filter rules."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
-    is_admin, session_or_error = require_admin(token)
-    if not is_admin:
-        return jsonify(session_or_error), (
-            403 if "Admin" in session_or_error.get("error", "") else 401
-        )
 
     rules = governance_repo.get_filter_rules()
 
@@ -465,17 +360,9 @@ def api_get_filter_rules():
 
 
 @governance_bp.route("/filter-rules", methods=["POST"])
+@admin_required
 def api_create_filter_rule():
     """Create a new content filter rule."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
-    is_admin, session_or_error = require_admin(token)
-    if not is_admin:
-        return jsonify(session_or_error), (
-            403 if "Admin" in session_or_error.get("error", "") else 401
-        )
 
     data = request.get_json() or {}
     pattern = data.get("pattern")
@@ -502,8 +389,8 @@ def api_create_filter_rule():
         client_info = get_client_info()
         audit_logger.log_action(
             action=AuditAction.SYSTEM_CONFIG_CHANGE,
-            user_id=session_or_error.get("user_id"),
-            username=session_or_error.get("username"),
+            user_id=g.user_id,
+            username=g.user.get("username"),
             resource_type="filter_rule",
             resource_id=str(rule_id),
             details={"action": "create", "pattern": pattern, "type": rule_type},
@@ -516,17 +403,9 @@ def api_create_filter_rule():
 
 
 @governance_bp.route("/filter-rules/<int:rule_id>", methods=["PUT"])
+@admin_required
 def api_update_filter_rule(rule_id):
     """Update a content filter rule."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
-    is_admin, session_or_error = require_admin(token)
-    if not is_admin:
-        return jsonify(session_or_error), (
-            403 if "Admin" in session_or_error.get("error", "") else 401
-        )
 
     data = request.get_json() or {}
 
@@ -545,8 +424,8 @@ def api_update_filter_rule(rule_id):
         client_info = get_client_info()
         audit_logger.log_action(
             action=AuditAction.SYSTEM_CONFIG_CHANGE,
-            user_id=session_or_error.get("user_id"),
-            username=session_or_error.get("username"),
+            user_id=g.user_id,
+            username=g.user.get("username"),
             resource_type="filter_rule",
             resource_id=str(rule_id),
             details={"action": "update", "changes": data},
@@ -559,17 +438,9 @@ def api_update_filter_rule(rule_id):
 
 
 @governance_bp.route("/filter-rules/<int:rule_id>", methods=["DELETE"])
+@admin_required
 def api_delete_filter_rule(rule_id):
     """Delete a content filter rule."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
-    is_admin, session_or_error = require_admin(token)
-    if not is_admin:
-        return jsonify(session_or_error), (
-            403 if "Admin" in session_or_error.get("error", "") else 401
-        )
 
     success = governance_repo.delete_filter_rule(rule_id)
 
@@ -578,8 +449,8 @@ def api_delete_filter_rule(rule_id):
         client_info = get_client_info()
         audit_logger.log_action(
             action=AuditAction.SYSTEM_CONFIG_CHANGE,
-            user_id=session_or_error.get("user_id"),
-            username=session_or_error.get("username"),
+            user_id=g.user_id,
+            username=g.user.get("username"),
             resource_type="filter_rule",
             resource_id=str(rule_id),
             details={"action": "delete"},
@@ -597,17 +468,9 @@ def api_delete_filter_rule(rule_id):
 
 
 @governance_bp.route("/security-settings", methods=["GET"])
+@admin_required
 def api_get_security_settings():
     """Get security settings."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
-    is_admin, session_or_error = require_admin(token)
-    if not is_admin:
-        return jsonify(session_or_error), (
-            403 if "Admin" in session_or_error.get("error", "") else 401
-        )
 
     settings = governance_repo.get_security_settings()
 
@@ -615,17 +478,9 @@ def api_get_security_settings():
 
 
 @governance_bp.route("/security-settings", methods=["PUT"])
+@admin_required
 def api_update_security_settings():
     """Update security settings."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
-    is_admin, session_or_error = require_admin(token)
-    if not is_admin:
-        return jsonify(session_or_error), (
-            403 if "Admin" in session_or_error.get("error", "") else 401
-        )
 
     data = request.get_json() or {}
 
@@ -636,8 +491,8 @@ def api_update_security_settings():
         client_info = get_client_info()
         audit_logger.log_action(
             action=AuditAction.SYSTEM_CONFIG_CHANGE,
-            user_id=session_or_error.get("user_id"),
-            username=session_or_error.get("username"),
+            user_id=g.user_id,
+            username=g.user.get("username"),
             resource_type="security_settings",
             details={"action": "update", "keys": list(data.keys())},
             **client_info,

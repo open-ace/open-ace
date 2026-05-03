@@ -7,17 +7,16 @@ API routes for reporting operations.
 
 import logging
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify, request
 
+from app.auth.decorators import auth_required
 from app.repositories.usage_repo import UsageRepository
 from app.repositories.user_repo import UserRepository
-from app.services.auth_service import AuthService
 from app.services.message_service import MessageService
 from app.services.usage_service import UsageService
 from app.utils.helpers import get_days_ago, get_today
 
 report_bp = Blueprint("report", __name__)
-auth_service = AuthService()
 usage_service = UsageService()
 message_service = MessageService()
 usage_repo = UsageRepository()
@@ -26,23 +25,16 @@ logger = logging.getLogger(__name__)
 
 
 @report_bp.route("/report/my-usage", methods=["GET"])
+@auth_required
 def api_my_usage():
     """Get current user's usage report."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
-    is_auth, session_or_error = auth_service.require_auth(token)
-    if not is_auth:
-        return jsonify(session_or_error), 401
-
     # Get date range
     start_date = request.args.get("start", get_days_ago(30))
     end_date = request.args.get("end", get_today())
 
     # Get user info
-    user_id = session_or_error.get("user_id")
-    username = session_or_error.get("username")
+    user_id = g.user_id
+    username = g.user.get("username")
 
     # Get user's system_account for daily_messages matching
     user = user_repo.get_user_by_id(user_id)

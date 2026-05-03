@@ -18,15 +18,14 @@ import uuid
 
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
+from app.auth.decorators import _extract_token, _load_user_from_token
 from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
 from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
 from app.modules.workspace.remote_session_manager import get_remote_session_manager
-from app.services.auth_service import AuthService
 
 logger = logging.getLogger(__name__)
 
 remote_bp = Blueprint("remote", __name__)
-auth_service = AuthService()
 
 
 @remote_bp.before_request
@@ -49,39 +48,19 @@ def load_user():
     if request.path.startswith("/api/remote/llm-proxy"):
         return
 
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
+    token = _extract_token()
 
     if token:
-        session = auth_service.validate_session(token)
-        if session[0]:
-            session_data = session[1]
-            g.user = {
-                "id": session_data.get("user_id"),
-                "username": session_data.get("username"),
-                "email": session_data.get("email"),
-                "role": session_data.get("role"),
-            }
+        user = _load_user_from_token(token)
+        if user:
+            g.user = user
+            g.user_id = user.get("id")
+            g.user_role = user.get("role")
             return None  # Authenticated
         else:
-            return jsonify({"error": "Authentication required"}), 401
-    else:
-        url_token = request.args.get("token")
-        if url_token:
-            # First try as a session_token (for SSE / EventSource which can't send cookies)
-            session = auth_service.validate_session(url_token)
-            if session[0]:
-                session_data = session[1]
-                g.user = {
-                    "id": session_data.get("user_id"),
-                    "username": session_data.get("username"),
-                    "email": session_data.get("email"),
-                    "role": session_data.get("role"),
-                }
-                return None  # Authenticated
-            else:
-                # Fall back to WebUI token validation
+            # Try as query-param token with WebUI fallback
+            url_token = request.args.get("token")
+            if url_token and url_token == token:
                 try:
                     from app.services.webui_manager import WebUIManager
 
@@ -91,37 +70,23 @@ def load_user():
                         from app.repositories.user_repo import UserRepository
 
                         user_repo = UserRepository()
-                        user = user_repo.get_user_by_id(user_id)
-                        if user:
+                        user_data = user_repo.get_user_by_id(user_id)
+                        if user_data:
                             g.user = {
                                 "id": user_id,
-                                "username": user.get("username"),
-                                "email": user.get("email"),
-                                "role": user.get("role"),
+                                "username": user_data.get("username"),
+                                "email": user_data.get("email"),
+                                "role": user_data.get("role"),
                             }
+                            g.user_id = user_id
+                            g.user_role = user_data.get("role")
                             return None  # Authenticated
                 except Exception as e:
                     logger.warning(f"Failed to validate URL token: {e}")
+            return jsonify({"error": "Authentication required"}), 401
 
-    # No valid authentication provided
+    # No token provided
     return jsonify({"error": "Authentication required"}), 401
-
-
-def _require_auth():
-    """Require authentication for the current request."""
-    if not hasattr(g, "user") or not g.user:
-        return jsonify({"error": "Authentication required"}), 401
-    return None
-
-
-def _require_admin():
-    """Require admin role for the current request."""
-    auth_error = _require_auth()
-    if auth_error:
-        return auth_error
-    if g.user.get("role") != "admin":
-        return jsonify({"error": "Admin access required"}), 403
-    return None
 
 
 def _require_machine_admin(machine_id):
@@ -167,9 +132,6 @@ def register_machine():
     Generate a registration token for a new machine.
     Admin only - the token is used by the agent to authenticate registration.
     """
-    auth_error = _require_admin()
-    if auth_error:
-        return auth_error
 
     data = request.get_json() or {}
     agent_mgr = get_remote_agent_manager()
@@ -194,9 +156,6 @@ def register_machine():
 @remote_bp.route("/machines", methods=["GET"])
 def list_machines():
     """List machines. Admin sees all, regular users see assigned machines."""
-    auth_error = _require_auth()
-    if auth_error:
-        return auth_error
 
     agent_mgr = get_remote_agent_manager()
 
@@ -216,9 +175,6 @@ def list_machines():
 @remote_bp.route("/machines/<machine_id>", methods=["GET"])
 def get_machine(machine_id):
     """Get details and status of a specific machine."""
-    auth_error = _require_auth()
-    if auth_error:
-        return auth_error
 
     agent_mgr = get_remote_agent_manager()
     machine = agent_mgr.get_machine(machine_id)
@@ -242,9 +198,6 @@ def get_machine(machine_id):
 @remote_bp.route("/machines/<machine_id>", methods=["DELETE"])
 def deregister_machine(machine_id):
     """Deregister a remote machine. Admin only."""
-    auth_error = _require_admin()
-    if auth_error:
-        return auth_error
 
     agent_mgr = get_remote_agent_manager()
     success = agent_mgr.deregister_machine(machine_id)
@@ -257,9 +210,6 @@ def deregister_machine(machine_id):
 @remote_bp.route("/machines/<machine_id>/assign", methods=["POST"])
 def assign_user(machine_id):
     """Assign a user to a machine. System admin or machine admin."""
-    auth_error = _require_auth()
-    if auth_error:
-        return auth_error
     admin_error = _require_machine_admin(machine_id)
     if admin_error:
         return admin_error
@@ -291,9 +241,6 @@ def assign_user(machine_id):
 @remote_bp.route("/machines/<machine_id>/assign/<int:user_id>", methods=["DELETE"])
 def revoke_user(machine_id, user_id):
     """Revoke a user's access to a machine. System admin or machine admin."""
-    auth_error = _require_auth()
-    if auth_error:
-        return auth_error
     admin_error = _require_machine_admin(machine_id)
     if admin_error:
         return admin_error
@@ -319,9 +266,6 @@ def revoke_user(machine_id, user_id):
 @remote_bp.route("/api-keys", methods=["GET"])
 def list_api_keys():
     """List all encrypted API keys (without revealing actual keys). Admin only."""
-    auth_error = _require_admin()
-    if auth_error:
-        return auth_error
 
     data = request.args
     tenant_id = int(data.get("tenant_id", 1))
@@ -340,9 +284,6 @@ def list_api_keys():
 @remote_bp.route("/api-keys", methods=["POST"])
 def store_api_key():
     """Store a new encrypted API key. Admin only."""
-    auth_error = _require_admin()
-    if auth_error:
-        return auth_error
 
     data = request.get_json() or {}
     provider = data.get("provider")
@@ -372,9 +313,6 @@ def store_api_key():
 @remote_bp.route("/api-keys/<int:key_id>", methods=["DELETE"])
 def delete_api_key(key_id):
     """Delete an API key by ID. Admin only."""
-    auth_error = _require_admin()
-    if auth_error:
-        return auth_error
 
     data = request.get_json() or {}
     tenant_id = int(data.get("tenant_id", 1))
@@ -393,9 +331,6 @@ def delete_api_key(key_id):
 @remote_bp.route("/machines/<machine_id>/users", methods=["GET"])
 def get_machine_users(machine_id):
     """Get list of users assigned to a machine. System admin or machine admin."""
-    auth_error = _require_auth()
-    if auth_error:
-        return auth_error
     admin_error = _require_machine_admin(machine_id)
     if admin_error:
         return admin_error
@@ -417,9 +352,6 @@ def get_machine_users(machine_id):
 @remote_bp.route("/machines/available", methods=["GET"])
 def get_available_machines():
     """Get machines available to the current user."""
-    auth_error = _require_auth()
-    if auth_error:
-        return auth_error
 
     agent_mgr = get_remote_agent_manager()
     machines = agent_mgr.get_available_machines(g.user["id"])
@@ -438,9 +370,6 @@ def get_available_machines():
 @remote_bp.route("/sessions", methods=["POST"])
 def create_remote_session():
     """Create a new remote session on a selected machine."""
-    auth_error = _require_auth()
-    if auth_error:
-        return auth_error
 
     data = request.get_json() or {}
     machine_id = data.get("machine_id")
@@ -479,9 +408,6 @@ def create_remote_session():
 @remote_bp.route("/sessions/<session_id>", methods=["GET"])
 def get_remote_session(session_id):
     """Get remote session status and output."""
-    auth_error = _require_auth()
-    if auth_error:
-        return auth_error
 
     result, access_error = _check_session_access(session_id)
     if access_error:
@@ -495,9 +421,6 @@ def get_remote_session(session_id):
 @remote_bp.route("/sessions/<session_id>/chat", methods=["POST"])
 def send_remote_message(session_id):
     """Send a message to a remote session."""
-    auth_error = _require_auth()
-    if auth_error:
-        return auth_error
 
     _, access_error = _check_session_access(session_id)
     if access_error:
@@ -533,9 +456,6 @@ def send_remote_message(session_id):
 @remote_bp.route("/sessions/<session_id>/model", methods=["PUT"])
 def update_remote_session_model(session_id):
     """Switch the model of an active remote session."""
-    auth_error = _require_auth()
-    if auth_error:
-        return auth_error
 
     _, access_error = _check_session_access(session_id)
     if access_error:
@@ -557,9 +477,6 @@ def update_remote_session_model(session_id):
 @remote_bp.route("/sessions/<session_id>/abort", methods=["POST"])
 def abort_remote_request(session_id):
     """Abort the current in-progress request without stopping the session."""
-    auth_error = _require_auth()
-    if auth_error:
-        return auth_error
 
     _, access_error = _check_session_access(session_id)
     if access_error:
@@ -576,9 +493,6 @@ def abort_remote_request(session_id):
 @remote_bp.route("/sessions/<session_id>/stop", methods=["POST"])
 def stop_remote_session(session_id):
     """Stop a remote session."""
-    auth_error = _require_auth()
-    if auth_error:
-        return auth_error
 
     _, access_error = _check_session_access(session_id)
     if access_error:
@@ -595,9 +509,6 @@ def stop_remote_session(session_id):
 @remote_bp.route("/sessions/<session_id>/pause", methods=["POST"])
 def pause_remote_session(session_id):
     """Pause a remote session."""
-    auth_error = _require_auth()
-    if auth_error:
-        return auth_error
 
     _, access_error = _check_session_access(session_id)
     if access_error:
@@ -614,9 +525,6 @@ def pause_remote_session(session_id):
 @remote_bp.route("/sessions/<session_id>/resume", methods=["POST"])
 def resume_remote_session(session_id):
     """Resume a paused remote session."""
-    auth_error = _require_auth()
-    if auth_error:
-        return auth_error
 
     _, access_error = _check_session_access(session_id)
     if access_error:
@@ -644,9 +552,6 @@ def send_permission_response(session_id):
             "message": "optional deny reason"
         }
     """
-    auth_error = _require_auth()
-    if auth_error:
-        return auth_error
 
     session_info, access_error = _check_session_access(session_id)
     if access_error:
@@ -680,9 +585,6 @@ def send_permission_response(session_id):
 @remote_bp.route("/sessions/<session_id>/stream")
 def stream_session_output(session_id):
     """SSE: real-time stream of remote session output, formatted as claude_json."""
-    auth_error = _require_auth()
-    if auth_error:
-        return auth_error
 
     _, access_error = _check_session_access(session_id)
     if access_error:
@@ -1273,9 +1175,6 @@ def usage_report():
 @remote_bp.route("/machines/<machine_id>/browse", methods=["GET"])
 def browse_remote_directory(machine_id):
     """Browse the file system on a remote machine."""
-    auth_error = _require_auth()
-    if auth_error:
-        return auth_error
 
     agent_mgr = get_remote_agent_manager()
 

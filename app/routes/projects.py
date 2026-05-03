@@ -14,12 +14,10 @@ from flask import Blueprint, jsonify, request
 
 from app.repositories.project_repo import ProjectRepository
 from app.repositories.user_repo import UserRepository
-from app.services.auth_service import AuthService
 
 logger = logging.getLogger(__name__)
 
 projects_bp = Blueprint("projects", __name__)
-auth_service = AuthService()
 project_repo = ProjectRepository()
 user_repo = UserRepository()
 
@@ -38,12 +36,12 @@ def get_current_user():
     if not token:
         return None, {"error": "Unauthorized"}, 401
 
-    valid, session_or_error = auth_service.validate_session(token)
-    if not valid:
-        return None, session_or_error, 401
+    from app.auth.decorators import _load_user_from_token
 
-    user_id = session_or_error.get("user_id")
-    user = user_repo.get_user_by_id(user_id)
+    user_data = _load_user_from_token(token)
+    if not user_data:
+        return None, {"error": "Unauthorized"}, 401
+    user = user_repo.get_user_by_id(user_data.get("id"))
     return user, None, 200
 
 

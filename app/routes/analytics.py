@@ -8,29 +8,16 @@ API routes for usage analytics and reporting.
 import logging
 from datetime import datetime, timedelta
 
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, Response, g, jsonify, request
 
+from app.auth.decorators import admin_required
 from app.modules.analytics.usage_analytics import UsageAnalytics
 from app.modules.governance.audit_logger import AuditAction, AuditLogger
-from app.services.auth_service import AuthService
 
 analytics_bp = Blueprint("analytics", __name__)
-auth_service = AuthService()
 usage_analytics = UsageAnalytics()
 audit_logger = AuditLogger()
 logger = logging.getLogger(__name__)
-
-
-def require_admin(token: str):
-    """Require admin role and return session data."""
-    is_admin, session_or_error = auth_service.require_admin(token)
-    return is_admin, session_or_error
-
-
-def require_auth(token: str):
-    """Require authentication and return session data."""
-    is_auth, session_or_error = auth_service.require_auth(token)
-    return is_auth, session_or_error
 
 
 def get_client_info():
@@ -42,18 +29,9 @@ def get_client_info():
 
 
 @analytics_bp.route("/analytics/report", methods=["GET"])
+@admin_required
 def api_usage_report():
     """Generate a comprehensive usage report."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
-    is_admin, session_or_error = require_admin(token)
-    if not is_admin:
-        return jsonify(session_or_error), (
-            403 if "Admin" in session_or_error.get("error", "") else 401
-        )
-
     # Get date range
     end_date = request.args.get("end_date", datetime.utcnow().strftime("%Y-%m-%d"))
     days = request.args.get("days", default=30, type=int)
@@ -75,8 +53,8 @@ def api_usage_report():
     client_info = get_client_info()
     audit_logger.log_action(
         action=AuditAction.DATA_VIEW,
-        user_id=session_or_error.get("user_id"),
-        username=session_or_error.get("username"),
+        user_id=g.user_id,
+        username=g.user.get("username"),
         resource_type="analytics_report",
         details={"start_date": start_date, "end_date": end_date, "days": days},
         **client_info,
@@ -86,18 +64,9 @@ def api_usage_report():
 
 
 @analytics_bp.route("/analytics/forecast", methods=["GET"])
+@admin_required
 def api_usage_forecast():
     """Get usage forecast."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
-    is_admin, session_or_error = require_admin(token)
-    if not is_admin:
-        return jsonify(session_or_error), (
-            403 if "Admin" in session_or_error.get("error", "") else 401
-        )
-
     days = request.args.get("days", default=7, type=int)
 
     forecast = usage_analytics.get_forecast(days=days)
@@ -106,18 +75,9 @@ def api_usage_forecast():
 
 
 @analytics_bp.route("/analytics/efficiency", methods=["GET"])
+@admin_required
 def api_efficiency_metrics():
     """Get efficiency metrics."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
-    is_admin, session_or_error = require_admin(token)
-    if not is_admin:
-        return jsonify(session_or_error), (
-            403 if "Admin" in session_or_error.get("error", "") else 401
-        )
-
     # Get date range
     end_date = request.args.get("end_date", datetime.utcnow().strftime("%Y-%m-%d"))
     days = request.args.get("days", default=30, type=int)
@@ -130,18 +90,9 @@ def api_efficiency_metrics():
 
 
 @analytics_bp.route("/analytics/export", methods=["GET"])
+@admin_required
 def api_export_analytics():
     """Export analytics data."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
-    is_admin, session_or_error = require_admin(token)
-    if not is_admin:
-        return jsonify(session_or_error), (
-            403 if "Admin" in session_or_error.get("error", "") else 401
-        )
-
     # Get parameters
     end_date = request.args.get("end_date", datetime.utcnow().strftime("%Y-%m-%d"))
     days = request.args.get("days", default=30, type=int)
@@ -158,8 +109,8 @@ def api_export_analytics():
     client_info = get_client_info()
     audit_logger.log_action(
         action=AuditAction.DATA_EXPORT,
-        user_id=session_or_error.get("user_id"),
-        username=session_or_error.get("username"),
+        user_id=g.user_id,
+        username=g.user.get("username"),
         resource_type="analytics",
         details={"format": format_type, "start_date": start_date, "end_date": end_date},
         **client_info,

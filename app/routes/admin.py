@@ -10,17 +10,16 @@ import os
 import subprocess
 
 import bcrypt
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify, request
 
+from app.auth.decorators import admin_required
 from app.repositories.usage_repo import UsageRepository
 from app.repositories.user_repo import UserRepository
-from app.services.auth_service import AuthService
 from app.utils.validators import validate_email, validate_password, validate_username
 
 logger = logging.getLogger(__name__)
 
 admin_bp = Blueprint("admin", __name__)
-auth_service = AuthService()
 user_repo = UserRepository()
 usage_repo = UsageRepository()
 
@@ -28,12 +27,6 @@ usage_repo = UsageRepository()
 def hash_password(password: str) -> str:
     """Hash a password using bcrypt."""
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
-
-
-def require_admin(token: str):
-    """Require admin role and return session data."""
-    is_admin, session_or_error = auth_service.require_admin(token)
-    return is_admin, session_or_error
 
 
 def get_workspace_base_dir() -> str:
@@ -111,18 +104,9 @@ def _ensure_workspace_dirs(system_account: str, base_dir: str):
 
 
 @admin_bp.route("/admin/users", methods=["GET"])
+@admin_required
 def api_get_users():
     """Get all users."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
-    is_admin, session_or_error = require_admin(token)
-    if not is_admin:
-        return jsonify(session_or_error), (
-            403 if "Admin" in session_or_error.get("error", "") else 401
-        )
-
     users = user_repo.get_all_users()
 
     # Remove password hashes
@@ -133,18 +117,9 @@ def api_get_users():
 
 
 @admin_bp.route("/admin/users", methods=["POST"])
+@admin_required
 def api_create_user():
     """Create a new user."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
-    is_admin, session_or_error = require_admin(token)
-    if not is_admin:
-        return jsonify(session_or_error), (
-            403 if "Admin" in session_or_error.get("error", "") else 401
-        )
-
     data = request.get_json() or {}
     username = data.get("username")
     email = data.get("email")
@@ -194,18 +169,9 @@ def api_create_user():
 
 
 @admin_bp.route("/admin/users/<int:user_id>", methods=["PUT"])
+@admin_required
 def api_update_user(user_id):
     """Update a user."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
-    is_admin, session_or_error = require_admin(token)
-    if not is_admin:
-        return jsonify(session_or_error), (
-            403 if "Admin" in session_or_error.get("error", "") else 401
-        )
-
     data = request.get_json() or {}
 
     # Auto-create system user if system_account is being set
@@ -232,20 +198,11 @@ def api_update_user(user_id):
 
 
 @admin_bp.route("/admin/users/<int:user_id>", methods=["DELETE"])
+@admin_required
 def api_delete_user(user_id):
     """Delete a user."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
-    is_admin, session_or_error = require_admin(token)
-    if not is_admin:
-        return jsonify(session_or_error), (
-            403 if "Admin" in session_or_error.get("error", "") else 401
-        )
-
     # Prevent deleting yourself
-    if session_or_error.get("user_id") == user_id:
+    if g.user_id == user_id:
         return jsonify({"error": "Cannot delete yourself"}), 400
 
     success = user_repo.delete_user(user_id)
@@ -257,18 +214,9 @@ def api_delete_user(user_id):
 
 
 @admin_bp.route("/admin/users/<int:user_id>/password", methods=["PUT"])
+@admin_required
 def api_update_user_password(user_id):
     """Update a user's password."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
-    is_admin, session_or_error = require_admin(token)
-    if not is_admin:
-        return jsonify(session_or_error), (
-            403 if "Admin" in session_or_error.get("error", "") else 401
-        )
-
     data = request.get_json() or {}
     password = data.get("password")
 
@@ -286,18 +234,9 @@ def api_update_user_password(user_id):
 
 
 @admin_bp.route("/admin/users/<int:user_id>/quota", methods=["PUT"])
+@admin_required
 def api_update_user_quota(user_id):
     """Update a user's quota."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
-    is_admin, session_or_error = require_admin(token)
-    if not is_admin:
-        return jsonify(session_or_error), (
-            403 if "Admin" in session_or_error.get("error", "") else 401
-        )
-
     data = request.get_json() or {}
 
     success = user_repo.update_user_quota(
@@ -315,18 +254,9 @@ def api_update_user_quota(user_id):
 
 
 @admin_bp.route("/admin/quota/usage", methods=["GET"])
+@admin_required
 def api_quota_usage():
     """Get quota usage for all users."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
-    is_admin, session_or_error = require_admin(token)
-    if not is_admin:
-        return jsonify(session_or_error), (
-            403 if "Admin" in session_or_error.get("error", "") else 401
-        )
-
     users = user_repo.get_all_users()
 
     # Remove sensitive data
