@@ -1,6 +1,6 @@
 [
   {
-    "key": "SEC001|app/routes/analysis.py|17|/api/analysis/batch",
+    "key": "SEC001|app/routes/analysis.py|/api/analysis/batch",
     "rule": "SEC001",
     "file": "app/routes/analysis.py",
     "line": 17,
@@ -8,7 +8,7 @@
     "message": "Route GET /api/analysis/batch has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/analysis.py|35|/api/analysis/key-metrics",
+    "key": "SEC001|app/routes/analysis.py|/api/analysis/key-metrics",
     "rule": "SEC001",
     "file": "app/routes/analysis.py",
     "line": 35,
@@ -16,7 +16,7 @@
     "message": "Route GET /api/analysis/key-metrics has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/analysis.py|48|/api/analysis/hourly-usage",
+    "key": "SEC001|app/routes/analysis.py|/api/analysis/hourly-usage",
     "rule": "SEC001",
     "file": "app/routes/analysis.py",
     "line": 48,
@@ -24,7 +24,7 @@
     "message": "Route GET /api/analysis/hourly-usage has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/analysis.py|59|/api/analysis/daily-hourly-usage",
+    "key": "SEC001|app/routes/analysis.py|/api/analysis/daily-hourly-usage",
     "rule": "SEC001",
     "file": "app/routes/analysis.py",
     "line": 59,
@@ -32,7 +32,7 @@
     "message": "Route GET /api/analysis/daily-hourly-usage has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/analysis.py|72|/api/analysis/peak-usage",
+    "key": "SEC001|app/routes/analysis.py|/api/analysis/peak-usage",
     "rule": "SEC001",
     "file": "app/routes/analysis.py",
     "line": 72,
@@ -40,7 +40,7 @@
     "message": "Route GET /api/analysis/peak-usage has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/analysis.py|85|/api/analysis/user-ranking",
+    "key": "SEC001|app/routes/analysis.py|/api/analysis/user-ranking",
     "rule": "SEC001",
     "file": "app/routes/analysis.py",
     "line": 85,
@@ -48,7 +48,7 @@
     "message": "Route GET /api/analysis/user-ranking has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/analysis.py|99|/api/analysis/conversation-stats",
+    "key": "SEC001|app/routes/analysis.py|/api/analysis/conversation-stats",
     "rule": "SEC001",
     "file": "app/routes/analysis.py",
     "line": 99,
@@ -56,7 +56,7 @@
     "message": "Route GET /api/analysis/conversation-stats has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/analysis.py|112|/api/analysis/user-segmentation",
+    "key": "SEC001|app/routes/analysis.py|/api/analysis/user-segmentation",
     "rule": "SEC001",
     "file": "app/routes/analysis.py",
     "line": 112,
@@ -64,7 +64,7 @@
     "message": "Route GET /api/analysis/user-segmentation has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/analysis.py|125|/api/analysis/tool-comparison",
+    "key": "SEC001|app/routes/analysis.py|/api/analysis/tool-comparison",
     "rule": "SEC001",
     "file": "app/routes/analysis.py",
     "line": 125,
@@ -72,7 +72,7 @@
     "message": "Route GET /api/analysis/tool-comparison has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/analysis.py|138|/api/analysis/anomaly-detection",
+    "key": "SEC001|app/routes/analysis.py|/api/analysis/anomaly-detection",
     "rule": "SEC001",
     "file": "app/routes/analysis.py",
     "line": 138,
@@ -80,7 +80,7 @@
     "message": "Route GET /api/analysis/anomaly-detection has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/analysis.py|157|/api/analysis/anomaly-trend",
+    "key": "SEC001|app/routes/analysis.py|/api/analysis/anomaly-trend",
     "rule": "SEC001",
     "file": "app/routes/analysis.py",
     "line": 157,
@@ -88,7 +88,7 @@
     "message": "Route GET /api/analysis/anomaly-trend has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/analysis.py|170|/api/analysis/recommendations",
+    "key": "SEC001|app/routes/analysis.py|/api/analysis/recommendations",
     "rule": "SEC001",
     "file": "app/routes/analysis.py",
     "line": 170,
@@ -96,7 +96,7 @@
     "message": "Route GET /api/analysis/recommendations has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/auth.py|86|/api/auth/logout",
+    "key": "SEC001|app/routes/auth.py|/api/auth/logout",
     "rule": "SEC001",
     "file": "app/routes/auth.py",
     "line": 86,
@@ -104,7 +104,7 @@
     "message": "Route POST /api/auth/logout has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/compliance.py|59|/reports",
+    "key": "SEC001|app/routes/compliance.py|/reports",
     "rule": "SEC001",
     "file": "app/routes/compliance.py",
     "line": 59,
@@ -112,7 +112,7 @@
     "message": "Route GET /reports has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/compliance.py|107|/reports",
+    "key": "SEC001|app/routes/compliance.py|/reports",
     "rule": "SEC001",
     "file": "app/routes/compliance.py",
     "line": 107,
@@ -120,7 +120,7 @@
     "message": "Route POST /reports has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/compliance.py|165|/reports/saved",
+    "key": "SEC001|app/routes/compliance.py|/reports/saved",
     "rule": "SEC001",
     "file": "app/routes/compliance.py",
     "line": 165,
@@ -128,7 +128,7 @@
     "message": "Route GET /reports/saved has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/compliance.py|190|/reports/<report_id>",
+    "key": "SEC001|app/routes/compliance.py|/reports/<report_id>",
     "rule": "SEC001",
     "file": "app/routes/compliance.py",
     "line": 190,
@@ -136,7 +136,7 @@
     "message": "Route GET /reports/<report_id> has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/compliance.py|222|/audit/patterns",
+    "key": "SEC001|app/routes/compliance.py|/audit/patterns",
     "rule": "SEC001",
     "file": "app/routes/compliance.py",
     "line": 222,
@@ -144,7 +144,7 @@
     "message": "Route GET /audit/patterns has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/compliance.py|237|/audit/anomalies",
+    "key": "SEC001|app/routes/compliance.py|/audit/anomalies",
     "rule": "SEC001",
     "file": "app/routes/compliance.py",
     "line": 237,
@@ -152,7 +152,7 @@
     "message": "Route GET /audit/anomalies has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/compliance.py|264|/audit/user/<int:user_id>/profile",
+    "key": "SEC001|app/routes/compliance.py|/audit/user/<int:user_id>/profile",
     "rule": "SEC001",
     "file": "app/routes/compliance.py",
     "line": 264,
@@ -160,7 +160,7 @@
     "message": "Route GET /audit/user/<int:user_id>/profile has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/compliance.py|278|/audit/security-score",
+    "key": "SEC001|app/routes/compliance.py|/audit/security-score",
     "rule": "SEC001",
     "file": "app/routes/compliance.py",
     "line": 278,
@@ -168,7 +168,7 @@
     "message": "Route GET /audit/security-score has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/compliance.py|298|/retention/rules",
+    "key": "SEC001|app/routes/compliance.py|/retention/rules",
     "rule": "SEC001",
     "file": "app/routes/compliance.py",
     "line": 298,
@@ -176,7 +176,7 @@
     "message": "Route GET /retention/rules has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/compliance.py|314|/retention/rules",
+    "key": "SEC001|app/routes/compliance.py|/retention/rules",
     "rule": "SEC001",
     "file": "app/routes/compliance.py",
     "line": 314,
@@ -184,7 +184,7 @@
     "message": "Route PUT /retention/rules has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/compliance.py|343|/retention/cleanup",
+    "key": "SEC001|app/routes/compliance.py|/retention/cleanup",
     "rule": "SEC001",
     "file": "app/routes/compliance.py",
     "line": 343,
@@ -192,7 +192,7 @@
     "message": "Route POST /retention/cleanup has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/compliance.py|357|/retention/history",
+    "key": "SEC001|app/routes/compliance.py|/retention/history",
     "rule": "SEC001",
     "file": "app/routes/compliance.py",
     "line": 357,
@@ -200,7 +200,7 @@
     "message": "Route GET /retention/history has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/compliance.py|376|/retention/storage",
+    "key": "SEC001|app/routes/compliance.py|/retention/storage",
     "rule": "SEC001",
     "file": "app/routes/compliance.py",
     "line": 376,
@@ -208,7 +208,7 @@
     "message": "Route GET /retention/storage has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/compliance.py|388|/retention/status",
+    "key": "SEC001|app/routes/compliance.py|/retention/status",
     "rule": "SEC001",
     "file": "app/routes/compliance.py",
     "line": 388,
@@ -216,7 +216,7 @@
     "message": "Route GET /retention/status has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/fetch.py|212|/api/fetch",
+    "key": "SEC001|app/routes/fetch.py|/api/fetch",
     "rule": "SEC001",
     "file": "app/routes/fetch.py",
     "line": 212,
@@ -224,7 +224,7 @@
     "message": "Route GET /api/fetch has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/fetch.py|221|/api/fetch/remote",
+    "key": "SEC001|app/routes/fetch.py|/api/fetch/remote",
     "rule": "SEC001",
     "file": "app/routes/fetch.py",
     "line": 221,
@@ -232,7 +232,7 @@
     "message": "Route GET /api/fetch/remote has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/fetch.py|230|/api/data-status",
+    "key": "SEC001|app/routes/fetch.py|/api/data-status",
     "rule": "SEC001",
     "file": "app/routes/fetch.py",
     "line": 230,
@@ -240,7 +240,7 @@
     "message": "Route GET /api/data-status has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/fs.py|205|/api/fs/browse",
+    "key": "SEC001|app/routes/fs.py|/api/fs/browse",
     "rule": "SEC001",
     "file": "app/routes/fs.py",
     "line": 205,
@@ -248,7 +248,7 @@
     "message": "Route GET /api/fs/browse has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/fs.py|353|/api/fs/check-path",
+    "key": "SEC001|app/routes/fs.py|/api/fs/check-path",
     "rule": "SEC001",
     "file": "app/routes/fs.py",
     "line": 353,
@@ -256,7 +256,7 @@
     "message": "Route POST /api/fs/check-path has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/fs.py|437|/api/fs/home",
+    "key": "SEC001|app/routes/fs.py|/api/fs/home",
     "rule": "SEC001",
     "file": "app/routes/fs.py",
     "line": 437,
@@ -264,7 +264,7 @@
     "message": "Route GET /api/fs/home has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/governance.py|111|/api/audit-logs",
+    "key": "SEC001|app/routes/governance.py|/api/audit-logs",
     "rule": "SEC001",
     "file": "app/routes/governance.py",
     "line": 111,
@@ -272,7 +272,7 @@
     "message": "Route GET /api/audit-logs has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/governance.py|117|/api/governance/audit-logs",
+    "key": "SEC001|app/routes/governance.py|/api/governance/audit-logs",
     "rule": "SEC001",
     "file": "app/routes/governance.py",
     "line": 117,
@@ -280,7 +280,7 @@
     "message": "Route GET /api/governance/audit-logs has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/messages.py|23|/api/messages",
+    "key": "SEC001|app/routes/messages.py|/api/messages",
     "rule": "SEC001",
     "file": "app/routes/messages.py",
     "line": 23,
@@ -288,7 +288,7 @@
     "message": "Route GET /api/messages has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/messages.py|74|/api/conversation-history",
+    "key": "SEC001|app/routes/messages.py|/api/conversation-history",
     "rule": "SEC001",
     "file": "app/routes/messages.py",
     "line": 74,
@@ -296,7 +296,7 @@
     "message": "Route GET /api/conversation-history has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/messages.py|93|/api/conversation-timeline/<path:session_id>",
+    "key": "SEC001|app/routes/messages.py|/api/conversation-timeline/<path:session_id>",
     "rule": "SEC001",
     "file": "app/routes/messages.py",
     "line": 93,
@@ -304,7 +304,7 @@
     "message": "Route GET /api/conversation-timeline/<path:session_id> has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/messages.py|100|/api/conversation-details/<path:session_id>",
+    "key": "SEC001|app/routes/messages.py|/api/conversation-details/<path:session_id>",
     "rule": "SEC001",
     "file": "app/routes/messages.py",
     "line": 100,
@@ -312,7 +312,7 @@
     "message": "Route GET /api/conversation-details/<path:session_id> has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/messages.py|109|/api/messages/count",
+    "key": "SEC001|app/routes/messages.py|/api/messages/count",
     "rule": "SEC001",
     "file": "app/routes/messages.py",
     "line": 109,
@@ -320,7 +320,7 @@
     "message": "Route GET /api/messages/count has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/pages.py|64|/login",
+    "key": "SEC001|app/routes/pages.py|/login",
     "rule": "SEC001",
     "file": "app/routes/pages.py",
     "line": 64,
@@ -328,7 +328,7 @@
     "message": "Route GET /login has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/pages.py|70|/logout",
+    "key": "SEC001|app/routes/pages.py|/logout",
     "rule": "SEC001",
     "file": "app/routes/pages.py",
     "line": 70,
@@ -336,7 +336,7 @@
     "message": "Route GET /logout has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/pages.py|83|/<path:path>",
+    "key": "SEC001|app/routes/pages.py|/<path:path>",
     "rule": "SEC001",
     "file": "app/routes/pages.py",
     "line": 83,
@@ -344,7 +344,7 @@
     "message": "Route GET /<path:path> has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/pages.py|95|/static/claude-code-webui/<path:filename>",
+    "key": "SEC001|app/routes/pages.py|/static/claude-code-webui/<path:filename>",
     "rule": "SEC001",
     "file": "app/routes/pages.py",
     "line": 95,
@@ -352,7 +352,7 @@
     "message": "Route GET /static/claude-code-webui/<path:filename> has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/projects.py|77|/api/projects",
+    "key": "SEC001|app/routes/projects.py|/api/projects",
     "rule": "SEC001",
     "file": "app/routes/projects.py",
     "line": 77,
@@ -360,7 +360,7 @@
     "message": "Route GET /api/projects has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/projects.py|107|/api/projects",
+    "key": "SEC001|app/routes/projects.py|/api/projects",
     "rule": "SEC001",
     "file": "app/routes/projects.py",
     "line": 107,
@@ -368,7 +368,7 @@
     "message": "Route POST /api/projects has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/projects.py|226|/api/projects/<int:project_id>",
+    "key": "SEC001|app/routes/projects.py|/api/projects/<int:project_id>",
     "rule": "SEC001",
     "file": "app/routes/projects.py",
     "line": 226,
@@ -376,7 +376,7 @@
     "message": "Route GET /api/projects/<int:project_id> has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/projects.py|259|/api/projects/<int:project_id>",
+    "key": "SEC001|app/routes/projects.py|/api/projects/<int:project_id>",
     "rule": "SEC001",
     "file": "app/routes/projects.py",
     "line": 259,
@@ -384,7 +384,7 @@
     "message": "Route PUT /api/projects/<int:project_id> has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/projects.py|296|/api/projects/<int:project_id>",
+    "key": "SEC001|app/routes/projects.py|/api/projects/<int:project_id>",
     "rule": "SEC001",
     "file": "app/routes/projects.py",
     "line": 296,
@@ -392,7 +392,7 @@
     "message": "Route DELETE /api/projects/<int:project_id> has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/projects.py|327|/api/projects/stats",
+    "key": "SEC001|app/routes/projects.py|/api/projects/stats",
     "rule": "SEC001",
     "file": "app/routes/projects.py",
     "line": 327,
@@ -400,7 +400,7 @@
     "message": "Route GET /api/projects/stats has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/projects.py|348|/api/projects/<int:project_id>/daily",
+    "key": "SEC001|app/routes/projects.py|/api/projects/<int:project_id>/daily",
     "rule": "SEC001",
     "file": "app/routes/projects.py",
     "line": 348,
@@ -408,7 +408,7 @@
     "message": "Route GET /api/projects/<int:project_id>/daily has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/projects.py|383|/api/projects/<int:project_id>/users",
+    "key": "SEC001|app/routes/projects.py|/api/projects/<int:project_id>/users",
     "rule": "SEC001",
     "file": "app/routes/projects.py",
     "line": 383,
@@ -416,7 +416,7 @@
     "message": "Route GET /api/projects/<int:project_id>/users has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC002|app/routes/remote.py|480|/api/remote/sessions/<session_id>",
+    "key": "SEC002|app/routes/remote.py|/api/remote/sessions/<session_id>",
     "rule": "SEC002",
     "file": "app/routes/remote.py",
     "line": 480,
@@ -424,7 +424,7 @@
     "message": "Route /api/remote/sessions/<session_id> has ID param(s) ['session_id'] but no ownership check"
   },
   {
-    "key": "SEC002|app/routes/remote.py|534|/api/remote/sessions/<session_id>/model",
+    "key": "SEC002|app/routes/remote.py|/api/remote/sessions/<session_id>/model",
     "rule": "SEC002",
     "file": "app/routes/remote.py",
     "line": 534,
@@ -432,7 +432,7 @@
     "message": "Route /api/remote/sessions/<session_id>/model has ID param(s) ['session_id'] but no ownership check"
   },
   {
-    "key": "SEC002|app/routes/remote.py|558|/api/remote/sessions/<session_id>/abort",
+    "key": "SEC002|app/routes/remote.py|/api/remote/sessions/<session_id>/abort",
     "rule": "SEC002",
     "file": "app/routes/remote.py",
     "line": 558,
@@ -440,7 +440,7 @@
     "message": "Route /api/remote/sessions/<session_id>/abort has ID param(s) ['session_id'] but no ownership check"
   },
   {
-    "key": "SEC002|app/routes/remote.py|577|/api/remote/sessions/<session_id>/stop",
+    "key": "SEC002|app/routes/remote.py|/api/remote/sessions/<session_id>/stop",
     "rule": "SEC002",
     "file": "app/routes/remote.py",
     "line": 577,
@@ -448,7 +448,7 @@
     "message": "Route /api/remote/sessions/<session_id>/stop has ID param(s) ['session_id'] but no ownership check"
   },
   {
-    "key": "SEC002|app/routes/remote.py|596|/api/remote/sessions/<session_id>/pause",
+    "key": "SEC002|app/routes/remote.py|/api/remote/sessions/<session_id>/pause",
     "rule": "SEC002",
     "file": "app/routes/remote.py",
     "line": 596,
@@ -456,7 +456,7 @@
     "message": "Route /api/remote/sessions/<session_id>/pause has ID param(s) ['session_id'] but no ownership check"
   },
   {
-    "key": "SEC002|app/routes/remote.py|615|/api/remote/sessions/<session_id>/resume",
+    "key": "SEC002|app/routes/remote.py|/api/remote/sessions/<session_id>/resume",
     "rule": "SEC002",
     "file": "app/routes/remote.py",
     "line": 615,
@@ -464,7 +464,7 @@
     "message": "Route /api/remote/sessions/<session_id>/resume has ID param(s) ['session_id'] but no ownership check"
   },
   {
-    "key": "SEC002|app/routes/remote.py|634|/api/remote/sessions/<session_id>/permission",
+    "key": "SEC002|app/routes/remote.py|/api/remote/sessions/<session_id>/permission",
     "rule": "SEC002",
     "file": "app/routes/remote.py",
     "line": 634,
@@ -472,7 +472,7 @@
     "message": "Route /api/remote/sessions/<session_id>/permission has ID param(s) ['session_id'] but no ownership check"
   },
   {
-    "key": "SEC002|app/routes/remote.py|681|/api/remote/sessions/<session_id>/stream",
+    "key": "SEC002|app/routes/remote.py|/api/remote/sessions/<session_id>/stream",
     "rule": "SEC002",
     "file": "app/routes/remote.py",
     "line": 681,
@@ -480,7 +480,7 @@
     "message": "Route /api/remote/sessions/<session_id>/stream has ID param(s) ['session_id'] but no ownership check"
   },
   {
-    "key": "SEC001|app/routes/roi.py|25|/api/roi",
+    "key": "SEC001|app/routes/roi.py|/api/roi",
     "rule": "SEC001",
     "file": "app/routes/roi.py",
     "line": 25,
@@ -488,7 +488,7 @@
     "message": "Route GET /api/roi has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/roi.py|48|/api/roi/trend",
+    "key": "SEC001|app/routes/roi.py|/api/roi/trend",
     "rule": "SEC001",
     "file": "app/routes/roi.py",
     "line": 48,
@@ -496,7 +496,7 @@
     "message": "Route GET /api/roi/trend has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/roi.py|64|/api/roi/by-tool",
+    "key": "SEC001|app/routes/roi.py|/api/roi/by-tool",
     "rule": "SEC001",
     "file": "app/routes/roi.py",
     "line": 64,
@@ -504,7 +504,7 @@
     "message": "Route GET /api/roi/by-tool has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/roi.py|84|/api/roi/by-user",
+    "key": "SEC001|app/routes/roi.py|/api/roi/by-user",
     "rule": "SEC001",
     "file": "app/routes/roi.py",
     "line": 84,
@@ -512,7 +512,7 @@
     "message": "Route GET /api/roi/by-user has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/roi.py|106|/api/roi/cost-breakdown",
+    "key": "SEC001|app/routes/roi.py|/api/roi/cost-breakdown",
     "rule": "SEC001",
     "file": "app/routes/roi.py",
     "line": 106,
@@ -520,7 +520,7 @@
     "message": "Route GET /api/roi/cost-breakdown has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/roi.py|135|/api/roi/daily-costs",
+    "key": "SEC001|app/routes/roi.py|/api/roi/daily-costs",
     "rule": "SEC001",
     "file": "app/routes/roi.py",
     "line": 135,
@@ -528,7 +528,7 @@
     "message": "Route GET /api/roi/daily-costs has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/roi.py|156|/api/roi/summary",
+    "key": "SEC001|app/routes/roi.py|/api/roi/summary",
     "rule": "SEC001",
     "file": "app/routes/roi.py",
     "line": 156,
@@ -536,7 +536,7 @@
     "message": "Route GET /api/roi/summary has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/roi.py|180|/api/optimization/suggestions",
+    "key": "SEC001|app/routes/roi.py|/api/optimization/suggestions",
     "rule": "SEC001",
     "file": "app/routes/roi.py",
     "line": 180,
@@ -544,7 +544,7 @@
     "message": "Route GET /api/optimization/suggestions has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/roi.py|195|/api/optimization/cost-trend",
+    "key": "SEC001|app/routes/roi.py|/api/optimization/cost-trend",
     "rule": "SEC001",
     "file": "app/routes/roi.py",
     "line": 195,
@@ -552,7 +552,7 @@
     "message": "Route GET /api/optimization/cost-trend has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/roi.py|210|/api/optimization/efficiency",
+    "key": "SEC001|app/routes/roi.py|/api/optimization/efficiency",
     "rule": "SEC001",
     "file": "app/routes/roi.py",
     "line": 210,
@@ -560,7 +560,7 @@
     "message": "Route GET /api/optimization/efficiency has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/sso.py|40|/providers",
+    "key": "SEC001|app/routes/sso.py|/providers",
     "rule": "SEC001",
     "file": "app/routes/sso.py",
     "line": 40,
@@ -568,7 +568,7 @@
     "message": "Route GET /providers has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/sso.py|138|/login/<provider_name>",
+    "key": "SEC001|app/routes/sso.py|/login/<provider_name>",
     "rule": "SEC001",
     "file": "app/routes/sso.py",
     "line": 138,
@@ -576,7 +576,7 @@
     "message": "Route GET /login/<provider_name> has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/sso.py|291|/session",
+    "key": "SEC001|app/routes/sso.py|/session",
     "rule": "SEC001",
     "file": "app/routes/sso.py",
     "line": 291,
@@ -584,7 +584,7 @@
     "message": "Route DELETE /session has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/tenant.py|39|",
+    "key": "SEC001|app/routes/tenant.py|",
     "rule": "SEC001",
     "file": "app/routes/tenant.py",
     "line": 39,
@@ -592,7 +592,7 @@
     "message": "Route GET  has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/tenant.py|64|/<int:tenant_id>",
+    "key": "SEC001|app/routes/tenant.py|/<int:tenant_id>",
     "rule": "SEC001",
     "file": "app/routes/tenant.py",
     "line": 64,
@@ -600,7 +600,7 @@
     "message": "Route GET /<int:tenant_id> has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/tenant.py|79|/slug/<slug>",
+    "key": "SEC001|app/routes/tenant.py|/slug/<slug>",
     "rule": "SEC001",
     "file": "app/routes/tenant.py",
     "line": 79,
@@ -608,7 +608,7 @@
     "message": "Route GET /slug/<slug> has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/tenant.py|94|",
+    "key": "SEC001|app/routes/tenant.py|",
     "rule": "SEC001",
     "file": "app/routes/tenant.py",
     "line": 94,
@@ -616,7 +616,7 @@
     "message": "Route POST  has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/tenant.py|125|/<int:tenant_id>",
+    "key": "SEC001|app/routes/tenant.py|/<int:tenant_id>",
     "rule": "SEC001",
     "file": "app/routes/tenant.py",
     "line": 125,
@@ -624,7 +624,7 @@
     "message": "Route PUT /<int:tenant_id> has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/tenant.py|164|/<int:tenant_id>/quota",
+    "key": "SEC001|app/routes/tenant.py|/<int:tenant_id>/quota",
     "rule": "SEC001",
     "file": "app/routes/tenant.py",
     "line": 164,
@@ -632,7 +632,7 @@
     "message": "Route PUT /<int:tenant_id>/quota has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/tenant.py|185|/<int:tenant_id>/settings",
+    "key": "SEC001|app/routes/tenant.py|/<int:tenant_id>/settings",
     "rule": "SEC001",
     "file": "app/routes/tenant.py",
     "line": 185,
@@ -640,7 +640,7 @@
     "message": "Route PUT /<int:tenant_id>/settings has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/tenant.py|206|/<int:tenant_id>/suspend",
+    "key": "SEC001|app/routes/tenant.py|/<int:tenant_id>/suspend",
     "rule": "SEC001",
     "file": "app/routes/tenant.py",
     "line": 206,
@@ -648,7 +648,7 @@
     "message": "Route POST /<int:tenant_id>/suspend has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/tenant.py|225|/<int:tenant_id>/activate",
+    "key": "SEC001|app/routes/tenant.py|/<int:tenant_id>/activate",
     "rule": "SEC001",
     "file": "app/routes/tenant.py",
     "line": 225,
@@ -656,7 +656,7 @@
     "message": "Route POST /<int:tenant_id>/activate has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/tenant.py|241|/<int:tenant_id>",
+    "key": "SEC001|app/routes/tenant.py|/<int:tenant_id>",
     "rule": "SEC001",
     "file": "app/routes/tenant.py",
     "line": 241,
@@ -664,7 +664,7 @@
     "message": "Route DELETE /<int:tenant_id> has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/tenant.py|258|/<int:tenant_id>/usage",
+    "key": "SEC001|app/routes/tenant.py|/<int:tenant_id>/usage",
     "rule": "SEC001",
     "file": "app/routes/tenant.py",
     "line": 258,
@@ -672,7 +672,7 @@
     "message": "Route GET /<int:tenant_id>/usage has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/tenant.py|278|/<int:tenant_id>/stats",
+    "key": "SEC001|app/routes/tenant.py|/<int:tenant_id>/stats",
     "rule": "SEC001",
     "file": "app/routes/tenant.py",
     "line": 278,
@@ -680,7 +680,7 @@
     "message": "Route GET /<int:tenant_id>/stats has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/tenant.py|293|/<int:tenant_id>/check-quota",
+    "key": "SEC001|app/routes/tenant.py|/<int:tenant_id>/check-quota",
     "rule": "SEC001",
     "file": "app/routes/tenant.py",
     "line": 293,
@@ -688,7 +688,7 @@
     "message": "Route POST /<int:tenant_id>/check-quota has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/tenant.py|311|/plans",
+    "key": "SEC001|app/routes/tenant.py|/plans",
     "rule": "SEC001",
     "file": "app/routes/tenant.py",
     "line": 311,
@@ -696,7 +696,7 @@
     "message": "Route GET /plans has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/tool_accounts.py|24|/api/tool-accounts",
+    "key": "SEC001|app/routes/tool_accounts.py|/api/tool-accounts",
     "rule": "SEC001",
     "file": "app/routes/tool_accounts.py",
     "line": 24,
@@ -704,7 +704,7 @@
     "message": "Route GET /api/tool-accounts has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/tool_accounts.py|41|/api/tool-accounts/user/<int:user_id>",
+    "key": "SEC001|app/routes/tool_accounts.py|/api/tool-accounts/user/<int:user_id>",
     "rule": "SEC001",
     "file": "app/routes/tool_accounts.py",
     "line": 41,
@@ -712,7 +712,7 @@
     "message": "Route GET /api/tool-accounts/user/<int:user_id> has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/tool_accounts.py|57|/api/tool-accounts/unmapped",
+    "key": "SEC001|app/routes/tool_accounts.py|/api/tool-accounts/unmapped",
     "rule": "SEC001",
     "file": "app/routes/tool_accounts.py",
     "line": 57,
@@ -720,7 +720,7 @@
     "message": "Route GET /api/tool-accounts/unmapped has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/tool_accounts.py|93|/api/tool-accounts",
+    "key": "SEC001|app/routes/tool_accounts.py|/api/tool-accounts",
     "rule": "SEC001",
     "file": "app/routes/tool_accounts.py",
     "line": 93,
@@ -728,7 +728,7 @@
     "message": "Route POST /api/tool-accounts has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/tool_accounts.py|140|/api/tool-accounts/<int:id>",
+    "key": "SEC001|app/routes/tool_accounts.py|/api/tool-accounts/<int:id>",
     "rule": "SEC001",
     "file": "app/routes/tool_accounts.py",
     "line": 140,
@@ -736,7 +736,7 @@
     "message": "Route PUT /api/tool-accounts/<int:id> has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/tool_accounts.py|162|/api/tool-accounts/<int:id>",
+    "key": "SEC001|app/routes/tool_accounts.py|/api/tool-accounts/<int:id>",
     "rule": "SEC001",
     "file": "app/routes/tool_accounts.py",
     "line": 162,
@@ -744,7 +744,7 @@
     "message": "Route DELETE /api/tool-accounts/<int:id> has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/tool_accounts.py|173|/api/tool-accounts/user/<int:user_id>/batch",
+    "key": "SEC001|app/routes/tool_accounts.py|/api/tool-accounts/user/<int:user_id>/batch",
     "rule": "SEC001",
     "file": "app/routes/tool_accounts.py",
     "line": 173,
@@ -752,7 +752,7 @@
     "message": "Route POST /api/tool-accounts/user/<int:user_id>/batch has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/tool_accounts.py|193|/api/tool-types",
+    "key": "SEC001|app/routes/tool_accounts.py|/api/tool-types",
     "rule": "SEC001",
     "file": "app/routes/tool_accounts.py",
     "line": 193,
@@ -760,7 +760,7 @@
     "message": "Route GET /api/tool-types has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/usage.py|20|/api/summary",
+    "key": "SEC001|app/routes/usage.py|/api/summary",
     "rule": "SEC001",
     "file": "app/routes/usage.py",
     "line": 20,
@@ -768,7 +768,7 @@
     "message": "Route GET /api/summary has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/usage.py|33|/api/summary/refresh",
+    "key": "SEC001|app/routes/usage.py|/api/summary/refresh",
     "rule": "SEC001",
     "file": "app/routes/usage.py",
     "line": 33,
@@ -776,7 +776,7 @@
     "message": "Route POST /api/summary/refresh has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/usage.py|44|/api/today",
+    "key": "SEC001|app/routes/usage.py|/api/today",
     "rule": "SEC001",
     "file": "app/routes/usage.py",
     "line": 44,
@@ -784,7 +784,7 @@
     "message": "Route GET /api/today has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/usage.py|53|/api/tool/<tool_name>/<int:days>",
+    "key": "SEC001|app/routes/usage.py|/api/tool/<tool_name>/<int:days>",
     "rule": "SEC001",
     "file": "app/routes/usage.py",
     "line": 53,
@@ -792,7 +792,7 @@
     "message": "Route GET /api/tool/<tool_name>/<int:days> has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/usage.py|61|/api/date/<date_str>",
+    "key": "SEC001|app/routes/usage.py|/api/date/<date_str>",
     "rule": "SEC001",
     "file": "app/routes/usage.py",
     "line": 61,
@@ -800,7 +800,7 @@
     "message": "Route GET /api/date/<date_str> has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/usage.py|70|/api/range",
+    "key": "SEC001|app/routes/usage.py|/api/range",
     "rule": "SEC001",
     "file": "app/routes/usage.py",
     "line": 70,
@@ -808,7 +808,7 @@
     "message": "Route GET /api/range has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/usage.py|82|/api/tools",
+    "key": "SEC001|app/routes/usage.py|/api/tools",
     "rule": "SEC001",
     "file": "app/routes/usage.py",
     "line": 82,
@@ -816,7 +816,7 @@
     "message": "Route GET /api/tools has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/usage.py|89|/api/hosts",
+    "key": "SEC001|app/routes/usage.py|/api/hosts",
     "rule": "SEC001",
     "file": "app/routes/usage.py",
     "line": 89,
@@ -824,7 +824,7 @@
     "message": "Route GET /api/hosts has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/usage.py|100|/api/trend",
+    "key": "SEC001|app/routes/usage.py|/api/trend",
     "rule": "SEC001",
     "file": "app/routes/usage.py",
     "line": 100,
@@ -832,7 +832,7 @@
     "message": "Route GET /api/trend has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/usage.py|121|/api/request/today",
+    "key": "SEC001|app/routes/usage.py|/api/request/today",
     "rule": "SEC001",
     "file": "app/routes/usage.py",
     "line": 121,
@@ -840,7 +840,7 @@
     "message": "Route GET /api/request/today has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/usage.py|132|/api/request/trend",
+    "key": "SEC001|app/routes/usage.py|/api/request/trend",
     "rule": "SEC001",
     "file": "app/routes/usage.py",
     "line": 132,
@@ -848,7 +848,7 @@
     "message": "Route GET /api/request/trend has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/usage.py|146|/api/request/by-tool",
+    "key": "SEC001|app/routes/usage.py|/api/request/by-tool",
     "rule": "SEC001",
     "file": "app/routes/usage.py",
     "line": 146,
@@ -856,7 +856,7 @@
     "message": "Route GET /api/request/by-tool has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/usage.py|160|/api/request/by-user",
+    "key": "SEC001|app/routes/usage.py|/api/request/by-user",
     "rule": "SEC001",
     "file": "app/routes/usage.py",
     "line": 160,
@@ -864,7 +864,7 @@
     "message": "Route GET /api/request/by-user has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/usage.py|173|/api/request/user/<user_name>/trend",
+    "key": "SEC001|app/routes/usage.py|/api/request/user/<user_name>/trend",
     "rule": "SEC001",
     "file": "app/routes/usage.py",
     "line": 173,
@@ -872,7 +872,7 @@
     "message": "Route GET /api/request/user/<user_name>/trend has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC001|app/routes/usage.py|187|/api/request/monthly",
+    "key": "SEC001|app/routes/usage.py|/api/request/monthly",
     "rule": "SEC001",
     "file": "app/routes/usage.py",
     "line": 187,
@@ -880,7 +880,7 @@
     "message": "Route GET /api/request/monthly has no authentication (no auth decorator, no before_request, no inline auth call)"
   },
   {
-    "key": "SEC002|app/routes/workspace.py|186|/api/workspace/prompts/<int:template_id>",
+    "key": "SEC002|app/routes/workspace.py|/api/workspace/prompts/<int:template_id>",
     "rule": "SEC002",
     "file": "app/routes/workspace.py",
     "line": 186,
@@ -888,7 +888,7 @@
     "message": "Route /api/workspace/prompts/<int:template_id> has ID param(s) ['template_id'] but no ownership check"
   },
   {
-    "key": "SEC002|app/routes/workspace.py|202|/api/workspace/prompts/<int:template_id>",
+    "key": "SEC002|app/routes/workspace.py|/api/workspace/prompts/<int:template_id>",
     "rule": "SEC002",
     "file": "app/routes/workspace.py",
     "line": 202,
@@ -896,7 +896,7 @@
     "message": "Route /api/workspace/prompts/<int:template_id> has ID param(s) ['template_id'] but no ownership check"
   },
   {
-    "key": "SEC002|app/routes/workspace.py|233|/api/workspace/prompts/<int:template_id>",
+    "key": "SEC002|app/routes/workspace.py|/api/workspace/prompts/<int:template_id>",
     "rule": "SEC002",
     "file": "app/routes/workspace.py",
     "line": 233,
@@ -904,7 +904,7 @@
     "message": "Route /api/workspace/prompts/<int:template_id> has ID param(s) ['template_id'] but no ownership check"
   },
   {
-    "key": "SEC002|app/routes/workspace.py|251|/api/workspace/prompts/<int:template_id>/render",
+    "key": "SEC002|app/routes/workspace.py|/api/workspace/prompts/<int:template_id>/render",
     "rule": "SEC002",
     "file": "app/routes/workspace.py",
     "line": 251,
@@ -912,7 +912,7 @@
     "message": "Route /api/workspace/prompts/<int:template_id>/render has ID param(s) ['template_id'] but no ownership check"
   },
   {
-    "key": "SEC002|app/routes/workspace.py|1282|/api/workspace/shares/<share_id>",
+    "key": "SEC002|app/routes/workspace.py|/api/workspace/shares/<share_id>",
     "rule": "SEC002",
     "file": "app/routes/workspace.py",
     "line": 1282,
@@ -920,7 +920,7 @@
     "message": "Route /api/workspace/shares/<share_id> has ID param(s) ['share_id'] but no ownership check"
   },
   {
-    "key": "SEC002|app/routes/workspace.py|1428|/api/workspace/knowledge/<entry_id>",
+    "key": "SEC002|app/routes/workspace.py|/api/workspace/knowledge/<entry_id>",
     "rule": "SEC002",
     "file": "app/routes/workspace.py",
     "line": 1428,
@@ -928,7 +928,7 @@
     "message": "Route /api/workspace/knowledge/<entry_id> has ID param(s) ['entry_id'] but no ownership check"
   },
   {
-    "key": "SEC003|app/routes/usage.py|0|/api",
+    "key": "SEC003|app/routes/usage.py|/api",
     "rule": "SEC003",
     "file": "app/routes/usage.py",
     "line": 0,
@@ -936,7 +936,7 @@
     "message": "Blueprint usage_bp (prefix='/api') has no @before_request auth hook. 0/15 routes have inline auth."
   },
   {
-    "key": "SEC003|app/routes/messages.py|0|/api",
+    "key": "SEC003|app/routes/messages.py|/api",
     "rule": "SEC003",
     "file": "app/routes/messages.py",
     "line": 0,
@@ -944,7 +944,7 @@
     "message": "Blueprint messages_bp (prefix='/api') has no @before_request auth hook. 0/6 routes have inline auth."
   },
   {
-    "key": "SEC003|app/routes/analysis.py|0|/api",
+    "key": "SEC003|app/routes/analysis.py|/api",
     "rule": "SEC003",
     "file": "app/routes/analysis.py",
     "line": 0,
@@ -952,7 +952,7 @@
     "message": "Blueprint analysis_bp (prefix='/api') has no @before_request auth hook. 0/12 routes have inline auth."
   },
   {
-    "key": "SEC003|app/routes/auth.py|0|/api",
+    "key": "SEC003|app/routes/auth.py|/api",
     "rule": "SEC003",
     "file": "app/routes/auth.py",
     "line": 0,
@@ -960,7 +960,7 @@
     "message": "Blueprint auth_bp (prefix='/api') has no @before_request auth hook. 4/6 routes have inline auth."
   },
   {
-    "key": "SEC003|app/routes/fetch.py|0|/api",
+    "key": "SEC003|app/routes/fetch.py|/api",
     "rule": "SEC003",
     "file": "app/routes/fetch.py",
     "line": 0,
@@ -968,7 +968,7 @@
     "message": "Blueprint fetch_bp (prefix='/api') has no @before_request auth hook. 0/5 routes have inline auth."
   },
   {
-    "key": "SEC003|app/routes/fs.py|0|/api",
+    "key": "SEC003|app/routes/fs.py|/api",
     "rule": "SEC003",
     "file": "app/routes/fs.py",
     "line": 0,
@@ -976,7 +976,7 @@
     "message": "Blueprint fs_bp (prefix='/api') has no @before_request auth hook. 0/3 routes have inline auth."
   },
   {
-    "key": "SEC003|app/routes/governance.py|0|/api",
+    "key": "SEC003|app/routes/governance.py|/api",
     "rule": "SEC003",
     "file": "app/routes/governance.py",
     "line": 0,
@@ -984,7 +984,7 @@
     "message": "Blueprint governance_bp (prefix='/api') has no @before_request auth hook. 17/19 routes have inline auth."
   },
   {
-    "key": "SEC003|app/routes/tenant.py|0|tenant_bp",
+    "key": "SEC003|app/routes/tenant.py|tenant_bp",
     "rule": "SEC003",
     "file": "app/routes/tenant.py",
     "line": 0,
@@ -992,7 +992,7 @@
     "message": "Blueprint tenant_bp (prefix='') has no @before_request auth hook. 0/14 routes have inline auth."
   },
   {
-    "key": "SEC003|app/routes/sso.py|0|sso_bp",
+    "key": "SEC003|app/routes/sso.py|sso_bp",
     "rule": "SEC003",
     "file": "app/routes/sso.py",
     "line": 0,
@@ -1000,7 +1000,7 @@
     "message": "Blueprint sso_bp (prefix='') has no @before_request auth hook. 6/9 routes have inline auth."
   },
   {
-    "key": "SEC003|app/routes/compliance.py|0|compliance_bp",
+    "key": "SEC003|app/routes/compliance.py|compliance_bp",
     "rule": "SEC003",
     "file": "app/routes/compliance.py",
     "line": 0,
@@ -1008,7 +1008,7 @@
     "message": "Blueprint compliance_bp (prefix='') has no @before_request auth hook. 0/14 routes have inline auth."
   },
   {
-    "key": "SEC003|app/routes/roi.py|0|/api",
+    "key": "SEC003|app/routes/roi.py|/api",
     "rule": "SEC003",
     "file": "app/routes/roi.py",
     "line": 0,
@@ -1016,7 +1016,7 @@
     "message": "Blueprint roi_bp (prefix='/api') has no @before_request auth hook. 0/10 routes have inline auth."
   },
   {
-    "key": "SEC003|app/routes/tool_accounts.py|0|/api",
+    "key": "SEC003|app/routes/tool_accounts.py|/api",
     "rule": "SEC003",
     "file": "app/routes/tool_accounts.py",
     "line": 0,
@@ -1024,7 +1024,7 @@
     "message": "Blueprint tool_accounts_bp (prefix='/api') has no @before_request auth hook. 0/8 routes have inline auth."
   },
   {
-    "key": "SEC003|app/routes/projects.py|0|/api",
+    "key": "SEC003|app/routes/projects.py|/api",
     "rule": "SEC003",
     "file": "app/routes/projects.py",
     "line": 0,
@@ -1032,7 +1032,7 @@
     "message": "Blueprint projects_bp (prefix='/api') has no @before_request auth hook. 0/8 routes have inline auth."
   },
   {
-    "key": "SEC003|app/routes/pages.py|0|pages_bp",
+    "key": "SEC003|app/routes/pages.py|pages_bp",
     "rule": "SEC003",
     "file": "app/routes/pages.py",
     "line": 0,

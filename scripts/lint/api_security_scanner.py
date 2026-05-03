@@ -129,7 +129,8 @@ class SecurityViolation:
     message: str
 
     def key(self) -> str:
-        return f"{self.rule}|{self.file}|{self.line}|{self.endpoint}"
+        # Exclude line number to prevent drift when code moves.
+        return f"{self.rule}|{self.file}|{self.endpoint}"
 
 
 # ---------------------------------------------------------------------------
@@ -146,6 +147,8 @@ class APISecurityScanner:
         self.blueprints: dict[str, tuple[str, bool]] = {}
         # Map filename -> list of RouteInfo
         self.routes: dict[str, list[RouteInfo]] = {}
+        # Cache: blueprint var name -> relative file path
+        self._bp_file_cache: dict[str, str] = {}
 
     def _relative_path(self, filepath: str | Path) -> str:
         try:
@@ -200,10 +203,11 @@ class APISecurityScanner:
                     if isinstance(dec, ast.Attribute) and dec.attr == "before_request":
                         has_before_request = True
 
-        # Update blueprint registry
+        # Update blueprint registry and cache
         if bp_var and bp_var in self.blueprints:
             old_prefix, _ = self.blueprints[bp_var]
             self.blueprints[bp_var] = (old_prefix, has_before_request)
+            self._bp_file_cache[bp_var] = rel_path
 
         url_prefix = self.blueprints.get(bp_var, ("", False))[0] if bp_var else ""
         file_routes: list[RouteInfo] = []
@@ -295,14 +299,14 @@ class APISecurityScanner:
         if not isinstance(path, str):
             return None
 
-        # Extract method from keywords
-        method = "GET"
+        # Extract methods from keywords (record all, join for display)
+        methods: list[str] = []
         for kw in dec.keywords:
             if kw.arg == "methods" and isinstance(kw.value, ast.List):
                 for elt in kw.value.elts:
                     if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
-                        method = elt.value
-                        break
+                        methods.append(elt.value)
+        method = ",".join(methods) if methods else "GET"
 
         return (method, path)
 
@@ -333,7 +337,18 @@ class APISecurityScanner:
         return False
 
     def _has_ownership_check(self, func: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
-        """Check if function body contains ownership verification patterns."""
+        """Check if function body contains ownership verification patterns.
+
+        NOTE: This is a best-effort heuristic using regex on ast.dump() output.
+        Limitations:
+        - Variable names not in the pattern list (e.g. caller_id, requester_id)
+          will not be detected.
+        - ast.dump() format may vary across Python versions.
+        - May produce false positives (e.g. logging user_id without comparison).
+
+        For a more robust solution, replace with proper AST node traversal that
+        walks Compare nodes and checks for user_id-related attribute access.
+        """
         src = ast.dump(func)
         # Look for comparisons involving user_id / owner
         for pattern in (
@@ -470,23 +485,18 @@ class APISecurityScanner:
 
     def _find_bp_file(self, bp_var: str) -> str | None:
         """Find the file that defines a blueprint variable."""
-        # Map bp_var to likely filename
-        # e.g. workspace_bp -> workspace.py, remote_bp -> remote.py
-        name = bp_var.replace("_bp", "")
-        candidates = [
-            PROJECT_ROOT / "app" / "routes" / f"{name}.py",
-            PROJECT_ROOT / "app" / "modules" / name / "*.py",
-        ]
-        for c in [PROJECT_ROOT / "app" / "routes" / f"{name}.py"]:
-            if c.exists():
-                return self._relative_path(c)
+        # Use cached mapping from scan_file phase
+        if bp_var in self._bp_file_cache:
+            return self._bp_file_cache[bp_var]
 
-        # Fallback: search in self.routes
-        for rel_path, routes in self.routes.items():
-            for r in routes:
-                bp_file_src = (PROJECT_ROOT / rel_path).read_text()
-                if f"{bp_var} = Blueprint" in bp_file_src:
-                    return rel_path
+        # Fallback: derive filename from bp_var naming convention
+        name = bp_var.replace("_bp", "")
+        candidate = PROJECT_ROOT / "app" / "routes" / f"{name}.py"
+        if candidate.exists():
+            rel = self._relative_path(candidate)
+            self._bp_file_cache[bp_var] = rel
+            return rel
+
         return None
 
 
@@ -538,6 +548,9 @@ def main() -> int:
     scanner.parse_blueprint_registry()
 
     # Phase 2: Scan files
+    # Note: incremental mode (passing specific files) gets correct SEC001/SEC002
+    # results, but SEC003 (blueprint-level check) may be incomplete since it
+    # only sees the passed files, not the full blueprint.
     if args.files:
         files = [Path(f) for f in args.files]
     else:
