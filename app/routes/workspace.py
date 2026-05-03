@@ -447,18 +447,13 @@ def list_sessions():
                 }
             )
 
-        # Enrich sessions with stats from daily_messages when agent_sessions stats are empty
-        sessions_needing_stats = [
-            s for s in formatted_sessions if (s.get("message_count") or 0) == 0
-        ]
-        if sessions_needing_stats:
+        # Enrich sessions with stats from daily_messages (take max across sources)
+        if formatted_sessions:
             try:
-                from app.repositories.database import get_param_placeholder
-
                 p = get_param_placeholder()
-                session_ids = [s["session_id"] for s in sessions_needing_stats]
-                placeholders = ", ".join([p] * len(session_ids))
-                stats_query = f"""
+                all_session_ids = [s["session_id"] for s in formatted_sessions]
+                placeholders = ", ".join([p] * len(all_session_ids))
+                dm_stats_query = f"""
                     SELECT
                         agent_session_id,
                         COUNT(*) as dm_msg_count,
@@ -467,21 +462,27 @@ def list_sessions():
                         SUM(output_tokens) as dm_output_tokens,
                         SUM(CASE WHEN role IN ('assistant', 'toolResult') THEN 1 ELSE 0 END) as dm_request_count,
                         MAX(timestamp) as dm_last_active,
-                            MAX(model) as dm_model
+                        MAX(model) as dm_model
                     FROM daily_messages
                     WHERE agent_session_id IN ({placeholders})
                     GROUP BY agent_session_id
                 """
-                stats_rows = db.fetch_all(stats_query, tuple(session_ids))
-                stats_map = {r["agent_session_id"]: r for r in stats_rows}
-                for s in sessions_needing_stats:
-                    dm = stats_map.get(s["session_id"])
+                dm_rows = db.fetch_all(dm_stats_query, tuple(all_session_ids))
+                dm_stats_map = {r["agent_session_id"]: r for r in dm_rows}
+                for s in formatted_sessions:
+                    dm = dm_stats_map.get(s["session_id"])
                     if dm and (dm["dm_msg_count"] or 0) > 0:
-                        s["message_count"] = dm["dm_msg_count"]
-                        s["total_tokens"] = dm["dm_total_tokens"] or 0
-                        s["total_input_tokens"] = dm["dm_input_tokens"] or 0
-                        s["total_output_tokens"] = dm["dm_output_tokens"] or 0
-                        s["request_count"] = dm["dm_request_count"] or 0
+                        # Take the larger value from either source
+                        dm_msg = dm["dm_msg_count"] or 0
+                        dm_req = dm["dm_request_count"] or 0
+                        dm_tokens = dm["dm_total_tokens"] or 0
+                        dm_input = dm["dm_input_tokens"] or 0
+                        dm_output = dm["dm_output_tokens"] or 0
+                        s["message_count"] = max(s.get("message_count") or 0, dm_msg)
+                        s["request_count"] = max(s.get("request_count") or 0, dm_req)
+                        s["total_tokens"] = max(s.get("total_tokens") or 0, dm_tokens)
+                        s["total_input_tokens"] = max(s.get("total_input_tokens") or 0, dm_input)
+                        s["total_output_tokens"] = max(s.get("total_output_tokens") or 0, dm_output)
                         if dm["dm_last_active"]:
                             s["updated_at"] = format_datetime(dm["dm_last_active"])
                         if not s.get("model") and dm.get("dm_model"):
@@ -597,6 +598,14 @@ def get_session(session_id):
         session = manager.get_session(session_id, include_messages=include_messages)
 
         if session:
+            from datetime import datetime as dt
+
+            from app.modules.workspace.session_manager import SessionMessage
+            from app.repositories.database import Database, get_param_placeholder
+
+            db = Database()
+            p = get_param_placeholder()
+
             # Calculate request_count from messages if available
             if include_messages and session.messages:
                 session.request_count = sum(
@@ -619,46 +628,42 @@ def get_session(session_id):
                 session.request_count = row["request_count"] if row else 0
                 conn.close()
 
-            # Enrich stats from daily_messages when agent_sessions stats are empty
-            if session.message_count == 0 and session.total_tokens == 0:
-                try:
-                    from app.repositories.database import Database, get_param_placeholder
-
-                    db = Database()
-                    p = get_param_placeholder()
-                    dm_query = f"""
-                        SELECT
-                            COUNT(*) as dm_msg_count,
-                            SUM(tokens_used) as dm_total_tokens,
-                            SUM(input_tokens) as dm_input_tokens,
-                            SUM(output_tokens) as dm_output_tokens,
-                            SUM(CASE WHEN role IN ('assistant', 'toolResult') THEN 1 ELSE 0 END) as dm_request_count,
-                            MAX(timestamp) as dm_last_active,
-                            MAX(model) as dm_model
-                        FROM daily_messages
-                        WHERE agent_session_id = {p}
-                    """
-                    dm = db.fetch_one(dm_query, (session_id,))
-                    if dm and (dm["dm_msg_count"] or 0) > 0:
-                        session.message_count = dm["dm_msg_count"]
-                        session.total_tokens = dm["dm_total_tokens"] or 0
-                        session.total_input_tokens = dm["dm_input_tokens"] or 0
-                        session.total_output_tokens = dm["dm_output_tokens"] or 0
-                        session.request_count = dm["dm_request_count"] or 0
-                        if dm["dm_last_active"]:
-                            session.updated_at = dm["dm_last_active"]
-                        if not session.model and dm.get("dm_model"):
-                            session.model = dm["dm_model"]
-                except Exception as e:
-                    logger.warning(f"Failed to enrich session stats from daily_messages: {e}")
+            # Enrich stats from daily_messages (take max across sources)
+            try:
+                dm_query = f"""
+                    SELECT
+                        COUNT(*) as dm_msg_count,
+                        SUM(tokens_used) as dm_total_tokens,
+                        SUM(input_tokens) as dm_input_tokens,
+                        SUM(output_tokens) as dm_output_tokens,
+                        SUM(CASE WHEN role IN ('assistant', 'toolResult') THEN 1 ELSE 0 END) as dm_request_count,
+                        MAX(timestamp) as dm_last_active,
+                        MAX(model) as dm_model
+                    FROM daily_messages
+                    WHERE agent_session_id = {p}
+                """
+                dm = db.fetch_one(dm_query, (session_id,))
+                if dm and (dm["dm_msg_count"] or 0) > 0:
+                    dm_msg = dm["dm_msg_count"] or 0
+                    dm_req = dm["dm_request_count"] or 0
+                    dm_tokens = dm["dm_total_tokens"] or 0
+                    dm_input = dm["dm_input_tokens"] or 0
+                    dm_output = dm["dm_output_tokens"] or 0
+                    session.message_count = max(session.message_count or 0, dm_msg)
+                    session.request_count = max(session.request_count or 0, dm_req)
+                    session.total_tokens = max(session.total_tokens or 0, dm_tokens)
+                    session.total_input_tokens = max(session.total_input_tokens or 0, dm_input)
+                    session.total_output_tokens = max(session.total_output_tokens or 0, dm_output)
+                    if dm["dm_last_active"]:
+                        session.updated_at = dm["dm_last_active"]
+                    if not session.model and dm.get("dm_model"):
+                        session.model = dm["dm_model"]
+            except Exception as e:
+                logger.warning(f"Failed to enrich session stats from daily_messages: {e}")
 
             # If include_messages but session has no messages, try daily_messages
             if include_messages and not session.messages:
                 try:
-                    from app.repositories.database import Database, get_param_placeholder
-
-                    db = Database()
-                    p = get_param_placeholder()
                     msg_query = f"""
                         SELECT id, agent_session_id as session_id, role, content,
                                tokens_used, model, timestamp
@@ -668,10 +673,6 @@ def get_session(session_id):
                     """
                     msg_rows = db.fetch_all(msg_query, (session_id,))
                     if msg_rows:
-                        from datetime import datetime as dt
-
-                        from app.modules.workspace.session_manager import SessionMessage
-
                         session.messages = [
                             SessionMessage(
                                 id=m.get("id"),
