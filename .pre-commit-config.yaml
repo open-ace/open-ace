@@ -24,6 +24,14 @@ repos:
         files: ^schema/schema-postgres\.sql$
         pass_filenames: false
 
+      # SQL compatibility check (incremental — only staged files)
+      - id: sql-compat-check
+        name: SQL Compatibility Check
+        entry: python3 scripts/lint/sql_compat_checker.py
+        language: system
+        files: ^(app|scripts)/.*\.py$
+        pass_filenames: true
+
   # =============================================================================
   # Code Formatting
   # =============================================================================
