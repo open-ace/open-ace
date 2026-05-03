@@ -154,7 +154,7 @@ def _is_var_used_in_sql(var_name: str, lines: list[str], assign_lineno: int) -> 
     """
     var_pattern = re.compile(rf"\b{re.escape(var_name)}\b")
     assign_pattern = re.compile(rf"\b{re.escape(var_name)}\s*=")
-    execute_pattern = re.compile(r"\bexecute\s*\(", re.IGNORECASE)
+    execute_pattern = re.compile(r"(?:^|[.\s\(,_])execute\s*\(", re.IGNORECASE)
 
     execute_lines: list[int] = []  # 0-indexed line numbers with execute() calls
 
