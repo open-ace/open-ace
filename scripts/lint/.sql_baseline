@@ -16,7 +16,7 @@
 {"rule": "SQL003", "file": "app/modules/workspace/prompt_library.py", "line": 427, "message": "LIKE query without escape_like() — special characters in user input will be treated as wildcards"}
 {"rule": "SQL003", "file": "app/modules/governance/quota_manager.py", "line": 549, "message": "LIKE query without escape_like() — special characters in user input will be treated as wildcards"}
 {"rule": "SQL003", "file": "app/modules/governance/quota_manager.py", "line": 667, "message": "LIKE query without escape_like() — special characters in user input will be treated as wildcards"}
-{"rule": "SQL003", "file": "app/routes/workspace.py", "line": 362, "message": "LIKE query without escape_like() — special characters in user input will be treated as wildcards"}
+{"rule": "SQL003", "file": "app/routes/workspace.py", "line": 365, "message": "LIKE query without escape_like() — special characters in user input will be treated as wildcards"}
 {"rule": "SQL001", "file": "app/services/quota_enforcement_scheduler.py", "line": 129, "message": "Boolean field 'is_active' compared with integer literal — use adapt_boolean_condition()"}
 {"rule": "SQL001", "file": "app/services/quota_enforcement_scheduler.py", "line": 151, "message": "Boolean field 'is_active' compared with integer literal — use adapt_boolean_condition()"}
 {"rule": "SQL001", "file": "app/services/data_fetch_scheduler.py", "line": 201, "message": "Boolean field 'is_active' compared with integer literal — use adapt_boolean_condition()"}
