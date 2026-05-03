@@ -119,7 +119,8 @@ def is_valid_path(path: str, allowed_prefixes: Optional[List[str]] = None) -> bo
     # Ensure path-separator boundary to prevent /home/user_evil matching /home.
     if allowed_prefixes:
         if not any(
-            abs_path == prefix or abs_path.startswith(prefix + os.sep) for prefix in allowed_prefixes
+            abs_path == prefix or abs_path.startswith(prefix + os.sep)
+            for prefix in allowed_prefixes
         ):
             return False
 
