@@ -11,7 +11,7 @@ from typing import Optional
 
 from flask import Blueprint, g, jsonify, redirect, request, url_for
 
-from app.auth.decorators import admin_required, auth_required
+from app.auth.decorators import admin_required, auth_required, public_endpoint
 from app.modules.sso.manager import SSOManager
 from app.modules.sso.provider import list_providers
 from app.repositories.user_repo import UserRepository
@@ -36,6 +36,7 @@ user_repo = UserRepository()
 
 
 @sso_bp.route("/providers", methods=["GET"])
+@public_endpoint
 def list_sso_providers():
     """List available SSO providers."""
     tenant_id = request.args.get("tenant_id", type=int)
@@ -122,6 +123,7 @@ def disable_provider(provider_name: str):
 
 
 @sso_bp.route("/login/<provider_name>", methods=["GET"])
+@public_endpoint
 def start_login(provider_name: str):
     """
     Start SSO login flow.
@@ -275,6 +277,7 @@ def get_session():
 
 
 @sso_bp.route("/session", methods=["DELETE"])
+@public_endpoint
 def logout():
     """Logout from SSO session."""
     token = request.cookies.get("session_token") or request.headers.get(

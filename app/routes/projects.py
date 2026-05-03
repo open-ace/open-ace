@@ -10,8 +10,9 @@ import os
 import platform
 import subprocess
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify, request
 
+from app.auth.decorators import _extract_token, _load_user_from_token
 from app.repositories.project_repo import ProjectRepository
 from app.repositories.user_repo import UserRepository
 
@@ -22,67 +23,53 @@ project_repo = ProjectRepository()
 user_repo = UserRepository()
 
 
+@projects_bp.before_request
+def _authenticate_user():
+    """Authenticate via session token or WebUI token."""
+    token = _extract_token()
+    if token:
+        user_data = _load_user_from_token(token)
+        if user_data:
+            user = user_repo.get_user_by_id(user_data.get("id"))
+            if user:
+                g.user = user_data
+                g.user_id = user_data.get("id")
+                return None
+
+    # Fallback: try WebUI token from query param
+    url_token = request.args.get("token")
+    if url_token:
+        from app.services.webui_manager import get_webui_manager
+
+        manager = get_webui_manager()
+        if manager:
+            valid, user_id, error = manager.validate_token(url_token)
+            if valid and user_id:
+                user = user_repo.get_user_by_id(user_id)
+                if user:
+                    g.user = {
+                        "id": user_id,
+                        "username": user.get("username"),
+                        "email": user.get("email"),
+                        "role": user.get("role"),
+                    }
+                    g.user_id = user_id
+                    g.user_role = user.get("role")
+                    return None
+
+    return jsonify({"error": "Authentication required"}), 401
+
+
 def run_as_user(system_account: str, command: list) -> subprocess.CompletedProcess:
     """Run a command as a specific user using sudo."""
     sudo_cmd = ["sudo", "-u", system_account] + command
     return subprocess.run(sudo_cmd, capture_output=True, text=True, timeout=30)
 
 
-def get_current_user():
-    """Get current user from session token."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-    if not token:
-        return None, {"error": "Unauthorized"}, 401
-
-    from app.auth.decorators import _load_user_from_token
-
-    user_data = _load_user_from_token(token)
-    if not user_data:
-        return None, {"error": "Unauthorized"}, 401
-    user = user_repo.get_user_by_id(user_data.get("id"))
-    return user, None, 200
-
-
-def get_webui_user():
-    """Get user from webui token (for iframe integration)."""
-    from app.services.webui_manager import get_webui_manager
-
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-    if not token:
-        # Also check query parameter for token
-        token = request.args.get("token")
-
-    if not token:
-        return None, {"error": "Unauthorized"}, 401
-
-    manager = get_webui_manager()
-    if not manager:
-        return None, {"error": "WebUI manager not available"}, 500
-
-    valid, user_id, error = manager.validate_token(token)
-    if not valid:
-        return None, {"error": error}, 401
-
-    user = user_repo.get_user_by_id(user_id)
-    return user, None, 200
-
-
 @projects_bp.route("/projects", methods=["GET"])
 def api_get_projects():
     """Get projects accessible by current user."""
-    # Try webui token first (for iframe integration)
-    user, error, code = get_webui_user()
-    if not user:
-        # Try regular session
-        user, error, code = get_current_user()
-        if not user:
-            return jsonify(error), code
-
-    user_id = user.get("id")
+    user_id = g.user_id
 
     # Get user's projects
     projects = project_repo.get_user_projects(user_id)
@@ -104,16 +91,8 @@ def api_get_projects():
 @projects_bp.route("/projects", methods=["POST"])
 def api_create_project():
     """Create a new project."""
-    # Try webui token first (for iframe integration)
-    user, error, code = get_webui_user()
-    if not user:
-        # Try regular session
-        user, error, code = get_current_user()
-        if not user:
-            return jsonify(error), code
-
-    user_id = user.get("id")
-    system_account = user.get("system_account")  # For sudo operations
+    user_id = g.user_id
+    system_account = g.user.get("system_account") if g.user else None
     data = request.get_json() or {}
 
     path = data.get("path")
@@ -223,19 +202,12 @@ def api_create_project():
 @projects_bp.route("/projects/<int:project_id>", methods=["GET"])
 def api_get_project(project_id):
     """Get project details."""
-    user, error, code = get_current_user()
-    if not user:
-        # Try webui token
-        user, error, code = get_webui_user()
-        if not user:
-            return jsonify(error), code
-
     project = project_repo.get_project_by_id(project_id)
     if not project:
         return jsonify({"error": "Project not found"}), 404
 
     # Check if user has access
-    user_id = user.get("id")
+    user_id = g.user_id
     user_project = project_repo.get_user_project(user_id, project_id)
 
     if not user_project and not project.is_shared:
@@ -256,17 +228,13 @@ def api_get_project(project_id):
 @projects_bp.route("/projects/<int:project_id>", methods=["PUT"])
 def api_update_project(project_id):
     """Update project information."""
-    user, error, code = get_current_user()
-    if not user:
-        return jsonify(error), code
-
     project = project_repo.get_project_by_id(project_id)
     if not project:
         return jsonify({"error": "Project not found"}), 404
 
     # Only creator or admin can update
-    user_id = user.get("id")
-    user_role = user.get("role")
+    user_id = g.user_id
+    user_role = g.user.get("role")
 
     if project.created_by != user_id and user_role != "admin":
         return jsonify({"error": "Only project creator or admin can update"}), 403
@@ -293,21 +261,13 @@ def api_update_project(project_id):
 @projects_bp.route("/projects/<int:project_id>", methods=["DELETE"])
 def api_delete_project(project_id):
     """Delete a project (soft delete)."""
-    # Try webui token first (for iframe integration)
-    user, error, code = get_webui_user()
-    if not user:
-        # Try regular session
-        user, error, code = get_current_user()
-        if not user:
-            return jsonify(error), code
-
     project = project_repo.get_project_by_id(project_id)
     if not project:
         return jsonify({"error": "Project not found"}), 404
 
     # Only creator or admin can delete
-    user_id = user.get("id")
-    user_role = user.get("role")
+    user_id = g.user_id
+    user_role = g.user.get("role")
 
     if project.created_by != user_id and user_role != "admin":
         return jsonify({"error": "Only project creator or admin can delete"}), 403
@@ -324,12 +284,7 @@ def api_delete_project(project_id):
 @projects_bp.route("/projects/stats", methods=["GET"])
 def api_get_all_project_stats():
     """Get statistics for all projects (admin only)."""
-    user, error, code = get_current_user()
-    if not user:
-        return jsonify(error), code
-
-    user_role = user.get("role")
-    if user_role != "admin":
+    if g.user.get("role") != "admin":
         return jsonify({"error": "Admin access required"}), 403
 
     stats = project_repo.get_all_project_stats()
@@ -345,19 +300,15 @@ def api_get_all_project_stats():
 @projects_bp.route("/projects/<int:project_id>/daily", methods=["GET"])
 def api_get_project_daily_stats(project_id):
     """Get daily statistics for a project."""
-    user, error, code = get_current_user()
-    if not user:
-        return jsonify(error), code
-
     project = project_repo.get_project_by_id(project_id)
     if not project:
         return jsonify({"error": "Project not found"}), 404
 
     # Check access
-    user_id = user.get("id")
+    user_id = g.user_id
     user_project = project_repo.get_user_project(user_id, project_id)
 
-    if not user_project and not project.is_shared and user.get("role") != "admin":
+    if not user_project and not project.is_shared and g.user.get("role") != "admin":
         return jsonify({"error": "Access denied"}), 403
 
     start_date = request.args.get("start_date")
@@ -380,19 +331,15 @@ def api_get_project_daily_stats(project_id):
 @projects_bp.route("/projects/<int:project_id>/users", methods=["GET"])
 def api_get_project_users(project_id):
     """Get users collaborating on a project."""
-    user, error, code = get_current_user()
-    if not user:
-        return jsonify(error), code
-
     project = project_repo.get_project_by_id(project_id)
     if not project:
         return jsonify({"error": "Project not found"}), 404
 
     # Check access
-    user_id = user.get("id")
+    user_id = g.user_id
     user_project = project_repo.get_user_project(user_id, project_id)
 
-    if not user_project and not project.is_shared and user.get("role") != "admin":
+    if not user_project and not project.is_shared and g.user.get("role") != "admin":
         return jsonify({"error": "Access denied"}), 403
 
     user_stats = project_repo.get_project_users(project_id)

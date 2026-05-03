@@ -14,6 +14,7 @@ from flask import (
     send_from_directory,
 )
 
+from app.auth.decorators import public_endpoint
 from app.services.auth_service import AuthService
 
 pages_bp = Blueprint("pages", __name__)
@@ -55,18 +56,21 @@ def serve_react_app():
 
 
 @pages_bp.route("/")
+@public_endpoint
 def index():
     """Serve the React SPA for the main page."""
     return serve_react_app()
 
 
 @pages_bp.route("/login")
+@public_endpoint
 def login_page():
     """Serve the React SPA for the login page."""
     return serve_react_app()
 
 
 @pages_bp.route("/logout")
+@public_endpoint
 def logout_page():
     """Logout and serve React SPA."""
     token = request.cookies.get("session_token")
@@ -80,6 +84,7 @@ def logout_page():
 
 # Catch-all route for React SPA (must be registered last)
 @pages_bp.route("/<path:path>")
+@public_endpoint
 def catch_all(path):
     """Serve React SPA for all other routes."""
     # Don't catch API routes or static files - return 404 to let Flask handle
@@ -92,6 +97,7 @@ def catch_all(path):
 
 
 @pages_bp.route("/static/claude-code-webui/<path:filename>")
+@public_endpoint
 def serve_static(filename):
     """Serve static files."""
     static_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "static")
