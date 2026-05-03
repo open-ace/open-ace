@@ -77,7 +77,8 @@ def run_fetch_scripts():
                 }
             except subprocess.TimeoutExpired:
                 results["qwen"] = {"success": False, "error": "Timeout after 5 minutes"}
-            except Exception:
+            except Exception as e:
+                logger.error(f"Error running qwen fetch script: {e}")
                 results["qwen"] = {"success": False, "error": "Internal server error"}
 
         # Run fetch_claude.py with sudo and --multi-user to scan all users' Claude directories
@@ -110,7 +111,8 @@ def run_fetch_scripts():
                 }
             except subprocess.TimeoutExpired:
                 results["claude"] = {"success": False, "error": "Timeout after 5 minutes"}
-            except Exception:
+            except Exception as e:
+                logger.error(f"Error running claude fetch script: {e}")
                 results["claude"] = {"success": False, "error": "Internal server error"}
 
         # Run fetch_openclaw.py with sudo and --multi-user to scan all users' OpenClaw directories
@@ -145,7 +147,8 @@ def run_fetch_scripts():
                 }
             except subprocess.TimeoutExpired:
                 results["openclaw"] = {"success": False, "error": "Timeout after 5 minutes"}
-            except Exception:
+            except Exception as e:
+                logger.error(f"Error running openclaw fetch script: {e}")
                 results["openclaw"] = {"success": False, "error": "Internal server error"}
 
         with _fetch_lock:

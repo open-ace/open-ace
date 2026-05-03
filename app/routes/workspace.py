@@ -55,7 +55,11 @@ auth_service = AuthService()
 
 @workspace_bp.before_request
 def load_user():
-    """Load the current user from session token before each request."""
+    """Load the current user from session token before each request.
+
+    All workspace endpoints require authentication. Returns 401 if no valid
+    session token is provided.
+    """
     token = request.cookies.get("session_token") or request.headers.get(
         "Authorization", ""
     ).replace("Bearer ", "")
@@ -70,8 +74,9 @@ def load_user():
                 "email": session_data.get("email"),
                 "role": session_data.get("role"),
             }
+            return None  # Authenticated — proceed to route handler
         else:
-            g.user = None
+            return jsonify({"error": "Authentication required"}), 401
     else:
         # Check for URL token parameter (used by qwen-code-webui)
         url_token = request.args.get("token")
@@ -94,15 +99,12 @@ def load_user():
                             "email": user.get("email"),
                             "role": user.get("role"),
                         }
-                    else:
-                        g.user = None
-                else:
-                    g.user = None
+                        return None  # Authenticated
             except Exception as e:
                 logger.warning(f"Failed to validate URL token: {e}")
-                g.user = None
-        else:
-            g.user = None
+
+    # No valid authentication provided
+    return jsonify({"error": "Authentication required"}), 401
 
 
 # ==================== Prompt Templates ====================
@@ -608,13 +610,9 @@ def get_session(session_id):
             # Ownership check: only the session owner or admin can access
             current_user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
             current_role = g.user.get("role") if hasattr(g, "user") and g.user else None
-            if (
-                current_role != "admin"
-                and current_user_id
-                and session.user_id
-                and session.user_id != current_user_id
-            ):
-                return jsonify({"success": False, "error": "Access denied"}), 403
+            if current_role != "admin":
+                if not current_user_id or not session.user_id or session.user_id != current_user_id:
+                    return jsonify({"success": False, "error": "Access denied"}), 403
             from datetime import datetime as dt
 
             from app.modules.workspace.session_manager import SessionMessage
@@ -837,13 +835,9 @@ def complete_session(session_id):
         if session:
             current_user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
             current_role = g.user.get("role") if hasattr(g, "user") and g.user else None
-            if (
-                current_role != "admin"
-                and current_user_id
-                and session.user_id
-                and session.user_id != current_user_id
-            ):
-                return jsonify({"success": False, "error": "Access denied"}), 403
+            if current_role != "admin":
+                if not current_user_id or not session.user_id or session.user_id != current_user_id:
+                    return jsonify({"success": False, "error": "Access denied"}), 403
 
         success = manager.complete_session(session_id)
 
@@ -867,13 +861,9 @@ def delete_session(session_id):
         if session:
             current_user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
             current_role = g.user.get("role") if hasattr(g, "user") and g.user else None
-            if (
-                current_role != "admin"
-                and current_user_id
-                and session.user_id
-                and session.user_id != current_user_id
-            ):
-                return jsonify({"success": False, "error": "Access denied"}), 403
+            if current_role != "admin":
+                if not current_user_id or not session.user_id or session.user_id != current_user_id:
+                    return jsonify({"success": False, "error": "Access denied"}), 403
 
         success = manager.delete_session(session_id)
 
@@ -938,13 +928,9 @@ def restore_session(session_id):
         current_user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
         current_role = g.user.get("role") if hasattr(g, "user") and g.user else None
         session_user_id = session_data.get("user_id")
-        if (
-            current_role != "admin"
-            and current_user_id
-            and session_user_id
-            and session_user_id != current_user_id
-        ):
-            return jsonify({"success": False, "error": "Access denied"}), 403
+        if current_role != "admin":
+            if not current_user_id or not session_user_id or session_user_id != current_user_id:
+                return jsonify({"success": False, "error": "Access denied"}), 403
 
         tool_name = session_data["tool_name"]
         project_path = session_data.get("project_path")
@@ -1056,13 +1042,9 @@ def rename_session(session_id):
         # Ownership check
         current_user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
         current_role = g.user.get("role") if hasattr(g, "user") and g.user else None
-        if (
-            current_role != "admin"
-            and current_user_id
-            and session.user_id
-            and session.user_id != current_user_id
-        ):
-            return jsonify({"success": False, "error": "Access denied"}), 403
+        if current_role != "admin":
+            if not current_user_id or not session.user_id or session.user_id != current_user_id:
+                return jsonify({"success": False, "error": "Access denied"}), 403
 
         session.title = new_name
         success = manager.update_session(session)

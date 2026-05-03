@@ -12,6 +12,8 @@ import platform
 import subprocess
 from pathlib import Path
 
+from typing import List, Optional
+
 from flask import Blueprint, jsonify, request
 
 from app.repositories.user_repo import UserRepository
@@ -93,8 +95,13 @@ def get_home_directory(user=None):
     return str(Path.home())
 
 
-def is_valid_path(path: str) -> bool:
-    """Check if path is valid for browsing."""
+def is_valid_path(path: str, allowed_prefixes: Optional[List[str]] = None) -> bool:
+    """Check if path is valid for browsing.
+
+    Optionally restricts the resolved path to a list of allowed prefix
+    directories (e.g. workspace base dir). If allowed_prefixes is None,
+    no prefix restriction is applied (backward compatible).
+    """
     if not path:
         return False
 
@@ -104,9 +111,14 @@ def is_valid_path(path: str) -> bool:
     except Exception:
         return False
 
-    # Check for path traversal in the resolved path
+    # Check for path traversal in the original input
     if ".." in path:
         return False
+
+    # Restrict resolved path to allowed prefixes if provided
+    if allowed_prefixes:
+        if not any(abs_path.startswith(prefix) for prefix in allowed_prefixes):
+            return False
 
     # Platform-specific validation
     system = platform.system()
@@ -206,8 +218,9 @@ def api_browse_directory():
     if not path or path.lower() == "home":
         path = get_home_directory(user)
     else:
-        # Validate and resolve path
-        if not is_valid_path(path):
+        # Validate and resolve path — restrict to workspace base dir
+        base_dir = get_workspace_base_dir()
+        if not is_valid_path(path, allowed_prefixes=[base_dir]):
             return jsonify({"error": "Invalid path"}), 400
 
         path = os.path.realpath(path)
@@ -347,8 +360,9 @@ def api_check_path():
     if not path:
         return jsonify({"error": "Path is required"}), 400
 
-    # Validate path format
-    if not is_valid_path(path):
+    # Validate path format — restrict to workspace base dir
+    base_dir = get_workspace_base_dir()
+    if not is_valid_path(path, allowed_prefixes=[base_dir]):
         return (
             jsonify(
                 {

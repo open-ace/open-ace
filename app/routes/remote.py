@@ -31,7 +31,12 @@ auth_service = AuthService()
 
 @remote_bp.before_request
 def load_user():
-    """Load the current user from session token before each request."""
+    """Load the current user from session token before each request.
+
+    Most remote endpoints require authentication. Returns 401 if no valid
+    session token is provided. WebSocket, agent, and LLM-proxy endpoints
+    use their own auth (JWT tokens) and are exempted.
+    """
     # Skip auth for WebSocket upgrade and agent endpoints (they use JWT)
     if request.path.endswith("/agent/ws"):
         return
@@ -56,8 +61,9 @@ def load_user():
                 "email": session_data.get("email"),
                 "role": session_data.get("role"),
             }
+            return None  # Authenticated
         else:
-            g.user = None
+            return jsonify({"error": "Authentication required"}), 401
     else:
         url_token = request.args.get("token")
         if url_token:
@@ -71,6 +77,7 @@ def load_user():
                     "email": session_data.get("email"),
                     "role": session_data.get("role"),
                 }
+                return None  # Authenticated
             else:
                 # Fall back to WebUI token validation
                 try:
@@ -90,15 +97,12 @@ def load_user():
                                 "email": user.get("email"),
                                 "role": user.get("role"),
                             }
-                        else:
-                            g.user = None
-                    else:
-                        g.user = None
+                            return None  # Authenticated
                 except Exception as e:
                     logger.warning(f"Failed to validate URL token: {e}")
-                    g.user = None
-        else:
-            g.user = None
+
+    # No valid authentication provided
+    return jsonify({"error": "Authentication required"}), 401
 
 
 def _require_auth():

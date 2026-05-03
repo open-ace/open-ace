@@ -7,6 +7,7 @@ Business logic for authentication and authorization.
 
 import logging
 import secrets
+import time
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -14,21 +15,46 @@ from app.repositories.user_repo import UserRepository
 
 logger = logging.getLogger(__name__)
 
-# In-memory login attempt tracking (per-username)
+# In-memory login attempt tracking (per-username).
+# LIMITATION: This dict is per-process. In multi-worker deployments (e.g. gunicorn
+# with multiple workers), each worker maintains an independent counter. Service
+# restarts also clear all lockouts. For production use, consider migrating to
+# Redis or a database-backed store to ensure consistent enforcement across workers.
 _login_attempts: dict[str, dict] = (
     {}
 )  # {username: {"count": int, "locked_until": Optional[datetime]}}
 
+# Cache for security_settings queries (60 second TTL)
+_security_settings_cache: dict = {}  # {"settings": dict, "timestamp": float}
+_SECURITY_SETTINGS_TTL = 60  # seconds
 
-def _get_max_login_attempts() -> int:
-    """Get max login attempts from security_settings."""
+
+def _get_security_settings() -> dict:
+    """Get security settings with a 60-second in-memory cache."""
+    now = time.time()
+    cached = _security_settings_cache.get("timestamp", 0)
+    if _security_settings_cache and (now - cached) < _SECURITY_SETTINGS_TTL:
+        return _security_settings_cache["settings"]
+
     try:
         from app.repositories.governance_repo import GovernanceRepository
 
         settings = GovernanceRepository().get_security_settings()
-        return int(settings.get("max_login_attempts", 5))
+        _security_settings_cache["settings"] = settings
+        _security_settings_cache["timestamp"] = now
+        return settings
     except Exception:
-        return 5
+        return {}
+
+
+def _get_lockout_duration_minutes() -> int:
+    """Get lockout duration in minutes from security_settings."""
+    return int(_get_security_settings().get("lockout_duration_minutes", 15))
+
+
+def _get_max_login_attempts() -> int:
+    """Get max login attempts from security_settings."""
+    return int(_get_security_settings().get("max_login_attempts", 5))
 
 
 def _check_login_lockout(username: str) -> tuple[bool, Optional[str]]:
@@ -54,6 +80,7 @@ def _check_login_lockout(username: str) -> tuple[bool, Optional[str]]:
 def _record_failed_login(username: str) -> None:
     """Record a failed login attempt and lock if threshold exceeded."""
     max_attempts = _get_max_login_attempts()
+    lockout_minutes = _get_lockout_duration_minutes()
 
     if username not in _login_attempts:
         _login_attempts[username] = {"count": 0, "locked_until": None}
@@ -61,7 +88,9 @@ def _record_failed_login(username: str) -> None:
     _login_attempts[username]["count"] += 1
 
     if _login_attempts[username]["count"] >= max_attempts:
-        _login_attempts[username]["locked_until"] = datetime.utcnow() + timedelta(minutes=15)
+        _login_attempts[username]["locked_until"] = datetime.utcnow() + timedelta(
+            minutes=lockout_minutes
+        )
         logger.warning(f"Account locked for {username} after {max_attempts} failed attempts")
 
 
@@ -77,9 +106,7 @@ SESSION_EXPIRATION_HOURS = 24
 def _get_session_timeout_hours() -> float:
     """Get session timeout from security_settings, falling back to 24h."""
     try:
-        from app.repositories.governance_repo import GovernanceRepository
-
-        settings = GovernanceRepository().get_security_settings()
+        settings = _get_security_settings()
         timeout_minutes = settings.get("session_timeout", SESSION_EXPIRATION_HOURS * 60)
         return float(timeout_minutes) / 60.0
     except Exception:

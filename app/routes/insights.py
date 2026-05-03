@@ -33,7 +33,11 @@ insights_service = InsightsService(
 
 @insights_bp.before_request
 def load_user():
-    """Load the current user from session token before each request."""
+    """Load the current user from session token before each request.
+
+    All insights endpoints require authentication. Returns 401 if no valid
+    session token is provided.
+    """
     token = request.cookies.get("session_token") or request.headers.get(
         "Authorization", ""
     ).replace("Bearer ", "")
@@ -48,10 +52,11 @@ def load_user():
                 "email": session_data.get("email"),
                 "role": session_data.get("role"),
             }
+            return None  # Authenticated
         else:
-            g.user = None
+            return jsonify({"error": "Authentication required"}), 401
     else:
-        g.user = None
+        return jsonify({"error": "Authentication required"}), 401
 
 
 def require_auth():
