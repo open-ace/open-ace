@@ -63,13 +63,13 @@ def _load_user_from_token(token: str) -> dict | None:
 
 def _check_session_ownership(user_id: int, session_id: str) -> bool:
     """Check if user owns the given session."""
-    from app.repositories.workspace_repo import WorkspaceRepository
+    from app.modules.workspace.session_manager import get_session_manager
 
-    repo = WorkspaceRepository()
-    session = repo.get_session(session_id)
+    mgr = get_session_manager()
+    session = mgr.get_session(session_id)
     if not session:
         return False
-    return session.get("user_id") == user_id
+    return getattr(session, "user_id", None) == user_id
 
 
 def _check_machine_admin(user_id: int, machine_id: str) -> bool:
@@ -114,7 +114,10 @@ def auth_required(f=None, *, ownership=None):
             g.user_id = user.get("id")
             g.user_role = user.get("role")
 
-            # Ownership checks
+            # Ownership checks (admin bypasses)
+            if g.user_role == "admin":
+                return func(*args, **kwargs)
+
             if ownership == "session":
                 session_id = kwargs.get("session_id")
                 if session_id and not _check_session_ownership(g.user_id, session_id):

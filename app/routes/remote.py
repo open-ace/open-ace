@@ -18,7 +18,7 @@ import uuid
 
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
-from app.auth.decorators import _extract_token, _load_user_from_token
+from app.auth.decorators import _extract_token, _load_user_from_token, admin_required
 from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
 from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
 from app.modules.workspace.remote_session_manager import get_remote_session_manager
@@ -57,35 +57,40 @@ def load_user():
             g.user_id = user.get("id")
             g.user_role = user.get("role")
             return None  # Authenticated
-        else:
-            # Try as query-param token with WebUI fallback
-            url_token = request.args.get("token")
-            if url_token and url_token == token:
-                try:
-                    from app.services.webui_manager import WebUIManager
 
-                    webui_manager = WebUIManager()
-                    is_valid, user_id, error = webui_manager.validate_token(url_token)
-                    if is_valid and user_id:
-                        from app.repositories.user_repo import UserRepository
+    # Fallback: try query param token (for SSE/EventSource which can't send cookies)
+    url_token = request.args.get("token")
+    if url_token and url_token != token:
+        user = _load_user_from_token(url_token)
+        if user:
+            g.user = user
+            g.user_id = user.get("id")
+            g.user_role = user.get("role")
+            return None
+        # Try WebUI token validation
+        try:
+            from app.services.webui_manager import WebUIManager
 
-                        user_repo = UserRepository()
-                        user_data = user_repo.get_user_by_id(user_id)
-                        if user_data:
-                            g.user = {
-                                "id": user_id,
-                                "username": user_data.get("username"),
-                                "email": user_data.get("email"),
-                                "role": user_data.get("role"),
-                            }
-                            g.user_id = user_id
-                            g.user_role = user_data.get("role")
-                            return None  # Authenticated
-                except Exception as e:
-                    logger.warning(f"Failed to validate URL token: {e}")
-            return jsonify({"error": "Authentication required"}), 401
+            webui_manager = WebUIManager()
+            is_valid, user_id, error = webui_manager.validate_token(url_token)
+            if is_valid and user_id:
+                from app.repositories.user_repo import UserRepository
 
-    # No token provided
+                user_repo = UserRepository()
+                user_data = user_repo.get_user_by_id(user_id)
+                if user_data:
+                    g.user = {
+                        "id": user_id,
+                        "username": user_data.get("username"),
+                        "email": user_data.get("email"),
+                        "role": user_data.get("role"),
+                    }
+                    g.user_id = user_id
+                    g.user_role = user_data.get("role")
+                    return None
+        except Exception as e:
+            logger.warning(f"Failed to validate URL token: {e}")
+
     return jsonify({"error": "Authentication required"}), 401
 
 
@@ -127,6 +132,7 @@ def _check_session_access(session_id):
 
 
 @remote_bp.route("/machines/register", methods=["POST"])
+@admin_required
 def register_machine():
     """
     Generate a registration token for a new machine.
@@ -196,6 +202,7 @@ def get_machine(machine_id):
 
 
 @remote_bp.route("/machines/<machine_id>", methods=["DELETE"])
+@admin_required
 def deregister_machine(machine_id):
     """Deregister a remote machine. Admin only."""
 
@@ -264,6 +271,7 @@ def revoke_user(machine_id, user_id):
 
 
 @remote_bp.route("/api-keys", methods=["GET"])
+@admin_required
 def list_api_keys():
     """List all encrypted API keys (without revealing actual keys). Admin only."""
 
@@ -282,6 +290,7 @@ def list_api_keys():
 
 
 @remote_bp.route("/api-keys", methods=["POST"])
+@admin_required
 def store_api_key():
     """Store a new encrypted API key. Admin only."""
 
@@ -311,6 +320,7 @@ def store_api_key():
 
 
 @remote_bp.route("/api-keys/<int:key_id>", methods=["DELETE"])
+@admin_required
 def delete_api_key(key_id):
     """Delete an API key by ID. Admin only."""
 

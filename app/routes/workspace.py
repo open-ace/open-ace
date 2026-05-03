@@ -64,33 +64,39 @@ def load_user():
             g.user_id = user.get("id")
             g.user_role = user.get("role")
             return None
-        else:
-            # Try WebUI token fallback (query param)
-            url_token = request.args.get("token")
-            if url_token and url_token == token:
-                try:
-                    from app.services.webui_manager import WebUIManager
 
-                    webui_manager = WebUIManager()
-                    is_valid, user_id, error = webui_manager.validate_token(url_token)
-                    if is_valid and user_id:
-                        from app.repositories.user_repo import UserRepository
+    # Fallback: try query param token (for SSE/EventSource which can't send cookies)
+    url_token = request.args.get("token")
+    if url_token and url_token != token:
+        user = _load_user_from_token(url_token)
+        if user:
+            g.user = user
+            g.user_id = user.get("id")
+            g.user_role = user.get("role")
+            return None
+        # Try WebUI token validation
+        try:
+            from app.services.webui_manager import WebUIManager
 
-                        user_repo = UserRepository()
-                        user_data = user_repo.get_user_by_id(user_id)
-                        if user_data:
-                            g.user = {
-                                "id": user_id,
-                                "username": user_data.get("username"),
-                                "email": user_data.get("email"),
-                                "role": user_data.get("role"),
-                            }
-                            g.user_id = user_id
-                            g.user_role = user_data.get("role")
-                            return None
-                except Exception as e:
-                    logger.warning(f"Failed to validate URL token: {e}")
-            return jsonify({"error": "Authentication required"}), 401
+            webui_manager = WebUIManager()
+            is_valid, user_id, error = webui_manager.validate_token(url_token)
+            if is_valid and user_id:
+                from app.repositories.user_repo import UserRepository
+
+                user_repo = UserRepository()
+                user_data = user_repo.get_user_by_id(user_id)
+                if user_data:
+                    g.user = {
+                        "id": user_id,
+                        "username": user_data.get("username"),
+                        "email": user_data.get("email"),
+                        "role": user_data.get("role"),
+                    }
+                    g.user_id = user_id
+                    g.user_role = user_data.get("role")
+                    return None
+        except Exception as e:
+            logger.warning(f"Failed to validate URL token: {e}")
 
     return jsonify({"error": "Authentication required"}), 401
 

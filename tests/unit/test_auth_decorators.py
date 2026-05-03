@@ -12,12 +12,13 @@ Tests the unified auth decorator framework:
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 # Ensure project root is on path
-project_root = "/Users/rhuang/workspace/open-ace"
+project_root = str(Path(__file__).resolve().parent.parent.parent)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
@@ -109,9 +110,7 @@ class TestExtractToken:
 
         app = _make_app()
 
-        with app.test_request_context(
-            "/", headers={"Authorization": "Bearer tok-header"}
-        ):
+        with app.test_request_context("/", headers={"Authorization": "Bearer tok-header"}):
             assert _extract_token() == "tok-header"
 
     def test_query_param_token(self):
@@ -172,9 +171,7 @@ class TestAuthRequired:
             return_value=(False, {"error": "Invalid"}),
         ):
             with app.test_client() as client:
-                resp = client.get(
-                    "/api/user", headers={"Authorization": "Bearer bad"}
-                )
+                resp = client.get("/api/user", headers={"Authorization": "Bearer bad"})
                 assert resp.status_code == 401
 
 
