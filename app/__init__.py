@@ -62,9 +62,9 @@ def create_app(config=None):
 
     # Pre-check API key encryption availability
     try:
-        from app.modules.workspace.api_key_proxy import _get_encryption_key
+        from app.modules.workspace.api_key_proxy import APIKeyProxyService
 
-        _get_encryption_key()
+        APIKeyProxyService()  # __init__ calls _get_encryption_key() internally
     except RuntimeError as e:
         if os.environ.get("FLASK_ENV") == "production":
             raise RuntimeError(f"API key encryption misconfigured: {e}")

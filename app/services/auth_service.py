@@ -61,70 +61,104 @@ def _get_max_login_attempts() -> int:
 
 
 def _check_login_lockout(username: str) -> tuple[bool, Optional[str]]:
-    """Check if account is temporarily locked. Returns (is_locked, error_message)."""
-    from app.repositories.database import Database
+    """Check if account is temporarily locked. Returns (is_locked, error_message).
 
-    db = Database()
-    row = db.fetch_one(
-        "SELECT attempt_count, locked_until FROM login_attempts WHERE username = %s",
-        (username,),
-    )
+    Degrades gracefully on DB failure: logs warning and allows login (no lockout).
+    """
+    from app.repositories.database import Database, get_param_placeholder
 
-    if not row:
-        return False, None
+    p = get_param_placeholder()
 
-    locked_until = row.get("locked_until")
-    if locked_until:
-        if isinstance(locked_until, str):
-            locked_until = datetime.fromisoformat(locked_until)
-        if locked_until > datetime.utcnow():
-            remaining = int((locked_until - datetime.utcnow()).total_seconds() / 60) + 1
-            return True, f"Account temporarily locked. Try again in {remaining} minutes."
-        else:
-            # Lockout expired — reset
-            db.execute("DELETE FROM login_attempts WHERE username = %s", (username,))
+    try:
+        db = Database()
+        row = db.fetch_one(
+            f"SELECT attempt_count, locked_until FROM login_attempts WHERE username = {p}",
+            (username,),
+        )
+
+        if not row:
             return False, None
 
-    return False, None
+        locked_until = row.get("locked_until")
+        if locked_until:
+            if isinstance(locked_until, str):
+                locked_until = datetime.fromisoformat(locked_until)
+            if locked_until > datetime.utcnow():
+                remaining = int((locked_until - datetime.utcnow()).total_seconds() / 60) + 1
+                return True, f"Account temporarily locked. Try again in {remaining} minutes."
+            else:
+                # Lockout expired — reset
+                db.execute(
+                    f"DELETE FROM login_attempts WHERE username = {p}",
+                    (username,),
+                )
+                return False, None
+
+        return False, None
+    except Exception as e:
+        logger.warning(f"Login lockout check failed for {username}: {e}")
+        return False, None
 
 
 def _record_failed_login(username: str) -> None:
-    """Record a failed login attempt and lock if threshold exceeded."""
+    """Record a failed login attempt and lock if threshold exceeded.
+
+    Uses SELECT + INSERT/UPDATE instead of ON CONFLICT for SQLite compatibility.
+    Degrades gracefully on DB failure: logs warning and continues.
+    """
     from app.repositories.database import Database, get_param_placeholder
 
-    db = Database()
     max_attempts = _get_max_login_attempts()
     lockout_minutes = _get_lockout_duration_minutes()
     p = get_param_placeholder()
 
-    # Upsert: increment attempt_count
-    db.execute(
-        f"""INSERT INTO login_attempts (username, attempt_count, locked_until)
-            VALUES ({p}, 1, NULL)
-            ON CONFLICT (username) DO UPDATE SET attempt_count = login_attempts.attempt_count + 1""",
-        (username,),
-    )
+    try:
+        db = Database()
 
-    # Check if threshold reached
-    row = db.fetch_one(
-        "SELECT attempt_count FROM login_attempts WHERE username = %s",
-        (username,),
-    )
-    if row and row["attempt_count"] >= max_attempts:
-        locked_until = datetime.utcnow() + timedelta(minutes=lockout_minutes)
-        db.execute(
-            "UPDATE login_attempts SET locked_until = %s WHERE username = %s",
-            (locked_until, username),
+        # Check existing record
+        row = db.fetch_one(
+            f"SELECT attempt_count FROM login_attempts WHERE username = {p}",
+            (username,),
         )
-        logger.warning(f"Account locked for {username} after {max_attempts} failed attempts")
+
+        if row:
+            new_count = row["attempt_count"] + 1
+            db.execute(
+                f"UPDATE login_attempts SET attempt_count = {p} WHERE username = {p}",
+                (new_count, username),
+            )
+        else:
+            new_count = 1
+            db.execute(
+                f"INSERT INTO login_attempts (username, attempt_count, locked_until) VALUES ({p}, {p}, NULL)",
+                (username, 1),
+            )
+
+        if new_count >= max_attempts:
+            locked_until = datetime.utcnow() + timedelta(minutes=lockout_minutes)
+            db.execute(
+                f"UPDATE login_attempts SET locked_until = {p} WHERE username = {p}",
+                (locked_until, username),
+            )
+            logger.warning(f"Account locked for {username} after {max_attempts} failed attempts")
+    except Exception as e:
+        logger.warning(f"Failed to record login attempt for {username}: {e}")
 
 
 def _clear_failed_logins(username: str) -> None:
     """Clear failed login attempts after successful login."""
-    from app.repositories.database import Database
+    from app.repositories.database import Database, get_param_placeholder
 
-    db = Database()
-    db.execute("DELETE FROM login_attempts WHERE username = %s", (username,))
+    p = get_param_placeholder()
+
+    try:
+        db = Database()
+        db.execute(
+            f"DELETE FROM login_attempts WHERE username = {p}",
+            (username,),
+        )
+    except Exception as e:
+        logger.warning(f"Failed to clear login attempts for {username}: {e}")
 
 
 # Session token expiration default (overridden by security_settings DB)
