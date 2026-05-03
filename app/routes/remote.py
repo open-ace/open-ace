@@ -37,12 +37,14 @@ def load_user():
     session token is provided. WebSocket, agent, and LLM-proxy endpoints
     use their own auth (JWT tokens) and are exempted.
     """
-    # Skip auth for WebSocket upgrade and agent endpoints (they use JWT)
-    if request.path.endswith("/agent/ws"):
+    # Skip auth for endpoints that use their own authentication (JWT, API keys)
+    _exact_exempt = {
+        "/remote/agent/ws",
+        "/remote/usage-report",
+    }
+    if request.path in _exact_exempt:
         return
-    if request.path.endswith("/llm-proxy"):
-        return
-    if request.path.endswith("/usage-report"):
+    if request.path.startswith("/remote/llm-proxy"):
         return
     if request.path.startswith("/remote/agent/install"):
         return

@@ -5,6 +5,7 @@ Open ACE - Upload Routes
 API routes for data upload operations.
 """
 
+import hmac
 import json
 import logging
 import os
@@ -36,7 +37,7 @@ def require_upload_auth(f):
 
         # Check Authorization header
         auth_header = request.headers.get("X-Upload-Auth")
-        if not auth_header or auth_header != UPLOAD_AUTH_KEY:
+        if not auth_header or not hmac.compare_digest(auth_header, UPLOAD_AUTH_KEY):
             logger.warning("Unauthorized upload attempt")
             return jsonify({"error": "Unauthorized"}), 401
 
