@@ -128,6 +128,36 @@ class TestIsVarUsedInSql:
         ]
         assert _is_var_used_in_sql("is_active_int", lines, 1) is False
 
+    def test_var_in_execute_params_separate_line(self):  # #33
+        """DB-API: params tuple on separate line from execute()."""
+        lines = [
+            "is_shared_int = 1 if is_shared else 0",
+            "cursor = self.db.execute(",
+            '    "INSERT INTO projects (is_shared) VALUES (?)",',
+            "    (is_shared_int,),",
+            ")",
+        ]
+        assert _is_var_used_in_sql("is_shared_int", lines, 1) is True
+
+    def test_var_in_underscore_execute(self):  # #36
+        """_execute() helper function pattern (scripts/shared/db.py)."""
+        lines = [
+            "is_active_val = 1 if is_active else 0",
+            "_execute(",
+            '    cursor, "UPDATE users SET is_active = ?", (is_active_val,)',
+            ")",
+        ]
+        assert _is_var_used_in_sql("is_active_val", lines, 1) is True
+
+    def test_multiple_execute_calls(self):  # #37
+        """Variable referenced in second execute() call should be detected."""
+        lines = [
+            "is_active_int = 1 if is_active else 0",
+            "cursor.execute('SELECT 1')",
+            "cursor.execute('UPDATE t SET x = ?', (is_active_int,))",
+        ]
+        assert _is_var_used_in_sql("is_active_int", lines, 1) is True
+
 
 # ---------------------------------------------------------------------------
 # _relative_path tests (#19)
@@ -260,6 +290,31 @@ class TestSQL001:
         """)
         violations = _check_sql001(code, "test.py")
         assert violations[0]["line"] == 3
+
+    def test_int_variable_in_execute_params(self):  # #33/#35
+        """Variable in execute() params on separate line from SQL string."""
+        code = textwrap.dedent("""\
+            is_shared_int = 1 if is_shared else 0
+            cursor = self.db.execute(
+                "INSERT INTO projects (is_shared) VALUES (?)",
+                (is_shared_int,),
+            )
+        """)
+        violations = _check_sql001(code, "test.py")
+        assert len(violations) == 1
+        assert "is_shared_int" in violations[0]["message"]
+
+    def test_int_variable_in_underscore_execute(self):  # #36
+        """Variable in _execute() helper call."""
+        code = textwrap.dedent("""\
+            is_active_val = 1 if is_active else 0
+            _execute(
+                cursor, "UPDATE users SET is_active = ?", (is_active_val,)
+            )
+        """)
+        violations = _check_sql001(code, "test.py")
+        assert len(violations) == 1
+        assert "is_active_val" in violations[0]["message"]
 
 
 # ---------------------------------------------------------------------------

@@ -1,3 +1,4 @@
+{"rule": "SQL001", "file": "app/repositories/project_repo.py", "line": 69, "message": "Boolean value converted to int variable 'is_shared_int' — use adapt_boolean_value() or adapt_boolean_condition()"}
 {"rule": "SQL001", "file": "app/repositories/project_repo.py", "line": 70, "message": "Boolean field 'is_active_int' compared with integer literal — use adapt_boolean_condition()"}
 {"rule": "SQL003", "file": "app/repositories/usage_repo.py", "line": 675, "message": "LIKE query without escape_like() — special characters in user input will be treated as wildcards"}
 {"rule": "SQL003", "file": "app/repositories/usage_repo.py", "line": 767, "message": "LIKE query without escape_like() — special characters in user input will be treated as wildcards"}
@@ -9,6 +10,7 @@
 {"rule": "SQL003", "file": "app/repositories/message_repo.py", "line": 614, "message": "LIKE query without escape_like() — special characters in user input will be treated as wildcards"}
 {"rule": "SQL003", "file": "app/repositories/message_repo.py", "line": 1058, "message": "LIKE query without escape_like() — special characters in user input will be treated as wildcards"}
 {"rule": "SQL003", "file": "app/repositories/message_repo.py", "line": 1110, "message": "LIKE query without escape_like() — special characters in user input will be treated as wildcards"}
+{"rule": "SQL001", "file": "app/repositories/user_repo.py", "line": 76, "message": "Boolean value converted to int variable 'is_active_int' — use adapt_boolean_value() or adapt_boolean_condition()"}
 {"rule": "SQL003", "file": "app/modules/workspace/session_manager.py", "line": 893, "message": "LIKE query without escape_like() — special characters in user input will be treated as wildcards"}
 {"rule": "SQL003", "file": "app/modules/workspace/prompt_library.py", "line": 422, "message": "LIKE query without escape_like() — special characters in user input will be treated as wildcards"}
 {"rule": "SQL003", "file": "app/modules/workspace/prompt_library.py", "line": 427, "message": "LIKE query without escape_like() — special characters in user input will be treated as wildcards"}
