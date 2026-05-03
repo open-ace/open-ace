@@ -115,9 +115,12 @@ def is_valid_path(path: str, allowed_prefixes: Optional[List[str]] = None) -> bo
     if ".." in path:
         return False
 
-    # Restrict resolved path to allowed prefixes if provided
+    # Restrict resolved path to allowed prefixes if provided.
+    # Ensure path-separator boundary to prevent /home/user_evil matching /home.
     if allowed_prefixes:
-        if not any(abs_path.startswith(prefix) for prefix in allowed_prefixes):
+        if not any(
+            abs_path == prefix or abs_path.startswith(prefix + os.sep) for prefix in allowed_prefixes
+        ):
             return False
 
     # Platform-specific validation
