@@ -281,9 +281,7 @@ class APISecurityScanner:
 
         return results
 
-    def _parse_route_decorator(
-        self, dec: ast.expr, url_prefix: str
-    ) -> tuple[str, str] | None:
+    def _parse_route_decorator(self, dec: ast.expr, url_prefix: str) -> tuple[str, str] | None:
         """Parse a @bp.route(...) decorator, return (method, path) or None."""
         if not isinstance(dec, ast.Call):
             return None
@@ -381,9 +379,7 @@ class APISecurityScanner:
                 if route.full_path in PUBLIC_ENDPOINTS:
                     continue
 
-                has_decorator_auth = bool(
-                    AUTH_DECORATORS.intersection(route.decorators)
-                )
+                has_decorator_auth = bool(AUTH_DECORATORS.intersection(route.decorators))
                 has_auth = has_decorator_auth or route.has_inline_auth or bp_has_before
 
                 # SEC001: No authentication
@@ -464,7 +460,9 @@ class APISecurityScanner:
             # If no before_request and no decorator auth, check inline auth coverage
             if not any_decorator_auth:
                 routes_with_auth = sum(
-                    1 for r in routes if r.has_inline_auth or bool(AUTH_DECORATORS.intersection(r.decorators))
+                    1
+                    for r in routes
+                    if r.has_inline_auth or bool(AUTH_DECORATORS.intersection(r.decorators))
                 )
                 # If less than half of routes have inline auth, flag the blueprint
                 if routes_with_auth < len(routes):
@@ -511,7 +509,14 @@ def load_baseline() -> set[str]:
         return set()
     try:
         data = json.loads(BASELINE_PATH.read_text())
-        return {item["key"] if "key" in item else f"{item['rule']}|{item['file']}|{item['line']}|{item['endpoint']}" for item in data}
+        return {
+            (
+                item["key"]
+                if "key" in item
+                else f"{item['rule']}|{item['file']}|{item['line']}|{item['endpoint']}"
+            )
+            for item in data
+        }
     except (json.JSONDecodeError, KeyError):
         return set()
 
