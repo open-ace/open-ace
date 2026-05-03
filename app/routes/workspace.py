@@ -702,76 +702,78 @@ def get_session(session_id):
         from scripts.shared.db import _execute, get_connection
 
         conn = get_connection()
-        cursor = conn.cursor()
+        try:
+            cursor = conn.cursor()
 
-        # Get session info from daily_messages
-        from app.repositories.database import get_param_placeholder
+            # Get session info from daily_messages
+            from app.repositories.database import get_param_placeholder
 
-        p = get_param_placeholder()
-        session_query = f"""
-            SELECT
-                agent_session_id as session_id,
-                tool_name,
-                host_name,
-                sender_name,
-                MAX(sender_id) as sender_id,
-                MAX(date) as date,
-                COUNT(*) as message_count,
-                SUM(CASE WHEN role IN ('assistant', 'toolResult') THEN 1 ELSE 0 END) as request_count,
-                SUM(tokens_used) as total_tokens,
-                SUM(input_tokens) as total_input_tokens,
-                SUM(output_tokens) as total_output_tokens,
-                MIN(timestamp) as created_at,
-                MAX(timestamp) as updated_at,
-                MAX(model) as model
-            FROM daily_messages
-            WHERE agent_session_id = {p}
-            GROUP BY agent_session_id, tool_name, host_name, sender_name
-        """
-        _execute(cursor, session_query, [session_id])
-        session_data = cursor.fetchone()
-
-        if not session_data:
-            conn.close()
-            return jsonify({"success": False, "error": "Session not found"}), 404
-
-        # Convert to dict if needed
-        if not isinstance(session_data, dict):
-            session_data = dict(session_data)
-
-        # Get messages if requested
-        messages = []
-        if include_messages:
-            messages_query = f"""
+            p = get_param_placeholder()
+            session_query = f"""
                 SELECT
-                    id,
                     agent_session_id as session_id,
-                    role,
-                    content,
-                    tokens_used,
-                    model,
-                    timestamp
+                    tool_name,
+                    host_name,
+                    sender_name,
+                    MAX(sender_id) as sender_id,
+                    MAX(date) as date,
+                    COUNT(*) as message_count,
+                    SUM(CASE WHEN role IN ('assistant', 'toolResult') THEN 1 ELSE 0 END) as request_count,
+                    SUM(tokens_used) as total_tokens,
+                    SUM(input_tokens) as total_input_tokens,
+                    SUM(output_tokens) as total_output_tokens,
+                    MIN(timestamp) as created_at,
+                    MAX(timestamp) as updated_at,
+                    MAX(model) as model
                 FROM daily_messages
                 WHERE agent_session_id = {p}
-                ORDER BY timestamp ASC
+                GROUP BY agent_session_id, tool_name, host_name, sender_name
             """
-            _execute(cursor, messages_query, [session_id])
-            messages_data = cursor.fetchall()
-            messages = [
-                {
-                    "id": m["id"] if isinstance(m, dict) else m[0],
-                    "session_id": m["session_id"] if isinstance(m, dict) else m[1],
-                    "role": m["role"] if isinstance(m, dict) else m[2],
-                    "content": m["content"] or "" if isinstance(m, dict) else (m[3] or ""),
-                    "tokens_used": m["tokens_used"] or 0 if isinstance(m, dict) else (m[4] or 0),
-                    "model": m["model"] if isinstance(m, dict) else m[5],
-                    "timestamp": m["timestamp"] if isinstance(m, dict) else m[6],
-                    "metadata": {},
-                }
-                for m in messages_data
-            ]
+            _execute(cursor, session_query, [session_id])
+            session_data = cursor.fetchone()
 
-        conn.close()
+            if not session_data:
+                return jsonify({"success": False, "error": "Session not found"}), 404
+
+            # Convert to dict if needed
+            if not isinstance(session_data, dict):
+                session_data = dict(session_data)
+
+            # Get messages if requested
+            messages = []
+            if include_messages:
+                messages_query = f"""
+                    SELECT
+                        id,
+                        agent_session_id as session_id,
+                        role,
+                        content,
+                        tokens_used,
+                        model,
+                        timestamp
+                    FROM daily_messages
+                    WHERE agent_session_id = {p}
+                    ORDER BY timestamp ASC
+                """
+                _execute(cursor, messages_query, [session_id])
+                messages_data = cursor.fetchall()
+                messages = [
+                    {
+                        "id": m["id"] if isinstance(m, dict) else m[0],
+                        "session_id": m["session_id"] if isinstance(m, dict) else m[1],
+                        "role": m["role"] if isinstance(m, dict) else m[2],
+                        "content": m["content"] or "" if isinstance(m, dict) else (m[3] or ""),
+                        "tokens_used": (
+                            m["tokens_used"] or 0 if isinstance(m, dict) else (m[4] or 0)
+                        ),
+                        "model": m["model"] if isinstance(m, dict) else m[5],
+                        "timestamp": m["timestamp"] if isinstance(m, dict) else m[6],
+                        "metadata": {},
+                    }
+                    for m in messages_data
+                ]
+        finally:
+            conn.close()
 
         # Format session for response
         formatted_session = {
