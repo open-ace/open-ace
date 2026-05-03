@@ -359,6 +359,8 @@ class APISecurityScanner:
             r"user_id.*==.*session",
             r"current_user.*id",
             r"ownership",
+            r"_check_session_access",
+            r"_require_machine_admin",
         ):
             if re.search(pattern, src):
                 return True

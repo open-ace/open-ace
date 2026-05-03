@@ -7,6 +7,7 @@ API routes for usage data operations.
 
 from flask import Blueprint, jsonify, request
 
+from app.auth.decorators import auth_required
 from app.services.summary_service import SummaryService
 from app.services.usage_service import UsageService
 from app.utils.helpers import get_days_ago, get_today
@@ -14,6 +15,12 @@ from app.utils.helpers import get_days_ago, get_today
 usage_bp = Blueprint("usage", __name__)
 usage_service = UsageService()
 summary_service = SummaryService()
+
+
+@usage_bp.before_request
+@auth_required
+def _require_auth():
+    pass
 
 
 @usage_bp.route("/summary")

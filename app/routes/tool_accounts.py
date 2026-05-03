@@ -9,6 +9,7 @@ import logging
 
 from flask import Blueprint, jsonify, request
 
+from app.auth.decorators import auth_required
 from app.models.user_tool_account import TOOL_TYPES, get_tool_type_display
 from app.repositories.user_repo import UserRepository
 from app.repositories.user_tool_account_repo import UserToolAccountRepository
@@ -18,6 +19,12 @@ logger = logging.getLogger(__name__)
 tool_accounts_bp = Blueprint("tool_accounts", __name__)
 tool_account_repo = UserToolAccountRepository()
 user_repo = UserRepository()
+
+
+@tool_accounts_bp.before_request
+@auth_required
+def _require_auth():
+    pass
 
 
 @tool_accounts_bp.route("/tool-accounts", methods=["GET"])

@@ -10,6 +10,7 @@ import logging
 import bcrypt
 from flask import Blueprint, jsonify, make_response, request
 
+from app.auth.decorators import public_endpoint
 from app.repositories.user_repo import UserRepository
 from app.services.auth_service import AuthService
 
@@ -83,6 +84,7 @@ def api_login():
 
 
 @auth_bp.route("/auth/logout", methods=["POST"])
+@public_endpoint
 def api_logout():
     """Logout endpoint."""
     token = request.cookies.get("session_token") or request.headers.get(

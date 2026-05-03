@@ -9,6 +9,7 @@ import time
 
 from flask import Blueprint, jsonify, request
 
+from app.auth.decorators import auth_required
 from app.services.message_service import MessageService
 
 messages_bp = Blueprint("messages", __name__)
@@ -17,6 +18,12 @@ message_service = MessageService()
 # Simple in-memory cache for expensive queries
 _senders_cache = {"data": None, "timestamp": 0}
 _senders_cache_ttl = 300  # 5 minutes
+
+
+@messages_bp.before_request
+@auth_required
+def _require_auth():
+    pass
 
 
 @messages_bp.route("/messages")

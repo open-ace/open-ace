@@ -13,6 +13,7 @@ from datetime import datetime
 
 from flask import Blueprint, jsonify
 
+from app.auth.decorators import admin_required, auth_required
 from app.repositories.database import DB_PATH
 from app.services.message_service import MessageService
 from app.services.usage_service import UsageService
@@ -166,6 +167,7 @@ def run_fetch_scripts():
 
 
 @fetch_bp.route("/fetch/data", methods=["POST"])
+@auth_required
 def api_fetch_data():
     """Trigger data collection from all sources."""
     global _fetch_status
@@ -195,6 +197,7 @@ def api_fetch_data():
 
 
 @fetch_bp.route("/fetch/status")
+@auth_required
 def api_fetch_status():
     """Get data fetch status."""
     from app.services.data_fetch_scheduler import scheduler
@@ -209,6 +212,7 @@ def api_fetch_status():
 
 
 @fetch_bp.route("/fetch")
+@admin_required
 def api_fetch():
     """Fetch data from local sources."""
     # This would integrate with the existing fetch scripts
@@ -218,6 +222,7 @@ def api_fetch():
 
 
 @fetch_bp.route("/fetch/remote")
+@admin_required
 def api_fetch_remote():
     """Fetch data from remote sources."""
     # This would integrate with the existing remote fetch functionality
@@ -227,6 +232,7 @@ def api_fetch_remote():
 
 
 @fetch_bp.route("/data-status")
+@auth_required
 def api_data_status():
     """Get data status information."""
     try:
