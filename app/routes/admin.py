@@ -172,6 +172,8 @@ def api_create_user():
     # Create user
     password_hash = hash_password(password)
     system_account = data.get("system_account")
+    if system_account and not validate_username(system_account):
+        return jsonify({"error": "Invalid system_account name"}), 400
     user_id = user_repo.create_user(
         username, email, password_hash, role, system_account=system_account
     )
@@ -208,6 +210,8 @@ def api_update_user(user_id):
 
     # Auto-create system user if system_account is being set
     system_account = data.get("system_account")
+    if system_account and not validate_username(system_account):
+        return jsonify({"error": "Invalid system_account name"}), 400
     if system_account:
         uid = data.get("system_uid")
         ensure_system_user(system_account, uid=uid)
