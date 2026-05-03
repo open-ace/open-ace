@@ -520,14 +520,16 @@ def generate_baseline(violations: list[SecurityViolation]) -> None:
     """Print baseline JSON to stdout."""
     items = []
     for v in violations:
-        items.append({
-            "key": v.key(),
-            "rule": v.rule,
-            "file": v.file,
-            "line": v.line,
-            "endpoint": v.endpoint,
-            "message": v.message,
-        })
+        items.append(
+            {
+                "key": v.key(),
+                "rule": v.rule,
+                "file": v.file,
+                "line": v.line,
+                "endpoint": v.endpoint,
+                "message": v.message,
+            }
+        )
     print(json.dumps(items, indent=2, ensure_ascii=False))
 
 
