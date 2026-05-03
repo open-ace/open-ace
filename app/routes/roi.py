@@ -10,12 +10,19 @@ from datetime import datetime, timedelta
 
 from flask import Blueprint, jsonify, request
 
+from app.auth.decorators import auth_required
 from app.modules.analytics.cost_optimizer import CostOptimizer
 from app.modules.analytics.roi_calculator import ROICalculator
 
 logger = logging.getLogger(__name__)
 
 roi_bp = Blueprint("roi", __name__)
+
+
+@roi_bp.before_request
+@auth_required
+def _require_auth():
+    pass
 
 
 # ==================== ROI Analysis ====================

@@ -32,8 +32,8 @@ def _authenticate_user():
         if user_data:
             user = user_repo.get_user_by_id(user_data.get("id"))
             if user:
-                g.user = user_data
-                g.user_id = user_data.get("id")
+                g.user = user  # Store full user object for system_account access
+                g.user_id = user.get("id")
                 return None
 
     # Fallback: try WebUI token from query param
@@ -47,12 +47,7 @@ def _authenticate_user():
             if valid and user_id:
                 user = user_repo.get_user_by_id(user_id)
                 if user:
-                    g.user = {
-                        "id": user_id,
-                        "username": user.get("username"),
-                        "email": user.get("email"),
-                        "role": user.get("role"),
-                    }
+                    g.user = user  # Store full user object for system_account access
                     g.user_id = user_id
                     g.user_role = user.get("role")
                     return None

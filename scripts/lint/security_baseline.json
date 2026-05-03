@@ -3,7 +3,7 @@
         "key": "SEC002|app/routes/projects.py|/api/projects/<int:project_id>",
         "rule": "SEC002",
         "file": "app/routes/projects.py",
-        "line": 203,
+        "line": 198,
         "endpoint": "/api/projects/<int:project_id>",
         "message": "Route /api/projects/<int:project_id> has ID param(s) ['project_id'] but no ownership check"
     },
@@ -11,7 +11,7 @@
         "key": "SEC002|app/routes/projects.py|/api/projects/<int:project_id>/daily",
         "rule": "SEC002",
         "file": "app/routes/projects.py",
-        "line": 301,
+        "line": 296,
         "endpoint": "/api/projects/<int:project_id>/daily",
         "message": "Route /api/projects/<int:project_id>/daily has ID param(s) ['project_id'] but no ownership check"
     },
@@ -51,7 +51,7 @@
         "key": "SEC002|app/routes/workspace.py|/api/workspace/shares/<share_id>",
         "rule": "SEC002",
         "file": "app/routes/workspace.py",
-        "line": 1280,
+        "line": 1275,
         "endpoint": "/api/workspace/shares/<share_id>",
         "message": "Route /api/workspace/shares/<share_id> has ID param(s) ['share_id'] but no ownership check"
     },
@@ -59,7 +59,7 @@
         "key": "SEC002|app/routes/workspace.py|/api/workspace/knowledge/<entry_id>",
         "rule": "SEC002",
         "file": "app/routes/workspace.py",
-        "line": 1426,
+        "line": 1421,
         "endpoint": "/api/workspace/knowledge/<entry_id>",
         "message": "Route /api/workspace/knowledge/<entry_id> has ID param(s) ['entry_id'] but no ownership check"
     }

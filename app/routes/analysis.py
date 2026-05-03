@@ -7,10 +7,17 @@ API routes for usage analysis and reporting.
 
 from flask import Blueprint, jsonify, request
 
+from app.auth.decorators import auth_required
 from app.services.analysis_service import AnalysisService
 
 analysis_bp = Blueprint("analysis", __name__)
 analysis_service = AnalysisService()
+
+
+@analysis_bp.before_request
+@auth_required
+def _require_auth():
+    pass
 
 
 @analysis_bp.route("/analysis/batch")
