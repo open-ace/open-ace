@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 """
 Open ACE - File System Routes
 
@@ -11,7 +13,6 @@ import os
 import platform
 import subprocess
 from pathlib import Path
-from typing import List, Optional
 
 from flask import Blueprint, jsonify, request
 
@@ -94,7 +95,7 @@ def get_home_directory(user=None):
     return str(Path.home())
 
 
-def is_valid_path(path: str, allowed_prefixes: Optional[List[str]] = None) -> bool:
+def is_valid_path(path: str, allowed_prefixes: list[str] | None = None) -> bool:
     """Check if path is valid for browsing.
 
     Optionally restricts the resolved path to a list of allowed prefix
