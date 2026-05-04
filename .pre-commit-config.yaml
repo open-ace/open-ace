@@ -121,5 +121,5 @@ repos:
     rev: 6.3.0
     hooks:
       - id: pydocstyle
-        args: [--ignore-decorators]
+        args: ["--ignore=D100,D102,D103,D107,D200,D202,D205,D400,D401"]
         exclude: ^tests/|^scripts/

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Utils module for Open ACE application."""
 
 from app.utils.formatters import format_message_data, format_usage_data

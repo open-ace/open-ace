@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Open ACE - Qwen Code CLI Adapter
 

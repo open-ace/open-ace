@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Routes module for Open ACE application."""
 
 from app.routes.admin import admin_bp
