@@ -1,3 +1,4 @@
+from typing import Any
 """
 Open ACE - User Tool Accounts API Routes
 
@@ -32,7 +33,7 @@ def get_all_tool_accounts():
     mappings = tool_account_repo.get_all()
 
     # Group by user
-    result = {}
+    result: dict[int, dict[str, Any]] = {}
     for mapping in mappings:
         user_id = mapping.user_id
         if user_id not in result:

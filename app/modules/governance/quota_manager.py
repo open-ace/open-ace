@@ -666,7 +666,7 @@ class QuotaManager:
                 sender_conditions.append("sender_name LIKE ?")
                 sender_params.append(f"{system_account}%")
 
-        local_usage_lookup = {}
+        local_usage_lookup: dict[int, int] = {}
         if sender_conditions:
             local_usage_rows = self.db.fetch_all(
                 """
@@ -707,7 +707,7 @@ class QuotaManager:
         )
 
         # Build alerts lookup by user_id
-        alerts_lookup = {}
+        alerts_lookup: dict[int, list[dict[str, Any]]] = {}
         for row in alert_rows:
             user_id = row.get("user_id")
             if user_id not in alerts_lookup:

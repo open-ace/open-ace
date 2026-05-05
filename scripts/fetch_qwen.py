@@ -15,7 +15,7 @@ import sys
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 
 def get_default_sender_name(tool: str = "qwen") -> str:
@@ -309,7 +309,7 @@ def process_jsonl_file(
     except (ValueError, IndexError):
         pass  # If path parsing fails, project_path remains None
 
-    daily = defaultdict(
+    daily: dict[str, dict[str, Any]] = defaultdict(
         lambda: {
             "prompt_tokens": 0,
             "candidates_tokens": 0,
@@ -641,7 +641,7 @@ def update_agent_sessions_stats(messages: list) -> int:
     from shared.db import _execute, _placeholder, get_connection
 
     # Group messages by agent_session_id
-    session_stats = defaultdict(
+    session_stats: dict[str, dict[str, Any]] = defaultdict(
         lambda: {
             "message_count": 0,
             "total_tokens": 0,
@@ -896,7 +896,7 @@ def fetch_and_save(
         hostname = config.get("host_name", "localhost")
 
     # Aggregate across all projects
-    aggregated = defaultdict(
+    aggregated: dict[str, dict[str, Any]] = defaultdict(
         lambda: {
             "prompt_tokens": 0,
             "candidates_tokens": 0,
@@ -909,7 +909,7 @@ def fetch_and_save(
     )
 
     # Collect all messages for batch insert
-    all_messages = []
+    all_messages: list[dict[str, Any]] = []
 
     # Multi-user mode: scan all users' qwen directories
     if multi_user_mode:

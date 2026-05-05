@@ -244,7 +244,7 @@ class DataFetchScheduler:
         action_key = f"{user_id}:quota_exceeded:{today}:{period}"
 
         if not hasattr(self, "_enforced_users"):
-            self._enforced_users = set()
+            self._enforced_users: set[str] = set()
         if action_key in self._enforced_users:
             return
 

@@ -18,7 +18,7 @@ import uuid
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 try:
     import websockets
@@ -962,7 +962,7 @@ def process_jsonl_file(
     except (ValueError, IndexError):
         pass  # If path parsing fails, agent_name remains None
 
-    daily = defaultdict(
+    daily: dict[str, dict[str, Any]] = defaultdict(
         lambda: {
             "input_tokens": 0,
             "output_tokens": 0,
@@ -972,7 +972,7 @@ def process_jsonl_file(
             "models_used": set(),
         }
     )
-    messages = []
+    messages: list[dict[str, Any]] = []
 
     # Extract agent_session_id from file path
     # Format: ~/.openclaw/agents/main/sessions/{uuid}.jsonl
@@ -985,13 +985,13 @@ def process_jsonl_file(
 
     # First pass: collect user message senders for assistant message attribution
     # Map: message_id -> (sender_id, sender_name)
-    user_senders = {}
+    user_senders: dict[str, tuple[str, str]] = {}
     # Also collect assistant senders for toolResult attribution
-    assistant_senders = {}
+    assistant_senders: dict[str, tuple[str, str]] = {}
     # Also collect toolResult senders for assistant attribution (multi-turn conversations)
-    toolResult_senders = {}
+    toolResult_senders: dict[str, tuple[str, str]] = {}
     # Also collect error senders for assistant attribution (error messages can have senders too)
-    error_senders = {}
+    error_senders: dict[str, tuple[str, str]] = {}
 
     with open(filepath, encoding="utf-8") as f:
         for line in f:
@@ -1339,7 +1339,7 @@ def fetch_and_save_messages(
         hostname = config.get("host_name", "localhost")
 
     # Aggregate across all files
-    aggregated = defaultdict(
+    aggregated: dict[str, dict[str, Any]] = defaultdict(
         lambda: {
             "input_tokens": 0,
             "output_tokens": 0,

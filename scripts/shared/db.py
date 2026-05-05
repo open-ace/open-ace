@@ -3807,7 +3807,7 @@ def get_conversation_details(session_id: str) -> dict:
     conn = get_connection()
     cursor = conn.cursor()
 
-    rows = []
+    rows: list[tuple[Any, ...]] = []
 
     # Try to find messages by agent_session_id first
     _execute(

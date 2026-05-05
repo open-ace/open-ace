@@ -268,7 +268,7 @@ def api_browse_directory():
 
 def list_subdirectories(path: str, system_account: str = None) -> list:
     """List subdirectories in a path, optionally as a specific user."""
-    directories = []
+    directories: list[str] = []
 
     try:
         if system_account:

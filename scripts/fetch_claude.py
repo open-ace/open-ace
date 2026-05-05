@@ -15,7 +15,7 @@ import sys
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 
 def get_default_sender_name(tool: str = "claude") -> str:
@@ -217,7 +217,7 @@ def process_jsonl_file(
     except (ValueError, IndexError):
         pass  # If path parsing fails, project_path remains None
 
-    daily = defaultdict(
+    daily: dict[str, dict[str, Any]] = defaultdict(
         lambda: {
             "input_tokens": 0,
             "output_tokens": 0,
@@ -227,7 +227,7 @@ def process_jsonl_file(
             "models_used": set(),
         }
     )
-    messages = []
+    messages: list[dict[str, Any]] = []
 
     # First pass: build message tree for conversation_id tracking
     # Key: message uuid, Value: (entry, parent_uuid)
@@ -565,7 +565,7 @@ def fetch_and_save(
         hostname = config.get("host_name", "localhost")
 
     # Aggregate across all projects
-    aggregated = defaultdict(
+    aggregated: dict[str, dict[str, Any]] = defaultdict(
         lambda: {
             "input_tokens": 0,
             "output_tokens": 0,

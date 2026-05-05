@@ -79,26 +79,26 @@ class AuditAnalyzer:
         )
 
         # Analyze by hour of day
-        hourly_activity = defaultdict(int)
+        hourly_activity: defaultdict[int, int] = defaultdict(int)
         for log in logs:
             if log.timestamp:
                 hour = log.timestamp.hour
                 hourly_activity[hour] += 1
 
         # Analyze by day of week
-        daily_activity = defaultdict(int)
+        daily_activity: defaultdict[int, int] = defaultdict(int)
         for log in logs:
             if log.timestamp:
                 day = log.timestamp.weekday()
                 daily_activity[day] += 1
 
         # Analyze by action type
-        action_distribution = defaultdict(int)
+        action_distribution: defaultdict[str, int] = defaultdict(int)
         for log in logs:
             action_distribution[log.action] += 1
 
         # Analyze by user
-        user_activity = defaultdict(int)
+        user_activity: defaultdict[int, int] = defaultdict(int)
         for log in logs:
             if log.user_id:
                 user_activity[log.user_id] += 1
@@ -212,7 +212,9 @@ class AuditAnalyzer:
         anomalies = []
 
         # Group by user and hour
-        user_hourly_activity = defaultdict(lambda: defaultdict(int))
+        user_hourly_activity: defaultdict[int, defaultdict[int]] = defaultdict(
+            lambda: defaultdict(int)
+        )
         for log in logs:
             if log.user_id and log.timestamp:
                 hour_key = log.timestamp.strftime("%Y-%m-%d %H")
@@ -369,9 +371,9 @@ class AuditAnalyzer:
             }
 
         # Analyze patterns
-        action_counts = defaultdict(int)
-        hourly_activity = defaultdict(int)
-        daily_activity = defaultdict(int)
+        action_counts: defaultdict[str, int] = defaultdict(int)
+        hourly_activity: defaultdict[int, int] = defaultdict(int)
+        daily_activity: defaultdict[int, int] = defaultdict(int)
 
         for log in logs:
             action_counts[log.action] += 1

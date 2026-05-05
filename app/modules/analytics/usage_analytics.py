@@ -367,7 +367,7 @@ class UsageAnalytics:
 
     def _detect_anomalies(self, start_date: str, end_date: str) -> list[Anomaly]:
         """Detect usage anomalies."""
-        anomalies = []
+        anomalies: list[Anomaly] = []
 
         # Get daily data
         daily_data = self._get_daily_totals(start_date, end_date)

@@ -323,9 +323,9 @@ class ReportGenerator:
         )
 
         # Calculate summary
-        action_counts = {}
-        severity_counts = {}
-        user_actions = {}
+        action_counts: dict[str, int] = {}
+        severity_counts: dict[str, int] = {}
+        user_actions: dict[str, int] = {}
 
         for log in audit_logs:
             action = log.action
@@ -618,7 +618,7 @@ class ReportGenerator:
 
     def _group_by_role(self, user_activity: list[dict]) -> dict[str, int]:
         """Group user activity by role."""
-        by_role = {}
+        by_role: dict[str, int] = {}
         for user in user_activity:
             role = user.get("role", "unknown")
             by_role[role] = by_role.get(role, 0) + 1
