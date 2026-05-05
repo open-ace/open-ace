@@ -23,7 +23,12 @@ import {
 } from '@/components/common';
 import { LazyLineChart, LazyBarChart } from '@/components/common/LazyCharts';
 import { getToolColor } from '@/components/common/Charts';
-import { requestApi, type RequestTodayStats, type RequestTrendByToolData, type RequestStatsByUser } from '@/api/request';
+import {
+  requestApi,
+  type RequestTodayStats,
+  type RequestTrendByToolData,
+  type RequestStatsByUser,
+} from '@/api/request';
 import { formatNumber } from '@/utils';
 
 // Date range presets
@@ -98,7 +103,7 @@ export const RequestDashboard: React.FC = () => {
     const userMap = new Map<string, { requests: number; tokens: number }>();
 
     userStats.forEach((stat) => {
-      const existing = userMap.get(stat.user) || { requests: 0, tokens: 0 };
+      const existing = userMap.get(stat.user) ?? { requests: 0, tokens: 0 };
       existing.requests += stat.requests;
       existing.tokens += stat.tokens;
       userMap.set(stat.user, existing);
@@ -125,7 +130,7 @@ export const RequestDashboard: React.FC = () => {
         const colors = getToolColor(tool, index);
         return {
           label: tool.toUpperCase(),
-          data: dates.map((date) => dataMap.get(`${date}-${tool}`) || 0),
+          data: dates.map((date) => dataMap.get(`${date}-${tool}`) ?? 0),
           borderColor: colors.border,
           backgroundColor: colors.background,
           fill: false,
@@ -174,7 +179,7 @@ export const RequestDashboard: React.FC = () => {
         <div className="col-md-3">
           <StatCard
             label={t('todayRequests', language)}
-            value={formatNumber(todayStats?.total_requests || 0)}
+            value={formatNumber(todayStats?.total_requests ?? 0)}
             icon={<i className="bi bi-lightning fs-4" />}
             variant="primary"
           />
@@ -190,11 +195,15 @@ export const RequestDashboard: React.FC = () => {
         <div className="col-md-3">
           <StatCard
             label={t('avgRequestsPerUser', language)}
-            value={aggregatedUserStats.length > 0
-              ? formatNumber(Math.round(
-                  aggregatedUserStats.reduce((sum, u) => sum + u.requests, 0) / aggregatedUserStats.length
-                ))
-              : '0'
+            value={
+              aggregatedUserStats.length > 0
+                ? formatNumber(
+                    Math.round(
+                      aggregatedUserStats.reduce((sum, u) => sum + u.requests, 0) /
+                        aggregatedUserStats.length
+                    )
+                  )
+                : '0'
             }
             icon={<i className="bi bi-calculator fs-4" />}
             variant="success"
@@ -203,9 +212,12 @@ export const RequestDashboard: React.FC = () => {
         <div className="col-md-3">
           <StatCard
             label={t('peakTool', language)}
-            value={todayStats?.by_tool
-              ? Object.entries(todayStats.by_tool).sort((a, b) => b[1] - a[1])[0]?.[0]?.toUpperCase() || '-'
-              : '-'
+            value={
+              todayStats?.by_tool
+                ? Object.entries(todayStats.by_tool)
+                    .sort((a, b) => b[1] - a[1])[0]?.[0]
+                    ?.toUpperCase() || '-'
+                : '-'
             }
             icon={<i className="bi bi-bar-chart fs-4" />}
             variant="warning"
@@ -220,7 +232,9 @@ export const RequestDashboard: React.FC = () => {
           {DATE_RANGE_PRESETS.map((preset) => (
             <Button
               key={preset.value}
-              variant={!useCustomRange && dateRange === preset.value ? 'primary' : 'outline-secondary'}
+              variant={
+                !useCustomRange && dateRange === preset.value ? 'primary' : 'outline-secondary'
+              }
               size="sm"
               onClick={() => {
                 setUseCustomRange(false);
@@ -291,9 +305,10 @@ export const RequestDashboard: React.FC = () => {
                     {Object.entries(todayStats.by_tool)
                       .sort((a, b) => b[1] - a[1])
                       .map(([tool, count]) => {
-                        const percentage = todayStats.total_requests > 0
-                          ? ((count / todayStats.total_requests) * 100).toFixed(1)
-                          : '0';
+                        const percentage =
+                          todayStats.total_requests > 0
+                            ? ((count / todayStats.total_requests) * 100).toFixed(1)
+                            : '0';
                         return (
                           <tr key={tool}>
                             <td>

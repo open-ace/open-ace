@@ -107,7 +107,8 @@ export const StatusBar: React.FC<StatusBarProps> = ({
           <i className="bi bi-bar-chart" />
           <span className="status-label">{t('token', language)}:</span>
           <span className="status-tokens">
-            {formatTokens(status?.tokens_used ?? 0)} / {formatTokens(status?.tokens_limit ?? 100000)}
+            {formatTokens(status?.tokens_used ?? 0)} /{' '}
+            {formatTokens(status?.tokens_limit ?? 100000)}
           </span>
           <div className="status-progress">
             <div
@@ -121,7 +122,8 @@ export const StatusBar: React.FC<StatusBarProps> = ({
           <i className="bi bi-arrow-up-circle" />
           <span className="status-label">{t('request', language)}:</span>
           <span className="status-requests">
-            {formatNumber(status?.requests_used ?? 0)} / {formatNumber(status?.requests_limit ?? 1000)}
+            {formatNumber(status?.requests_used ?? 0)} /{' '}
+            {formatNumber(status?.requests_limit ?? 1000)}
           </span>
           <div className="status-progress">
             <div

@@ -183,9 +183,12 @@ export const ProjectManagement: React.FC = () => {
                         <i className="bi bi-folder text-warning me-2" />
                         <div>
                           <strong>
-                            {project.project_name || project.project_path.split(/[/\\]/).pop()}
+                            {project.project_name ?? project.project_path.split(/[/\\]/).pop()}
                           </strong>
-                          <small className="d-block text-muted font-monospace" style={{ maxWidth: '250px' }}>
+                          <small
+                            className="d-block text-muted font-monospace"
+                            style={{ maxWidth: '250px' }}
+                          >
                             {project.project_path}
                           </small>
                         </div>
@@ -239,7 +242,7 @@ export const ProjectManagement: React.FC = () => {
       <Modal
         isOpen={selectedProject !== null}
         onClose={() => setSelectedProject(null)}
-        title={selectedProject?.project_name || t('projectDetails', language)}
+        title={selectedProject?.project_name ?? t('projectDetails', language)}
         size="lg"
       >
         {selectedProject && (
@@ -268,11 +271,9 @@ export const ProjectManagement: React.FC = () => {
           <i className="bi bi-exclamation-triangle me-2" />
           <div>
             {t('deleteProjectConfirm', language)}{' '}
-            <strong>{deleteTarget?.project_name || deleteTarget?.project_path}</strong>?
+            <strong>{deleteTarget?.project_name ?? deleteTarget?.project_path}</strong>?
             <br />
-            <small className="text-muted">
-              {t('deleteProjectWarning', language)}
-            </small>
+            <small className="text-muted">{t('deleteProjectWarning', language)}</small>
           </div>
         </div>
       </Modal>
@@ -287,7 +288,7 @@ const ProjectDetailContent: React.FC<{
 }> = ({ project, formatDuration }) => {
   const language = useLanguage();
 
-  const projectName = project.project_name || project.project_path.split(/[/\\]/).pop();
+  const projectName = project.project_name ?? project.project_path.split(/[/\\]/).pop();
 
   return (
     <div className="space-y-4">
@@ -301,12 +302,19 @@ const ProjectDetailContent: React.FC<{
         </div>
         <div className="flex-grow-1 min-width-0">
           <h5 className="mb-1">{projectName}</h5>
-          <div className="font-monospace text-muted small text-truncate" title={project.project_path}>
+          <div
+            className="font-monospace text-muted small text-truncate"
+            title={project.project_path}
+          >
             {project.project_path}
           </div>
           <div className="d-flex gap-2 mt-2">
-            <Badge variant="primary" pill>{t('users', language)}: {project.total_users}</Badge>
-            <Badge variant="info" pill>{t('sessions', language)}: {project.total_sessions}</Badge>
+            <Badge variant="primary" pill>
+              {t('users', language)}: {project.total_users}
+            </Badge>
+            <Badge variant="info" pill>
+              {t('sessions', language)}: {project.total_sessions}
+            </Badge>
           </div>
         </div>
       </div>
@@ -316,31 +324,47 @@ const ProjectDetailContent: React.FC<{
       {/* Stats Grid */}
       <div className="row g-3">
         <div className="col-6 col-md-3">
-          <div className="text-center p-3 rounded-3" style={{ backgroundColor: 'var(--bs-primary-bg-subtle, #cfe2ff)' }}>
+          <div
+            className="text-center p-3 rounded-3"
+            style={{ backgroundColor: 'var(--bs-primary-bg-subtle, #cfe2ff)' }}
+          >
             <i className="bi bi-people text-primary d-block mb-1" />
             <div className="text-muted small">{t('users', language)}</div>
             <div className="fs-4 fw-bold text-primary">{project.total_users}</div>
           </div>
         </div>
         <div className="col-6 col-md-3">
-          <div className="text-center p-3 rounded-3" style={{ backgroundColor: 'var(--bs-info-bg-subtle, #cff4fc)' }}>
+          <div
+            className="text-center p-3 rounded-3"
+            style={{ backgroundColor: 'var(--bs-info-bg-subtle, #cff4fc)' }}
+          >
             <i className="bi bi-chat-square-text text-info d-block mb-1" />
             <div className="text-muted small">{t('sessions', language)}</div>
             <div className="fs-4 fw-bold text-info">{project.total_sessions}</div>
           </div>
         </div>
         <div className="col-6 col-md-3">
-          <div className="text-center p-3 rounded-3" style={{ backgroundColor: 'var(--bs-success-bg-subtle, #d1e7dd)' }}>
+          <div
+            className="text-center p-3 rounded-3"
+            style={{ backgroundColor: 'var(--bs-success-bg-subtle, #d1e7dd)' }}
+          >
             <i className="bi bi-cpu text-success d-block mb-1" />
             <div className="text-muted small">{t('tokens', language)}</div>
-            <div className="fs-4 fw-bold text-success">{Number(project.total_tokens).toLocaleString()}</div>
+            <div className="fs-4 fw-bold text-success">
+              {Number(project.total_tokens).toLocaleString()}
+            </div>
           </div>
         </div>
         <div className="col-6 col-md-3">
-          <div className="text-center p-3 rounded-3" style={{ backgroundColor: 'var(--bs-warning-bg-subtle, #fff3cd)' }}>
+          <div
+            className="text-center p-3 rounded-3"
+            style={{ backgroundColor: 'var(--bs-warning-bg-subtle, #fff3cd)' }}
+          >
             <i className="bi bi-clock text-warning d-block mb-1" />
             <div className="text-muted small">{t('workTime', language)}</div>
-            <div className="fs-4 fw-bold text-warning">{formatDuration(project.total_duration_seconds)}</div>
+            <div className="fs-4 fw-bold text-warning">
+              {formatDuration(project.total_duration_seconds)}
+            </div>
           </div>
         </div>
       </div>
@@ -355,9 +379,7 @@ const ProjectDetailContent: React.FC<{
             <div>
               <div className="text-muted small">{t('firstAccess', language)}</div>
               <div className="fw-medium">
-                {project.first_access
-                  ? formatDateTime(project.first_access)
-                  : t('never', language)}
+                {project.first_access ? formatDateTime(project.first_access) : t('never', language)}
               </div>
             </div>
           </div>
@@ -368,9 +390,7 @@ const ProjectDetailContent: React.FC<{
             <div>
               <div className="text-muted small">{t('lastAccess', language)}</div>
               <div className="fw-medium">
-                {project.last_access
-                  ? formatDateTime(project.last_access)
-                  : t('never', language)}
+                {project.last_access ? formatDateTime(project.last_access) : t('never', language)}
               </div>
             </div>
           </div>
@@ -384,7 +404,9 @@ const ProjectDetailContent: React.FC<{
         <h6 className="mb-3 d-flex align-items-center">
           <i className="bi bi-people me-2" />
           {t('collaborators', language)}
-          <Badge variant="secondary" pill className="ms-2">{project.user_stats.length}</Badge>
+          <Badge variant="secondary" pill className="ms-2">
+            {project.user_stats.length}
+          </Badge>
         </h6>
         {project.user_stats.length === 0 ? (
           <div className="text-muted text-center py-3">
@@ -408,8 +430,8 @@ const ProjectDetailContent: React.FC<{
                   <tr key={user.id}>
                     <td>
                       <div className="d-flex align-items-center">
-                        <Avatar name={user.username || 'User'} size="xs" className="me-2" />
-                        <strong>{user.username || `User ${user.user_id}`}</strong>
+                        <Avatar name={user.username ?? 'User'} size="xs" className="me-2" />
+                        <strong>{user.username ?? `User ${user.user_id}`}</strong>
                       </div>
                     </td>
                     <td className="text-center">{user.total_sessions}</td>

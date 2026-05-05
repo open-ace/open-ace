@@ -256,7 +256,12 @@ class ApiClient {
     return this.request<T>(url, { method: 'GET', signal });
   }
 
-  async post<T>(endpoint: string, body?: unknown, signal?: AbortSignal, timeout?: number): Promise<T> {
+  async post<T>(
+    endpoint: string,
+    body?: unknown,
+    signal?: AbortSignal,
+    timeout?: number
+  ): Promise<T> {
     return this.request<T>(endpoint, { method: 'POST', body, signal, timeout });
   }
 

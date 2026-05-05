@@ -108,7 +108,10 @@ interface ChartCardSkeletonProps {
   height?: number;
 }
 
-const ChartCardSkeleton: React.FC<ChartCardSkeletonProps> = ({ titleWidth = 150, height = 300 }) => {
+const ChartCardSkeleton: React.FC<ChartCardSkeletonProps> = ({
+  titleWidth = 150,
+  height = 300,
+}) => {
   return (
     <div className="card">
       <div className="card-header d-flex justify-content-between align-items-center mb-3 pb-2 border-bottom">
@@ -184,12 +187,7 @@ export const ManagePageSkeleton: React.FC = () => {
         <div className="p-3">
           <Skeleton variant="text" height={24} width="80%" className="bg-white/20 mb-4" />
           {[1, 2, 3, 4, 5, 6].map((i) => (
-            <Skeleton
-              key={i}
-              variant="rounded"
-              height={40}
-              className="w-100 mb-2 bg-white/10"
-            />
+            <Skeleton key={i} variant="rounded" height={40} className="w-100 mb-2 bg-white/10" />
           ))}
         </div>
       </div>

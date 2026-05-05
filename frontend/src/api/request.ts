@@ -189,9 +189,10 @@ export const requestApi = {
     if (startDate) params.start = startDate;
     if (endDate) params.end = endDate;
     if (host) params.host = host;
-    return apiClient.get<
-      Array<{ date: string; requests: number; tokens: number }>
-    >(`/api/request/user/${encodeURIComponent(userName)}/trend`, params);
+    return apiClient.get<Array<{ date: string; requests: number; tokens: number }>>(
+      `/api/request/user/${encodeURIComponent(userName)}/trend`,
+      params
+    );
   },
 
   async getMonthlyStats(
@@ -215,10 +216,7 @@ export const requestApi = {
     return apiClient.get<QuotaStatusResponse>('/api/quota/status');
   },
 
-  async getMyUsage(
-    startDate?: string,
-    endDate?: string
-  ): Promise<UserUsageResponse> {
+  async getMyUsage(startDate?: string, endDate?: string): Promise<UserUsageResponse> {
     const params: Record<string, string> = {};
     if (startDate) params.start = startDate;
     if (endDate) params.end = endDate;

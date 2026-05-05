@@ -372,15 +372,26 @@ export const AuditCenter: React.FC = () => {
 
             {/* Detail Modal */}
             {selectedLog && (
-              <div className="modal show d-block" tabIndex={-1} onClick={() => setSelectedLog(null)}>
-                <div className="modal-dialog modal-lg modal-dialog-scrollable" onClick={(e) => e.stopPropagation()}>
+              <div
+                className="modal show d-block"
+                tabIndex={-1}
+                onClick={() => setSelectedLog(null)}
+              >
+                <div
+                  className="modal-dialog modal-lg modal-dialog-scrollable"
+                  onClick={(e) => e.stopPropagation()}
+                >
                   <div className="modal-content">
                     <div className="modal-header">
                       <h5 className="modal-title">
                         <i className="bi bi-journal-text me-2" />
                         {t('details', language)} - {selectedLog.action}
                       </h5>
-                      <button type="button" className="btn-close" onClick={() => setSelectedLog(null)} />
+                      <button
+                        type="button"
+                        className="btn-close"
+                        onClick={() => setSelectedLog(null)}
+                      />
                     </div>
                     <div className="modal-body">
                       <table className="table table-borderless mb-0">
@@ -395,7 +406,11 @@ export const AuditCenter: React.FC = () => {
                           </tr>
                           <tr>
                             <th>{t('tableAction', language)}</th>
-                            <td><Badge variant={ACTION_COLORS[selectedLog.action] ?? 'secondary'}>{selectedLog.action}</Badge></td>
+                            <td>
+                              <Badge variant={ACTION_COLORS[selectedLog.action] ?? 'secondary'}>
+                                {selectedLog.action}
+                              </Badge>
+                            </td>
                           </tr>
                           <tr>
                             <th>{t('resourceType', language)}</th>
@@ -404,7 +419,9 @@ export const AuditCenter: React.FC = () => {
                           {selectedLog.resource_id && (
                             <tr>
                               <th>{t('resourceId', language)}</th>
-                              <td><code>{selectedLog.resource_id}</code></td>
+                              <td>
+                                <code>{selectedLog.resource_id}</code>
+                              </td>
                             </tr>
                           )}
                           <tr>
@@ -414,7 +431,9 @@ export const AuditCenter: React.FC = () => {
                           {selectedLog.session_id && (
                             <tr>
                               <th>Session ID</th>
-                              <td><code>{selectedLog.session_id}</code></td>
+                              <td>
+                                <code>{selectedLog.session_id}</code>
+                              </td>
                             </tr>
                           )}
                           <tr>
@@ -433,14 +452,24 @@ export const AuditCenter: React.FC = () => {
                           )}
                         </tbody>
                       </table>
-                      {selectedLog.details && typeof selectedLog.details === 'object' && Object.keys(selectedLog.details).length > 0 && (
-                        <div className="mt-3">
-                          <h6>{t('tableDetails', language)}</h6>
-                          <pre className="bg-light p-3 rounded" style={{ maxHeight: '300px', overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                            {JSON.stringify(selectedLog.details, null, 2)}
-                          </pre>
-                        </div>
-                      )}
+                      {selectedLog.details &&
+                        typeof selectedLog.details === 'object' &&
+                        Object.keys(selectedLog.details).length > 0 && (
+                          <div className="mt-3">
+                            <h6>{t('tableDetails', language)}</h6>
+                            <pre
+                              className="bg-light p-3 rounded"
+                              style={{
+                                maxHeight: '300px',
+                                overflow: 'auto',
+                                whiteSpace: 'pre-wrap',
+                                wordBreak: 'break-word',
+                              }}
+                            >
+                              {JSON.stringify(selectedLog.details, null, 2)}
+                            </pre>
+                          </div>
+                        )}
                     </div>
                     <div className="modal-footer">
                       <Button variant="secondary" onClick={() => setSelectedLog(null)}>
@@ -507,9 +536,24 @@ export const AuditCenter: React.FC = () => {
               <div className="col-md-8">
                 <h6>{t('categoryScores', language) ?? 'Severity Breakdown'}</h6>
                 {[
-                  { label: 'High Severity', count: securityScore.high_severity_count, max: 10, variant: 'danger' },
-                  { label: 'Medium Severity', count: securityScore.medium_severity_count, max: 10, variant: 'warning' },
-                  { label: 'Low Severity', count: securityScore.low_severity_count, max: 10, variant: 'info' },
+                  {
+                    label: 'High Severity',
+                    count: securityScore.high_severity_count,
+                    max: 10,
+                    variant: 'danger',
+                  },
+                  {
+                    label: 'Medium Severity',
+                    count: securityScore.medium_severity_count,
+                    max: 10,
+                    variant: 'warning',
+                  },
+                  {
+                    label: 'Low Severity',
+                    count: securityScore.low_severity_count,
+                    max: 10,
+                    variant: 'info',
+                  },
                 ].map((item) => {
                   const scorePercent = Math.max(0, 100 - (item.count / item.max) * 100);
                   return (
@@ -522,7 +566,10 @@ export const AuditCenter: React.FC = () => {
                       </div>
                       <div className="progress" style={{ height: '8px' }}>
                         <div
-                          className={cn('progress-bar', `bg-${scorePercent >= 80 ? 'success' : scorePercent >= 60 ? 'warning' : 'danger'}`)}
+                          className={cn(
+                            'progress-bar',
+                            `bg-${scorePercent >= 80 ? 'success' : scorePercent >= 60 ? 'warning' : 'danger'}`
+                          )}
                           style={{ width: `${scorePercent}%` }}
                         />
                       </div>
@@ -676,22 +723,39 @@ export const AuditCenter: React.FC = () => {
             <div>
               <div className="row mb-3">
                 <div className="col-md-3">
-                  <StatCard label={t('total', language) ?? 'Total Actions'} value={String(userProfile.total_actions)} variant="primary" />
+                  <StatCard
+                    label={t('total', language) ?? 'Total Actions'}
+                    value={String(userProfile.total_actions)}
+                    variant="primary"
+                  />
                 </div>
                 <div className="col-md-3">
-                  <StatCard label={t('actionsPerDay', language) ?? 'Actions/Day'} value={userProfile.actions_per_day.toFixed(1)} variant="info" />
+                  <StatCard
+                    label={t('actionsPerDay', language) ?? 'Actions/Day'}
+                    value={userProfile.actions_per_day.toFixed(1)}
+                    variant="info"
+                  />
                 </div>
                 <div className="col-md-3">
-                  <StatCard label={t('peakHour', language) ?? 'Peak Hour'} value={`${userProfile.peak_activity_hour}:00`} variant="warning" />
+                  <StatCard
+                    label={t('peakHour', language) ?? 'Peak Hour'}
+                    value={`${userProfile.peak_activity_hour}:00`}
+                    variant="warning"
+                  />
                 </div>
                 <div className="col-md-3">
-                  <StatCard label={t('peakDay', language) ?? 'Peak Day'} value={userProfile.peak_activity_day} variant="success" />
+                  <StatCard
+                    label={t('peakDay', language) ?? 'Peak Day'}
+                    value={userProfile.peak_activity_day}
+                    variant="success"
+                  />
                 </div>
               </div>
               <div className="row">
                 <div className="col-md-6">
                   <h6>{t('activeHours', language)}</h6>
-                  {userProfile.hourly_distribution && Object.keys(userProfile.hourly_distribution).length > 0 ? (
+                  {userProfile.hourly_distribution &&
+                  Object.keys(userProfile.hourly_distribution).length > 0 ? (
                     <BarChart
                       labels={Object.keys(userProfile.hourly_distribution).map((h) => `${h}:00`)}
                       datasets={[
@@ -708,7 +772,8 @@ export const AuditCenter: React.FC = () => {
                 </div>
                 <div className="col-md-6">
                   <h6>{t('commonOperations', language)}</h6>
-                  {userProfile.action_breakdown && Object.keys(userProfile.action_breakdown).length > 0 ? (
+                  {userProfile.action_breakdown &&
+                  Object.keys(userProfile.action_breakdown).length > 0 ? (
                     <ul className="list-group">
                       {Object.entries(userProfile.action_breakdown)
                         .sort(([, a], [, b]) => b - a)

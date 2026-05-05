@@ -244,8 +244,8 @@ export const ManageLayout: React.FC<ManageLayoutProps> = ({ children }) => {
   useEffect(() => {
     setCollapsedSections((prev) => {
       // Check if current state already has only the active section expanded
-      const onlyActiveExpanded = navSections.every(
-        (section) => section.id === activeSection ? prev[section.id] === false : prev[section.id] !== false
+      const onlyActiveExpanded = navSections.every((section) =>
+        section.id === activeSection ? prev[section.id] === false : prev[section.id] !== false
       );
 
       if (onlyActiveExpanded) {

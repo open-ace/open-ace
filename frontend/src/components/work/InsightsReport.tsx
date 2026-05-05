@@ -43,7 +43,7 @@ export const InsightsReport: React.FC = () => {
       setIsHistoryLoading(true);
       try {
         const data = await insightsApi.getHistory();
-        setHistory(data.reports || []);
+        setHistory(data.reports ?? []);
       } catch {
         // Silently fail for history
       } finally {
@@ -54,56 +54,59 @@ export const InsightsReport: React.FC = () => {
   }, []);
 
   // Generate report
-  const generateReport = useCallback(async (days?: DateRange) => {
-    const range = days || dateRange;
-    const end = new Date();
-    const start = new Date();
-    start.setDate(end.getDate() - range);
-    const startDate = start.toISOString().split('T')[0];
-    const endDate = end.toISOString().split('T')[0];
+  const generateReport = useCallback(
+    async (days?: DateRange) => {
+      const range = days ?? dateRange;
+      const end = new Date();
+      const start = new Date();
+      start.setDate(end.getDate() - range);
+      const startDate = start.toISOString().split('T')[0];
+      const endDate = end.toISOString().split('T')[0];
 
-    // Cancel previous request
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
-
-    setIsLoading(true);
-    setError(null);
-    setInsufficientData(false);
-    setReport(null);
-
-    try {
-      const result = await insightsApi.generateReport(startDate, endDate, controller.signal);
-
-      if (result && 'error' in result && result.error === 'insufficient_data') {
-        setInsufficientData(true);
-        return;
+      // Cancel previous request
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
       }
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
 
-      if (result && 'error' in result && result.error) {
-        setError((result as { error: string; message?: string }).message || result.error);
-        return;
-      }
+      setIsLoading(true);
+      setError(null);
+      setInsufficientData(false);
+      setReport(null);
 
-      setReport(result as InsightsReportData);
-
-      // Refresh history after successful generation
       try {
-        const historyData = await insightsApi.getHistory();
-        setHistory(historyData.reports || []);
-      } catch {
-        // Ignore history refresh error
+        const result = await insightsApi.generateReport(startDate, endDate, controller.signal);
+
+        if (result && 'error' in result && result.error === 'insufficient_data') {
+          setInsufficientData(true);
+          return;
+        }
+
+        if (result && 'error' in result && result.error) {
+          setError((result as { error: string; message?: string }).message ?? result.error);
+          return;
+        }
+
+        setReport(result as InsightsReportData);
+
+        // Refresh history after successful generation
+        try {
+          const historyData = await insightsApi.getHistory();
+          setHistory(historyData.reports ?? []);
+        } catch {
+          // Ignore history refresh error
+        }
+      } catch (err) {
+        const errObj = err as { name?: string; message?: string };
+        if (errObj?.name === 'AbortError') return;
+        setError(errObj?.message ?? 'Failed to generate report');
+      } finally {
+        setIsLoading(false);
       }
-    } catch (err) {
-      const errObj = err as { name?: string; message?: string };
-      if (errObj?.name === 'AbortError') return;
-      setError(errObj?.message || 'Failed to generate report');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [dateRange]);
+    },
+    [dateRange]
+  );
 
   // View a specific history report
   const viewHistoryReport = useCallback(async (item: InsightsHistoryItem) => {
@@ -120,24 +123,27 @@ export const InsightsReport: React.FC = () => {
       setReport(result as InsightsReportData);
     } catch (err) {
       const error = err as { message?: string };
-      setError(error?.message || 'Failed to load report');
+      setError(error?.message ?? 'Failed to load report');
     } finally {
       setIsLoading(false);
     }
   }, []);
 
   // Delete a report
-  const deleteReport = useCallback(async (id: number) => {
-    try {
-      await insightsApi.deleteReport(id);
-      setHistory((prev) => prev.filter((r) => r.id !== id));
-      if (report?.id === id) {
-        setReport(null);
+  const deleteReport = useCallback(
+    async (id: number) => {
+      try {
+        await insightsApi.deleteReport(id);
+        setHistory((prev) => prev.filter((r) => r.id !== id));
+        if (report?.id === id) {
+          setReport(null);
+        }
+      } catch {
+        // Ignore delete error
       }
-    } catch {
-      // Ignore delete error
-    }
-  }, [report]);
+    },
+    [report]
+  );
 
   // Get score color
   const getScoreColor = (score: number): string => {
@@ -178,12 +184,7 @@ export const InsightsReport: React.FC = () => {
               </button>
             ))}
           </div>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => generateReport()}
-            disabled={isLoading}
-          >
+          <Button variant="primary" size="sm" onClick={() => generateReport()} disabled={isLoading}>
             {isLoading ? (
               <>
                 <span className="spinner-border spinner-border-sm me-1" />
@@ -221,7 +222,15 @@ export const InsightsReport: React.FC = () => {
                   <span className="small">
                     {item.start_date} ~ {item.end_date}
                   </span>
-                  <Badge variant={item.overall_score >= 7 ? 'success' : item.overall_score >= 4 ? 'warning' : 'danger'}>
+                  <Badge
+                    variant={
+                      item.overall_score >= 7
+                        ? 'success'
+                        : item.overall_score >= 4
+                          ? 'warning'
+                          : 'danger'
+                    }
+                  >
                     {item.overall_score}/10
                   </Badge>
                 </button>
@@ -255,9 +264,7 @@ export const InsightsReport: React.FC = () => {
       )}
 
       {/* Error State */}
-      {error && !isLoading && (
-        <Error message={error} onRetry={() => generateReport()} />
-      )}
+      {error && !isLoading && <Error message={error} onRetry={() => generateReport()} />}
 
       {/* Insufficient Data State */}
       {insufficientData && !isLoading && !error && (
@@ -328,7 +335,7 @@ export const InsightsReport: React.FC = () => {
             <div className="col-md-6">
               <Card title={t('strengths', language)}>
                 <ul className="list-unstyled mb-0">
-                  {(report.strengths || []).map((item, idx) => (
+                  {(report.strengths ?? []).map((item, idx) => (
                     <li key={idx} className="d-flex align-items-start mb-2">
                       <i className="bi bi-check-circle-fill text-success me-2 mt-1" />
                       <span>{item}</span>
@@ -342,7 +349,7 @@ export const InsightsReport: React.FC = () => {
             <div className="col-md-6">
               <Card title={t('areasForImprovement', language)}>
                 <ul className="list-unstyled mb-0">
-                  {(report.areas_for_improvement || []).map((item, idx) => (
+                  {(report.areas_for_improvement ?? []).map((item, idx) => (
                     <li key={idx} className="d-flex align-items-start mb-2">
                       <i className="bi bi-exclamation-triangle-fill text-warning me-2 mt-1" />
                       <span>{item}</span>
@@ -354,10 +361,10 @@ export const InsightsReport: React.FC = () => {
           </div>
 
           {/* Suggestions */}
-          {(report.suggestions || []).length > 0 && (
+          {(report.suggestions ?? []).length > 0 && (
             <Card title={t('suggestions', language)} className="mb-4">
               <div className="row g-3">
-                {(report.suggestions || []).map((suggestion, idx) => (
+                {(report.suggestions ?? []).map((suggestion, idx) => (
                   <div key={idx} className="col-md-6">
                     <div className="border rounded p-3 h-100">
                       <h6 className="mb-2">
@@ -367,7 +374,9 @@ export const InsightsReport: React.FC = () => {
                       <p className="text-muted small mb-2">{suggestion.description}</p>
                       {suggestion.example && (
                         <div className="bg-light rounded p-2">
-                          <small className="text-muted fw-medium">{t('exampleLabel', language)}：</small>
+                          <small className="text-muted fw-medium">
+                            {t('exampleLabel', language)}：
+                          </small>
                           <div className="small mt-1" style={{ whiteSpace: 'pre-wrap' }}>
                             {suggestion.example}
                           </div>

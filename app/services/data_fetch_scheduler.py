@@ -182,7 +182,7 @@ class DataFetchScheduler:
         """Check all users' quotas and enforce limits after data refresh."""
         from datetime import datetime as dt
 
-        from app.repositories.database import Database, adapt_sql
+        from app.repositories.database import Database, adapt_boolean_condition, adapt_sql
 
         today = dt.utcnow().strftime("%Y-%m-%d")
         month_start = dt.utcnow().replace(day=1).strftime("%Y-%m-%d")
@@ -193,7 +193,7 @@ class DataFetchScheduler:
         try:
             # Find users who exceeded their daily quota
             daily_rows = db.fetch_all(
-                adapt_sql("""
+                adapt_sql(f"""
                     SELECT uds.user_id, uds.requests AS today_requests,
                            uds.tokens AS today_tokens, u.username,
                            u.daily_request_quota, u.daily_token_quota
@@ -215,7 +215,7 @@ class DataFetchScheduler:
 
             # Find users who exceeded their monthly quota
             monthly_rows = db.fetch_all(
-                adapt_sql("""
+                adapt_sql(f"""
                     SELECT u.user_id, SUM(uds.requests) AS month_requests,
                            SUM(uds.tokens) AS month_tokens, u.username,
                            u.monthly_request_quota, u.monthly_token_quota

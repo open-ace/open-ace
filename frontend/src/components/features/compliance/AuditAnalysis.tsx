@@ -191,9 +191,24 @@ export const AuditAnalysis: React.FC = () => {
             <div className="col-md-8">
               <h6>{t('categoryScores', language) ?? 'Severity Breakdown'}</h6>
               {[
-                { label: 'High Severity', count: securityScore.high_severity_count, max: 10, variant: 'danger' },
-                { label: 'Medium Severity', count: securityScore.medium_severity_count, max: 10, variant: 'warning' },
-                { label: 'Low Severity', count: securityScore.low_severity_count, max: 10, variant: 'info' },
+                {
+                  label: 'High Severity',
+                  count: securityScore.high_severity_count,
+                  max: 10,
+                  variant: 'danger',
+                },
+                {
+                  label: 'Medium Severity',
+                  count: securityScore.medium_severity_count,
+                  max: 10,
+                  variant: 'warning',
+                },
+                {
+                  label: 'Low Severity',
+                  count: securityScore.low_severity_count,
+                  max: 10,
+                  variant: 'info',
+                },
               ].map((item) => {
                 const scorePercent = Math.max(0, 100 - (item.count / item.max) * 100);
                 return (
@@ -206,7 +221,10 @@ export const AuditAnalysis: React.FC = () => {
                     </div>
                     <div className="progress" style={{ height: '8px' }}>
                       <div
-                        className={cn('progress-bar', `bg-${scorePercent >= 80 ? 'success' : scorePercent >= 60 ? 'warning' : 'danger'}`)}
+                        className={cn(
+                          'progress-bar',
+                          `bg-${scorePercent >= 80 ? 'success' : scorePercent >= 60 ? 'warning' : 'danger'}`
+                        )}
                         style={{ width: `${scorePercent}%` }}
                       />
                     </div>
@@ -214,9 +232,7 @@ export const AuditAnalysis: React.FC = () => {
                 );
               })}
               <div className="mt-2">
-                <small className="text-muted">
-                  Total anomalies: {securityScore.anomaly_count}
-                </small>
+                <small className="text-muted">Total anomalies: {securityScore.anomaly_count}</small>
               </div>
             </div>
           </div>
@@ -360,22 +376,39 @@ export const AuditAnalysis: React.FC = () => {
           <div>
             <div className="row mb-3">
               <div className="col-md-3">
-                <StatCard label="Total Actions" value={String(userProfile.total_actions)} variant="primary" />
+                <StatCard
+                  label="Total Actions"
+                  value={String(userProfile.total_actions)}
+                  variant="primary"
+                />
               </div>
               <div className="col-md-3">
-                <StatCard label="Actions/Day" value={userProfile.actions_per_day.toFixed(1)} variant="info" />
+                <StatCard
+                  label="Actions/Day"
+                  value={userProfile.actions_per_day.toFixed(1)}
+                  variant="info"
+                />
               </div>
               <div className="col-md-3">
-                <StatCard label="Peak Hour" value={`${userProfile.peak_activity_hour}:00`} variant="warning" />
+                <StatCard
+                  label="Peak Hour"
+                  value={`${userProfile.peak_activity_hour}:00`}
+                  variant="warning"
+                />
               </div>
               <div className="col-md-3">
-                <StatCard label="Peak Day" value={userProfile.peak_activity_day} variant="success" />
+                <StatCard
+                  label="Peak Day"
+                  value={userProfile.peak_activity_day}
+                  variant="success"
+                />
               </div>
             </div>
             <div className="row">
               <div className="col-md-6">
                 <h6>{t('activeHours', language)}</h6>
-                {userProfile.hourly_distribution && Object.keys(userProfile.hourly_distribution).length > 0 ? (
+                {userProfile.hourly_distribution &&
+                Object.keys(userProfile.hourly_distribution).length > 0 ? (
                   <BarChart
                     labels={Object.keys(userProfile.hourly_distribution).map((h) => `${h}:00`)}
                     datasets={[
@@ -392,7 +425,8 @@ export const AuditAnalysis: React.FC = () => {
               </div>
               <div className="col-md-6">
                 <h6>{t('commonOperations', language)}</h6>
-                {userProfile.action_breakdown && Object.keys(userProfile.action_breakdown).length > 0 ? (
+                {userProfile.action_breakdown &&
+                Object.keys(userProfile.action_breakdown).length > 0 ? (
                   <ul className="list-group">
                     {Object.entries(userProfile.action_breakdown)
                       .sort(([, a], [, b]) => b - a)

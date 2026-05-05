@@ -155,7 +155,7 @@ export const APIKeyManagement: React.FC = () => {
                   <td>
                     <strong>{key.key_name}</strong>
                   </td>
-                  <td className="text-muted">{key.base_url || '-'}</td>
+                  <td className="text-muted">{key.base_url ?? '-'}</td>
                   <td>
                     <Badge variant={key.is_active ? 'success' : 'secondary'}>
                       {key.is_active ? t('active', language) : t('inactive', language)}

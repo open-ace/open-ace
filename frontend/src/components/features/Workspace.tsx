@@ -41,8 +41,8 @@ import { cn } from '@/utils';
  * URL is regenerated when restoring tabs based on sessionId, encodedProjectName, toolName
  */
 interface WorkspaceTab extends StoreWorkspaceTab {
-  url: string;       // Runtime-generated URL for iframe
-  token: string;     // Token for authentication (runtime)
+  url: string; // Runtime-generated URL for iframe
+  token: string; // Token for authentication (runtime)
 }
 
 // Generate unique tab ID
@@ -121,7 +121,7 @@ export const Workspace: React.FC = () => {
             setUserWebUI(userWebUIResponse);
             setLoadingStage('ready');
           } else {
-            setError(userWebUIResponse.error || 'Failed to get user workspace URL');
+            setError(userWebUIResponse.error ?? 'Failed to get user workspace URL');
           }
         } else {
           setLoadingStage('ready');
@@ -190,13 +190,23 @@ export const Workspace: React.FC = () => {
             }
             useAppStore.getState().updateWorkspaceTab(currentActiveTabId, updateData);
             // Also update local tabs state
-            const effectiveTitle = (title && !isGenericTitle) ? title
-              : (isGenericTitle && encodedProjectName) ? decodeURIComponent(encodedProjectName)
-              : undefined;
+            const effectiveTitle =
+              title && !isGenericTitle
+                ? title
+                : isGenericTitle && encodedProjectName
+                  ? decodeURIComponent(encodedProjectName)
+                  : undefined;
             setTabs((prev) =>
               prev.map((tab) =>
                 tab.id === currentActiveTabId
-                  ? { ...tab, sessionId, encodedProjectName, toolName, title: effectiveTitle || tab.title, settings }
+                  ? {
+                      ...tab,
+                      sessionId,
+                      encodedProjectName,
+                      toolName,
+                      title: effectiveTitle ?? tab.title,
+                      settings,
+                    }
                   : tab
               )
             );
@@ -222,16 +232,12 @@ export const Workspace: React.FC = () => {
           }
 
           // If we couldn't find the source, use currentActiveTabId as fallback
-          if (!sourceTabId) {
-            sourceTabId = useAppStore.getState().workspaceActiveTabId;
-          }
+          sourceTabId ??= useAppStore.getState().workspaceActiveTabId;
 
           if (sourceTabId) {
             setTabs((prev) =>
               prev.map((tab) =>
-                tab.id === sourceTabId
-                  ? { ...tab, waitingForUser: isWaiting, waitingType }
-                  : tab
+                tab.id === sourceTabId ? { ...tab, waitingForUser: isWaiting, waitingType } : tab
               )
             );
             // Update store
@@ -252,7 +258,7 @@ export const Workspace: React.FC = () => {
           if (currentTabs.length <= 1) return currentTabs;
 
           const currentActiveTabId = useAppStore.getState().workspaceActiveTabId;
-          const currentIndex = currentTabs.findIndex(tab => tab.id === currentActiveTabId);
+          const currentIndex = currentTabs.findIndex((tab) => tab.id === currentActiveTabId);
 
           // Calculate new index
           let newIndex: number;
@@ -317,102 +323,112 @@ export const Workspace: React.FC = () => {
     if (quotaStatus?.over_quota?.any && workspaceFullscreen) {
       exitWorkspaceFullscreen();
       // Show a toast notification to inform user
-      toast.warning(t('exitedFullscreenDueToQuotaTitle', language), t('exitedFullscreenDueToQuotaDesc', language));
+      toast.warning(
+        t('exitedFullscreenDueToQuotaTitle', language),
+        t('exitedFullscreenDueToQuotaDesc', language)
+      );
     }
   }, [quotaStatus?.over_quota?.any, workspaceFullscreen, exitWorkspaceFullscreen, language, toast]);
 
   // Get the effective URL for iframe
-  const getEffectiveUrl = useCallback((
-    restoreSessionId?: string,
-    encodedProjectName?: string,
-    toolName?: string,
-    settings?: { model?: string; useWebUI?: boolean; permissionMode?: string },
-    remoteParams?: { workspaceType?: 'local' | 'remote'; machineId?: string; machineName?: string }
-  ): string => {
-    if (!config?.enabled) return '';
-
-    // Helper to append parameter to URL
-    const appendParam = (url: string, key: string, value: string | undefined) => {
-      if (value === undefined) return url;
-      const separator = url.includes('?') ? '&' : '?';
-      return `${url}${separator}${key}=${encodeURIComponent(value)}`;
-    };
-
-    // Helper to append remote workspace parameters
-    const appendRemoteParams = (url: string) => {
-      if (!remoteParams?.workspaceType) return url;
-      let result = appendParam(url, 'workspaceType', remoteParams.workspaceType);
-      result = appendParam(result, 'machineId', remoteParams.machineId);
-      result = appendParam(result, 'machineName', remoteParams.machineName);
-      return result;
-    };
-
-    // Multi-user mode: use user-specific URL with token and openace_url
-    if (config.multi_user_mode && userWebUI?.success) {
-      const baseUrl = userWebUI.url;
-      const token = userWebUI.token;
-      const openaceUrl = userWebUI.openace_url;
-      // Add token and openace_url as URL parameters
-      const separator = baseUrl.includes('?') ? '&' : '?';
-      let url = `${baseUrl}${separator}token=${encodeURIComponent(token)}`;
-      if (openaceUrl) {
-        url = `${url}&openace_url=${encodeURIComponent(openaceUrl)}`;
+  const getEffectiveUrl = useCallback(
+    (
+      restoreSessionId?: string,
+      encodedProjectName?: string,
+      toolName?: string,
+      settings?: { model?: string; useWebUI?: boolean; permissionMode?: string },
+      remoteParams?: {
+        workspaceType?: 'local' | 'remote';
+        machineId?: string;
+        machineName?: string;
       }
+    ): string => {
+      if (!config?.enabled) return '';
+
+      // Helper to append parameter to URL
+      const appendParam = (url: string, key: string, value: string | undefined) => {
+        if (value === undefined) return url;
+        const separator = url.includes('?') ? '&' : '?';
+        return `${url}${separator}${key}=${encodeURIComponent(value)}`;
+      };
+
+      // Helper to append remote workspace parameters
+      const appendRemoteParams = (url: string) => {
+        if (!remoteParams?.workspaceType) return url;
+        let result = appendParam(url, 'workspaceType', remoteParams.workspaceType);
+        result = appendParam(result, 'machineId', remoteParams.machineId);
+        result = appendParam(result, 'machineName', remoteParams.machineName);
+        return result;
+      };
+
+      // Multi-user mode: use user-specific URL with token and openace_url
+      if (config.multi_user_mode && userWebUI?.success) {
+        const baseUrl = userWebUI.url;
+        const token = userWebUI.token;
+        const openaceUrl = userWebUI.openace_url;
+        // Add token and openace_url as URL parameters
+        const separator = baseUrl.includes('?') ? '&' : '?';
+        let url = `${baseUrl}${separator}token=${encodeURIComponent(token)}`;
+        if (openaceUrl) {
+          url = `${url}&openace_url=${encodeURIComponent(openaceUrl)}`;
+        }
+        // Add lang parameter for language sync
+        url = `${url}&lang=${encodeURIComponent(language)}`;
+        // Add sessionId, encodedProjectName, and toolName if restoring a session
+        if (restoreSessionId) {
+          url = `${url}&sessionId=${encodeURIComponent(restoreSessionId)}`;
+        }
+        if (encodedProjectName) {
+          url = `${url}&encodedProjectName=${encodeURIComponent(encodedProjectName)}`;
+        }
+        if (toolName) {
+          url = `${url}&toolName=${encodeURIComponent(toolName)}`;
+        }
+        // Add settings parameters (Issue #70)
+        if (settings?.model) {
+          url = `${url}&model=${encodeURIComponent(settings.model)}`;
+        }
+        if (settings?.useWebUI !== undefined) {
+          url = `${url}&useWebUI=${settings.useWebUI}`;
+        }
+        if (settings?.permissionMode) {
+          url = `${url}&permissionMode=${encodeURIComponent(settings.permissionMode)}`;
+        }
+        // Remote workspace parameters
+        url = appendRemoteParams(url);
+        return url;
+      }
+
+      // Single-user mode: use configured URL
+      let url = config.url;
       // Add lang parameter for language sync
-      url = `${url}&lang=${encodeURIComponent(language)}`;
-      // Add sessionId, encodedProjectName, and toolName if restoring a session
+      const langSeparator = url.includes('?') ? '&' : '?';
+      url = `${url}${langSeparator}lang=${encodeURIComponent(language)}`;
       if (restoreSessionId) {
-        url = `${url}&sessionId=${encodeURIComponent(restoreSessionId)}`;
+        url = appendParam(url, 'sessionId', restoreSessionId);
       }
       if (encodedProjectName) {
-        url = `${url}&encodedProjectName=${encodeURIComponent(encodedProjectName)}`;
+        url = appendParam(url, 'encodedProjectName', encodedProjectName);
       }
       if (toolName) {
-        url = `${url}&toolName=${encodeURIComponent(toolName)}`;
+        url = appendParam(url, 'toolName', toolName);
       }
       // Add settings parameters (Issue #70)
       if (settings?.model) {
-        url = `${url}&model=${encodeURIComponent(settings.model)}`;
+        url = appendParam(url, 'model', settings.model);
       }
       if (settings?.useWebUI !== undefined) {
         url = `${url}&useWebUI=${settings.useWebUI}`;
       }
       if (settings?.permissionMode) {
-        url = `${url}&permissionMode=${encodeURIComponent(settings.permissionMode)}`;
+        url = appendParam(url, 'permissionMode', settings.permissionMode);
       }
       // Remote workspace parameters
       url = appendRemoteParams(url);
       return url;
-    }
-
-    // Single-user mode: use configured URL
-    let url = config.url;
-    // Add lang parameter for language sync
-    const langSeparator = url.includes('?') ? '&' : '?';
-    url = `${url}${langSeparator}lang=${encodeURIComponent(language)}`;
-    if (restoreSessionId) {
-      url = appendParam(url, 'sessionId', restoreSessionId);
-    }
-    if (encodedProjectName) {
-      url = appendParam(url, 'encodedProjectName', encodedProjectName);
-    }
-    if (toolName) {
-      url = appendParam(url, 'toolName', toolName);
-    }
-    // Add settings parameters (Issue #70)
-    if (settings?.model) {
-      url = appendParam(url, 'model', settings.model);
-    }
-    if (settings?.useWebUI !== undefined) {
-      url = `${url}&useWebUI=${settings.useWebUI}`;
-    }
-    if (settings?.permissionMode) {
-      url = appendParam(url, 'permissionMode', settings.permissionMode);
-    }
-    // Remote workspace parameters
-    url = appendRemoteParams(url);
-    return url;
-  }, [config, userWebUI, language]);
+    },
+    [config, userWebUI, language]
+  );
 
   // Initialize tabs when config is loaded (Issue #65: Restore from store if available)
   useEffect(() => {
@@ -440,7 +456,7 @@ export const Workspace: React.FC = () => {
     const urlWorkspaceType = searchParams.get('workspaceType') as 'local' | 'remote' | null;
     const urlMachineId = searchParams.get('machineId');
     const urlMachineName = searchParams.get('machineName');
-    const restoreSessionId = urlSessionId || restoreSession;
+    const restoreSessionId = urlSessionId ?? restoreSession;
 
     // Determine if we should restore from store or create new
     // Priority: URL restore params > Store saved state > New session
@@ -450,25 +466,32 @@ export const Workspace: React.FC = () => {
     if (restoreSessionId) {
       // Case 1: URL restore params - create a single tab with the restore session
       // Build settings from URL params
-      const urlSettings: { model?: string; useWebUI?: boolean; permissionMode?: string } | undefined =
-        (urlModel || urlUseWebUI !== null || urlPermissionMode)
+      const urlSettings:
+        | { model?: string; useWebUI?: boolean; permissionMode?: string }
+        | undefined =
+        urlModel || urlUseWebUI !== null || urlPermissionMode
           ? {
-              model: urlModel || undefined,
+              model: urlModel ?? undefined,
               useWebUI: urlUseWebUI === 'true' ? true : urlUseWebUI === 'false' ? false : undefined,
-              permissionMode: urlPermissionMode || undefined,
+              permissionMode: urlPermissionMode ?? undefined,
             }
           : undefined;
 
       // Build remote params from URL
-      const remoteParams: { workspaceType?: 'local' | 'remote'; machineId?: string; machineName?: string } | undefined =
-        urlWorkspaceType
-          ? { workspaceType: urlWorkspaceType, machineId: urlMachineId || undefined, machineName: urlMachineName || undefined }
-          : undefined;
+      const remoteParams:
+        | { workspaceType?: 'local' | 'remote'; machineId?: string; machineName?: string }
+        | undefined = urlWorkspaceType
+        ? {
+            workspaceType: urlWorkspaceType,
+            machineId: urlMachineId ?? undefined,
+            machineName: urlMachineName ?? undefined,
+          }
+        : undefined;
 
       const effectiveUrl = getEffectiveUrl(
         restoreSessionId,
-        urlEncodedProjectName || undefined,
-        urlToolName || undefined,
+        urlEncodedProjectName ?? undefined,
+        urlToolName ?? undefined,
         urlSettings,
         remoteParams
       );
@@ -477,14 +500,14 @@ export const Workspace: React.FC = () => {
           id: generateTabId(),
           title: t('restoredSession', language),
           url: effectiveUrl,
-          token: userWebUI?.token || '',
+          token: userWebUI?.token ?? '',
           sessionId: restoreSessionId,
-          encodedProjectName: urlEncodedProjectName || undefined,
-          toolName: urlToolName || undefined,
+          encodedProjectName: urlEncodedProjectName ?? undefined,
+          toolName: urlToolName ?? undefined,
           settings: urlSettings,
-          workspaceType: urlWorkspaceType || undefined,
-          machineId: urlMachineId || undefined,
-          machineName: urlMachineName || undefined,
+          workspaceType: urlWorkspaceType ?? undefined,
+          machineId: urlMachineId ?? undefined,
+          machineName: urlMachineName ?? undefined,
           createdAt: Date.now(),
           waitingForUser: false,
           waitingType: null,
@@ -524,7 +547,11 @@ export const Workspace: React.FC = () => {
         // Regenerate URL based on sessionId if available
         // Include settings and remote params in URL for restoration
         const remoteParams = storedTab.workspaceType
-          ? { workspaceType: storedTab.workspaceType, machineId: storedTab.machineId, machineName: storedTab.machineName }
+          ? {
+              workspaceType: storedTab.workspaceType,
+              machineId: storedTab.machineId,
+              machineName: storedTab.machineName,
+            }
           : undefined;
         const effectiveUrl = storedTab.sessionId
           ? getEffectiveUrl(
@@ -538,15 +565,17 @@ export const Workspace: React.FC = () => {
 
         return {
           ...storedTab,
-          url: effectiveUrl || '',
-          token: userWebUI?.token || '',
+          url: effectiveUrl ?? '',
+          token: userWebUI?.token ?? '',
         };
       });
 
       // Use stored active tab ID if it exists in the restored tabs
-      initialActiveTabId = storedTabs.find(t => t.id === storedActiveTabId)
+      initialActiveTabId = storedTabs.find((t) => t.id === storedActiveTabId)
         ? storedActiveTabId
-        : (initialTabs.length > 0 ? initialTabs[0].id : '');
+        : initialTabs.length > 0
+          ? initialTabs[0].id
+          : '';
 
       console.log('[Issue #65] Restored workspace tabs from store:', {
         tabsCount: initialTabs.length,
@@ -560,7 +589,7 @@ export const Workspace: React.FC = () => {
           id: generateTabId(),
           title: t('newSession', language),
           url: effectiveUrl,
-          token: userWebUI?.token || '',
+          token: userWebUI?.token ?? '',
           createdAt: Date.now(),
           waitingForUser: false,
           waitingType: null,
@@ -587,7 +616,7 @@ export const Workspace: React.FC = () => {
       setActiveTabId(initialActiveTabId);
       setStoredActiveTabId(initialActiveTabId);
       // Mark as loading
-      setLoadingTabs(new Set(initialTabs.map(t => t.id)));
+      setLoadingTabs(new Set(initialTabs.map((t) => t.id)));
       setTabsInitialized(true);
     }
   }, [
@@ -615,7 +644,7 @@ export const Workspace: React.FC = () => {
         machineId: searchParams.get('machineId'),
         machineName: searchParams.get('machineName'),
       };
-      const sessionId = searchParams.get('sessionId') || undefined;
+      const sessionId = searchParams.get('sessionId') ?? undefined;
 
       // Clear the URL parameters
       searchParams.delete('newTab');
@@ -627,63 +656,85 @@ export const Workspace: React.FC = () => {
 
       // Create new tab with remote params
       const rp = remoteParams.workspaceType
-        ? { workspaceType: remoteParams.workspaceType, machineId: remoteParams.machineId || undefined, machineName: remoteParams.machineName || undefined }
+        ? {
+            workspaceType: remoteParams.workspaceType,
+            machineId: remoteParams.machineId ?? undefined,
+            machineName: remoteParams.machineName ?? undefined,
+          }
         : undefined;
       createNewTab(sessionId, rp);
     }
   }, [searchParams, config, getEffectiveUrl, tabsInitialized]);
 
   // Create a new tab
-  const createNewTab = useCallback((
-    restoreSessionId?: string,
-    remoteParams?: { workspaceType?: 'local' | 'remote'; machineId?: string; machineName?: string; sessionId?: string; projectPath?: string },
-  ) => {
-    // Pass raw project path — getEffectiveUrl will URL-encode it.
-    // ChatPage Strategy 1.5 decodes it, correctly handling hyphens in paths.
-    const encodedProjectName = remoteParams?.projectPath || undefined;
-    const effectiveUrl = getEffectiveUrl(restoreSessionId || remoteParams?.sessionId || undefined, encodedProjectName, undefined, undefined, remoteParams);
-    if (!effectiveUrl) return;
+  const createNewTab = useCallback(
+    (
+      restoreSessionId?: string,
+      remoteParams?: {
+        workspaceType?: 'local' | 'remote';
+        machineId?: string;
+        machineName?: string;
+        sessionId?: string;
+        projectPath?: string;
+      }
+    ) => {
+      // Pass raw project path — getEffectiveUrl will URL-encode it.
+      // ChatPage Strategy 1.5 decodes it, correctly handling hyphens in paths.
+      const encodedProjectName = remoteParams?.projectPath ?? undefined;
+      const effectiveUrl = getEffectiveUrl(
+        restoreSessionId ?? remoteParams?.sessionId ?? undefined,
+        encodedProjectName,
+        undefined,
+        undefined,
+        remoteParams
+      );
+      if (!effectiveUrl) return;
 
-    // Title: "Restored Session" only when restoring from session list, not new remote sessions
-    const isNewRemote = remoteParams?.workspaceType === 'remote';
-    const newTab: WorkspaceTab = {
-      id: generateTabId(),
-      title: (restoreSessionId && !isNewRemote) ? t('restoredSession', language) : t('newSession', language),
-      url: effectiveUrl,
-      token: userWebUI?.token || '',
-      createdAt: Date.now(),
-      waitingForUser: false,
-      waitingType: null,
-      sessionId: restoreSessionId || remoteParams?.sessionId,
-      encodedProjectName,
-      workspaceType: remoteParams?.workspaceType,
-      machineId: remoteParams?.machineId,
-      machineName: remoteParams?.machineName,
-    };
+      // Title: "Restored Session" only when restoring from session list, not new remote sessions
+      const isNewRemote = remoteParams?.workspaceType === 'remote';
+      const newTab: WorkspaceTab = {
+        id: generateTabId(),
+        title:
+          restoreSessionId && !isNewRemote
+            ? t('restoredSession', language)
+            : t('newSession', language),
+        url: effectiveUrl,
+        token: userWebUI?.token ?? '',
+        createdAt: Date.now(),
+        waitingForUser: false,
+        waitingType: null,
+        sessionId: restoreSessionId ?? remoteParams?.sessionId,
+        encodedProjectName,
+        workspaceType: remoteParams?.workspaceType,
+        machineId: remoteParams?.machineId,
+        machineName: remoteParams?.machineName,
+      };
 
-    // Update local state
-    setTabs((prev) => [...prev, newTab]);
-    setActiveTabId(newTab.id);
+      // Update local state
+      setTabs((prev) => [...prev, newTab]);
+      setActiveTabId(newTab.id);
 
-    // Update store (Issue #65)
-    addStoredTab({
-      id: newTab.id,
-      title: newTab.title,
-      sessionId: newTab.sessionId,
-      encodedProjectName: newTab.encodedProjectName,
-      toolName: newTab.toolName,
-      createdAt: newTab.createdAt,
-      waitingForUser: newTab.waitingForUser,
-      waitingType: newTab.waitingType,
-      workspaceType: newTab.workspaceType,
-      machineId: newTab.machineId,
-      machineName: newTab.machineName,
-    });
-    setStoredActiveTabId(newTab.id);
+      // Update store (Issue #65)
+      addStoredTab({
+        id: newTab.id,
+        title: newTab.title,
+        sessionId: newTab.sessionId,
+        encodedProjectName: newTab.encodedProjectName,
+        toolName: newTab.toolName,
+        createdAt: newTab.createdAt,
+        waitingForUser: newTab.waitingForUser,
+        waitingType: newTab.waitingType,
+        workspaceType: newTab.workspaceType,
+        machineId: newTab.machineId,
+        machineName: newTab.machineName,
+      });
+      setStoredActiveTabId(newTab.id);
 
-    // Mark as loading
-    setLoadingTabs((prev) => new Set(prev).add(newTab.id));
-  }, [getEffectiveUrl, userWebUI, language, addStoredTab, setStoredActiveTabId]);
+      // Mark as loading
+      setLoadingTabs((prev) => new Set(prev).add(newTab.id));
+    },
+    [getEffectiveUrl, userWebUI, language, addStoredTab, setStoredActiveTabId]
+  );
 
   // Actually remove a tab (shared by closeTab and remote close confirmation)
   const doCloseTab = useCallback(
@@ -749,33 +800,39 @@ export const Workspace: React.FC = () => {
   }, []);
 
   // Switch to a tab
-  const switchTab = useCallback((tabId: string) => {
-    setActiveTabId(tabId);
-    // Update store (Issue #65)
-    setStoredActiveTabId(tabId);
+  const switchTab = useCallback(
+    (tabId: string) => {
+      setActiveTabId(tabId);
+      // Update store (Issue #65)
+      setStoredActiveTabId(tabId);
 
-    // Send focus message to iframe after tab switch
-    // Use setTimeout to ensure the iframe is visible before sending message
-    setTimeout(() => {
-      const iframe = iframeRefs.current.get(tabId);
-      if (iframe?.contentWindow) {
-        iframe.contentWindow.postMessage({ type: 'openace-focus-input' }, '*');
-        // Also send tab-activated to clear notification
-        iframe.contentWindow.postMessage({ type: 'openace-tab-activated' }, '*');
-      }
-    }, 100);
-  }, [setStoredActiveTabId]);
+      // Send focus message to iframe after tab switch
+      // Use setTimeout to ensure the iframe is visible before sending message
+      setTimeout(() => {
+        const iframe = iframeRefs.current.get(tabId);
+        if (iframe?.contentWindow) {
+          iframe.contentWindow.postMessage({ type: 'openace-focus-input' }, '*');
+          // Also send tab-activated to clear notification
+          iframe.contentWindow.postMessage({ type: 'openace-tab-activated' }, '*');
+        }
+      }, 100);
+    },
+    [setStoredActiveTabId]
+  );
 
   // Rename a tab
-  const handleRenameTab = useCallback((tabId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    const tab = tabs.find((t) => t.id === tabId);
-    if (tab) {
-      setRenameTabId(tabId);
-      setRenameValue(tab.title);
-      setShowRenameModal(true);
-    }
-  }, [tabs]);
+  const handleRenameTab = useCallback(
+    (tabId: string, e: React.MouseEvent) => {
+      e.stopPropagation();
+      const tab = tabs.find((t) => t.id === tabId);
+      if (tab) {
+        setRenameTabId(tabId);
+        setRenameValue(tab.title);
+        setShowRenameModal(true);
+      }
+    },
+    [tabs]
+  );
 
   const handleSaveRename = useCallback(async () => {
     if (!renameTabId || !renameValue.trim()) return;
@@ -792,7 +849,7 @@ export const Workspace: React.FC = () => {
       }
 
       // Try to extract session ID from URL or from stored sessionId
-      let sessionId: string | null = tab.sessionId || null;
+      let sessionId: string | null = tab.sessionId ?? null;
       if (!sessionId) {
         const urlParts = tab.url.split('/c/');
         if (urlParts.length > 1) {
@@ -817,9 +874,7 @@ export const Workspace: React.FC = () => {
 
       // Always update tab title locally (regardless of backend result)
       setTabs((prev) =>
-        prev.map((tab) =>
-          tab.id === renameTabId ? { ...tab, title: renameValue.trim() } : tab
-        )
+        prev.map((tab) => (tab.id === renameTabId ? { ...tab, title: renameValue.trim() } : tab))
       );
 
       // Update store (Issue #65)
@@ -850,23 +905,26 @@ export const Workspace: React.FC = () => {
     setResizingTabId(tabId);
   }, []);
 
-  const handleResizeMove = useCallback((e: MouseEvent) => {
-    if (!resizingTabId) return;
+  const handleResizeMove = useCallback(
+    (e: MouseEvent) => {
+      if (!resizingTabId) return;
 
-    const tabElement = document.querySelector(`[data-tab-id="${resizingTabId}"]`) as HTMLElement;
-    if (!tabElement) return;
+      const tabElement = document.querySelector(`[data-tab-id="${resizingTabId}"]`) as HTMLElement;
+      if (!tabElement) return;
 
-    const rect = tabElement.getBoundingClientRect();
-    const newWidth = e.clientX - rect.left;
+      const rect = tabElement.getBoundingClientRect();
+      const newWidth = e.clientX - rect.left;
 
-    // Constrain width between 100px and 400px
-    const constrainedWidth = Math.max(100, Math.min(400, newWidth));
+      // Constrain width between 100px and 400px
+      const constrainedWidth = Math.max(100, Math.min(400, newWidth));
 
-    setTabWidths((prev) => ({
-      ...prev,
-      [resizingTabId]: constrainedWidth,
-    }));
-  }, [resizingTabId]);
+      setTabWidths((prev) => ({
+        ...prev,
+        [resizingTabId]: constrainedWidth,
+      }));
+    },
+    [resizingTabId]
+  );
 
   const handleResizeEnd = useCallback(() => {
     setResizingTabId(null);
@@ -914,7 +972,7 @@ export const Workspace: React.FC = () => {
 
       // Check modifier keys: Cmd+Shift on Mac, Ctrl+Shift on Windows/Linux
       const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-      const modifierPressed = isMac ? (e.metaKey && e.shiftKey) : (e.ctrlKey && e.shiftKey);
+      const modifierPressed = isMac ? e.metaKey && e.shiftKey : e.ctrlKey && e.shiftKey;
 
       // Handle Comma key (previous tab) and Period key (next tab)
       // Use e.code instead of e.key to support non-English input methods
@@ -930,11 +988,11 @@ export const Workspace: React.FC = () => {
           shiftKey: e.shiftKey,
           direction: e.code === 'Comma' ? 'prev' : 'next',
           tabsLength: tabs.length,
-          activeTabId
+          activeTabId,
         });
 
         // Find current active tab index
-        const currentIndex = tabs.findIndex(tab => tab.id === activeTabId);
+        const currentIndex = tabs.findIndex((tab) => tab.id === activeTabId);
 
         // Calculate new index
         let newIndex: number;
@@ -992,12 +1050,18 @@ export const Workspace: React.FC = () => {
             </p>
           )}
           <div className="progress-steps mt-3">
-            <div className={`progress-step ${loadingStage === 'loadingConfig' || loadingStage === 'startingWorkspace' || loadingStage === 'ready' ? 'active' : ''}`}>
+            <div
+              className={`progress-step ${loadingStage === 'loadingConfig' || loadingStage === 'startingWorkspace' || loadingStage === 'ready' ? 'active' : ''}`}
+            >
               <i className="bi bi-check-circle-fill" />
               <span>{t('loadingConfig', language) || 'Load config'}</span>
             </div>
-            <div className={`progress-step ${loadingStage === 'startingWorkspace' || loadingStage === 'ready' ? 'active' : ''}`}>
-              <i className={`bi ${loadingStage === 'startingWorkspace' ? 'bi-arrow-repeat spin' : 'bi-check-circle-fill'}`} />
+            <div
+              className={`progress-step ${loadingStage === 'startingWorkspace' || loadingStage === 'ready' ? 'active' : ''}`}
+            >
+              <i
+                className={`bi ${loadingStage === 'startingWorkspace' ? 'bi-arrow-repeat spin' : 'bi-check-circle-fill'}`}
+              />
               <span>{t('startingInstance', language) || 'Start instance'}</span>
             </div>
             <div className={`progress-step ${loadingStage === 'ready' ? 'active' : ''}`}>
@@ -1033,7 +1097,9 @@ export const Workspace: React.FC = () => {
         <div className="text-center py-5">
           <i className="bi bi-exclamation-circle fs-1 text-warning" />
           <h4 className="mt-3">{t('workspaceUnavailable', language)}</h4>
-          <p className="text-muted">{userWebUI?.error || t('workspaceUnavailableHelp', language)}</p>
+          <p className="text-muted">
+            {userWebUI?.error ?? t('workspaceUnavailableHelp', language)}
+          </p>
           <Button variant="primary" onClick={() => window.location.reload()}>
             <i className="bi bi-arrow-clockwise me-2" />
             {t('retry', language)}
@@ -1085,9 +1151,7 @@ export const Workspace: React.FC = () => {
                   <span className="d-block">{t('monthlyTokenQuotaExceeded', language)}</span>
                 )}
               </p>
-              <p className="text-muted small mb-4">
-                {t('quotaLimitsHelpDesc', language)}
-              </p>
+              <p className="text-muted small mb-4">{t('quotaLimitsHelpDesc', language)}</p>
               <div className="d-flex gap-2 justify-content-center">
                 <Button variant="outline-primary" onClick={goToUsage}>
                   <i className="bi bi-bar-chart me-2" />
@@ -1106,15 +1170,20 @@ export const Workspace: React.FC = () => {
   }
 
   return (
-    <div className={cn('workspace h-100 d-flex flex-column', workspaceFullscreen && 'fullscreen-mode')}>
+    <div
+      className={cn('workspace h-100 d-flex flex-column', workspaceFullscreen && 'fullscreen-mode')}
+    >
       {/* Page Header - Hidden in fullscreen */}
-      <div className={cn('page-header mb-3 px-3 pt-3 d-flex align-items-center', workspaceFullscreen && 'd-none')}>
+      <div
+        className={cn(
+          'page-header mb-3 px-3 pt-3 d-flex align-items-center',
+          workspaceFullscreen && 'd-none'
+        )}
+      >
         <div className="d-flex align-items-center flex-grow-1">
           <h2>{t('workspace', language)}</h2>
           {config.multi_user_mode && userWebUI?.system_account && (
-            <small className="text-muted ms-2">
-              ({userWebUI.system_account})
-            </small>
+            <small className="text-muted ms-2">({userWebUI.system_account})</small>
           )}
         </div>
         <div className="d-flex align-items-center gap-2">
@@ -1122,25 +1191,38 @@ export const Workspace: React.FC = () => {
           <button
             className={cn(
               'btn btn-sm',
-              enableTabNotifications
-                ? 'btn-outline-primary'
-                : 'btn-outline-secondary'
+              enableTabNotifications ? 'btn-outline-primary' : 'btn-outline-secondary'
             )}
             onClick={toggleTabNotifications}
-            title={enableTabNotifications ? t('disableTabNotifications', language) || 'Disable tab notifications' : t('enableTabNotifications', language) || 'Enable tab notifications'}
+            title={
+              enableTabNotifications
+                ? t('disableTabNotifications', language) || 'Disable tab notifications'
+                : t('enableTabNotifications', language) || 'Enable tab notifications'
+            }
           >
-            <i className={cn('bi me-1', enableTabNotifications ? 'bi-bell-fill' : 'bi-bell-slash')} />
+            <i
+              className={cn('bi me-1', enableTabNotifications ? 'bi-bell-fill' : 'bi-bell-slash')}
+            />
             <span className="d-none d-sm-inline">
-              {enableTabNotifications ? t('tabNotificationsOn', language) || 'Notifications On' : t('tabNotificationsOff', language) || 'Off'}
+              {enableTabNotifications
+                ? t('tabNotificationsOn', language) || 'Notifications On'
+                : t('tabNotificationsOff', language) || 'Off'}
             </span>
           </button>
           {/* Fullscreen toggle button */}
           <button
             className="btn btn-sm btn-outline-secondary fullscreen-toggle-btn"
             onClick={() => toggleWorkspaceFullscreen(false, false)}
-            title={workspaceFullscreen ? t('exitFullscreen', language) : t('enterFullscreen', language)}
+            title={
+              workspaceFullscreen ? t('exitFullscreen', language) : t('enterFullscreen', language)
+            }
           >
-            <i className={cn('bi me-1', workspaceFullscreen ? 'bi-fullscreen-exit' : 'bi-fullscreen')} />
+            <i
+              className={cn(
+                'bi me-1',
+                workspaceFullscreen ? 'bi-fullscreen-exit' : 'bi-fullscreen'
+              )}
+            />
             {workspaceFullscreen ? t('exitFullscreen', language) : t('enterFullscreen', language)}
           </button>
         </div>
@@ -1148,7 +1230,10 @@ export const Workspace: React.FC = () => {
       {/* Tab Bar */}
       {tabs.length > 0 && (
         <div
-          className={cn('workspace-tabs d-flex align-items-center border-bottom', workspaceFullscreen ? 'bg-white fullscreen-tabs' : 'bg-light')}
+          className={cn(
+            'workspace-tabs d-flex align-items-center border-bottom',
+            workspaceFullscreen ? 'bg-white fullscreen-tabs' : 'bg-light'
+          )}
           style={{ minHeight: '40px' }}
         >
           {/* Tabs */}
@@ -1171,16 +1256,24 @@ export const Workspace: React.FC = () => {
                     userSelect: 'none',
                   }}
                 >
-                  <i className={cn(
-                    'bi me-2 flex-shrink-0',
-                    tab.waitingForUser ? 'bi-bell-fill text-info' : 'bi-chat-dots text-muted'
-                  )} />
-                  <span className={cn(
-                    'text-truncate small flex-grow-1',
-                    tab.waitingForUser && 'fw-semibold'
-                  )} style={{ minWidth: 0 }}>
+                  <i
+                    className={cn(
+                      'bi me-2 flex-shrink-0',
+                      tab.waitingForUser ? 'bi-bell-fill text-info' : 'bi-chat-dots text-muted'
+                    )}
+                  />
+                  <span
+                    className={cn(
+                      'text-truncate small flex-grow-1',
+                      tab.waitingForUser && 'fw-semibold'
+                    )}
+                    style={{ minWidth: 0 }}
+                  >
                     {tab.workspaceType === 'remote' ? (
-                      <i className="bi bi-cloud-fill text-primary me-1" title={`Remote: ${tab.machineName || tab.machineId}`} />
+                      <i
+                        className="bi bi-cloud-fill text-primary me-1"
+                        title={`Remote: ${tab.machineName ?? tab.machineId}`}
+                      />
                     ) : (
                       <i className="bi bi-laptop text-success me-1" title="Local" />
                     )}
@@ -1188,19 +1281,20 @@ export const Workspace: React.FC = () => {
                   </span>
                   {/* Waiting indicator badge */}
                   {tab.waitingForUser && activeTabId !== tab.id && (
-                    <span className={cn(
-                      'waiting-badge badge bg-info'
-                    )} style={{
-                      fontSize: '0.65rem',
-                      padding: '0.2rem 0.4rem',
-                      marginLeft: '0.25rem',
-                      borderRadius: '50%',
-                      minWidth: '1.2rem',
-                      height: '1.2rem',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center'
-                    }}>
+                    <span
+                      className={cn('waiting-badge badge bg-info')}
+                      style={{
+                        fontSize: '0.65rem',
+                        padding: '0.2rem 0.4rem',
+                        marginLeft: '0.25rem',
+                        borderRadius: '50%',
+                        minWidth: '1.2rem',
+                        height: '1.2rem',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
                       ●
                     </span>
                   )}
@@ -1256,15 +1350,21 @@ export const Workspace: React.FC = () => {
             <button
               className={cn(
                 'btn btn-sm px-3 py-1 mx-2',
-                enableTabNotifications
-                  ? 'btn-outline-primary'
-                  : 'btn-outline-secondary'
+                enableTabNotifications ? 'btn-outline-primary' : 'btn-outline-secondary'
               )}
               onClick={toggleTabNotifications}
-              title={enableTabNotifications ? t('disableTabNotifications', language) : t('enableTabNotifications', language)}
+              title={
+                enableTabNotifications
+                  ? t('disableTabNotifications', language)
+                  : t('enableTabNotifications', language)
+              }
             >
-              <i className={cn('bi me-1', enableTabNotifications ? 'bi-bell-fill' : 'bi-bell-slash')} />
-              {enableTabNotifications ? t('tabNotificationsOn', language) : t('tabNotificationsOff', language)}
+              <i
+                className={cn('bi me-1', enableTabNotifications ? 'bi-bell-fill' : 'bi-bell-slash')}
+              />
+              {enableTabNotifications
+                ? t('tabNotificationsOn', language)
+                : t('tabNotificationsOff', language)}
             </button>
           )}
           {/* Exit Fullscreen Button - Only show in fullscreen mode */}
@@ -1498,7 +1598,12 @@ export const Workspace: React.FC = () => {
           setShowNewSessionModal(false);
           createNewTab();
         }}
-        onCreateRemote={(params: { machineId: string; machineName: string; sessionId: string; projectPath: string }) => {
+        onCreateRemote={(params: {
+          machineId: string;
+          machineName: string;
+          sessionId: string;
+          projectPath: string;
+        }) => {
           setShowNewSessionModal(false);
           createNewTab(undefined, {
             workspaceType: 'remote',
@@ -1517,10 +1622,25 @@ export const Workspace: React.FC = () => {
         title="关闭远程工作区"
         size="sm"
       >
-        <p style={{ color: 'var(--text-secondary, #6c757d)', fontSize: '0.875rem', marginBottom: '1rem' }}>
+        <p
+          style={{
+            color: 'var(--text-secondary, #6c757d)',
+            fontSize: '0.875rem',
+            marginBottom: '1rem',
+          }}
+        >
           这是一个远程工作区会话。关闭前请选择是否停止远程会话。
         </p>
-        <div style={{ background: 'var(--bg-tertiary, #f8f9fa)', borderRadius: '0.5rem', padding: '0.75rem', marginBottom: '1rem', fontSize: '0.8125rem', color: 'var(--text-secondary, #6c757d)' }}>
+        <div
+          style={{
+            background: 'var(--bg-tertiary, #f8f9fa)',
+            borderRadius: '0.5rem',
+            padding: '0.75rem',
+            marginBottom: '1rem',
+            fontSize: '0.8125rem',
+            color: 'var(--text-secondary, #6c757d)',
+          }}
+        >
           不停止会话可以恢复，但会占用服务器资源。
         </div>
         <div className="d-flex justify-content-end gap-2">

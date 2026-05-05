@@ -23,10 +23,7 @@ interface ToolAccountsEditorProps {
   onChange?: () => void;
 }
 
-export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({
-  userId,
-  onChange,
-}) => {
+export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({ userId, onChange }) => {
   const language = useLanguage();
   const [toolAccounts, setToolAccounts] = useState<ToolAccount[]>([]);
   const [unmappedAccounts, setUnmappedAccounts] = useState<UnmappedAccount[]>([]);
@@ -99,7 +96,7 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({
         const account = unmappedAccounts.find((a) => a.sender_name === name);
         return {
           tool_account: name,
-          tool_type: account?.tool_type || undefined,
+          tool_type: account?.tool_type ?? undefined,
         };
       });
 
@@ -137,7 +134,7 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({
                 variant="secondary"
                 className="d-flex align-items-center gap-1"
               >
-                {account.tool_type_display || account.tool_type || ''}
+                {account.tool_type_display ?? account.tool_type ?? ''}
                 {account.tool_type ? ': ' : ''}
                 {account.tool_account}
                 <button
@@ -155,20 +152,12 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({
 
       {/* Action buttons */}
       <div className="d-flex gap-2">
-        <Button
-          variant="outline-primary"
-          size="sm"
-          onClick={() => setShowAddModal(true)}
-        >
+        <Button variant="outline-primary" size="sm" onClick={() => setShowAddModal(true)}>
           <i className="bi bi-plus-lg me-1" />
           {t('addToolAccount', language)}
         </Button>
         {unmappedAccounts.length > 0 && (
-          <Button
-            variant="outline-secondary"
-            size="sm"
-            onClick={() => setShowUnmappedModal(true)}
-          >
+          <Button variant="outline-secondary" size="sm" onClick={() => setShowUnmappedModal(true)}>
             <i className="bi bi-link me-1" />
             {t('mapToUser', language)}
             <Badge variant="secondary" className="ms-1">
@@ -205,9 +194,7 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({
             <label className="form-label">{t('toolAccount', language)}</label>
             <TextInput
               value={newAccount.tool_account}
-              onChange={(value) =>
-                setNewAccount({ ...newAccount, tool_account: value })
-              }
+              onChange={(value) => setNewAccount({ ...newAccount, tool_account: value })}
               placeholder="e.g., rhuang-MacBook.local-qwen"
             />
           </div>
@@ -216,9 +203,7 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({
             <select
               className="form-select"
               value={newAccount.tool_type}
-              onChange={(e) =>
-                setNewAccount({ ...newAccount, tool_type: e.target.value })
-              }
+              onChange={(e) => setNewAccount({ ...newAccount, tool_type: e.target.value })}
             >
               <option value="">-- Select --</option>
               {TOOL_TYPES.map((type) => (
@@ -232,9 +217,7 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({
             <label className="form-label">{t('description', language)}</label>
             <TextInput
               value={newAccount.description}
-              onChange={(value) =>
-                setNewAccount({ ...newAccount, description: value })
-              }
+              onChange={(value) => setNewAccount({ ...newAccount, description: value })}
               placeholder="Optional description"
             />
           </div>
@@ -262,13 +245,8 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({
           </>
         }
       >
-        <p className="text-muted small mb-3">
-          Select accounts to map to this user:
-        </p>
-        <div
-          className="list-group"
-          style={{ maxHeight: '400px', overflowY: 'auto' }}
-        >
+        <p className="text-muted small mb-3">Select accounts to map to this user:</p>
+        <div className="list-group" style={{ maxHeight: '400px', overflowY: 'auto' }}>
           {unmappedAccounts.map((account) => (
             <label
               key={account.sender_name}
@@ -289,9 +267,7 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({
                     {account.tool_type_display}
                   </Badge>
                 )}
-                <small className="text-muted">
-                  {account.message_count} msgs
-                </small>
+                <small className="text-muted">{account.message_count} msgs</small>
               </div>
             </label>
           ))}

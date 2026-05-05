@@ -223,10 +223,7 @@ export const UserManagement: React.FC = () => {
                   <td>{user.email}</td>
                   <td>{user.system_account ?? '-'}</td>
                   <td>
-                    <ToolAccountsEditor
-                      userId={user.id}
-                      onChange={() => refetch()}
-                    />
+                    <ToolAccountsEditor userId={user.id} onChange={() => refetch()} />
                   </td>
                   <td>
                     <Badge variant={getRoleBadgeVariant(user.role)}>{user.role}</Badge>

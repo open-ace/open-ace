@@ -214,7 +214,7 @@ export const Messages: React.FC = () => {
       </Card>
 
       {/* Stats */}
-      {totalCount != null && (
+      {totalCount !== null && (
         <div className="mb-3 messages-stats">
           <span className="text-muted">
             {t('total', language)}: {totalCount.toLocaleString()} {t('messages', language)}
@@ -380,7 +380,7 @@ const MessageCard = React.memo<MessageCardProps>(({ message, language }) => {
         </div>
 
         {/* Tokens display */}
-        {message.tokens != null && message.tokens > 0 && (
+        {message.tokens !== null && message.tokens > 0 && (
           <div className="message-tokens">
             <i className="bi bi-cpu me-1" />
             {formatTokens(message.tokens)} {t('tokens', language)}

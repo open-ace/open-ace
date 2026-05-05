@@ -105,16 +105,16 @@ export function formatRelativeTime(
   const diffHour = Math.floor(diffMin / 60);
   const diffDay = Math.floor(diffHour / 24);
 
-  const t = translations || {};
+  const t = translations ?? {};
 
   if (diffSec < 60) {
-    return t.justNow || 'just now';
+    return t.justNow ?? 'just now';
   } else if (diffMin < 60) {
-    return `${diffMin} ${t.minAgo || 'min ago'}`;
+    return `${diffMin} ${t.minAgo ?? 'min ago'}`;
   } else if (diffHour < 24) {
-    return `${diffHour} ${t.hourAgo || 'hr ago'}`;
+    return `${diffHour} ${t.hourAgo ?? 'hr ago'}`;
   } else if (diffDay < 7) {
-    return `${diffDay} ${t.dayAgo || 'day ago'}`;
+    return `${diffDay} ${t.dayAgo ?? 'day ago'}`;
   } else {
     return formatDate(d);
   }

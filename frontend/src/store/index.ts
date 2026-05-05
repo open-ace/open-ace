@@ -14,22 +14,22 @@ import type { User, Theme, Language, AppMode } from '@/types';
 export interface WorkspaceTab {
   id: string;
   title: string;
-  sessionId?: string;        // Session ID from qwen-code-webui (extracted from URL or backend)
+  sessionId?: string; // Session ID from qwen-code-webui (extracted from URL or backend)
   encodedProjectName?: string; // Encoded project path for session restoration
-  toolName?: string;         // Tool name for session restoration
+  toolName?: string; // Tool name for session restoration
   createdAt: number;
   waitingForUser: boolean;
   waitingType: 'permission' | 'plan' | 'input' | null;
   // Settings for tab restoration (Issue #70)
   settings?: {
-    model?: string;          // Selected model ID
-    useWebUI?: boolean;      // Use WebUI components toggle
+    model?: string; // Selected model ID
+    useWebUI?: boolean; // Use WebUI components toggle
     permissionMode?: string; // Permission mode: default, plan, auto-edit, yolo
   };
   // Remote workspace fields
   workspaceType?: 'local' | 'remote';
-  machineId?: string;        // Remote machine ID
-  machineName?: string;      // Remote machine display name
+  machineId?: string; // Remote machine ID
+  machineName?: string; // Remote machine display name
 }
 
 interface AppState {
@@ -234,7 +234,8 @@ export const useWorkspaceActiveTabId = () => useAppStore((state) => state.worksp
 
 // Separate action selectors for stable references (fixes infinite loop)
 export const useSetWorkspaceTabs = () => useAppStore((state) => state.setWorkspaceTabs);
-export const useSetWorkspaceActiveTabId = () => useAppStore((state) => state.setWorkspaceActiveTabId);
+export const useSetWorkspaceActiveTabId = () =>
+  useAppStore((state) => state.setWorkspaceActiveTabId);
 export const useAddWorkspaceTab = () => useAppStore((state) => state.addWorkspaceTab);
 export const useUpdateWorkspaceTab = () => useAppStore((state) => state.updateWorkspaceTab);
 export const useRemoveWorkspaceTab = () => useAppStore((state) => state.removeWorkspaceTab);

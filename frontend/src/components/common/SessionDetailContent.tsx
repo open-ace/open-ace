@@ -108,7 +108,9 @@ export const SessionDetailContent: React.FC<SessionDetailContentProps> = ({
           </div>
           <div className="col-md-4">
             <small className="text-muted d-block">{t('requestsMessages', language)}</small>
-            <span>{session.request_count ?? 0} / {session.message_count ?? 0}</span>
+            <span>
+              {session.request_count ?? 0} / {session.message_count ?? 0}
+            </span>
           </div>
           <div className="col-md-4">
             <small className="text-muted d-block">{t('model', language) ?? 'Model'}</small>
@@ -121,7 +123,7 @@ export const SessionDetailContent: React.FC<SessionDetailContentProps> = ({
             {session.workspace_type === 'remote' && (
               <Badge variant="info" className="ms-1">
                 <i className="bi bi-cloud-fill me-1" />
-                {session.machine_name || 'Remote'}
+                {session.machine_name ?? 'Remote'}
               </Badge>
             )}
           </div>
@@ -306,7 +308,7 @@ function parseStreamJsonLine(data: string): { text: string; type: 'text' | 'erro
   if (msgType === 'result') {
     const subtype = parsed.subtype as string;
     if (subtype === 'error') {
-      const error = parsed.error as string || parsed.result as string || 'Unknown error';
+      const error = (parsed.error as string) || (parsed.result as string) || 'Unknown error';
       return [{ text: `Error: ${error}`, type: 'error' }];
     }
     // Success result — nothing to display
@@ -377,10 +379,7 @@ const RemoteOutputSection: React.FC<{ sessionId: string; language: Language }> =
           }}
         >
           {displaySegments.map((seg, idx) => (
-            <div
-              key={idx}
-              className={seg.type === 'error' ? 'text-danger' : undefined}
-            >
+            <div key={idx} className={seg.type === 'error' ? 'text-danger' : undefined}>
               {seg.text}
             </div>
           ))}

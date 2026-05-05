@@ -36,38 +36,35 @@ export const Modal: React.FC<ModalProps> = ({
   );
 
   // Handle enter key for form submission
-  const handleEnter = useCallback(
-    (e: KeyboardEvent) => {
-      if (e.key === 'Enter') {
-        // Don't submit if focus is on textarea, button, or select
-        const activeElement = document.activeElement as HTMLElement;
-        const tagName = activeElement?.tagName?.toLowerCase();
-        const isTextarea = tagName === 'textarea';
-        const isButton = tagName === 'button';
-        const isSelect = tagName === 'select';
+  const handleEnter = useCallback((e: KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      // Don't submit if focus is on textarea, button, or select
+      const activeElement = document.activeElement as HTMLElement;
+      const tagName = activeElement?.tagName?.toLowerCase();
+      const isTextarea = tagName === 'textarea';
+      const isButton = tagName === 'button';
+      const isSelect = tagName === 'select';
 
-        // Allow Enter on buttons (they handle their own click)
-        if (isButton) return;
+      // Allow Enter on buttons (they handle their own click)
+      if (isButton) return;
 
-        // Don't submit if in textarea (user might want newline)
-        if (isTextarea) return;
+      // Don't submit if in textarea (user might want newline)
+      if (isTextarea) return;
 
-        // Don't submit if in select
-        if (isSelect) return;
+      // Don't submit if in select
+      if (isSelect) return;
 
-        // Find form inside modal and submit it
-        if (modalRef.current) {
-          const form = modalRef.current.querySelector('form') as HTMLFormElement | null;
-          if (form) {
-            e.preventDefault();
-            // Use requestSubmit to properly trigger React's onSubmit handler
-            form.requestSubmit();
-          }
+      // Find form inside modal and submit it
+      if (modalRef.current) {
+        const form = modalRef.current.querySelector('form') as HTMLFormElement | null;
+        if (form) {
+          e.preventDefault();
+          // Use requestSubmit to properly trigger React's onSubmit handler
+          form.requestSubmit();
         }
       }
-    },
-    []
-  );
+    }
+  }, []);
 
   // Add/remove event listener
   useEffect(() => {

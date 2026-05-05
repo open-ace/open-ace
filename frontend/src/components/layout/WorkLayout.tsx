@@ -50,11 +50,8 @@ export const WorkLayout: React.FC<WorkLayoutProps> = ({ children }) => {
 
   // Fullscreen state from global store
   const workspaceFullscreen = useWorkspaceFullscreen();
-  const {
-    exitWorkspaceFullscreen,
-    previousLeftPanelCollapsed,
-    previousRightPanelCollapsed,
-  } = useAppStore();
+  const { exitWorkspaceFullscreen, previousLeftPanelCollapsed, previousRightPanelCollapsed } =
+    useAppStore();
 
   // Get active nav item from path
   const getActiveNavItem = () => {

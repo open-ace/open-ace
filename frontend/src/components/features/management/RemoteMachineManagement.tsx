@@ -22,15 +22,7 @@ import {
 import { useLanguage } from '@/store';
 import type { Language } from '@/i18n';
 import { t } from '@/i18n';
-import {
-  Button,
-  Modal,
-  Select,
-  Loading,
-  Error,
-  EmptyState,
-  Badge,
-} from '@/components/common';
+import { Button, Modal, Select, Loading, Error, EmptyState, Badge } from '@/components/common';
 import type { RemoteMachine } from '@/api';
 
 export const RemoteMachineManagement: React.FC = () => {
@@ -46,8 +38,7 @@ export const RemoteMachineManagement: React.FC = () => {
 
   // Derive isSystemAdmin: if no machine has current_user_permission, user is system admin
   // (backend only sets this field when querying with user_id for non-admin users)
-  const isSystemAdmin = machines.length === 0
-    || machines.every((m) => !m.current_user_permission);
+  const isSystemAdmin = machines.length === 0 || machines.every((m) => !m.current_user_permission);
 
   // Dialog states
   const [showTokenDialog, setShowTokenDialog] = useState(false);
@@ -194,7 +185,7 @@ export const RemoteMachineManagement: React.FC = () => {
   const handleOpenDeregister = (machine: RemoteMachine) => {
     setDeregisterTarget(machine);
     // Set default OS based on machine's os_type
-    const os = (machine.os_type || '').toLowerCase();
+    const os = (machine.os_type ?? '').toLowerCase();
     if (os.includes('windows')) {
       setDeregisterOS('windows');
     } else if (os.includes('darwin') || os.includes('mac')) {
@@ -254,7 +245,10 @@ export const RemoteMachineManagement: React.FC = () => {
 
   // Permission options for assign dialog
   const permissionOptions = isSystemAdmin
-    ? [{ value: 'user', label: 'User' }, { value: 'admin', label: 'Admin' }]
+    ? [
+        { value: 'user', label: 'User' },
+        { value: 'admin', label: 'Admin' },
+      ]
     : [{ value: 'user', label: 'User' }];
 
   return (
@@ -263,7 +257,12 @@ export const RemoteMachineManagement: React.FC = () => {
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h2>{t('remoteMachines', language)}</h2>
         {isSystemAdmin && (
-          <Button variant="primary" size="sm" onClick={handleGenerateToken} loading={generateToken.isPending}>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={handleGenerateToken}
+            loading={generateToken.isPending}
+          >
             <i className="bi bi-plus-lg me-1" />
             {t('generateToken', language)}
           </Button>
@@ -326,9 +325,9 @@ export const RemoteMachineManagement: React.FC = () => {
                     <strong>{machine.machine_name}</strong>
                     <div className="text-muted small">{machine.machine_id.substring(0, 8)}...</div>
                   </td>
-                  <td>{machine.hostname || '-'}</td>
+                  <td>{machine.hostname ?? '-'}</td>
                   <td>
-                    {machine.os_type || '-'}
+                    {machine.os_type ?? '-'}
                     {machine.os_version ? ` ${machine.os_version}` : ''}
                   </td>
                   <td>
@@ -336,7 +335,7 @@ export const RemoteMachineManagement: React.FC = () => {
                       {machine.status === 'online' ? t('online', language) : t('offline', language)}
                     </Badge>
                   </td>
-                  <td>{machine.agent_version || '-'}</td>
+                  <td>{machine.agent_version ?? '-'}</td>
                   <td>
                     {machine.last_heartbeat
                       ? new Date(machine.last_heartbeat).toLocaleString()
@@ -415,21 +414,24 @@ export const RemoteMachineManagement: React.FC = () => {
                 className={`btn ${selectedOS === 'linux' ? 'btn-primary' : 'btn-outline-primary'}`}
                 onClick={() => setSelectedOS('linux')}
               >
-                <i className="bi bi-linux me-1" />Linux
+                <i className="bi bi-linux me-1" />
+                Linux
               </button>
               <button
                 type="button"
                 className={`btn ${selectedOS === 'macos' ? 'btn-primary' : 'btn-outline-primary'}`}
                 onClick={() => setSelectedOS('macos')}
               >
-                <i className="bi bi-apple me-1" />macOS
+                <i className="bi bi-apple me-1" />
+                macOS
               </button>
               <button
                 type="button"
                 className={`btn ${selectedOS === 'windows' ? 'btn-primary' : 'btn-outline-primary'}`}
                 onClick={() => setSelectedOS('windows')}
               >
-                <i className="bi bi-windows me-1" />Windows
+                <i className="bi bi-windows me-1" />
+                Windows
               </button>
             </div>
           </div>
@@ -533,7 +535,8 @@ export const RemoteMachineManagement: React.FC = () => {
         <p>{t('deregisterConfirm', language)}</p>
         {deregisterTarget && (
           <p>
-            <strong>{deregisterTarget.machine_name}</strong> ({deregisterTarget.hostname || deregisterTarget.machine_id.substring(0, 8)})
+            <strong>{deregisterTarget.machine_name}</strong> (
+            {deregisterTarget.hostname ?? deregisterTarget.machine_id.substring(0, 8)})
           </p>
         )}
 
@@ -552,21 +555,24 @@ export const RemoteMachineManagement: React.FC = () => {
                 className={`btn ${deregisterOS === 'linux' ? 'btn-primary' : 'btn-outline-primary'}`}
                 onClick={() => setDeregisterOS('linux')}
               >
-                <i className="bi bi-linux me-1" />Linux
+                <i className="bi bi-linux me-1" />
+                Linux
               </button>
               <button
                 type="button"
                 className={`btn ${deregisterOS === 'macos' ? 'btn-primary' : 'btn-outline-primary'}`}
                 onClick={() => setDeregisterOS('macos')}
               >
-                <i className="bi bi-apple me-1" />macOS
+                <i className="bi bi-apple me-1" />
+                macOS
               </button>
               <button
                 type="button"
                 className={`btn ${deregisterOS === 'windows' ? 'btn-primary' : 'btn-outline-primary'}`}
                 onClick={() => setDeregisterOS('windows')}
               >
-                <i className="bi bi-windows me-1" />Windows
+                <i className="bi bi-windows me-1" />
+                Windows
               </button>
             </div>
           </div>
@@ -644,22 +650,22 @@ const MachineDetailsDialog: React.FC<MachineDetailsDialogProps> = ({
         </div>
         <div className="col-md-6">
           <label className="text-muted small">{t('hostname', language)}</label>
-          <div>{machine.hostname || '-'}</div>
+          <div>{machine.hostname ?? '-'}</div>
         </div>
         <div className="col-md-6">
           <label className="text-muted small">{t('operatingSystem', language)}</label>
           <div>
-            {machine.os_type || '-'}
+            {machine.os_type ?? '-'}
             {machine.os_version ? ` ${machine.os_version}` : ''}
           </div>
         </div>
         <div className="col-md-6">
           <label className="text-muted small">{t('agentVersion', language)}</label>
-          <div>{machine.agent_version || '-'}</div>
+          <div>{machine.agent_version ?? '-'}</div>
         </div>
         <div className="col-md-6">
           <label className="text-muted small">{t('ipAddress', language)}</label>
-          <div>{machine.ip_address || '-'}</div>
+          <div>{machine.ip_address ?? '-'}</div>
         </div>
         <div className="col-md-6">
           <label className="text-muted small">{t('keyStatus', language)}</label>
@@ -677,9 +683,7 @@ const MachineDetailsDialog: React.FC<MachineDetailsDialogProps> = ({
         <div className="col-md-6">
           <label className="text-muted small">{t('lastHeartbeat', language)}</label>
           <div>
-            {machine.last_heartbeat
-              ? new Date(machine.last_heartbeat).toLocaleString()
-              : '-'}
+            {machine.last_heartbeat ? new Date(machine.last_heartbeat).toLocaleString() : '-'}
           </div>
         </div>
       </div>
@@ -696,7 +700,10 @@ const MachineDetailsDialog: React.FC<MachineDetailsDialogProps> = ({
             <i className={`bi ${capabilitiesExpanded ? 'bi-chevron-up' : 'bi-chevron-down'}`} />
           </div>
           {capabilitiesExpanded && (
-            <pre className="bg-light p-2 rounded small mb-0 mt-2" style={{ maxHeight: '200px', overflow: 'auto' }}>
+            <pre
+              className="bg-light p-2 rounded small mb-0 mt-2"
+              style={{ maxHeight: '200px', overflow: 'auto' }}
+            >
               {JSON.stringify(machine.capabilities, null, 2)}
             </pre>
           )}

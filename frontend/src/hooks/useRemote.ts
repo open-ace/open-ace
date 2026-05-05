@@ -50,10 +50,19 @@ export function useAssignUser() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ machineId, userId, permission }: { machineId: string; userId: number; permission?: string }) =>
-      remoteApi.assignUser(machineId, userId, permission),
+    mutationFn: ({
+      machineId,
+      userId,
+      permission,
+    }: {
+      machineId: string;
+      userId: number;
+      permission?: string;
+    }) => remoteApi.assignUser(machineId, userId, permission),
     onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['remote', 'machines', variables.machineId, 'users'] });
+      queryClient.invalidateQueries({
+        queryKey: ['remote', 'machines', variables.machineId, 'users'],
+      });
       queryClient.invalidateQueries({ queryKey: ['remote', 'machines'] });
       queryClient.invalidateQueries({ queryKey: ['remote', 'available-machines'] });
     },
@@ -67,7 +76,9 @@ export function useRevokeUser() {
     mutationFn: ({ machineId, userId }: { machineId: string; userId: number }) =>
       remoteApi.revokeUser(machineId, userId),
     onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['remote', 'machines', variables.machineId, 'users'] });
+      queryClient.invalidateQueries({
+        queryKey: ['remote', 'machines', variables.machineId, 'users'],
+      });
       queryClient.invalidateQueries({ queryKey: ['remote', 'machines'] });
       queryClient.invalidateQueries({ queryKey: ['remote', 'available-machines'] });
     },

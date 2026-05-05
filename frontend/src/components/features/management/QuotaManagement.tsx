@@ -43,8 +43,8 @@ export const QuotaManagement: React.FC = () => {
     setEditingUser(user);
     // Token quotas are stored in M (millions) units directly
     setFormData({
-      daily_token_quota: user.daily_token_quota || undefined,
-      monthly_token_quota: user.monthly_token_quota || undefined,
+      daily_token_quota: user.daily_token_quota ?? undefined,
+      monthly_token_quota: user.monthly_token_quota ?? undefined,
       daily_request_quota: user.daily_request_quota,
       monthly_request_quota: user.monthly_request_quota,
     });
@@ -62,8 +62,8 @@ export const QuotaManagement: React.FC = () => {
     try {
       // Token quotas are stored in M (millions) units directly
       const submitData: UpdateQuotaRequest = {
-        daily_token_quota: formData.daily_token_quota || undefined,
-        monthly_token_quota: formData.monthly_token_quota || undefined,
+        daily_token_quota: formData.daily_token_quota ?? undefined,
+        monthly_token_quota: formData.monthly_token_quota ?? undefined,
         daily_request_quota: formData.daily_request_quota,
         monthly_request_quota: formData.monthly_request_quota,
       };
@@ -72,9 +72,10 @@ export const QuotaManagement: React.FC = () => {
       handleCloseModal();
     } catch (err) {
       console.error('Failed to update quota:', err);
-      const errorMessage = err && typeof err === 'object' && 'message' in err
-        ? String((err as { message: string }).message)
-        : t('error', language);
+      const errorMessage =
+        err && typeof err === 'object' && 'message' in err
+          ? String((err as { message: string }).message)
+          : t('error', language);
       toast.error(t('error', language), errorMessage);
     }
   };

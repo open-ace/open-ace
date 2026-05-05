@@ -96,8 +96,10 @@ export const remoteApi = {
     return apiClient.get(`/api/remote/machines/${machineId}`);
   },
 
-  generateRegistrationToken(tenantId?: number): Promise<{ success: boolean; registration_token: string; message: string }> {
-    return apiClient.post('/api/remote/machines/register', { tenant_id: tenantId || 1 });
+  generateRegistrationToken(
+    tenantId?: number
+  ): Promise<{ success: boolean; registration_token: string; message: string }> {
+    return apiClient.post('/api/remote/machines/register', { tenant_id: tenantId ?? 1 });
   },
 
   deregisterMachine(machineId: string): Promise<{ success: boolean; message: string }> {
@@ -108,8 +110,15 @@ export const remoteApi = {
     return apiClient.get(`/api/remote/machines/${machineId}/users`);
   },
 
-  assignUser(machineId: string, userId: number, permission: string = 'user'): Promise<{ success: boolean; message: string }> {
-    return apiClient.post(`/api/remote/machines/${machineId}/assign`, { user_id: userId, permission });
+  assignUser(
+    machineId: string,
+    userId: number,
+    permission: string = 'user'
+  ): Promise<{ success: boolean; message: string }> {
+    return apiClient.post(`/api/remote/machines/${machineId}/assign`, {
+      user_id: userId,
+      permission,
+    });
   },
 
   revokeUser(machineId: string, userId: number): Promise<{ success: boolean; message: string }> {
@@ -123,12 +132,14 @@ export const remoteApi = {
     return apiClient.get('/api/remote/api-keys', params);
   },
 
-  storeApiKey(data: StoreApiKeyRequest): Promise<{ success: boolean; key: { provider: string; key_name: string } }> {
+  storeApiKey(
+    data: StoreApiKeyRequest
+  ): Promise<{ success: boolean; key: { provider: string; key_name: string } }> {
     return apiClient.post('/api/remote/api-keys', data);
   },
 
   deleteApiKey(keyId: number, tenantId?: number): Promise<{ success: boolean; message: string }> {
-    return apiClient.delete(`/api/remote/api-keys/${keyId}`, { tenant_id: tenantId || 1 });
+    return apiClient.delete(`/api/remote/api-keys/${keyId}`, { tenant_id: tenantId ?? 1 });
   },
 
   // Available machines (for session creation)
@@ -137,7 +148,9 @@ export const remoteApi = {
   },
 
   // Session management
-  createSession(data: CreateRemoteSessionRequest): Promise<{ success: boolean; session: RemoteSession }> {
+  createSession(
+    data: CreateRemoteSessionRequest
+  ): Promise<{ success: boolean; session: RemoteSession }> {
     return apiClient.post('/api/remote/sessions', data);
   },
 

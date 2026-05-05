@@ -429,7 +429,9 @@ const ConversationRow: React.FC<ConversationRowProps> = ({
       case 'date':
         return conversation.date;
       case 'tool_name':
-        return <span className="badge bg-secondary">{formatToolName(conversation.tool_name ?? '')}</span>;
+        return (
+          <span className="badge bg-secondary">{formatToolName(conversation.tool_name ?? '')}</span>
+        );
       case 'host_name':
         return conversation.host_name ?? '-';
       case 'sender_name':

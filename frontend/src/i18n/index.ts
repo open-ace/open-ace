@@ -346,9 +346,11 @@ const translations: Record<Language, Translations> = {
     dailyTokenQuotaExceeded: 'Daily token quota exceeded. ',
     monthlyTokenQuotaExceeded: 'Monthly token quota exceeded. ',
     quotaLimitsHelp: 'About Quota Limits',
-    quotaLimitsHelpDesc: 'Quota limits are set by your administrator. If you need higher limits, please contact your administrator.',
+    quotaLimitsHelpDesc:
+      'Quota limits are set by your administrator. If you need higher limits, please contact your administrator.',
     exitedFullscreenDueToQuotaTitle: 'Exited Fullscreen',
-    exitedFullscreenDueToQuotaDesc: 'You have been exited from fullscreen mode because your quota limit was reached.',
+    exitedFullscreenDueToQuotaDesc:
+      'You have been exited from fullscreen mode because your quota limit was reached.',
 
     // Sessions
     activeSessions: 'Active Sessions',
@@ -470,7 +472,8 @@ const translations: Record<Language, Translations> = {
     noProjectsDescription: 'Projects will appear here when users create them from the Work mode.',
     deleteProject: 'Delete Project',
     deleteProjectConfirm: 'Are you sure you want to delete',
-    deleteProjectWarning: 'This will remove all associated data but won\'t affect the actual directory.',
+    deleteProjectWarning:
+      "This will remove all associated data but won't affect the actual directory.",
     never: 'Never',
     viewDetails: 'View Details',
     auditAnalysis: 'Audit Analysis',
@@ -630,7 +633,8 @@ const translations: Record<Language, Translations> = {
     insightsNoData: 'Not enough conversation data',
     insightsNoDataDesc: 'Use AI tools more to generate a personalized insights report.',
     insightsWelcome: 'Discover your AI usage patterns',
-    insightsWelcomeDesc: 'Generate a personalized report to understand your strengths and areas for improvement when using AI.',
+    insightsWelcomeDesc:
+      'Generate a personalized report to understand your strengths and areas for improvement when using AI.',
     avgMessages: 'Avg Messages/Session',
     historyReports: 'History Reports',
     exampleLabel: 'Example',
@@ -648,7 +652,8 @@ const translations: Record<Language, Translations> = {
     registrationToken: 'Registration Token',
     deregister: 'Deregister',
     deregisterMachine: 'Deregister Machine',
-    deregisterConfirm: 'Are you sure you want to deregister this machine? This will remove all associated data.',
+    deregisterConfirm:
+      'Are you sure you want to deregister this machine? This will remove all associated data.',
     assignUsers: 'Assign Users',
     assignUser: 'Assign User',
     revokeUser: 'Revoke User',
@@ -669,14 +674,16 @@ const translations: Record<Language, Translations> = {
     noMachines: 'No machines registered',
     noMachinesDescription: 'Generate a registration token and use it to register a remote agent.',
     tokenGenerated: 'Registration token generated',
-    tokenGeneratedDesc: 'Use the following token to register a remote agent. This token is valid for one use only.',
+    tokenGeneratedDesc:
+      'Use the following token to register a remote agent. This token is valid for one use only.',
     copyToken: 'Copy Token',
     copied: 'Copied!',
     installCommand: 'Install Command',
     installCommandDesc: 'Run this command on the remote machine to install and register the agent.',
     copyInstallCommand: 'Copy Install Command',
     uninstallCommand: 'Uninstall Command',
-    uninstallCommandDesc: 'Run this command on the remote machine to uninstall the agent after deregistration.',
+    uninstallCommandDesc:
+      'Run this command on the remote machine to uninstall the agent after deregistration.',
     permission: 'Permission',
     selectPermission: 'Select Permission',
     noAssignedUsers: 'No users assigned',
@@ -710,7 +717,8 @@ const translations: Record<Language, Translations> = {
     remoteWorkspace: 'Remote Workspace',
     selectMachine: 'Select Machine',
     noAvailableMachines: 'No available machines',
-    noAvailableMachinesDesc: 'There are no online machines assigned to you. Contact an admin to get access.',
+    noAvailableMachinesDesc:
+      'There are no online machines assigned to you. Contact an admin to get access.',
     projectPathHint: 'Working directory on the remote machine',
     remoteSession: 'Remote Session',
     pauseSession: 'Pause Session',
@@ -1826,7 +1834,8 @@ const translations: Record<Language, Translations> = {
     insightsNoData: '会話データが不足しています',
     insightsNoDataDesc: 'AI ツールをさらに使用してからレポートを生成してください。',
     insightsWelcome: 'AI 使用パターンを見つけましょう',
-    insightsWelcomeDesc: 'パーソナライズされたレポートを生成して、AI 使用時の強みと改善点を理解しましょう。',
+    insightsWelcomeDesc:
+      'パーソナライズされたレポートを生成して、AI 使用時の強みと改善点を理解しましょう。',
     avgMessages: '平均メッセージ/セッション',
     historyReports: '履歴レポート',
     exampleLabel: '例',
@@ -1842,7 +1851,8 @@ const translations: Record<Language, Translations> = {
     remoteWorkspace: 'リモートワークスペース',
     selectMachine: 'マシンを選択',
     noAvailableMachines: '利用可能なマシンがありません',
-    noAvailableMachinesDesc: 'オンラインで割り当てられたマシンがありません。管理者に連絡してください。',
+    noAvailableMachinesDesc:
+      'オンラインで割り当てられたマシンがありません。管理者に連絡してください。',
     projectPathHint: 'リモートマシン上の作業ディレクトリ',
     remoteSession: 'リモートセッション',
     pauseSession: 'セッションを一時停止',

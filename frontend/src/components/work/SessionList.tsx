@@ -275,20 +275,18 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
       <Modal
         isOpen={showDetailModal}
         onClose={handleCloseModal}
-        title={
-          (() => {
-            const sessionIdShort = sessionDetail?.data?.session_id?.slice(0, 8) ?? '';
-            const sessionTitle = sessionDetail?.data?.title ?? '';
-            // Check if title is meaningful (not just a default pattern like "qwen - 994f805a")
-            const isDefaultTitle = sessionTitle.includes(sessionIdShort) ||
-                                   sessionTitle.match(/^[a-z]+ - [a-f0-9]{8}$/i);
-            // Format: "994f805a（会话名字）" or just "994f805a"
-            if (sessionTitle && !isDefaultTitle) {
-              return `${sessionIdShort}（${sessionTitle}）`;
-            }
-            return sessionIdShort || 'Session';
-          })()
-        }
+        title={(() => {
+          const sessionIdShort = sessionDetail?.data?.session_id?.slice(0, 8) ?? '';
+          const sessionTitle = sessionDetail?.data?.title ?? '';
+          // Check if title is meaningful (not just a default pattern like "qwen - 994f805a")
+          const isDefaultTitle =
+            sessionTitle.includes(sessionIdShort) || sessionTitle.match(/^[a-z]+ - [a-f0-9]{8}$/i);
+          // Format: "994f805a（会话名字）" or just "994f805a"
+          if (sessionTitle && !isDefaultTitle) {
+            return `${sessionIdShort}（${sessionTitle}）`;
+          }
+          return sessionIdShort || 'Session';
+        })()}
         size="lg"
       >
         {isLoadingDetail ? (
@@ -306,10 +304,7 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
       </Modal>
 
       {/* New Session Modal */}
-      <NewSessionModal
-        isOpen={showNewSessionModal}
-        onClose={() => setShowNewSessionModal(false)}
-      />
+      <NewSessionModal isOpen={showNewSessionModal} onClose={() => setShowNewSessionModal(false)} />
     </div>
   );
 };
@@ -341,12 +336,14 @@ const SessionGroup: React.FC<SessionGroupProps> = ({
             <button
               className={`session-item w-100 p-2 ${selectedSessionId === session.id ? 'selected' : ''}`}
               onClick={() => onSessionClick(session.id)}
-              title={session.title}  // Issue #66: Show session name on hover
+              title={session.title} // Issue #66: Show session name on hover
             >
               <span className="session-id text-truncate">
                 {session.workspace_type === 'remote' ? (
-                  <i className="bi bi-cloud-fill text-primary me-1"
-                     title={`Remote: ${session.machine_name || session.id.slice(0, 8)}`} />
+                  <i
+                    className="bi bi-cloud-fill text-primary me-1"
+                    title={`Remote: ${session.machine_name ?? session.id.slice(0, 8)}`}
+                  />
                 ) : (
                   <i className="bi bi-laptop text-success me-1" title="Local" />
                 )}
@@ -355,7 +352,10 @@ const SessionGroup: React.FC<SessionGroupProps> = ({
               <span className="session-time text-muted">{session.time}</span>
               <span className="session-requests text-muted">
                 <i className="bi bi-arrow-up-circle" />
-                <span className="ms-1">{session.requests} {t('request', language)}</span>  {/* Issue #66: i18n for "req" */}
+                <span className="ms-1">
+                  {session.requests} {t('request', language)}
+                </span>{' '}
+                {/* Issue #66: i18n for "req" */}
               </span>
             </button>
           </li>

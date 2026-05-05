@@ -111,8 +111,6 @@ export async function getProjectUsers(
 /**
  * Delete a project
  */
-export async function deleteProject(
-  projectId: number
-): Promise<{ success: boolean }> {
+export async function deleteProject(projectId: number): Promise<{ success: boolean }> {
   return apiClient.delete<{ success: boolean }>(`/api/projects/${projectId}`);
 }
