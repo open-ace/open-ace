@@ -1306,6 +1306,7 @@ def fetch_and_save_messages(
     hostname: Optional[str] = None,
     tool_name: str = "openclaw",
     multi_user_mode: bool = False,
+    recent: bool = False,
 ) -> bool:
     """
     Fetch OpenClaw messages and save to database.
@@ -1315,6 +1316,8 @@ def fetch_and_save_messages(
         sessions_dir: Optional specific sessions directory
         hostname: Optional host name to identify this machine
         tool_name: Tool name (default: openclaw)
+        multi_user_mode: If True, scan all users' OpenClaw directories
+        recent: If True, only process files modified today
         multi_user_mode: If True, scan all users' OpenClaw directories
 
     Returns:
@@ -1357,6 +1360,12 @@ def fetch_and_save_messages(
     all_messages = []
     total_files = 0
 
+    recent_cutoff = (
+        datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+        if recent
+        else 0
+    )
+
     # Multi-user mode: scan all users' OpenClaw directories
     if multi_user_mode:
         print("Multi-user mode: scanning all users' OpenClaw directories...")
@@ -1372,10 +1381,13 @@ def fetch_and_save_messages(
 
             # Get all jsonl files
             jsonl_files = list(sessions_path.glob("*.jsonl"))
+            if recent:
+                jsonl_files = [f for f in jsonl_files if f.stat().st_mtime >= recent_cutoff]
             if not jsonl_files:
                 continue
 
-            print(f"  Found {len(jsonl_files)} session files")
+            suffix = " [recent]" if recent else ""
+            print(f"  Found {len(jsonl_files)} session files{suffix}")
             for f in sorted(jsonl_files, key=lambda x: x.name):
                 total_files += 1
                 daily, messages = process_jsonl_file(f, hostname, tool_name, system_account)
@@ -1402,12 +1414,15 @@ def fetch_and_save_messages(
 
         # Get all jsonl files
         jsonl_files = list(sessions_dir.glob("*.jsonl"))
+        if recent:
+            jsonl_files = [f for f in jsonl_files if f.stat().st_mtime >= recent_cutoff]
 
         if not jsonl_files:
             print(f"Error: No .jsonl files found in {sessions_dir}")
             return False
 
-        print(f"Found {len(jsonl_files)} session files in {sessions_dir}")
+        suffix = " [recent]" if recent else ""
+        print(f"Found {len(jsonl_files)} session files in {sessions_dir}{suffix}")
 
         for f in sorted(jsonl_files, key=lambda x: x.name):
             total_files += 1
@@ -1500,6 +1515,11 @@ def main():
         "--config",
         help="Path to config.json file (useful when running as root via sudo)",
     )
+    parser.add_argument(
+        "--recent",
+        action="store_true",
+        help="Only process files modified today (for scheduler use)",
+    )
     args = parser.parse_args()
 
     # If --config is specified, use it to get database URL
@@ -1542,6 +1562,7 @@ def main():
             hostname=args.hostname,
             tool_name=args.tool,
             multi_user_mode=args.multi_user,
+            recent=args.recent,
         )
         success = success and messages_success
 
