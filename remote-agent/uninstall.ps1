@@ -37,7 +37,7 @@ if ($Task) {
 }
 
 # Try to kill process directly
-$AgentProcess = Get-Process -Name "python" -ErrorAction SilentlyContinue | 
+$AgentProcess = Get-Process -Name "python" -ErrorAction SilentlyContinue |
     Where-Object { $_.Path -like "*agent.py*" }
 if ($AgentProcess) {
     Stop-Process -Id $AgentProcess.Id -Force -ErrorAction SilentlyContinue

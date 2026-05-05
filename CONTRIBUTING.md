@@ -86,11 +86,11 @@ pytest
 def get_daily_usage(date: str, tool_name: str = None) -> dict:
     """
     Get token usage for a specific date.
-    
+
     Args:
         date: Date in YYYY-MM-DD format
         tool_name: Optional tool filter (claude, qwen, openclaw)
-    
+
     Returns:
         Dictionary with usage statistics
     """

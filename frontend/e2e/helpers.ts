@@ -14,7 +14,7 @@ export async function login(page: Page, username = 'admin', password = 'admin123
   // Fill login form
   await page.locator('#username').fill(username);
   await page.locator('#password').fill(password);
-  
+
   // Submit form
   await page.locator('button[type="submit"]').click();
 

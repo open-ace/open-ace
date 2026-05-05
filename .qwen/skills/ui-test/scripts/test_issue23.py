@@ -10,15 +10,16 @@ UI Test for Issue 23: Messages 页面 openclaw 工具的 assistant 消息不显�
 """
 
 import asyncio
-import sys
 import os
+import sys
 
 # Add the skill directory to path
 skill_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, skill_dir)
 
 from playwright.async_api import async_playwright
-from config import BASE_URL, USERNAME, PASSWORD, VIEWPORT_SIZE
+
+from config import BASE_URL, PASSWORD, USERNAME, VIEWPORT_SIZE
 
 
 async def test_issue23():

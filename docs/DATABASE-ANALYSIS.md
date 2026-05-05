@@ -543,7 +543,7 @@ RECOMMENDED_INDEXES = {
 **问题描述**: 以下高频查询列缺少索引：
 
 | 表 | 列 | 查询场景 |
-|----|----|---------| 
+|----|----|---------|
 | daily_messages | feishu_conversation_id | 会话历史查询 |
 | daily_messages | conversation_id | 会话关联 |
 | sessions | expires_at | 过期会话清理 |
@@ -641,7 +641,7 @@ def create_user(self, username, email, password_hash, role='user', ...):
 
 ```sql
 -- 当前查询方式（全表扫描）
-SELECT * FROM tenants 
+SELECT * FROM tenants
 WHERE json_extract(quota, '$.daily_token_limit') > 1000000;
 ```
 
@@ -655,7 +655,7 @@ WHERE json_extract(quota, '$.daily_token_limit') > 1000000;
 
 ```sql
 -- 无法高效执行
-SELECT * FROM daily_usage 
+SELECT * FROM daily_usage
 WHERE 'gpt-4' IN (SELECT value FROM json_each(models_used));
 ```
 
@@ -994,21 +994,21 @@ DROP INDEX IF EXISTS idx_messages_date_sender;    -- 低频查询
 
 ```sql
 -- 会话查询索引
-CREATE INDEX IF NOT EXISTS idx_messages_feishu_conv 
+CREATE INDEX IF NOT EXISTS idx_messages_feishu_conv
     ON daily_messages(feishu_conversation_id);
-    
-CREATE INDEX IF NOT EXISTS idx_messages_conv_id 
+
+CREATE INDEX IF NOT EXISTS idx_messages_conv_id
     ON daily_messages(conversation_id);
 
 -- 会话历史查询优化
-CREATE INDEX IF NOT EXISTS idx_messages_date_conv 
+CREATE INDEX IF NOT EXISTS idx_messages_date_conv
     ON daily_messages(date, feishu_conversation_id);
 
 -- sessions 表索引
-CREATE INDEX IF NOT EXISTS idx_sessions_expires 
+CREATE INDEX IF NOT EXISTS idx_sessions_expires
     ON sessions(expires_at);
-    
-CREATE INDEX IF NOT EXISTS idx_sessions_active 
+
+CREATE INDEX IF NOT EXISTS idx_sessions_active
     ON sessions(is_active, expires_at);
 ```
 
@@ -1016,7 +1016,7 @@ CREATE INDEX IF NOT EXISTS idx_sessions_active
 
 ```sql
 -- 替换多个单列索引为一个优化的复合索引
-CREATE INDEX IF NOT EXISTS idx_messages_query_optimized 
+CREATE INDEX IF NOT EXISTS idx_messages_query_optimized
     ON daily_messages(date, tool_name, host_name, timestamp DESC);
 ```
 
@@ -1034,12 +1034,12 @@ def upgrade():
     op.add_column('users', sa.Column('monthly_token_quota', sa.Integer(), nullable=True))
     op.add_column('users', sa.Column('daily_request_quota', sa.Integer(), nullable=True))
     op.add_column('users', sa.Column('monthly_request_quota', sa.Integer(), nullable=True))
-    
+
     # 迁移 is_admin 到 role
     op.execute("""
         UPDATE users SET role = 'admin' WHERE is_admin = 1
     """)
-    
+
     # 添加索引
     op.create_index('idx_users_role', 'users', ['role'])
     op.create_index('idx_users_active', 'users', ['is_active'])
@@ -1070,17 +1070,17 @@ def upgrade():
         sa.Column('expires_at', sa.TIMESTAMP(), nullable=False),
         sa.Column('is_active', sa.Integer(), server_default='1'),
     )
-    
+
     # 迁移数据
     op.execute("""
         INSERT INTO sessions_new (id, token, user_id, created_at, expires_at, is_active)
         SELECT id, session_id, user_id, created_at, expires_at, is_active FROM sessions
     """)
-    
+
     # 删除旧表，重命名新表
     op.drop_table('sessions')
     op.rename_table('sessions_new', 'sessions')
-    
+
     # 创建索引
     op.create_index('idx_sessions_user_id', 'sessions', ['user_id'])
     op.create_index('idx_sessions_token', 'sessions', ['token'])
@@ -1102,14 +1102,14 @@ def upgrade():
         sa.Column('tokens_used', sa.Integer(), server_default='0'),
         sa.Column('requests_used', sa.Integer(), server_default='0'),
     )
-    
+
     op.execute("""
         INSERT INTO quota_usage_new SELECT * FROM quota_usage
     """)
-    
+
     op.drop_table('quota_usage')
     op.rename_table('quota_usage_new', 'quota_usage')
-    
+
     op.create_index('idx_quota_user_date', 'quota_usage', ['user_id', 'date'])
 ```
 
@@ -1169,19 +1169,19 @@ from app.repositories.database import Database
 def migrate_tenant_json_fields():
     """将 tenants 表的 JSON 字段迁移到独立表"""
     db = Database()
-    
+
     # 获取所有租户
     tenants = db.fetch_all("SELECT id, quota, settings FROM tenants")
-    
+
     for tenant in tenants:
         tenant_id = tenant['id']
-        
+
         # 迁移 quota
         if tenant.get('quota'):
             quota = json.loads(tenant['quota'])
             db.execute("""
-                INSERT OR REPLACE INTO tenant_quotas 
-                (tenant_id, daily_token_limit, monthly_token_limit, 
+                INSERT OR REPLACE INTO tenant_quotas
+                (tenant_id, daily_token_limit, monthly_token_limit,
                  daily_request_limit, monthly_request_limit, max_users, max_sessions_per_user)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             """, (
@@ -1193,7 +1193,7 @@ def migrate_tenant_json_fields():
                 quota.get('max_users', 100),
                 quota.get('max_sessions_per_user', 5),
             ))
-        
+
         # 迁移 settings
         if tenant.get('settings'):
             settings = json.loads(tenant['settings'])
@@ -1211,7 +1211,7 @@ def migrate_tenant_json_fields():
                 settings.get('sso_enabled', False),
                 settings.get('sso_provider'),
             ))
-    
+
     print(f"Migrated {len(tenants)} tenants")
 ```
 
@@ -1330,7 +1330,7 @@ def get_database_url() -> str:
     # 优先使用环境变量
     if os.environ.get('DATABASE_URL'):
         return os.environ['DATABASE_URL']
-    
+
     # 默认 SQLite
     config_dir = os.path.expanduser("~/.open-ace")
     os.makedirs(config_dir, exist_ok=True)
@@ -1339,7 +1339,7 @@ def get_database_url() -> str:
 def get_engine_config() -> dict:
     """获取引擎配置"""
     url = get_database_url()
-    
+
     if url.startswith('postgresql'):
         # PostgreSQL 配置
         return {
@@ -1357,18 +1357,18 @@ def get_engine_config() -> dict:
 
 class Database:
     """数据库管理类"""
-    
+
     def __init__(self, db_url: str = None):
         config = get_engine_config()
         if db_url:
             config['url'] = db_url
-        
+
         self.engine = create_engine(
             config.pop('url'),
             **config
         )
         self.Session = sessionmaker(bind=self.engine)
-    
+
     @contextmanager
     def connection(self):
         """连接上下文管理器"""
@@ -1411,32 +1411,32 @@ def migrate_table(sqlite_conn, pg_conn, table_name: str, columns: list):
     """迁移单个表"""
     sqlite_cur = sqlite_conn.cursor()
     pg_cur = pg_conn.cursor()
-    
+
     # 读取 SQLite 数据
     cols = ', '.join(columns)
     sqlite_cur.execute(f"SELECT {cols} FROM {table_name}")
     rows = sqlite_cur.fetchall()
-    
+
     if not rows:
         print(f"  {table_name}: 0 rows (skipped)")
         return
-    
+
     # 插入到 PostgreSQL
     placeholders = ', '.join(['%s'] * len(columns))
     sql = f"INSERT INTO {table_name} ({cols}) VALUES ({placeholders}) ON CONFLICT DO NOTHING"
-    
+
     execute_values(pg_cur, sql, rows)
     pg_conn.commit()
-    
+
     print(f"  {table_name}: {len(rows)} rows migrated")
 
 def main():
     """主迁移流程"""
     print("Starting migration from SQLite to PostgreSQL...")
-    
+
     sqlite_conn = get_sqlite_connection()
     pg_conn = get_postgres_connection()
-    
+
     # 迁移顺序（按外键依赖）
     tables = {
         'users': ['id', 'username', 'email', 'password_hash', 'role', 'is_active', 'created_at', 'last_login'],
@@ -1449,16 +1449,16 @@ def main():
         'user_permissions': ['id', 'user_id', 'permission', 'granted_by', 'granted_at'],
         'quota_usage': ['id', 'user_id', 'date', 'tool_name', 'tokens_used', 'requests_used'],
     }
-    
+
     for table, columns in tables.items():
         try:
             migrate_table(sqlite_conn, pg_conn, table, columns)
         except Exception as e:
             print(f"  {table}: ERROR - {e}")
-    
+
     sqlite_conn.close()
     pg_conn.close()
-    
+
     print("Migration completed!")
 
 if __name__ == '__main__':

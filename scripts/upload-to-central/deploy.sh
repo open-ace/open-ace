@@ -78,15 +78,15 @@ done
 # Uninstall mode
 if $UNINSTALL; then
     echo "=== Uninstalling Open ACE Remote Sync ==="
-    
+
     sudo systemctl stop upload-to-central 2>/dev/null || true
     sudo systemctl disable upload-to-central 2>/dev/null || true
     sudo rm -f /etc/systemd/system/upload-to-central.service
     sudo systemctl daemon-reload
-    
+
     rm -rf "$INSTALL_DIR"
     rm -rf ~/.open-ace
-    
+
     echo "Uninstall complete!"
     exit 0
 fi
@@ -147,7 +147,7 @@ if [ -d "/tmp/shared" ] && [ -f "/tmp/shared/db.py" ]; then
     cp /tmp/shared/*.py "$INSTALL_DIR/shared/"
 else
     echo "Creating minimal shared modules..."
-    
+
     cat > "$INSTALL_DIR/shared/__init__.py" << 'EOF'
 from .config import load_config
 from .db import get_connection, init_database, save_usage, save_messages_batch
@@ -249,7 +249,7 @@ def save_messages_batch(messages, batch_size=500):
         cursor = conn.cursor()
         for msg in messages:
             try:
-                cursor.execute('''INSERT OR REPLACE INTO daily_messages 
+                cursor.execute('''INSERT OR REPLACE INTO daily_messages
                     (date, tool_name, host_name, message_id, parent_id, role, content,
                      tokens_used, input_tokens, output_tokens, model, timestamp,
                      sender_id, sender_name, message_source, feishu_conversation_id,

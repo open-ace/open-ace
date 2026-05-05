@@ -232,7 +232,7 @@ configure_sudoers() {
         print_info "安装完成后，重新运行此脚本或手动配置 sudoers:"
         print_info "  sudo visudo -f /etc/sudoers.d/open-ace-webui"
         print_info "  添加: $RUN_USER ALL=(ALL) NOPASSWD: /path/to/qwen-code-webui *"
-        
+
         if [ "$NON_INTERACTIVE" = false ]; then
             prompt_yesno "是否继续安装（稍后手动配置 sudoers）?" "y" continue_without_sudoers
             if [ "$continue_without_sudoers" != "yes" ]; then
@@ -346,10 +346,10 @@ detect_os() {
 # Detect CPU architecture and return Docker platform string
 detect_arch() {
     local arch=""
-    
+
     # Try uname -m first (most reliable)
     local machine_arch=$(uname -m 2>/dev/null || echo "")
-    
+
     case "$machine_arch" in
         x86_64|amd64)
             arch="amd64"
@@ -380,7 +380,7 @@ detect_arch() {
             fi
             ;;
     esac
-    
+
     echo "$arch"
 }
 
@@ -388,14 +388,14 @@ detect_arch() {
 get_docker_platform() {
     local os_type=$(detect_os)
     local arch=$(detect_arch)
-    
+
     # Docker platform format: linux/amd64 or linux/arm64
     echo "linux/${arch}"
 }
 
 install_docker_macos() {
     print_info "检测到 macOS 系统"
-    
+
     # Check if Homebrew is installed
     if ! command -v brew &>/dev/null; then
         print_warning "Homebrew 未安装"
@@ -409,10 +409,10 @@ install_docker_macos() {
             return 1
         fi
     fi
-    
+
     print_info "通过 Homebrew 安装 Docker..."
     brew install --cask docker
-    
+
     print_success "Docker Desktop 安装完成"
     print_info "请启动 Docker Desktop 应用程序"
     return 0
@@ -439,13 +439,13 @@ install_docker_debian() {
     if ! curl -fsSL https://download.docker.com/linux/$(lsb_release -is | tr '[:upper:]' '[:lower:]')/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg 2>/dev/null; then
         print_warning "官方源连接失败，尝试使用阿里云镜像..."
         curl -fsSL https://mirrors.aliyun.com/docker-ce/linux/$(lsb_release -is | tr '[:upper:]' '[:lower:]')/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
-        
+
         if [ $? -ne 0 ]; then
             print_error "无法添加 Docker GPG 密钥"
             print_info "请检查网络连接或手动安装 Docker"
             return 1
         fi
-        
+
         # Use Aliyun mirror for repository
         print_info "添加 Docker 软件源 (阿里云镜像)..."
         echo \
@@ -489,10 +489,10 @@ install_docker_redhat() {
     print_info "添加 Docker 软件源..."
     if ! sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo 2>/dev/null; then
         print_warning "官方源添加失败，尝试使用阿里云镜像..."
-        
+
         # Use Aliyun mirror as fallback
         sudo yum-config-manager --add-repo https://mirrors.aliyun.com/docker-ce/linux/centos/docker-ce.repo
-        
+
         if [ $? -ne 0 ]; then
             print_error "无法添加 Docker 软件源"
             print_info "请检查网络连接或手动安装 Docker"
@@ -533,7 +533,7 @@ install_docker_fedora() {
     if ! sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo 2>/dev/null; then
         print_warning "官方源添加失败，尝试使用阿里云镜像..."
         sudo dnf config-manager --add-repo https://mirrors.aliyun.com/docker-ce/linux/fedora/docker-ce.repo
-        
+
         if [ $? -ne 0 ]; then
             print_error "无法添加 Docker 软件源"
             print_info "请检查网络连接或手动安装 Docker"
@@ -613,7 +613,7 @@ configure_firewall() {
     # Try firewalld first (CentOS/RHEL/Fedora)
     if command -v firewall-cmd &>/dev/null && systemctl is-active --quiet firewalld; then
         print_info "检测到 firewalld"
-        
+
         # Check if port is already open
         if sudo firewall-cmd --list-ports | grep -q "${port}/tcp"; then
             print_success "端口 $port 已开放"
@@ -624,7 +624,7 @@ configure_firewall() {
         print_info "开放端口 $port/tcp..."
         sudo firewall-cmd --permanent --add-port=${port}/tcp
         sudo firewall-cmd --reload
-        
+
         print_success "防火墙端口 $port 已开放"
         return 0
     fi
@@ -632,7 +632,7 @@ configure_firewall() {
     # Try ufw (Ubuntu/Debian)
     if command -v ufw &>/dev/null; then
         print_info "检测到 ufw"
-        
+
         # Check if ufw is active
         if ! sudo ufw status | grep -q "Status: active"; then
             print_warning "ufw 未启用，跳过防火墙配置"
@@ -649,7 +649,7 @@ configure_firewall() {
         # Open port
         print_info "开放端口 $port/tcp..."
         sudo ufw allow ${port}/tcp
-        
+
         print_success "防火墙端口 $port 已开放"
         return 0
     fi
@@ -657,7 +657,7 @@ configure_firewall() {
     # Try iptables as fallback
     if command -v iptables &>/dev/null; then
         print_info "检测到 iptables"
-        
+
         # Check if port is already open
         if sudo iptables -L INPUT -n | grep -q "dpt:${port}"; then
             print_success "端口 $port 已开放"
@@ -667,13 +667,13 @@ configure_firewall() {
         # Open port
         print_info "开放端口 $port/tcp..."
         sudo iptables -I INPUT -p tcp --dport ${port} -j ACCEPT
-        
+
         # Try to save iptables rules
         if command -v iptables-save &>/dev/null; then
             sudo iptables-save > /etc/iptables/rules.v4 2>/dev/null || \
             sudo iptables-save > /etc/sysconfig/iptables 2>/dev/null || true
         fi
-        
+
         print_success "防火墙端口 $port 已开放"
         print_warning "请注意: iptables 规则可能需要手动保存以持久化"
         return 0
@@ -761,13 +761,13 @@ check_prerequisites() {
         prompt_yesno "是否自动安装 Docker?" "y" install_docker_confirm
         if [ "$install_docker_confirm" = "yes" ]; then
             install_docker
-            
+
             # Check if installation was successful
             if ! command -v docker &>/dev/null; then
                 print_error "Docker 安装失败"
                 exit 1
             fi
-            
+
             # On macOS, Docker Desktop needs to be started manually
             if [[ "$OSTYPE" == "darwin"* ]]; then
                 print_info "请启动 Docker Desktop 后重新运行此脚本"
@@ -791,14 +791,14 @@ check_prerequisites() {
     # Check if Docker daemon is running
     if ! docker info &>/dev/null; then
         print_warning "Docker daemon 未运行"
-        
+
         # Try to start Docker service on Linux
         if [[ "$OSTYPE" != "darwin"* ]] && command -v systemctl &>/dev/null; then
             print_info "尝试启动 Docker 服务..."
             sudo systemctl start docker 2>/dev/null || true
             sleep 3
         fi
-        
+
         # Check again
         if ! docker info &>/dev/null; then
             print_error "Docker daemon 未运行"
@@ -828,7 +828,7 @@ build_docker_image() {
     echo "  1) 加载镜像文件 (包含应用和 PostgreSQL)"
     echo "  2) 跳过 (稍后手动处理)"
     echo ""
-    
+
     prompt_input "请选择" "1" build_choice
 
     case "$build_choice" in
@@ -839,7 +839,7 @@ build_docker_image() {
             fi
             if [ -f "$image_file" ]; then
                 print_info "加载镜像文件: $image_file"
-                
+
                 # Check if file is compressed (gzip)
                 if file "$image_file" | grep -q "gzip compressed"; then
                     print_info "检测到 gzip 压缩文件，解压并加载..."
@@ -847,19 +847,19 @@ build_docker_image() {
                 else
                     docker load -i "$image_file"
                 fi
-                
+
                 # Check if both images are loaded
                 local images_loaded=0
                 if docker image inspect "$IMAGE_NAME" &>/dev/null; then
                     print_success "应用镜像加载完成: $IMAGE_NAME"
                     images_loaded=$((images_loaded + 1))
                 fi
-                
+
                 if docker image inspect "postgres:15-alpine" &>/dev/null; then
                     print_success "PostgreSQL 镜像加载完成: postgres:15-alpine"
                     images_loaded=$((images_loaded + 1))
                 fi
-                
+
                 if [ $images_loaded -ge 1 ]; then
                     print_success "镜像加载完成 (共 $images_loaded 个)"
                     return 0
@@ -961,7 +961,7 @@ create_config() {
         HOST_NAME=$(hostname -f 2>/dev/null || hostname 2>/dev/null || echo "localhost")
     fi
     local server_url="http://${HOST_NAME}:${WEB_PORT}"
-    
+
     # Get server IP address for URL conversion (more reliable than hostname)
     local server_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
     if [ -z "$server_ip" ]; then
@@ -979,7 +979,7 @@ create_config() {
     # Browsers cannot resolve host.docker.internal, so we use the actual server IP
     local workspace_url_config="$WORKSPACE_URL"
     local openclaw_url_config="$OPENCLAW_GATEWAY_URL"
-    
+
     if [ "$WORKSPACE_ENABLED" = "true" ]; then
         # Replace localhost/127.0.0.1 with server IP
         workspace_url_config=$(echo "$WORKSPACE_URL" | sed "s|://localhost:|://$server_ip:|g" | sed "s|://127.0.0.1:|://$server_ip:|g")
@@ -987,7 +987,7 @@ create_config() {
             print_info "  - Workspace URL: $workspace_url_config (已转换为服务器 IP)"
         fi
     fi
-    
+
     if [ "$OPENCLAW_ENABLED" = "true" ]; then
         # Replace localhost/127.0.0.1 with server IP
         openclaw_url_config=$(echo "$OPENCLAW_GATEWAY_URL" | sed "s|://localhost:|://$server_ip:|g" | sed "s|://127.0.0.1:|://$server_ip:|g")
@@ -1448,13 +1448,13 @@ show_deployment_info() {
     echo "  $DEPLOY_DIR/config/config.json"
     echo "  $DEPLOY_DIR/.env"
     echo ""
-    
+
     # Tool configuration hints
     local tool_config_needed=false
     if [ "$QWEN_ENABLED" = "true" ] || [ "$CLAUDE_ENABLED" = "true" ] || [ "$OPENCLAW_ENABLED" = "true" ]; then
         tool_config_needed=true
     fi
-    
+
     if [ "$tool_config_needed" = true ]; then
         echo -e "${YELLOW}工具配置 (重要):${NC}"
         echo "  请在运行用户家目录下正确设置配置文件:"
@@ -1478,7 +1478,7 @@ show_deployment_info() {
             echo ""
         fi
     fi
-    
+
     echo "防火墙:"
     echo "  端口 $WEB_PORT 已开放"
     if [ "$OPENCLAW_ENABLED" = "true" ] && [ -n "$OPENCLAW_PORT" ]; then
@@ -1536,7 +1536,7 @@ check_prerequisites
 if [ "$NON_INTERACTIVE" = false ]; then
     echo -e "${YELLOW}配置部署参数 (回车使用默认值)${NC}"
     echo ""
-    
+
     # Basic settings
     echo -e "${BLUE}=== 基本设置 ===${NC}"
     prompt_input "运行用户" "$RUN_USER" RUN_USER
@@ -1545,17 +1545,17 @@ if [ "$NON_INTERACTIVE" = false ]; then
     DB_USER="$RUN_USER"
     prompt_input "部署目录" "$DEPLOY_DIR" DEPLOY_DIR
     prompt_input "Web 端口" "$WEB_PORT" WEB_PORT
-    
+
     # Host name
     default_hostname=$(hostname -f 2>/dev/null || hostname 2>/dev/null || echo "localhost")
     prompt_input "主机名 (用于配置文件)" "$default_hostname" HOST_NAME
     [ -z "$HOST_NAME" ] && HOST_NAME="$default_hostname"
-    
+
     echo ""
     echo -e "${BLUE}=== 数据库设置 ===${NC}"
     prompt_input "数据库用户" "$DB_USER" DB_USER
     prompt_input "数据库名称" "$DB_NAME" DB_NAME
-    
+
     echo ""
     echo -e "${BLUE}=== 工具配置 ===${NC}"
     prompt_yesno "启用 OpenClaw 工具?" "y" enable_openclaw
@@ -1568,13 +1568,13 @@ if [ "$NON_INTERACTIVE" = false ]; then
             OPENCLAW_PORT="18789"
         fi
     fi
-    
+
     prompt_yesno "启用 Claude 工具?" "y" enable_claude
     CLAUDE_ENABLED=$([ "$enable_claude" = "yes" ] && echo "true" || echo "false")
-    
+
     prompt_yesno "启用 Qwen 工具?" "y" enable_qwen
     QWEN_ENABLED=$([ "$enable_qwen" = "yes" ] && echo "true" || echo "false")
-    
+
     echo ""
     echo -e "${BLUE}=== Workspace 配置 ===${NC}"
     prompt_yesno "启用 Workspace?" "y" enable_workspace

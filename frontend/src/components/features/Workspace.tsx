@@ -207,7 +207,7 @@ export const Workspace: React.FC = () => {
       // Listen for tab notification from qwen-code-webui iframe
       if (event.data?.type === 'qwen-code-tab-notification') {
         const { isWaiting, waitingType } = event.data;
-        
+
         // Only update if tab notifications are enabled
         if (enableTabNotifications) {
           // Find the tab that sent this message by matching event.source to iframe contentWindow
@@ -250,10 +250,10 @@ export const Workspace: React.FC = () => {
         // Get current tabs and active tab from state
         setTabs((currentTabs) => {
           if (currentTabs.length <= 1) return currentTabs;
-          
+
           const currentActiveTabId = useAppStore.getState().workspaceActiveTabId;
           const currentIndex = currentTabs.findIndex(tab => tab.id === currentActiveTabId);
-          
+
           // Calculate new index
           let newIndex: number;
           if (direction === 'prev') {
@@ -261,7 +261,7 @@ export const Workspace: React.FC = () => {
           } else {
             newIndex = currentIndex >= currentTabs.length - 1 ? 0 : currentIndex + 1;
           }
-          
+
           const targetTab = currentTabs[newIndex];
           if (targetTab && targetTab.id !== currentActiveTabId) {
             // Switch to the target tab
@@ -1122,8 +1122,8 @@ export const Workspace: React.FC = () => {
           <button
             className={cn(
               'btn btn-sm',
-              enableTabNotifications 
-                ? 'btn-outline-primary' 
+              enableTabNotifications
+                ? 'btn-outline-primary'
                 : 'btn-outline-secondary'
             )}
             onClick={toggleTabNotifications}
@@ -1190,9 +1190,9 @@ export const Workspace: React.FC = () => {
                   {tab.waitingForUser && activeTabId !== tab.id && (
                     <span className={cn(
                       'waiting-badge badge bg-info'
-                    )} style={{ 
-                      fontSize: '0.65rem', 
-                      padding: '0.2rem 0.4rem', 
+                    )} style={{
+                      fontSize: '0.65rem',
+                      padding: '0.2rem 0.4rem',
                       marginLeft: '0.25rem',
                       borderRadius: '50%',
                       minWidth: '1.2rem',
@@ -1236,7 +1236,7 @@ export const Workspace: React.FC = () => {
                 </div>
               );
             })}
-            
+
             {/* New Tab Button - placed right after the last tab */}
             <button
               className="btn btn-sm btn-link px-3 py-2 text-muted workspace-new-tab-btn"

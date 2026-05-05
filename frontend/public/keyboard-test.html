@@ -50,7 +50,7 @@
 </head>
 <body>
     <h1>🎹 Keyboard Shortcut Test</h1>
-    
+
     <div class="test-result">
         <h3>Instructions:</h3>
         <p>Press the following key combinations to test:</p>
@@ -87,7 +87,7 @@
             const timestamp = new Date().toLocaleTimeString();
             entry.innerHTML = `<span style="color: #666">[${timestamp}]</span> ${message}`;
             logDiv.insertBefore(entry, logDiv.firstChild);
-            
+
             // Keep only last 50 entries
             while (logDiv.children.length > 50) {
                 logDiv.removeChild(logDiv.lastChild);
@@ -99,20 +99,20 @@
             // Check if it's a digit key
             if (e.key >= '1' && e.key <= '9') {
                 const modifierPressed = isMac ? e.metaKey : e.ctrlKey;
-                
+
                 if (modifierPressed && e.shiftKey) {
                     e.preventDefault();
-                    
+
                     log(`<span class="success">✓ Detected:</span> ${e.key} | metaKey: ${e.metaKey} | ctrlKey: ${e.ctrlKey} | shiftKey: ${e.shiftKey}`, 'success');
                     return;
                 }
-                
+
                 if (modifierPressed) {
                     log(`<span class="warning">⚠ Partial match:</span> ${e.key} | metaKey: ${e.metaKey} | ctrlKey: ${e.ctrlKey} | shiftKey: ${e.shiftKey} <br>→ Missing Shift key!`, 'warning');
                     return;
                 }
             }
-            
+
             // Log all keydown events for debugging
             if (e.key === 'Shift' || e.key === 'Meta' || e.key === 'Control') {
                 log(`<span class="info">Modifier pressed:</span> ${e.key}`, 'info');

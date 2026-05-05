@@ -312,7 +312,7 @@ const navSections: NavSection[] = [
 ];
 ```
 
-**需要改动**: 
+**需要改动**:
 1. 添加"异常"菜单项到分析分组
 2. 调整路由映射
 
@@ -511,34 +511,34 @@ def detect_anomalies(
 ) -> List[Dict]:
     """
     检测使用异常
-    
+
     异常类型:
     1. 用量突增: 日用量超过平均值 2 倍
     2. 用量骤降: 日用量低于平均值 50%
     3. 延迟异常: 响应时间超过阈值
     4. 错误率异常: 错误率超过阈值
-    
+
     返回:
         List[Dict]: 异常列表
     """
     anomalies = []
-    
+
     # 获取每日用量数据
     daily_data = self.message_repo.get_daily_token_totals(start_date, end_date, host_name)
-    
+
     if not daily_data:
         return anomalies
-    
+
     # 计算平均值和标准差
     tokens = [d.get('total_tokens', 0) for d in daily_data]
     avg_tokens = sum(tokens) / len(tokens)
     std_tokens = (sum((t - avg_tokens) ** 2 for t in tokens) / len(tokens)) ** 0.5
-    
+
     # 检测异常
     for d in daily_data:
         token = d.get('total_tokens', 0)
         date = d.get('date')
-        
+
         # 用量突增
         if token > avg_tokens + 2 * std_tokens:
             anomalies.append({
@@ -549,7 +549,7 @@ def detect_anomalies(
                 'deviation': (token - avg_tokens) / avg_tokens * 100,
                 'severity': 'high' if token > avg_tokens * 3 else 'medium'
             })
-        
+
         # 用量骤降
         if token < avg_tokens * 0.5:
             anomalies.append({
@@ -560,7 +560,7 @@ def detect_anomalies(
                 'deviation': (avg_tokens - token) / avg_tokens * 100,
                 'severity': 'low'
             })
-    
+
     return anomalies
 ```
 

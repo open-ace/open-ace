@@ -272,13 +272,13 @@ test('Management page - User CRUD', async ({ page }) => {
   // 登录 Admin 用户
   await page.goto('/login');
   // ... 登录流程
-  
+
   // 导航到 Management
   await page.click('[data-testid="nav-management"]');
-  
+
   // 验证用户列表加载
   await expect(page.locator('.user-management table')).toBeVisible();
-  
+
   // 测试创建用户
   await page.click('button:has-text("Add User")');
   // ... 填写表单并提交
@@ -289,13 +289,13 @@ test('Report page - Usage display', async ({ page }) => {
   // 登录普通用户
   await page.goto('/login');
   // ... 登录流程
-  
+
   // 导航到 Report
   await page.click('[data-testid="nav-report"]');
-  
+
   // 验证统计卡片
   await expect(page.locator('.stat-card')).toHaveCount(4);
-  
+
   // 验证图表渲染
   await expect(page.locator('canvas')).toBeVisible();
 });
@@ -305,10 +305,10 @@ test('Workspace page - iframe loading', async ({ page }) => {
   // 登录普通用户
   await page.goto('/login');
   // ... 登录流程
-  
+
   // 导航到 Workspace
   await page.click('[data-testid="nav-workspace"]');
-  
+
   // 验证 iframe 或提示信息
   const iframe = page.locator('iframe');
   if (await iframe.isVisible()) {

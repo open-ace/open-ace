@@ -1,9 +1,9 @@
 # Open ACE 全面功能测试报告（修复后）
 
-**测试日期**: 2026 年 3 月 21 日  
-**测试人员**: AI Agent  
-**测试版本**: v0.2.0  
-**测试环境**: macOS, Chromium 浏览器  
+**测试日期**: 2026 年 3 月 21 日
+**测试人员**: AI Agent
+**测试版本**: v0.2.0
+**测试环境**: macOS, Chromium 浏览器
 **测试工具**: Playwright E2E Testing Framework
 
 ---
@@ -36,7 +36,7 @@
 
 **问题**: 返回 500 错误（被 catch_all 路由错误捕获）
 
-**修复**: 
+**修复**:
 - 在 `app/routes/auth.py` 中添加了新的 `/auth/me` 端点
 - 该端点是 `/auth/profile` 的别名，返回当前用户信息
 
@@ -396,6 +396,6 @@ npm run test:e2e -- --grep "Comprehensive" --project=chromium
 
 ---
 
-**报告生成时间**: 2026-03-21  
-**报告版本**: 2.0 (修复后)  
+**报告生成时间**: 2026-03-21
+**报告版本**: 2.0 (修复后)
 **保密级别**: 内部公开

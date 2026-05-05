@@ -12,10 +12,7 @@ from datetime import datetime, timedelta
 from typing import Any, Optional, cast
 
 from app.modules.sso.oauth2 import OAuth2Provider
-from app.modules.sso.oidc import (
-    OIDCProvider,
-    get_provider_class,
-)
+from app.modules.sso.oidc import OIDCProvider, get_provider_class
 from app.modules.sso.provider import (
     SSOAuthResult,
     SSOProvider,

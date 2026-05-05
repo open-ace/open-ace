@@ -204,20 +204,20 @@ class ApiClient {
   async get<T>(endpoint: string, params?: Record<string, any>): Promise<T> {
     const url = new URL(`${this.baseURL}${endpoint}`);
     if (params) {
-      Object.keys(params).forEach(key => 
+      Object.keys(params).forEach(key =>
         url.searchParams.append(key, params[key])
       );
     }
-    
+
     const response = await fetch(url.toString(), {
       method: 'GET',
       headers: { 'Content-Type': 'application/json' }
     });
-    
+
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
-    
+
     return response.json();
   }
 
@@ -227,11 +227,11 @@ class ApiClient {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     });
-    
+
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
-    
+
     return response.json();
   }
 }
@@ -324,7 +324,7 @@ export class DashboardComponent {
 
   private renderSummary(): string {
     if (!this.summary) return '';
-    
+
     return `
       <div class="summary-card">
         <h3>Total Overview</h3>
@@ -348,7 +348,7 @@ export class DashboardComponent {
 
   private renderTodayUsage(): string {
     if (!this.todayUsage) return '';
-    
+
     return `
       <div class="today-card">
         <h3>Today's Usage</h3>
@@ -453,12 +453,12 @@ export class CacheManager {
   get<T>(key: string): T | null {
     const item = this.cache.get(key);
     if (!item) return null;
-    
+
     if (Date.now() - item.timestamp > this.ttl) {
       this.cache.delete(key);
       return null;
     }
-    
+
     return item.data as T;
   }
 
@@ -734,19 +734,19 @@ export default dashboardSlice.reducer;
     // 构建工具
     "vite": "^5.0.0",
     "typescript": "^5.3.0",
-    
+
     // 代码规范
     "eslint": "^8.55.0",
     "prettier": "^3.1.0",
     "@typescript-eslint/eslint-plugin": "^6.13.0",
     "@typescript-eslint/parser": "^6.13.0",
-    
+
     // 测试工具
     "vitest": "^1.0.0",
     "@testing-library/react": "^14.1.0",
     "@testing-library/jest-dom": "^6.1.5",
     "playwright": "^1.40.0",
-    
+
     // 性能分析
     "rollup-plugin-visualizer": "^5.9.0",
     "vite-plugin-compression": "^0.5.1"

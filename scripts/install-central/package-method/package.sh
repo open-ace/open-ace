@@ -419,7 +419,7 @@ fi
 if [ "$FORCE_DOWNLOAD" = false ] && [ -f "$PROJECT_DIR/requirements.txt" ]; then
     if [ -d "$CACHED_VENDOR_DIR" ] && [ "$(ls -A $CACHED_VENDOR_DIR/*.whl 2>/dev/null)" ]; then
         cached_pkg_count=$(ls -1 "$CACHED_VENDOR_DIR"/*.whl 2>/dev/null | wc -l | tr -d ' ')
-        
+
         # Check if hash matches
         if [ -f "$HASH_FILE" ]; then
             OLD_HASH=$(cat "$HASH_FILE")
@@ -456,7 +456,7 @@ if [ "$SKIP_DOWNLOAD" = false ] && [ -f "$PROJECT_DIR/requirements.txt" ]; then
     # Note: We target Python 3.9 minimum (Open ACE requires Python >= 3.9)
     PIP_CMD=""
     PIP_VERSION=""
-    
+
     if command -v pip3 &>/dev/null; then
         PIP_CMD="pip3"
         # Extract major version number (e.g., "pip 23.3.1" -> 23)
@@ -465,13 +465,13 @@ if [ "$SKIP_DOWNLOAD" = false ] && [ -f "$PROJECT_DIR/requirements.txt" ]; then
         PIP_CMD="pip"
         PIP_VERSION=$(pip --version 2>/dev/null | awk '{print $2}' | cut -d. -f1)
     fi
-    
+
     if [ -n "$PIP_CMD" ]; then
         # Download packages compatible with Python 3.9+
         # Use --python-version 3.9 to get compatible wheels
         # Use --only-binary=:all: to avoid source builds that may fail on older systems
         echo -e "${YELLOW}Downloading packages for Python 3.9+ compatibility...${NC}"
-        
+
         # Use --prefer-binary only if pip version >= 20
         if [ -n "$PIP_VERSION" ] && [ "$PIP_VERSION" -ge 20 ]; then
             $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" \
@@ -525,7 +525,7 @@ if [ "$SKIP_DOWNLOAD" = false ] && [ -f "$PROJECT_DIR/requirements.txt" ]; then
     echo -e "${YELLOW}Caching vendor directory for future packages...${NC}"
     mkdir -p "$CACHED_VENDOR_DIR"
     cp -r "$VENDOR_DIR"/* "$CACHED_VENDOR_DIR/"
-    
+
     # Save requirements hash
     echo "$REQUIREMENTS_HASH" > "$HASH_FILE"
 elif [ ! -f "$PROJECT_DIR/requirements.txt" ]; then

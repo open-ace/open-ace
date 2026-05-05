@@ -71,9 +71,9 @@ check_python_version() {
         print_info "  apt install python3.9 python3.9-venv python3.9-dev"
         exit 1
     fi
-    
+
     local python_version=$(python3 -c "import sys; print(sys.version_info.major * 100 + sys.version_info.minor)")
-    
+
     if [ "$python_version" -lt 309 ]; then
         local actual_version=$(python3 --version 2>&1 | head -1)
         print_error "Python version too old: $actual_version"
@@ -94,7 +94,7 @@ check_python_version() {
         print_info "  update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.9 1"
         exit 1
     fi
-    
+
     local actual_version=$(python3 --version 2>&1 | head -1)
     print_success "Python version: $actual_version (OK)"
 }
@@ -102,22 +102,22 @@ check_python_version() {
 # Check Python version on remote system
 check_python_version_remote() {
     local remote="$1"
-    
+
     if ! ssh "$remote" "command -v python3 &>/dev/null"; then
         print_error "Python 3 is not installed on $remote"
         print_info "Open ACE requires Python 3.9 or later"
         return 1
     fi
-    
+
     local python_version=$(ssh "$remote" "python3 -c \"import sys; print(sys.version_info.major * 100 + sys.version_info.minor)\"")
-    
+
     if [ "$python_version" -lt 309 ]; then
         local actual_version=$(ssh "$remote" "python3 --version 2>&1 | head -1")
         print_error "Python version too old on $remote: $actual_version"
         print_error "Open ACE requires Python 3.9 or later"
         return 1
     fi
-    
+
     local actual_version=$(ssh "$remote" "python3 --version 2>&1 | head -1")
     print_success "Python version on $remote: $actual_version (OK)"
     return 0
@@ -595,20 +595,20 @@ configure_pg_hba_conf() {
     # Change peer/ident to md5 for local connections
     # BUT keep peer authentication for postgres user (needed for admin commands via su)
     # CRITICAL: postgres user needs peer auth to create other users/databases
-    
+
     # Always ensure postgres peer entry exists at the beginning of the file
     # (must be first rule so it matches before the general "local all all" rule)
-    
+
     # First, remove any existing postgres-specific entries (we'll add a fresh one)
     sed -i '/^local[[:space:]]*postgres[[:space:]]*postgres/d' "$pg_hba_conf" 2>/dev/null
-    
+
     # Add postgres peer entry at the beginning
     { echo "local   postgres        postgres                                peer"; cat "$pg_hba_conf"; } > "${pg_hba_conf}.tmp" && mv "${pg_hba_conf}.tmp" "$pg_hba_conf"
     print_info "Added postgres peer authentication rule at top"
 
     # Change all "local all" entries from peer/ident to md5 (using flexible pattern)
     sed -i -E 's/^local[[:space:]]+all[[:space:]]+all[[:space:]]+(peer|ident)[[:space:]]*$/local   all             all                                     md5/' "$pg_hba_conf" 2>/dev/null || true
-    
+
     # Also change ident to md5 for host connections
     sed -i 's/ident$/md5/' "$pg_hba_conf" 2>/dev/null || true
 
@@ -961,7 +961,7 @@ update_config_workspace() {
         export _WS_MAX_INSTANCES="$WORKSPACE_MAX_INSTANCES"
         export _WS_IDLE_TIMEOUT="$WORKSPACE_IDLE_TIMEOUT"
         export _WS_WEBUI_PATH="$webui_path"
-        
+
         python3 << 'EOF'
 import json
 import os
@@ -1510,22 +1510,22 @@ Defaults env_keep += \"OPENAI_API_KEY OPENAI_BASE_URL BAILIAN_CODING_PLAN_API_KE
         # Check if both webui_path and fetch rules exist
         local has_webui=false
         local has_fetch=false
-        
+
         if grep -q "$webui_path" "$sudoers_file" 2>/dev/null; then
             has_webui=true
         fi
-        
+
         # Check for fetch script rules (at least one should exist)
         if grep -q "fetch_qwen.py\|fetch_claude.py\|fetch_openclaw.py" "$sudoers_file" 2>/dev/null; then
             has_fetch=true
         fi
-        
+
         # If both exist, no need to update
         if [ "$has_webui" = true ] && [ "$has_fetch" = true ]; then
             print_success "Sudoers rules already exist with correct paths"
             return 0
         fi
-        
+
         # Need to update - missing either webui or fetch rules
         # Check for old paths that need to be updated
         if grep -qE '/.*npm.*bin/qwen-code-webui|/usr/local/bin/qwen-code-webui' "$sudoers_file" 2>/dev/null; then
@@ -2600,7 +2600,7 @@ do_fresh_install() {
             print_info "Then run this script again."
             exit 1
         fi
-        
+
         # Create temp requirements excluding:
         # - psycopg2-binary: use system package instead (avoids segfault, see Issue #38)
         # - psycogreen: only has source dist, installed separately after build tools
@@ -2655,20 +2655,20 @@ do_fresh_install() {
 
     # Initialize database schema
     print_info "Initializing database schema..."
-    
+
     # Determine database type and execute appropriate schema
     local db_type="postgresql"
     if [ -f "$config_dir/config.json" ]; then
         db_type=$(python3 -c "import json; c=json.load(open('$config_dir/config.json')); print(c.get('database', {}).get('type', 'postgresql'))")
     fi
-    
+
     local schema_file=""
     if [ "$db_type" = "postgresql" ]; then
         schema_file="$target_path/schema/schema-postgres.sql"
     else
         schema_file="$target_path/schema/schema-sqlite.sql"
     fi
-    
+
     if [ -f "$schema_file" ]; then
         print_info "Executing schema: $schema_file"
         if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ]; then
@@ -2684,7 +2684,7 @@ do_fresh_install() {
                     local db_name=$(echo "$db_url" | sed -n 's/.*\/\([^?]*\).*/\1/p')
                     local db_user=$(echo "$db_url" | sed -n 's/.*\/\/\([^:@]*\):.*/\1/p')
                     local db_pass=$(echo "$db_url" | sed -n 's/.*:\/\/[^:]*:\([^@]*\)@.*/\1/p')
-                    
+
                     if su - "$install_user" -c "cd '$target_path' && PGPASSWORD='$db_pass' psql -h '$db_host' -p '$db_port' -U '$db_user' -d '$db_name' -f '$schema_file'"; then
                         print_success "Database schema created"
                     else
@@ -2714,7 +2714,7 @@ do_fresh_install() {
                     local db_name=$(echo "$db_url" | sed -n 's/.*\/\([^?]*\).*/\1/p')
                     local db_user=$(echo "$db_url" | sed -n 's/.*\/\/\([^:@]*\):.*/\1/p')
                     local db_pass=$(echo "$db_url" | sed -n 's/.*:\/\/[^:]*:\([^@]*\)@.*/\1/p')
-                    
+
                     if PGPASSWORD="$db_pass" psql -h "$db_host" -p "$db_port" -U "$db_user" -d "$db_name" -f "$schema_file"; then
                         print_success "Database schema created"
                     else
@@ -2730,7 +2730,7 @@ do_fresh_install() {
     else
         print_warning "Schema file not found: $schema_file"
     fi
-    
+
     # Mark alembic version as head (skip running migrations)
     print_info "Marking database version..."
     if [ -f "$target_path/alembic.ini" ] && [ -d "$target_path/migrations" ]; then
@@ -2961,7 +2961,7 @@ with open('$config_dir/config.json', 'w') as f:
             print_info "Then run this script again."
             exit 1
         fi
-        
+
         # Install dependencies (prefer vendor directory for offline install)
         # Exclude psycopg2-binary (use system package instead) and psycogreen (source dist, handled separately)
         TEMP_REQ=$(mktemp)

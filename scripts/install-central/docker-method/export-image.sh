@@ -313,7 +313,7 @@ fi
 # Check if export was successful
 if [ -f "$OUTPUT_FILE" ]; then
     OUTPUT_SIZE=$(ls -lh "$OUTPUT_FILE" | awk '{print $5}')
-    
+
     print_success "镜像导出成功"
     echo ""
     echo "导出信息:"

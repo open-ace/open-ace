@@ -280,7 +280,7 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
             const sessionIdShort = sessionDetail?.data?.session_id?.slice(0, 8) ?? '';
             const sessionTitle = sessionDetail?.data?.title ?? '';
             // Check if title is meaningful (not just a default pattern like "qwen - 994f805a")
-            const isDefaultTitle = sessionTitle.includes(sessionIdShort) || 
+            const isDefaultTitle = sessionTitle.includes(sessionIdShort) ||
                                    sessionTitle.match(/^[a-z]+ - [a-f0-9]{8}$/i);
             // Format: "994f805a（会话名字）" or just "994f805a"
             if (sessionTitle && !isDefaultTitle) {
@@ -331,7 +331,7 @@ const SessionGroup: React.FC<SessionGroupProps> = ({
   selectedSessionId,
 }) => {
   const language = useLanguage();
-  
+
   return (
     <div className="session-group mb-3">
       <div className="session-group-title text-muted small mb-1">{title}</div>

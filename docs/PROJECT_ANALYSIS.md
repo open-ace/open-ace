@@ -471,35 +471,35 @@ class FilterResult:
 
 class ContentFilter:
     """敏感内容过滤"""
-    
+
     def __init__(self, config: dict):
         self.sensitive_patterns = config.get('sensitive_patterns', [])
         self.pii_patterns = self._load_pii_patterns()
-    
+
     def check_message(self, content: str) -> FilterResult:
         """检查消息内容"""
         matched = []
         risk_level = 'low'
-        
+
         # 检查敏感词
         for pattern in self.sensitive_patterns:
             if re.search(pattern, content, re.IGNORECASE):
                 matched.append(f"sensitive:{pattern}")
                 risk_level = 'high'
-        
+
         # 检查 PII
         for pii_type, pattern in self.pii_patterns.items():
             if re.search(pattern, content):
                 matched.append(f"pii:{pii_type}")
                 risk_level = max(risk_level, 'medium')
-        
+
         return FilterResult(
             passed=len(matched) == 0,
             risk_level=risk_level,
             matched_rules=matched,
             suggestion=self._get_suggestion(risk_level) if matched else None
         )
-    
+
     def _load_pii_patterns(self) -> dict:
         """加载 PII 识别模式"""
         return {
@@ -531,10 +531,10 @@ class AuditLog:
 
 class AuditLogger:
     """操作审计日志"""
-    
+
     def __init__(self, db_path: str):
         self.db_path = db_path
-    
+
     def log_action(
         self,
         user_id: str,
@@ -557,7 +557,7 @@ class AuditLogger:
             user_agent=user_agent
         )
         self._save_log(log)
-    
+
     def query_logs(
         self,
         user_id: str = None,
@@ -639,7 +639,7 @@ class User:
     is_active: bool = True
     created_at: datetime = field(default_factory=datetime.utcnow)
     last_login: Optional[datetime] = None
-    
+
     def has_permission(self, resource: str, action: str) -> bool:
         """检查权限"""
         if self.role == UserRole.ADMIN:
@@ -960,25 +960,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      
+
       - name: Install dependencies
         run: |
           pip install black isort ruff mypy
-      
+
       - name: Run Black
         run: black --check .
-      
+
       - name: Run isort
         run: isort --check-only --diff .
-      
+
       - name: Run Ruff
         run: ruff check .
-      
+
       - name: Run MyPy
         run: mypy app/
 
@@ -987,23 +987,23 @@ jobs:
     strategy:
       matrix:
         python-version: ['3.9', '3.10', '3.11', '3.12']
-    
+
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      
+
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
           pip install pytest pytest-cov
-      
+
       - name: Run tests
         run: pytest --cov=app --cov-report=xml
-      
+
       - name: Upload coverage
         uses: codecov/codecov-action@v3
         with:
@@ -1012,13 +1012,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
     needs: [lint, test]
-    
+
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      
+
       - name: Build Docker image
         uses: docker/build-push-action@v5
         with:

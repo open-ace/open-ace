@@ -14,13 +14,12 @@ UI 功能自动化测试脚本
     --test TEST         指定测试用例文件 (JSON 格式)
 """
 
+import argparse
+import json
 import os
 import sys
-import json
-import argparse
 from datetime import datetime
-from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
 
 # Default configuration
 DEFAULT_URL = "http://localhost:5000/"
@@ -263,7 +262,7 @@ class UITester:
 
             # 如果步骤失败，可以选择继续或停止
             if not passed and step.get("critical", False):
-                print(f"   ⚠ 关键步骤失败，停止测试")
+                print("   ⚠ 关键步骤失败，停止测试")
                 break
 
         status = "✓ 通过" if result.passed else "✗ 失败"
@@ -274,7 +273,7 @@ class UITester:
     def run_tests(self, test_cases: List[Dict[str, Any]]):
         """运行所有测试用例"""
         print(f"\n{'#'*60}")
-        print(f"UI 功能自动化测试")
+        print("UI 功能自动化测试")
         print(f"{'#'*60}")
         print(f"目标: {self.url}")
         print(f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -352,7 +351,7 @@ def main():
 
     # 加载测试用例
     if args.test:
-        with open(args.test, "r", encoding="utf-8") as f:
+        with open(args.test, encoding="utf-8") as f:
             test_cases = json.load(f)
     else:
         # 默认测试用例（示例）

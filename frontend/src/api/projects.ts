@@ -90,7 +90,7 @@ export async function getProjectDailyStats(
   const params: Record<string, string> = {};
   if (startDate) params.start_date = startDate;
   if (endDate) params.end_date = endDate;
-  
+
   return apiClient.get<{ success: boolean; stats: ProjectDailyStats[] }>(
     `/api/projects/${projectId}/daily`,
     params

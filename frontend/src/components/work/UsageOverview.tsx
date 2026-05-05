@@ -124,7 +124,7 @@ export const UsageOverview: React.FC = () => {
           <div className="skeleton-title" style={{ width: '200px', height: '32px', background: '#e0e0e0', borderRadius: '4px' }} />
           <div className="skeleton-button" style={{ width: '100px', height: '36px', background: '#e0e0e0', borderRadius: '4px' }} />
         </div>
-        
+
         {/* Skeleton Cards */}
         <h5 className="mb-3" style={{ visibility: 'hidden' }}>{t('daily', language)}</h5>
         <div className="row g-3 mb-4">
@@ -141,7 +141,7 @@ export const UsageOverview: React.FC = () => {
             </Card>
           </div>
         </div>
-        
+
         <h5 className="mb-3" style={{ visibility: 'hidden' }}>{t('monthly', language)}</h5>
         <div className="row g-3 mb-4">
           <div className="col-md-6">
@@ -157,7 +157,7 @@ export const UsageOverview: React.FC = () => {
             </Card>
           </div>
         </div>
-        
+
         {/* Skeleton Charts */}
         <Card className="mb-4">
           <div style={{ width: '150px', height: '24px', background: '#e0e0e0', borderRadius: '4px', marginBottom: '16px' }} />

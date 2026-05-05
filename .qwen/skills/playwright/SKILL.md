@@ -50,7 +50,7 @@ HTML 报告格式：
     <h1>截图报告</h1>
     <p>生成时间：<timestamp></p>
     <p>问题：<issue_title></p>
-    
+
     <div class="screenshot">
         <h3>截图 1 标题</h3>
         <img src="screenshot1.png">

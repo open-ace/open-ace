@@ -1455,4 +1455,3 @@ ALTER TABLE ONLY user_tool_accounts
 
 ALTER TABLE ONLY web_user_auth_sessions
     ADD CONSTRAINT web_user_auth_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
-

@@ -9,9 +9,10 @@
 """
 
 import asyncio
-from playwright.async_api import async_playwright
 import os
 from datetime import datetime
+
+from playwright.async_api import async_playwright
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000/")
 USERNAME = os.environ.get("USERNAME", "admin")
@@ -70,13 +71,11 @@ async def test_issue33():
             await page.wait_for_timeout(2000)
 
             # 使用 JavaScript 点击导航链接
-            await page.evaluate(
-                """() => {
-                const navLink = document.querySelector('a[href="#analysis-content"]') || 
+            await page.evaluate("""() => {
+                const navLink = document.querySelector('a[href="#analysis-content"]') ||
                                document.querySelector('[data-bs-target="#analysis-content"]');
                 if (navLink) navLink.click();
-            }"""
-            )
+            }""")
             await page.wait_for_load_state("networkidle")
             await page.wait_for_timeout(1000)
             results.append(("导航到 Analysis", True, ""))
@@ -122,24 +121,20 @@ async def test_issue33():
             analysis_visible = await page.is_visible("#analysis-content")
             if not analysis_visible:
                 print("   Analysis 内容不可见，尝试点击...")
-                await page.evaluate(
-                    """() => {
+                await page.evaluate("""() => {
                     const analysisTab = document.querySelector('[data-bs-target="#analysis-content"]');
                     if (analysisTab) analysisTab.click();
-                }"""
-                )
+                }""")
                 await page.wait_for_timeout(1000)
 
             # 使用 Bootstrap Tab API 切换
-            await page.evaluate(
-                """() => {
+            await page.evaluate("""() => {
                 const tabElement = document.getElementById('conversation-history-tab');
                 if (tabElement) {
                     const tab = new bootstrap.Tab(tabElement);
                     tab.show();
                 }
-            }"""
-            )
+            }""")
 
             await page.wait_for_timeout(2000)
 

@@ -247,7 +247,7 @@ Phase 3: 模板使用 (1 天)
                 </select>
             </div>
             <div class="col-md-4">
-                <input type="text" id="search-input" class="form-control" 
+                <input type="text" id="search-input" class="form-control"
                        placeholder="Search templates..." onkeyup="debounce(loadTemplates, 300)">
             </div>
         </div>
@@ -262,14 +262,14 @@ Phase 3: 模板使用 (1 天)
 async function loadTemplates() {
     const category = document.getElementById('category-filter').value;
     const search = document.getElementById('search-input').value;
-    
+
     const params = new URLSearchParams();
     if (category) params.append('category', category);
     if (search) params.append('search', search);
-    
+
     const response = await fetch(`/api/workspace/prompts?${params}`);
     const data = await response.json();
-    
+
     if (data.success) {
         renderTemplateList(data.data.templates);
     }
@@ -352,7 +352,7 @@ class Alert:
     message: str
     user_id: int
     created_at: datetime
-    
+
     def to_dict(self):
         return {
             **asdict(self),
@@ -362,25 +362,25 @@ class Alert:
 
 class AlertNotifier:
     """实时告警通知器"""
-    
+
     def __init__(self):
         self._subscribers: List[Callable] = []
         self._websocket_clients: Set = set()
         self._email_config = {}
         self._webhooks = {}
-    
+
     def subscribe(self, callback: Callable):
         """订阅告警"""
         self._subscribers.append(callback)
-    
+
     def register_websocket(self, ws):
         """注册 WebSocket 客户端"""
         self._websocket_clients.add(ws)
-    
+
     def unregister_websocket(self, ws):
         """注销 WebSocket 客户端"""
         self._websocket_clients.discard(ws)
-    
+
     async def broadcast(self, alert: Alert):
         """广播告警到所有订阅者"""
         # 1. 调用订阅者回调
@@ -392,7 +392,7 @@ class AlertNotifier:
                     callback(alert)
             except Exception as e:
                 logger.error(f"Error in alert callback: {e}")
-        
+
         # 2. WebSocket 推送
         alert_dict = alert.to_dict()
         for ws in list(self._websocket_clients):
@@ -401,12 +401,12 @@ class AlertNotifier:
             except Exception as e:
                 logger.error(f"Error sending to WebSocket: {e}")
                 self._websocket_clients.discard(ws)
-    
+
     async def send_email_alert(self, alert: Alert, user_email: str):
         """发送邮件告警"""
         # TODO: 实现邮件发送逻辑
         logger.info(f"Sending email alert to {user_email}: {alert.title}")
-    
+
     async def send_webhook_alert(self, alert: Alert, webhook_url: str):
         """发送 Webhook 告警"""
         try:
@@ -420,23 +420,23 @@ class AlertNotifier:
                         logger.error(f"Webhook failed: {response.status}")
         except Exception as e:
             logger.error(f"Error sending webhook: {e}")
-    
+
     async def notify_user(self, user_id: int, alert: Alert):
         """通知特定用户"""
         # 获取用户通知偏好
         preferences = await self._get_user_preferences(user_id)
-        
+
         # WebSocket 推送
         # (通过用户关联的 WebSocket 连接)
-        
+
         # 邮件通知
         if preferences.get('email_enabled') and alert.severity in ['warning', 'critical']:
             await self.send_email_alert(alert, preferences.get('email'))
-        
+
         # Webhook 通知
         if preferences.get('webhook_url'):
             await self.send_webhook_alert(alert, preferences['webhook_url'])
-    
+
     async def _get_user_preferences(self, user_id: int) -> dict:
         """获取用户通知偏好"""
         # TODO: 从数据库获取
@@ -478,18 +478,18 @@ def register_socket_events(socketio):
     @socketio.on('connect', namespace='/alerts')
     def handle_connect():
         logger.info(f"Client connected to alerts: {request.sid}")
-    
+
     @socketio.on('disconnect', namespace='/alerts')
     def handle_disconnect():
         logger.info(f"Client disconnected from alerts: {request.sid}")
-    
+
     @socketio.on('subscribe', namespace='/alerts')
     def handle_subscribe(data):
         user_id = data.get('user_id')
         if user_id:
             join_room(f'user_{user_id}')
             logger.info(f"User {user_id} subscribed to alerts")
-    
+
     @socketio.on('unsubscribe', namespace='/alerts')
     def handle_unsubscribe(data):
         user_id = data.get('user_id')
@@ -508,41 +508,41 @@ class AlertManager {
         this.reconnectAttempts = 0;
         this.maxReconnectAttempts = 5;
     }
-    
+
     connect(userId) {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/api/alerts/ws`;
-        
+
         this.socket = new WebSocket(wsUrl);
-        
+
         this.socket.onopen = () => {
             console.log('Alert WebSocket connected');
             this.connected = true;
             this.reconnectAttempts = 0;
-            
+
             // 订阅用户告警
             this.socket.send(JSON.stringify({
                 type: 'subscribe',
                 user_id: userId
             }));
         };
-        
+
         this.socket.onmessage = (event) => {
             const alert = JSON.parse(event.data);
             this.handleAlert(alert);
         };
-        
+
         this.socket.onclose = () => {
             console.log('Alert WebSocket disconnected');
             this.connected = false;
             this.attemptReconnect(userId);
         };
-        
+
         this.socket.onerror = (error) => {
             console.error('Alert WebSocket error:', error);
         };
     }
-    
+
     attemptReconnect(userId) {
         if (this.reconnectAttempts < this.maxReconnectAttempts) {
             this.reconnectAttempts++;
@@ -551,33 +551,33 @@ class AlertManager {
             setTimeout(() => this.connect(userId), delay);
         }
     }
-    
+
     handleAlert(alert) {
         console.log('Received alert:', alert);
-        
+
         // 显示通知
         this.showNotification(alert);
-        
+
         // 更新告警计数
         this.updateAlertBadge();
-        
+
         // 如果是严重告警，显示模态框
         if (alert.severity === 'critical') {
             this.showCriticalAlertModal(alert);
         }
     }
-    
+
     showNotification(alert) {
         // 使用 Bootstrap Toast
         const toastContainer = document.getElementById('alert-toast-container');
         if (!toastContainer) return;
-        
+
         const severityClass = {
             'info': 'bg-info',
             'warning': 'bg-warning',
             'critical': 'bg-danger'
         }[alert.severity] || 'bg-secondary';
-        
+
         const toastHtml = `
             <div class="toast ${severityClass} text-white" role="alert">
                 <div class="toast-header">
@@ -590,17 +590,17 @@ class AlertManager {
                 </div>
             </div>
         `;
-        
+
         toastContainer.insertAdjacentHTML('beforeend', toastHtml);
         const toastEl = toastContainer.lastElementChild;
         const toast = new bootstrap.Toast(toastEl, { delay: 5000 });
         toast.show();
-        
+
         toastEl.addEventListener('hidden.bs.toast', () => {
             toastEl.remove();
         });
     }
-    
+
     updateAlertBadge() {
         const badge = document.getElementById('alert-badge');
         if (badge) {
@@ -609,7 +609,7 @@ class AlertManager {
             badge.style.display = count > 0 ? 'inline' : 'none';
         }
     }
-    
+
     showCriticalAlertModal(alert) {
         // 显示严重告警模态框
         const modal = new bootstrap.Modal(document.getElementById('critical-alert-modal'));
@@ -664,7 +664,7 @@ class ROIMetrics:
     roi_percentage: float = 0.0
     cost_per_request: float = 0.0
     cost_per_token: float = 0.0
-    
+
     def to_dict(self) -> dict:
         return {
             'period': self.period,
@@ -691,7 +691,7 @@ class ModelPricing:
 
 class ROICalculator:
     """ROI 计算器"""
-    
+
     # 模型定价（每 1K tokens，美元）
     MODEL_PRICING = {
         'claude-3-opus': ModelPricing(input_price=0.015, output_price=0.075),
@@ -705,22 +705,22 @@ class ROICalculator:
         'gpt-4-turbo': ModelPricing(input_price=0.01, output_price=0.03),
         'gpt-3.5-turbo': ModelPricing(input_price=0.0005, output_price=0.0015),
     }
-    
+
     # 默认定价（未知模型）
     DEFAULT_PRICING = ModelPricing(input_price=0.01, output_price=0.03)
-    
+
     # 假设人工处理成本
     HOURLY_LABOR_COST = 50.0  # 美元/小时
-    
+
     # AI 效率提升倍数
     PRODUCTIVITY_MULTIPLIER = 10.0
-    
+
     # 平均每个请求节省的时间（分钟）
     AVG_TIME_SAVED_PER_REQUEST = 5.0
-    
+
     def __init__(self, db_path: str):
         self.db_path = db_path
-    
+
     def calculate_roi(
         self,
         start_date: str,
@@ -730,25 +730,25 @@ class ROICalculator:
     ) -> ROIMetrics:
         """
         计算指定时间段的 ROI
-        
+
         Args:
             start_date: 开始日期 (YYYY-MM-DD)
             end_date: 结束日期 (YYYY-MM-DD)
             user_id: 可选的用户 ID 筛选
             tool_name: 可选的工具名称筛选
-        
+
         Returns:
             ROIMetrics: ROI 指标
         """
         import sqlite3
-        
+
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        
+
         # 构建查询
         query = '''
-            SELECT 
+            SELECT
                 COUNT(*) as request_count,
                 SUM(input_tokens) as total_input_tokens,
                 SUM(output_tokens) as total_output_tokens,
@@ -757,73 +757,73 @@ class ROICalculator:
             WHERE date >= ? AND date <= ?
         '''
         params = [start_date, end_date]
-        
+
         if user_id:
             query += ' AND user_id = ?'
             params.append(user_id)
-        
+
         if tool_name:
             query += ' AND tool_name = ?'
             params.append(tool_name)
-        
+
         cursor.execute(query, params)
         row = cursor.fetchone()
-        
+
         # 获取模型使用详情
         model_query = '''
-            SELECT tool_name, model, 
+            SELECT tool_name, model,
                    SUM(input_tokens) as input_tokens,
                    SUM(output_tokens) as output_tokens
             FROM daily_usage
             WHERE date >= ? AND date <= ?
         '''
         model_params = [start_date, end_date]
-        
+
         if user_id:
             model_query += ' AND user_id = ?'
             model_params.append(user_id)
-        
+
         if tool_name:
             model_query += ' AND tool_name = ?'
             model_params.append(tool_name)
-        
+
         model_query += ' GROUP BY tool_name, model'
-        
+
         cursor.execute(model_query, model_params)
         model_rows = cursor.fetchall()
         conn.close()
-        
+
         # 计算成本
         total_cost = 0.0
         for model_row in model_rows:
             model_name = model_row['model'] or 'default'
             pricing = self.MODEL_PRICING.get(model_name, self.DEFAULT_PRICING)
-            
+
             input_cost = (model_row['input_tokens'] or 0) / 1000 * pricing.input_price
             output_cost = (model_row['output_tokens'] or 0) / 1000 * pricing.output_price
             total_cost += input_cost + output_cost
-        
+
         # 获取统计数据
         requests = row['request_count'] or 0
         tokens = row['total_tokens'] or 0
-        
+
         # 计算节省
         estimated_hours_saved = requests * self.AVG_TIME_SAVED_PER_REQUEST / 60
         estimated_savings = estimated_hours_saved * self.HOURLY_LABOR_COST
-        
+
         # 计算 ROI
         if total_cost > 0:
             roi_percentage = ((estimated_savings - total_cost) / total_cost) * 100
         else:
             roi_percentage = 0.0
-        
+
         # 效率提升
         productivity_gain = (self.PRODUCTIVITY_MULTIPLIER - 1) * 100
-        
+
         # 单位成本
         cost_per_request = total_cost / requests if requests > 0 else 0
         cost_per_token = total_cost / tokens if tokens > 0 else 0
-        
+
         return ROIMetrics(
             period=f"{start_date} to {end_date}",
             start_date=start_date,
@@ -838,7 +838,7 @@ class ROICalculator:
             cost_per_request=cost_per_request,
             cost_per_token=cost_per_token,
         )
-    
+
     def get_roi_trend(
         self,
         months: int = 6,
@@ -846,30 +846,30 @@ class ROICalculator:
     ) -> List[ROIMetrics]:
         """
         获取 ROI 趋势
-        
+
         Args:
             months: 月数
             user_id: 可选的用户 ID
-        
+
         Returns:
             List[ROIMetrics]: ROI 趋势列表
         """
         trends = []
         today = datetime.utcnow()
-        
+
         for i in range(months):
             end_date = today - timedelta(days=i*30)
             start_date = end_date - timedelta(days=30)
-            
+
             roi = self.calculate_roi(
                 start_date.strftime('%Y-%m-%d'),
                 end_date.strftime('%Y-%m-%d'),
                 user_id
             )
             trends.append(roi)
-        
+
         return list(reversed(trends))
-    
+
     def get_roi_by_tool(
         self,
         start_date: str,
@@ -877,34 +877,34 @@ class ROICalculator:
     ) -> Dict[str, ROIMetrics]:
         """
         按工具获取 ROI
-        
+
         Args:
             start_date: 开始日期
             end_date: 结束日期
-        
+
         Returns:
             Dict[str, ROIMetrics]: 工具名称到 ROI 的映射
         """
         import sqlite3
-        
+
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
+
         cursor.execute('''
             SELECT DISTINCT tool_name FROM daily_usage
             WHERE date >= ? AND date <= ?
         ''', (start_date, end_date))
-        
+
         tools = [row[0] for row in cursor.fetchall()]
         conn.close()
-        
+
         result = {}
         for tool in tools:
             if tool:
                 result[tool] = self.calculate_roi(start_date, end_date, tool_name=tool)
-        
+
         return result
-    
+
     def get_roi_by_user(
         self,
         start_date: str,
@@ -912,31 +912,31 @@ class ROICalculator:
     ) -> Dict[int, ROIMetrics]:
         """
         按用户获取 ROI
-        
+
         Args:
             start_date: 开始日期
             end_date: 结束日期
-        
+
         Returns:
             Dict[int, ROIMetrics]: 用户 ID 到 ROI 的映射
         """
         import sqlite3
-        
+
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
+
         cursor.execute('''
             SELECT DISTINCT user_id FROM daily_usage
             WHERE date >= ? AND date <= ? AND user_id IS NOT NULL
         ''', (start_date, end_date))
-        
+
         users = [row[0] for row in cursor.fetchall()]
         conn.close()
-        
+
         result = {}
         for user_id in users:
             result[user_id] = self.calculate_roi(start_date, end_date, user_id=user_id)
-        
+
         return result
 ```
 
@@ -966,16 +966,16 @@ def get_roi():
         end_date = request.args.get('end_date')
         user_id = request.args.get('user_id', type=int)
         tool_name = request.args.get('tool_name')
-        
+
         if not start_date or not end_date:
             return jsonify({
                 'success': False,
                 'error': 'start_date and end_date are required'
             }), 400
-        
+
         calculator = ROICalculator(str(DB_PATH))
         roi = calculator.calculate_roi(start_date, end_date, user_id, tool_name)
-        
+
         return jsonify({
             'success': True,
             'data': roi.to_dict()
@@ -991,10 +991,10 @@ def get_roi_trend():
     try:
         months = request.args.get('months', default=6, type=int)
         user_id = request.args.get('user_id', type=int)
-        
+
         calculator = ROICalculator(str(DB_PATH))
         trends = calculator.get_roi_trend(months, user_id)
-        
+
         return jsonify({
             'success': True,
             'data': [t.to_dict() for t in trends]
@@ -1010,16 +1010,16 @@ def get_roi_by_tool():
     try:
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
-        
+
         if not start_date or not end_date:
             return jsonify({
                 'success': False,
                 'error': 'start_date and end_date are required'
             }), 400
-        
+
         calculator = ROICalculator(str(DB_PATH))
         roi_by_tool = calculator.get_roi_by_tool(start_date, end_date)
-        
+
         return jsonify({
             'success': True,
             'data': {k: v.to_dict() for k, v in roi_by_tool.items()}
@@ -1082,7 +1082,7 @@ class OptimizationSuggestion:
     affected_tools: List[str] = field(default_factory=list)
     implementation_effort: str = 'medium'  # low, medium, high
     created_at: datetime = field(default_factory=datetime.utcnow)
-    
+
     def to_dict(self) -> dict:
         return {
             'suggestion_id': self.suggestion_id,
@@ -1101,7 +1101,7 @@ class OptimizationSuggestion:
 
 class CostOptimizer:
     """成本优化分析器"""
-    
+
     # 模型定价（每 1K tokens）
     MODEL_PRICING = {
         'claude-3-opus': {'input': 0.015, 'output': 0.075},
@@ -1112,64 +1112,64 @@ class CostOptimizer:
         'qwen-plus': {'input': 0.004, 'output': 0.012},
         'qwen-turbo': {'input': 0.002, 'output': 0.006},
     }
-    
+
     # 模型层级（从贵到便宜）
     MODEL_HIERARCHY = {
         'claude': ['claude-3-opus', 'claude-3-sonnet', 'claude-3-haiku'],
         'qwen': ['qwen-max', 'qwen-plus', 'qwen-turbo'],
     }
-    
+
     def __init__(self, db_path: str):
         self.db_path = db_path
-    
+
     def analyze(self, days: int = 30) -> List[OptimizationSuggestion]:
         """
         分析使用数据并生成优化建议
-        
+
         Args:
             days: 分析最近多少天的数据
-        
+
         Returns:
             List[OptimizationSuggestion]: 优化建议列表
         """
         suggestions = []
-        
+
         end_date = datetime.utcnow().strftime('%Y-%m-%d')
         start_date = (datetime.utcnow() - timedelta(days=days)).strftime('%Y-%m-%d')
-        
+
         # 获取使用数据
         usage_data = self._get_usage_data(start_date, end_date)
-        
+
         # 1. 分析模型使用
         model_suggestions = self._analyze_model_usage(usage_data)
         suggestions.extend(model_suggestions)
-        
+
         # 2. 分析使用模式
         pattern_suggestions = self._analyze_usage_patterns(usage_data)
         suggestions.extend(pattern_suggestions)
-        
+
         # 3. 分析配额效率
         quota_suggestions = self._analyze_quota_efficiency(usage_data)
         suggestions.extend(quota_suggestions)
-        
+
         # 4. 分析工具使用
         tool_suggestions = self._analyze_tool_usage(usage_data)
         suggestions.extend(tool_suggestions)
-        
+
         # 按潜在节省排序
         suggestions.sort(key=lambda x: x.potential_savings, reverse=True)
-        
+
         return suggestions
-    
+
     def _get_usage_data(self, start_date: str, end_date: str) -> Dict[str, Any]:
         """获取使用数据"""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        
+
         # 总体统计
         cursor.execute('''
-            SELECT 
+            SELECT
                 COUNT(*) as total_requests,
                 SUM(input_tokens) as total_input_tokens,
                 SUM(output_tokens) as total_output_tokens
@@ -1177,7 +1177,7 @@ class CostOptimizer:
             WHERE date >= ? AND date <= ?
         ''', (start_date, end_date))
         overall = cursor.fetchone()
-        
+
         # 按模型统计
         cursor.execute('''
             SELECT tool_name, model,
@@ -1190,7 +1190,7 @@ class CostOptimizer:
             GROUP BY tool_name, model
         ''', (start_date, end_date))
         by_model = cursor.fetchall()
-        
+
         # 按用户统计
         cursor.execute('''
             SELECT user_id,
@@ -1201,7 +1201,7 @@ class CostOptimizer:
             GROUP BY user_id
         ''', (start_date, end_date))
         by_user = cursor.fetchall()
-        
+
         # 按时间段统计
         cursor.execute('''
             SELECT strftime('%H', timestamp) as hour,
@@ -1212,25 +1212,25 @@ class CostOptimizer:
             ORDER BY requests DESC
         ''', (start_date, end_date))
         by_hour = cursor.fetchall()
-        
+
         conn.close()
-        
+
         return {
             'overall': overall,
             'by_model': by_model,
             'by_user': by_user,
             'by_hour': by_hour,
         }
-    
+
     def _analyze_model_usage(self, data: Dict) -> List[OptimizationSuggestion]:
         """分析模型使用情况"""
         suggestions = []
-        
+
         for row in data['by_model']:
             model = row['model'] or 'unknown'
             avg_tokens = row['avg_tokens_per_request'] or 0
             requests = row['requests'] or 0
-            
+
             # 检查是否使用昂贵模型处理简单任务
             if model in ['claude-3-opus', 'qwen-max']:
                 if avg_tokens < 500:  # 短对话
@@ -1238,14 +1238,14 @@ class CostOptimizer:
                     tool_prefix = 'claude' if 'claude' in model else 'qwen'
                     hierarchy = self.MODEL_HIERARCHY.get(tool_prefix, [])
                     current_idx = hierarchy.index(model) if model in hierarchy else 0
-                    
+
                     if current_idx < len(hierarchy) - 1:
                         cheaper_model = hierarchy[current_idx + 1]
                         savings = self._calculate_model_savings(
-                            model, cheaper_model, 
+                            model, cheaper_model,
                             row['input_tokens'], row['output_tokens']
                         )
-                        
+
                         suggestions.append(OptimizationSuggestion(
                             suggestion_id=f'model_switch_{model}_{cheaper_model}',
                             suggestion_type=OptimizationType.MODEL_SWITCH.value,
@@ -1261,23 +1261,23 @@ class CostOptimizer:
                             ],
                             affected_tools=[row['tool_name']],
                         ))
-        
+
         return suggestions
-    
+
     def _analyze_usage_patterns(self, data: Dict) -> List[OptimizationSuggestion]:
         """分析使用模式"""
         suggestions = []
-        
+
         # 分析高峰时段
         if data['by_hour']:
             peak_hours = sorted(data['by_hour'], key=lambda x: x['requests'], reverse=True)[:3]
             peak_hours_list = [h['hour'] for h in peak_hours]
-            
+
             # 如果高峰时段请求集中，建议错峰使用
             total_requests = data['overall']['total_requests'] or 1
             peak_requests = sum(h['requests'] for h in peak_hours)
             peak_percentage = peak_requests / total_requests * 100
-            
+
             if peak_percentage > 50:
                 suggestions.append(OptimizationSuggestion(
                     suggestion_id='time_optimization_peak',
@@ -1293,25 +1293,25 @@ class CostOptimizer:
                         "监控响应时间并动态调整",
                     ],
                 ))
-        
+
         return suggestions
-    
+
     def _analyze_quota_efficiency(self, data: Dict) -> List[OptimizationSuggestion]:
         """分析配额效率"""
         suggestions = []
-        
+
         # 找出配额使用不均衡的用户
         if data['by_user']:
             total_tokens = sum(u['total_tokens'] or 0 for u in data['by_user'])
             user_count = len(data['by_user'])
             avg_tokens = total_tokens / user_count if user_count > 0 else 0
-            
+
             # 找出使用量远低于平均的用户
             low_usage_users = [
                 u['user_id'] for u in data['by_user']
                 if (u['total_tokens'] or 0) < avg_tokens * 0.2
             ]
-            
+
             if len(low_usage_users) > user_count * 0.3:
                 suggestions.append(OptimizationSuggestion(
                     suggestion_id='quota_adjustment_low_usage',
@@ -1328,16 +1328,16 @@ class CostOptimizer:
                     ],
                     affected_users=low_usage_users[:10],  # 只显示前10个
                 ))
-        
+
         return suggestions
-    
+
     def _analyze_tool_usage(self, data: Dict) -> List[OptimizationSuggestion]:
         """分析工具使用"""
         suggestions = []
-        
+
         # 检查是否有多个工具提供类似功能
         tools = set(row['tool_name'] for row in data['by_model'] if row['tool_name'])
-        
+
         if len(tools) > 2:
             suggestions.append(OptimizationSuggestion(
                 suggestion_id='tool_consolidation',
@@ -1354,9 +1354,9 @@ class CostOptimizer:
                 ],
                 affected_tools=list(tools),
             ))
-        
+
         return suggestions
-    
+
     def _calculate_model_savings(
         self,
         current_model: str,
@@ -1367,21 +1367,21 @@ class CostOptimizer:
         """计算切换模型的节省"""
         current_pricing = self.MODEL_PRICING.get(current_model, {'input': 0.01, 'output': 0.03})
         cheaper_pricing = self.MODEL_PRICING.get(cheaper_model, {'input': 0.01, 'output': 0.03})
-        
+
         current_cost = (input_tokens / 1000 * current_pricing['input'] +
                        output_tokens / 1000 * current_pricing['output'])
-        
+
         cheaper_cost = (input_tokens / 1000 * cheaper_pricing['input'] +
                        output_tokens / 1000 * cheaper_pricing['output'])
-        
+
         return current_cost - cheaper_cost
-    
+
     def get_cost_breakdown(self, start_date: str, end_date: str) -> Dict[str, Any]:
         """获取成本分解"""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        
+
         # 按模型分解
         cursor.execute('''
             SELECT tool_name, model,
@@ -1392,16 +1392,16 @@ class CostOptimizer:
             WHERE date >= ? AND date <= ?
             GROUP BY tool_name, model
         ''', (start_date, end_date))
-        
+
         breakdown = []
         for row in cursor.fetchall():
             model = row['model'] or 'unknown'
             pricing = self.MODEL_PRICING.get(model, {'input': 0.01, 'output': 0.03})
-            
+
             input_cost = (row['input_tokens'] or 0) / 1000 * pricing['input']
             output_cost = (row['output_tokens'] or 0) / 1000 * pricing['output']
             total_cost = input_cost + output_cost
-            
+
             breakdown.append({
                 'tool_name': row['tool_name'],
                 'model': model,
@@ -1412,9 +1412,9 @@ class CostOptimizer:
                 'output_cost': round(output_cost, 4),
                 'total_cost': round(total_cost, 4),
             })
-        
+
         conn.close()
-        
+
         return {
             'breakdown': breakdown,
             'total_cost': round(sum(b['total_cost'] for b in breakdown), 4),
