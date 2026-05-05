@@ -8,6 +8,7 @@ Database schema is created by schema.sql during installation.
 
 import os
 import sys
+from typing import Optional
 
 import bcrypt
 
@@ -60,8 +61,8 @@ def create_default_tenant(
         # PostgreSQL: psycopg2 converts Python True/False to PostgreSQL TRUE/FALSE
         # SQLite: use integer 1/0 for boolean
         if db.is_postgresql():
-            bool_true = True
-            bool_false = False
+            bool_true: bool | int = True
+            bool_false: bool | int = False
         else:
             bool_true = 1
             bool_false = 0
@@ -89,7 +90,7 @@ def create_default_admin(
     username: str = "admin",
     password: str = "admin123",
     email: str = "admin@localhost",
-    system_account: str = None,
+    system_account: Optional[str] = None,
     tenant_id: int = 1,
 ) -> bool:
     """Create a default admin user with forced password change on first login."""

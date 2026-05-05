@@ -107,7 +107,7 @@ class DatabaseOptimizer:
         Returns:
             Dict with results.
         """
-        results = {
+        results: dict[str, list] = {
             "created": [],
             "skipped": [],
             "errors": [],
@@ -164,7 +164,7 @@ class DatabaseOptimizer:
         Returns:
             Dict with results.
         """
-        results = {
+        results: dict[str, list] = {
             "dropped": [],
             "errors": [],
         }
@@ -204,7 +204,7 @@ class DatabaseOptimizer:
         Returns:
             Dict with analysis results.
         """
-        analysis = {
+        analysis: dict[str, Any] = {
             "table": table_name,
             "row_count": 0,
             "indexes": [],

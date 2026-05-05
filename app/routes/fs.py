@@ -12,6 +12,7 @@ import os
 import platform
 import subprocess
 from pathlib import Path
+from typing import Any
 
 from flask import Blueprint, g, jsonify, request
 
@@ -43,7 +44,7 @@ def get_current_user():
     user_data = _load_user_from_token(token)
     if not user_data:
         return None, {"error": "Unauthorized"}, 401
-    user = user_repo.get_user_by_id(user_data.get("id"))
+    user = user_repo.get_user_by_id(int(user_data.get("id", 0)))
     return user, None, 200
 
 
@@ -51,11 +52,11 @@ def get_webui_user():
     """Get user from webui token (for iframe integration)."""
     from app.services.webui_manager import get_webui_manager
 
-    token = request.cookies.get("session_token") or request.headers.get(
+    token: str | None = request.cookies.get("session_token") or request.headers.get(
         "Authorization", ""
     ).replace("Bearer ", "")
     if not token:
-        token = request.args.get("token")
+        token = request.args.get("token") or ""
 
     if not token:
         return None, {"error": "Unauthorized"}, 401
@@ -65,7 +66,7 @@ def get_webui_user():
         return None, {"error": "WebUI manager not available"}, 500
 
     valid, user_id, error = manager.validate_token(token)
-    if not valid:
+    if not valid or user_id is None:
         return None, {"error": error}, 401
 
     user = user_repo.get_user_by_id(user_id)
@@ -136,7 +137,7 @@ def is_valid_path(path: str, allowed_prefixes: list[str] | None = None) -> bool:
     return True
 
 
-def get_directory_info(path: str, system_account: str = None):
+def get_directory_info(path: str, system_account: str | None = None):
     """Get information about a directory, optionally as a specific user."""
     try:
         if system_account:
@@ -251,7 +252,7 @@ def api_browse_directory():
     directories = list_subdirectories(path, system_account)
 
     # Get parent directory
-    parent = str(Path(path).parent)
+    parent: str | None = str(Path(path).parent)
     if parent == path:  # Root directory
         parent = None
 
@@ -266,9 +267,9 @@ def api_browse_directory():
     )
 
 
-def list_subdirectories(path: str, system_account: str = None) -> list:
+def list_subdirectories(path: str, system_account: str | None = None) -> list:
     """List subdirectories in a path, optionally as a specific user."""
-    directories = []
+    directories: list[dict[str, Any]] = []
 
     try:
         if system_account:

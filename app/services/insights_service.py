@@ -8,7 +8,7 @@ Calls GLM-5 model (OpenAI-compatible API) to produce structured analysis.
 import json
 import logging
 import os
-from typing import Optional
+from typing import Optional, cast
 
 import requests
 
@@ -38,7 +38,7 @@ class InsightsService:
         config_path = os.path.join(CONFIG_DIR, "config.json")
         try:
             with open(config_path) as f:
-                return json.load(f)
+                return cast("dict", json.load(f))
         except Exception as e:
             logger.warning(f"Could not load config.json: {e}")
             return {}
@@ -265,7 +265,7 @@ class InsightsService:
                 "AI returned empty content (reasoning model may have consumed all tokens). "
                 "Consider increasing max_tokens or using a non-reasoning model."
             )
-        return content
+        return cast("str", content)
 
     def _extract_json(self, text: str) -> str:
         """Extract JSON from AI response, stripping markdown code fences if present."""

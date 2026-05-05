@@ -21,7 +21,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from threading import RLock
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ class WebUIInstance:
                 health_url += f"?token={self.token}"
             req = urllib.request.Request(health_url)
             with urllib.request.urlopen(req, timeout=3) as resp:
-                return resp.status == 200
+                return cast("bool", resp.status == 200)
         except Exception:
             return False
 
@@ -341,9 +341,9 @@ class WebUIManager:
             if len(parts) != 4:
                 return False, None, "Invalid token format"
 
-            user_id, port, random_part, signature = parts
-            user_id = int(user_id)
-            port = int(port)
+            user_id_str, port_str, random_part, signature = parts
+            user_id: int = int(user_id_str)
+            port: int = int(port_str)
 
             expected_signature = hashlib.sha256(
                 f"{user_id}:{port}:{random_part}:{self.config.token_secret}".encode()
@@ -485,7 +485,7 @@ class WebUIManager:
         try:
             with open(config_path) as f:
                 config = json.load(f)
-            return config.get("server", {})
+            return cast("dict", config.get("server", {}))
         except Exception:
             return {}
 

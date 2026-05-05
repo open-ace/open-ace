@@ -5,9 +5,9 @@ Business logic for usage analysis and reporting.
 """
 
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Any, Optional
 
 from app.repositories.daily_stats_repo import DailyStatsRepository
 from app.repositories.message_repo import MessageRepository
@@ -72,7 +72,7 @@ class AnalysisService:
 
         # Use pre-aggregated data from daily_stats for fast queries
         # Only hourly data needs to query daily_messages directly
-        futures = {
+        futures: dict[Future, str] = {
             _executor.submit(
                 self.daily_stats_repo.get_batch_aggregates, start_date, end_date, host_name
             ): "aggregates",
@@ -97,8 +97,8 @@ class AnalysisService:
         }
 
         # Collect results
-        results = {}
-        for future in as_completed(futures):
+        results: dict[str, Any] = {}
+        for future in as_completed(futures):  # type: ignore[arg-type]
             key = futures[future]
             try:
                 results[key] = future.result()
@@ -183,7 +183,7 @@ class AnalysisService:
         )
         peak_days = [{"date": d, "tokens": t} for d, t in sorted_days[:5]]
 
-        hourly_totals = {}
+        hourly_totals: dict[int, int] = {}
         for h in hourly_data:
             hour = int(h.get("hour", 0))
             hourly_totals[hour] = hourly_totals.get(hour, 0) + (h.get("tokens", 0) or 0)
@@ -429,7 +429,7 @@ class AnalysisService:
             end_date = datetime.now().strftime("%Y-%m-%d")
 
         # Use parallel queries for better performance
-        futures = {
+        futures: dict[Future, str] = {
             _executor.submit(
                 self.message_repo.get_daily_token_totals, start_date, end_date, host_name
             ): "daily_data",
@@ -439,8 +439,8 @@ class AnalysisService:
         }
 
         # Collect results
-        results = {}
-        for future in as_completed(futures):
+        results: dict[str, Any] = {}
+        for future in as_completed(futures):  # type: ignore[arg-type]
             key = futures[future]
             try:
                 results[key] = future.result()
@@ -702,7 +702,7 @@ class AnalysisService:
             tool_totals[tool] += u.get("tokens_used", 0)
 
         if tool_totals:
-            top_tool = max(tool_totals, key=tool_totals.get)
+            top_tool = max(tool_totals, key=lambda k: tool_totals.get(k, 0))
             top_usage = tool_totals[top_tool]
             if total_tokens > 0 and (top_usage / total_tokens) > 0.7:
                 recommendations.append(

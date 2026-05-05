@@ -10,7 +10,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 logger = logging.getLogger(__name__)
 
@@ -269,7 +269,7 @@ class ContentFilter:
         """Redact matched patterns in content using predefined templates."""
         # Use predefined template for better performance
         redact_func = REDACTION_TEMPLATES.get(pattern_name, REDACTION_TEMPLATES["default"])
-        return pattern.sub(redact_func, content)
+        return cast("str", pattern.sub(redact_func, content))
 
     def _generate_suggestion(self, matched_rules: list[dict]) -> str:
         """Generate suggestion for blocked content."""

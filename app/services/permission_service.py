@@ -245,7 +245,7 @@ class PermissionService:
         )
 
         for perm in custom_perms:
-            permissions.add(perm.get("permission"))
+            permissions.add(str(perm.get("permission")))
 
         return permissions
 

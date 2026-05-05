@@ -7,7 +7,7 @@ Provides fast dashboard queries by maintaining a summary table.
 
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional, cast
 
 from app.repositories.database import Database, is_postgresql
 from app.repositories.usage_repo import UsageRepository
@@ -277,7 +277,7 @@ class SummaryService:
             ORDER BY host_name, total_tokens DESC
         """
         rows = self.db.fetch_all(query, ())
-        results = {}
+        results: dict[str, dict[str, Any]] = {}
         for row in rows:
             host = row["host_name"]
             tool = row["tool_name"]
@@ -317,7 +317,7 @@ class SummaryService:
                 if isinstance(last_update, str):
                     last_update = datetime.fromisoformat(last_update.replace("Z", "+00:00"))
                 age = (datetime.utcnow() - last_update.replace(tzinfo=None)).total_seconds()
-                return age > 3600  # Refresh if older than 1 hour
+                return cast("bool", age > 3600)  # Refresh if older than 1 hour
             return True
         return True  # No data, needs refresh
 

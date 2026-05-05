@@ -11,17 +11,13 @@ import logging
 import secrets
 import urllib.parse
 from datetime import datetime, timedelta
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 import jwt
 import requests
 
 from app.modules.sso.oauth2 import OAuth2Provider
-from app.modules.sso.provider import (
-    SSOAuthResult,
-    SSOProviderConfig,
-    SSOUser,
-)
+from app.modules.sso.provider import SSOAuthResult, SSOProviderConfig, SSOUser
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +33,8 @@ class OIDCProvider(OAuth2Provider):
             config: Provider configuration.
         """
         super().__init__(config)
-        self._jwks_cache = None
-        self._jwks_cache_time = None
+        self._jwks_cache: Optional[dict[str, Any]] = None
+        self._jwks_cache_time: Optional[datetime] = None
 
     def get_authorization_url(
         self,
@@ -168,7 +164,7 @@ class OIDCProvider(OAuth2Provider):
             self._jwks_cache_time = datetime.utcnow()
 
             logger.debug(f"Successfully fetched JWKS from {jwks_url}")
-            return jwks
+            return cast("dict[str, Any]", jwks)
 
         except requests.RequestException as e:
             logger.error(f"Failed to fetch JWKS from {jwks_url}: {e}")
@@ -190,7 +186,7 @@ class OIDCProvider(OAuth2Provider):
             for key in jwks.get("keys", []):
                 if key.get("kid") == kid:
                     # Convert JWK to PEM format
-                    return self._jwk_to_pem(key)
+                    return cast("Optional[str]", self._jwk_to_pem(key))
 
             logger.warning(f"No matching key found for kid: {kid}")
             return None
@@ -226,7 +222,7 @@ class OIDCProvider(OAuth2Provider):
             format=serialization.PublicFormat.SubjectPublicKeyInfo,
         )
 
-        return pem.decode("utf-8")
+        return cast("str", pem.decode("utf-8"))
 
     def _verify_id_token(self, id_token: str) -> Optional[dict[str, Any]]:
         """
@@ -273,7 +269,7 @@ class OIDCProvider(OAuth2Provider):
             )
 
             logger.debug(f"Successfully verified ID token for sub: {payload.get('sub')}")
-            return payload
+            return cast("Optional[dict[str, Any]]", payload)
 
         except jwt.ExpiredSignatureError:
             logger.error("ID token has expired")

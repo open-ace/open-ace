@@ -8,7 +8,7 @@ import contextlib
 import json
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional, cast
 
 from app.models.tenant import QuotaConfig, Tenant, TenantSettings, TenantUsage
 from app.repositories.database import Database
@@ -295,7 +295,7 @@ class TenantRepository:
 
         try:
             cursor = self.db.execute(query, tuple(params))
-            return cursor.rowcount > 0
+            return cast("bool", cursor.rowcount > 0)
 
         except Exception as e:
             logger.error(f"Failed to update tenant: {e}")
@@ -317,7 +317,7 @@ class TenantRepository:
 
         try:
             cursor = self.db.execute(query, (datetime.utcnow(), datetime.utcnow(), tenant_id))
-            return cursor.rowcount > 0
+            return cast("bool", cursor.rowcount > 0)
         except Exception as e:
             logger.error(f"Failed to soft delete tenant: {e}")
             return False
@@ -336,7 +336,7 @@ class TenantRepository:
 
         try:
             cursor = self.db.execute(query, (datetime.utcnow(), tenant_id))
-            return cursor.rowcount > 0
+            return cast("bool", cursor.rowcount > 0)
         except Exception as e:
             logger.error(f"Failed to restore tenant: {e}")
             return False
@@ -362,7 +362,7 @@ class TenantRepository:
                 )
                 cursor.execute(adapt_sql("DELETE FROM tenants WHERE id = ?"), (tenant_id,))
                 conn.commit()
-                return cursor.rowcount > 0
+                return cast("bool", cursor.rowcount > 0)
 
         except Exception as e:
             logger.error(f"Failed to hard delete tenant: {e}")
@@ -443,7 +443,7 @@ class TenantRepository:
             List[TenantUsage]: Usage records.
         """
         conditions = ["tenant_id = ?"]
-        params = [tenant_id]
+        params: list[Any] = [tenant_id]
 
         if start_date:
             conditions.append("date >= ?")
@@ -500,7 +500,7 @@ class TenantRepository:
                     (delta, datetime.utcnow(), tenant_id),
                 )
                 conn.commit()
-                return cursor.rowcount > 0
+                return cast("bool", cursor.rowcount > 0)
 
         except Exception as e:
             logger.error(f"Failed to update user count: {e}")

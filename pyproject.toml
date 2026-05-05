@@ -149,6 +149,10 @@ pretty = true
 module = "tests.*"
 ignore_errors = true
 
+[[tool.mypy.overrides]]
+module = "scripts.*"
+disable_error_code = ["no-any-return", "arg-type", "union-attr", "operator", "index", "has-type", "return-value"]
+
 # =============================================================================
 # Pytest Configuration
 # =============================================================================

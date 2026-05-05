@@ -383,7 +383,7 @@ class Database:
             return cursor
 
     def fetch_one(
-        self, query: str, params: tuple = (), commit: bool = False
+        self, query: str, params: Union[tuple, list] = (), commit: bool = False
     ) -> Optional[dict[str, Any]]:
         """
         Execute a query and return a single row.
@@ -419,7 +419,7 @@ class Database:
                 return row
             return dict(row)
 
-    def fetch_all(self, query: str, params: tuple = ()) -> list[dict[str, Any]]:
+    def fetch_all(self, query: str, params: Union[tuple, list] = ()) -> list[dict[str, Any]]:
         """
         Execute a query and return all rows.
 

@@ -14,7 +14,7 @@ import secrets
 import sqlite3
 from base64 import b64decode, b64encode
 from datetime import datetime, timedelta
-from typing import Any, Optional, Union
+from typing import Any, Optional, Union, cast
 
 from app.repositories.database import DB_PATH, get_database_url, is_postgresql
 
@@ -114,7 +114,7 @@ class APIKeyProxyService:
             from cryptography.fernet import Fernet
 
             f = Fernet(base64.urlsafe_b64encode(self._encryption_key))
-            return f.encrypt(api_key.encode()).decode()
+            return cast("str", f.encrypt(api_key.encode()).decode())
         except ImportError:
             raise RuntimeError(
                 "cryptography package is required for API key encryption. "
@@ -129,7 +129,7 @@ class APIKeyProxyService:
             from cryptography.fernet import Fernet
 
             f = Fernet(base64.urlsafe_b64encode(self._encryption_key))
-            return f.decrypt(encrypted_key.encode()).decode()
+            return cast("str", f.decrypt(encrypted_key.encode()).decode())
         except ImportError:
             raise RuntimeError(
                 "cryptography package is required for API key encryption. "
@@ -436,7 +436,7 @@ class APIKeyProxyService:
                 except Exception as e:
                     logger.warning("Failed to check session status for proxy token: %s", e)
 
-            return payload
+            return cast("Optional[dict[str, Any]]", payload)
         except Exception as e:
             logger.warning(f"Failed to validate proxy token: {e}")
             return None

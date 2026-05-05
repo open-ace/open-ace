@@ -15,7 +15,7 @@ import sys
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 
 def get_default_sender_name(tool: str = "qwen") -> str:
@@ -309,7 +309,7 @@ def process_jsonl_file(
     except (ValueError, IndexError):
         pass  # If path parsing fails, project_path remains None
 
-    daily = defaultdict(
+    daily: dict[str, dict[str, Any]] = defaultdict(
         lambda: {
             "prompt_tokens": 0,
             "candidates_tokens": 0,
@@ -557,6 +557,7 @@ def _process_projects_dir(
     system_account: Optional[str],
     aggregated: dict,
     all_messages: list,
+    recent: bool = False,
 ) -> int:
     """
     Process a qwen projects directory and aggregate results.
@@ -567,6 +568,7 @@ def _process_projects_dir(
         system_account: System account (username) for multi-user mode
         aggregated: Aggregated daily stats dict (modified in place)
         all_messages: List to collect messages (modified in place)
+        recent: If True, only process files modified today
 
     Returns:
         Number of files processed
@@ -595,12 +597,21 @@ def _process_projects_dir(
         if subdirs_with_jsonl:
             projects_to_scan = sorted(subdirs_with_jsonl, key=lambda x: x.name.lower())
 
+    recent_cutoff = (
+        datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+        if recent
+        else 0
+    )
+
     total_files = 0
     for proj_dir in projects_to_scan:
         jsonl_files = list(proj_dir.glob("*.jsonl"))
+        if recent:
+            jsonl_files = [f for f in jsonl_files if f.stat().st_mtime >= recent_cutoff]
         if not jsonl_files:
             continue
-        print(f"  Scanning: {proj_dir.name} ({len(jsonl_files)} files)")
+        suffix = " [recent]" if recent else ""
+        print(f"  Scanning: {proj_dir.name} ({len(jsonl_files)} files{suffix})")
         for f in jsonl_files:
             total_files += 1
             daily, messages = process_jsonl_file(f, hostname, system_account)
@@ -641,7 +652,7 @@ def update_agent_sessions_stats(messages: list) -> int:
     from shared.db import _execute, _placeholder, get_connection
 
     # Group messages by agent_session_id
-    session_stats = defaultdict(
+    session_stats: dict[str, dict[str, Any]] = defaultdict(
         lambda: {
             "message_count": 0,
             "total_tokens": 0,
@@ -871,6 +882,7 @@ def fetch_and_save(
     project_dir: Optional[Path] = None,
     hostname: Optional[str] = None,
     multi_user_mode: bool = False,
+    recent: bool = False,
 ) -> bool:
     """
     Fetch Qwen usage and save to database.
@@ -880,6 +892,7 @@ def fetch_and_save(
         project_dir: Optional specific project directory
         hostname: Optional host name to identify this machine
         multi_user_mode: If True, scan all users' qwen directories
+        recent: If True, only process files modified today
 
     Returns:
         True if successful, False otherwise
@@ -896,7 +909,7 @@ def fetch_and_save(
         hostname = config.get("host_name", "localhost")
 
     # Aggregate across all projects
-    aggregated = defaultdict(
+    aggregated: dict[str, dict[str, Any]] = defaultdict(
         lambda: {
             "prompt_tokens": 0,
             "candidates_tokens": 0,
@@ -909,7 +922,7 @@ def fetch_and_save(
     )
 
     # Collect all messages for batch insert
-    all_messages = []
+    all_messages: list[dict[str, Any]] = []
 
     # Multi-user mode: scan all users' qwen directories
     if multi_user_mode:
@@ -929,7 +942,7 @@ def fetch_and_save(
         for system_account, user_project_dir in user_projects:
             print(f"\nProcessing user: {system_account}")
             files_processed = _process_projects_dir(
-                user_project_dir, hostname, system_account, aggregated, all_messages
+                user_project_dir, hostname, system_account, aggregated, all_messages, recent
             )
             total_files += files_processed
 
@@ -942,20 +955,13 @@ def fetch_and_save(
             print("Error: Cannot find Qwen project/chats directory.")
             return False
 
-        total_files = _process_projects_dir(project_dir, hostname, None, aggregated, all_messages)
+        total_files = _process_projects_dir(
+            project_dir, hostname, None, aggregated, all_messages, recent
+        )
 
     print(f"\nProcessed {total_files} files, {len(all_messages)} messages")
 
-    # Batch insert messages
-    if all_messages:
-        print("Saving messages to database...")
-        saved_count = db.save_messages_batch(all_messages, batch_size=500)
-        print(f"Saved {saved_count} messages")
-
-        # Update agent_sessions stats from collected messages
-        print("Updating agent_sessions statistics...")
-        update_agent_sessions_stats(all_messages)
-
+    # Save daily_usage FIRST (most critical, lightweight)
     # Filter by date range
     today = datetime.now().strftime("%Y-%m-%d")
     start_date = (datetime.now() - timedelta(days=days - 1)).strftime("%Y-%m-%d")
@@ -980,6 +986,20 @@ def fetch_and_save(
             print(f"  {date}: {total:,} tokens, {stats['request_count']} requests")
 
     print(f"\nSaved {saved} days of Qwen usage data")
+
+    # Save messages (idempotent UPSERT)
+    if all_messages:
+        print("Saving messages to database...")
+        saved_count = db.save_messages_batch(all_messages, batch_size=500)
+        print(f"Saved {saved_count} messages")
+
+        # Update agent_sessions stats (non-critical)
+        try:
+            print("Updating agent_sessions statistics...")
+            update_agent_sessions_stats(all_messages)
+        except Exception as e:
+            print(f"Warning: Failed to update agent session stats: {e}")
+
     return True
 
 
@@ -996,6 +1016,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--config",
         help="Path to config.json file (useful when running as root via sudo)",
+    )
+    parser.add_argument(
+        "--recent",
+        action="store_true",
+        help="Only process files modified today (for scheduler use)",
     )
     args = parser.parse_args()
 
@@ -1019,5 +1044,6 @@ if __name__ == "__main__":
         project_dir=Path(args.project) if args.project else None,
         hostname=args.hostname,
         multi_user_mode=args.multi_user,
+        recent=args.recent,
     )
     sys.exit(0 if success else 1)

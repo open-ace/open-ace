@@ -11,7 +11,7 @@ import os
 import sqlite3
 import sys
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional, Union
+from typing import Any, Optional, Union, cast
 
 # Ensure scripts directory is in path for standalone script execution
 _script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -34,7 +34,7 @@ def _get_db_url() -> str:
     global _db_url_cache
     if _db_url_cache is None:
         _db_url_cache = config.get_database_url()
-    return _db_url_cache
+    return cast(str, _db_url_cache)
 
 
 def is_postgresql() -> bool:
@@ -85,7 +85,7 @@ def _convert_sql(sql: str) -> str:
     return sql
 
 
-def _execute(cursor, sql: str, params: tuple = ()) -> None:
+def _execute(cursor, sql: str, params: Union[tuple, list] = ()) -> None:
     """Execute SQL with automatic placeholder conversion for PostgreSQL."""
     cursor.execute(_convert_sql(sql), params)
 
@@ -144,7 +144,7 @@ def _table_exists(cursor, table_name: str) -> bool:
             "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = %s) as exists",
             (table_name,),
         )
-        return cursor.fetchone()["exists"]
+        return cast(bool, cursor.fetchone()["exists"])
     else:
         _execute(
             cursor, "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,)
@@ -160,7 +160,7 @@ def _index_exists(cursor, table_name: str, index_name: str) -> bool:
             "SELECT EXISTS (SELECT FROM pg_indexes WHERE tablename = %s AND indexname = %s) as exists",
             (table_name, index_name),
         )
-        return cursor.fetchone()["exists"]
+        return cast(bool, cursor.fetchone()["exists"])
     else:
         _execute(
             cursor,
@@ -181,8 +181,8 @@ def _column_exists(cursor, table_name: str, column_name: str) -> bool:
         result = cursor.fetchone()
         # Handle both dict-like (RealDictRow) and tuple results
         if isinstance(result, dict):
-            return result["exists"]
-        return result[0]
+            return cast(bool, result["exists"])
+        return cast(bool, result[0])
     else:
         _execute(cursor, f"PRAGMA table_info({table_name})")
         columns = [col[1] for col in cursor.fetchall()]
@@ -532,10 +532,10 @@ def get_usage_by_tool(
     start_date = datetime.now()
     if isinstance(days, int):
         start_date = datetime.now() - timedelta(days=days - 1)
-    start_date = start_date.strftime("%Y-%m-%d")
+    start_date_str = start_date.strftime("%Y-%m-%d")
 
     conditions = ["tool_name = ?", "date >= ?", "date <= ?"]
-    params = [tool_name, start_date, end_date]
+    params = [tool_name, start_date_str, end_date]
 
     if host_name:
         conditions.append("host_name = ?")
@@ -904,11 +904,11 @@ def save_messages_batch(messages: list[dict], batch_size: int = 1000) -> int:
         # Get unique (date, tool_name, host_name) combinations
         keys = set()
         for msg in messages:
-            key = (msg.get("date"), msg.get("tool_name"), msg.get("host_name", "localhost"))
-            keys.add(key)
+            lookup_key = (msg.get("date"), msg.get("tool_name"), msg.get("host_name", "localhost"))
+            keys.add(lookup_key)
 
         # Query existing messages in one go
-        existing_map = {}
+        existing_map: dict[tuple[Any, ...], dict[str, Any]] = {}
         for date, tool_name, host_name in keys:
             if is_postgresql():
                 _execute(
@@ -1423,7 +1423,7 @@ def init_auth_database() -> None:
 def create_user(
     username: str,
     password_hash: str,
-    email: str = None,
+    email: Optional[str] = None,
     role: str = "user",
     daily_token_quota: int = 1000000,
     daily_request_quota: int = 1000,
@@ -1452,14 +1452,14 @@ def create_user(
 def create_user_with_is_active(
     username: str,
     password_hash: str,
-    email: str = None,
+    email: Optional[str] = None,
     role: str = "user",
     daily_token_quota: int = 1000000,
     daily_request_quota: int = 1000,
     is_active: bool = True,
-    system_account: str = None,
+    system_account: Optional[str] = None,
     must_change_password: bool = False,
-    tenant_id: int = None,
+    tenant_id: Optional[int] = None,
 ) -> bool:
     """Create a new user with is_active and must_change_password flags."""
     conn = get_connection()
@@ -1473,8 +1473,8 @@ def create_user_with_is_active(
         must_change_val = must_change_password
     else:
         # SQLite: use integer values
-        is_active_val = 1 if is_active else 0
-        must_change_val = 1 if must_change_password else 0
+        is_active_val = 1 if is_active else 0  # type: ignore[assignment]
+        must_change_val = 1 if must_change_password else 0  # type: ignore[assignment]
 
     try:
         _execute(
@@ -1547,7 +1547,7 @@ def is_default_admin_password() -> bool:
     # Calculate the default password hash
     default_password_hash = hashlib.sha256(b"admin123").hexdigest()
 
-    return admin_user["password_hash"] == default_password_hash
+    return cast(bool, admin_user["password_hash"] == default_password_hash)
 
 
 def get_all_users() -> list[dict]:
@@ -1782,7 +1782,11 @@ def delete_user(user_id: int) -> bool:
 
 
 def save_quota_usage(
-    user_id: int, date: str, tool_name: str = None, tokens_used: int = 0, requests_used: int = 0
+    user_id: int,
+    date: str,
+    tool_name: Optional[str] = None,
+    tokens_used: int = 0,
+    requests_used: int = 0,
 ) -> bool:
     """Save quota usage for a user."""
     conn = get_connection()
@@ -1801,7 +1805,9 @@ def save_quota_usage(
     return True
 
 
-def aggregate_quota_usage_from_messages(start_date: str = None, end_date: str = None) -> int:
+def aggregate_quota_usage_from_messages(
+    start_date: Optional[str] = None, end_date: Optional[str] = None
+) -> int:
     """Aggregate quota usage from daily_messages table.
 
     This function aggregates token and request usage from daily_messages
@@ -3807,7 +3813,7 @@ def get_conversation_details(session_id: str) -> dict:
     conn = get_connection()
     cursor = conn.cursor()
 
-    rows = []
+    rows: list[tuple[Any, ...]] = []
 
     # Try to find messages by agent_session_id first
     _execute(

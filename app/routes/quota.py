@@ -366,13 +366,13 @@ def get_my_usage():
             },
             "limits": {
                 "daily_token": (
-                    user.get("daily_token_quota") * TOKEN_QUOTA_MULTIPLIER
-                    if user.get("daily_token_quota")
+                    daily * TOKEN_QUOTA_MULTIPLIER
+                    if (daily := user.get("daily_token_quota")) is not None
                     else None
                 ),
                 "monthly_token": (
-                    user.get("monthly_token_quota") * TOKEN_QUOTA_MULTIPLIER
-                    if user.get("monthly_token_quota")
+                    monthly * TOKEN_QUOTA_MULTIPLIER
+                    if (monthly := user.get("monthly_token_quota")) is not None
                     else None
                 ),
                 "daily_request": user.get("daily_request_quota"),
@@ -415,7 +415,7 @@ def webui_quota_check():
     manager = get_webui_manager()
     valid, user_id, error = manager.validate_token(webui_token)
 
-    if not valid:
+    if not valid or user_id is None:
         return jsonify({"error": f"Invalid token: {error}"}), 401
 
     try:

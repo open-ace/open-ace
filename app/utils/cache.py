@@ -5,6 +5,8 @@ Provides caching capabilities for improved performance.
 Supports both in-memory and Redis caching.
 """
 
+from __future__ import annotations
+
 import hashlib
 import logging
 import os
@@ -13,7 +15,7 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, Callable, TypeVar, cast
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +27,7 @@ class CacheEntry:
     """Cache entry with metadata."""
 
     value: Any
-    expires_at: Optional[float] = None
+    expires_at: float | None = None
     created_at: float = 0.0
     hits: int = 0
 
@@ -40,12 +42,12 @@ class CacheBackend(ABC):
     """Abstract cache backend."""
 
     @abstractmethod
-    def get(self, key: str) -> Optional[CacheEntry]:
+    def get(self, key: str) -> CacheEntry | None:
         """Get cache entry by key."""
         pass
 
     @abstractmethod
-    def set(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
+    def set(self, key: str, value: Any, ttl: int | None = None) -> bool:
         """Set cache entry."""
         pass
 
@@ -83,7 +85,7 @@ class MemoryCache(CacheBackend):
         self._hits = 0
         self._misses = 0
 
-    def get(self, key: str) -> Optional[CacheEntry]:
+    def get(self, key: str) -> CacheEntry | None:
         """Get cache entry by key."""
         with self._lock:
             entry = self._cache.get(key)
@@ -101,7 +103,7 @@ class MemoryCache(CacheBackend):
             self._hits += 1
             return entry
 
-    def set(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
+    def set(self, key: str, value: Any, ttl: int | None = None) -> bool:
         """Set cache entry."""
         with self._lock:
             # Evict if at capacity
@@ -188,7 +190,7 @@ class RedisCache(CacheBackend):
         host: str = "localhost",
         port: int = 6379,
         db: int = 0,
-        password: Optional[str] = None,
+        password: str | None = None,
         prefix: str = "openace:",
         default_ttl: int = 300,
     ):
@@ -233,7 +235,7 @@ class RedisCache(CacheBackend):
         """Create prefixed key."""
         return f"{self.prefix}{key}"
 
-    def get(self, key: str) -> Optional[CacheEntry]:
+    def get(self, key: str) -> CacheEntry | None:
         """Get cache entry by key."""
         try:
             client = self._get_client()
@@ -243,13 +245,13 @@ class RedisCache(CacheBackend):
                 return None
 
             entry = pickle.loads(data)
-            return entry
+            return cast("CacheEntry | None", entry)
 
         except Exception as e:
             logger.error(f"Redis get error: {e}")
             return None
 
-    def set(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
+    def set(self, key: str, value: Any, ttl: int | None = None) -> bool:
         """Set cache entry."""
         try:
             client = self._get_client()
@@ -312,8 +314,10 @@ class CacheManager:
     Provides a unified interface for caching with automatic backend selection.
     """
 
-    _instance = None
+    _instance: CacheManager | None = None
     _lock = threading.Lock()
+    _initialized: bool
+    _backend: MemoryCache | RedisCache
 
     def __new__(cls, *args, **kwargs):
         """Singleton pattern."""
@@ -323,7 +327,7 @@ class CacheManager:
                     cls._instance = super().__new__(cls)
         return cls._instance
 
-    def __init__(self, backend: Optional[str] = None, **kwargs):
+    def __init__(self, backend: str | None = None, **kwargs):
         """
         Initialize cache manager.
 
@@ -338,7 +342,7 @@ class CacheManager:
 
         if backend == "redis":
             try:
-                self._backend = RedisCache(
+                self._backend: MemoryCache | RedisCache = RedisCache(
                     host=kwargs.get("host", os.environ.get("REDIS_HOST", "localhost")),
                     port=kwargs.get("port", int(os.environ.get("REDIS_PORT", 6379))),
                     db=kwargs.get("db", 0),
@@ -355,7 +359,7 @@ class CacheManager:
                     default_ttl=kwargs.get("default_ttl", 300),
                 )
         else:
-            self._backend = MemoryCache(
+            self._backend: MemoryCache | RedisCache = MemoryCache(
                 max_size=kwargs.get("max_size", 1000),
                 default_ttl=kwargs.get("default_ttl", 300),
             )
@@ -363,12 +367,12 @@ class CacheManager:
 
         self._initialized = True
 
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Any | None:
         """Get value from cache."""
         entry = self._backend.get(key)
         return entry.value if entry else None
 
-    def set(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
+    def set(self, key: str, value: Any, ttl: int | None = None) -> bool:
         """Set value in cache."""
         return self._backend.set(key, value, ttl)
 
@@ -413,7 +417,7 @@ class CacheManager:
         return key_string
 
 
-def cached(ttl: int = 300, key_prefix: str = "", skip_args: Optional[list] = None):
+def cached(ttl: int = 300, key_prefix: str = "", skip_args: list | None = None):
     """
     Decorator for caching function results.
 
@@ -441,7 +445,7 @@ def cached(ttl: int = 300, key_prefix: str = "", skip_args: Optional[list] = Non
             # Try to get from cache
             cached_value = cache.get(key)
             if cached_value is not None:
-                return cached_value
+                return cast("T", cached_value)
 
             # Compute and cache
             result = func(*args, **kwargs)
@@ -450,8 +454,8 @@ def cached(ttl: int = 300, key_prefix: str = "", skip_args: Optional[list] = Non
             return result
 
         # Add cache control methods
-        wrapper.cache_clear = lambda: cache.clear()
-        wrapper.cache_stats = lambda: cache.stats()
+        wrapper.cache_clear = lambda: cache.clear()  # type: ignore[attr-defined]
+        wrapper.cache_stats = lambda: cache.stats()  # type: ignore[attr-defined]
 
         return wrapper
 
@@ -459,7 +463,7 @@ def cached(ttl: int = 300, key_prefix: str = "", skip_args: Optional[list] = Non
 
 
 # Global cache instance
-_cache: Optional[CacheManager] = None
+_cache: CacheManager | None = None
 
 
 def get_cache() -> CacheManager:

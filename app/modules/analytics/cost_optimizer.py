@@ -232,8 +232,8 @@ class CostOptimizer:
 
         # Note: user_id and timestamp columns don't exist in daily_usage table
         # So by_user and by_hour will be empty lists
-        by_user = []
-        by_hour = []
+        by_user: list[dict[str, Any]] = []
+        by_hour: list[dict[str, Any]] = []
 
         return {
             "overall": overall,

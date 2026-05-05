@@ -105,8 +105,8 @@ def cmd_top(tool: Optional[str] = None, days: int = 7, host: Optional[str] = Non
         return
 
     # Aggregate by tool
-    tool_totals = defaultdict(int)
-    tool_requests = defaultdict(int)
+    tool_totals: dict[str, int] = defaultdict(int)
+    tool_requests: dict[str, int] = defaultdict(int)
     for entry in entries:
         tool_totals[entry["tool_name"]] += entry["tokens_used"]
         tool_requests[entry["tool_name"]] += entry.get("request_count", 0)

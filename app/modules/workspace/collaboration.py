@@ -592,7 +592,7 @@ class CollaborationManager:
         rows = cursor.fetchall()
         conn.close()
 
-        return [self.get_team(row["team_id"]) for row in rows]
+        return [t for row in rows if (t := self.get_team(row["team_id"])) is not None]
 
     # ==================== Session Sharing ====================
 

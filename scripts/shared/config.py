@@ -11,6 +11,7 @@ environment variables to override defaults.
 
 import json
 import os
+from typing import cast
 
 # Configuration directory path
 # This is the main configuration that should be set during installation
@@ -34,7 +35,7 @@ def _load_user_config() -> dict:
     if os.path.exists(CONFIG_PATH):
         try:
             with open(CONFIG_PATH) as f:
-                return json.load(f)
+                return cast(dict, json.load(f))
         except (OSError, json.JSONDecodeError):
             pass
     return {}
@@ -63,7 +64,7 @@ def _get_web_host() -> str:
     server_config = user_config.get("server", {})
     config_host = server_config.get("web_host")
     if config_host:
-        return config_host
+        return cast(str, config_host)
 
     # Priority 2: Default
     return "0.0.0.0"
@@ -91,7 +92,7 @@ def load_remote_config() -> dict:
     if os.path.exists(remote_config_path):
         try:
             with open(remote_config_path) as f:
-                return json.load(f)
+                return cast(dict, json.load(f))
         except (OSError, json.JSONDecodeError):
             pass
     return {}
@@ -101,7 +102,7 @@ def get_remote_users() -> list:
     """Get list of configured remote users."""
     config = load_remote_config()
     if "remote_users" in config:
-        return config["remote_users"]
+        return cast(list, config["remote_users"])
     return [REMOTE_USER]
 
 
@@ -123,7 +124,7 @@ def get_database_config() -> dict:
 
     # Merge with user config
     default_config.update(db_config)
-    return default_config
+    return cast(dict, default_config)
 
 
 def get_database_url() -> str:
@@ -172,7 +173,7 @@ def get_data_fetch_config() -> dict:
 
     # Merge with user config
     default_config.update(fetch_config)
-    return default_config
+    return cast(dict, default_config)
 
 
 def get_data_fetch_interval() -> int:
@@ -192,7 +193,7 @@ def get_data_fetch_interval() -> int:
 
     # Priority 2: Config file
     fetch_config = get_data_fetch_config()
-    return fetch_config.get("interval", 300)
+    return cast(int, fetch_config.get("interval", 300))
 
 
 def is_data_fetch_enabled() -> bool:
@@ -209,7 +210,7 @@ def is_data_fetch_enabled() -> bool:
 
     # Priority 2: Config file
     fetch_config = get_data_fetch_config()
-    return fetch_config.get("enabled", True)
+    return cast(bool, fetch_config.get("enabled", True))
 
 
 def get_quota_enforcement_config() -> dict:

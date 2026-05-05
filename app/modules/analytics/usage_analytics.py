@@ -273,7 +273,7 @@ class UsageAnalytics:
         peak_day = None
         peak_tokens = 0
         if daily_totals:
-            peak_day = max(daily_totals, key=daily_totals.get)
+            peak_day = max(daily_totals, key=lambda k: daily_totals.get(k, 0))
             peak_tokens = daily_totals[peak_day]
 
         return {
@@ -367,7 +367,7 @@ class UsageAnalytics:
 
     def _detect_anomalies(self, start_date: str, end_date: str) -> list[Anomaly]:
         """Detect usage anomalies."""
-        anomalies = []
+        anomalies: list[Anomaly] = []
 
         # Get daily data
         daily_data = self._get_daily_totals(start_date, end_date)
@@ -394,7 +394,7 @@ class UsageAnalytics:
                         Anomaly(
                             type="spike",
                             metric="tokens",
-                            date=date,
+                            date=str(date or ""),
                             expected_value=mean_tokens,
                             actual_value=value,
                             deviation_percentage=(
@@ -413,7 +413,7 @@ class UsageAnalytics:
                         Anomaly(
                             type="drop",
                             metric="tokens",
-                            date=date,
+                            date=str(date or ""),
                             expected_value=mean_tokens,
                             actual_value=value,
                             deviation_percentage=(

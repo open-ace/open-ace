@@ -10,7 +10,7 @@ import json
 import logging
 import os
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from app.repositories.database import CONFIG_DIR, Database
 
@@ -141,7 +141,7 @@ class GovernanceRepository:
                         datetime.utcnow().isoformat(),
                     ),
                 )
-                return cursor.lastrowid
+                return cast("Optional[int]", cursor.lastrowid)
         except Exception as e:
             logger.error(f"Error creating filter rule: {e}")
             return None
@@ -172,7 +172,7 @@ class GovernanceRepository:
             bool: True if successful.
         """
         updates = []
-        params = []
+        params: list[Any] = []
 
         if pattern is not None:
             updates.append("pattern = ?")
@@ -205,8 +205,8 @@ class GovernanceRepository:
         query = f"UPDATE content_filter_rules SET {', '.join(updates)} WHERE id = ?"
 
         try:
-            cursor = self.db.execute(query, params)
-            return cursor.rowcount > 0
+            cursor = self.db.execute(query, tuple(params))
+            return cast("bool", cursor.rowcount > 0)
         except Exception as e:
             logger.error(f"Error updating filter rule: {e}")
             return False
@@ -225,7 +225,7 @@ class GovernanceRepository:
 
         try:
             cursor = self.db.execute(query, (rule_id,))
-            return cursor.rowcount > 0
+            return cast("bool", cursor.rowcount > 0)
         except Exception as e:
             logger.error(f"Error deleting filter rule: {e}")
             return False

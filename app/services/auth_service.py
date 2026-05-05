@@ -8,7 +8,7 @@ import logging
 import secrets
 import time
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, cast
 
 from app.repositories.user_repo import UserRepository
 
@@ -36,7 +36,7 @@ def _get_security_settings() -> dict:
     now = time.time()
     cached = _security_settings_cache.get("timestamp", 0)
     if _security_settings_cache and (now - cached) < _SECURITY_SETTINGS_TTL:
-        return _security_settings_cache["settings"]
+        return cast("dict", _security_settings_cache["settings"])
 
     try:
         from app.repositories.governance_repo import GovernanceRepository
@@ -379,7 +379,9 @@ class AuthService:
             bool: True if admin.
         """
         session = self.get_session(token)
-        return session and session.get("role") == "admin"
+        if session is None:
+            return False
+        return session.get("role") == "admin"
 
     def require_auth(self, token: str) -> tuple[bool, Optional[dict]]:
         """
@@ -409,7 +411,7 @@ class AuthService:
         if not is_auth:
             return False, session
 
-        if session.get("role") != "admin":
+        if session is None or session.get("role") != "admin":
             return False, {"error": "Admin access required"}
 
         return True, session

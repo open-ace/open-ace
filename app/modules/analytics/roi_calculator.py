@@ -173,7 +173,7 @@ class ROICalculator:
         end_date: str,
         user_id: Optional[int] = None,
         tool_name: Optional[str] = None,
-    ) -> ROIMetrics:
+    ) -> Optional[ROIMetrics]:
         """
         Calculate ROI for a period.
 
@@ -184,7 +184,7 @@ class ROICalculator:
             tool_name: Optional tool name filter.
 
         Returns:
-            ROIMetrics: ROI metrics.
+            Optional[ROIMetrics]: ROI metrics, or None if no data found.
         """
         # Build query
         query = """
@@ -196,7 +196,7 @@ class ROICalculator:
             FROM daily_usage
             WHERE date >= ? AND date <= ?
         """
-        params = [start_date, end_date]
+        params: list[Any] = [start_date, end_date]
 
         if user_id:
             query += " AND user_id = ?"
@@ -208,6 +208,9 @@ class ROICalculator:
 
         row = self.db.fetch_one(query, params)
 
+        if row is None:
+            return None
+
         # Get model breakdown for cost calculation
         model_query = """
             SELECT tool_name, models_used as model,
@@ -216,7 +219,7 @@ class ROICalculator:
             FROM daily_usage
             WHERE date >= ? AND date <= ?
         """
-        model_params = [start_date, end_date]
+        model_params: list[Any] = [start_date, end_date]
 
         if user_id:
             model_query += " AND user_id = ?"
@@ -325,7 +328,7 @@ class ROICalculator:
             FROM daily_usage
             WHERE date >= %s
         """
-        params = [start_date]
+        params: list[Any] = [start_date]
 
         if user_id:
             query += " AND user_id = %s"
@@ -345,7 +348,7 @@ class ROICalculator:
             FROM daily_usage
             WHERE date >= %s
         """
-        model_params = [start_date]
+        model_params: list[Any] = [start_date]
 
         if user_id:
             model_query += " AND user_id = %s"
@@ -671,7 +674,7 @@ class ROICalculator:
             FROM daily_usage
             WHERE date >= ? AND date <= ?
         """
-        params = [start_date, end_date]
+        params: list[Any] = [start_date, end_date]
 
         if user_id:
             query += " AND user_id = ?"
@@ -728,7 +731,7 @@ class ROICalculator:
             FROM daily_usage
             WHERE date >= ? AND date <= ?
         """
-        params = [start_date, end_date]
+        params: list[Any] = [start_date, end_date]
 
         if user_id:
             query += " AND user_id = ?"
