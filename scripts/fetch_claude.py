@@ -228,6 +228,8 @@ def process_jsonl_file(
         }
     )
     messages: list[dict[str, Any]] = []
+    # Track seen message_ids per date to deduplicate request_count
+    seen_msg_ids: dict[str, set[str]] = defaultdict(set)
 
     # First pass: build message tree for conversation_id tracking
     # Key: message uuid, Value: (entry, parent_uuid)
@@ -392,7 +394,15 @@ def process_jsonl_file(
                 ):
                     # Still count requests even if tokens are 0 (e.g., cache hits)
                     if tokens["is_assistant_message"]:
-                        daily[date_key]["request_count"] += 1
+                        msg = entry.get("message", {})
+                        mid = (
+                            (msg.get("id") if isinstance(msg, dict) else None)
+                            or entry.get("id")
+                            or entry.get("uuid")
+                        )
+                        if mid and mid not in seen_msg_ids[date_key]:
+                            seen_msg_ids[date_key].add(mid)
+                            daily[date_key]["request_count"] += 1
                     continue
 
                 daily[date_key]["input_tokens"] += tokens["input_tokens"]
@@ -401,7 +411,15 @@ def process_jsonl_file(
                 daily[date_key]["cache_creation_tokens"] += tokens["cache_creation_tokens"]
 
                 if tokens["is_assistant_message"]:
-                    daily[date_key]["request_count"] += 1
+                    msg = entry.get("message", {})
+                    mid = (
+                        (msg.get("id") if isinstance(msg, dict) else None)
+                        or entry.get("id")
+                        or entry.get("uuid")
+                    )
+                    if mid and mid not in seen_msg_ids[date_key]:
+                        seen_msg_ids[date_key].add(mid)
+                        daily[date_key]["request_count"] += 1
 
                 if tokens["model"]:
                     daily[date_key]["models_used"].add(tokens["model"])
