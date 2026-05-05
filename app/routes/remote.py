@@ -1022,7 +1022,7 @@ def llm_proxy(path=""):
             data=body,
             stream=True,
             timeout=120,
-            proxies={"http": None, "https": None},
+            proxies={"http": None, "https": None},  # type: ignore[dict-item]
         )
 
         # Handle streaming response

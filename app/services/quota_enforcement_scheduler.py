@@ -5,10 +5,11 @@ Background scheduler that periodically checks all users' quotas
 and enforces limits (terminates sessions, generates alerts).
 """
 
+from __future__ import annotations
+
 import logging
 import threading
 from datetime import datetime
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -16,8 +17,9 @@ logger = logging.getLogger(__name__)
 class QuotaEnforcementScheduler:
     """Background scheduler for proactive quota enforcement."""
 
-    _instance = None
+    _instance: QuotaEnforcementScheduler | None = None
     _lock = threading.Lock()
+    _initialized: bool
 
     def __new__(cls):
         if cls._instance is None:
@@ -42,7 +44,7 @@ class QuotaEnforcementScheduler:
         self._enforced_users = set()
         logger.info("QuotaEnforcementScheduler initialized")
 
-    def configure(self, interval: Optional[int] = None, enabled: Optional[bool] = None):
+    def configure(self, interval: int | None = None, enabled: bool | None = None):
         if interval is not None:
             self._interval = max(30, interval)
             logger.info(f"Quota enforcement interval set to {self._interval} seconds")
@@ -241,7 +243,7 @@ def init_quota_enforcement():
         sys.path.insert(0, scripts_path)
 
     try:
-        from config import get_quota_enforcement_config
+        from config import get_quota_enforcement_config  # type: ignore[attr-defined]
 
         config = get_quota_enforcement_config()
         enforcement_scheduler.configure(

@@ -12,7 +12,7 @@ This service should be called:
 
 import logging
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, cast
 
 from app.repositories.database import Database, is_postgresql
 from app.repositories.user_repo import UserRepository
@@ -149,7 +149,7 @@ class UserDailyStatsAggregator:
                 logger.debug(
                     f"Aggregated {records_updated} records for user {username} (sender_prefix: {sender_prefix})"
                 )
-                return records_updated
+                return cast("int", records_updated)
 
         except Exception as e:
             logger.error(f"Failed to aggregate user {username}: {e}")
@@ -199,7 +199,7 @@ class UserDailyStatsAggregator:
                 conn.commit()
 
                 logger.info(f"Cleaned up {deleted} old user_daily_stats records")
-                return deleted
+                return cast("int", deleted)
 
         except Exception as e:
             logger.error(f"Failed to cleanup old data: {e}")

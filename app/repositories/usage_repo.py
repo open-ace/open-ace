@@ -8,7 +8,7 @@ import json
 import logging
 from datetime import datetime, timedelta
 from functools import lru_cache
-from typing import Optional
+from typing import Optional, cast
 
 from app.repositories.database import Database
 
@@ -30,7 +30,7 @@ def _parse_json_cached(json_str: Optional[str]) -> Optional[list[str]]:
     if json_str is None:
         return None
     try:
-        return json.loads(json_str)
+        return cast("list[str]", json.loads(json_str))
     except (json.JSONDecodeError, TypeError):
         return None
 

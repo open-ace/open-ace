@@ -457,8 +457,8 @@ class SessionManager:
                 json.dumps(session.settings),
                 session.model,
                 session.expires_at.isoformat() if session.expires_at else None,
-                session.created_at.isoformat(),
-                session.updated_at.isoformat(),
+                session.created_at.isoformat() if session.created_at else None,
+                session.updated_at.isoformat() if session.updated_at else None,
             ),
         )
 
@@ -550,7 +550,7 @@ class SessionManager:
                 session.request_count,
                 session.model,
                 json.dumps(session.tags),
-                session.updated_at.isoformat(),
+                session.updated_at.isoformat() if session.updated_at else None,
                 session.completed_at.isoformat() if session.completed_at else None,
                 session.workspace_type,
                 session.remote_machine_id,
@@ -583,7 +583,7 @@ class SessionManager:
         cursor = conn.cursor()
 
         query = f"SELECT * FROM session_messages WHERE session_id = {_param()}"
-        params = [session_id]
+        params: list[Any] = [session_id]
 
         if before_id:
             query += f" AND id < {_param()}"
@@ -658,7 +658,7 @@ class SessionManager:
                 message.content,
                 message.tokens_used,
                 message.model,
-                message.timestamp.isoformat(),
+                message.timestamp.isoformat() if message.timestamp else None,
                 json.dumps(message.metadata),
             ),
         )
@@ -870,7 +870,7 @@ class SessionManager:
         cursor = conn.cursor()
 
         conditions = []
-        params = []
+        params: list[Any] = []
 
         if user_id is not None:
             conditions.append(f"user_id = {_param()}")

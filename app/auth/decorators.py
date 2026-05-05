@@ -16,13 +16,17 @@ from __future__ import annotations
 
 import logging
 from functools import wraps
+from typing import TYPE_CHECKING, cast
 
 from flask import g, jsonify, request
 
 logger = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from app.services.auth_service import AuthService
 
-def _get_auth_service():
+
+def _get_auth_service() -> AuthService:
     """Lazy import to avoid circular imports."""
     from app.services.auth_service import AuthService
 
@@ -33,25 +37,26 @@ def _extract_token() -> str:
     """Extract auth token from request (cookie → header → query param)."""
     token = request.cookies.get("session_token")
     if token:
-        return token
+        return cast("str", token)
 
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
-        return auth_header[7:]
+        return cast("str", auth_header[7:])
 
-    return request.args.get("token", "")
+    return cast("str", request.args.get("token", ""))
 
 
 def _authenticate(token: str) -> tuple[bool, dict | None]:
     """Validate token and return (success, user_dict_or_error)."""
     auth_service = _get_auth_service()
-    return auth_service.validate_session(token)
+    result: tuple[bool, dict | None] = auth_service.validate_session(token)
+    return result
 
 
 def _load_user_from_token(token: str) -> dict | None:
     """Validate token and set g.user. Returns user dict or None."""
     valid, result = _authenticate(token)
-    if not valid:
+    if not valid or result is None:
         return None
     return {
         "id": result.get("user_id"),
@@ -82,7 +87,7 @@ def _check_machine_admin(user_id: int, machine_id: str) -> bool:
 
         mgr = get_remote_agent_manager()
         perm = mgr.get_user_permission(machine_id, user_id)
-        return perm == "admin"
+        return cast("bool", perm == "admin")
     except Exception:
         return False
 
@@ -178,12 +183,12 @@ def public_endpoint(f):
     Used by the API security scanner to identify intentionally unauthenticated
     routes, replacing the hardcoded PUBLIC_ENDPOINTS list.
     """
-    f._is_public_endpoint = True
+    f._is_public_endpoint = True  # type: ignore[attr-defined]
 
     @wraps(f)
     def wrapper(*args, **kwargs):
         return f(*args, **kwargs)
 
     # Copy the marker to the wrapper so scanner can find it
-    wrapper._is_public_endpoint = True
+    wrapper._is_public_endpoint = True  # type: ignore[attr-defined]
     return wrapper

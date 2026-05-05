@@ -212,7 +212,7 @@ class AuditAnalyzer:
         anomalies = []
 
         # Group by user and hour
-        user_hourly_activity: defaultdict[int, defaultdict[int]] = defaultdict(
+        user_hourly_activity: defaultdict[int, defaultdict[str, int]] = defaultdict(
             lambda: defaultdict(int)
         )
         for log in logs:
@@ -231,8 +231,9 @@ class AuditAnalyzer:
                             description=f"User {user_id} had {count} actions in one hour",
                             affected_users=[user_id],
                             occurrences=count,
-                            first_seen=datetime.strptime(hour, "%Y-%m-%d %H"),
-                            last_seen=datetime.strptime(hour, "%Y-%m-%d %H") + timedelta(hours=1),
+                            first_seen=datetime.strptime(str(hour), "%Y-%m-%d %H"),
+                            last_seen=datetime.strptime(str(hour), "%Y-%m-%d %H")
+                            + timedelta(hours=1),
                             details={
                                 "hour": hour,
                                 "action_count": count,

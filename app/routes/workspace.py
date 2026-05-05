@@ -565,8 +565,8 @@ def create_session():
                 if project:
                     project_id = project.id
                     # Auto-add user to project if not already
-                    if user_id:
-                        project_repo.add_user_project(user_id, project_id)
+                    if user_id and project_id:
+                        project_repo.add_user_project(int(user_id), int(project_id))
             except Exception as e:
                 logger.warning(f"Failed to look up project by path: {e}")
 
@@ -1513,7 +1513,7 @@ def get_user_webui_url():
         system_account = user.get("system_account") or user.get("username")
 
         # Get or create user's webui instance
-        url, token = manager.get_user_webui_url(user_id, system_account)
+        url, token = manager.get_user_webui_url(int(user_id), str(system_account))
 
         # Update activity timestamp
         manager.update_user_activity(user_id)

@@ -7,7 +7,7 @@ API routes for admin operations.
 import logging
 import os
 import subprocess
-from typing import Optional
+from typing import Optional, cast
 
 import bcrypt
 from flask import Blueprint, g, jsonify, request
@@ -26,7 +26,7 @@ usage_repo = UsageRepository()
 
 def hash_password(password: str) -> str:
     """Hash a password using bcrypt."""
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
+    return cast("str", bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode())
 
 
 def get_workspace_base_dir() -> str:
@@ -121,9 +121,9 @@ def api_get_users():
 def api_create_user():
     """Create a new user."""
     data = request.get_json() or {}
-    username = data.get("username")
-    email = data.get("email")
-    password = data.get("password")
+    username: str = data.get("username", "")
+    email: str = data.get("email", "")
+    password: str = data.get("password", "")
     role = data.get("role", "user")
 
     # Validate inputs
@@ -150,7 +150,7 @@ def api_create_user():
     if system_account and not validate_username(system_account):
         return jsonify({"error": "Invalid system_account name"}), 400
     user_id = user_repo.create_user(
-        username, email, password_hash, role, system_account=system_account
+        username, email, password_hash, str(role), system_account=system_account
     )
 
     if user_id:
@@ -218,7 +218,7 @@ def api_delete_user(user_id):
 def api_update_user_password(user_id):
     """Update a user's password."""
     data = request.get_json() or {}
-    password = data.get("password")
+    password: str = data.get("password", "")
 
     is_valid, error_msg = validate_password(password)
     if not is_valid:

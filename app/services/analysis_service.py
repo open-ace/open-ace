@@ -702,7 +702,7 @@ class AnalysisService:
             tool_totals[tool] += u.get("tokens_used", 0)
 
         if tool_totals:
-            top_tool = max(tool_totals, key=tool_totals.get)
+            top_tool = max(tool_totals, key=lambda k: tool_totals.get(k, 0))
             top_usage = tool_totals[top_tool]
             if total_tokens > 0 and (top_usage / total_tokens) > 0.7:
                 recommendations.append(

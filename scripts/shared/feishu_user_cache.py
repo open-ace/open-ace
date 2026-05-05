@@ -9,7 +9,7 @@ Fetches user details from Feishu API when needed.
 import json
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, cast
 
 import requests
 
@@ -32,7 +32,7 @@ def load_cache() -> dict:
 
     try:
         with open(CACHE_FILE, encoding="utf-8") as f:
-            return json.load(f)
+            return cast(dict, json.load(f))
     except (OSError, json.JSONDecodeError):
         return {"users": {}, "last_updated": 0}
 
@@ -55,7 +55,7 @@ def get_feishu_token(app_id: str, app_secret: str) -> Optional[str]:
         data = response.json()
 
         if data.get("code") == 0:
-            return data.get("tenant_access_token")
+            return cast(Optional[str], data.get("tenant_access_token"))
         else:
             print(f"Failed to get Feishu token: {data}")
             return None
@@ -72,7 +72,7 @@ def get_user_info(user_id: str, app_id: str, app_secret: str) -> Optional[dict]:
     if user_id in cache["users"]:
         user_cache = cache["users"][user_id]
         if time.time() - user_cache.get("cached_at", 0) < CACHE_TTL:
-            return user_cache.get("data")
+            return cast(Optional[dict], user_cache.get("data"))
 
     # Get access token
     token = get_feishu_token(app_id, app_secret)
@@ -103,7 +103,7 @@ def get_user_info(user_id: str, app_id: str, app_secret: str) -> Optional[dict]:
             cache["users"][user_id] = {"data": user_info, "cached_at": time.time()}
             save_cache(cache)
 
-            return user_info
+            return cast(Optional[dict], user_info)
         else:
             print(f"Failed to get user info for {user_id}: {data}")
             return None
@@ -135,7 +135,7 @@ def get_user_name(user_id: str, app_id: str, app_secret: str) -> Optional[str]:
         display_name = zh_name or nickname or name or en_name
 
         if display_name:
-            return display_name
+            return cast(str, display_name)
 
     return None
 
@@ -150,7 +150,7 @@ def get_user_name_from_cache(user_id: str) -> Optional[str]:
         # Check if cache is still valid (within TTL)
         if time.time() - user_cache.get("cached_at", 0) < CACHE_TTL:
             name = user_data.get("zh_name") or user_data.get("nickname") or user_data.get("name")
-            return name
+            return cast(Optional[str], name)
 
     return None
 

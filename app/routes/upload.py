@@ -9,6 +9,7 @@ import json
 import logging
 import os
 from functools import wraps
+from typing import Any
 
 from flask import Blueprint, jsonify, request
 
@@ -172,7 +173,10 @@ def api_upload_batch():
     """Upload batch data (usage and messages)."""
     data = request.get_json() or {}
 
-    results = {"usage": {"saved": 0, "errors": []}, "messages": {"saved": 0, "errors": []}}
+    results: dict[str, Any] = {
+        "usage": {"saved": 0, "errors": []},
+        "messages": {"saved": 0, "errors": []},
+    }
 
     # Process usage data
     usage_data = data.get("usage", [])

@@ -379,7 +379,7 @@ def _create_user_from_sso(sso_user, provider_name: str) -> Optional[int]:
         user_id = user_repo.create_user(
             username=username,
             email=sso_user.email or "",
-            password="",  # No password for SSO users
+            password_hash="",  # No password for SSO users
             role="user",
         )
 

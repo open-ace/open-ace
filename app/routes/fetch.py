@@ -68,12 +68,13 @@ def run_fetch_scripts():
                         "--days",
                         "1",
                         "--multi-user",
+                        "--recent",
                         "--config",
                         config_path,
                     ],
                     capture_output=True,
                     text=True,
-                    timeout=300,  # 5 minutes timeout
+                    timeout=600,
                     cwd=project_root,
                 )
                 results["qwen"] = {
@@ -82,7 +83,7 @@ def run_fetch_scripts():
                     "error": result.stderr[-500:] if result.stderr else None,
                 }
             except subprocess.TimeoutExpired:
-                results["qwen"] = {"success": False, "error": "Timeout after 5 minutes"}
+                results["qwen"] = {"success": False, "error": "Timeout after 10 minutes"}
             except Exception as e:
                 logger.error(f"Error running qwen fetch script: {e}")
                 results["qwen"] = {"success": False, "error": "Internal server error"}
@@ -102,12 +103,13 @@ def run_fetch_scripts():
                         "--days",
                         "1",
                         "--multi-user",
+                        "--recent",
                         "--config",
                         config_path,
                     ],
                     capture_output=True,
                     text=True,
-                    timeout=300,
+                    timeout=600,
                     cwd=project_root,
                 )
                 results["claude"] = {
@@ -116,7 +118,7 @@ def run_fetch_scripts():
                     "error": result.stderr[-500:] if result.stderr else None,
                 }
             except subprocess.TimeoutExpired:
-                results["claude"] = {"success": False, "error": "Timeout after 5 minutes"}
+                results["claude"] = {"success": False, "error": "Timeout after 10 minutes"}
             except Exception as e:
                 logger.error(f"Error running claude fetch script: {e}")
                 results["claude"] = {"success": False, "error": "Internal server error"}
@@ -138,12 +140,13 @@ def run_fetch_scripts():
                         "--mode",
                         "messages",
                         "--multi-user",
+                        "--recent",
                         "--config",
                         config_path,
                     ],
                     capture_output=True,
                     text=True,
-                    timeout=300,
+                    timeout=600,
                     cwd=project_root,
                 )
                 results["openclaw"] = {
@@ -152,7 +155,7 @@ def run_fetch_scripts():
                     "error": result.stderr[-500:] if result.stderr else None,
                 }
             except subprocess.TimeoutExpired:
-                results["openclaw"] = {"success": False, "error": "Timeout after 5 minutes"}
+                results["openclaw"] = {"success": False, "error": "Timeout after 10 minutes"}
             except Exception as e:
                 logger.error(f"Error running openclaw fetch script: {e}")
                 results["openclaw"] = {"success": False, "error": "Internal server error"}

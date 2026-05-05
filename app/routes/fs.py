@@ -12,6 +12,7 @@ import os
 import platform
 import subprocess
 from pathlib import Path
+from typing import Any
 
 from flask import Blueprint, g, jsonify, request
 
@@ -43,7 +44,7 @@ def get_current_user():
     user_data = _load_user_from_token(token)
     if not user_data:
         return None, {"error": "Unauthorized"}, 401
-    user = user_repo.get_user_by_id(user_data.get("id"))
+    user = user_repo.get_user_by_id(int(user_data.get("id", 0)))
     return user, None, 200
 
 
@@ -65,7 +66,7 @@ def get_webui_user():
         return None, {"error": "WebUI manager not available"}, 500
 
     valid, user_id, error = manager.validate_token(token)
-    if not valid:
+    if not valid or user_id is None:
         return None, {"error": error}, 401
 
     user = user_repo.get_user_by_id(user_id)
@@ -268,7 +269,7 @@ def api_browse_directory():
 
 def list_subdirectories(path: str, system_account: str | None = None) -> list:
     """List subdirectories in a path, optionally as a specific user."""
-    directories: list[str] = []
+    directories: list[dict[str, Any]] = []
 
     try:
         if system_account:

@@ -8,7 +8,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from app.repositories.database import Database
 
@@ -291,7 +291,7 @@ class DataRetentionManager:
             deleted = cursor.rowcount
 
         logger.info(f"Deleted {deleted} records from {table_name}")
-        return deleted
+        return cast("int", deleted)
 
     def _archive_old_data(self, data_type: str, cutoff: datetime, dry_run: bool) -> int:
         """Archive old data (export and delete)."""
@@ -360,7 +360,7 @@ class DataRetentionManager:
             anonymized = 0
 
         logger.info(f"Anonymized {anonymized} records in {table_name}")
-        return anonymized
+        return cast("int", anonymized)
 
     def _save_report(self, report: RetentionReport) -> None:
         """Save retention report to database."""

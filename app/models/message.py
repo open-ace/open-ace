@@ -107,12 +107,12 @@ class Message:
 
         return cls(
             id=data.get("id"),
-            date=data.get("date"),
-            tool_name=data.get("tool_name"),
+            date=str(data.get("date", "")),
+            tool_name=str(data.get("tool_name", "")),
             host_name=data.get("host_name", "localhost"),
-            message_id=data.get("message_id"),
+            message_id=str(data.get("message_id", "")),
             parent_id=data.get("parent_id"),
-            role=data.get("role"),
+            role=str(data.get("role", "")),
             content=data.get("content"),
             full_entry=data.get("full_entry"),
             tokens_used=data.get("tokens_used", 0),

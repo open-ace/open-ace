@@ -11,7 +11,7 @@ import os
 import sqlite3
 import sys
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional, Union
+from typing import Any, Optional, Union, cast
 
 # Ensure scripts directory is in path for standalone script execution
 _script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -34,7 +34,7 @@ def _get_db_url() -> str:
     global _db_url_cache
     if _db_url_cache is None:
         _db_url_cache = config.get_database_url()
-    return _db_url_cache
+    return cast(str, _db_url_cache)
 
 
 def is_postgresql() -> bool:
@@ -144,7 +144,7 @@ def _table_exists(cursor, table_name: str) -> bool:
             "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = %s) as exists",
             (table_name,),
         )
-        return cursor.fetchone()["exists"]
+        return cast(bool, cursor.fetchone()["exists"])
     else:
         _execute(
             cursor, "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,)
@@ -160,7 +160,7 @@ def _index_exists(cursor, table_name: str, index_name: str) -> bool:
             "SELECT EXISTS (SELECT FROM pg_indexes WHERE tablename = %s AND indexname = %s) as exists",
             (table_name, index_name),
         )
-        return cursor.fetchone()["exists"]
+        return cast(bool, cursor.fetchone()["exists"])
     else:
         _execute(
             cursor,
@@ -181,8 +181,8 @@ def _column_exists(cursor, table_name: str, column_name: str) -> bool:
         result = cursor.fetchone()
         # Handle both dict-like (RealDictRow) and tuple results
         if isinstance(result, dict):
-            return result["exists"]
-        return result[0]
+            return cast(bool, result["exists"])
+        return cast(bool, result[0])
     else:
         _execute(cursor, f"PRAGMA table_info({table_name})")
         columns = [col[1] for col in cursor.fetchall()]
@@ -908,7 +908,7 @@ def save_messages_batch(messages: list[dict], batch_size: int = 1000) -> int:
             keys.add(lookup_key)
 
         # Query existing messages in one go
-        existing_map: dict[tuple[str, ...], dict[str, Any]] = {}
+        existing_map: dict[tuple[Any, ...], dict[str, Any]] = {}
         for date, tool_name, host_name in keys:
             if is_postgresql():
                 _execute(
@@ -1547,7 +1547,7 @@ def is_default_admin_password() -> bool:
     # Calculate the default password hash
     default_password_hash = hashlib.sha256(b"admin123").hexdigest()
 
-    return admin_user["password_hash"] == default_password_hash
+    return cast(bool, admin_user["password_hash"] == default_password_hash)
 
 
 def get_all_users() -> list[dict]:

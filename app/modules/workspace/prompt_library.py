@@ -45,7 +45,7 @@ class PromptTemplate:
     description: str = ""
     category: str = PromptCategory.GENERAL.value
     content: str = ""
-    variables: list[dict[str, str]] = field(default_factory=list)
+    variables: list[dict[str, Any]] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
     author_id: Optional[int] = None
     author_name: str = ""
@@ -272,7 +272,7 @@ class PromptLibrary:
         conn.close()
 
         logger.info(f"Created prompt template: {template.name} (ID: {template_id})")
-        return template_id
+        return int(str(template_id or 0))
 
     def get_template(self, template_id: int) -> Optional[PromptTemplate]:
         """
@@ -402,7 +402,7 @@ class PromptLibrary:
 
         # Build query conditions
         conditions = []
-        params = []
+        params: list[Any] = []
 
         if user_id is not None and include_public:
             conditions.append(f"(author_id = ? OR {adapt_boolean_condition('is_public', True)})")
