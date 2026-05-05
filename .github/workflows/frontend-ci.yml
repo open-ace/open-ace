@@ -117,6 +117,17 @@ jobs:
           cd ..
           pip install -r requirements.txt
 
+      - name: Initialize database
+        run: |
+          cd ..
+          mkdir -p ~/.open-ace
+          sqlite3 ~/.open-ace/ace.db < schema/schema-sqlite.sql
+
+      - name: Create admin user
+        run: |
+          cd ..
+          python3 scripts/init_db.py
+
       - name: Run E2E tests
         run: npm run test:e2e
         env:
