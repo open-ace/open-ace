@@ -16,6 +16,8 @@ import socket
 import subprocess
 import threading
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from threading import RLock
@@ -38,14 +40,38 @@ class WebUIInstance:
     process: Optional[subprocess.Popen] = None
     url: str = ""
 
+    _last_health_check: float = 0.0
+    _health_check_ttl: float = 30.0  # Cache health check result for 30s
+
     def is_alive(self) -> bool:
-        """Check if the process is still running."""
+        """Check if the process is still running and responsive."""
         if self.pid is None:
             return False
         try:
             os.kill(self.pid, 0)
-            return True
         except (OSError, ProcessLookupError):
+            return False
+
+        # PID exists, but verify HTTP health (cached for _health_check_ttl seconds)
+        now = time.time()
+        if now - self._last_health_check < self._health_check_ttl:
+            return True
+
+        healthy = self._check_http_health()
+        if healthy:
+            self._last_health_check = now
+        return healthy
+
+    def _check_http_health(self) -> bool:
+        """Make an HTTP request to verify the webui is actually responding."""
+        try:
+            health_url = f"http://localhost:{self.port}/api/version"
+            if self.token:
+                health_url += f"?token={self.token}"
+            req = urllib.request.Request(health_url)
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                return resp.status == 200
+        except Exception:
             return False
 
     def update_activity(self):
@@ -360,6 +386,13 @@ class WebUIManager:
                 if instance.is_alive():
                     instance.update_activity()
                     return instance.url, instance.token
+                else:
+                    # Process exists but HTTP health check failed — restart
+                    logger.warning(
+                        f"WebUI instance for user {user_id} (pid={instance.pid}, port={instance.port}) "
+                        f"is alive but not responding to HTTP requests, restarting"
+                    )
+                    self._stop_instance_internal(user_id)
 
             # Check instance limit
             active_count = sum(1 for i in self._instances.values() if i.is_alive())

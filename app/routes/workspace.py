@@ -54,6 +54,10 @@ workspace_bp = Blueprint("workspace", __name__)
 @workspace_bp.before_request
 def load_user():
     """Load the current user from session token before each request."""
+    # Skip auth for CORS preflight requests (browser-initiated, carries no business data)
+    if request.method == "OPTIONS":
+        return None
+
     token = _extract_token()
 
     if token:
