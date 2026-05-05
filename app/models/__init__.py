@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Models module for Open ACE application."""
 
 from app.models.message import DailyMessage, Message

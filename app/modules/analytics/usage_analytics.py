@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Open ACE - Usage Analytics Module
 

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Repositories module for Open ACE application."""
 
 from app.repositories.message_repo import MessageRepository

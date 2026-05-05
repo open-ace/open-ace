@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Services module for Open ACE (AI Computing Explorer) application."""
 
 from app.services.analysis_service import AnalysisService
