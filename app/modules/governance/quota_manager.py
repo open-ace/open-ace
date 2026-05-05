@@ -666,7 +666,7 @@ class QuotaManager:
                 sender_conditions.append("sender_name LIKE ?")
                 sender_params.append(f"{system_account}%")
 
-        local_usage_lookup: dict[int, int] = {}
+        local_usage_lookup: dict[Any, dict[str, int]] = {}
         if sender_conditions:
             local_usage_rows = self.db.fetch_all(
                 """
@@ -689,8 +689,8 @@ class QuotaManager:
                     uid = user.get("id")
                     sa = user.get("system_account") or user.get("username", "")
                     if sa and sender_name.startswith(sa):
-                        existing = local_usage_lookup.get(uid, {"tokens": 0, "requests": 0})
-                        local_usage_lookup[uid] = {
+                        existing: dict[str, int] = local_usage_lookup.get(uid, {"tokens": 0, "requests": 0})  # type: ignore[assignment]
+                        local_usage_lookup[uid] = {  # type: ignore[assignment]
                             "tokens": existing["tokens"] + int(row["tokens"]),
                             "requests": existing["requests"] + int(row["requests"]),
                         }

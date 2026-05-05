@@ -46,7 +46,7 @@ def parse_date(date_str: str) -> Optional[str]:
         return None
 
 
-def load_config(config_path: str = None) -> dict:
+def load_config(config_path: Optional[str] = None) -> dict:
     """Load configuration from JSON file."""
     import json
     import os
@@ -67,7 +67,7 @@ def load_config(config_path: str = None) -> dict:
     return config
 
 
-def save_config(config: dict, config_path: str = None) -> None:
+def save_config(config: dict, config_path: Optional[str] = None) -> None:
     """Save configuration to JSON file."""
     import json
     import os

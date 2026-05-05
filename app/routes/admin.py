@@ -7,6 +7,7 @@ API routes for admin operations.
 import logging
 import os
 import subprocess
+from typing import Optional
 
 import bcrypt
 from flask import Blueprint, g, jsonify, request
@@ -33,7 +34,7 @@ def get_workspace_base_dir() -> str:
     return os.environ.get("WORKSPACE_BASE_DIR", "/home")
 
 
-def ensure_system_user(system_account: str, uid: int = None) -> bool:
+def ensure_system_user(system_account: str, uid: Optional[int] = None) -> bool:
     """
     Ensure a system user exists for workspace operations.
     Creates the OS user, workspace directory, and .qwen directory.

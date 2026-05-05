@@ -7,6 +7,7 @@ Background scheduler for automatic data fetching at configurable intervals.
 import logging
 import threading
 from datetime import datetime
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ class DataFetchScheduler:
         self._initialized = True
         logger.info("DataFetchScheduler initialized")
 
-    def configure(self, interval: int = None, enabled: bool = None):
+    def configure(self, interval: Optional[int] = None, enabled: Optional[bool] = None):
         """
         Configure the scheduler.
 

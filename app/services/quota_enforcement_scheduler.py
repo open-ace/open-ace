@@ -8,6 +8,7 @@ and enforces limits (terminates sessions, generates alerts).
 import logging
 import threading
 from datetime import datetime
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +42,7 @@ class QuotaEnforcementScheduler:
         self._enforced_users = set()
         logger.info("QuotaEnforcementScheduler initialized")
 
-    def configure(self, interval: int = None, enabled: bool = None):
+    def configure(self, interval: Optional[int] = None, enabled: Optional[bool] = None):
         if interval is not None:
             self._interval = max(30, interval)
             logger.info(f"Quota enforcement interval set to {self._interval} seconds")

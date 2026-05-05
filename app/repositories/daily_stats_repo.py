@@ -8,7 +8,7 @@ instead of scanning the large daily_messages table.
 
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from app.repositories.database import Database, is_postgresql
 from app.utils.cache import cached
@@ -416,7 +416,7 @@ class DailyStatsRepository:
             else:
                 # Refresh all
                 date_condition = "1=1"
-                params = ()
+                params: tuple[Any, ...] = ()
 
             if is_postgresql():
                 # Delete existing stats for the date(s)
@@ -535,7 +535,7 @@ class DailyStatsRepository:
             else:
                 # Refresh all
                 date_condition = "1=1"
-                params = ()
+                params: tuple[Any, ...] = ()
 
             if is_postgresql():
                 # Delete existing stats for the date(s)

@@ -5,6 +5,7 @@ API routes for message data operations.
 """
 
 import time
+from typing import Any
 
 from flask import Blueprint, jsonify, request
 
@@ -15,7 +16,7 @@ messages_bp = Blueprint("messages", __name__)
 message_service = MessageService()
 
 # Simple in-memory cache for expensive queries
-_senders_cache = {"data": None, "timestamp": 0}
+_senders_cache: dict[str, Any] = {"data": None, "timestamp": 0}
 _senders_cache_ttl = 300  # 5 minutes
 
 

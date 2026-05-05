@@ -341,9 +341,9 @@ class WebUIManager:
             if len(parts) != 4:
                 return False, None, "Invalid token format"
 
-            user_id, port, random_part, signature = parts
-            user_id = int(user_id)
-            port = int(port)
+            user_id_str, port_str, random_part, signature = parts
+            user_id: int = int(user_id_str)
+            port: int = int(port_str)
 
             expected_signature = hashlib.sha256(
                 f"{user_id}:{port}:{random_part}:{self.config.token_secret}".encode()

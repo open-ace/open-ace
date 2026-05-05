@@ -358,7 +358,10 @@ def parse_usage_response(response: dict) -> dict:
 
 
 async def fetch_and_save_usage(
-    days: int = 7, gateway_url: str = None, token: str = None, hostname: str = None
+    days: int = 7,
+    gateway_url: Optional[str] = None,
+    token: Optional[str] = None,
+    hostname: Optional[str] = None,
 ) -> bool:
     """
     Fetch OpenClaw usage via WebSocket API and save to database.
@@ -985,13 +988,13 @@ def process_jsonl_file(
 
     # First pass: collect user message senders for assistant message attribution
     # Map: message_id -> (sender_id, sender_name)
-    user_senders: dict[str, tuple[str, str]] = {}
+    user_senders: dict[str, tuple[Optional[str], Optional[str]]] = {}
     # Also collect assistant senders for toolResult attribution
-    assistant_senders: dict[str, tuple[str, str]] = {}
+    assistant_senders: dict[str, tuple[Optional[str], Optional[str]]] = {}
     # Also collect toolResult senders for assistant attribution (multi-turn conversations)
-    toolResult_senders: dict[str, tuple[str, str]] = {}
+    toolResult_senders: dict[str, tuple[Optional[str], Optional[str]]] = {}
     # Also collect error senders for assistant attribution (error messages can have senders too)
-    error_senders: dict[str, tuple[str, str]] = {}
+    error_senders: dict[str, tuple[Optional[str], Optional[str]]] = {}
 
     with open(filepath, encoding="utf-8") as f:
         for line in f:

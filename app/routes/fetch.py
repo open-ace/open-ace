@@ -9,6 +9,7 @@ import os
 import subprocess
 import threading
 from datetime import datetime
+from typing import Any
 
 from flask import Blueprint, jsonify
 
@@ -24,7 +25,12 @@ message_service = MessageService()
 logger = logging.getLogger(__name__)
 
 # Global state for fetch status
-_fetch_status = {"is_running": False, "last_run": None, "last_result": None, "error": None}
+_fetch_status: dict[str, Any] = {
+    "is_running": False,
+    "last_run": None,
+    "last_result": None,
+    "error": "",
+}
 _fetch_lock = threading.Lock()
 
 

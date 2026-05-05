@@ -51,11 +51,11 @@ def get_webui_user():
     """Get user from webui token (for iframe integration)."""
     from app.services.webui_manager import get_webui_manager
 
-    token = request.cookies.get("session_token") or request.headers.get(
+    token: str | None = request.cookies.get("session_token") or request.headers.get(
         "Authorization", ""
     ).replace("Bearer ", "")
     if not token:
-        token = request.args.get("token")
+        token = request.args.get("token") or ""
 
     if not token:
         return None, {"error": "Unauthorized"}, 401
@@ -136,7 +136,7 @@ def is_valid_path(path: str, allowed_prefixes: list[str] | None = None) -> bool:
     return True
 
 
-def get_directory_info(path: str, system_account: str = None):
+def get_directory_info(path: str, system_account: str | None = None):
     """Get information about a directory, optionally as a specific user."""
     try:
         if system_account:
@@ -251,7 +251,7 @@ def api_browse_directory():
     directories = list_subdirectories(path, system_account)
 
     # Get parent directory
-    parent = str(Path(path).parent)
+    parent: str | None = str(Path(path).parent)
     if parent == path:  # Root directory
         parent = None
 
@@ -266,7 +266,7 @@ def api_browse_directory():
     )
 
 
-def list_subdirectories(path: str, system_account: str = None) -> list:
+def list_subdirectories(path: str, system_account: str | None = None) -> list:
     """List subdirectories in a path, optionally as a specific user."""
     directories: list[str] = []
 

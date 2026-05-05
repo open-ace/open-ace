@@ -17,11 +17,7 @@ import jwt
 import requests
 
 from app.modules.sso.oauth2 import OAuth2Provider
-from app.modules.sso.provider import (
-    SSOAuthResult,
-    SSOProviderConfig,
-    SSOUser,
-)
+from app.modules.sso.provider import SSOAuthResult, SSOProviderConfig, SSOUser
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +33,8 @@ class OIDCProvider(OAuth2Provider):
             config: Provider configuration.
         """
         super().__init__(config)
-        self._jwks_cache = None
-        self._jwks_cache_time = None
+        self._jwks_cache: Optional[dict[str, Any]] = None
+        self._jwks_cache_time: Optional[datetime] = None
 
     def get_authorization_url(
         self,
@@ -165,7 +161,7 @@ class OIDCProvider(OAuth2Provider):
 
             # Cache the result
             self._jwks_cache = jwks
-            self._jwks_cache_time = datetime.utcnow()
+            self._jwks_cache_time: Optional[datetime] = datetime.utcnow()
 
             logger.debug(f"Successfully fetched JWKS from {jwks_url}")
             return jwks

@@ -54,7 +54,7 @@ def _convert_sql(sql: str) -> str:
     return sql
 
 
-def _execute(cursor, sql: str, params: tuple = ()) -> None:
+def _execute(cursor, sql: str, params: Union[tuple, list] = ()) -> None:
     """Execute SQL with automatic placeholder conversion for PostgreSQL."""
     cursor.execute(_convert_sql(sql), params)
 
@@ -441,10 +441,10 @@ def get_usage_by_tool(
     start_date = datetime.now()
     if isinstance(days, int):
         start_date = datetime.now() - timedelta(days=days - 1)
-    start_date = start_date.strftime("%Y-%m-%d")
+    start_date_str = start_date.strftime("%Y-%m-%d")
 
     conditions = ["tool_name = ?", "date >= ?", "date <= ?"]
-    params = [tool_name, start_date, end_date]
+    params = [tool_name, start_date_str, end_date]
 
     if host_name:
         conditions.append("host_name = ?")
@@ -883,11 +883,11 @@ def save_messages_batch(messages: list[dict], batch_size: int = 1000) -> int:
         # Get unique (date, tool_name, host_name) combinations
         keys = set()
         for msg in messages:
-            key = (msg.get("date"), msg.get("tool_name"), msg.get("host_name", "localhost"))
-            keys.add(key)
+            lookup_key = (msg.get("date"), msg.get("tool_name"), msg.get("host_name", "localhost"))
+            keys.add(lookup_key)
 
         # Query existing messages in one go
-        existing_map = {}
+        existing_map: dict[tuple[str, ...], dict[str, Any]] = {}
         for date, tool_name, host_name in keys:
             if is_postgresql():
                 _execute(
@@ -1403,7 +1403,7 @@ def init_auth_database() -> None:
 def create_user(
     username: str,
     password_hash: str,
-    email: str = None,
+    email: Optional[str] = None,
     role: str = "user",
     daily_token_quota: int = 1000000,
     daily_request_quota: int = 1000,
@@ -1432,12 +1432,12 @@ def create_user(
 def create_user_with_is_active(
     username: str,
     password_hash: str,
-    email: str = None,
+    email: Optional[str] = None,
     role: str = "user",
     daily_token_quota: int = 1000000,
     daily_request_quota: int = 1000,
     is_active: bool = True,
-    system_account: str = None,
+    system_account: Optional[str] = None,
     must_change_password: bool = False,
 ) -> bool:
     """Create a new user with is_active and must_change_password flags."""
@@ -1755,7 +1755,11 @@ def delete_user(user_id: int) -> bool:
 
 
 def save_quota_usage(
-    user_id: int, date: str, tool_name: str = None, tokens_used: int = 0, requests_used: int = 0
+    user_id: int,
+    date: str,
+    tool_name: Optional[str] = None,
+    tokens_used: int = 0,
+    requests_used: int = 0,
 ) -> bool:
     """Save quota usage for a user."""
     conn = get_connection()
@@ -1774,7 +1778,9 @@ def save_quota_usage(
     return True
 
 
-def aggregate_quota_usage_from_messages(start_date: str = None, end_date: str = None) -> int:
+def aggregate_quota_usage_from_messages(
+    start_date: Optional[str] = None, end_date: Optional[str] = None
+) -> int:
     """Aggregate quota usage from daily_messages table.
 
     This function aggregates token and request usage from daily_messages

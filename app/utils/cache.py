@@ -13,7 +13,7 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, Callable, Optional, TypeVar, Union
 
 logger = logging.getLogger(__name__)
 
@@ -314,6 +314,7 @@ class CacheManager:
 
     _instance = None
     _lock = threading.Lock()
+    _backend: Union["MemoryCache", "RedisCache"]
 
     def __new__(cls, *args, **kwargs):
         """Singleton pattern."""
@@ -338,7 +339,7 @@ class CacheManager:
 
         if backend == "redis":
             try:
-                self._backend = RedisCache(
+                self._backend: MemoryCache | RedisCache = RedisCache(
                     host=kwargs.get("host", os.environ.get("REDIS_HOST", "localhost")),
                     port=kwargs.get("port", int(os.environ.get("REDIS_PORT", 6379))),
                     db=kwargs.get("db", 0),
@@ -355,7 +356,7 @@ class CacheManager:
                     default_ttl=kwargs.get("default_ttl", 300),
                 )
         else:
-            self._backend = MemoryCache(
+            self._backend: MemoryCache | RedisCache = MemoryCache(
                 max_size=kwargs.get("max_size", 1000),
                 default_ttl=kwargs.get("default_ttl", 300),
             )

@@ -9,7 +9,7 @@ import smtplib
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Optional
+from typing import Optional, Union
 
 
 def send_email(
@@ -64,7 +64,7 @@ def send_email(
         # Port 465 usually means SSL, ports 587/25 usually mean TLS
         use_ssl = smtp_port == 465
         if use_ssl:
-            server = smtplib.SMTP_SSL(smtp_server, smtp_port)
+            server: smtplib.SMTP_SSL | smtplib.SMTP = smtplib.SMTP_SSL(smtp_server, smtp_port)
         else:
             if use_tls:
                 server = smtplib.SMTP(smtp_server, smtp_port)
@@ -373,6 +373,7 @@ def test_email_config(smtp_config: dict) -> bool:
 
         # Port 465 usually means SSL, ports 587/25 usually mean TLS
         use_ssl = smtp_port == 465
+        server: Union[smtplib.SMTP_SSL, smtplib.SMTP]
         if use_ssl:
             server = smtplib.SMTP_SSL(smtp_server, smtp_port)
         else:
