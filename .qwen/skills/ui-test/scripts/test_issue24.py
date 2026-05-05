@@ -121,7 +121,7 @@ def test_issue24():
                         print(f"  消息 {i+1}: role=user, source={source_text}")
 
                         # Check if tool_name is shown in the message meta
-                        tool_name_elem = msg.locator(".message-meta .text-muted:has(.bi-box-seam)")
+                        msg.locator(".message-meta .text-muted:has(.bi-box-seam)")
 
                         if source_text == "qwen":
                             qwen_user_messages += 1

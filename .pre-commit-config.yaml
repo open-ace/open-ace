@@ -102,6 +102,7 @@ repos:
       - id: check-yaml
         args: [--unsafe]
       - id: check-json
+        exclude: tsconfig\.json$
       - id: check-toml
       - id: check-added-large-files
         args: [--maxkb=1000]

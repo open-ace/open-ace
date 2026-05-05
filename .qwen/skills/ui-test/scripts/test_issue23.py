@@ -147,7 +147,7 @@ async def test_issue23():
     print("Issue 23 测试报告")
     print("=" * 50)
     for step, status in results:
-        status_str = "✓" if status == True else "✗" if status == False else "○"
+        status_str = "✓" if status else "✗" if not status else "○"
         print(f"  {status_str} {step}")
     print("-" * 50)
     print("截图:")

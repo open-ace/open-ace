@@ -19,7 +19,7 @@ import json
 import os
 import sys
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 # Default configuration
 DEFAULT_URL = "http://localhost:5000/"
@@ -34,10 +34,10 @@ class TestResult:
 
     def __init__(self, name: str):
         self.name = name
-        self.steps: List[Dict[str, Any]] = []
+        self.steps: list[dict[str, Any]] = []
         self.passed = True
         self.error: Optional[str] = None
-        self.screenshots: List[str] = []
+        self.screenshots: list[str] = []
 
     def add_step(self, step: str, passed: bool, message: str = ""):
         self.steps.append({"step": step, "passed": passed, "message": message})
@@ -64,7 +64,7 @@ class UITester:
         self.password = password
         self.headless = headless
         self.output_dir = output_dir
-        self.results: List[TestResult] = []
+        self.results: list[TestResult] = []
         self.browser = None
         self.page = None
         self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -219,7 +219,7 @@ class UITester:
         print(f"   📷 截图: {filename}")
         return filepath
 
-    def run_test_case(self, test_case: Dict[str, Any]) -> TestResult:
+    def run_test_case(self, test_case: dict[str, Any]) -> TestResult:
         """运行单个测试用例"""
         result = TestResult(test_case.get("name", "未命名测试"))
         print(f"\n{'='*50}")
@@ -270,7 +270,7 @@ class UITester:
 
         return result
 
-    def run_tests(self, test_cases: List[Dict[str, Any]]):
+    def run_tests(self, test_cases: list[dict[str, Any]]):
         """运行所有测试用例"""
         print(f"\n{'#'*60}")
         print("UI 功能自动化测试")
