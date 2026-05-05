@@ -23,7 +23,12 @@ interface NewSessionModalProps {
   show?: boolean;
   onClose: () => void;
   onCreateLocal?: () => void;
-  onCreateRemote?: (params: { machineId: string; machineName: string; sessionId: string; projectPath: string }) => void;
+  onCreateRemote?: (params: {
+    machineId: string;
+    machineName: string;
+    sessionId: string;
+    projectPath: string;
+  }) => void;
 }
 
 export const NewSessionModal: React.FC<NewSessionModalProps> = ({
@@ -62,7 +67,7 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
 
   // Get default workspace path based on OS type
   const getDefaultPath = (osType: string | null | undefined): string => {
-    const os = (osType || '').toLowerCase();
+    const os = (osType ?? '').toLowerCase();
     if (os.includes('windows')) {
       return 'C:\\workspace';
     }
@@ -76,7 +81,7 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
     setSelectedMachineId(machineId);
     const machine = machines.find((m) => m.machine_id === machineId);
     if (machine) {
-      setProjectPath(machine.work_dir || getDefaultPath(machine.os_type));
+      setProjectPath(machine.work_dir ?? getDefaultPath(machine.os_type));
     }
   };
 
@@ -105,7 +110,7 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
 
       onClose();
 
-      const machineName = selectedMachine?.machine_name || selectedMachineId.slice(0, 8);
+      const machineName = selectedMachine?.machine_name ?? selectedMachineId.slice(0, 8);
       const sessionId = result.session?.session_id || '';
 
       if (onCreateRemote) {
@@ -216,13 +221,11 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
                     <div>
                       <strong>{machine.machine_name}</strong>
                       <div className="text-muted small">
-                        {machine.hostname || machine.machine_id.slice(0, 8)}
+                        {machine.hostname ?? machine.machine_id.slice(0, 8)}
                         {machine.os_type && ` | ${machine.os_type}`}
                       </div>
                     </div>
-                    <Badge variant="success">
-                      {t('online', language)}
-                    </Badge>
+                    <Badge variant="success">{t('online', language)}</Badge>
                   </button>
                 ))}
               </div>
@@ -238,18 +241,19 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
                 className="form-control"
                 value={projectPath}
                 onChange={(e) => setProjectPath(e.target.value)}
-                placeholder={selectedMachine ? getDefaultPath(selectedMachine.os_type) : '/root/workspace'}
+                placeholder={
+                  selectedMachine ? getDefaultPath(selectedMachine.os_type) : '/root/workspace'
+                }
               />
-              <div className="form-text text-muted small">
-                {t('projectPathHint', language)}
-              </div>
+              <div className="form-text text-muted small">{t('projectPathHint', language)}</div>
             </div>
           )}
 
           {/* Error Display */}
           {createRemoteSession.isError && (
             <div className="alert alert-danger small">
-              {t('error', language)}: {(createRemoteSession.error as Error)?.message || t('error', language)}
+              {t('error', language)}:{' '}
+              {(createRemoteSession.error as Error)?.message || t('error', language)}
             </div>
           )}
         </>

@@ -389,7 +389,9 @@ export const AlertManagement: React.FC = () => {
                   type="checkbox"
                   id="pushEnabled"
                   checked={preferences.push_enabled}
-                  onChange={(e) => setPreferences({ ...preferences, push_enabled: e.target.checked })}
+                  onChange={(e) =>
+                    setPreferences({ ...preferences, push_enabled: e.target.checked })
+                  }
                 />
                 <label className="form-check-label" htmlFor="pushEnabled">
                   {t('pushNotifications', language)}

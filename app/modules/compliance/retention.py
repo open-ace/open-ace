@@ -277,7 +277,7 @@ class DataRetentionManager:
         # Count records to delete
         count_query = f"SELECT COUNT(*) as count FROM {table_name} WHERE {time_col} < ?"
         result = self.db.fetch_one(count_query, (cutoff,))
-        count = result["count"] if result else 0
+        count = int(result["count"]) if result else 0
 
         if dry_run:
             logger.info(f"[DRY RUN] Would delete {count} records from {table_name}")
@@ -318,7 +318,7 @@ class DataRetentionManager:
         # Count records to anonymize
         count_query = f"SELECT COUNT(*) as count FROM {table_name} WHERE {time_col} < ?"
         result = self.db.fetch_one(count_query, (cutoff,))
-        count = result["count"] if result else 0
+        count = int(result["count"]) if result else 0
 
         if dry_run:
             logger.info(f"[DRY RUN] Would anonymize {count} records in {table_name}")

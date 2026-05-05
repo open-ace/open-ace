@@ -1,7 +1,7 @@
 # Open ACE 企业级AI工作平台 UI/UX 优化方案
 
-> 文档版本: 1.0  
-> 创建日期: 2026-03-23  
+> 文档版本: 1.0
+> 创建日期: 2026-03-23
 > 目标: 打造"方便用、方便管"的企业级AI工作平台
 
 ---
@@ -519,12 +519,12 @@ interface FilterBarProps {
     padding: 8px 0;
     z-index: 1000;
   }
-  
+
   .mobile-nav .nav-item {
     flex: 1;
     text-align: center;
   }
-  
+
   .main-content {
     padding-bottom: 70px;
   }
@@ -640,7 +640,7 @@ interface FilterBarProps {
 // components/common/ModeSwitcher.tsx
 export const ModeSwitcher: React.FC = () => {
   const [mode, setMode] = useState<'work' | 'manage'>('work');
-  
+
   return (
     <div className="mode-switcher">
       <button
@@ -673,12 +673,12 @@ export const WorkLayout: React.FC = ({ children }) => {
       <aside className="session-panel">
         <SessionList />
       </aside>
-      
+
       {/* 主内容 */}
       <main className="main-panel">
         {children}
       </main>
-      
+
       {/* 辅助面板 */}
       <aside className="assist-panel">
         <Tabs defaultTab="prompts">
@@ -693,7 +693,7 @@ export const WorkLayout: React.FC = ({ children }) => {
           </Tab>
         </Tabs>
       </aside>
-      
+
       {/* 状态栏 */}
       <footer className="status-bar">
         <span>模型: GPT-4</span>
@@ -730,7 +730,7 @@ export const ManageLayout: React.FC = ({ children }) => {
           <NavItem id="users" icon="bi-people">管理</NavItem>
         </NavSection>
       </nav>
-      
+
       {/* 主内容 */}
       <main className="main-content">
         {children}
@@ -754,7 +754,7 @@ const routes = [
       { path: 'session/:id', element: <Workspace /> },
     ],
   },
-  
+
   // 管理模式
   {
     path: '/manage',
@@ -767,7 +767,7 @@ const routes = [
       { path: 'users', element: <UserManagement /> },
     ],
   },
-  
+
   // 公共页面
   { path: '/login', element: <Login /> },
   { path: '/report', element: <Report /> },
@@ -832,13 +832,13 @@ const routes = [
   --color-primary-500: #3b82f6;
   --color-primary-600: #2563eb;
   --color-primary-700: #1d4ed8;
-  
+
   /* 语义颜色 */
   --color-success: #10b981;
   --color-warning: #f59e0b;
   --color-danger: #ef4444;
   --color-info: #3b82f6;
-  
+
   /* 间距系统 */
   --spacing-1: 0.25rem;
   --spacing-2: 0.5rem;
@@ -846,18 +846,18 @@ const routes = [
   --spacing-4: 1rem;
   --spacing-6: 1.5rem;
   --spacing-8: 2rem;
-  
+
   /* 圆角 */
   --radius-sm: 0.25rem;
   --radius-md: 0.375rem;
   --radius-lg: 0.5rem;
   --radius-xl: 0.75rem;
-  
+
   /* 阴影 */
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
   --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1);
   --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1);
-  
+
   /* 动画 */
   --duration-fast: 150ms;
   --duration-normal: 300ms;
@@ -930,7 +930,7 @@ export function DataTable<T>({ data, columns, features }: DataTableProps<T>) {
         {features?.columnVisibility && <ColumnSelector table={table} />}
         {features?.export && <ExportButton formats={features.export} />}
       </div>
-      
+
       {/* 表格 */}
       <table className="data-table">
         <thead>
@@ -956,7 +956,7 @@ export function DataTable<T>({ data, columns, features }: DataTableProps<T>) {
           ))}
         </tbody>
       </table>
-      
+
       {/* 分页 */}
       {features?.pagination && <TablePagination table={table} />}
     </div>
@@ -1005,7 +1005,7 @@ export function FilterBar({
           />
         ))}
       </div>
-      
+
       <div className="filter-actions">
         {onReset && (
           <Button variant="ghost" size="sm" onClick={onReset}>
@@ -1055,9 +1055,9 @@ export function StatsCard({
         <span className="stats-card__title">{title}</span>
         {icon && <span className="stats-card__icon">{icon}</span>}
       </div>
-      
+
       <div className="stats-card__value">{value}</div>
-      
+
       {change && (
         <div className={cn('stats-card__change', change.type)}>
           {change.type === 'increase' ? (
@@ -1068,7 +1068,7 @@ export function StatsCard({
           <span>{Math.abs(change.value)}%</span>
         </div>
       )}
-      
+
       {sparkline && (
         <div className="stats-card__sparkline">
           <Sparkline data={sparkline} />
@@ -1091,14 +1091,14 @@ export function Dashboard() {
       <PageHeader title="仪表盘">
         <FilterBar filters={dashboardFilters} />
       </PageHeader>
-      
+
       <StatsGrid columns={4}>
         <StatsCard title="今日Token" value="1.2M" change={{ value: 12, type: 'increase' }} />
         <StatsCard title="请求数" value="8,432" change={{ value: 5, type: 'increase' }} />
         <StatsCard title="活跃用户" value="156" change={{ value: 3, type: 'decrease' }} />
         <StatsCard title="健康分" value="98%" variant="success" />
       </StatsGrid>
-      
+
       <Grid columns={12} gap={4}>
         <GridItem colSpan={8}>
           <Card title="使用趋势">
@@ -1111,7 +1111,7 @@ export function Dashboard() {
           </Card>
         </GridItem>
       </Grid>
-      
+
       <Card title="工具详情">
         <DataTable data={toolsData} columns={toolColumns} features={{ sorting: true, export: ['csv'] }} />
       </Card>
@@ -1217,5 +1217,5 @@ export function Dashboard() {
 
 ---
 
-> 文档维护: Open ACE 开发团队  
+> 文档维护: Open ACE 开发团队
 > 最后更新: 2026-03-23

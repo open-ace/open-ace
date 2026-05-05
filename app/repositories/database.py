@@ -26,7 +26,7 @@ class PgConnectionWrapper:
         self._cursor_factory = cursor_factory
         self._from_pool = from_pool
 
-    def __getattr__(self, name):
+    def __getattr__(self, name):  # noqa: D105
         return getattr(self._conn, name)
 
     def cursor(self, cursor_factory=None):
@@ -161,7 +161,7 @@ def adapt_boolean_condition(column: str, value: bool) -> str:
 
 
 def escape_like(value: str, escape_char: str = "\\") -> str:
-    """
+    r"""
     Escape special characters in a LIKE pattern value.
 
     Escapes %, _, and the escape character itself so that a LIKE query

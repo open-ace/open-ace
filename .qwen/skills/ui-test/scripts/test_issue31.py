@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Test script for Issue 31: Messages page should show remote machines."""
 
-import sys
 import os
+import sys
 
 # Add skill scripts to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from ui_test import UITester, DEFAULT_URL, DEFAULT_USERNAME, DEFAULT_PASSWORD
+from ui_test import DEFAULT_PASSWORD, DEFAULT_URL, DEFAULT_USERNAME, UITester
 
 
 def test_issue31_remote_machines():

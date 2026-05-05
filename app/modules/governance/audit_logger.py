@@ -368,7 +368,7 @@ class AuditLogger:
         query = f"SELECT COUNT(*) as count FROM audit_logs WHERE {where_clause}"
         result = self.db.fetch_one(query, tuple(params))
 
-        return result["count"] if result else 0
+        return int(result["count"]) if result else 0
 
     def get_user_activity(self, user_id: int, days: int = 30) -> dict[str, Any]:
         """

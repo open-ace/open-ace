@@ -184,7 +184,7 @@ sed -i 's|image: open-ace:latest|image: open-ace:v1.2.0|' docker-compose.yml
 docker compose up -d open-ace
 ```
 
-**Note**: 
+**Note**:
 - Data is stored in `./data` directory and PostgreSQL volume - it will NOT be lost
 - Configuration in `./config` is preserved
 - PostgreSQL container continues running - only open-ace container is updated
@@ -521,7 +521,7 @@ Each user with a `system_account` must have:
    ```bash
    # Check if user exists
    id <system_account>
-   
+
    # Create if needed
    sudo useradd -m <system_account>
    ```

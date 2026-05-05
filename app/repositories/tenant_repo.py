@@ -93,7 +93,7 @@ class TenantRepository:
                             tenant.subscription_ends_at,
                         ),
                     )
-                    tenant_id = cursor.lastrowid
+                    tenant_id = int(cursor.lastrowid) if cursor.lastrowid is not None else None
 
                 # Insert tenant_quotas
                 quota_dict = tenant.quota.to_dict()
@@ -150,7 +150,7 @@ class TenantRepository:
                 conn.commit()
 
             logger.info(f"Created tenant: {tenant.name} (ID: {tenant_id})")
-            return tenant_id
+            return int(tenant_id) if tenant_id is not None else None
 
         except Exception as e:
             logger.error(f"Failed to create tenant: {e}")
@@ -523,7 +523,7 @@ class TenantRepository:
         else:
             result = self.db.fetch_one("SELECT COUNT(*) as count FROM tenants")
 
-        return result["count"] if result else 0
+        return int(result["count"]) if result else 0
 
     def _row_to_tenant(self, row: dict) -> Tenant:
         """Convert database row to Tenant model."""

@@ -323,7 +323,7 @@ WORKSPACE_IDLE_TIMEOUT=30         # 空闲超时（分钟）
    # 使用 NodeSource 安装 Node.js 20.x
    curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
    yum install -y nodejs  # Rocky Linux/CentOS
-   
+
    # 或 Debian/Ubuntu
    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
    apt-get install -y nodejs
@@ -334,7 +334,7 @@ WORKSPACE_IDLE_TIMEOUT=30         # 空闲超时（分钟）
    npm install -g qwen-code-webui
    npm install -g @qwen-code/qwen-code
    ```
-   
+
    **注意：**
    - qwen-code CLI 包名是 `@qwen-code/qwen-code`（不是 `qwen-code`）
    - CLI 命令名是 `qwen`（不是 `qwen-code`）

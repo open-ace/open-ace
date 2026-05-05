@@ -24,30 +24,98 @@ import { t } from '@/i18n';
 
 // Lazy-loaded page components for code splitting
 // Each page is loaded only when navigated to, reducing initial bundle size
-const Dashboard = lazy(() => import('@/components/features/Dashboard').then(m => ({ default: m.Dashboard })));
-const Messages = lazy(() => import('@/components/features/Messages').then(m => ({ default: m.Messages })));
-const Analysis = lazy(() => import('@/components/features/Analysis').then(m => ({ default: m.Analysis })));
-const Report = lazy(() => import('@/components/features/Report').then(m => ({ default: m.Report })));
-const Workspace = lazy(() => import('@/components/features/Workspace').then(m => ({ default: m.Workspace })));
-const Sessions = lazy(() => import('@/components/features/Sessions').then(m => ({ default: m.Sessions })));
-const Prompts = lazy(() => import('@/components/features/Prompts').then(m => ({ default: m.Prompts })));
-const TrendAnalysis = lazy(() => import('@/components/features/analysis/TrendAnalysis').then(m => ({ default: m.TrendAnalysis })));
-const AnomalyDetection = lazy(() => import('@/components/features/analysis/AnomalyDetection').then(m => ({ default: m.AnomalyDetection })));
-const ROIAnalysis = lazy(() => import('@/components/features/analysis/ROIAnalysis').then(m => ({ default: m.ROIAnalysis })));
-const ConversationHistory = lazy(() => import('@/components/features/ConversationHistory').then(m => ({ default: m.ConversationHistory })));
-const RequestDashboard = lazy(() => import('@/components/features/management/RequestDashboard').then(m => ({ default: m.RequestDashboard })));
-const UsageOverview = lazy(() => import('@/components/work/UsageOverview').then(m => ({ default: m.UsageOverview })));
-const InsightsReport = lazy(() => import('@/components/work/InsightsReport').then(m => ({ default: m.InsightsReport })));
-const UserManagement = lazy(() => import('@/components/features/management/UserManagement').then(m => ({ default: m.UserManagement })));
-const AuditCenter = lazy(() => import('@/components/features/management/AuditCenter').then(m => ({ default: m.AuditCenter })));
-const QuotaAlerts = lazy(() => import('@/components/features/management/QuotaAlerts').then(m => ({ default: m.QuotaAlerts })));
-const ComplianceMgmt = lazy(() => import('@/components/features/management/ComplianceMgmt').then(m => ({ default: m.ComplianceMgmt })));
-const SecurityCenter = lazy(() => import('@/components/features/management/SecurityCenter').then(m => ({ default: m.SecurityCenter })));
-const TenantManagement = lazy(() => import('@/components/features/management/TenantManagement').then(m => ({ default: m.TenantManagement })));
-const SSOSettings = lazy(() => import('@/components/features/settings/SSOSettings').then(m => ({ default: m.SSOSettings })));
-const ProjectManagement = lazy(() => import('@/components/features/management/ProjectManagement').then(m => ({ default: m.ProjectManagement })));
-const RemoteMachineManagement = lazy(() => import('@/components/features/management/RemoteMachineManagement').then(m => ({ default: m.RemoteMachineManagement })));
-const APIKeyManagement = lazy(() => import('@/components/features/management/APIKeyManagement').then(m => ({ default: m.APIKeyManagement })));
+const Dashboard = lazy(() =>
+  import('@/components/features/Dashboard').then((m) => ({ default: m.Dashboard }))
+);
+const Messages = lazy(() =>
+  import('@/components/features/Messages').then((m) => ({ default: m.Messages }))
+);
+const Analysis = lazy(() =>
+  import('@/components/features/Analysis').then((m) => ({ default: m.Analysis }))
+);
+const Report = lazy(() =>
+  import('@/components/features/Report').then((m) => ({ default: m.Report }))
+);
+const Workspace = lazy(() =>
+  import('@/components/features/Workspace').then((m) => ({ default: m.Workspace }))
+);
+const Sessions = lazy(() =>
+  import('@/components/features/Sessions').then((m) => ({ default: m.Sessions }))
+);
+const Prompts = lazy(() =>
+  import('@/components/features/Prompts').then((m) => ({ default: m.Prompts }))
+);
+const TrendAnalysis = lazy(() =>
+  import('@/components/features/analysis/TrendAnalysis').then((m) => ({ default: m.TrendAnalysis }))
+);
+const AnomalyDetection = lazy(() =>
+  import('@/components/features/analysis/AnomalyDetection').then((m) => ({
+    default: m.AnomalyDetection,
+  }))
+);
+const ROIAnalysis = lazy(() =>
+  import('@/components/features/analysis/ROIAnalysis').then((m) => ({ default: m.ROIAnalysis }))
+);
+const ConversationHistory = lazy(() =>
+  import('@/components/features/ConversationHistory').then((m) => ({
+    default: m.ConversationHistory,
+  }))
+);
+const RequestDashboard = lazy(() =>
+  import('@/components/features/management/RequestDashboard').then((m) => ({
+    default: m.RequestDashboard,
+  }))
+);
+const UsageOverview = lazy(() =>
+  import('@/components/work/UsageOverview').then((m) => ({ default: m.UsageOverview }))
+);
+const InsightsReport = lazy(() =>
+  import('@/components/work/InsightsReport').then((m) => ({ default: m.InsightsReport }))
+);
+const UserManagement = lazy(() =>
+  import('@/components/features/management/UserManagement').then((m) => ({
+    default: m.UserManagement,
+  }))
+);
+const AuditCenter = lazy(() =>
+  import('@/components/features/management/AuditCenter').then((m) => ({ default: m.AuditCenter }))
+);
+const QuotaAlerts = lazy(() =>
+  import('@/components/features/management/QuotaAlerts').then((m) => ({ default: m.QuotaAlerts }))
+);
+const ComplianceMgmt = lazy(() =>
+  import('@/components/features/management/ComplianceMgmt').then((m) => ({
+    default: m.ComplianceMgmt,
+  }))
+);
+const SecurityCenter = lazy(() =>
+  import('@/components/features/management/SecurityCenter').then((m) => ({
+    default: m.SecurityCenter,
+  }))
+);
+const TenantManagement = lazy(() =>
+  import('@/components/features/management/TenantManagement').then((m) => ({
+    default: m.TenantManagement,
+  }))
+);
+const SSOSettings = lazy(() =>
+  import('@/components/features/settings/SSOSettings').then((m) => ({ default: m.SSOSettings }))
+);
+const ProjectManagement = lazy(() =>
+  import('@/components/features/management/ProjectManagement').then((m) => ({
+    default: m.ProjectManagement,
+  }))
+);
+const RemoteMachineManagement = lazy(() =>
+  import('@/components/features/management/RemoteMachineManagement').then((m) => ({
+    default: m.RemoteMachineManagement,
+  }))
+);
+const APIKeyManagement = lazy(() =>
+  import('@/components/features/management/APIKeyManagement').then((m) => ({
+    default: m.APIKeyManagement,
+  }))
+);
 
 // Page loading fallback with skeleton
 const PageLoader: React.FC = () => {
@@ -125,7 +193,17 @@ const LegacyAppContent: React.FC = () => {
         {section === 'sessions' && <Sessions />}
         {section === 'prompts' && <Prompts />}
         {section === 'security' && <SecurityCenter />}
-        {!['dashboard', 'messages', 'analysis', 'management', 'report', 'workspace', 'sessions', 'prompts', 'security'].includes(section) && <Dashboard />}
+        {![
+          'dashboard',
+          'messages',
+          'analysis',
+          'management',
+          'report',
+          'workspace',
+          'sessions',
+          'prompts',
+          'security',
+        ].includes(section) && <Dashboard />}
       </Suspense>
     );
   };
@@ -146,26 +224,30 @@ const LegacyAppContent: React.FC = () => {
 // Work Mode Routes
 const WorkRoutes: React.FC = () => {
   const location = useLocation();
-  const isWorkspaceRoute = location.pathname === '/work' ||
+  const isWorkspaceRoute =
+    location.pathname === '/work' ||
     location.pathname === '/work/' ||
     location.pathname === '/work/workspace';
 
   return (
     <Suspense fallback={<PageLoader />}>
       <Routes>
-        <Route path="/" element={
-          <WorkLayout>
-            {/* Workspace always mounted - hidden when other routes are active.
+        <Route
+          path="/"
+          element={
+            <WorkLayout>
+              {/* Workspace always mounted - hidden when other routes are active.
                 display:contents makes children direct flex children of .work-main,
                 preserving layout. display:none hides but keeps iframe in DOM. */}
-            <div style={{ display: isWorkspaceRoute ? 'contents' : 'none' }}>
-              <Workspace />
-            </div>
-            <div style={{ display: isWorkspaceRoute ? 'none' : 'contents' }}>
-              <Outlet />
-            </div>
-          </WorkLayout>
-        }>
+              <div style={{ display: isWorkspaceRoute ? 'contents' : 'none' }}>
+                <Workspace />
+              </div>
+              <div style={{ display: isWorkspaceRoute ? 'none' : 'contents' }}>
+                <Outlet />
+              </div>
+            </WorkLayout>
+          }
+        >
           <Route index element={null} />
           <Route path="sessions" element={<Sessions />} />
           <Route path="prompts" element={<Prompts />} />
@@ -293,11 +375,15 @@ const AppContent: React.FC = () => {
       {/* Default redirect - Admin goes to manage mode, others go to work mode */}
       <Route
         path="/"
-        element={isAdmin ? <Navigate to="/manage/dashboard" replace /> : <Navigate to="/work" replace />}
+        element={
+          isAdmin ? <Navigate to="/manage/dashboard" replace /> : <Navigate to="/work" replace />
+        }
       />
       <Route
         path="*"
-        element={isAdmin ? <Navigate to="/manage/dashboard" replace /> : <Navigate to="/work" replace />}
+        element={
+          isAdmin ? <Navigate to="/manage/dashboard" replace /> : <Navigate to="/work" replace />
+        }
       />
     </Routes>
   );

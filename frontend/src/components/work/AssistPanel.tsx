@@ -58,12 +58,52 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
   const helpDocs = [
     {
       id: 'getting-started',
-      title: language === 'zh' ? '快速上手指南' : language === 'ja' ? 'クイックスタートガイド' : language === 'ko' ? '빠른 시작 가이드' : 'Getting Started',
-      icon: 'bi-book'
+      title:
+        language === 'zh'
+          ? '快速上手指南'
+          : language === 'ja'
+            ? 'クイックスタートガイド'
+            : language === 'ko'
+              ? '빠른 시작 가이드'
+              : 'Getting Started',
+      icon: 'bi-book',
     },
-    { id: 'prompts-guide', title: language === 'zh' ? '提示词指南' : language === 'ja' ? 'プロンプトガイド' : language === 'ko' ? '프롬프트 가이드' : 'Prompts Guide', icon: 'bi-file-text' },
-    { id: 'keyboard-shortcuts', title: language === 'zh' ? '键盘快捷键' : language === 'ja' ? 'キーボードショートカット' : language === 'ko' ? '키보드 단축키' : 'Keyboard Shortcuts', icon: 'bi-keyboard' },
-    { id: 'faq', title: language === 'zh' ? '常见问题' : language === 'ja' ? 'よくある質問' : language === 'ko' ? '자주 묻는 질문' : 'FAQ', icon: 'bi-question-circle' },
+    {
+      id: 'prompts-guide',
+      title:
+        language === 'zh'
+          ? '提示词指南'
+          : language === 'ja'
+            ? 'プロンプトガイド'
+            : language === 'ko'
+              ? '프롬프트 가이드'
+              : 'Prompts Guide',
+      icon: 'bi-file-text',
+    },
+    {
+      id: 'keyboard-shortcuts',
+      title:
+        language === 'zh'
+          ? '键盘快捷键'
+          : language === 'ja'
+            ? 'キーボードショートカット'
+            : language === 'ko'
+              ? '키보드 단축키'
+              : 'Keyboard Shortcuts',
+      icon: 'bi-keyboard',
+    },
+    {
+      id: 'faq',
+      title:
+        language === 'zh'
+          ? '常见问题'
+          : language === 'ja'
+            ? 'よくある質問'
+            : language === 'ko'
+              ? '자주 묻는 질문'
+              : 'FAQ',
+      icon: 'bi-question-circle',
+    },
   ];
 
   const handleToolClick = (url: string) => {
@@ -129,7 +169,10 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
       ) : (
         <EmptyState icon="bi-file-text" title={t('noPromptsFound', language)} />
       )}
-      <button className="btn btn-link btn-sm mt-2" onClick={() => window.open('/work/prompts', '_blank')}>
+      <button
+        className="btn btn-link btn-sm mt-2"
+        onClick={() => window.open('/work/prompts', '_blank')}
+      >
         <i className="bi bi-arrow-right me-1" />
         {t('viewAll', language)}
       </button>

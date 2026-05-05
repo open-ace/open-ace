@@ -13,14 +13,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
-import {
-  Card,
-  Button,
-  Loading,
-  Error,
-  Progress,
-  Badge,
-} from '@/components/common';
+import { Card, Button, Loading, Error, Progress, Badge } from '@/components/common';
 import { LazyLineChart } from '@/components/common/LazyCharts';
 import { requestApi, type QuotaStatusResponse, type UserUsageResponse } from '@/api/request';
 import { formatNumber, formatTokens } from '@/utils';
@@ -121,47 +114,107 @@ export const UsageOverview: React.FC = () => {
       <div className="usage-overview">
         {/* Skeleton Loading State */}
         <div className="d-flex justify-content-between align-items-center mb-4">
-          <div className="skeleton-title" style={{ width: '200px', height: '32px', background: '#e0e0e0', borderRadius: '4px' }} />
-          <div className="skeleton-button" style={{ width: '100px', height: '36px', background: '#e0e0e0', borderRadius: '4px' }} />
+          <div
+            className="skeleton-title"
+            style={{ width: '200px', height: '32px', background: '#e0e0e0', borderRadius: '4px' }}
+          />
+          <div
+            className="skeleton-button"
+            style={{ width: '100px', height: '36px', background: '#e0e0e0', borderRadius: '4px' }}
+          />
         </div>
-        
+
         {/* Skeleton Cards */}
-        <h5 className="mb-3" style={{ visibility: 'hidden' }}>{t('daily', language)}</h5>
+        <h5 className="mb-3" style={{ visibility: 'hidden' }}>
+          {t('daily', language)}
+        </h5>
         <div className="row g-3 mb-4">
           <div className="col-md-6">
             <Card>
-              <div style={{ width: '120px', height: '20px', background: '#e0e0e0', borderRadius: '4px', marginBottom: '12px' }} />
-              <div style={{ width: '100%', height: '8px', background: '#f0f0f0', borderRadius: '4px' }} />
+              <div
+                style={{
+                  width: '120px',
+                  height: '20px',
+                  background: '#e0e0e0',
+                  borderRadius: '4px',
+                  marginBottom: '12px',
+                }}
+              />
+              <div
+                style={{ width: '100%', height: '8px', background: '#f0f0f0', borderRadius: '4px' }}
+              />
             </Card>
           </div>
           <div className="col-md-6">
             <Card>
-              <div style={{ width: '120px', height: '20px', background: '#e0e0e0', borderRadius: '4px', marginBottom: '12px' }} />
-              <div style={{ width: '100%', height: '8px', background: '#f0f0f0', borderRadius: '4px' }} />
+              <div
+                style={{
+                  width: '120px',
+                  height: '20px',
+                  background: '#e0e0e0',
+                  borderRadius: '4px',
+                  marginBottom: '12px',
+                }}
+              />
+              <div
+                style={{ width: '100%', height: '8px', background: '#f0f0f0', borderRadius: '4px' }}
+              />
             </Card>
           </div>
         </div>
-        
-        <h5 className="mb-3" style={{ visibility: 'hidden' }}>{t('monthly', language)}</h5>
+
+        <h5 className="mb-3" style={{ visibility: 'hidden' }}>
+          {t('monthly', language)}
+        </h5>
         <div className="row g-3 mb-4">
           <div className="col-md-6">
             <Card>
-              <div style={{ width: '120px', height: '20px', background: '#e0e0e0', borderRadius: '4px', marginBottom: '12px' }} />
-              <div style={{ width: '100%', height: '8px', background: '#f0f0f0', borderRadius: '4px' }} />
+              <div
+                style={{
+                  width: '120px',
+                  height: '20px',
+                  background: '#e0e0e0',
+                  borderRadius: '4px',
+                  marginBottom: '12px',
+                }}
+              />
+              <div
+                style={{ width: '100%', height: '8px', background: '#f0f0f0', borderRadius: '4px' }}
+              />
             </Card>
           </div>
           <div className="col-md-6">
             <Card>
-              <div style={{ width: '120px', height: '20px', background: '#e0e0e0', borderRadius: '4px', marginBottom: '12px' }} />
-              <div style={{ width: '100%', height: '8px', background: '#f0f0f0', borderRadius: '4px' }} />
+              <div
+                style={{
+                  width: '120px',
+                  height: '20px',
+                  background: '#e0e0e0',
+                  borderRadius: '4px',
+                  marginBottom: '12px',
+                }}
+              />
+              <div
+                style={{ width: '100%', height: '8px', background: '#f0f0f0', borderRadius: '4px' }}
+              />
             </Card>
           </div>
         </div>
-        
+
         {/* Skeleton Charts */}
         <Card className="mb-4">
-          <div style={{ width: '150px', height: '24px', background: '#e0e0e0', borderRadius: '4px', marginBottom: '16px' }} />
-          <div style={{ width: '100%', height: '250px', background: '#f5f5f5', borderRadius: '4px' }} />
+          <div
+            style={{
+              width: '150px',
+              height: '24px',
+              background: '#e0e0e0',
+              borderRadius: '4px',
+              marginBottom: '16px',
+            }}
+          />
+          <div
+            style={{ width: '100%', height: '250px', background: '#f5f5f5', borderRadius: '4px' }}
+          />
         </Card>
       </div>
     );
@@ -247,7 +300,8 @@ export const UsageOverview: React.FC = () => {
               <strong>{t('quotaExceeded', language)}</strong>
               <p className="mb-0 small">
                 {quotaStatus.over_quota.daily_request && t('dailyRequestQuotaExceeded', language)}
-                {quotaStatus.over_quota.monthly_request && t('monthlyRequestQuotaExceeded', language)}
+                {quotaStatus.over_quota.monthly_request &&
+                  t('monthlyRequestQuotaExceeded', language)}
                 {quotaStatus.over_quota.daily_token && t('dailyTokenQuotaExceeded', language)}
                 {quotaStatus.over_quota.monthly_token && t('monthlyTokenQuotaExceeded', language)}
               </p>
@@ -274,7 +328,8 @@ export const UsageOverview: React.FC = () => {
                   {formatTokens(quotaStatus?.daily.tokens.used ?? 0)}
                 </small>
                 <small className="text-muted">
-                  / {quotaStatus?.daily.tokens.limit
+                  /{' '}
+                  {quotaStatus?.daily.tokens.limit
                     ? formatTokens(quotaStatus.daily.tokens.limit)
                     : '∞'}
                 </small>
@@ -310,7 +365,8 @@ export const UsageOverview: React.FC = () => {
                   {formatNumber(quotaStatus?.daily.requests.used ?? 0)}
                 </small>
                 <small className="text-muted">
-                  / {quotaStatus?.daily.requests.limit
+                  /{' '}
+                  {quotaStatus?.daily.requests.limit
                     ? formatNumber(quotaStatus.daily.requests.limit)
                     : '∞'}
                 </small>
@@ -350,7 +406,8 @@ export const UsageOverview: React.FC = () => {
                   {formatTokens(quotaStatus?.monthly.tokens.used ?? 0)}
                 </small>
                 <small className="text-muted">
-                  / {quotaStatus?.monthly.tokens.limit
+                  /{' '}
+                  {quotaStatus?.monthly.tokens.limit
                     ? formatTokens(quotaStatus.monthly.tokens.limit)
                     : '∞'}
                 </small>
@@ -386,7 +443,8 @@ export const UsageOverview: React.FC = () => {
                   {formatNumber(quotaStatus?.monthly.requests.used ?? 0)}
                 </small>
                 <small className="text-muted">
-                  / {quotaStatus?.monthly.requests.limit
+                  /{' '}
+                  {quotaStatus?.monthly.requests.limit
                     ? formatNumber(quotaStatus.monthly.requests.limit)
                     : '∞'}
                 </small>
@@ -420,7 +478,17 @@ export const UsageOverview: React.FC = () => {
                 unit="M"
               />
             ) : (
-              <div style={{ width: '100%', height: '250px', background: '#f5f5f5', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div
+                style={{
+                  width: '100%',
+                  height: '250px',
+                  background: '#f5f5f5',
+                  borderRadius: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
                 <Loading size="sm" />
               </div>
             )}
@@ -433,7 +501,9 @@ export const UsageOverview: React.FC = () => {
             </div>
             <div className="text-center">
               <span className="text-muted small">{t('maximum', language)}:</span>
-              <span className="fw-medium ms-2 text-success">{formatTokens(tokenTrendStats.maximum)}</span>
+              <span className="fw-medium ms-2 text-success">
+                {formatTokens(tokenTrendStats.maximum)}
+              </span>
             </div>
           </div>
         </Card>
@@ -450,7 +520,17 @@ export const UsageOverview: React.FC = () => {
                 height={250}
               />
             ) : (
-              <div style={{ width: '100%', height: '250px', background: '#f5f5f5', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div
+                style={{
+                  width: '100%',
+                  height: '250px',
+                  background: '#f5f5f5',
+                  borderRadius: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
                 <Loading size="sm" />
               </div>
             )}
@@ -463,7 +543,9 @@ export const UsageOverview: React.FC = () => {
             </div>
             <div className="text-center">
               <span className="text-muted small">{t('maximum', language)}:</span>
-              <span className="fw-medium ms-2 text-primary">{formatNumber(requestTrendStats.maximum)}</span>
+              <span className="fw-medium ms-2 text-primary">
+                {formatNumber(requestTrendStats.maximum)}
+              </span>
             </div>
           </div>
         </Card>
@@ -477,9 +559,7 @@ export const UsageOverview: React.FC = () => {
             <p className="mb-1">
               <strong>{t('quotaLimitsHelp', language)}</strong>
             </p>
-            <p className="mb-0">
-              {t('quotaLimitsHelpDesc', language)}
-            </p>
+            <p className="mb-0">{t('quotaLimitsHelpDesc', language)}</p>
           </div>
         </div>
       </Card>

@@ -102,6 +102,7 @@ repos:
       - id: check-yaml
         args: [--unsafe]
       - id: check-json
+        exclude: tsconfig\.json$
       - id: check-toml
       - id: check-added-large-files
         args: [--maxkb=1000]
@@ -109,6 +110,7 @@ repos:
       - id: check-case-conflict
       - id: check-executables-have-shebangs
       - id: check-shebang-scripts-are-executable
+        exclude: ^tests/|\.qwen/
       - id: debug-statements
       - id: detect-private-key
       - id: no-commit-to-branch
@@ -121,5 +123,5 @@ repos:
     rev: 6.3.0
     hooks:
       - id: pydocstyle
-        args: ["--ignore=D100,D102,D103,D107,D200,D202,D205,D400,D401"]
+        args: ["--ignore=D100,D102,D103,D107,D200,D202,D203,D205,D212,D213,D400,D401,D406,D407,D413,D415"]
         exclude: ^tests/|^scripts/

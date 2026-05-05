@@ -5,14 +5,14 @@ Test script for Issue #24: Messages 页面 qwen 工具的 user 消息显示 OPEN
 验证修复：qwen 工具的 user 消息应该显示 qwen 标签，而不是 OPENCLAW 标签
 """
 
-import sys
 import os
+import sys
 import time
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from playwright.sync_api import sync_playwright, expect
+from playwright.sync_api import sync_playwright
 
 # Test configuration
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000")
@@ -121,14 +121,14 @@ def test_issue24():
                         print(f"  消息 {i+1}: role=user, source={source_text}")
 
                         # Check if tool_name is shown in the message meta
-                        tool_name_elem = msg.locator(".message-meta .text-muted:has(.bi-box-seam)")
+                        msg.locator(".message-meta .text-muted:has(.bi-box-seam)")
 
                         if source_text == "qwen":
                             qwen_user_messages += 1
-                            print(f"    ✓ 正确显示 qwen 标签")
+                            print("    ✓ 正确显示 qwen 标签")
                         elif source_text == "openclaw":
                             openclaw_user_messages += 1
-                            print(f"    ✗ 错误显示 openclaw 标签（应该显示 qwen）")
+                            print("    ✗ 错误显示 openclaw 标签（应该显示 qwen）")
                             test_passed = False
                         else:
                             print(f"    ? 显示其他标签: {source_text}")

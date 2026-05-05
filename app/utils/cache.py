@@ -217,7 +217,7 @@ class RedisCache(CacheBackend):
         """Get Redis client (lazy initialization)."""
         if self._client is None:
             try:
-                import redis
+                import redis  # type: ignore[import-untyped]
 
                 self._client = redis.Redis(
                     host=self.host,

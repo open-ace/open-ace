@@ -144,8 +144,8 @@ export const QuotaAlerts: React.FC = () => {
     setEditingUser(user);
     // Token quotas are stored in M (millions) units directly
     setFormData({
-      daily_token_quota: user.daily_token_quota || undefined,
-      monthly_token_quota: user.monthly_token_quota || undefined,
+      daily_token_quota: user.daily_token_quota ?? undefined,
+      monthly_token_quota: user.monthly_token_quota ?? undefined,
       daily_request_quota: user.daily_request_quota,
       monthly_request_quota: user.monthly_request_quota,
     });
@@ -163,8 +163,8 @@ export const QuotaAlerts: React.FC = () => {
     try {
       // Token quotas are stored in M (millions) units directly
       const submitData: UpdateQuotaRequest = {
-        daily_token_quota: formData.daily_token_quota || undefined,
-        monthly_token_quota: formData.monthly_token_quota || undefined,
+        daily_token_quota: formData.daily_token_quota ?? undefined,
+        monthly_token_quota: formData.monthly_token_quota ?? undefined,
         daily_request_quota: formData.daily_request_quota,
         monthly_request_quota: formData.monthly_request_quota,
       };
@@ -173,9 +173,10 @@ export const QuotaAlerts: React.FC = () => {
       handleCloseQuotaModal();
     } catch (err) {
       console.error('Failed to update quota:', err);
-      const errorMessage = err && typeof err === 'object' && 'message' in err 
-        ? String((err as { message: string }).message) 
-        : t('error', language);
+      const errorMessage =
+        err && typeof err === 'object' && 'message' in err
+          ? String((err as { message: string }).message)
+          : t('error', language);
       toast.error(t('error', language), errorMessage);
     }
   };
@@ -411,7 +412,9 @@ export const QuotaAlerts: React.FC = () => {
                         <small>{t('monthlyRequestQuota', language)}</small>
                         <small>
                           {formatNumber(user.requests_month ?? 0)} /{' '}
-                          {user.monthly_request_quota ? formatNumber(user.monthly_request_quota) : '∞'}
+                          {user.monthly_request_quota
+                            ? formatNumber(user.monthly_request_quota)
+                            : '∞'}
                         </small>
                       </div>
                       <Progress
@@ -734,50 +737,50 @@ export const QuotaAlerts: React.FC = () => {
                   </label>
                 </div>
               </div>
-            <div className="col-12">
-              <div className="form-check form-switch">
+              <div className="col-12">
+                <div className="form-check form-switch">
+                  <input
+                    className="form-check-input"
+                    type="checkbox"
+                    id="pushEnabled"
+                    checked={preferences.push_enabled}
+                    onChange={(e) =>
+                      setPreferences({ ...preferences, push_enabled: e.target.checked })
+                    }
+                  />
+                  <label className="form-check-label" htmlFor="pushEnabled">
+                    {t('pushNotifications', language)}
+                  </label>
+                </div>
+              </div>
+              <div className="col-12">
+                <label className="form-label">{t('webhookUrl', language)}</label>
                 <input
-                  className="form-check-input"
-                  type="checkbox"
-                  id="pushEnabled"
-                  checked={preferences.push_enabled}
-                  onChange={(e) =>
-                    setPreferences({ ...preferences, push_enabled: e.target.checked })
+                  type="url"
+                  className="form-control"
+                  value={preferences.webhook_url ?? ''}
+                  onChange={(e) => setPreferences({ ...preferences, webhook_url: e.target.value })}
+                  placeholder="https://example.com/webhook"
+                />
+              </div>
+              <div className="col-12">
+                <label className="form-label">{t('minSeverity', language)}</label>
+                <Select
+                  options={[
+                    { value: 'info', label: 'Info' },
+                    { value: 'warning', label: 'Warning' },
+                    { value: 'critical', label: 'Critical' },
+                  ]}
+                  value={preferences.min_severity}
+                  onChange={(value) =>
+                    setPreferences({
+                      ...preferences,
+                      min_severity: value as 'info' | 'warning' | 'critical',
+                    })
                   }
                 />
-                <label className="form-check-label" htmlFor="pushEnabled">
-                  {t('pushNotifications', language)}
-                </label>
               </div>
             </div>
-            <div className="col-12">
-              <label className="form-label">{t('webhookUrl', language)}</label>
-              <input
-                type="url"
-                className="form-control"
-                value={preferences.webhook_url ?? ''}
-                onChange={(e) => setPreferences({ ...preferences, webhook_url: e.target.value })}
-                placeholder="https://example.com/webhook"
-              />
-            </div>
-            <div className="col-12">
-              <label className="form-label">{t('minSeverity', language)}</label>
-              <Select
-                options={[
-                  { value: 'info', label: 'Info' },
-                  { value: 'warning', label: 'Warning' },
-                  { value: 'critical', label: 'Critical' },
-                ]}
-                value={preferences.min_severity}
-                onChange={(value) =>
-                  setPreferences({
-                    ...preferences,
-                    min_severity: value as 'info' | 'warning' | 'critical',
-                  })
-                }
-              />
-            </div>
-          </div>
           </form>
         </Modal>
       </>

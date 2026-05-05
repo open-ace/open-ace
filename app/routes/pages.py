@@ -6,12 +6,7 @@ Page routes for web UI. All pages are served by React SPA.
 
 import os
 
-from flask import (
-    Blueprint,
-    make_response,
-    request,
-    send_from_directory,
-)
+from flask import Blueprint, make_response, request, send_from_directory
 
 from app.auth.decorators import public_endpoint
 from app.services.auth_service import AuthService

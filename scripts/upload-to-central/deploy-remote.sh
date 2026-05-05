@@ -138,7 +138,7 @@ echo "Copying fetch scripts..."
 FETCH_DIR="$SCRIPT_DIR/../../scripts"
 if [ -d "$FETCH_DIR" ]; then
     scp "$FETCH_DIR"/fetch_*.py "$SSH_USER@$SSH_HOST:/tmp/" 2>/dev/null || echo "  (No fetch scripts found, skipping)"
-    
+
     # Copy shared modules
     echo "Copying shared modules..."
     ssh "$SSH_USER@$SSH_HOST" "mkdir -p /tmp/shared"
@@ -151,7 +151,7 @@ fi
 echo "Running deployment on remote..."
 ssh "$SSH_USER@$SSH_HOST" << EOF
     chmod +x /tmp/deploy-ace-sync.sh
-    
+
     # Run deployment (requires sudo for systemd)
     /tmp/deploy-ace-sync.sh \
         --server "$SERVER_URL" \
@@ -161,7 +161,7 @@ ssh "$SSH_USER@$SSH_HOST" << EOF
         --user "$SSH_USER" \
         --install-dir "$INSTALL_DIR" \
         --fetch-scripts /tmp
-    
+
     # Cleanup
     rm -f /tmp/deploy-ace-sync.sh /tmp/fetch_*.py
 EOF

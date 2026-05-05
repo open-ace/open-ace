@@ -39,13 +39,13 @@ jobs:
           script: |
             const weekInfo = process.env.WEEK_INFO;
             const currentDate = new Date().toISOString().split('T')[0];
-            
+
             const issueBody = `## 定期代码审查提醒
-            
+
             ${weekInfo} - ${currentDate}
-            
+
             请审查以下内容是否需要优化或更新：
-            
+
             | 类别 | 检查项 |
             |------|--------|
             | 🗄️ 数据库 | 查询性能、索引优化、表结构、迁移脚本 |
@@ -53,20 +53,20 @@ jobs:
             | 🖥️ 前端 | 包体积、渲染性能、组件优化、依赖更新 |
             | 🎨 UI | 用户体验、响应式设计、可访问性、交互流畅度 |
             | 📚 文档 | README、CHANGELOG、API 文档、部署指南 |
-            
+
             ### 检查清单
-            
+
             - [ ] 数据库查询是否有慢查询需要优化？
             - [ ] 后端 API 是否有性能瓶颈？
             - [ ] 前端包体积是否过大？
             - [ ] UI 是否有用户体验问题？
             - [ ] 文档是否与当前版本同步？
-            
+
             ---
-            
+
             *此提醒每3周自动生成一次。完成后请关闭此 issue。*
             `;
-            
+
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,

@@ -12,16 +12,9 @@ from datetime import datetime
 
 import pytest
 
-from app.modules.workspace.collaboration import (
-    CollaborationManager,
-    SharePermission,
-)
+from app.modules.workspace.collaboration import CollaborationManager, SharePermission
 from app.modules.workspace.prompt_library import PromptCategory, PromptLibrary, PromptTemplate
-from app.modules.workspace.session_manager import (
-    SessionManager,
-    SessionStatus,
-    SessionType,
-)
+from app.modules.workspace.session_manager import SessionManager, SessionStatus, SessionType
 from app.modules.workspace.state_sync import StateSyncManager, SyncEvent, SyncEventType
 from app.modules.workspace.tool_connector import ToolConnector, ToolInfo, ToolType
 

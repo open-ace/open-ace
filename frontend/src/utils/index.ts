@@ -26,14 +26,14 @@ export {
 } from './performance';
 
 const TOOL_DISPLAY_NAMES: Record<string, string> = {
-  'qwen': 'Qwen',
+  qwen: 'Qwen',
   'qwen-code': 'Qwen',
   'qwen-code-cli': 'Qwen',
-  'claude': 'Claude',
+  claude: 'Claude',
   'claude-code': 'Claude',
-  'openclaw': 'OpenClaw',
-  'openai': 'OpenAI',
-  'run_shell_command': 'Shell',
+  openclaw: 'OpenClaw',
+  openai: 'OpenAI',
+  run_shell_command: 'Shell',
 };
 
 export function formatToolName(name: string): string {

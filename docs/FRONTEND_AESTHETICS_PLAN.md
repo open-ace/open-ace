@@ -59,29 +59,29 @@
   --bg-tertiary: #e8eaed;     /* 第三级背景 */
   --bg-card: #ffffff;         /* 卡片背景 */
   --bg-sidebar: #1a1d21;      /* 侧边栏背景 - 深色 */
-  
+
   /* 主色调 */
   --color-primary: #0066ff;       /* 电光蓝 */
   --color-primary-hover: #0052cc; /* 悬停状态 */
   --color-primary-light: #e6f0ff; /* 浅色背景 */
-  
+
   /* 点缀色 */
   --color-accent: #ff3366;        /* 霓虹粉 - 强调 */
   --color-success: #00d68f;       /* 薄荷绿 */
   --color-warning: #ffaa00;       /* 琥珀黄 */
   --color-danger: #ff4757;        /* 珊瑚红 */
   --color-info: #00b4d8;          /* 青色 */
-  
+
   /* 文字色 */
   --text-primary: #1a1d21;        /* 主文字 */
   --text-secondary: #6b7280;      /* 次级文字 */
   --text-muted: #9ca3af;          /* 弱化文字 */
   --text-inverse: #ffffff;        /* 反色文字 */
-  
+
   /* 边框色 */
   --border-color: #e5e7eb;
   --border-color-light: #f3f4f6;
-  
+
   /* 阴影 */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
@@ -101,29 +101,29 @@
   --bg-tertiary: #21262d;     /* 第三级背景 */
   --bg-card: #21262d;         /* 卡片背景 */
   --bg-sidebar: #010409;      /* 侧边栏背景 */
-  
+
   /* 主色调 */
   --color-primary: #58a6ff;       /* GitHub 蓝 */
   --color-primary-hover: #79b8ff;
   --color-primary-light: #1f3a5f;
-  
+
   /* 点缀色 */
   --color-accent: #f78166;        /* 珊瑚橙 */
   --color-success: #3fb950;       /* 绿色 */
   --color-warning: #d29922;       /* 黄色 */
   --color-danger: #f85149;        /* 红色 */
   --color-info: #56d4dd;          /* 青色 */
-  
+
   /* 文字色 */
   --text-primary: #c9d1d9;
   --text-secondary: #8b949e;
   --text-muted: #6e7681;
   --text-inverse: #0d1117;
-  
+
   /* 边框色 */
   --border-color: #30363d;
   --border-color-light: #21262d;
-  
+
   /* 阴影 */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
@@ -150,7 +150,7 @@
 ```css
 .sidebar {
   background: var(--bg-sidebar);
-  background-image: 
+  background-image:
     linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
   background-size: 20px 20px;
@@ -223,8 +223,8 @@
   border-radius: 12px;
   padding: 1px;
   background: linear-gradient(135deg, var(--border-color) 0%, transparent 50%);
-  -webkit-mask: 
-    linear-gradient(#fff 0 0) content-box, 
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
     linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
@@ -284,14 +284,14 @@
 ```css
 .content-area {
   background-color: var(--bg-secondary);
-  background-image: 
+  background-image:
     radial-gradient(circle, var(--border-color) 1px, transparent 1px);
   background-size: 24px 24px;
 }
 
 /* 或者使用渐变深度 */
 .content-area {
-  background: 
+  background:
     linear-gradient(180deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
 }
 ```

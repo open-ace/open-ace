@@ -458,7 +458,7 @@ class MessageRepository:
         """
 
         result = self.db.fetch_one(query, tuple(params))
-        return result["total"] if result else 0
+        return int(result["total"]) if result else 0
 
     def get_conversation_timeline(self, session_id: str) -> list[dict]:
         """
@@ -618,7 +618,7 @@ class MessageRepository:
         query = f"SELECT COUNT(*) as count FROM daily_messages {where_clause}"
 
         result = self.db.fetch_one(query, tuple(params))
-        return result["count"] if result else 0
+        return int(result["count"]) if result else 0
 
     def get_user_token_totals(
         self,

@@ -271,59 +271,62 @@ export const ContentFilter: React.FC = () => {
                 placeholder={t('enterPattern', language)}
               />
             </div>
-          <div className="col-md-4">
-            <label className="form-label">{t('tableType', language)}</label>
-            <Select
-              options={TYPE_OPTIONS}
-              value={formData.type}
-              onChange={(value) =>
-                setFormData({ ...formData, type: value as CreateFilterRuleRequest['type'] })
-              }
-            />
-          </div>
-          <div className="col-md-4">
-            <label className="form-label">{t('tableSeverity', language)}</label>
-            <Select
-              options={SEVERITY_OPTIONS}
-              value={formData.severity}
-              onChange={(value) =>
-                setFormData({ ...formData, severity: value as CreateFilterRuleRequest['severity'] })
-              }
-            />
-          </div>
-          <div className="col-md-4">
-            <label className="form-label">{t('tableAction', language)}</label>
-            <Select
-              options={ACTION_OPTIONS}
-              value={formData.action}
-              onChange={(value) =>
-                setFormData({ ...formData, action: value as CreateFilterRuleRequest['action'] })
-              }
-            />
-          </div>
-          <div className="col-12">
-            <label className="form-label">{t('description', language)}</label>
-            <TextInput
-              value={formData.description ?? ''}
-              onChange={(value: string) => setFormData({ ...formData, description: value })}
-              placeholder={t('enterDescription', language)}
-            />
-          </div>
-          <div className="col-12">
-            <div className="form-check">
-              <input
-                className="form-check-input"
-                type="checkbox"
-                checked={formData.is_enabled}
-                onChange={(e) => setFormData({ ...formData, is_enabled: e.target.checked })}
-                id="ruleEnabled"
+            <div className="col-md-4">
+              <label className="form-label">{t('tableType', language)}</label>
+              <Select
+                options={TYPE_OPTIONS}
+                value={formData.type}
+                onChange={(value) =>
+                  setFormData({ ...formData, type: value as CreateFilterRuleRequest['type'] })
+                }
               />
-              <label className="form-check-label" htmlFor="ruleEnabled">
-                {t('enabled', language)}
-              </label>
+            </div>
+            <div className="col-md-4">
+              <label className="form-label">{t('tableSeverity', language)}</label>
+              <Select
+                options={SEVERITY_OPTIONS}
+                value={formData.severity}
+                onChange={(value) =>
+                  setFormData({
+                    ...formData,
+                    severity: value as CreateFilterRuleRequest['severity'],
+                  })
+                }
+              />
+            </div>
+            <div className="col-md-4">
+              <label className="form-label">{t('tableAction', language)}</label>
+              <Select
+                options={ACTION_OPTIONS}
+                value={formData.action}
+                onChange={(value) =>
+                  setFormData({ ...formData, action: value as CreateFilterRuleRequest['action'] })
+                }
+              />
+            </div>
+            <div className="col-12">
+              <label className="form-label">{t('description', language)}</label>
+              <TextInput
+                value={formData.description ?? ''}
+                onChange={(value: string) => setFormData({ ...formData, description: value })}
+                placeholder={t('enterDescription', language)}
+              />
+            </div>
+            <div className="col-12">
+              <div className="form-check">
+                <input
+                  className="form-check-input"
+                  type="checkbox"
+                  checked={formData.is_enabled}
+                  onChange={(e) => setFormData({ ...formData, is_enabled: e.target.checked })}
+                  id="ruleEnabled"
+                />
+                <label className="form-check-label" htmlFor="ruleEnabled">
+                  {t('enabled', language)}
+                </label>
+              </div>
             </div>
           </div>
-        </div>
         </form>
       </Modal>
     </div>

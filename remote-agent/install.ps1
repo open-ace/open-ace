@@ -140,7 +140,7 @@ if ($InstallCli) {
         # Temporarily relax error handling for npm (it may output warnings to stderr)
         $prevErrorAction = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
-        
+
         switch ($InstallCli) {
             "qwen-code-cli" {
                 npm install -g "@qwen-code/qwen-code@latest" 2>&1 | Out-Null
@@ -159,7 +159,7 @@ if ($InstallCli) {
                 }
             }
         }
-        
+
         # Restore error handling
         $ErrorActionPreference = $prevErrorAction
     } else {

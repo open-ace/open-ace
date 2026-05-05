@@ -183,7 +183,7 @@ export const Sessions: React.FC = () => {
         let attempts = 0;
         const maxAttempts = 30; // 30 seconds max
         while (attempts < maxAttempts) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          await new Promise((resolve) => setTimeout(resolve, 1000));
           const statusResponse = await fetch('/api/fetch/status');
           const statusResult = await statusResponse.json();
 
@@ -303,9 +303,7 @@ export const Sessions: React.FC = () => {
       <Card className="mb-3 sessions-filter-card">
         <div className="sessions-filter-row">
           <div className="sessions-filter-group">
-            <label className="sessions-filter-label">
-              {t('tableTool', language)}:
-            </label>
+            <label className="sessions-filter-label">{t('tableTool', language)}:</label>
             <Select
               options={toolOptions}
               value={filters.tool_name ?? ''}
@@ -315,9 +313,7 @@ export const Sessions: React.FC = () => {
             />
           </div>
           <div className="sessions-filter-group">
-            <label className="sessions-filter-label">
-              {t('status', language) ?? 'Status'}:
-            </label>
+            <label className="sessions-filter-label">{t('status', language) ?? 'Status'}:</label>
             <Select
               options={statusOptions}
               value={filters.status ?? ''}
@@ -333,7 +329,11 @@ export const Sessions: React.FC = () => {
                 <span
                   key={st}
                   className={`badge bg-${statusColors[st] ?? 'secondary'}`}
-                  style={{ fontSize: '0.7rem', cursor: 'pointer', opacity: filters.status === st ? 1 : 0.7 }}
+                  style={{
+                    fontSize: '0.7rem',
+                    cursor: 'pointer',
+                    opacity: filters.status === st ? 1 : 0.7,
+                  }}
                   onClick={() => handleFilterChange('status', filters.status === st ? '' : st)}
                 >
                   {count}
@@ -342,9 +342,7 @@ export const Sessions: React.FC = () => {
             </div>
           )}
           <div className="sessions-filter-group">
-            <label className="sessions-filter-label">
-              {t('type', language) ?? 'Type'}:
-            </label>
+            <label className="sessions-filter-label">{t('type', language) ?? 'Type'}:</label>
             <Select
               options={typeOptions}
               value={filters.session_type ?? ''}
@@ -405,7 +403,11 @@ export const Sessions: React.FC = () => {
                 isDeleting={deleteMutation.isPending}
                 isCompleting={completeMutation.isPending}
                 isRestoring={restoreMutation.isPending}
-                isRemoteControlPending={stopRemoteMutation.isPending || pauseRemoteMutation.isPending || resumeRemoteMutation.isPending}
+                isRemoteControlPending={
+                  stopRemoteMutation.isPending ||
+                  pauseRemoteMutation.isPending ||
+                  resumeRemoteMutation.isPending
+                }
               />
             ))}
           </div>
@@ -461,20 +463,18 @@ export const Sessions: React.FC = () => {
       <Modal
         isOpen={showDetailModal}
         onClose={handleCloseModal}
-        title={
-          (() => {
-            const sessionIdShort = sessionDetail?.data?.session_id?.slice(0, 8) ?? '';
-            const sessionTitle = sessionDetail?.data?.title ?? '';
-            // Check if title is meaningful (not just a default pattern like "qwen - 994f805a")
-            const isDefaultTitle = sessionTitle.includes(sessionIdShort) ||
-                                   sessionTitle.match(/^[a-z]+ - [a-f0-9]{8}$/i);
-            // Format: "994f805a（会话名字）" or just "994f805a"
-            if (sessionTitle && !isDefaultTitle) {
-              return `${sessionIdShort}（${sessionTitle}）`;
-            }
-            return sessionIdShort || (t('sessionDetails', language) ?? 'Session Details');
-          })()
-        }
+        title={(() => {
+          const sessionIdShort = sessionDetail?.data?.session_id?.slice(0, 8) ?? '';
+          const sessionTitle = sessionDetail?.data?.title ?? '';
+          // Check if title is meaningful (not just a default pattern like "qwen - 994f805a")
+          const isDefaultTitle =
+            sessionTitle.includes(sessionIdShort) || sessionTitle.match(/^[a-z]+ - [a-f0-9]{8}$/i);
+          // Format: "994f805a（会话名字）" or just "994f805a"
+          if (sessionTitle && !isDefaultTitle) {
+            return `${sessionIdShort}（${sessionTitle}）`;
+          }
+          return sessionIdShort || (t('sessionDetails', language) ?? 'Session Details');
+        })()}
         size="lg"
       >
         {isLoadingDetail ? (
@@ -553,7 +553,9 @@ const SessionCard: React.FC<SessionCardProps> = ({
           {/* Center: Badges */}
           <div className="session-card-badges">
             <Badge variant={statusColors[session.status] ?? 'secondary'}>
-              {statusIcons[session.status] && <i className={`bi ${statusIcons[session.status]} me-1`} />}
+              {statusIcons[session.status] && (
+                <i className={`bi ${statusIcons[session.status]} me-1`} />
+              )}
               {session.status}
             </Badge>
             <Badge variant={typeColors[session.session_type] ?? 'secondary'}>
@@ -562,7 +564,7 @@ const SessionCard: React.FC<SessionCardProps> = ({
             {isRemote && (
               <Badge variant="info">
                 <i className="bi bi-cloud-fill me-1" />
-                {session.machine_name || 'Remote'}
+                {session.machine_name ?? 'Remote'}
               </Badge>
             )}
           </div>
@@ -642,16 +644,39 @@ const SessionCard: React.FC<SessionCardProps> = ({
 
         {/* Row 2: Meta info — grid aligned columns */}
         <div className="session-card-meta">
-          <span><i className="bi bi-tools me-1" />{formatToolName(session.tool_name)}</span>
-          <span><i className="bi bi-pc-display me-1" />{session.host_name}</span>
-          <span className="meta-model">
-            {session.model && <><i className="bi bi-cpu me-1" />{session.model}</>}
+          <span>
+            <i className="bi bi-tools me-1" />
+            {formatToolName(session.tool_name)}
           </span>
-          <span><i className="bi bi-chat-dots me-1" />{session.message_count} {t('messages', language)}</span>
-          <span><i className="bi bi-cpu me-1" />{formatTokens(session.total_tokens)} {t('tokens', language)}</span>
-          <span><i className="bi bi-clock me-1" />{session.created_at ? formatDateTime(session.created_at) : '-'}</span>
+          <span>
+            <i className="bi bi-pc-display me-1" />
+            {session.host_name}
+          </span>
+          <span className="meta-model">
+            {session.model && (
+              <>
+                <i className="bi bi-cpu me-1" />
+                {session.model}
+              </>
+            )}
+          </span>
+          <span>
+            <i className="bi bi-chat-dots me-1" />
+            {session.message_count} {t('messages', language)}
+          </span>
+          <span>
+            <i className="bi bi-cpu me-1" />
+            {formatTokens(session.total_tokens)} {t('tokens', language)}
+          </span>
+          <span>
+            <i className="bi bi-clock me-1" />
+            {session.created_at ? formatDateTime(session.created_at) : '-'}
+          </span>
           {session.completed_at && (
-            <span><i className="bi bi-check-circle me-1" />{formatDateTime(session.completed_at)}</span>
+            <span>
+              <i className="bi bi-check-circle me-1" />
+              {formatDateTime(session.completed_at)}
+            </span>
           )}
         </div>
       </div>

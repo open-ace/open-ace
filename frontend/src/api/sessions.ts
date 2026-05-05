@@ -165,9 +165,7 @@ export const sessionsApi = {
   /**
    * Restore a historical session to workspace
    */
-  async restoreSession(
-    sessionId: string
-  ): Promise<{
+  async restoreSession(sessionId: string): Promise<{
     success: boolean;
     data?: {
       session_id: string;

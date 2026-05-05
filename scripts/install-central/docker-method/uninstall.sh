@@ -205,14 +205,14 @@ remove_volumes() {
 
     # Get project name from deploy directory
     local project_name=$(basename "$DEPLOY_DIR" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g')
-    
+
     # List of volume patterns to check
     local volume_patterns=(
         "open-ace"
         "${project_name}"
         "postgres"
     )
-    
+
     local all_volumes=""
     for pattern in "${volume_patterns[@]}"; do
         local vols=$(docker volume ls --filter "name=$pattern" --format "{{.Name}}" 2>/dev/null || true)
@@ -220,7 +220,7 @@ remove_volumes() {
             all_volumes="$all_volumes$vols"$'\n'
         fi
     done
-    
+
     # Remove duplicates and empty lines
     all_volumes=$(echo "$all_volumes" | sort -u | grep -v '^$' || true)
 

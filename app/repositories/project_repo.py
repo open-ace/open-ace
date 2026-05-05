@@ -62,7 +62,7 @@ class ProjectRepository:
                     (path, name, description, created_by, now, now, True, is_shared),
                     commit=True,
                 )
-                project_id = result["id"] if result else None
+                project_id = int(result["id"]) if result else None
             else:
                 # SQLite uses 1/0 for boolean columns
                 is_shared_int = adapt_boolean_value(is_shared)
@@ -75,7 +75,7 @@ class ProjectRepository:
                     """,
                     (path, name, description, created_by, now, now, is_active_int, is_shared_int),
                 )
-                project_id = cursor.lastrowid
+                project_id = int(cursor.lastrowid) if cursor.lastrowid is not None else None
 
             # If creator is specified, add them to user_projects
             if project_id and created_by:

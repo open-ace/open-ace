@@ -483,7 +483,7 @@ Phase 3: 模板使用 (1 天)
                 &lt;/select&gt;
             &lt;/div&gt;
             &lt;div class=&quot;col-md-4&quot;&gt;
-                &lt;input type=&quot;text&quot; id=&quot;search-input&quot; class=&quot;form-control&quot; 
+                &lt;input type=&quot;text&quot; id=&quot;search-input&quot; class=&quot;form-control&quot;
                        placeholder=&quot;Search templates...&quot; onkeyup=&quot;debounce(loadTemplates, 300)&quot;&gt;
             &lt;/div&gt;
         &lt;/div&gt;
@@ -991,7 +991,7 @@ class ROICalculator:
 
         # 构建查询
         query = '''
-            SELECT 
+            SELECT
                 COUNT(*) as request_count,
                 SUM(input_tokens) as total_input_tokens,
                 SUM(output_tokens) as total_output_tokens,
@@ -1014,7 +1014,7 @@ class ROICalculator:
 
         # 获取模型使用详情
         model_query = '''
-            SELECT tool_name, model, 
+            SELECT tool_name, model,
                    SUM(input_tokens) as input_tokens,
                    SUM(output_tokens) as output_tokens
             FROM daily_usage
@@ -1405,7 +1405,7 @@ class CostOptimizer:
 
         # 总体统计
         cursor.execute('''
-            SELECT 
+            SELECT
                 COUNT(*) as total_requests,
                 SUM(input_tokens) as total_input_tokens,
                 SUM(output_tokens) as total_output_tokens
@@ -1478,7 +1478,7 @@ class CostOptimizer:
                     if current_idx &lt; len(hierarchy) - 1:
                         cheaper_model = hierarchy[current_idx + 1]
                         savings = self._calculate_model_savings(
-                            model, cheaper_model, 
+                            model, cheaper_model,
                             row['input_tokens'], row['output_tokens']
                         )
 
