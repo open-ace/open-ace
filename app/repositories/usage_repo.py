@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from functools import lru_cache
 from typing import Optional, cast
 
-from app.repositories.database import Database
+from app.repositories.database import Database, escape_like
 
 logger = logging.getLogger(__name__)
 
@@ -672,7 +672,7 @@ class UsageRepository:
             # sender_name format is: {username}-{hostname}-{tool}
             # Use LIKE to match username prefix
             conditions.append("sender_name LIKE ?")
-            params.append(f"{user_name}%")
+            params.append(f"{escape_like(user_name)}%")
 
         query = f"""
             SELECT
@@ -764,7 +764,7 @@ class UsageRepository:
         # sender_name format is: {username}-{hostname}-{tool}
         # Use LIKE to match username prefix
         conditions = ["date >= ?", "date <= ?", "role = ?", "sender_name LIKE ?"]
-        params = [start_date, end_date, "assistant", f"{user_name}%"]
+        params = [start_date, end_date, "assistant", f"{escape_like(user_name)}%"]
 
         if host_name:
             conditions.append("host_name = ?")
@@ -892,7 +892,7 @@ class UsageRepository:
             # sender_name format is: {username}-{hostname}-{tool}
             # Use LIKE to match username prefix
             conditions.append("sender_name LIKE ?")
-            params.append(f"{user_name}%")
+            params.append(f"{escape_like(user_name)}%")
 
         query = f"""
             SELECT
@@ -954,7 +954,7 @@ class UsageRepository:
               AND role = 'assistant'
               AND (message_source IS NULL OR message_source != 'remote_workspace')
         """,
-            (f"{system_account}%", start_date, end_date),
+            (f"{escape_like(system_account)}%", start_date, end_date),
         )
 
         # Remote session usage from agent_sessions
@@ -1002,6 +1002,7 @@ class UsageRepository:
         Returns a list of daily records suitable for the user's usage report page.
         """
         # Local CLI usage from daily_messages
+        safe_account = escape_like(system_account)
         local_rows = self.db.fetch_all(
             """
             SELECT
@@ -1019,7 +1020,7 @@ class UsageRepository:
             GROUP BY date, tool_name
             ORDER BY date DESC
         """,
-            (f"{system_account}%", start_date, end_date),
+            (f"{safe_account}%", start_date, end_date),
         )
 
         # Remote session usage from agent_sessions + session_messages

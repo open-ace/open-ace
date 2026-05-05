@@ -7,7 +7,7 @@ Repository for message data access operations.
 import logging
 from typing import Any, Optional
 
-from app.repositories.database import Database
+from app.repositories.database import Database, escape_like
 
 logger = logging.getLogger(__name__)
 
@@ -226,7 +226,7 @@ class MessageRepository:
 
         if search:
             conditions.append("content LIKE ?")
-            params.append(f"%{search}%")
+            params.append(f"%{escape_like(search)}%")
 
         query = f"""
             SELECT * FROM daily_messages
@@ -295,7 +295,7 @@ class MessageRepository:
 
         if search:
             conditions.append("content LIKE ?")
-            params.append(f"%{search}%")
+            params.append(f"%{escape_like(search)}%")
 
         query = f"""
             SELECT * FROM daily_messages
@@ -611,7 +611,7 @@ class MessageRepository:
 
         if search:
             conditions.append("content LIKE ?")
-            params.append(f"%{search}%")
+            params.append(f"%{escape_like(search)}%")
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
@@ -1057,7 +1057,7 @@ class MessageRepository:
               AND sender_name LIKE ?
               AND role IN ('user', 'assistant')
         """
-        result = self.db.fetch_one(query, (start_date, end_date, f"{sender_prefix}%"))
+        result = self.db.fetch_one(query, (start_date, end_date, f"{escape_like(sender_prefix)}%"))
 
         if result:
             total_conversations = result["total_conversations"] or 0
@@ -1102,6 +1102,7 @@ class MessageRepository:
             List[Dict]: List of conversations, each with session_id and messages.
         """
         # Find distinct agent_session_ids that have user messages
+        safe_prefix = escape_like(sender_prefix)
         session_query = """
             SELECT DISTINCT COALESCE(agent_session_id, conversation_id) as session_id
             FROM daily_messages
@@ -1112,7 +1113,7 @@ class MessageRepository:
             LIMIT ?
         """
         sessions = self.db.fetch_all(
-            session_query, (start_date, end_date, f"{sender_prefix}%", limit)
+            session_query, (start_date, end_date, f"{safe_prefix}%", limit)
         )
 
         if not sessions:
