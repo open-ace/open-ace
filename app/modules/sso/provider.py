@@ -161,13 +161,21 @@ class SSOProvider(ABC):
         self.config = config
 
     @abstractmethod
-    def get_authorization_url(self, state: str, redirect_uri: Optional[str] = None) -> str:
+    def get_authorization_url(
+        self,
+        state: str,
+        redirect_uri: Optional[str] = None,
+        code_challenge: Optional[str] = None,
+        nonce: Optional[str] = None,
+    ) -> str:
         """
         Get the authorization URL for the OAuth flow.
 
         Args:
             state: State parameter for CSRF protection.
             redirect_uri: Override redirect URI.
+            code_challenge: PKCE code challenge (optional).
+            nonce: Nonce for replay protection (optional).
 
         Returns:
             str: Authorization URL.

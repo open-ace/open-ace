@@ -9,7 +9,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from app.repositories.database import (
     Database,
@@ -223,18 +223,14 @@ class QuotaManager:
 
         # Get quota limits based on period
         if period == "monthly":
+            monthly_quota = user.get("monthly_token_quota") if user else None
             token_limit = (
-                user.get("monthly_token_quota") * TOKEN_QUOTA_MULTIPLIER
-                if user and user.get("monthly_token_quota")
-                else None
+                monthly_quota * TOKEN_QUOTA_MULTIPLIER if monthly_quota is not None else None
             )
             request_limit = user.get("monthly_request_quota") if user else None
         else:
-            token_limit = (
-                user.get("daily_token_quota") * TOKEN_QUOTA_MULTIPLIER
-                if user and user.get("daily_token_quota")
-                else None
-            )
+            daily_quota = user.get("daily_token_quota") if user else None
+            token_limit = daily_quota * TOKEN_QUOTA_MULTIPLIER if daily_quota is not None else None
             request_limit = user.get("daily_request_quota") if user else None
 
         # Default limits if not set
@@ -586,7 +582,9 @@ class QuotaManager:
                     percentage=row.get("percentage", 0),
                     message=row.get("message", ""),
                     created_at=(
-                        datetime.fromisoformat(row["created_at"]) if row.get("created_at") else None
+                        datetime.fromisoformat(row["created_at"])
+                        if row.get("created_at")
+                        else datetime.utcnow()
                     ),
                     acknowledged=bool(row.get("acknowledged", 0)),
                     acknowledged_at=(
@@ -616,7 +614,7 @@ class QuotaManager:
                     (adapt_boolean_value(True), datetime.utcnow(), acknowledged_by, alert_id),
                 )
                 conn.commit()
-                return cursor.rowcount > 0
+                return cast("bool", cursor.rowcount > 0)
         except Exception as e:
             logger.error(f"Failed to acknowledge alert: {e}")
             return False
@@ -707,9 +705,9 @@ class QuotaManager:
         )
 
         # Build alerts lookup by user_id
-        alerts_lookup: dict[int, list[dict[str, Any]]] = {}
+        alerts_lookup: dict[int, list[QuotaAlert]] = {}
         for row in alert_rows:
-            user_id = row.get("user_id")
+            user_id = row.get("user_id", 0)
             if user_id not in alerts_lookup:
                 alerts_lookup[user_id] = []
             if len(alerts_lookup[user_id]) < 5:  # Limit to 5 alerts per user
@@ -728,7 +726,7 @@ class QuotaManager:
                         created_at=(
                             datetime.fromisoformat(row["created_at"])
                             if row.get("created_at")
-                            else None
+                            else datetime.utcnow()
                         ),
                         acknowledged=bool(row.get("acknowledged", 0)),
                         acknowledged_at=(
@@ -823,7 +821,9 @@ class QuotaManager:
                     percentage=row.get("percentage", 0),
                     message=row.get("message", ""),
                     created_at=(
-                        datetime.fromisoformat(row["created_at"]) if row.get("created_at") else None
+                        datetime.fromisoformat(row["created_at"])
+                        if row.get("created_at")
+                        else datetime.utcnow()
                     ),
                     acknowledged=bool(row.get("acknowledged", 0)),
                     acknowledged_at=(
@@ -855,7 +855,7 @@ class QuotaManager:
                 conn.commit()
 
             logger.info(f"Cleaned up {deleted} old quota alerts")
-            return deleted
+            return cast("int", deleted)
 
         except Exception as e:
             logger.error(f"Failed to cleanup alerts: {e}")

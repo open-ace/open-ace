@@ -6,7 +6,7 @@ Repository for project data access operations.
 
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional, cast
 
 from app.models.project import Project, ProjectDailyStats, ProjectStats, UserProject
 from app.repositories.database import Database
@@ -185,7 +185,7 @@ class ProjectRepository:
         """
         try:
             updates = []
-            params = []
+            params: list[Any] = []
 
             if name is not None:
                 updates.append("name = ?")
@@ -303,7 +303,7 @@ class ProjectRepository:
                         project_id,
                     ),
                 )
-                return cursor.lastrowid
+                return cast("Optional[int]", cursor.lastrowid)
         except Exception as e:
             logger.error(f"Error adding user project: {e}")
             return None
@@ -422,6 +422,8 @@ class ProjectRepository:
             WHERE project_id = ?
         """
         result = self.db.fetch_one(query, (project_id,))
+        if result is None:
+            return None
 
         # Get user-level stats
         user_stats = self.get_project_users(project_id)
@@ -524,7 +526,7 @@ class ProjectRepository:
             List[ProjectDailyStats]: List of daily statistics.
         """
         conditions = ["project_id = ?"]
-        params = [project_id]
+        params: list[Any] = [project_id]
 
         if start_date:
             conditions.append("date >= ?")

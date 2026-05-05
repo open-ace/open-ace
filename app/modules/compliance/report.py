@@ -11,7 +11,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from app.modules.governance.audit_logger import AuditLogger
 from app.repositories.database import Database
@@ -240,7 +240,7 @@ class ReportGenerator:
         total_requests = sum(r.get("total_requests", 0) or 0 for r in usage_data)
         unique_tools = {r.get("tool_name") for r in usage_data if r.get("tool_name")}
 
-        summary = {
+        summary: dict[str, Any] = {
             "period": {
                 "start": start_date,
                 "end": end_date,
@@ -295,7 +295,7 @@ class ReportGenerator:
         active_users = [u for u in user_activity if u.get("active_days", 0) > 0]
         total_users = len(user_activity)
 
-        summary = {
+        summary: dict[str, Any] = {
             "period": {
                 "start": start_date,
                 "end": end_date,
@@ -325,7 +325,7 @@ class ReportGenerator:
         # Calculate summary
         action_counts: dict[str, int] = {}
         severity_counts: dict[str, int] = {}
-        user_actions: dict[str, int] = {}
+        user_actions: dict[Union[str, int], int] = {}
 
         for log in audit_logs:
             action = log.action
@@ -338,7 +338,7 @@ class ReportGenerator:
             if user_id:
                 user_actions[user_id] = user_actions.get(user_id, 0) + 1
 
-        summary = {
+        summary: dict[str, Any] = {
             "period": {
                 "start": period_start.isoformat(),
                 "end": period_end.isoformat(),
@@ -375,7 +375,7 @@ class ReportGenerator:
             limit=10000,
         )
 
-        summary = {
+        summary: dict[str, Any] = {
             "period": {
                 "start": period_start.isoformat(),
                 "end": period_end.isoformat(),
@@ -424,7 +424,7 @@ class ReportGenerator:
         role_changes = [l for l in all_logs if l.action == "user_role_change"]
         content_blocked = [l for l in all_logs if l.action == "content_blocked"]
 
-        summary = {
+        summary: dict[str, Any] = {
             "period": {
                 "start": period_start.isoformat(),
                 "end": period_end.isoformat(),
@@ -476,7 +476,7 @@ class ReportGenerator:
         # Get user quota status
         users = self.user_repo.get_all_users(include_inactive=False)
 
-        summary = {
+        summary: dict[str, Any] = {
             "period": {
                 "start": period_start.isoformat(),
                 "end": period_end.isoformat(),
@@ -507,7 +507,7 @@ class ReportGenerator:
         security_summary, _ = self._generate_security_report(period_start, period_end, tenant_id)
         quota_summary, _ = self._generate_quota_usage(period_start, period_end, tenant_id)
 
-        summary = {
+        summary: dict[str, Any] = {
             "period": {
                 "start": period_start.isoformat(),
                 "end": period_end.isoformat(),
@@ -684,7 +684,7 @@ class ReportGenerator:
         """Get saved reports."""
         try:
             conditions = []
-            params = []
+            params: list[Any] = []
 
             if report_type:
                 conditions.append("report_type = ?")

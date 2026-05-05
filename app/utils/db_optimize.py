@@ -204,7 +204,7 @@ class DatabaseOptimizer:
         Returns:
             Dict with analysis results.
         """
-        analysis = {
+        analysis: dict[str, Any] = {
             "table": table_name,
             "row_count": 0,
             "indexes": [],

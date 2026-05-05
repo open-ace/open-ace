@@ -403,7 +403,7 @@ class StateSyncManager:
         cursor = conn.cursor()
 
         conditions = []
-        params = []
+        params: list[Any] = []
 
         if event_type:
             conditions.append("event_type = ?")

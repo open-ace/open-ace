@@ -46,8 +46,8 @@ class Usage:
         """Create from dictionary."""
         return cls(
             id=data.get("id"),
-            date=data.get("date"),
-            tool_name=data.get("tool_name"),
+            date=str(data.get("date", "")),
+            tool_name=str(data.get("tool_name", "")),
             host_name=data.get("host_name", "localhost"),
             tokens_used=data.get("tokens_used", 0),
             input_tokens=data.get("input_tokens", 0),

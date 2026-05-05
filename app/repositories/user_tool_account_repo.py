@@ -5,7 +5,7 @@ Repository for user_tool_accounts table operations.
 """
 
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from app.models.user_tool_account import UserToolAccount
 from app.repositories.database import Database
@@ -114,7 +114,7 @@ class UserToolAccountRepository:
     ) -> Optional[UserToolAccount]:
         """Update a tool account mapping."""
         updates = []
-        params = []
+        params: list[Any] = []
 
         if user_id is not None:
             updates.append("user_id = ?")
@@ -175,9 +175,9 @@ class UserToolAccountRepository:
     def _row_to_model(self, row: dict) -> UserToolAccount:
         """Convert database row to model."""
         return UserToolAccount(
-            id=row.get("id"),
-            user_id=row.get("user_id"),
-            tool_account=row.get("tool_account"),
+            id=int(row.get("id", 0)),
+            user_id=int(row.get("user_id", 0)),
+            tool_account=str(row.get("tool_account", "")),
             tool_type=row.get("tool_type"),
             description=row.get("description"),
             created_at=row.get("created_at"),
@@ -215,7 +215,7 @@ class UserToolAccountRepository:
         for account in tool_accounts:
             mapping = self.create(
                 user_id=user_id,
-                tool_account=account.get("tool_account"),
+                tool_account=str(account.get("tool_account", "")),
                 tool_type=account.get("tool_type"),
                 description=account.get("description"),
             )

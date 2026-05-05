@@ -132,6 +132,8 @@ def update_tenant(tenant_id: int):
         return jsonify({"error": "Failed to update tenant"}), 500
 
     tenant = tenant_service.get_tenant(tenant_id)
+    if tenant is None:
+        return jsonify({"error": "Tenant not found"}), 404
     return jsonify(tenant.to_dict())
 
 
@@ -151,6 +153,8 @@ def update_tenant_quota(tenant_id: int):
         return jsonify({"error": "Failed to update tenant quota"}), 500
 
     tenant = tenant_service.get_tenant(tenant_id)
+    if tenant is None:
+        return jsonify({"error": "Tenant not found"}), 404
     return jsonify(tenant.to_dict())
 
 
@@ -170,6 +174,8 @@ def update_tenant_settings(tenant_id: int):
         return jsonify({"error": "Failed to update tenant settings"}), 500
 
     tenant = tenant_service.get_tenant(tenant_id)
+    if tenant is None:
+        return jsonify({"error": "Tenant not found"}), 404
     return jsonify(tenant.to_dict())
 
 
@@ -187,6 +193,8 @@ def suspend_tenant(tenant_id: int):
         return jsonify({"error": "Failed to suspend tenant"}), 500
 
     tenant = tenant_service.get_tenant(tenant_id)
+    if tenant is None:
+        return jsonify({"error": "Tenant not found"}), 404
     return jsonify(tenant.to_dict())
 
 
@@ -201,6 +209,8 @@ def activate_tenant(tenant_id: int):
         return jsonify({"error": "Failed to activate tenant"}), 500
 
     tenant = tenant_service.get_tenant(tenant_id)
+    if tenant is None:
+        return jsonify({"error": "Tenant not found"}), 404
     return jsonify(tenant.to_dict())
 
 

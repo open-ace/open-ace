@@ -9,7 +9,7 @@ Fetches group details from Feishu API when needed.
 import json
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, cast
 
 import requests
 
@@ -32,7 +32,7 @@ def load_cache() -> dict:
 
     try:
         with open(CACHE_FILE, encoding="utf-8") as f:
-            return json.load(f)
+            return cast(dict, json.load(f))
     except (OSError, json.JSONDecodeError):
         return {"groups": {}, "last_updated": 0}
 
@@ -55,7 +55,7 @@ def get_feishu_token(app_id: str, app_secret: str) -> Optional[str]:
         data = response.json()
 
         if data.get("code") == 0:
-            return data.get("tenant_access_token")
+            return cast(Optional[str], data.get("tenant_access_token"))
         else:
             print(f"Failed to get Feishu token: {data}")
             return None
@@ -77,7 +77,7 @@ def get_group_subject(group_id: str, token: str) -> Optional[str]:
 
         if data.get("code") == 0:
             chat_info = data.get("data", {})
-            return chat_info.get("name")
+            return cast(Optional[str], chat_info.get("name"))
         else:
             print(f"Failed to get group info for {group_id}: {data}")
             return None
@@ -112,7 +112,7 @@ def get_group_subject_from_conversation_label(
     if chat_id in cache["groups"]:
         group_cache = cache["groups"][chat_id]
         if time.time() - group_cache.get("cached_at", 0) < CACHE_TTL:
-            return group_cache.get("name")
+            return cast(Optional[str], group_cache.get("name"))
 
     # Get access token
     token = get_feishu_token(app_id, app_secret)
@@ -138,7 +138,7 @@ def get_group_name(group_id: str, app_id: str, app_secret: str) -> Optional[str]
     if group_id in cache["groups"]:
         group_cache = cache["groups"][group_id]
         if time.time() - group_cache.get("cached_at", 0) < CACHE_TTL:
-            return group_cache.get("name")
+            return cast(Optional[str], group_cache.get("name"))
 
     # Get access token
     token = get_feishu_token(app_id, app_secret)
@@ -169,7 +169,7 @@ def get_group_name_from_conversation_label(
     if label in cache["groups"]:
         group_cache = cache["groups"][label]
         if time.time() - group_cache.get("cached_at", 0) < CACHE_TTL:
-            return group_cache.get("name")
+            return cast(Optional[str], group_cache.get("name"))
 
     # Try to get group name from API
     group_name = get_group_subject_from_conversation_label(label, app_id, app_secret)

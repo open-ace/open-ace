@@ -412,11 +412,11 @@ class DailyStatsRepository:
             if date:
                 # Refresh specific date
                 date_condition = "date = ?"
-                params = (date,)
+                params: tuple[Any, ...] = (date,)
             else:
                 # Refresh all
                 date_condition = "1=1"
-                params: tuple[Any, ...] = ()
+                params = ()
 
             if is_postgresql():
                 # Delete existing stats for the date(s)
@@ -531,11 +531,11 @@ class DailyStatsRepository:
             if date:
                 # Refresh specific date
                 date_condition = "date = ?"
-                params = (date,)
+                params: tuple[Any, ...] = (date,)
             else:
                 # Refresh all
                 date_condition = "1=1"
-                params: tuple[Any, ...] = ()
+                params = ()
 
             if is_postgresql():
                 # Delete existing stats for the date(s)

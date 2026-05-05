@@ -10,7 +10,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, cast
 
 logger = logging.getLogger(__name__)
 
@@ -389,7 +389,7 @@ class ToolConnector:
                 result = self._handlers[tool_name](
                     message=message, session_id=session_id, model=model, **kwargs
                 )
-                return result
+                return cast("dict[str, Any]", result)
             except Exception as e:
                 logger.error(f"Handler error for {tool_name}: {e}")
                 return {

@@ -341,7 +341,7 @@ class AlertNotifier:
         conn.commit()
         conn.close()
 
-        return alert_id
+        return int(alert_id) if alert_id is not None else 0
 
     async def broadcast(self, alert: Alert, target_user_id: Optional[int] = None) -> None:
         """
@@ -405,7 +405,7 @@ class AlertNotifier:
         cursor = conn.cursor()
 
         conditions = []
-        params = []
+        params: list[Any] = []
 
         if user_id is not None:
             conditions.append("user_id = ?")

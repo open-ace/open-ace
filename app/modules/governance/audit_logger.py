@@ -10,7 +10,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from app.repositories.database import Database, adapt_boolean_value, adapt_sql
 
@@ -115,7 +115,7 @@ class AuditLog:
 
         return cls(
             id=data.get("id"),
-            timestamp=timestamp,
+            timestamp=timestamp if isinstance(timestamp, datetime) else datetime.utcnow(),
             user_id=data.get("user_id"),
             username=data.get("username"),
             action=data.get("action", ""),
@@ -278,7 +278,7 @@ class AuditLogger:
             List[AuditLog]: List of matching audit logs.
         """
         conditions = []
-        params = []
+        params: list[Any] = []
 
         if user_id is not None:
             conditions.append("user_id = ?")
@@ -345,7 +345,7 @@ class AuditLogger:
             int: Count of matching logs.
         """
         conditions = []
-        params = []
+        params: list[Any] = []
 
         if user_id is not None:
             conditions.append("user_id = ?")
@@ -418,7 +418,7 @@ class AuditLogger:
                 conn.commit()
 
             logger.info(f"Cleaned up {deleted} audit logs older than {days} days")
-            return deleted
+            return cast("int", deleted)
 
         except Exception as e:
             logger.error(f"Failed to cleanup audit logs: {e}")

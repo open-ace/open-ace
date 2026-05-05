@@ -5,6 +5,7 @@ API routes for authentication operations.
 """
 
 import logging
+from typing import cast
 
 import bcrypt
 from flask import Blueprint, jsonify, make_response, request
@@ -23,14 +24,14 @@ user_repo = UserRepository()
 def verify_password(password: str, password_hash: str) -> bool:
     """Verify password against bcrypt hash."""
     try:
-        return bcrypt.checkpw(password.encode(), password_hash.encode())
+        return cast("bool", bcrypt.checkpw(password.encode(), password_hash.encode()))
     except Exception:
         return False
 
 
 def hash_password(password: str) -> str:
     """Hash a password using bcrypt."""
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
+    return cast("str", bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode())
 
 
 @auth_bp.route("/auth/login", methods=["POST"])
@@ -65,10 +66,14 @@ def api_login():
 
             manager = get_webui_manager()
             if manager.config.enabled and manager.config.multi_user_mode:
-                user_id = user.get("id")
+                user_id = int(user.get("id", 0))
                 # Get user's system_account
                 user_data = user_repo.get_user_by_id(user_id)
-                system_account = user_data.get("system_account") or user_data.get("username")
+                system_account = (
+                    user_data.get("system_account") or user_data.get("username")
+                    if user_data
+                    else None
+                )
                 if user_id and system_account:
                     logger.info(
                         f"Pre-starting webui for user {user_id} ({system_account}) on login"
@@ -109,7 +114,10 @@ def api_profile():
     if not is_auth:
         return jsonify(session_or_error), 401
 
-    user_id = session_or_error.get("user_id")
+    if session_or_error is None:
+        return jsonify({"error": "Invalid session"}), 401
+
+    user_id = int(session_or_error.get("user_id", 0))
     profile = auth_service.get_user_profile(user_id)
 
     if profile:
@@ -156,7 +164,10 @@ def api_current_user():
     if not is_auth:
         return jsonify(session_or_error), 401
 
-    user_id = session_or_error.get("user_id")
+    if session_or_error is None:
+        return jsonify({"error": "Invalid session"}), 401
+
+    user_id = int(session_or_error.get("user_id", 0))
     profile = auth_service.get_user_profile(user_id)
 
     if profile:
@@ -176,6 +187,9 @@ def api_change_password():
     if not is_auth:
         return jsonify(session_or_error), 401
 
+    if session_or_error is None:
+        return jsonify({"error": "Invalid session"}), 401
+
     data = request.get_json() or {}
     current_password = data.get("current_password")
     new_password = data.get("new_password")
@@ -183,7 +197,7 @@ def api_change_password():
     if not current_password or not new_password:
         return jsonify({"error": "Current password and new password required"}), 400
 
-    user_id = session_or_error.get("user_id")
+    user_id = int(session_or_error.get("user_id", 0))
 
     success, error = auth_service.change_password(
         user_id, current_password, new_password, verify_password, hash_password

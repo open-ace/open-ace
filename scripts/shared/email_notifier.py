@@ -5,6 +5,8 @@ AI Token Usage - Email Module
 Provides email sending functionality for the ai_token_usage project.
 """
 
+from __future__ import annotations
+
 import smtplib
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
@@ -17,7 +19,7 @@ def send_email(
     body: str,
     smtp_config: dict,
     to_email: str,
-    from_email: Optional[str] = None,
+    from_email: str | None = None,
     is_html: bool = False,
 ) -> bool:
     """
@@ -103,8 +105,8 @@ def format_tokens(tokens: int) -> str:
 def format_report_email(
     summary: dict[str, dict],
     daily_data: list[dict],
-    tool_name: Optional[str] = None,
-    report_date: Optional[str] = None,
+    tool_name: str | None = None,
+    report_date: str | None = None,
 ) -> str:
     """
     Format the email body from usage data.
@@ -373,7 +375,7 @@ def test_email_config(smtp_config: dict) -> bool:
 
         # Port 465 usually means SSL, ports 587/25 usually mean TLS
         use_ssl = smtp_port == 465
-        server: Union[smtplib.SMTP_SSL, smtplib.SMTP]
+        server: smtplib.SMTP_SSL | smtplib.SMTP
         if use_ssl:
             server = smtplib.SMTP_SSL(smtp_server, smtp_port)
         else:

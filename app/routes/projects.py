@@ -29,7 +29,7 @@ def _authenticate_user():
     if token:
         user_data = _load_user_from_token(token)
         if user_data:
-            user = user_repo.get_user_by_id(user_data.get("id"))
+            user = user_repo.get_user_by_id(int(user_data.get("id", 0)))
             if user:
                 g.user = user  # Store full user object for system_account access
                 g.user_id = user.get("id")
@@ -179,6 +179,8 @@ def api_create_project():
 
     if project_id:
         project = project_repo.get_project_by_id(project_id)
+        if project is None:
+            return jsonify({"error": "Project not found"}), 404
         return (
             jsonify(
                 {
@@ -247,6 +249,8 @@ def api_update_project(project_id):
 
     if success:
         project = project_repo.get_project_by_id(project_id)
+        if project is None:
+            return jsonify({"error": "Project not found"}), 404
         return jsonify({"success": True, "project": project.to_dict()})
 
     return jsonify({"error": "Failed to update project"}), 500

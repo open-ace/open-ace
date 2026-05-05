@@ -12,7 +12,7 @@ import time
 import uuid
 from contextlib import suppress
 from datetime import datetime, timedelta
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from app.repositories.database import DB_PATH, Database, is_postgresql
 
@@ -375,7 +375,7 @@ class RemoteAgentManager:
                 f"DELETE FROM remote_machines WHERE machine_id = {_param()}", (machine_id,)
             )
 
-            success = cursor.rowcount > 0
+            success = cast("bool", cursor.rowcount > 0)
             conn.commit()
 
         # Close active connection and cleanup rate limiter
@@ -383,7 +383,7 @@ class RemoteAgentManager:
             self._connections.pop(machine_id, None)
         self._last_heartbeat_db_write.pop(machine_id, None)
 
-        return success
+        return cast("bool", success)
 
     # ==================== Connection Management ====================
 
@@ -664,10 +664,10 @@ class RemoteAgentManager:
             """,
                 (machine_id, user_id),
             )
-            success = cursor.rowcount > 0
+            success = cast("bool", cursor.rowcount > 0)
             conn.commit()
 
-        return success
+        return cast("bool", success)
 
     def check_user_access(self, machine_id: str, user_id: int) -> Optional[str]:
         """Check user access, returns permission level ('admin'/'user') or None."""
@@ -685,7 +685,9 @@ class RemoteAgentManager:
 
         if result is None:
             return None
-        return result["permission"] if isinstance(result, dict) else result[0]
+        return cast(
+            "Optional[str]", result["permission"] if isinstance(result, dict) else result[0]
+        )
 
     def get_user_permission(self, machine_id: str, user_id: int) -> Optional[str]:
         """Return user's machine permission: 'admin', 'user', or None."""

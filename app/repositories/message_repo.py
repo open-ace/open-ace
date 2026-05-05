@@ -5,7 +5,7 @@ Repository for message data access operations.
 """
 
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from app.repositories.database import Database
 
@@ -337,8 +337,8 @@ class MessageRepository:
         """
         from datetime import datetime, timedelta
 
-        conditions = []
-        params = []
+        conditions: list[str] = []
+        params: list[Any] = []
 
         if date:
             conditions.append("date = ?")

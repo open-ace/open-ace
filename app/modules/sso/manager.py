@@ -9,7 +9,7 @@ import logging
 import secrets
 import threading
 from datetime import datetime, timedelta
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from app.modules.sso.oauth2 import OAuth2Provider
 from app.modules.sso.oidc import (
@@ -303,7 +303,7 @@ class SSOManager:
             with self._providers_lock:
                 self._providers[name] = provider
 
-            return provider
+            return cast("Optional[SSOProvider]", provider)
 
         except Exception as e:
             logger.error(f"Failed to load SSO provider {name}: {e}")
@@ -620,7 +620,7 @@ class SSOManager:
                 )
                 deleted = cursor.rowcount
                 conn.commit()
-                return deleted
+                return cast("int", deleted)
 
         except Exception as e:
             logger.error(f"Failed to cleanup sessions: {e}")

@@ -6,7 +6,7 @@ Repository for user data access operations.
 
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional, cast
 
 from app.repositories.database import Database, adapt_boolean_value, adapt_sql
 
@@ -88,7 +88,7 @@ class UserRepository:
                         system_account,
                     ),
                 )
-                return cursor.lastrowid
+                return cast("int", cursor.lastrowid)
         except Exception as e:
             logger.error(f"Error creating user: {e}")
             return None
@@ -182,7 +182,7 @@ class UserRepository:
             bool: True if successful.
         """
         updates = []
-        params = []
+        params: list[Any] = []
 
         if username is not None:
             updates.append("username = ?")
@@ -216,7 +216,7 @@ class UserRepository:
 
         try:
             cursor = self.db.execute(query, tuple(params))
-            return cursor.rowcount > 0
+            return cast("bool", cursor.rowcount > 0)
         except Exception as e:
             logger.error(f"Error updating user: {e}")
             return False
@@ -239,7 +239,7 @@ class UserRepository:
 
         try:
             cursor = self.db.execute(query, (password_hash, must_change_val, user_id))
-            return cursor.rowcount > 0
+            return cast("bool", cursor.rowcount > 0)
         except Exception as e:
             logger.error(f"Error updating password: {e}")
             return False
@@ -260,7 +260,7 @@ class UserRepository:
 
         try:
             cursor = self.db.execute(query, (must_change_val, user_id))
-            return cursor.rowcount > 0
+            return cast("bool", cursor.rowcount > 0)
         except Exception as e:
             logger.error(f"Error setting must_change_password: {e}")
             return False
@@ -303,7 +303,7 @@ class UserRepository:
 
         try:
             cursor = self.db.execute(query, (datetime.utcnow(), user_id))
-            return cursor.rowcount > 0
+            return cast("bool", cursor.rowcount > 0)
         except Exception as e:
             logger.error(f"Error soft deleting user: {e}")
             return False
@@ -322,7 +322,7 @@ class UserRepository:
 
         try:
             cursor = self.db.execute(query, (user_id,))
-            return cursor.rowcount > 0
+            return cast("bool", cursor.rowcount > 0)
         except Exception as e:
             logger.error(f"Error restoring user: {e}")
             return False
@@ -341,7 +341,7 @@ class UserRepository:
 
         try:
             cursor = self.db.execute(query, (user_id,))
-            return cursor.rowcount > 0
+            return cast("bool", cursor.rowcount > 0)
         except Exception as e:
             logger.error(f"Error hard deleting user: {e}")
             return False
@@ -394,7 +394,7 @@ class UserRepository:
 
         try:
             cursor = self.db.execute(query, tuple(params))
-            return cursor.rowcount > 0
+            return cast("bool", cursor.rowcount > 0)
         except Exception as e:
             logger.error(f"Error updating user quota: {e}")
             return False
@@ -474,7 +474,7 @@ class UserRepository:
 
         try:
             cursor = self.db.execute(query, (datetime.utcnow(),))
-            return cursor.rowcount
+            return cast("int", cursor.rowcount)
         except Exception as e:
             logger.error(f"Error cleaning up sessions: {e}")
             return 0
