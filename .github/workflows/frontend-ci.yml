@@ -104,6 +104,9 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium firefox webkit
 
+      - name: Build frontend
+        run: npm run build
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
