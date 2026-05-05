@@ -161,7 +161,7 @@ class OIDCProvider(OAuth2Provider):
 
             # Cache the result
             self._jwks_cache = jwks
-            self._jwks_cache_time: Optional[datetime] = datetime.utcnow()
+            self._jwks_cache_time = datetime.utcnow()
 
             logger.debug(f"Successfully fetched JWKS from {jwks_url}")
             return jwks

@@ -29,7 +29,7 @@ _fetch_status: dict[str, Any] = {
     "is_running": False,
     "last_run": None,
     "last_result": None,
-    "error": "",
+    "error": None,
 }
 _fetch_lock = threading.Lock()
 
