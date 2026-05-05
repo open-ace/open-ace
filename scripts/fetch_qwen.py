@@ -962,7 +962,6 @@ def fetch_and_save(
     print(f"\nProcessed {total_files} files, {len(all_messages)} messages")
 
     # Save daily_usage FIRST (most critical, lightweight)
-    # Filter by date range
     today = datetime.now().strftime("%Y-%m-%d")
     start_date = (datetime.now() - timedelta(days=days - 1)).strftime("%Y-%m-%d")
 

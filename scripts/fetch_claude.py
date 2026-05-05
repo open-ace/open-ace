@@ -539,6 +539,7 @@ def fetch_and_save(
     project_dir: Optional[Path] = None,
     hostname: Optional[str] = None,
     multi_user_mode: bool = False,
+    recent: bool = False,
 ) -> bool:
     """
     Fetch Claude usage and save to database.
@@ -548,6 +549,7 @@ def fetch_and_save(
         project_dir: Optional specific project directory
         hostname: Optional host name to identify this machine
         multi_user_mode: If True, scan all users' Claude directories
+        recent: If True, only process files modified today
 
     Returns:
         True if successful, False otherwise
@@ -580,6 +582,12 @@ def fetch_and_save(
     all_messages = []
     total_files = 0
 
+    recent_cutoff = (
+        datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+        if recent
+        else 0
+    )
+
     # Multi-user mode: scan all users' Claude directories
     if multi_user_mode:
         print("Multi-user mode: scanning all users' Claude directories...")
@@ -607,9 +615,12 @@ def fetch_and_save(
 
             for proj_dir in projects_to_scan:
                 jsonl_files = list(proj_dir.glob("*.jsonl"))
+                if recent:
+                    jsonl_files = [f for f in jsonl_files if f.stat().st_mtime >= recent_cutoff]
                 if not jsonl_files:
                     continue
-                print(f"  Scanning: {proj_dir.name} ({len(jsonl_files)} files)")
+                suffix = " [recent]" if recent else ""
+                print(f"  Scanning: {proj_dir.name} ({len(jsonl_files)} files{suffix})")
                 for f in jsonl_files:
                     total_files += 1
                     daily, messages = process_jsonl_file(f, hostname, system_account)
@@ -655,9 +666,12 @@ def fetch_and_save(
 
         for proj_dir in projects_to_scan:
             jsonl_files = list(proj_dir.glob("*.jsonl"))
+            if recent:
+                jsonl_files = [f for f in jsonl_files if f.stat().st_mtime >= recent_cutoff]
             if not jsonl_files:
                 continue
-            print(f"Scanning: {proj_dir.name} ({len(jsonl_files)} files)")
+            suffix = " [recent]" if recent else ""
+            print(f"Scanning: {proj_dir.name} ({len(jsonl_files)} files{suffix})")
             for f in jsonl_files:
                 total_files += 1
                 daily, messages = process_jsonl_file(f, hostname)
@@ -729,6 +743,11 @@ if __name__ == "__main__":
         "--config",
         help="Path to config.json file (useful when running as root via sudo)",
     )
+    parser.add_argument(
+        "--recent",
+        action="store_true",
+        help="Only process files modified today (for scheduler use)",
+    )
     args = parser.parse_args()
 
     # If --config is specified, use it to get database URL
@@ -751,5 +770,6 @@ if __name__ == "__main__":
         project_dir=Path(args.project) if args.project else None,
         hostname=args.hostname,
         multi_user_mode=args.multi_user,
+        recent=args.recent,
     )
     sys.exit(0 if success else 1)
