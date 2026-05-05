@@ -72,7 +72,7 @@ class UserRepository:
                 return result["id"] if result else None
             else:
                 # SQLite uses 1/0 for boolean columns
-                is_active_int = 1 if is_active else 0
+                is_active_int = adapt_boolean_value(is_active)
                 cursor = self.db.execute(
                     """
                     INSERT INTO users (username, email, password_hash, role, is_active, created_at, system_account)

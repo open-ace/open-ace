@@ -14,7 +14,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Optional, cast
 
-from app.repositories.database import Database, is_postgresql
+from app.repositories.database import Database, escape_like, is_postgresql
 from app.repositories.user_repo import UserRepository
 
 logger = logging.getLogger(__name__)
@@ -92,6 +92,7 @@ class UserDailyStatsAggregator:
         try:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
+                safe_prefix = escape_like(sender_prefix)
 
                 if is_postgresql():
                     cursor.execute(
@@ -118,7 +119,7 @@ class UserDailyStatsAggregator:
                             output_tokens = EXCLUDED.output_tokens,
                             updated_at = CURRENT_TIMESTAMP
                     """,
-                        (user_id, start_str, end_str, f"{sender_prefix}%"),
+                        (user_id, start_str, end_str, f"{safe_prefix}%"),
                     )
                 else:
                     now = datetime.utcnow().isoformat()
@@ -140,7 +141,7 @@ class UserDailyStatsAggregator:
                           AND dm.role = 'assistant'
                         GROUP BY dm.date
                     """,
-                        (user_id, now, start_str, end_str, f"{sender_prefix}%"),
+                        (user_id, now, start_str, end_str, f"{escape_like(sender_prefix)}%"),
                     )
 
                 conn.commit()

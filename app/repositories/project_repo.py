@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Any, Optional, cast
 
 from app.models.project import Project, ProjectDailyStats, ProjectStats, UserProject
-from app.repositories.database import Database
+from app.repositories.database import Database, adapt_boolean_value
 
 logger = logging.getLogger(__name__)
 
@@ -65,8 +65,8 @@ class ProjectRepository:
                 project_id = result["id"] if result else None
             else:
                 # SQLite uses 1/0 for boolean columns
-                is_shared_int = 1 if is_shared else 0
-                is_active_int = 1
+                is_shared_int = adapt_boolean_value(is_shared)
+                is_active_int = adapt_boolean_value(True)
                 cursor = self.db.execute(
                     """
                     INSERT INTO projects (path, name, description, created_by, created_at,

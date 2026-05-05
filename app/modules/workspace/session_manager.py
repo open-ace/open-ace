@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Optional, Union
 
-from app.repositories.database import DB_PATH, get_database_url, is_postgresql
+from app.repositories.database import DB_PATH, escape_like, get_database_url, is_postgresql
 
 logger = logging.getLogger(__name__)
 
@@ -890,7 +890,7 @@ class SessionManager:
 
         if search:
             conditions.append(f"title LIKE {_param()}")
-            params.append(f"%{search}%")
+            params.append(f"%{escape_like(search)}%")
 
         where_clause = " AND ".join(conditions) if conditions else "1=1"
 

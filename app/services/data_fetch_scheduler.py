@@ -200,7 +200,7 @@ class DataFetchScheduler:
                     FROM user_daily_stats uds
                     JOIN users u ON uds.user_id = u.id
                     WHERE uds.date = ?
-                      AND u.is_active = 1
+                      AND {adapt_boolean_condition("u.is_active", True)}
                       AND (
                         uds.requests >= COALESCE(u.daily_request_quota, 999999)
                         OR uds.tokens >= COALESCE(u.daily_token_quota, 999999) * 1000000
@@ -222,7 +222,7 @@ class DataFetchScheduler:
                     FROM user_daily_stats uds
                     JOIN users u ON uds.user_id = u.id
                     WHERE uds.date >= ? AND uds.date <= ?
-                      AND u.is_active = 1
+                      AND {adapt_boolean_condition("u.is_active", True)}
                       AND u.monthly_token_quota IS NOT NULL
                       AND (
                         SUM(uds.requests) >= COALESCE(u.monthly_request_quota, 999999)

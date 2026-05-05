@@ -17,6 +17,7 @@ from app.repositories.database import (
     DB_PATH,
     adapt_boolean_condition,
     adapt_sql,
+    escape_like,
     get_database_url,
     is_postgresql,
 )
@@ -419,12 +420,12 @@ class PromptLibrary:
 
         if search:
             conditions.append("(name LIKE ? OR description LIKE ?)")
-            params.extend([f"%{search}%", f"%{search}%"])
+            params.extend([f"%{escape_like(search)}%", f"%{escape_like(search)}%"])
 
         if tags:
             for tag in tags:
                 conditions.append("tags LIKE ?")
-                params.append(f"%{tag}%")
+                params.append(f"%{escape_like(tag)}%")
 
         where_clause = " AND ".join(conditions) if conditions else "1=1"
 

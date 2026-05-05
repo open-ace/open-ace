@@ -16,6 +16,7 @@ from app.repositories.database import (
     adapt_boolean_condition,
     adapt_boolean_value,
     adapt_sql,
+    escape_like,
 )
 from app.repositories.user_repo import UserRepository
 
@@ -545,7 +546,7 @@ class QuotaManager:
                       AND role = 'assistant'
                       AND (message_source IS NULL OR message_source != 'remote_workspace')
                 """,
-                    (f"{system_account}%", start_date, end_date),
+                    (f"{escape_like(system_account)}%", start_date, end_date),
                 )
                 local_tokens = int(local_result["tokens"]) if local_result else 0
                 local_requests = int(local_result["requests"]) if local_result else 0
@@ -662,7 +663,7 @@ class QuotaManager:
             system_account = user.get("system_account") or user.get("username", "")
             if system_account:
                 sender_conditions.append("sender_name LIKE ?")
-                sender_params.append(f"{system_account}%")
+                sender_params.append(f"{escape_like(system_account)}%")
 
         local_usage_lookup: dict[Any, dict[str, int]] = {}
         if sender_conditions:
