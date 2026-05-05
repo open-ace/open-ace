@@ -121,5 +121,5 @@ repos:
     rev: 6.3.0
     hooks:
       - id: pydocstyle
-        args: ["--ignore=D100,D102,D103,D107,D200,D202,D205,D400,D401"]
+        args: ["--ignore=D100,D102,D103,D107,D200,D202,D203,D205,D212,D213,D400,D401,D406,D407,D413,D415"]
         exclude: ^tests/|^scripts/

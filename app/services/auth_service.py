@@ -350,7 +350,7 @@ class AuthService:
             return False
         if isinstance(expires_at, str):
             expires_at = datetime.fromisoformat(expires_at)
-        return expires_at < datetime.utcnow()
+        return bool(expires_at < datetime.utcnow())
 
     def get_user_profile(self, user_id: int) -> Optional[dict]:
         """

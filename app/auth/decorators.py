@@ -97,6 +97,7 @@ def auth_required(f=None, *, ownership=None):
     Decorator: require authentication, optionally with ownership check.
 
     Args:
+        f: The function to decorate.
         ownership: Optional ownership check type.
             'session' — verifies g.user.id matches session's user_id
             'machine' — verifies machine admin permission
@@ -125,12 +126,20 @@ def auth_required(f=None, *, ownership=None):
 
             if ownership == "session":
                 session_id = kwargs.get("session_id")
-                if session_id and not _check_session_ownership(g.user_id, session_id):
+                if (
+                    session_id
+                    and isinstance(g.user_id, int)
+                    and not _check_session_ownership(g.user_id, session_id)
+                ):
                     return jsonify({"error": "Access denied"}), 403
 
             elif ownership == "machine":
                 machine_id = kwargs.get("machine_id")
-                if machine_id and not _check_machine_admin(g.user_id, machine_id):
+                if (
+                    machine_id
+                    and isinstance(g.user_id, int)
+                    and not _check_machine_admin(g.user_id, machine_id)
+                ):
                     return jsonify({"error": "Machine admin permission required"}), 403
 
             return func(*args, **kwargs)

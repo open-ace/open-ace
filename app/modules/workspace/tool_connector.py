@@ -403,7 +403,7 @@ class ToolConnector:
                 result = await self._adapters[tool_name].send_message(
                     message=message, session_id=session_id, model=model, **kwargs
                 )
-                return result
+                return dict(result)
             except Exception as e:
                 logger.error(f"Adapter error for {tool_name}: {e}")
                 return {

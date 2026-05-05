@@ -661,7 +661,7 @@ class RemoteSessionManager:
             return self._user_name_cache[user_id]
         try:
             user = self._user_repo.get_user_by_id(user_id)
-            name = user.get("display_name") or user.get("username", "") if user else ""
+            name = str(user.get("display_name") or user.get("username", "")) if user else ""
             self._user_name_cache[user_id] = name
             return name
         except Exception:

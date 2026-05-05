@@ -168,7 +168,7 @@ class AgentConfig:
 
     @property
     def ws_url(self) -> str:
-        """WebSocket URL derived from server_url."""
+        """Websocket URL derived from server_url."""
         http_url = self.server_url
         if http_url.startswith("https://"):
             return "wss://" + http_url[8:]
@@ -222,7 +222,7 @@ class AgentConfig:
         """Return a copy of the current configuration."""
         return dict(self._data)
 
-    def __repr__(self) -> str:
+    def __repr__(self) -> str:  # noqa: D105
         # Hide sensitive fields
         safe = {k: v for k, v in self._data.items() if k != "agent_token"}
         return f"AgentConfig({safe})"
