@@ -121,13 +121,7 @@ jobs:
         run: |
           cd ..
           mkdir -p ~/.open-ace
-          python3 -c "
-          import sys
-          sys.path.insert(0, '.')
-          from scripts.shared.db import init_database, init_auth_database
-          init_database()
-          init_auth_database()
-          "
+          sqlite3 ~/.open-ace/ace.db < schema/schema-sqlite.sql
 
       - name: Create admin user
         run: |
