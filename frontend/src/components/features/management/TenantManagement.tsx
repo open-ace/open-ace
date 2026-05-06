@@ -60,7 +60,14 @@ export const TenantManagement: React.FC = () => {
     contact_email: '',
     contact_name: '',
   });
-  const [quotaData, setQuotaData] = useState({ monthly_tokens: 0, monthly_requests: 0 });
+  const [quotaData, setQuotaData] = useState({
+    daily_token_limit: 1000000,
+    monthly_token_limit: 30000000,
+    daily_request_limit: 10000,
+    monthly_request_limit: 300000,
+    max_users: 100,
+    max_sessions_per_user: 5,
+  });
 
   // Fetch tenants
   const fetchTenants = React.useCallback(async () => {
@@ -122,8 +129,12 @@ export const TenantManagement: React.FC = () => {
   const handleOpenQuota = (tenant: Tenant) => {
     setEditingTenant(tenant);
     setQuotaData({
-      monthly_tokens: tenant.quota?.monthly_tokens ?? 100000,
-      monthly_requests: tenant.quota?.monthly_requests ?? 10000,
+      daily_token_limit: tenant.quota?.daily_token_limit ?? 1000000,
+      monthly_token_limit: tenant.quota?.monthly_token_limit ?? 30000000,
+      daily_request_limit: tenant.quota?.daily_request_limit ?? 10000,
+      monthly_request_limit: tenant.quota?.monthly_request_limit ?? 300000,
+      max_users: tenant.quota?.max_users ?? 100,
+      max_sessions_per_user: tenant.quota?.max_sessions_per_user ?? 5,
     });
     setShowQuotaModal(true);
   };
@@ -328,28 +339,30 @@ export const TenantManagement: React.FC = () => {
                       <Badge variant={getStatusVariant(tenant.status)}>{tenant.status}</Badge>
                     </td>
                     <td>
-                      {tenant.quota ? (
+                      {tenant.quota && tenant.total_tokens_used !== undefined ? (
                         <div>
                           <div className="progress" style={{ height: '6px' }}>
                             <div
                               className={cn(
                                 'progress-bar',
-                                (tenant.quota.used_tokens / tenant.quota.monthly_tokens) * 100 >= 90
+                                (tenant.total_tokens_used / tenant.quota.monthly_token_limit) *
+                                  100 >=
+                                90
                                   ? 'bg-danger'
-                                  : (tenant.quota.used_tokens / tenant.quota.monthly_tokens) *
-                                        100 >=
-                                      70
+                                  : (tenant.total_tokens_used / tenant.quota.monthly_token_limit) *
+                                      100 >=
+                                    70
                                     ? 'bg-warning'
                                     : 'bg-success'
                               )}
                               style={{
-                                width: `${Math.min(100, (tenant.quota.used_tokens / tenant.quota.monthly_tokens) * 100)}%`,
+                                width: `${Math.min(100, (tenant.total_tokens_used / tenant.quota.monthly_token_limit) * 100)}%`,
                               }}
                             />
                           </div>
                           <small className="text-muted">
-                            {tenant.quota.used_tokens.toLocaleString()} /{' '}
-                            {tenant.quota.monthly_tokens.toLocaleString()}
+                            {tenant.total_tokens_used.toLocaleString()} /{' '}
+                            {tenant.quota.monthly_token_limit.toLocaleString()}
                           </small>
                         </div>
                       ) : (
@@ -488,7 +501,7 @@ export const TenantManagement: React.FC = () => {
         isOpen={showQuotaModal}
         onClose={handleCloseQuotaModal}
         title={t('editQuota', language)}
-        size="sm"
+        size="md"
         footer={
           <>
             <Button variant="secondary" onClick={handleCloseQuotaModal}>
@@ -507,25 +520,84 @@ export const TenantManagement: React.FC = () => {
           }}
         >
           <div className="row g-3">
-            <div className="col-12">
-              <label className="form-label">{t('monthlyTokens', language)}</label>
+            <div className="col-md-6">
+              <label className="form-label">{t('dailyTokenLimit', language)}</label>
               <input
                 type="number"
                 className="form-control"
-                value={quotaData.monthly_tokens}
+                value={quotaData.daily_token_limit}
                 onChange={(e) =>
-                  setQuotaData({ ...quotaData, monthly_tokens: parseInt(e.target.value) || 0 })
+                  setQuotaData({
+                    ...quotaData,
+                    daily_token_limit: parseInt(e.target.value) || 0,
+                  })
                 }
               />
             </div>
-            <div className="col-12">
-              <label className="form-label">{t('monthlyRequests', language)}</label>
+            <div className="col-md-6">
+              <label className="form-label">{t('monthlyTokenLimit', language)}</label>
               <input
                 type="number"
                 className="form-control"
-                value={quotaData.monthly_requests}
+                value={quotaData.monthly_token_limit}
                 onChange={(e) =>
-                  setQuotaData({ ...quotaData, monthly_requests: parseInt(e.target.value) || 0 })
+                  setQuotaData({
+                    ...quotaData,
+                    monthly_token_limit: parseInt(e.target.value) || 0,
+                  })
+                }
+              />
+            </div>
+            <div className="col-md-6">
+              <label className="form-label">{t('dailyRequestLimit', language)}</label>
+              <input
+                type="number"
+                className="form-control"
+                value={quotaData.daily_request_limit}
+                onChange={(e) =>
+                  setQuotaData({
+                    ...quotaData,
+                    daily_request_limit: parseInt(e.target.value) || 0,
+                  })
+                }
+              />
+            </div>
+            <div className="col-md-6">
+              <label className="form-label">{t('monthlyRequestLimit', language)}</label>
+              <input
+                type="number"
+                className="form-control"
+                value={quotaData.monthly_request_limit}
+                onChange={(e) =>
+                  setQuotaData({
+                    ...quotaData,
+                    monthly_request_limit: parseInt(e.target.value) || 0,
+                  })
+                }
+              />
+            </div>
+            <div className="col-md-6">
+              <label className="form-label">{t('maxUsers', language)}</label>
+              <input
+                type="number"
+                className="form-control"
+                value={quotaData.max_users}
+                onChange={(e) =>
+                  setQuotaData({ ...quotaData, max_users: parseInt(e.target.value) || 1 })
+                }
+              />
+            </div>
+            <div className="col-md-6">
+              <label className="form-label">{t('maxSessionsPerUser', language)}</label>
+              <input
+                type="number"
+                className="form-control"
+                value={quotaData.max_sessions_per_user}
+                onChange={(e) =>
+                  setQuotaData({
+                    ...quotaData,
+                    max_sessions_per_user: parseInt(e.target.value) || 1,
+                  })
                 }
               />
             </div>
