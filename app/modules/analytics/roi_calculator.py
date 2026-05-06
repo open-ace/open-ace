@@ -13,6 +13,7 @@ from typing import Any, Optional
 
 from app.repositories.database import Database
 from app.utils.cache import cached
+from app.utils.tool_names import normalize_tool_name
 
 logger = logging.getLogger(__name__)
 
@@ -482,10 +483,10 @@ class ROICalculator:
         """
         model_rows = self.db.fetch_all(model_query, (start_date, end_date))
 
-        # Group model data by tool
+        # Group model data by tool (normalize tool names)
         model_data_by_tool: dict[str, list[dict]] = {}
         for row in model_rows:
-            tool = row.get("tool_name")
+            tool = normalize_tool_name(row.get("tool_name", ""))
             if tool:
                 if tool not in model_data_by_tool:
                     model_data_by_tool[tool] = []
@@ -493,7 +494,7 @@ class ROICalculator:
 
         result = {}
         for row in rows:
-            tool = row.get("tool_name")
+            tool = normalize_tool_name(row.get("tool_name", ""))
             if not tool:
                 continue
 
@@ -696,7 +697,7 @@ class ROICalculator:
 
             breakdown.append(
                 CostBreakdown(
-                    tool_name=row.get("tool_name") or "unknown",
+                    tool_name=normalize_tool_name(row.get("tool_name") or "unknown"),
                     model=model,
                     requests=row.get("requests") or 0,
                     input_tokens=input_tokens,
