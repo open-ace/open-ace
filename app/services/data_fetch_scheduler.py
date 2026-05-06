@@ -190,7 +190,7 @@ class DataFetchScheduler:
             summary_service.refresh_summary()
             logger.info("Usage summary refreshed")
         except Exception as e:
-            logger.exception(f"Error refreshing usage summary: {e}")
+            logger.warning(f"Usage summary refresh failed: {e}")
 
     def _check_quotas(self):
         """Check all users' quotas and enforce limits after data refresh."""
