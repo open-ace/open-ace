@@ -602,6 +602,10 @@ const translations: Record<Language, Translations> = {
     activate: 'Activate',
     suspend: 'Suspend',
     monthlyTokens: 'Monthly Tokens',
+    monthlyTokenLimit: 'Monthly Token Limit',
+    monthlyRequestLimit: 'Monthly Request Limit',
+    maxUsers: 'Max Users',
+    maxSessionsPerUser: 'Max Sessions/User',
     quota: 'Quota',
 
     // SSO Settings
@@ -1326,6 +1330,10 @@ const translations: Record<Language, Translations> = {
     activate: '激活',
     suspend: '暂停',
     monthlyTokens: '每月 Token',
+    monthlyTokenLimit: '每月 Token 限额',
+    monthlyRequestLimit: '每月请求限额',
+    maxUsers: '最大用户数',
+    maxSessionsPerUser: '每用户最大会话数',
     quota: '配额',
 
     // SSO Settings
