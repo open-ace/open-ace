@@ -2,12 +2,12 @@
  * ProjectManagement Component - Project management page
  *
  * Features:
- * - Project list with statistics
+ * - Project list with statistics and sortable columns
  * - View project details
  * - Delete projects
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, startTransition } from 'react';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import {
@@ -25,6 +25,40 @@ import {
 import { getAllProjectStats, deleteProject, type ProjectStats } from '@/api/projects';
 import { formatDateTime } from '@/utils';
 
+type ProjectSortKey =
+  | 'project_name'
+  | 'total_users'
+  | 'total_tokens'
+  | 'total_requests'
+  | 'total_duration_seconds'
+  | 'last_access';
+type SortDirection = 'asc' | 'desc';
+
+const SortableHeader: React.FC<{
+  columnKey: ProjectSortKey;
+  currentSortKey: ProjectSortKey | null;
+  sortDirection: SortDirection;
+  onSort: (key: ProjectSortKey) => void;
+  children: React.ReactNode;
+}> = ({ columnKey, currentSortKey, sortDirection, onSort, children }) => (
+  <th
+    onClick={() => onSort(columnKey)}
+    style={{ cursor: 'pointer' }}
+    aria-sort={
+      currentSortKey === columnKey
+        ? sortDirection === 'asc'
+          ? 'ascending'
+          : 'descending'
+        : undefined
+    }
+  >
+    {children}
+    {currentSortKey === columnKey && (
+      <i className={`bi bi-caret-${sortDirection === 'asc' ? 'up' : 'down'}-fill ms-1`} />
+    )}
+  </th>
+);
+
 export const ProjectManagement: React.FC = () => {
   const language = useLanguage();
   const [stats, setStats] = useState<ProjectStats[]>([]);
@@ -33,6 +67,8 @@ export const ProjectManagement: React.FC = () => {
   const [selectedProject, setSelectedProject] = useState<ProjectStats | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ProjectStats | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [sortKey, setSortKey] = useState<ProjectSortKey | null>(null);
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
   const fetchStats = async () => {
     setIsLoading(true);
@@ -76,6 +112,38 @@ export const ProjectManagement: React.FC = () => {
     const totalDuration = stats.reduce((sum, p) => sum + p.total_duration_seconds, 0);
     return { totalProjects, totalUsers, totalTokens, totalDuration };
   }, [stats]);
+
+  const handleSort = (key: ProjectSortKey) => {
+    startTransition(() => {
+      if (sortKey === key) {
+        setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+      } else {
+        setSortKey(key);
+        setSortDirection('desc');
+      }
+    });
+  };
+
+  const sortedStats = useMemo(() => {
+    if (!sortKey) return stats;
+    return [...stats].sort((a, b) => {
+      let cmp: number;
+      if (sortKey === 'project_name') {
+        const aName = a.project_name ?? a.project_path;
+        const bName = b.project_name ?? b.project_path;
+        cmp = aName.localeCompare(bName);
+      } else if (sortKey === 'last_access') {
+        const aVal = a.last_access ?? '';
+        const bVal = b.last_access ?? '';
+        cmp = aVal.localeCompare(bVal);
+      } else {
+        const aVal = Number(a[sortKey]) || 0;
+        const bVal = Number(b[sortKey]) || 0;
+        cmp = aVal - bVal;
+      }
+      return sortDirection === 'asc' ? cmp : -cmp;
+    });
+  }, [stats, sortKey, sortDirection]);
 
   const formatDuration = (seconds: number): string => {
     if (seconds < 60) return `${seconds}s`;
@@ -166,17 +234,59 @@ export const ProjectManagement: React.FC = () => {
             <table className="table table-hover">
               <thead>
                 <tr>
-                  <th>{t('project', language)}</th>
-                  <th>{t('users', language)}</th>
-                  <th>{t('tokens', language)}</th>
-                  <th>{t('requests', language)}</th>
-                  <th>{t('workTime', language)}</th>
-                  <th>{t('lastActive', language)}</th>
+                  <SortableHeader
+                    columnKey="project_name"
+                    currentSortKey={sortKey}
+                    sortDirection={sortDirection}
+                    onSort={handleSort}
+                  >
+                    {t('project', language)}
+                  </SortableHeader>
+                  <SortableHeader
+                    columnKey="total_users"
+                    currentSortKey={sortKey}
+                    sortDirection={sortDirection}
+                    onSort={handleSort}
+                  >
+                    {t('users', language)}
+                  </SortableHeader>
+                  <SortableHeader
+                    columnKey="total_tokens"
+                    currentSortKey={sortKey}
+                    sortDirection={sortDirection}
+                    onSort={handleSort}
+                  >
+                    {t('tokens', language)}
+                  </SortableHeader>
+                  <SortableHeader
+                    columnKey="total_requests"
+                    currentSortKey={sortKey}
+                    sortDirection={sortDirection}
+                    onSort={handleSort}
+                  >
+                    {t('requests', language)}
+                  </SortableHeader>
+                  <SortableHeader
+                    columnKey="total_duration_seconds"
+                    currentSortKey={sortKey}
+                    sortDirection={sortDirection}
+                    onSort={handleSort}
+                  >
+                    {t('workTime', language)}
+                  </SortableHeader>
+                  <SortableHeader
+                    columnKey="last_access"
+                    currentSortKey={sortKey}
+                    sortDirection={sortDirection}
+                    onSort={handleSort}
+                  >
+                    {t('lastActive', language)}
+                  </SortableHeader>
                   <th>{t('tableActions', language)}</th>
                 </tr>
               </thead>
               <tbody>
-                {stats.map((project) => (
+                {sortedStats.map((project) => (
                   <tr key={project.project_id}>
                     <td>
                       <div className="d-flex align-items-center">
