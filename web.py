@@ -31,6 +31,14 @@ project_root = os.path.dirname(os.path.abspath(__file__))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
+# Load secret_key from config.json before creating app
+# This ensures APIKeyProxyService can find the encryption key
+from scripts.shared.config import get_secret_key
+
+secret_key = get_secret_key()
+if secret_key:
+    os.environ["SECRET_KEY"] = secret_key
+
 # Create the Flask application using the factory
 from app import create_app
 

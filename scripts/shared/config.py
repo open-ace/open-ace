@@ -11,7 +11,7 @@ environment variables to override defaults.
 
 import json
 import os
-from typing import cast
+from typing import Optional, cast
 
 # Configuration directory path
 # This is the main configuration that should be set during installation
@@ -220,3 +220,24 @@ def get_quota_enforcement_config() -> dict:
     default_config = {"interval": 60, "enabled": True}
     default_config.update(enforcement_config)
     return default_config
+
+
+def get_secret_key() -> Optional[str]:
+    """
+    Get secret key with priority: environment variable > config file.
+
+    Returns:
+        Optional[str]: Secret key from config, or None if not configured or
+                    already set in environment.
+    """
+    # Priority 1: Environment variable (already set)
+    if os.environ.get("SECRET_KEY"):
+        return None  # Don't override environment variable
+
+    # Priority 2: Config file
+    user_config = _load_user_config()
+    secret_key = user_config.get("secret_key")
+    if secret_key:
+        return cast(str, secret_key)
+
+    return None
