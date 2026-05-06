@@ -14,6 +14,7 @@ from app.repositories.message_repo import MessageRepository
 from app.repositories.usage_repo import UsageRepository
 from app.utils.cache import cached
 from app.utils.helpers import get_days_ago, get_today
+from app.utils.tool_names import normalize_tool_name
 
 logger = logging.getLogger(__name__)
 
@@ -123,13 +124,15 @@ class AnalysisService:
         unique_tools = aggregates.get("unique_tools", 0)
         unique_hosts = aggregates.get("unique_hosts", 0)
 
-        # Top tools
+        # Top tools (normalize tool names and merge)
         top_tools = []
         if tool_stats:
-            for ts in tool_stats[:5]:
-                top_tools.append(
-                    {"tool": ts.get("tool_name", "unknown"), "count": ts.get("total_tokens", 0)}
-                )
+            merged_tools: dict[str, int] = {}
+            for ts in tool_stats:
+                tool = normalize_tool_name(ts.get("tool_name", "unknown"))
+                merged_tools[tool] = merged_tools.get(tool, 0) + ts.get("total_tokens", 0)
+            for tool, count in sorted(merged_tools.items(), key=lambda x: -x[1])[:5]:
+                top_tools.append({"tool": tool, "count": count})
 
         # Sessions = unique days * unique tools (approximation)
         total_sessions = aggregates.get("unique_days", 1) * unique_tools if unique_tools > 0 else 1
@@ -222,21 +225,34 @@ class AnalysisService:
 
         user_ranking = {"users": users}
 
-        # Tool comparison
-        tools_comparison = []
+        # Tool comparison (normalize and merge)
+        merged_tc: dict[str, dict] = {}
         for tool_data in tool_stats:
-            total_t_tokens = tool_data.get("total_tokens", 0)
-            message_count = tool_data.get("message_count", 0)
-            tools_comparison.append(
-                {
-                    "tool_name": tool_data.get("tool_name", "unknown"),
-                    "total_tokens": total_t_tokens,
-                    "total_requests": message_count,
+            tool = normalize_tool_name(tool_data.get("tool_name", "unknown"))
+            if tool in merged_tc:
+                existing = merged_tc[tool]
+                existing["total_tokens"] += tool_data.get("total_tokens", 0)
+                existing["total_requests"] += tool_data.get("message_count", 0)
+                existing["total_input_tokens"] += tool_data.get("total_input_tokens", 0)
+                existing["total_output_tokens"] += tool_data.get("total_output_tokens", 0)
+            else:
+                merged_tc[tool] = {
+                    "total_tokens": tool_data.get("total_tokens", 0),
+                    "total_requests": tool_data.get("message_count", 0),
                     "total_input_tokens": tool_data.get("total_input_tokens", 0),
                     "total_output_tokens": tool_data.get("total_output_tokens", 0),
+                }
+        tools_comparison = []
+        for tool, data in merged_tc.items():
+            tools_comparison.append(
+                {
+                    "tool_name": tool,
                     "avg_tokens_per_request": (
-                        total_t_tokens / message_count if message_count > 0 else 0
+                        data["total_tokens"] / data["total_requests"]
+                        if data["total_requests"] > 0
+                        else 0
                     ),
+                    **data,
                 }
             )
         tools_comparison.sort(key=lambda x: x["total_tokens"], reverse=True)
@@ -308,12 +324,12 @@ class AnalysisService:
             total_input = sum(u.get("total_input_tokens", 0) for u in user_tokens)
             total_output = sum(u.get("total_output_tokens", 0) for u in user_tokens)
 
-        # Get unique tools and hosts
+        # Get unique tools and hosts (normalize tool names)
         tools = set()
         hosts = set()
         for u in usage_data:
             if u.get("tool_name"):
-                tools.add(u["tool_name"])
+                tools.add(normalize_tool_name(u["tool_name"]))
             if u.get("host_name"):
                 hosts.add(u["host_name"])
 
@@ -324,33 +340,39 @@ class AnalysisService:
 
         top_tools = []
         if tool_stats:
-            for ts in tool_stats[:5]:
-                top_tools.append(
-                    {"tool": ts.get("tool_name", "unknown"), "count": ts.get("total_tokens", 0)}
-                )
+            merged_top: dict[str, int] = {}
+            for ts in tool_stats:
+                tool = normalize_tool_name(ts.get("tool_name", "unknown"))
+                merged_top[tool] = merged_top.get(tool, 0) + ts.get("total_tokens", 0)
+            top_tools = sorted(
+                [{"tool": k, "count": v} for k, v in merged_top.items()],
+                key=lambda x: int(x["count"]) if isinstance(x["count"], (int, float)) else 0,
+                reverse=True,
+            )[:5]
         else:
             # Fallback to usage_data if no message data
-            tool_totals = {}
+            tool_totals: dict[str, int] = {}
             for u in usage_data:
-                tool = u.get("tool_name", "unknown")
-                if tool not in tool_totals:
-                    tool_totals[tool] = 0
-                tool_totals[tool] += u.get("tokens_used", 0)
+                tool = normalize_tool_name(u.get("tool_name", "unknown"))
+                tool_totals[tool] = tool_totals.get(tool, 0) + u.get("tokens_used", 0)
 
             # If tool_totals are all 0, use request_count instead
             if all(v == 0 for v in tool_totals.values()):
+                tool_totals = {}
                 for u in usage_data:
-                    tool = u.get("tool_name", "unknown")
+                    tool = normalize_tool_name(u.get("tool_name", "unknown"))
                     tool_totals[tool] = tool_totals.get(tool, 0) + u.get("request_count", 0)
 
             top_tools = sorted(
                 [{"tool": k, "count": v} for k, v in tool_totals.items()],
-                key=lambda x: x["count"],
+                key=lambda x: int(x["count"]) if isinstance(x["count"], (int, float)) else 0,
                 reverse=True,
             )[:5]
 
-        # Calculate sessions and averages
-        total_sessions = len({(u.get("date"), u.get("tool_name")) for u in usage_data})
+        # Calculate sessions and averages (normalize tool names for dedup)
+        total_sessions = len(
+            {(u.get("date"), normalize_tool_name(u.get("tool_name", ""))) for u in usage_data}
+        )
 
         # Count total messages from user_tokens
         total_messages = (
@@ -634,21 +656,34 @@ class AnalysisService:
             start_date=start_date, end_date=end_date, host_name=host_name
         )
 
-        # Convert to array format expected by frontend
-        tools = []
+        # Convert to array format expected by frontend (normalize and merge)
+        merged_tools: dict[str, dict] = {}
         for tool_data in tool_stats:
-            total_tokens = tool_data.get("total_tokens", 0)
-            message_count = tool_data.get("message_count", 0)
-            tools.append(
-                {
-                    "tool_name": tool_data.get("tool_name", "unknown"),
-                    "total_tokens": total_tokens,
-                    "total_requests": message_count,
+            tool = normalize_tool_name(tool_data.get("tool_name", "unknown"))
+            if tool in merged_tools:
+                existing = merged_tools[tool]
+                existing["total_tokens"] += tool_data.get("total_tokens", 0)
+                existing["total_requests"] += tool_data.get("message_count", 0)
+                existing["total_input_tokens"] += tool_data.get("total_input_tokens", 0)
+                existing["total_output_tokens"] += tool_data.get("total_output_tokens", 0)
+            else:
+                merged_tools[tool] = {
+                    "total_tokens": tool_data.get("total_tokens", 0),
+                    "total_requests": tool_data.get("message_count", 0),
                     "total_input_tokens": tool_data.get("total_input_tokens", 0),
                     "total_output_tokens": tool_data.get("total_output_tokens", 0),
+                }
+        tools = []
+        for tool, data in merged_tools.items():
+            tools.append(
+                {
+                    "tool_name": tool,
                     "avg_tokens_per_request": (
-                        total_tokens / message_count if message_count > 0 else 0
+                        data["total_tokens"] / data["total_requests"]
+                        if data["total_requests"] > 0
+                        else 0
                     ),
+                    **data,
                 }
             )
 
@@ -693,13 +728,11 @@ class AnalysisService:
                     }
                 )
 
-        # Check for tools with high usage
-        tool_totals = {}
+        # Check for tools with high usage (normalize tool names)
+        tool_totals: dict[str, int] = {}
         for u in usage_data:
-            tool = u.get("tool_name", "unknown")
-            if tool not in tool_totals:
-                tool_totals[tool] = 0
-            tool_totals[tool] += u.get("tokens_used", 0)
+            tool = normalize_tool_name(u.get("tool_name", "unknown"))
+            tool_totals[tool] = tool_totals.get(tool, 0) + u.get("tokens_used", 0)
 
         if tool_totals:
             top_tool = max(tool_totals, key=lambda k: tool_totals.get(k, 0))

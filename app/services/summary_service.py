@@ -11,6 +11,7 @@ from typing import Any, Optional, cast
 
 from app.repositories.database import Database, is_postgresql
 from app.repositories.usage_repo import UsageRepository
+from app.utils.tool_names import normalize_tool_name
 
 logger = logging.getLogger(__name__)
 
@@ -129,9 +130,36 @@ class SummaryService:
             # Execute both queries
             per_host_results = self.db.fetch_all(query_per_host, ())
             global_results = self.db.fetch_all(query_global, ())
-            return per_host_results + global_results
+            return self._merge_aggregates(per_host_results + global_results)
 
-        return self.db.fetch_all(query, params)
+        return self._merge_aggregates(self.db.fetch_all(query, params))
+
+    def _merge_aggregates(self, rows: list[dict]) -> list[dict]:
+        merged: dict[tuple, dict] = {}
+        for row in rows:
+            tool = normalize_tool_name(row["tool_name"])
+            host = row.get("host_name")
+            key = (tool, host)
+            if key in merged:
+                existing = merged[key]
+                existing["days_count"] = max(existing["days_count"], row["days_count"] or 0)
+                existing["total_tokens"] += row["total_tokens"] or 0
+                existing["total_requests"] += row["total_requests"] or 0
+                existing["total_input_tokens"] += row["total_input_tokens"] or 0
+                existing["total_output_tokens"] += row["total_output_tokens"] or 0
+                if row["first_date"] and (
+                    not existing["first_date"] or row["first_date"] < existing["first_date"]
+                ):
+                    existing["first_date"] = row["first_date"]
+                if row["last_date"] and (
+                    not existing["last_date"] or row["last_date"] > existing["last_date"]
+                ):
+                    existing["last_date"] = row["last_date"]
+            else:
+                merged[key] = {**row, "tool_name": tool}
+        for v in merged.values():
+            v["avg_tokens"] = v["total_tokens"] // max(v["days_count"], 1)
+        return list(merged.values())
 
     def _update_summary_table(self, aggregates: list[dict]) -> None:
         """
@@ -247,20 +275,27 @@ class SummaryService:
                 ORDER BY total_tokens DESC
             """
             rows = self.db.fetch_all(query, ())
-        # Convert to dict keyed by tool_name
-        results = {}
+        # Convert to dict keyed by tool_name, normalize and merge
+        results: dict[str, dict] = {}
         for row in rows:
-            tool = row["tool_name"]
-            results[tool] = {
-                "days_count": row["days_count"] or 0,
-                "total_tokens": row["total_tokens"] or 0,
-                "avg_tokens": row["avg_tokens"] or 0,
-                "total_requests": row["total_requests"] or 0,
-                "total_input_tokens": row["total_input_tokens"] or 0,
-                "total_output_tokens": row["total_output_tokens"] or 0,
-                "first_date": row["first_date"],
-                "last_date": row["last_date"],
-            }
+            tool = normalize_tool_name(row["tool_name"])
+            if tool in results:
+                existing = results[tool]
+                existing["total_tokens"] += row["total_tokens"] or 0
+                existing["total_requests"] += row["total_requests"] or 0
+                existing["total_input_tokens"] += row["total_input_tokens"] or 0
+                existing["total_output_tokens"] += row["total_output_tokens"] or 0
+            else:
+                results[tool] = {
+                    "days_count": row["days_count"] or 0,
+                    "total_tokens": row["total_tokens"] or 0,
+                    "avg_tokens": row["avg_tokens"] or 0,
+                    "total_requests": row["total_requests"] or 0,
+                    "total_input_tokens": row["total_input_tokens"] or 0,
+                    "total_output_tokens": row["total_output_tokens"] or 0,
+                    "first_date": row["first_date"],
+                    "last_date": row["last_date"],
+                }
 
         return results
 
@@ -280,19 +315,26 @@ class SummaryService:
         results: dict[str, dict[str, Any]] = {}
         for row in rows:
             host = row["host_name"]
-            tool = row["tool_name"]
+            tool = normalize_tool_name(row["tool_name"])
             if host not in results:
                 results[host] = {}
-            results[host][tool] = {
-                "days_count": row["days_count"] or 0,
-                "total_tokens": row["total_tokens"] or 0,
-                "avg_tokens": row["avg_tokens"] or 0,
-                "total_requests": row["total_requests"] or 0,
-                "total_input_tokens": row["total_input_tokens"] or 0,
-                "total_output_tokens": row["total_output_tokens"] or 0,
-                "first_date": row["first_date"],
-                "last_date": row["last_date"],
-            }
+            if tool in results[host]:
+                existing = results[host][tool]
+                existing["total_tokens"] += row["total_tokens"] or 0
+                existing["total_requests"] += row["total_requests"] or 0
+                existing["total_input_tokens"] += row["total_input_tokens"] or 0
+                existing["total_output_tokens"] += row["total_output_tokens"] or 0
+            else:
+                results[host][tool] = {
+                    "days_count": row["days_count"] or 0,
+                    "total_tokens": row["total_tokens"] or 0,
+                    "avg_tokens": row["avg_tokens"] or 0,
+                    "total_requests": row["total_requests"] or 0,
+                    "total_input_tokens": row["total_input_tokens"] or 0,
+                    "total_output_tokens": row["total_output_tokens"] or 0,
+                    "first_date": row["first_date"],
+                    "last_date": row["last_date"],
+                }
 
         return results
 
