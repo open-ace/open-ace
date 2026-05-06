@@ -267,6 +267,8 @@ class MessageService:
         is_group_chat: Optional[int] = None,
         agent_session_id: Optional[str] = None,
         conversation_id: Optional[str] = None,
+        user_id: Optional[int] = None,
+        project_path: Optional[str] = None,
     ) -> bool:
         """
         Save a message.
@@ -296,4 +298,6 @@ class MessageService:
             is_group_chat=is_group_chat,
             agent_session_id=agent_session_id,
             conversation_id=conversation_id,
+            user_id=user_id,
+            project_path=project_path,
         )

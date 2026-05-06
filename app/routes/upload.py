@@ -136,6 +136,8 @@ def api_upload_messages():
                 is_group_chat=msg.get("is_group_chat"),
                 agent_session_id=msg.get("agent_session_id"),
                 conversation_id=msg.get("conversation_id"),
+                user_id=msg.get("user_id"),
+                project_path=msg.get("project_path"),
             )
 
             if success:
@@ -224,6 +226,8 @@ def api_upload_batch():
                 is_group_chat=m.get("is_group_chat"),
                 agent_session_id=m.get("agent_session_id"),
                 conversation_id=m.get("conversation_id"),
+                user_id=m.get("user_id"),
+                project_path=m.get("project_path"),
             )
             if success:
                 results["messages"]["saved"] += 1

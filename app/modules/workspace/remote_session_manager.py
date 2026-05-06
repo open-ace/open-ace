@@ -700,6 +700,8 @@ class RemoteSessionManager:
                 message_source="remote_workspace",
                 agent_session_id=session_id,
                 conversation_id=session_id,
+                user_id=session.user_id,
+                project_path=session.project_path,
             )
         except Exception as e:
             logger.warning(f"Failed to mirror message to daily_messages for {session_id[:8]}: {e}")
