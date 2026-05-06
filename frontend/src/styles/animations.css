@@ -655,7 +655,8 @@
 /* ===== Tab Notification Badge Animation ===== */
 
 @keyframes notificationPulse {
-  0%, 100% {
+  0%,
+  100% {
     transform: scale(1);
     opacity: 1;
   }
@@ -666,7 +667,8 @@
 }
 
 @keyframes notificationBounce {
-  0%, 100% {
+  0%,
+  100% {
     transform: translateY(0);
   }
   25% {
@@ -682,5 +684,7 @@
 }
 
 .waiting-badge.danger {
-  animation: notificationPulse 0.8s ease-in-out infinite, notificationBounce 1s ease-in-out infinite;
+  animation:
+    notificationPulse 0.8s ease-in-out infinite,
+    notificationBounce 1s ease-in-out infinite;
 }

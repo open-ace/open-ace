@@ -30,6 +30,10 @@ dist-ssr
 # Test coverage
 coverage
 
+# Playwright
+playwright-report/
+test-results/
+
 # Environment files
 .env
 .env.local
