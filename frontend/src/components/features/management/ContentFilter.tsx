@@ -21,6 +21,7 @@ import {
   EmptyState,
   Badge,
 } from '@/components/common';
+import { FilterRuleTableHeader } from './FilterRuleTableHeader';
 import type { ContentFilterRule, CreateFilterRuleRequest } from '@/api';
 
 const TYPE_OPTIONS = [
@@ -171,16 +172,7 @@ export const ContentFilter: React.FC = () => {
       ) : (
         <div className="table-responsive">
           <table className="table table-hover">
-            <thead>
-              <tr>
-                <th>{t('tablePattern', language)}</th>
-                <th>{t('tableType', language)}</th>
-                <th>{t('tableSeverity', language)}</th>
-                <th>{t('tableAction', language)}</th>
-                <th>{t('tableStatus', language)}</th>
-                <th>{t('tableActions', language)}</th>
-              </tr>
-            </thead>
+            <FilterRuleTableHeader />
             <tbody>
               {rules.map((rule) => (
                 <tr key={rule.id}>
@@ -270,6 +262,7 @@ export const ContentFilter: React.FC = () => {
                 onChange={(value: string) => setFormData({ ...formData, pattern: value })}
                 placeholder={t('enterPattern', language)}
               />
+              <small className="text-muted">{t('patternHelp', language)}</small>
             </div>
             <div className="col-md-4">
               <label className="form-label">{t('tableType', language)}</label>
@@ -280,6 +273,11 @@ export const ContentFilter: React.FC = () => {
                   setFormData({ ...formData, type: value as CreateFilterRuleRequest['type'] })
                 }
               />
+              <small className="text-muted">
+                {formData.type === 'keyword' && t('keywordTypeHelp', language)}
+                {formData.type === 'regex' && t('regexTypeHelp', language)}
+                {formData.type === 'pii' && t('piiTypeHelp', language)}
+              </small>
             </div>
             <div className="col-md-4">
               <label className="form-label">{t('tableSeverity', language)}</label>
@@ -303,6 +301,11 @@ export const ContentFilter: React.FC = () => {
                   setFormData({ ...formData, action: value as CreateFilterRuleRequest['action'] })
                 }
               />
+              <small className="text-muted">
+                {formData.action === 'warn' && t('warnActionHelp', language)}
+                {formData.action === 'block' && t('blockActionHelp', language)}
+                {formData.action === 'redact' && t('redactActionHelp', language)}
+              </small>
             </div>
             <div className="col-12">
               <label className="form-label">{t('description', language)}</label>

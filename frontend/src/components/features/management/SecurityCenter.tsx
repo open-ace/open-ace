@@ -31,6 +31,7 @@ import {
   Badge,
 } from '@/components/common';
 import { useToast } from '@/components/common';
+import { FilterRuleTableHeader } from './FilterRuleTableHeader';
 import type {
   ContentFilterRule,
   CreateFilterRuleRequest,
@@ -243,16 +244,7 @@ export const SecurityCenter: React.FC = () => {
         ) : (
           <div className="table-responsive">
             <table className="table table-hover">
-              <thead>
-                <tr>
-                  <th>{t('tablePattern', language)}</th>
-                  <th>{t('tableType', language)}</th>
-                  <th>{t('tableSeverity', language)}</th>
-                  <th>{t('tableAction', language)}</th>
-                  <th>{t('tableStatus', language)}</th>
-                  <th>{t('tableActions', language)}</th>
-                </tr>
-              </thead>
+              <FilterRuleTableHeader />
               <tbody>
                 {rules.map((rule) => (
                   <tr key={rule.id}>
@@ -342,6 +334,7 @@ export const SecurityCenter: React.FC = () => {
                   onChange={(value: string) => setRuleFormData({ ...ruleFormData, pattern: value })}
                   placeholder={t('enterPattern', language)}
                 />
+                <small className="text-muted">{t('patternHelp', language)}</small>
               </div>
               <div className="col-md-4">
                 <label className="form-label">{t('tableType', language)}</label>
@@ -355,6 +348,11 @@ export const SecurityCenter: React.FC = () => {
                     })
                   }
                 />
+                <small className="text-muted">
+                  {ruleFormData.type === 'keyword' && t('keywordTypeHelp', language)}
+                  {ruleFormData.type === 'regex' && t('regexTypeHelp', language)}
+                  {ruleFormData.type === 'pii' && t('piiTypeHelp', language)}
+                </small>
               </div>
               <div className="col-md-4">
                 <label className="form-label">{t('tableSeverity', language)}</label>
@@ -381,6 +379,11 @@ export const SecurityCenter: React.FC = () => {
                     })
                   }
                 />
+                <small className="text-muted">
+                  {ruleFormData.action === 'warn' && t('warnActionHelp', language)}
+                  {ruleFormData.action === 'block' && t('blockActionHelp', language)}
+                  {ruleFormData.action === 'redact' && t('redactActionHelp', language)}
+                </small>
               </div>
               <div className="col-12">
                 <label className="form-label">{t('description', language)}</label>
