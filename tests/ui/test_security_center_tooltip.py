@@ -2,6 +2,17 @@
 """
 Test Security Center Tooltip - Issue #208
 Verify that tooltip help icons are displayed in the filter rules table header
+
+Dependencies:
+    pip install playwright
+    playwright install chromium
+
+Configuration:
+    Environment variables (optional):
+        BASE_URL: Target URL (default: http://localhost:5001)
+        USERNAME: Login username (default: admin)
+        PASSWORD: Login password (default: admin123)
+        HEADLESS: Run in headless mode (default: true)
 """
 
 import os
@@ -9,11 +20,9 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-import time
-
 from playwright.sync_api import sync_playwright
 
-# Configuration
+# Configuration - use environment variables or defaults
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 USERNAME = os.environ.get("USERNAME", "admin")
 PASSWORD = os.environ.get("PASSWORD", "admin123")
@@ -42,21 +51,19 @@ def test_security_center_tooltip():
             page.fill("#password", PASSWORD)
             page.click('button[type="submit"]')
             page.wait_for_url("**/", timeout=10000)
-            time.sleep(1)
+            page.wait_for_timeout(500)  # Wait for page to stabilize
             results.append(("Login", "PASS"))
             print("  ✓ Login successful")
 
             # Step 2: Navigate to Management page (Security Center)
             print("\nStep 2: Navigate to Security Center page...")
             page.goto(f"{BASE_URL}/manage/security")
-            time.sleep(2)  # Wait for page to fully load
+            page.wait_for_selector("h2", timeout=10000)
             results.append(("Navigate to Security Center", "PASS"))
             print("  ✓ Security Center page loaded")
 
             # Step 3: Verify Security Center page loaded
             print("\nStep 3: Verify Security Center page...")
-            # Wait for the page to render
-            page.wait_for_selector("h2", timeout=10000)
             screenshot_path = os.path.join(SCREENSHOT_DIR, "01_security_center_page.png")
             page.screenshot(path=screenshot_path)
             print(f"  Screenshot saved: {screenshot_path}")
@@ -68,7 +75,7 @@ def test_security_center_tooltip():
             content_filter_tab = page.locator("text=Content Filter")
             if content_filter_tab.count() > 0:
                 content_filter_tab.first.click()
-                time.sleep(1)
+                page.wait_for_timeout(500)
                 results.append(("Click Content Filter tab", "PASS"))
                 print("  ✓ Content Filter tab clicked")
             else:
@@ -100,7 +107,7 @@ def test_security_center_tooltip():
             pattern_help_icon = page.locator("th .bi-question-circle").first
             if pattern_help_icon.count() > 0:
                 pattern_help_icon.hover()
-                time.sleep(0.5)  # Wait for tooltip to appear
+                page.wait_for_timeout(200)  # Wait for tooltip animation
 
                 # Check if tooltip is visible
                 tooltip = page.locator(".tooltip.show, .tooltip-inner")
@@ -133,7 +140,7 @@ def test_security_center_tooltip():
             type_help_icon = page.locator("th .bi-question-circle").nth(1)
             if type_help_icon.count() > 0:
                 type_help_icon.hover()
-                time.sleep(0.5)
+                page.wait_for_timeout(200)
 
                 tooltip = page.locator(".tooltip.show, .tooltip-inner")
                 if tooltip.count() > 0:
@@ -165,7 +172,7 @@ def test_security_center_tooltip():
             action_help_icon = page.locator("th .bi-question-circle").nth(2)
             if action_help_icon.count() > 0:
                 action_help_icon.hover()
-                time.sleep(0.5)
+                page.wait_for_timeout(200)
 
                 tooltip = page.locator(".tooltip.show, .tooltip-inner")
                 if tooltip.count() > 0:
@@ -197,7 +204,7 @@ def test_security_center_tooltip():
             add_rule_btn = page.locator("button:has-text('Add Rule'), button:has-text('添加规则')")
             if add_rule_btn.count() > 0:
                 add_rule_btn.first.click()
-                time.sleep(1)
+                page.wait_for_selector(".modal-content", timeout=5000)
 
                 screenshot_path = os.path.join(SCREENSHOT_DIR, "05_add_rule_modal.png")
                 page.screenshot(path=screenshot_path)
@@ -231,7 +238,7 @@ def test_security_center_tooltip():
                 close_btn = page.locator("button:has-text('Cancel'), button:has-text('取消')")
                 if close_btn.count() > 0:
                     close_btn.first.click()
-                    time.sleep(0.5)
+                    page.wait_for_timeout(300)
             else:
                 results.append(("Click Add Rule button", "FAIL - Button not found"))
                 print("  ✗ Add Rule button not found")

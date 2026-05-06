@@ -20,8 +20,8 @@ import {
   Error,
   EmptyState,
   Badge,
-  Tooltip,
 } from '@/components/common';
+import { FilterRuleTableHeader } from './FilterRuleTableHeader';
 import type { ContentFilterRule, CreateFilterRuleRequest } from '@/api';
 
 const TYPE_OPTIONS = [
@@ -172,31 +172,7 @@ export const ContentFilter: React.FC = () => {
       ) : (
         <div className="table-responsive">
           <table className="table table-hover">
-            <thead>
-              <tr>
-                <th>
-                  {t('tablePattern', language)}
-                  <Tooltip content={t('patternHelp', language)} placement="top">
-                    <i className="bi bi-question-circle text-muted ms-1" style={{ cursor: 'pointer' }} />
-                  </Tooltip>
-                </th>
-                <th>
-                  {t('tableType', language)}
-                  <Tooltip content={`${t('keywordTypeHelp', language)}\n${t('regexTypeHelp', language)}\n${t('piiTypeHelp', language)}`} placement="top">
-                    <i className="bi bi-question-circle text-muted ms-1" style={{ cursor: 'pointer' }} />
-                  </Tooltip>
-                </th>
-                <th>{t('tableSeverity', language)}</th>
-                <th>
-                  {t('tableAction', language)}
-                  <Tooltip content={`${t('warnActionHelp', language)}\n${t('blockActionHelp', language)}\n${t('redactActionHelp', language)}`} placement="top">
-                    <i className="bi bi-question-circle text-muted ms-1" style={{ cursor: 'pointer' }} />
-                  </Tooltip>
-                </th>
-                <th>{t('tableStatus', language)}</th>
-                <th>{t('tableActions', language)}</th>
-              </tr>
-            </thead>
+            <FilterRuleTableHeader />
             <tbody>
               {rules.map((rule) => (
                 <tr key={rule.id}>
