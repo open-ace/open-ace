@@ -16,7 +16,7 @@ from base64 import b64decode, b64encode
 from datetime import datetime, timedelta
 from typing import Any, Optional, Union, cast
 
-from app.repositories.database import DB_PATH, get_database_url, is_postgresql
+from app.repositories.database import DB_PATH, adapt_boolean_value, get_database_url, is_postgresql
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +82,7 @@ class APIKeyProxyService:
         cursor = conn.cursor()
 
         id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
-        bool_true = "BOOLEAN DEFAULT TRUE" if is_postgresql() else "INTEGER DEFAULT 1"
+        is_active_type = "INTEGER DEFAULT 1"  # Use INTEGER for both PostgreSQL and SQLite (actual DB has INTEGER)
 
         # api_key_store table is created by migration, but ensure it exists for
         # environments that don't run migrations
@@ -95,7 +95,7 @@ class APIKeyProxyService:
                 encrypted_key TEXT NOT NULL,
                 key_hash TEXT NOT NULL,
                 base_url TEXT,
-                is_active {bool_true},
+                is_active {is_active_type},
                 created_by INTEGER,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -170,34 +170,29 @@ class APIKeyProxyService:
         cursor = conn.cursor()
 
         try:
-            if is_postgresql():
-                cursor.execute(
-                    f"""
-                    INSERT INTO api_key_store (tenant_id, provider, key_name, encrypted_key, key_hash, base_url, created_by)
-                    VALUES ({_params(7)})
-                    ON CONFLICT (tenant_id, provider, key_name) DO UPDATE SET
-                        encrypted_key = EXCLUDED.encrypted_key,
-                        key_hash = EXCLUDED.key_hash,
-                        base_url = EXCLUDED.base_url,
-                        is_active = TRUE,
-                        updated_at = CURRENT_TIMESTAMP
-                """,
-                    (tenant_id, provider, key_name, encrypted, key_hash, base_url, created_by),
-                )
-            else:
-                cursor.execute(
-                    f"""
-                    INSERT INTO api_key_store (tenant_id, provider, key_name, encrypted_key, key_hash, base_url, created_by)
-                    VALUES ({_params(7)})
-                    ON CONFLICT (tenant_id, provider, key_name) DO UPDATE SET
-                        encrypted_key = excluded.encrypted_key,
-                        key_hash = excluded.key_hash,
-                        base_url = excluded.base_url,
-                        is_active = TRUE,
-                        updated_at = CURRENT_TIMESTAMP
-                """,
-                    (tenant_id, provider, key_name, encrypted, key_hash, base_url, created_by),
-                )
+            is_active_val = adapt_boolean_value(True)
+            cursor.execute(
+                f"""
+                INSERT INTO api_key_store (tenant_id, provider, key_name, encrypted_key, key_hash, base_url, created_by)
+                VALUES ({_params(7)})
+                ON CONFLICT (tenant_id, provider, key_name) DO UPDATE SET
+                    encrypted_key = EXCLUDED.encrypted_key,
+                    key_hash = EXCLUDED.key_hash,
+                    base_url = EXCLUDED.base_url,
+                    is_active = {_param()},
+                    updated_at = CURRENT_TIMESTAMP
+            """,
+                (
+                    tenant_id,
+                    provider,
+                    key_name,
+                    encrypted,
+                    key_hash,
+                    base_url,
+                    created_by,
+                    is_active_val,
+                ),
+            )
 
             conn.commit()
             logger.info(
@@ -454,7 +449,7 @@ class APIKeyProxyService:
 def get_ddl_statements() -> list[str]:
     """Return DDL statements for API key proxy tables."""
     id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
-    bool_true = "BOOLEAN DEFAULT TRUE" if is_postgresql() else "INTEGER DEFAULT 1"
+    is_active_type = "INTEGER DEFAULT 1"  # Use INTEGER for both (actual DB has INTEGER)
     return [
         f"""
         CREATE TABLE IF NOT EXISTS api_key_store (
@@ -465,7 +460,7 @@ def get_ddl_statements() -> list[str]:
             encrypted_key TEXT NOT NULL,
             key_hash TEXT NOT NULL,
             base_url TEXT,
-            is_active {bool_true},
+            is_active {is_active_type},
             created_by INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
