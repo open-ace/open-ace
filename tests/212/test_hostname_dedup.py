@@ -8,7 +8,7 @@ Tests:
   - Same hostname re-registration (old record online) -> error
   - Empty hostname -> no merge, normal INSERT
   - Merge preserves machine_assignments
-  - Merge preserves agent_sessionss
+  - Merge preserves agent_sessions
   - Merge cleans up in-memory state
 """
 
@@ -113,7 +113,7 @@ def make_manager():
         "granted_at TIMESTAMP)"
     )
     conn.execute(
-        "CREATE TABLE IF NOT EXISTS agent_sessionss ("
+        "CREATE TABLE IF NOT EXISTS agent_sessions ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT, "
         "session_id TEXT NOT NULL UNIQUE, "
         "user_id INTEGER, "
