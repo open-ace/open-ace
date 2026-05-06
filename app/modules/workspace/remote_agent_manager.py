@@ -287,7 +287,7 @@ class RemoteAgentManager:
             logger.warning("Invalid or expired registration token")
             return None
 
-        with self.db.connection() as conn:
+        with self._lock, self.db.connection() as conn:
             cursor = conn.cursor()
 
             now = datetime.utcnow().isoformat()
@@ -308,6 +308,7 @@ class RemoteAgentManager:
 
                     online_match = [r for r in existing if r["status"] == "online"]
                     if online_match:
+                        conn.rollback()
                         return {
                             "error": "hostname_conflict",
                             "message": f"Hostname '{hostname}' is already registered and online. "
@@ -373,8 +374,8 @@ class RemoteAgentManager:
                             (machine_id, old_machine_id),
                         )
 
-                        # Migrate agent_sessions (table may not exist if no sessions yet)
-                        with suppress(Exception):
+                        # Migrate agent_sessions (table may not exist yet)
+                        try:
                             cursor.execute(
                                 f"""
                                 UPDATE agent_sessions SET remote_machine_id = {_param()}
@@ -382,15 +383,18 @@ class RemoteAgentManager:
                                 """,
                                 (machine_id, old_machine_id),
                             )
+                        except Exception:
+                            logger.debug(
+                                "agent_sessions table not available during merge, skipping"
+                            )
 
                         # Clean up in-memory state for old machine_id
-                        with self._lock:
-                            self._connections.pop(old_machine_id, None)
-                            self._command_queues.pop(old_machine_id, None)
-                            self._last_heartbeat_db_write.pop(old_machine_id, None)
-                            for sid, mid in list(self._session_machines.items()):
-                                if mid == old_machine_id:
-                                    self._session_machines[sid] = machine_id
+                        self._connections.pop(old_machine_id, None)
+                        self._command_queues.pop(old_machine_id, None)
+                        self._last_heartbeat_db_write.pop(old_machine_id, None)
+                        for sid, mid in list(self._session_machines.items()):
+                            if mid == old_machine_id:
+                                self._session_machines[sid] = machine_id
 
                         conn.commit()
 
