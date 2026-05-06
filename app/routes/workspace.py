@@ -19,6 +19,7 @@ from app.modules.workspace.prompt_library import PromptCategory, PromptTemplate,
 from app.modules.workspace.session_manager import SessionType, _param, get_session_manager
 from app.modules.workspace.state_sync import get_state_sync_manager
 from app.modules.workspace.tool_connector import get_tool_connector
+from app.utils.tool_names import TOOL_NAME_ALIASES, normalize_tool_name
 
 logger = logging.getLogger(__name__)
 
@@ -344,11 +345,6 @@ def list_sessions():
             params.append(user_id)
 
         if tool_name:
-            TOOL_NAME_ALIASES = {
-                "qwen": ["qwen", "qwen-code", "qwen-code-cli"],
-                "claude": ["claude", "claude-code"],
-                "openclaw": ["openclaw"],
-            }
             aliases = TOOL_NAME_ALIASES.get(tool_name, [tool_name])
             placeholders = ",".join(["?" for _ in aliases])
             conditions.append(f"tool_name IN ({placeholders})")
@@ -548,6 +544,7 @@ def create_session():
         tool_name = data.get("tool_name")
         if not tool_name:
             return jsonify({"success": False, "error": "tool_name is required"}), 400
+        tool_name = normalize_tool_name(tool_name)
 
         user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
 
@@ -934,7 +931,7 @@ def restore_session(session_id):
         remote_machine_id = session_data.get("remote_machine_id")
 
         # Generate encodedProjectName based on tool
-        if tool_name in ["qwen", "claude", "qwen-code"]:
+        if normalize_tool_name(tool_name) in ["qwen", "claude"]:
             # project_path may be actual path or encoded name
             # Need to convert actual path to encoded name if necessary
             # Format: /home/rhuang/open-ace -> -home-rhuang-open-ace

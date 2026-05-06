@@ -20,6 +20,7 @@ from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
 from app.modules.workspace.session_manager import SessionManager
 from app.repositories.message_repo import MessageRepository
 from app.repositories.user_repo import UserRepository
+from app.utils.tool_names import normalize_tool_name
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +102,7 @@ class RemoteSessionManager:
 
         # Create session in SessionManager
         session = self._session_manager.create_session(
-            tool_name=cli_tool,
+            tool_name=normalize_tool_name(cli_tool),
             user_id=user_id,
             title=title or f"Remote: {machine.get('machine_name', machine_id[:8])}",
             host_name=machine.get("hostname", machine_id),
@@ -682,7 +683,7 @@ class RemoteSessionManager:
             now = datetime.utcnow()
             self._message_repo.save_message(
                 date=now.strftime("%Y-%m-%d"),
-                tool_name=session.tool_name or "unknown",
+                tool_name=normalize_tool_name(session.tool_name or "unknown"),
                 message_id=str(uuid.uuid4()),
                 role=role,
                 host_name=session.host_name or "remote",

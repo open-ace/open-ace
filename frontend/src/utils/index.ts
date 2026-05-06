@@ -27,10 +27,7 @@ export {
 
 const TOOL_DISPLAY_NAMES: Record<string, string> = {
   qwen: 'Qwen',
-  'qwen-code': 'Qwen',
-  'qwen-code-cli': 'Qwen',
   claude: 'Claude',
-  'claude-code': 'Claude',
   openclaw: 'OpenClaw',
   openai: 'OpenAI',
   run_shell_command: 'Shell',
