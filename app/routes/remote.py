@@ -35,6 +35,10 @@ def load_user():
     session token is provided. WebSocket, agent, and LLM-proxy endpoints
     use their own auth (JWT tokens) and are exempted.
     """
+    # Skip auth for CORS preflight requests
+    if request.method == "OPTIONS":
+        return
+
     # Skip auth for endpoints that use their own authentication (JWT, API keys)
     # or are public (agent install/uninstall scripts, agent file downloads)
     _exact_exempt = {
@@ -65,16 +69,9 @@ def load_user():
             g.user_role = user.get("role")
             return None  # Authenticated
 
-    # Fallback: try query param token (for SSE/EventSource which can't send cookies)
+    # Fallback: try WebUI token validation (for iframe requests from qwen-code-webui)
     url_token = request.args.get("token")
-    if url_token and url_token != token:
-        user = _load_user_from_token(url_token)
-        if user:
-            g.user = user
-            g.user_id = user.get("id")
-            g.user_role = user.get("role")
-            return None
-        # Try WebUI token validation
+    if url_token:
         try:
             from app.services.webui_manager import WebUIManager
 
