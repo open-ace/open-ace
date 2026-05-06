@@ -1596,7 +1596,7 @@ export const Workspace: React.FC = () => {
         onClose={() => setShowNewSessionModal(false)}
         onCreateLocal={() => {
           setShowNewSessionModal(false);
-          createNewTab();
+          createNewTab(undefined, { workspaceType: 'local' });
         }}
         onCreateRemote={(params: {
           machineId: string;
