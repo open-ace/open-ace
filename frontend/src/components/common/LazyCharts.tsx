@@ -87,6 +87,8 @@ export interface TokenTrendChartProps {
     tool: string;
     tokens: number;
   }>;
+  startDate?: string;
+  endDate?: string;
   height?: number;
   className?: string;
 }

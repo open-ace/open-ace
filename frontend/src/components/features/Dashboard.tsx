@@ -179,7 +179,7 @@ export const Dashboard: React.FC = () => {
           <div className="col-md-8 mb-4">
             <Card title={t('trendChart', language)}>
               {trendData && trendData.length > 0 ? (
-                <TokenTrendChart data={trendData} height={300} />
+                <TokenTrendChart data={trendData} startDate={startDate} endDate={endDate} height={300} />
               ) : (
                 <EmptyState icon="bi-graph-up" title={t('noData', language)} />
               )}
