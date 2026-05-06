@@ -756,6 +756,8 @@ def agent_register():
     )
 
     if result:
+        if result.get("error") == "hostname_conflict":
+            return jsonify({"error": result["message"]}), 409
         return jsonify({"success": True, "machine": result})
     return jsonify({"error": "Invalid or expired registration token"}), 401
 

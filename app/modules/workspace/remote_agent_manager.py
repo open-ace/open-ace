@@ -287,36 +287,142 @@ class RemoteAgentManager:
             logger.warning("Invalid or expired registration token")
             return None
 
-        with self.db.connection() as conn:
+        with self._lock, self.db.connection() as conn:
             cursor = conn.cursor()
 
             now = datetime.utcnow().isoformat()
 
             try:
-                cursor.execute(
-                    f"""
-                    INSERT INTO remote_machines
-                    (machine_id, machine_name, hostname, os_type, os_version, ip_address,
-                     status, agent_version, capabilities, tenant_id, created_by, created_at, updated_at, last_heartbeat)
-                    VALUES ({_params(14)})
-                """,
-                    (
-                        machine_id,
-                        machine_name,
-                        hostname,
-                        os_type,
-                        os_version,
-                        ip_address,
-                        "online",
-                        agent_version,
-                        json.dumps(capabilities) if capabilities else None,
-                        token_info["tenant_id"],
-                        token_info["created_by"],
-                        now,
-                        now,
-                        now,
-                    ),
-                )
+                # Check for existing machine with same hostname in same tenant
+                merged = False
+                if hostname:
+                    cursor.execute(
+                        f"""
+                        SELECT machine_id, status FROM remote_machines
+                        WHERE hostname = {_param()} AND tenant_id = {_param()}
+                        ORDER BY updated_at DESC
+                        """,
+                        (hostname, token_info["tenant_id"]),
+                    )
+                    existing = cursor.fetchall()
+
+                    online_match = [r for r in existing if r["status"] == "online"]
+                    if online_match:
+                        conn.rollback()
+                        return {
+                            "error": "hostname_conflict",
+                            "message": f"Hostname '{hostname}' is already registered and online. "
+                            f"Contact an admin to resolve the conflict.",
+                        }
+
+                    offline_match = [r for r in existing if r["status"] == "offline"]
+                    if offline_match:
+                        old_machine_id = offline_match[0]["machine_id"]
+                        merged = True
+                        logger.info(
+                            "Merging re-registered machine: hostname=%s, old_id=%s, new_id=%s",
+                            hostname,
+                            old_machine_id[:8],
+                            machine_id[:8],
+                        )
+
+                        # Update the existing record with new machine_id and metadata
+                        cursor.execute(
+                            f"""
+                            UPDATE remote_machines
+                            SET machine_id = {_param()}, machine_name = {_param()},
+                                os_type = {_param()}, os_version = {_param()},
+                                ip_address = {_param()}, status = {_param()},
+                                agent_version = {_param()}, capabilities = {_param()},
+                                updated_at = {_param()}, last_heartbeat = {_param()},
+                                created_by = {_param()}
+                            WHERE machine_id = {_param()}
+                            """,
+                            (
+                                machine_id,
+                                machine_name,
+                                os_type,
+                                os_version,
+                                ip_address,
+                                "online",
+                                agent_version,
+                                json.dumps(capabilities) if capabilities else None,
+                                now,
+                                now,
+                                token_info["created_by"],
+                                old_machine_id,
+                            ),
+                        )
+
+                        # Migrate machine_assignments: delete conflicting, then update
+                        cursor.execute(
+                            f"""
+                            DELETE FROM machine_assignments
+                            WHERE machine_id = {_param()}
+                            AND user_id IN (
+                                SELECT user_id FROM machine_assignments
+                                WHERE machine_id = {_param()}
+                            )
+                            """,
+                            (old_machine_id, machine_id),
+                        )
+                        cursor.execute(
+                            f"""
+                            UPDATE machine_assignments SET machine_id = {_param()}
+                            WHERE machine_id = {_param()}
+                            """,
+                            (machine_id, old_machine_id),
+                        )
+
+                        # Migrate agent_sessions (table may not exist yet)
+                        try:
+                            cursor.execute(
+                                f"""
+                                UPDATE agent_sessions SET remote_machine_id = {_param()}
+                                WHERE remote_machine_id = {_param()}
+                                """,
+                                (machine_id, old_machine_id),
+                            )
+                        except Exception:
+                            logger.debug(
+                                "agent_sessions table not available during merge, skipping"
+                            )
+
+                        # Clean up in-memory state for old machine_id
+                        self._connections.pop(old_machine_id, None)
+                        self._command_queues.pop(old_machine_id, None)
+                        self._last_heartbeat_db_write.pop(old_machine_id, None)
+                        for sid, mid in list(self._session_machines.items()):
+                            if mid == old_machine_id:
+                                self._session_machines[sid] = machine_id
+
+                        conn.commit()
+
+                if not merged:
+                    cursor.execute(
+                        f"""
+                        INSERT INTO remote_machines
+                        (machine_id, machine_name, hostname, os_type, os_version, ip_address,
+                         status, agent_version, capabilities, tenant_id, created_by, created_at, updated_at, last_heartbeat)
+                        VALUES ({_params(14)})
+                    """,
+                        (
+                            machine_id,
+                            machine_name,
+                            hostname,
+                            os_type,
+                            os_version,
+                            ip_address,
+                            "online",
+                            agent_version,
+                            json.dumps(capabilities) if capabilities else None,
+                            token_info["tenant_id"],
+                            token_info["created_by"],
+                            now,
+                            now,
+                            now,
+                        ),
+                    )
 
                 conn.commit()
 
@@ -810,6 +916,7 @@ def get_ddl_statements() -> list[str]:
         """,
         "CREATE INDEX IF NOT EXISTS idx_remote_machines_machine_id ON remote_machines(machine_id)",
         "CREATE INDEX IF NOT EXISTS idx_remote_machines_status ON remote_machines(status)",
+        "CREATE INDEX IF NOT EXISTS idx_remote_machines_hostname_tenant ON remote_machines(hostname, tenant_id)",
         "CREATE INDEX IF NOT EXISTS idx_machine_assignments_user_id ON machine_assignments(user_id)",
     ]
 
