@@ -54,6 +54,15 @@ def _convert_sql(sql: str) -> str:
     return sql
 
 
+def escape_like(value: str, escape_char: str = "\\") -> str:
+    """Escape special characters in a LIKE pattern value."""
+    return (
+        value.replace(escape_char, escape_char + escape_char)
+        .replace("%", escape_char + "%")
+        .replace("_", escape_char + "_")
+    )
+
+
 def _execute(cursor, sql: str, params: Union[tuple, list] = ()) -> None:
     """Execute SQL with automatic placeholder conversion for PostgreSQL."""
     cursor.execute(_convert_sql(sql), params)
@@ -1129,7 +1138,7 @@ def get_messages_by_date(
 
     if search:
         conditions.append("content LIKE ?")
-        params.append(f"%{search}%")
+        params.append(f"%{escape_like(search)}%")
 
     # Get total count
     where_clause = " AND ".join(conditions)

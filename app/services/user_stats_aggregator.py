@@ -92,34 +92,18 @@ class UserDailyStatsAggregator:
         try:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
-                safe_prefix = escape_like(sender_prefix)
-
                 if is_postgresql():
                     cursor.execute(
                         """
-                        INSERT INTO user_daily_stats
-                        (user_id, date, requests, tokens, input_tokens, output_tokens, updated_at)
-                        SELECT
-                            %s as user_id,
-                            dm.date::date,
-                            COUNT(*) as requests,
-                            COALESCE(SUM(dm.tokens_used), 0) as tokens,
-                            COALESCE(SUM(dm.input_tokens), 0) as input_tokens,
-                            COALESCE(SUM(dm.output_tokens), 0) as output_tokens,
-                            CURRENT_TIMESTAMP
+                        INSERT INTO user_daily_stats (user_id, date, requests, tokens, input_tokens, output_tokens, updated_at)
+                        SELECT %s, dm.date::date, COUNT(*), COALESCE(SUM(dm.tokens_used), 0),
+                               COALESCE(SUM(dm.input_tokens), 0), COALESCE(SUM(dm.output_tokens), 0), CURRENT_TIMESTAMP
                         FROM daily_messages dm
-                        WHERE dm.date >= %s AND dm.date <= %s
-                          AND dm.sender_name LIKE %s
-                          AND dm.role = 'assistant'
+                        WHERE dm.date >= %s AND dm.date <= %s AND dm.sender_name LIKE %s AND dm.role = 'assistant'
                         GROUP BY dm.date::date
-                        ON CONFLICT (user_id, date) DO UPDATE SET
-                            requests = EXCLUDED.requests,
-                            tokens = EXCLUDED.tokens,
-                            input_tokens = EXCLUDED.input_tokens,
-                            output_tokens = EXCLUDED.output_tokens,
-                            updated_at = CURRENT_TIMESTAMP
-                    """,
-                        (user_id, start_str, end_str, f"{safe_prefix}%"),
+                        ON CONFLICT (user_id, date) DO UPDATE SET requests = EXCLUDED.requests, tokens = EXCLUDED.tokens,
+                            input_tokens = EXCLUDED.input_tokens, output_tokens = EXCLUDED.output_tokens, updated_at = CURRENT_TIMESTAMP""",
+                        (user_id, start_str, end_str, f"{escape_like(sender_prefix)}%"),
                     )
                 else:
                     now = datetime.utcnow().isoformat()

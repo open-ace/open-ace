@@ -1007,25 +1007,17 @@ class UsageRepository:
         Returns a list of daily records suitable for the user's usage report page.
         """
         # Local CLI usage from daily_messages
-        safe_account = escape_like(system_account)
         local_rows = self.db.fetch_all(
             """
-            SELECT
-                date,
-                tool_name,
-                SUM(tokens_used) as tokens_used,
-                SUM(input_tokens) as input_tokens,
-                SUM(output_tokens) as output_tokens,
-                COUNT(*) as request_count
+            SELECT date, tool_name, SUM(tokens_used) as tokens_used,
+                   SUM(input_tokens) as input_tokens, SUM(output_tokens) as output_tokens,
+                   COUNT(*) as request_count
             FROM daily_messages
             WHERE sender_name LIKE ?
-              AND date >= ? AND date <= ?
-              AND role = 'assistant'
+              AND date >= ? AND date <= ? AND role = 'assistant'
               AND (message_source IS NULL OR message_source != 'remote_workspace')
-            GROUP BY date, tool_name
-            ORDER BY date DESC
-        """,
-            (f"{safe_account}%", start_date, end_date),
+            GROUP BY date, tool_name ORDER BY date DESC""",
+            (f"{escape_like(system_account)}%", start_date, end_date),
         )
 
         # Remote session usage from agent_sessions + session_messages

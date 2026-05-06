@@ -78,6 +78,15 @@ def sanitize_utf8(text: Optional[str]) -> Optional[str]:
         return text.encode("utf-8", errors="surrogatepass").decode("utf-8", errors="replace")
 
 
+def escape_like(value: str, escape_char: str = "\\") -> str:
+    """Escape special characters in a LIKE pattern value."""
+    return (
+        value.replace(escape_char, escape_char + escape_char)
+        .replace("%", escape_char + "%")
+        .replace("_", escape_char + "_")
+    )
+
+
 def _convert_sql(sql: str) -> str:
     """Convert SQL placeholders from ? to %s for PostgreSQL."""
     if is_postgresql():
@@ -1139,7 +1148,7 @@ def get_messages_by_date(
 
     if search:
         conditions.append("content LIKE ?")
-        params.append(f"%{search}%")
+        params.append(f"%{escape_like(search)}%")
 
     # Get total count
     where_clause = " AND ".join(conditions)
