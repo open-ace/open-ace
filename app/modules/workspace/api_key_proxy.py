@@ -234,7 +234,7 @@ class APIKeyProxyService:
             cursor.execute(
                 f"""
                 SELECT encrypted_key, base_url FROM api_key_store
-                WHERE tenant_id = {_param()} AND provider = {_param()} AND is_active = TRUE
+                WHERE tenant_id = {_param()} AND provider = {_param()} AND is_active != 0
                 LIMIT 1
             """,
                 (tenant_id, provider),
