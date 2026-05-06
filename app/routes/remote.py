@@ -373,8 +373,8 @@ def get_available_machines():
     agent_mgr = get_remote_agent_manager()
     machines = agent_mgr.get_available_machines(g.user["id"])
 
-    # Filter to only show online machines
-    available = [m for m in machines if m.get("status") == "online"]
+    # Filter out offline machines (show online/idle/busy)
+    available = [m for m in machines if m.get("status") != "offline"]
 
     return jsonify(
         {
