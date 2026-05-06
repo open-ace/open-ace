@@ -2,7 +2,7 @@
  * Charts Component - Chart.js integration with react-chartjs-2
  */
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -513,17 +513,57 @@ interface TokenTrendChartProps {
     tool: string;
     tokens: number;
   }>;
+  startDate?: string;
+  endDate?: string;
   height?: number;
   className?: string;
 }
 
 export const TokenTrendChart: React.FC<TokenTrendChartProps> = ({
   data,
+  startDate,
+  endDate,
   height = 300,
   className,
 }) => {
-  // Get unique dates and tools
-  const dates = [...new Set(data.map((d) => d.date))].sort();
+  // Generate complete date range if startDate and endDate are provided
+  const dates = useMemo(() => {
+    if (startDate && endDate) {
+      // Parse dates using local time to avoid timezone offset issues
+      const parseLocalDate = (dateStr: string): Date => {
+        const [year, month, day] = dateStr.split('-').map(Number);
+        return new Date(year, month - 1, day);
+      };
+
+      const formatDate = (d: Date): string => {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+      };
+
+      const start = parseLocalDate(startDate);
+      const end = parseLocalDate(endDate);
+
+      if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+        return [...new Set(data.map((d) => d.date))].sort();
+      }
+
+      const dateArray: string[] = [];
+      const currentDate = new Date(start);
+
+      while (currentDate <= end) {
+        dateArray.push(formatDate(currentDate));
+        currentDate.setDate(currentDate.getDate() + 1);
+      }
+
+      return dateArray;
+    }
+
+    // Fallback: use unique dates from data
+    return [...new Set(data.map((d) => d.date))].sort();
+  }, [data, startDate, endDate]);
+
   const tools = [...new Set(data.map((d) => d.tool))];
 
   // Create a map for quick lookup

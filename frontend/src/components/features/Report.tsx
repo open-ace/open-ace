@@ -181,7 +181,7 @@ export const Report: React.FC = () => {
         <div className="col-md-8 mb-4">
           <Card title={t('tokenTrend', language)}>
             {chartData.length > 0 ? (
-              <TokenTrendChart data={chartData} height={300} />
+              <TokenTrendChart data={chartData} startDate={startDate} endDate={endDate} height={300} />
             ) : (
               <EmptyState icon="bi-graph-up" title={t('noData', language)} />
             )}
