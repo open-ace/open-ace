@@ -326,12 +326,12 @@ class ROICalculator:
                 SUM(input_tokens) as total_input_tokens,
                 SUM(output_tokens) as total_output_tokens
             FROM daily_usage
-            WHERE date >= %s
+            WHERE date >= ?
         """
         params: list[Any] = [start_date]
 
         if user_id:
-            query += " AND user_id = %s"
+            query += " AND user_id = ?"
             params.append(user_id)
 
         query += f" GROUP BY {month_expr} ORDER BY month"
@@ -346,12 +346,12 @@ class ROICalculator:
                 SUM(input_tokens) as input_tokens,
                 SUM(output_tokens) as output_tokens
             FROM daily_usage
-            WHERE date >= %s
+            WHERE date >= ?
         """
         model_params: list[Any] = [start_date]
 
         if user_id:
-            model_query += " AND user_id = %s"
+            model_query += " AND user_id = ?"
             model_params.append(user_id)
 
         model_query += f" GROUP BY {month_expr}, tool_name, models_used"

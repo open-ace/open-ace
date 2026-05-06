@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from functools import lru_cache
 from typing import Optional, cast
 
-from app.repositories.database import Database, escape_like
+from app.repositories.database import Database, escape_like, is_postgresql
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +81,6 @@ class UsageRepository:
         with self.db.connection() as conn:
             cursor = conn.cursor()
             # Use different syntax for SQLite and PostgreSQL
-            from app.repositories.database import is_postgresql
 
             if is_postgresql():
                 cursor.execute(
@@ -153,11 +152,17 @@ class UsageRepository:
             params.append(host_name)
 
         where_clause = " AND ".join(conditions)
+        if is_postgresql():
+            join_on = "dm.date::text = du.date::text AND dm.tool_name = du.tool_name AND dm.host_name = du.host_name"
+        else:
+            join_on = (
+                "dm.date = du.date AND dm.tool_name = du.tool_name AND dm.host_name = du.host_name"
+            )
         query = f"""
             SELECT dm.*,
                    COALESCE(du.request_count, 0) as request_count
             FROM daily_messages dm
-            LEFT JOIN daily_usage du ON dm.date::text = du.date::text AND dm.tool_name = du.tool_name AND dm.host_name = du.host_name
+            LEFT JOIN daily_usage du ON {join_on}
             WHERE {where_clause}
             ORDER BY dm.date DESC
         """

@@ -159,12 +159,14 @@ class RemoteSessionManager:
 
         # Also update the dedicated columns (list_sessions reads from columns, not context JSON)
         try:
-            from app.repositories.database import get_db_connection
+            from app.repositories.database import adapt_sql, get_db_connection
 
             with get_db_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "UPDATE agent_sessions SET workspace_type = %s, remote_machine_id = %s WHERE session_id = %s",
+                    adapt_sql(
+                        "UPDATE agent_sessions SET workspace_type = ?, remote_machine_id = ? WHERE session_id = ?"
+                    ),
                     ("remote", machine_id, session_id),
                 )
                 conn.commit()
@@ -204,12 +206,14 @@ class RemoteSessionManager:
         # Fallback 2: dedicated DB column
         if not machine_id:
             try:
-                from app.repositories.database import get_db_connection
+                from app.repositories.database import adapt_sql, get_db_connection
 
                 with get_db_connection() as conn:
                     cursor = conn.cursor()
                     cursor.execute(
-                        "SELECT remote_machine_id FROM agent_sessions WHERE session_id = %s",
+                        adapt_sql(
+                            "SELECT remote_machine_id FROM agent_sessions WHERE session_id = ?"
+                        ),
                         (session_id,),
                     )
                     row = cursor.fetchone()
