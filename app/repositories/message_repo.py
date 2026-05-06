@@ -8,6 +8,7 @@ import logging
 from typing import Any, Optional
 
 from app.repositories.database import Database, escape_like
+from app.utils.tool_names import normalize_tool_name
 
 logger = logging.getLogger(__name__)
 
@@ -409,7 +410,11 @@ class MessageRepository:
         """
 
         params.extend([limit, offset])
-        return self.db.fetch_all(query, tuple(params))
+        rows = self.db.fetch_all(query, tuple(params))
+        # Normalize tool_name in results for display
+        for row in rows:
+            row["tool_name"] = normalize_tool_name(row["tool_name"])
+        return rows
 
     def count_conversations(
         self,
@@ -862,9 +867,22 @@ class MessageRepository:
             ORDER BY total_tokens DESC
         """
 
-        return self.db.fetch_all(query, tuple(params))
+        rows = self.db.fetch_all(query, tuple(params))
 
-    def get_conversation_stats_summary(self, host_name: Optional[str] = None) -> dict:
+        # Normalize tool names and merge
+        merged: dict[str, dict] = {}
+        for row in rows:
+            tool = normalize_tool_name(row["tool_name"])
+            if tool in merged:
+                existing = merged[tool]
+                existing["total_tokens"] += row["total_tokens"] or 0
+                existing["total_input_tokens"] += row["total_input_tokens"] or 0
+                existing["total_output_tokens"] += row["total_output_tokens"] or 0
+                existing["message_count"] += row["message_count"] or 0
+            else:
+                merged[tool] = {**row, "tool_name": tool}
+
+        return sorted(merged.values(), key=lambda x: x.get("total_tokens", 0), reverse=True)
         """
         Get conversation statistics summary without fetching full history.
 

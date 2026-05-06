@@ -10,6 +10,7 @@ from typing import Optional
 
 from app.repositories.usage_repo import UsageRepository
 from app.utils.cache import cached
+from app.utils.tool_names import normalize_tool_name
 
 logger = logging.getLogger(__name__)
 
@@ -45,9 +46,9 @@ class UsageService:
 
         # Merge entries by tool_name (combine all hosts)
         # Use sets for O(1) lookup instead of O(n) list lookup
-        merged = {}
+        merged: dict[str, dict] = {}
         for entry in entries:
-            tool = entry.get("tool_name", "unknown")
+            tool = normalize_tool_name(entry.get("tool_name", "unknown"))
             if tool not in merged:
                 merged[tool] = {
                     "date": entry.get("date"),

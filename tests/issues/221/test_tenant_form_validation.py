@@ -27,7 +27,7 @@ from playwright.async_api import async_playwright
 # Configuration
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 SESSION_TOKEN = os.environ.get("SESSION_TOKEN", "")
-SCREENSHOT_DIR = "/Users/rhuang/workspace/open-ace/screenshots/issues/221"
+SCREENSHOT_DIR = os.environ.get("SCREENSHOT_DIR", "./screenshots/issues/221")
 
 
 async def test_tenant_form_validation():
@@ -68,8 +68,8 @@ async def test_tenant_form_validation():
             current_url = page.url
             if "/login" in current_url or "login" in current_url:
                 print("  Need to login first...")
-                await page.fill("#username", "admin")
-                await page.fill("#password", "admin123")
+                await page.fill("#username", os.environ.get("TEST_USERNAME", "admin"))
+                await page.fill("#password", os.environ.get("TEST_PASSWORD", "admin123"))
                 await page.click('button[type="submit"]')
                 await page.wait_for_timeout(2000)
                 print("  ✓ Logged in")

@@ -313,18 +313,26 @@ class UsageRepository:
 
         rows = self.db.fetch_all(query, tuple(params))
 
-        results = {}
+        results: dict[str, dict] = {}
         for row in rows:
-            results[row["tool_name"]] = {
-                "days_count": row["days_count"],
-                "total_tokens": row["total_tokens"] or 0,
-                "avg_tokens": round(row["avg_tokens"], 2) if row["avg_tokens"] else 0,
-                "total_requests": row["total_requests"] if row["total_requests"] else 0,
-                "total_input_tokens": row["total_input_tokens"] or 0,
-                "total_output_tokens": row["total_output_tokens"] or 0,
-                "first_date": row["first_date"],
-                "last_date": row["last_date"],
-            }
+            tool = normalize_tool_name(row["tool_name"])
+            if tool in results:
+                existing = results[tool]
+                existing["total_tokens"] += row["total_tokens"] or 0
+                existing["total_requests"] += row["total_requests"] if row["total_requests"] else 0
+                existing["total_input_tokens"] += row["total_input_tokens"] or 0
+                existing["total_output_tokens"] += row["total_output_tokens"] or 0
+            else:
+                results[tool] = {
+                    "days_count": row["days_count"],
+                    "total_tokens": row["total_tokens"] or 0,
+                    "avg_tokens": round(row["avg_tokens"], 2) if row["avg_tokens"] else 0,
+                    "total_requests": row["total_requests"] if row["total_requests"] else 0,
+                    "total_input_tokens": row["total_input_tokens"] or 0,
+                    "total_output_tokens": row["total_output_tokens"] or 0,
+                    "first_date": row["first_date"],
+                    "last_date": row["last_date"],
+                }
 
         return results
 
@@ -342,7 +350,7 @@ class UsageRepository:
         """
 
         rows = self.db.fetch_all(query)
-        return [row["tool_name"] for row in rows]
+        return sorted({normalize_tool_name(row["tool_name"]) for row in rows})
 
     def get_all_hosts(self) -> list[str]:
         """
@@ -643,9 +651,10 @@ class UsageRepository:
         """
         by_tool_rows = self.db.fetch_all(by_tool_query, tuple(params))
 
-        by_tool = {}
+        by_tool: dict[str, int] = {}
         for row in by_tool_rows:
-            by_tool[row["tool_name"]] = int(row["requests"] or 0)
+            tool = normalize_tool_name(row["tool_name"])
+            by_tool[tool] = by_tool.get(tool, 0) + int(row["requests"] or 0)
 
         return {
             "date": today,
@@ -709,7 +718,7 @@ class UsageRepository:
             results.append(
                 {
                     "user": sender_name,
-                    "tool": row["tool_name"],
+                    "tool": normalize_tool_name(row["tool_name"]),
                     "requests": int(row["requests"] or 0),
                     "tokens": int(row["tokens"] or 0),
                 }
@@ -1059,7 +1068,7 @@ class UsageRepository:
             results.append(
                 {
                     "date": str(row["date"]),
-                    "tool_name": row["tool_name"] or "unknown",
+                    "tool_name": normalize_tool_name(row["tool_name"] or "unknown"),
                     "tokens_used": int(row["tokens_used"] or 0),
                     "input_tokens": int(row["input_tokens"] or 0),
                     "output_tokens": int(row["output_tokens"] or 0),
@@ -1078,5 +1087,5 @@ class UsageRepository:
                 }
             )
 
-        results.sort(key=lambda x: x["date"], reverse=True)
+        results.sort(key=lambda x: str(x["date"]), reverse=True)
         return results

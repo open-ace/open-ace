@@ -20,13 +20,18 @@ export interface Tenant {
   updated_at?: string;
   quota?: TenantQuota;
   settings?: Record<string, unknown>;
+  user_count?: number;
+  total_tokens_used?: number;
+  total_requests_made?: number;
 }
 
 export interface TenantQuota {
-  monthly_tokens: number;
-  monthly_requests: number;
-  used_tokens: number;
-  used_requests: number;
+  daily_token_limit: number;
+  monthly_token_limit: number;
+  daily_request_limit: number;
+  monthly_request_limit: number;
+  max_users: number;
+  max_sessions_per_user: number;
 }
 
 export interface CreateTenantRequest {
@@ -51,8 +56,12 @@ export interface UpdateTenantRequest {
 }
 
 export interface UpdateTenantQuotaRequest {
-  monthly_tokens?: number;
-  monthly_requests?: number;
+  daily_token_limit?: number;
+  monthly_token_limit?: number;
+  daily_request_limit?: number;
+  monthly_request_limit?: number;
+  max_users?: number;
+  max_sessions_per_user?: number;
 }
 
 export interface TenantUsage {
