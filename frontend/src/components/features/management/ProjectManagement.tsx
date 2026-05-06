@@ -34,6 +34,31 @@ type ProjectSortKey =
   | 'last_access';
 type SortDirection = 'asc' | 'desc';
 
+const SortableHeader: React.FC<{
+  columnKey: ProjectSortKey;
+  currentSortKey: ProjectSortKey | null;
+  sortDirection: SortDirection;
+  onSort: (key: ProjectSortKey) => void;
+  children: React.ReactNode;
+}> = ({ columnKey, currentSortKey, sortDirection, onSort, children }) => (
+  <th
+    onClick={() => onSort(columnKey)}
+    style={{ cursor: 'pointer' }}
+    aria-sort={
+      currentSortKey === columnKey
+        ? sortDirection === 'asc'
+          ? 'ascending'
+          : 'descending'
+        : undefined
+    }
+  >
+    {children}
+    {currentSortKey === columnKey && (
+      <i className={`bi bi-caret-${sortDirection === 'asc' ? 'up' : 'down'}-fill ms-1`} />
+    )}
+  </th>
+);
+
 export const ProjectManagement: React.FC = () => {
   const language = useLanguage();
   const [stats, setStats] = useState<ProjectStats[]>([]);
@@ -209,60 +234,54 @@ export const ProjectManagement: React.FC = () => {
             <table className="table table-hover">
               <thead>
                 <tr>
-                  <th
-                    onClick={() => handleSort('project_name')}
-                    style={{ cursor: 'pointer' }}
+                  <SortableHeader
+                    columnKey="project_name"
+                    currentSortKey={sortKey}
+                    sortDirection={sortDirection}
+                    onSort={handleSort}
                   >
                     {t('project', language)}
-                    {sortKey === 'project_name' && (
-                      <i className={`bi bi-caret-${sortDirection === 'asc' ? 'up' : 'down'}-fill ms-1`} />
-                    )}
-                  </th>
-                  <th
-                    onClick={() => handleSort('total_users')}
-                    style={{ cursor: 'pointer' }}
+                  </SortableHeader>
+                  <SortableHeader
+                    columnKey="total_users"
+                    currentSortKey={sortKey}
+                    sortDirection={sortDirection}
+                    onSort={handleSort}
                   >
                     {t('users', language)}
-                    {sortKey === 'total_users' && (
-                      <i className={`bi bi-caret-${sortDirection === 'asc' ? 'up' : 'down'}-fill ms-1`} />
-                    )}
-                  </th>
-                  <th
-                    onClick={() => handleSort('total_tokens')}
-                    style={{ cursor: 'pointer' }}
+                  </SortableHeader>
+                  <SortableHeader
+                    columnKey="total_tokens"
+                    currentSortKey={sortKey}
+                    sortDirection={sortDirection}
+                    onSort={handleSort}
                   >
                     {t('tokens', language)}
-                    {sortKey === 'total_tokens' && (
-                      <i className={`bi bi-caret-${sortDirection === 'asc' ? 'up' : 'down'}-fill ms-1`} />
-                    )}
-                  </th>
-                  <th
-                    onClick={() => handleSort('total_requests')}
-                    style={{ cursor: 'pointer' }}
+                  </SortableHeader>
+                  <SortableHeader
+                    columnKey="total_requests"
+                    currentSortKey={sortKey}
+                    sortDirection={sortDirection}
+                    onSort={handleSort}
                   >
                     {t('requests', language)}
-                    {sortKey === 'total_requests' && (
-                      <i className={`bi bi-caret-${sortDirection === 'asc' ? 'up' : 'down'}-fill ms-1`} />
-                    )}
-                  </th>
-                  <th
-                    onClick={() => handleSort('total_duration_seconds')}
-                    style={{ cursor: 'pointer' }}
+                  </SortableHeader>
+                  <SortableHeader
+                    columnKey="total_duration_seconds"
+                    currentSortKey={sortKey}
+                    sortDirection={sortDirection}
+                    onSort={handleSort}
                   >
                     {t('workTime', language)}
-                    {sortKey === 'total_duration_seconds' && (
-                      <i className={`bi bi-caret-${sortDirection === 'asc' ? 'up' : 'down'}-fill ms-1`} />
-                    )}
-                  </th>
-                  <th
-                    onClick={() => handleSort('last_access')}
-                    style={{ cursor: 'pointer' }}
+                  </SortableHeader>
+                  <SortableHeader
+                    columnKey="last_access"
+                    currentSortKey={sortKey}
+                    sortDirection={sortDirection}
+                    onSort={handleSort}
                   >
                     {t('lastActive', language)}
-                    {sortKey === 'last_access' && (
-                      <i className={`bi bi-caret-${sortDirection === 'asc' ? 'up' : 'down'}-fill ms-1`} />
-                    )}
-                  </th>
+                  </SortableHeader>
                   <th>{t('tableActions', language)}</th>
                 </tr>
               </thead>
