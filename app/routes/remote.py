@@ -36,15 +36,23 @@ def load_user():
     use their own auth (JWT tokens) and are exempted.
     """
     # Skip auth for endpoints that use their own authentication (JWT, API keys)
+    # or are public (agent install/uninstall scripts, agent file downloads)
     _exact_exempt = {
+        "/api/remote/agent/register",
         "/api/remote/agent/ws",
+        "/api/remote/agent/message",
         "/api/remote/usage-report",
         "/api/remote/agent/install.sh",
         "/api/remote/agent/install.ps1",
+        "/api/remote/agent/uninstall.sh",
+        "/api/remote/agent/uninstall.ps1",
     }
     if request.path in _exact_exempt:
         return
     if request.path.startswith("/api/remote/llm-proxy"):
+        return
+    # Agent file downloads are public (needed for agent installation)
+    if request.path.startswith("/api/remote/agent/files/"):
         return
 
     token = _extract_token()
