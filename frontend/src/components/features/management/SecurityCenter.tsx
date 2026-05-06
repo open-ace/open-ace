@@ -29,6 +29,7 @@ import {
   Error,
   EmptyState,
   Badge,
+  Tooltip,
 } from '@/components/common';
 import { useToast } from '@/components/common';
 import type {
@@ -245,10 +246,25 @@ export const SecurityCenter: React.FC = () => {
             <table className="table table-hover">
               <thead>
                 <tr>
-                  <th>{t('tablePattern', language)}</th>
-                  <th>{t('tableType', language)}</th>
+                  <th>
+                    {t('tablePattern', language)}
+                    <Tooltip content={t('patternHelp', language)} placement="top">
+                      <i className="bi bi-question-circle text-muted ms-1" style={{ cursor: 'pointer' }} />
+                    </Tooltip>
+                  </th>
+                  <th>
+                    {t('tableType', language)}
+                    <Tooltip content={`${t('keywordTypeHelp', language)}\n${t('regexTypeHelp', language)}\n${t('piiTypeHelp', language)}`} placement="top">
+                      <i className="bi bi-question-circle text-muted ms-1" style={{ cursor: 'pointer' }} />
+                    </Tooltip>
+                  </th>
                   <th>{t('tableSeverity', language)}</th>
-                  <th>{t('tableAction', language)}</th>
+                  <th>
+                    {t('tableAction', language)}
+                    <Tooltip content={`${t('warnActionHelp', language)}\n${t('blockActionHelp', language)}\n${t('redactActionHelp', language)}`} placement="top">
+                      <i className="bi bi-question-circle text-muted ms-1" style={{ cursor: 'pointer' }} />
+                    </Tooltip>
+                  </th>
                   <th>{t('tableStatus', language)}</th>
                   <th>{t('tableActions', language)}</th>
                 </tr>
@@ -342,6 +358,7 @@ export const SecurityCenter: React.FC = () => {
                   onChange={(value: string) => setRuleFormData({ ...ruleFormData, pattern: value })}
                   placeholder={t('enterPattern', language)}
                 />
+                <small className="text-muted">{t('patternHelp', language)}</small>
               </div>
               <div className="col-md-4">
                 <label className="form-label">{t('tableType', language)}</label>
@@ -355,6 +372,11 @@ export const SecurityCenter: React.FC = () => {
                     })
                   }
                 />
+                <small className="text-muted">
+                  {ruleFormData.type === 'keyword' && t('keywordTypeHelp', language)}
+                  {ruleFormData.type === 'regex' && t('regexTypeHelp', language)}
+                  {ruleFormData.type === 'pii' && t('piiTypeHelp', language)}
+                </small>
               </div>
               <div className="col-md-4">
                 <label className="form-label">{t('tableSeverity', language)}</label>
@@ -381,6 +403,11 @@ export const SecurityCenter: React.FC = () => {
                     })
                   }
                 />
+                <small className="text-muted">
+                  {ruleFormData.action === 'warn' && t('warnActionHelp', language)}
+                  {ruleFormData.action === 'block' && t('blockActionHelp', language)}
+                  {ruleFormData.action === 'redact' && t('redactActionHelp', language)}
+                </small>
               </div>
               <div className="col-12">
                 <label className="form-label">{t('description', language)}</label>

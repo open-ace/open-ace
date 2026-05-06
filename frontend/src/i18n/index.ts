@@ -204,6 +204,13 @@ const translations: Record<Language, Translations> = {
     description: 'Description',
     enterDescription: 'Enter description',
     enabled: 'Enabled',
+    patternHelp: 'Enter the content to match. For keywords, use exact words; for regex, use valid patterns; for PII, select a type.',
+    keywordTypeHelp: 'Keyword: Match exact word or phrase',
+    regexTypeHelp: 'Regex: Match using regular expression patterns',
+    piiTypeHelp: 'PII: Detect personal identifiable information (email, phone, SSN, etc.)',
+    warnActionHelp: 'Warn: Log warning but allow the message',
+    blockActionHelp: 'Block: Prevent the message from being sent',
+    redactActionHelp: 'Redact: Replace sensitive content with placeholder',
 
     // Security Settings
     settingsSaved: 'Settings saved successfully',
@@ -927,6 +934,13 @@ const translations: Record<Language, Translations> = {
     description: '描述',
     enterDescription: '请输入描述',
     enabled: '启用',
+    patternHelp: '输入要匹配的内容。关键词类型使用精确词语；正则类型使用有效的正则表达式；PII类型选择个人信息类型。',
+    keywordTypeHelp: '关键词：精确匹配词语或短语',
+    regexTypeHelp: '正则表达式：使用正则表达式模式匹配',
+    piiTypeHelp: 'PII：检测个人隐私信息（邮箱、电话、身份证等）',
+    warnActionHelp: '警告：记录警告但允许消息发送',
+    blockActionHelp: '阻止：禁止消息发送',
+    redactActionHelp: '替换：将敏感内容替换为占位符',
 
     // Security Settings
     settingsSaved: '设置已保存',
@@ -1629,6 +1643,13 @@ const translations: Record<Language, Translations> = {
     description: '説明',
     enterDescription: '説明を入力',
     enabled: '有効',
+    patternHelp: 'マッチする内容を入力。キーワードは正確な単語、正規表現は有効なパターン、PIIはタイプを選択。',
+    keywordTypeHelp: 'キーワード：正確な単語またはフレーズにマッチ',
+    regexTypeHelp: '正規表現：正規表現パターンでマッチ',
+    piiTypeHelp: 'PII：個人識別情報（メール、電話、SSNなど）を検出',
+    warnActionHelp: '警告：警告をログに記録し、メッセージを許可',
+    blockActionHelp: 'ブロック：メッセージの送信を阻止',
+    redactActionHelp: '秘匿：機密内容をプレースホルダーで置換',
 
     // Security Settings
     settingsSaved: '設定を保存しました',
@@ -2051,6 +2072,13 @@ const translations: Record<Language, Translations> = {
     description: '설명',
     enterDescription: '설명 입력',
     enabled: '활성화',
+    patternHelp: '매치할 내용을 입력. 키워드는 정확한 단어, 정규식은 유효한 패턴, PII는 유형을 선택.',
+    keywordTypeHelp: '키워드: 정확한 단어 또는 문구 매치',
+    regexTypeHelp: '정규식: 정규식 패턴으로 매치',
+    piiTypeHelp: 'PII: 개인 식별 정보(이메일, 전화, SSN 등) 감지',
+    warnActionHelp: '경고: 경고를 로그하고 메시지 허용',
+    blockActionHelp: '차단: 메시지 전송 방지',
+    redactActionHelp: '수정: 민감한 내용을 플레이스홀더로 교체',
 
     // Security Settings
     settingsSaved: '설정이 저장되었습니다',
