@@ -68,6 +68,10 @@ export const TenantManagement: React.FC = () => {
     max_users: 100,
     max_sessions_per_user: 5,
   });
+  const [formError, setFormError] = useState<string | null>(null);
+
+  // Form validation
+  const isFormValid = formData.name.trim().length > 0;
 
   // Fetch tenants
   const fetchTenants = React.useCallback(async () => {
@@ -104,6 +108,7 @@ export const TenantManagement: React.FC = () => {
   // Handlers
   const handleOpenCreate = () => {
     setEditingTenant(null);
+    setFormError(null);
     setFormData({
       name: '',
       slug: '',
@@ -116,6 +121,7 @@ export const TenantManagement: React.FC = () => {
 
   const handleOpenEdit = (tenant: Tenant) => {
     setEditingTenant(tenant);
+    setFormError(null);
     setFormData({
       name: tenant.name,
       slug: tenant.slug,
@@ -150,6 +156,11 @@ export const TenantManagement: React.FC = () => {
   };
 
   const handleSubmit = async () => {
+    if (!formData.name.trim()) {
+      setFormError(t('tenantNameRequired', language));
+      return;
+    }
+
     try {
       if (editingTenant) {
         await tenantApi.updateTenant(editingTenant.id, formData as UpdateTenantRequest);
@@ -159,7 +170,9 @@ export const TenantManagement: React.FC = () => {
       handleCloseModal();
       fetchTenants();
     } catch (err) {
-      console.error('Failed to save tenant:', err);
+      const errorMessage =
+        err instanceof Error ? (err as Error).message : 'Failed to save tenant';
+      setFormError(errorMessage);
     }
   };
 
@@ -433,7 +446,7 @@ export const TenantManagement: React.FC = () => {
             <Button variant="secondary" onClick={handleCloseModal}>
               {t('cancel', language)}
             </Button>
-            <Button variant="primary" onClick={handleSubmit}>
+            <Button variant="primary" onClick={handleSubmit} disabled={!isFormValid}>
               {t('save', language)}
             </Button>
           </>
@@ -445,6 +458,11 @@ export const TenantManagement: React.FC = () => {
             handleSubmit();
           }}
         >
+          {formError && (
+            <div className="alert alert-danger mb-3" role="alert">
+              {formError}
+            </div>
+          )}
           <div className="row g-3">
             <div className="col-12">
               <label className="form-label">{t('tenantName', language)} *</label>
