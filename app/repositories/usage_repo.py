@@ -11,6 +11,7 @@ from functools import lru_cache
 from typing import Optional, cast
 
 from app.repositories.database import Database, escape_like, is_postgresql
+from app.utils.tool_names import normalize_tool_name
 
 logger = logging.getLogger(__name__)
 
@@ -447,14 +448,20 @@ class UsageRepository:
 
         rows = self.db.fetch_all(query, tuple(params))
 
-        # Ensure all values are integers
-        results = []
+        # Ensure all values are integers, normalize tool names
+        merged: dict[tuple, dict] = {}
         for row in rows:
-            results.append(
-                {"date": row["date"], "tool": row["tool_name"], "tokens": int(row["tokens"] or 0)}
-            )
+            key = (row["date"], normalize_tool_name(row["tool_name"]))
+            if key in merged:
+                merged[key]["tokens"] += int(row["tokens"] or 0)
+            else:
+                merged[key] = {
+                    "date": row["date"],
+                    "tool": normalize_tool_name(row["tool_name"]),
+                    "tokens": int(row["tokens"] or 0),
+                }
 
-        return results
+        return list(merged.values())
 
     def get_request_count_total(
         self, start_date: str, end_date: str, host_name: Optional[str] = None
@@ -574,7 +581,7 @@ class UsageRepository:
 
         rows = self.db.fetch_all(query, tuple(params))
 
-        results = []
+        results: dict[tuple, dict] = {}
         for row in rows:
             # Convert date to YYYY-MM-DD format if it's a datetime object
             date_val = row["date"]
@@ -583,15 +590,18 @@ class UsageRepository:
             else:
                 # Parse HTTP date format if needed
                 date_str = str(date_val).split()[0] if " " in str(date_val) else str(date_val)
-            results.append(
-                {
+            tool = normalize_tool_name(row["tool_name"])
+            key = (date_str, tool)
+            if key in results:
+                results[key]["requests"] += int(row["requests"] or 0)
+            else:
+                results[key] = {
                     "date": date_str,
-                    "tool": row["tool_name"],
+                    "tool": tool,
                     "requests": int(row["requests"] or 0),
                 }
-            )
 
-        return results
+        return list(results.values())
 
     def get_today_request_stats(self, host_name: Optional[str] = None) -> dict:
         """
