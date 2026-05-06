@@ -61,8 +61,10 @@ export const TenantManagement: React.FC = () => {
     contact_name: '',
   });
   const [quotaData, setQuotaData] = useState({
-    monthly_token_limit: 0,
-    monthly_request_limit: 0,
+    daily_token_limit: 1000000,
+    monthly_token_limit: 30000000,
+    daily_request_limit: 10000,
+    monthly_request_limit: 300000,
     max_users: 100,
     max_sessions_per_user: 5,
   });
@@ -127,7 +129,9 @@ export const TenantManagement: React.FC = () => {
   const handleOpenQuota = (tenant: Tenant) => {
     setEditingTenant(tenant);
     setQuotaData({
+      daily_token_limit: tenant.quota?.daily_token_limit ?? 1000000,
       monthly_token_limit: tenant.quota?.monthly_token_limit ?? 30000000,
+      daily_request_limit: tenant.quota?.daily_request_limit ?? 10000,
       monthly_request_limit: tenant.quota?.monthly_request_limit ?? 300000,
       max_users: tenant.quota?.max_users ?? 100,
       max_sessions_per_user: tenant.quota?.max_sessions_per_user ?? 5,
@@ -516,7 +520,21 @@ export const TenantManagement: React.FC = () => {
           }}
         >
           <div className="row g-3">
-            <div className="col-12">
+            <div className="col-md-6">
+              <label className="form-label">{t('dailyTokenLimit', language)}</label>
+              <input
+                type="number"
+                className="form-control"
+                value={quotaData.daily_token_limit}
+                onChange={(e) =>
+                  setQuotaData({
+                    ...quotaData,
+                    daily_token_limit: parseInt(e.target.value) || 0,
+                  })
+                }
+              />
+            </div>
+            <div className="col-md-6">
               <label className="form-label">{t('monthlyTokenLimit', language)}</label>
               <input
                 type="number"
@@ -530,7 +548,21 @@ export const TenantManagement: React.FC = () => {
                 }
               />
             </div>
-            <div className="col-12">
+            <div className="col-md-6">
+              <label className="form-label">{t('dailyRequestLimit', language)}</label>
+              <input
+                type="number"
+                className="form-control"
+                value={quotaData.daily_request_limit}
+                onChange={(e) =>
+                  setQuotaData({
+                    ...quotaData,
+                    daily_request_limit: parseInt(e.target.value) || 0,
+                  })
+                }
+              />
+            </div>
+            <div className="col-md-6">
               <label className="form-label">{t('monthlyRequestLimit', language)}</label>
               <input
                 type="number"
@@ -544,7 +576,7 @@ export const TenantManagement: React.FC = () => {
                 }
               />
             </div>
-            <div className="col-12">
+            <div className="col-md-6">
               <label className="form-label">{t('maxUsers', language)}</label>
               <input
                 type="number"
@@ -555,7 +587,7 @@ export const TenantManagement: React.FC = () => {
                 }
               />
             </div>
-            <div className="col-12">
+            <div className="col-md-6">
               <label className="form-label">{t('maxSessionsPerUser', language)}</label>
               <input
                 type="number"
