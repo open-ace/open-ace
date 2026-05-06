@@ -413,12 +413,12 @@ class APIKeyProxyService:
             session_id = payload.get("session_id")
             if session_id:
                 try:
-                    from app.repositories.database import get_db_connection
+                    from app.repositories.database import adapt_sql, get_db_connection
 
                     with get_db_connection() as conn:
                         cursor = conn.cursor()
                         cursor.execute(
-                            "SELECT status FROM agent_sessions WHERE session_id = %s",
+                            adapt_sql("SELECT status FROM agent_sessions WHERE session_id = ?"),
                             (session_id,),
                         )
                         row = cursor.fetchone()

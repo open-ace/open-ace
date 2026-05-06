@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from functools import lru_cache
 from typing import Optional, cast
 
-from app.repositories.database import Database, escape_like
+from app.repositories.database import Database, escape_like, is_postgresql
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +81,6 @@ class UsageRepository:
         with self.db.connection() as conn:
             cursor = conn.cursor()
             # Use different syntax for SQLite and PostgreSQL
-            from app.repositories.database import is_postgresql
 
             if is_postgresql():
                 cursor.execute(
@@ -153,11 +152,17 @@ class UsageRepository:
             params.append(host_name)
 
         where_clause = " AND ".join(conditions)
+        if is_postgresql():
+            join_on = "dm.date::text = du.date::text AND dm.tool_name = du.tool_name AND dm.host_name = du.host_name"
+        else:
+            join_on = (
+                "dm.date = du.date AND dm.tool_name = du.tool_name AND dm.host_name = du.host_name"
+            )
         query = f"""
             SELECT dm.*,
                    COALESCE(du.request_count, 0) as request_count
             FROM daily_messages dm
-            LEFT JOIN daily_usage du ON dm.date::text = du.date::text AND dm.tool_name = du.tool_name AND dm.host_name = du.host_name
+            LEFT JOIN daily_usage du ON {join_on}
             WHERE {where_clause}
             ORDER BY dm.date DESC
         """
@@ -1002,25 +1007,17 @@ class UsageRepository:
         Returns a list of daily records suitable for the user's usage report page.
         """
         # Local CLI usage from daily_messages
-        safe_account = escape_like(system_account)
         local_rows = self.db.fetch_all(
             """
-            SELECT
-                date,
-                tool_name,
-                SUM(tokens_used) as tokens_used,
-                SUM(input_tokens) as input_tokens,
-                SUM(output_tokens) as output_tokens,
-                COUNT(*) as request_count
+            SELECT date, tool_name, SUM(tokens_used) as tokens_used,
+                   SUM(input_tokens) as input_tokens, SUM(output_tokens) as output_tokens,
+                   COUNT(*) as request_count
             FROM daily_messages
             WHERE sender_name LIKE ?
-              AND date >= ? AND date <= ?
-              AND role = 'assistant'
+              AND date >= ? AND date <= ? AND role = 'assistant'
               AND (message_source IS NULL OR message_source != 'remote_workspace')
-            GROUP BY date, tool_name
-            ORDER BY date DESC
-        """,
-            (f"{safe_account}%", start_date, end_date),
+            GROUP BY date, tool_name ORDER BY date DESC""",
+            (f"{escape_like(system_account)}%", start_date, end_date),
         )
 
         # Remote session usage from agent_sessions + session_messages
