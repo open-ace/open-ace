@@ -47,6 +47,8 @@ class MessageRepository:
         is_group_chat: Optional[int] = None,
         agent_session_id: Optional[str] = None,
         conversation_id: Optional[str] = None,
+        user_id: Optional[int] = None,
+        project_path: Optional[str] = None,
     ) -> bool:
         """
         Save a message to the database.
@@ -87,8 +89,8 @@ class MessageRepository:
                  full_entry, tokens_used, input_tokens, output_tokens, model,
                  timestamp, sender_id, sender_name, message_source,
                  feishu_conversation_id, group_subject, is_group_chat,
-                 agent_session_id, conversation_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 agent_session_id, conversation_id, user_id, project_path)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (date, tool_name, host_name, message_id) DO UPDATE SET
                     parent_id = EXCLUDED.parent_id,
                     role = EXCLUDED.role,
@@ -106,7 +108,9 @@ class MessageRepository:
                     group_subject = EXCLUDED.group_subject,
                     is_group_chat = EXCLUDED.is_group_chat,
                     agent_session_id = EXCLUDED.agent_session_id,
-                    conversation_id = EXCLUDED.conversation_id
+                    conversation_id = EXCLUDED.conversation_id,
+                    user_id = EXCLUDED.user_id,
+                    project_path = EXCLUDED.project_path
             """,
                 (
                     date,
@@ -130,6 +134,8 @@ class MessageRepository:
                     is_group_chat,
                     agent_session_id,
                     conversation_id,
+                    user_id,
+                    project_path,
                 ),
             )
         else:
@@ -140,8 +146,8 @@ class MessageRepository:
                  full_entry, tokens_used, input_tokens, output_tokens, model,
                  timestamp, sender_id, sender_name, message_source,
                  feishu_conversation_id, group_subject, is_group_chat,
-                 agent_session_id, conversation_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 agent_session_id, conversation_id, user_id, project_path)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     date,
@@ -165,6 +171,8 @@ class MessageRepository:
                     is_group_chat,
                     agent_session_id,
                     conversation_id,
+                    user_id,
+                    project_path,
                 ),
             )
 
