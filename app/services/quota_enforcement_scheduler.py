@@ -151,12 +151,9 @@ class QuotaEnforcementScheduler:
                     JOIN users u ON uds.user_id = u.id
                     WHERE uds.date >= ? AND uds.date <= ?
                       AND {adapt_boolean_condition("u.is_active", True)}
-                      AND u.monthly_token_quota IS NOT NULL
-                      AND (
-                        SUM(uds.requests) >= COALESCE(u.monthly_request_quota, 999999)
-                        OR SUM(uds.tokens) >= COALESCE(u.monthly_token_quota, 999999) * 1000000
-                      )
                     GROUP BY u.user_id, u.username, u.monthly_request_quota, u.monthly_token_quota
+                    HAVING SUM(uds.requests) >= COALESCE(u.monthly_request_quota, 999999)
+                        OR SUM(uds.tokens) >= COALESCE(u.monthly_token_quota, 999999) * 1000000
                 """),
                 (month_start, today),
             )
