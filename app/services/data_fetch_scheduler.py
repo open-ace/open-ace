@@ -147,6 +147,9 @@ class DataFetchScheduler:
         # Safety net: aggregate user_daily_stats periodically
         self._aggregate_user_stats()
 
+        # Refresh usage_summary table
+        self._refresh_usage_summary()
+
         # Check quotas after data is fresh
         self._check_quotas()
 
@@ -177,6 +180,17 @@ class DataFetchScheduler:
             aggregate_user_stats_background()
         except Exception as e:
             logger.warning(f"Scheduled user stats aggregation failed: {e}")
+
+    def _refresh_usage_summary(self):
+        """Refresh usage_summary table after new data is fetched."""
+        from app.services.summary_service import SummaryService
+
+        try:
+            summary_service = SummaryService()
+            summary_service.refresh_summary()
+            logger.info("Usage summary refreshed")
+        except Exception as e:
+            logger.exception(f"Error refreshing usage summary: {e}")
 
     def _check_quotas(self):
         """Check all users' quotas and enforce limits after data refresh."""
