@@ -170,34 +170,27 @@ class APIKeyProxyService:
         cursor = conn.cursor()
 
         try:
-            if is_postgresql():
-                cursor.execute(
-                    f"""
-                    INSERT INTO api_key_store (tenant_id, provider, key_name, encrypted_key, key_hash, base_url, created_by)
-                    VALUES ({_params(7)})
-                    ON CONFLICT (tenant_id, provider, key_name) DO UPDATE SET
-                        encrypted_key = EXCLUDED.encrypted_key,
-                        key_hash = EXCLUDED.key_hash,
-                        base_url = EXCLUDED.base_url,
-                        is_active = TRUE,
-                        updated_at = CURRENT_TIMESTAMP
-                """,
-                    (tenant_id, provider, key_name, encrypted, key_hash, base_url, created_by),
-                )
-            else:
-                cursor.execute(
-                    f"""
-                    INSERT INTO api_key_store (tenant_id, provider, key_name, encrypted_key, key_hash, base_url, created_by)
-                    VALUES ({_params(7)})
-                    ON CONFLICT (tenant_id, provider, key_name) DO UPDATE SET
-                        encrypted_key = excluded.encrypted_key,
-                        key_hash = excluded.key_hash,
-                        base_url = excluded.base_url,
-                        is_active = TRUE,
-                        updated_at = CURRENT_TIMESTAMP
-                """,
-                    (tenant_id, provider, key_name, encrypted, key_hash, base_url, created_by),
-                )
+            cursor.execute(
+                f"""
+                INSERT INTO api_key_store (tenant_id, provider, key_name, encrypted_key, key_hash, base_url, created_by)
+                VALUES ({_params(7)})
+                ON CONFLICT (tenant_id, provider, key_name) DO UPDATE SET
+                    encrypted_key = EXCLUDED.encrypted_key,
+                    key_hash = EXCLUDED.key_hash,
+                    base_url = EXCLUDED.base_url,
+                    is_active = TRUE,
+                    updated_at = CURRENT_TIMESTAMP
+            """,
+                (
+                    tenant_id,
+                    provider,
+                    key_name,
+                    encrypted,
+                    key_hash,
+                    base_url,
+                    created_by,
+                ),
+            )
 
             conn.commit()
             logger.info(
