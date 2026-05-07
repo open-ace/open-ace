@@ -232,7 +232,7 @@ export const RemoteMachineManagement: React.FC = () => {
 
   // Stats
   const totalMachines = machines.length;
-  const onlineCount = machines.filter((m) => m.status === 'online' || m.status === 'idle').length;
+  const onlineCount = machines.filter((m) => m.status === 'online' || m.status === 'idle' || m.status === 'busy').length;
   const offlineCount = totalMachines - onlineCount;
 
   if (isLoading) {
@@ -331,8 +331,8 @@ export const RemoteMachineManagement: React.FC = () => {
                     {machine.os_version ? ` ${machine.os_version}` : ''}
                   </td>
                   <td>
-                    <Badge variant={machine.status === 'online' || machine.status === 'idle' ? 'success' : 'secondary'}>
-                      {machine.status === 'online' || machine.status === 'idle' ? t('online', language) : t('offline', language)}
+                    <Badge variant={machine.status === 'online' || machine.status === 'idle' || machine.status === 'busy' ? 'success' : 'secondary'}>
+                      {machine.status === 'online' || machine.status === 'idle' || machine.status === 'busy' ? t('online', language) : t('offline', language)}
                     </Badge>
                   </td>
                   <td>{machine.agent_version ?? '-'}</td>
@@ -670,8 +670,8 @@ const MachineDetailsDialog: React.FC<MachineDetailsDialogProps> = ({
         <div className="col-md-6">
           <label className="text-muted small">{t('keyStatus', language)}</label>
           <div>
-            <Badge variant={machine.status === 'online' || machine.status === 'idle' ? 'success' : 'secondary'}>
-              {machine.status === 'online' || machine.status === 'idle' ? t('online', language) : t('offline', language)}
+            <Badge variant={machine.status === 'online' || machine.status === 'idle' || machine.status === 'busy' ? 'success' : 'secondary'}>
+              {machine.status === 'online' || machine.status === 'idle' || machine.status === 'busy' ? t('online', language) : t('offline', language)}
             </Badge>
             {machine.connected && (
               <Badge variant="info" className="ms-2">
