@@ -6,13 +6,15 @@ Connects to the Open ACE server via HTTP polling, handles commands
 through the executor module, and sends heartbeats.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import os
 import signal
 import sys
 import time
-from typing import Any, Optional
+from typing import Any
 
 import requests
 from executor import ProcessExecutor
@@ -31,7 +33,7 @@ class RemoteAgent:
     manages CLI subprocesses, and reports output and status back.
     """
 
-    def __init__(self, config: Optional[AgentConfig] = None):
+    def __init__(self, config: AgentConfig | None = None):
         self.config = config or AgentConfig()
         self._executor = ProcessExecutor(
             server_url=self.config.server_url,
@@ -158,7 +160,7 @@ class RemoteAgent:
                 except Exception as e:
                     logger.error("Error handling command: %s", e)
 
-    def _http_send(self, message: dict[str, Any]) -> Optional[dict[str, Any]]:
+    def _http_send(self, message: dict[str, Any]) -> dict[str, Any] | None:
         """
         POST a message to the server's HTTP fallback endpoint.
 
@@ -261,7 +263,7 @@ class RemoteAgent:
             }
         )
 
-    def _send_session_status(self, session_id: str, status: str, pid: Optional[int] = None) -> None:
+    def _send_session_status(self, session_id: str, status: str, pid: int | None = None) -> None:
         """Send a session_status message to the server."""
         logger.info(
             "Sending session_status: session=%s status=%s pid=%s", session_id[:8], status, pid
@@ -385,10 +387,18 @@ class RemoteAgent:
 
         result = self._executor.send_message(session_id, content)
         if not result["success"]:
+            error_msg = result.get("error", "unknown error")
             logger.warning(
                 "Failed to send message to session %s: %s",
                 session_id[:8],
-                result.get("error"),
+                error_msg,
+            )
+            self._send_session_status(session_id, "error")
+            self._send_session_output(
+                session_id,
+                f"Failed to send message: {error_msg}",
+                "stderr",
+                is_complete=True,
             )
 
     def _cmd_stop_session(self, data: dict[str, Any]) -> None:

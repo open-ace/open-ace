@@ -6,8 +6,9 @@ Each adapter knows how to install, configure, and launch a specific
 CLI coding tool (e.g., qwen-code, claude-code, openclaw).
 """
 
+from __future__ import annotations
+
 import abc
-from typing import Optional
 
 
 class BaseCLIAdapter(abc.ABC):
@@ -33,9 +34,9 @@ class BaseCLIAdapter(abc.ABC):
         self,
         session_id: str,
         project_path: str,
-        model: Optional[str] = None,
-        permission_mode: Optional[str] = None,
-        allowed_tools: Optional[list[str]] = None,
+        model: str | None = None,
+        permission_mode: str | None = None,
+        allowed_tools: list[str] | None = None,
         resume: bool = False,
     ) -> list[str]:
         """Build the command-line arguments to start the CLI."""
@@ -56,7 +57,7 @@ class BaseCLIAdapter(abc.ABC):
         return True
 
     def build_single_shot_args(
-        self, prompt: str, project_path: str, model: Optional[str] = None
+        self, prompt: str, project_path: str, model: str | None = None
     ) -> list[str]:
         """Build args for a single-shot prompt execution (used when stdin is not supported)."""
         return [self.get_executable_name(), prompt]

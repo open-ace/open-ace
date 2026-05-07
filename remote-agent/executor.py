@@ -9,6 +9,8 @@ Uses CLI adapters from cli_adapters to build per-tool command lines and
 environment variables.
 """
 
+from __future__ import annotations
+
 import contextlib
 import json
 import logging
@@ -19,10 +21,12 @@ import subprocess
 import threading
 import uuid
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable
 
 from cli_adapters import get_adapter
-from cli_adapters.base import BaseCLIAdapter
+
+if TYPE_CHECKING:
+    from cli_adapters.base import BaseCLIAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -42,12 +46,12 @@ class SessionProcess:
         project_path: str,
         cli_tool: str,
         output_callback: Callable[[str, str, str, bool], None],
-        permission_callback: Optional[Callable[[str, dict], None]] = None,
-        usage_callback: Optional[Callable[[str, dict[str, int]], None]] = None,
-        env: Optional[dict[str, str]] = None,
-        model: Optional[str] = None,
-        permission_mode: Optional[str] = None,
-        allowed_tools: Optional[list[str]] = None,
+        permission_callback: Callable[[str, dict], None] | None = None,
+        usage_callback: Callable[[str, dict[str, int]], None] | None = None,
+        env: dict[str, str] | None = None,
+        model: str | None = None,
+        permission_mode: str | None = None,
+        allowed_tools: list[str] | None = None,
     ):
         self.session_id = session_id
         self.process = process
@@ -61,8 +65,8 @@ class SessionProcess:
         self.permission_mode = permission_mode
         self.allowed_tools: list[str] = list(allowed_tools) if allowed_tools else []
 
-        self._stdout_thread: Optional[threading.Thread] = None
-        self._stderr_thread: Optional[threading.Thread] = None
+        self._stdout_thread: threading.Thread | None = None
+        self._stderr_thread: threading.Thread | None = None
         self._stopped = threading.Event()
         self._restart_lock = threading.Lock()  # Prevents concurrent restarts
         self._paused = False
@@ -70,12 +74,12 @@ class SessionProcess:
 
         # SDK mode initialization tracking
         self._sdk_initialized = threading.Event()
-        self._init_request_id: Optional[str] = None
+        self._init_request_id: str | None = None
         # CLI's internal session_id (from SDK init response), used for --resume
-        self._cli_session_id: Optional[str] = None
+        self._cli_session_id: str | None = None
 
     @property
-    def pid(self) -> Optional[int]:
+    def pid(self) -> int | None:
         """Process ID, or None if the process has not started or has exited."""
         return self.process.pid if self.process.returncode is None else None
 
@@ -214,7 +218,7 @@ class SessionProcess:
             return False
 
     def send_permission_response(
-        self, request_id: str, behavior: str, message: Optional[str] = None
+        self, request_id: str, behavior: str, message: str | None = None
     ) -> bool:
         """
         Write a control_response to the subprocess stdin to approve/deny
@@ -428,7 +432,7 @@ class SessionProcess:
         except ImportError:
             return False
 
-    def wait_for_exit(self, timeout: float = 1.0) -> Optional[int]:
+    def wait_for_exit(self, timeout: float = 1.0) -> int | None:
         """
         Wait briefly for the process to exit and return its return code.
         Returns None if the process is still running.
@@ -514,9 +518,9 @@ class ProcessExecutor:
     def __init__(
         self,
         server_url: str,
-        output_callback: Optional[Callable] = None,
-        permission_callback: Optional[Callable] = None,
-        usage_callback: Optional[Callable] = None,
+        output_callback: Callable | None = None,
+        permission_callback: Callable | None = None,
+        usage_callback: Callable | None = None,
     ):
         """
         Args:
@@ -570,7 +574,7 @@ class ProcessExecutor:
         self,
         cli_tool: str,
         proxy_token: str,
-        model: Optional[str] = None,
+        model: str | None = None,
     ) -> dict[str, str]:
         """
         Build environment variables for the CLI subprocess.
@@ -610,7 +614,7 @@ class ProcessExecutor:
 
         return env
 
-    def _find_executable(self, cli_tool: str) -> Optional[str]:
+    def _find_executable(self, cli_tool: str) -> str | None:
         """
         Locate the CLI tool executable on the system.
 
@@ -689,9 +693,9 @@ class ProcessExecutor:
         cli_tool: str,
         session_id: str,
         project_path: str,
-        model: Optional[str] = None,
-        permission_mode: Optional[str] = None,
-        allowed_tools: Optional[list[str]] = None,
+        model: str | None = None,
+        permission_mode: str | None = None,
+        allowed_tools: list[str] | None = None,
         resume: bool = False,
     ) -> list[str]:
         adapter = get_adapter(cli_tool)
@@ -716,9 +720,9 @@ class ProcessExecutor:
         project_path: str,
         cli_tool: str,
         proxy_token: str,
-        model: Optional[str] = None,
-        permission_mode: Optional[str] = None,
-        allowed_tools: Optional[list[str]] = None,
+        model: str | None = None,
+        permission_mode: str | None = None,
+        allowed_tools: list[str] | None = None,
     ) -> dict[str, Any]:
         with self._lock:
             if session_id in self._sessions and self._sessions[session_id].is_running:
@@ -941,7 +945,7 @@ class ProcessExecutor:
         return {"success": False, "error": "Failed to write to process stdin"}
 
     def _run_single_shot(
-        self, session: "SessionProcess", content: str, adapter: BaseCLIAdapter
+        self, session: SessionProcess, content: str, adapter: BaseCLIAdapter
     ) -> dict[str, Any]:
         """Run a single-shot CLI command for tools that don't support stdin."""
         args = adapter.build_single_shot_args(content, session.project_path)
@@ -1232,7 +1236,7 @@ class ProcessExecutor:
         return {"success": True}
 
     def send_permission_response(
-        self, session_id: str, request_id: str, behavior: str, message: Optional[str] = None
+        self, session_id: str, request_id: str, behavior: str, message: str | None = None
     ) -> dict[str, Any]:
         """
         Send a permission response to a CLI subprocess.
@@ -1284,7 +1288,7 @@ class ProcessExecutor:
         self._save_sessions_meta()
         return {"success": True, "paused": session._paused, "pid": session.pid}
 
-    def get_session_info(self, session_id: str) -> Optional[dict[str, Any]]:
+    def get_session_info(self, session_id: str) -> dict[str, Any] | None:
         """Get information about a session."""
         with self._lock:
             session = self._sessions.get(session_id)

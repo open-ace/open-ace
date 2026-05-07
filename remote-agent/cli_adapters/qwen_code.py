@@ -6,11 +6,12 @@ Uses OPENAI_API_KEY / OPENAI_BASE_URL environment variables to route
 requests through the Open ACE proxy.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import shutil
 from pathlib import Path
-from typing import Optional
 
 from .base import BaseCLIAdapter
 
@@ -54,9 +55,9 @@ class QwenCodeAdapter(BaseCLIAdapter):
         self,
         session_id: str,
         project_path: str,
-        model: Optional[str] = None,
-        permission_mode: Optional[str] = None,
-        allowed_tools: Optional[list[str]] = None,
+        model: str | None = None,
+        permission_mode: str | None = None,
+        allowed_tools: list[str] | None = None,
         resume: bool = False,
     ) -> list[str]:
         args = [
@@ -87,7 +88,7 @@ class QwenCodeAdapter(BaseCLIAdapter):
         return True
 
     def build_single_shot_args(
-        self, prompt: str, project_path: str, model: Optional[str] = None
+        self, prompt: str, project_path: str, model: str | None = None
     ) -> list[str]:
         args = [
             self.EXECUTABLE,
@@ -114,7 +115,7 @@ class QwenCodeAdapter(BaseCLIAdapter):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def configure_settings(proxy_url: str, proxy_token: str) -> Optional[str]:
+    def configure_settings(proxy_url: str, proxy_token: str) -> str | None:
         """
         Write a minimal ~/.qwen/settings.json so that the CLI picks up
         the proxy even when environment variables are not the primary

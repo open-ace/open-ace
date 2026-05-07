@@ -6,13 +6,15 @@ Config file location: ~/.open-ace-agent/config.json
 Environment variables take precedence over the config file.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import os
 import socket
 import uuid
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +43,7 @@ class AgentConfig:
     3. Built-in defaults
     """
 
-    def __init__(self, config_path: Optional[str] = None):
+    def __init__(self, config_path: str | None = None):
         self._config_path = Path(config_path) if config_path else CONFIG_FILE
         self._data: dict[str, Any] = {}
         self._load()
@@ -93,7 +95,7 @@ class AgentConfig:
         return url.rstrip("/")
 
     @property
-    def agent_token(self) -> Optional[str]:
+    def agent_token(self) -> str | None:
         """
         Authentication token for the agent.
 

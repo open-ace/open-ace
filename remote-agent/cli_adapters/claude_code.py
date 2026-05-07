@@ -6,9 +6,10 @@ Uses ANTHROPIC_API_KEY and ANTHROPIC_BASE_URL environment variables to
 route requests through the Open ACE proxy.
 """
 
+from __future__ import annotations
+
 import logging
 import shutil
-from typing import Optional
 
 from .base import BaseCLIAdapter
 
@@ -48,9 +49,9 @@ class ClaudeCodeAdapter(BaseCLIAdapter):
         self,
         session_id: str,
         project_path: str,
-        model: Optional[str] = None,
-        permission_mode: Optional[str] = None,
-        allowed_tools: Optional[list[str]] = None,
+        model: str | None = None,
+        permission_mode: str | None = None,
+        allowed_tools: list[str] | None = None,
         resume: bool = False,
     ) -> list[str]:
         """

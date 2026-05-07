@@ -618,7 +618,13 @@ def stream_session_output(session_id):
                     for entry in new_output:
                         data = entry.get("data", "").strip()
                         stream = entry.get("stream", "stdout")
-                        if not data or stream == "stderr":
+                        if not data:
+                            last_index += 1
+                            continue
+                        if stream == "stderr":
+                            # Forward stderr as error events so the frontend
+                            # can display CLI errors instead of silently hanging.
+                            yield f"data: {json.dumps({'type': 'error', 'data': data})}\n\n"
                             last_index += 1
                             continue
                         try:
