@@ -6,9 +6,10 @@ API surface, so we route requests through the Open ACE proxy using
 OPENAI_API_KEY and OPENAI_BASE_URL environment variables.
 """
 
+from __future__ import annotations
+
 import logging
 import shutil
-from typing import Optional
 
 from .base import BaseCLIAdapter
 
@@ -59,9 +60,9 @@ class OpenClawAdapter(BaseCLIAdapter):
         self,
         session_id: str,
         project_path: str,
-        model: Optional[str] = None,
-        permission_mode: Optional[str] = None,
-        allowed_tools: Optional[list[str]] = None,
+        model: str | None = None,
+        permission_mode: str | None = None,
+        allowed_tools: list[str] | None = None,
         resume: bool = False,
     ) -> list[str]:
         """

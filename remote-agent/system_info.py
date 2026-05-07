@@ -4,6 +4,8 @@ Open ACE Remote Agent - System Capability Detection
 Gathers hardware info, OS details, and checks for installed CLI tools.
 """
 
+from __future__ import annotations
+
 import logging
 import os
 import platform
