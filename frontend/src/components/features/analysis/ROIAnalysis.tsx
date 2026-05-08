@@ -357,10 +357,20 @@ export const ROIAnalysis: React.FC = () => {
           <div className="col-md-3">
             <StatCard
               label={t('roiPercentage', language)}
-              value={`${roiMetrics.roi_percentage.toFixed(1)}%`}
+              value={
+                roiMetrics.roi_percentage < -100
+                  ? 'N/A'
+                  : `${roiMetrics.roi_percentage.toFixed(1)}%`
+              }
               icon={<i className="bi bi-graph-up-arrow fs-4" />}
               variant={roiMetrics.roi_percentage >= 0 ? 'success' : 'danger'}
             />
+            {roiMetrics.roi_percentage < -100 && (
+              <div className="text-danger small mt-1">
+                <i className="bi bi-exclamation-triangle me-1" />
+                {t('roiDataAnomaly', language) || 'Data anomaly detected'}
+              </div>
+            )}
           </div>
           <div className="col-md-3">
             <StatCard
@@ -376,6 +386,17 @@ export const ROIAnalysis: React.FC = () => {
               }
             />
           </div>
+        </div>
+      )}
+
+      {/* Data Anomaly Warning */}
+      {roiMetrics && roiMetrics.roi_percentage < -100 && (
+        <div className="alert alert-warning mb-4" role="alert">
+          <i className="bi bi-exclamation-triangle me-2" />
+          <strong>{t('dataAnomalyDetected', language) || 'Data Anomaly Detected'}:</strong>
+          {' '}
+          {t('tokenAccumulationWarning', language) ||
+            'Token counts may be inflated due to cumulative counting. Cost and ROI calculations may be inaccurate.'}
         </div>
       )}
 
