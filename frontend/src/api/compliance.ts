@@ -79,6 +79,14 @@ export interface SecurityScore {
   recommendations: string[];
 }
 
+export interface AuditThresholds {
+  audit_failed_login_threshold: number;
+  audit_rapid_action_threshold: number;
+  audit_off_hours_threshold: number;
+  audit_role_change_threshold: number;
+  audit_permission_change_threshold: number;
+}
+
 export interface RetentionRule {
   data_type: string;
   retention_days: number;
@@ -161,6 +169,15 @@ export const complianceApi = {
   async getSecurityScore(days?: number): Promise<SecurityScore> {
     const queryParams: Record<string, string> = days ? { days: String(days) } : {};
     return apiClient.get<SecurityScore>('/api/compliance/audit/security-score', queryParams);
+  },
+
+  // Audit Thresholds
+  async getAuditThresholds(): Promise<AuditThresholds> {
+    return apiClient.get<AuditThresholds>('/api/compliance/audit/thresholds');
+  },
+
+  async updateAuditThresholds(data: Partial<AuditThresholds>): Promise<{ success: boolean }> {
+    return apiClient.put<{ success: boolean }>('/api/compliance/audit/thresholds', data);
   },
 
   // Data Retention

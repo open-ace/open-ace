@@ -34,6 +34,8 @@ export {
   useDeleteFilterRule,
   useSecuritySettings,
   useUpdateSecuritySettings,
+  useAuditThresholds,
+  useUpdateAuditThresholds,
 } from './useAdmin';
 export { useMyUsage } from './useReport';
 export {

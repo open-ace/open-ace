@@ -166,6 +166,21 @@ const translations: Record<Language, Translations> = {
     complianceManagement: 'Compliance',
     securityCenter: 'Security Center',
 
+    // Audit Thresholds
+    auditThresholds: 'Audit Thresholds',
+    anomalyDetectionThresholds: 'Anomaly Detection Thresholds',
+    failedLoginThreshold: 'Failed Login Threshold',
+    failedLoginThresholdHelp: 'Number of failed login attempts before triggering an anomaly alert',
+    rapidActionThreshold: 'Rapid Action Threshold',
+    rapidActionThresholdHelp: 'Number of actions per hour before triggering a rapid activity alert',
+    offHoursThreshold: 'Off-Hours Activity Threshold',
+    offHoursThresholdHelp: 'Number of off-hours actions (22:00-06:00) before triggering an alert',
+    roleChangeThreshold: 'Role Change Threshold',
+    roleChangeThresholdHelp: 'Number of role changes before triggering a frequent role change alert',
+    permissionChangeThreshold: 'Permission Change Threshold',
+    permissionChangeThresholdHelp: 'Number of permission changes before triggering an alert',
+    auditThresholdsSaved: 'Audit thresholds saved successfully',
+
     // Quota Management
     quotaUsage: 'Quota Usage',
     noQuotaData: 'No quota data available',
@@ -904,6 +919,21 @@ const translations: Record<Language, Translations> = {
     complianceManagement: '合规管理',
     securityCenter: '安全中心',
 
+    // Audit Thresholds
+    auditThresholds: '审计阈值',
+    anomalyDetectionThresholds: '异常检测阈值',
+    failedLoginThreshold: '失败登录阈值',
+    failedLoginThresholdHelp: '触发异常告警所需的失败登录次数',
+    rapidActionThreshold: '快速操作阈值',
+    rapidActionThresholdHelp: '每小时触发快速活动告警的操作次数',
+    offHoursThreshold: '非工作时间活动阈值',
+    offHoursThresholdHelp: '非工作时间（22:00-06:00）触发告警的操作次数',
+    roleChangeThreshold: '角色变更阈值',
+    roleChangeThresholdHelp: '触发频繁角色变更告警的变更次数',
+    permissionChangeThreshold: '权限变更阈值',
+    permissionChangeThresholdHelp: '触发告警的权限变更次数',
+    auditThresholdsSaved: '审计阈值保存成功',
+
     // Quota Management
     quotaUsage: '配额使用',
     noQuotaData: '暂无配额数据',
@@ -1623,6 +1653,21 @@ const translations: Record<Language, Translations> = {
     complianceManagement: 'コンプライアンス',
     securityCenter: 'セキュリティセンター',
 
+    // Audit Thresholds
+    auditThresholds: '監査しきい値',
+    anomalyDetectionThresholds: '異常検出しきい値',
+    failedLoginThreshold: 'ログイン失敗しきい値',
+    failedLoginThresholdHelp: '異常アラートをトリガーするログイン失敗回数',
+    rapidActionThreshold: '急速操作しきい値',
+    rapidActionThresholdHelp: '急速アクティビティアラートをトリガーする1時間あたりの操作回数',
+    offHoursThreshold: '非営業時間活動しきい値',
+    offHoursThresholdHelp: '非営業時間（22:00-06:00）にアラートをトリガーする操作回数',
+    roleChangeThreshold: '役割変更しきい値',
+    roleChangeThresholdHelp: '頻繁な役割変更アラートをトリガーする変更回数',
+    permissionChangeThreshold: '権限変更しきい値',
+    permissionChangeThresholdHelp: 'アラートをトリガーする権限変更回数',
+    auditThresholdsSaved: '監査しきい値が保存されました',
+
     // Quota Management
     quotaUsage: 'クォータ使用量',
     noQuotaData: 'クォータデータがありません',
@@ -2052,6 +2097,21 @@ const translations: Record<Language, Translations> = {
     quotaAndAlerts: '할당량 및 알림',
     complianceManagement: '규정 준수',
     securityCenter: '보안 센터',
+
+    // Audit Thresholds
+    auditThresholds: '감사 임계값',
+    anomalyDetectionThresholds: '이상 탐지 임계값',
+    failedLoginThreshold: '로그인 실패 임계값',
+    failedLoginThresholdHelp: '이상 알림을 트리거하는 로그인 실패 횟수',
+    rapidActionThreshold: '급속 작업 임계값',
+    rapidActionThresholdHelp: '급속 활동 알림을 트리거하는 시간당 작업 횟수',
+    offHoursThreshold: '비업무 시간 활동 임계값',
+    offHoursThresholdHelp: '비업무 시간(22:00-06:00) 알림을 트리거하는 작업 횟수',
+    roleChangeThreshold: '역할 변경 임계값',
+    roleChangeThresholdHelp: '빈번한 역할 변경 알림을 트리거하는 변경 횟수',
+    permissionChangeThreshold: '권한 변경 임계값',
+    permissionChangeThresholdHelp: '알림을 트리거하는 권한 변경 횟수',
+    auditThresholdsSaved: '감사 임계값이 저장되었습니다',
 
     // Quota Management
     quotaUsage: '할당량 사용',

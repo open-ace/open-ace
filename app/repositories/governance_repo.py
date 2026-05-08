@@ -251,6 +251,12 @@ class GovernanceRepository:
             "password_require_special": False,
             "two_factor_enabled": False,
             "ip_whitelist": [],
+            # Audit anomaly thresholds
+            "audit_failed_login_threshold": 5,
+            "audit_rapid_action_threshold": 50,
+            "audit_off_hours_threshold": 10,
+            "audit_role_change_threshold": 5,
+            "audit_permission_change_threshold": 10,
         }
 
         try:
