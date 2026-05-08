@@ -457,7 +457,8 @@ def _get_anomaly_statuses() -> dict:
             "FROM anomaly_status"
         )
         return {(r["anomaly_type"], r["affected_users_hash"]): r for r in rows}
-    except Exception:
+    except Exception as e:
+        logger.error(f"Failed to load anomaly statuses: {e}")
         return {}
 
 
@@ -485,22 +486,13 @@ def update_anomaly_status():
 
     db = Database()
     try:
-        existing = db.fetch_one(
-            "SELECT id FROM anomaly_status WHERE anomaly_type = ? AND affected_users_hash = ?",
-            (anomaly_type, hash_val),
+        db.execute(
+            "INSERT INTO anomaly_status (anomaly_type, affected_users_hash, status, processed_by, processed_at) "
+            "VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT (anomaly_type, affected_users_hash) "
+            "DO UPDATE SET status = ?, processed_by = ?, processed_at = ?",
+            (anomaly_type, hash_val, new_status, user_id, now, new_status, user_id, now),
         )
-        if existing:
-            db.execute(
-                "UPDATE anomaly_status SET status = ?, processed_by = ?, processed_at = ? "
-                "WHERE anomaly_type = ? AND affected_users_hash = ?",
-                (new_status, user_id, now, anomaly_type, hash_val),
-            )
-        else:
-            db.execute(
-                "INSERT INTO anomaly_status (anomaly_type, affected_users_hash, status, processed_by, processed_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (anomaly_type, hash_val, new_status, user_id, now),
-            )
         return jsonify({"success": True, "status": new_status})
     except Exception as e:
         logger.error(f"Failed to update anomaly status: {e}")

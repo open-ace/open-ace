@@ -104,7 +104,8 @@ export const AuditCenter: React.FC = () => {
       setAnomalies((prev) =>
         prev.map((a) =>
           a.anomaly_type === anomalyType &&
-          JSON.stringify(a.affected_users) === JSON.stringify(affectedUsers)
+          JSON.stringify([...(a.affected_users || [])].sort()) ===
+            JSON.stringify([...affectedUsers].sort())
             ? { ...a, status, processed_at: new Date().toISOString() }
             : a
         )
@@ -715,7 +716,7 @@ export const AuditCenter: React.FC = () => {
                       )
                       .map((anomaly, index) => (
                         <tr
-                          key={index}
+                          key={`${anomaly.anomaly_type}-${index}`}
                           className={anomaly.status === 'processed' ? 'opacity-50' : ''}
                         >
                           <td>
@@ -812,30 +813,30 @@ export const AuditCenter: React.FC = () => {
                           {t('previous', language)}
                         </button>
                       </li>
-                      {Array.from(
-                        {
-                          length: Math.min(
-                            5,
-                            Math.ceil(anomalies.length / ANOMALY_PAGE_SIZE)
-                          ),
-                        },
-                        (_, i) => {
-                          const pageNum = i + 1;
-                          return (
-                            <li
-                              key={pageNum}
-                              className={`page-item ${anomalyPage === pageNum ? 'active' : ''}`}
-                            >
-                              <button
-                                className="page-link"
-                                onClick={() => setAnomalyPage(pageNum)}
+                      {(() => {
+                        const totalPages = Math.ceil(anomalies.length / ANOMALY_PAGE_SIZE);
+                        const startPage = Math.max(1, anomalyPage - 2);
+                        const endPage = Math.min(totalPages, startPage + 4);
+                        return Array.from(
+                          { length: endPage - startPage + 1 },
+                          (_, i) => {
+                            const pageNum = startPage + i;
+                            return (
+                              <li
+                                key={pageNum}
+                                className={`page-item ${anomalyPage === pageNum ? 'active' : ''}`}
                               >
-                                {pageNum}
-                              </button>
-                            </li>
-                          );
-                        }
-                      )}
+                                <button
+                                  className="page-link"
+                                  onClick={() => setAnomalyPage(pageNum)}
+                                >
+                                  {pageNum}
+                                </button>
+                              </li>
+                            );
+                          }
+                        );
+                      })()}
                       <li
                         className={`page-item ${
                           anomalyPage ===

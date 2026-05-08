@@ -182,6 +182,14 @@ const translations: Record<Language, Translations> = {
     quotaUpdated: 'Quota Updated',
     quotaUpdatedDesc: 'User quota settings have been saved successfully.',
 
+    // Audit Thresholds
+    auditThresholds: 'Audit Thresholds',
+    failedLoginThreshold: 'Failed Login Threshold',
+    failedLoginThresholdHelp: 'Number of failed login attempts before triggering an anomaly alert',
+    rapidActionThreshold: 'Rapid Action Threshold',
+    rapidActionThresholdHelp: 'Number of actions per hour before triggering a rapid activity alert',
+    auditThresholdsSaved: 'Audit thresholds saved successfully',
+
     // Audit Log
     allActions: 'All Actions',
     allResourceTypes: 'All Resource Types',
@@ -932,6 +940,14 @@ const translations: Record<Language, Translations> = {
     quotaUpdated: '配额已更新',
     quotaUpdatedDesc: '用户配额设置已成功保存。',
 
+    // Audit Thresholds
+    auditThresholds: '审计阈值',
+    failedLoginThreshold: '失败登录阈值',
+    failedLoginThresholdHelp: '触发异常告警所需的失败登录次数',
+    rapidActionThreshold: '快速操作阈值',
+    rapidActionThresholdHelp: '每小时触发快速活动告警的操作次数',
+    auditThresholdsSaved: '审计阈值保存成功',
+
     // Audit Log
     allActions: '所有操作',
     allResourceTypes: '所有资源类型',
@@ -1661,6 +1677,14 @@ const translations: Record<Language, Translations> = {
     dailyRequestQuota: '毎日のリクエストクォータ',
     monthlyRequestQuota: '月間リクエストクォータ',
 
+    // Audit Thresholds
+    auditThresholds: '監査しきい値',
+    failedLoginThreshold: 'ログイン失敗しきい値',
+    failedLoginThresholdHelp: '異常アラートをトリガーするログイン失敗回数',
+    rapidActionThreshold: '急速操作しきい値',
+    rapidActionThresholdHelp: '急速アクティビティアラートをトリガーする1時間あたりの操作回数',
+    auditThresholdsSaved: '監査しきい値が保存されました',
+
     // Audit Log
     allActions: 'すべてのアクション',
     allResourceTypes: 'すべてのリソースタイプ',
@@ -2117,6 +2141,14 @@ const translations: Record<Language, Translations> = {
     unlimited: '무제한',
     dailyRequestQuota: '일일 요청 할당량',
     monthlyRequestQuota: '월간 요청 할당량',
+
+    // Audit Thresholds
+    auditThresholds: '감사 임계값',
+    failedLoginThreshold: '로그인 실패 임계값',
+    failedLoginThresholdHelp: '이상 경보를 트리거하는 로그인 실패 횟수',
+    rapidActionThreshold: '빠른 작업 임계값',
+    rapidActionThresholdHelp: '빠른 활동 경보를 트리거하는 시간당 작업 횟수',
+    auditThresholdsSaved: '감사 임계값이 저장되었습니다',
 
     // Audit Log
     allActions: '모든 작업',
