@@ -119,12 +119,10 @@ export const QuotaAlerts: React.FC = () => {
     }
   }, [typeFilter, severityFilter, readFilter]);
 
-  // Fetch alerts when tab is active
+  // Fetch alerts on component mount
   useEffect(() => {
-    if (activeTab === 'alerts') {
-      fetchAlerts();
-    }
-  }, [activeTab, fetchAlerts]);
+    fetchAlerts();
+  }, [fetchAlerts]);
 
   // Fetch preferences
   useEffect(() => {
