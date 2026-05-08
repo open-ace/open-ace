@@ -294,7 +294,7 @@ export const ConversationHistory: React.FC = () => {
           {/* Table Header with Column Selector and Fullscreen */}
           <div className="d-flex justify-content-between align-items-center mb-3">
             <span className="text-muted">
-              {t('total', language)}: {sortedConversations.length} {t('conversations', language)}
+              {t('total', language)}: {data?.total ?? 0} {t('conversations', language)}
             </span>
             <div className="d-flex gap-2">
               {/* Column Selector */}
