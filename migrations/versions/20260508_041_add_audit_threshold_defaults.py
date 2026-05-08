@@ -13,7 +13,7 @@ from typing import Union
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "041_audit_thresholds"
+revision: str = "041_add_audit_threshold_defaults"
 down_revision: Union[str, None] = "040_api_key_bool"
 branch_labels: Union[str, None] = None
 depends_on: Union[str, None] = None

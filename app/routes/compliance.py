@@ -26,6 +26,9 @@ report_generator = ReportGenerator()
 _retention_manager = None
 
 # Audit threshold settings cache (60s TTL, similar to auth_service pattern)
+# Note: In multi-worker deployments (e.g. gunicorn with multiple workers),
+# each worker maintains its own cache. Settings changes may take up to 60s
+# to propagate across all workers.
 _audit_settings_cache: dict = {}
 _audit_settings_cache_time: float = 0
 _AUDIT_SETTINGS_CACHE_TTL = 60
@@ -310,13 +313,13 @@ def update_audit_thresholds():
     if not data:
         return jsonify({"error": "Request body required"}), 400
 
-    # Validate: only allow known threshold keys, values must be positive integers
+    # Validate: only allow known threshold keys, values must be positive integers (1-10000)
     updates = {}
     for key in THRESHOLD_KEYS:
         if key in data:
             val = data[key]
-            if not isinstance(val, (int, float)) or val < 1:
-                return jsonify({"error": f"{key} must be a positive number"}), 400
+            if not isinstance(val, (int, float)) or val < 1 or val > 10000:
+                return jsonify({"error": f"{key} must be a number between 1 and 10000"}), 400
             updates[key] = int(val)
 
     if not updates:

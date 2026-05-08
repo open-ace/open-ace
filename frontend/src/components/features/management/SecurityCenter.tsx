@@ -232,8 +232,10 @@ export const SecurityCenter: React.FC = () => {
 
   // --- Audit Thresholds Handlers ---
   const handleThresholdsInputChange = (key: keyof AuditThresholdsType, value: string) => {
-    const numVal = parseInt(value) || 0;
-    setThresholdsFormData((prev) => ({ ...prev, [key]: numVal }));
+    const numVal = parseInt(value);
+    if (isNaN(numVal) || numVal < 1) return; // Reject invalid input
+    const clamped = Math.min(numVal, 10000); // Upper bound
+    setThresholdsFormData((prev) => ({ ...prev, [key]: clamped }));
   };
 
   const handleSaveThresholds = async () => {

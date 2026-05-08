@@ -117,6 +117,20 @@ def test_api_thresholds(session):
     )
     check(r.status_code == 400, "Negative value rejected with 400")
 
+    # Test validation: zero value should fail
+    r = session.put(
+        f"{BASE_URL}/api/compliance/audit/thresholds",
+        json={"audit_failed_login_threshold": 0},
+    )
+    check(r.status_code == 400, "Zero value rejected with 400")
+
+    # Test validation: value exceeding upper bound should fail
+    r = session.put(
+        f"{BASE_URL}/api/compliance/audit/thresholds",
+        json={"audit_failed_login_threshold": 10001},
+    )
+    check(r.status_code == 400, "Value > 10000 rejected with 400")
+
     # Test validation: empty body should fail
     r = session.put(
         f"{BASE_URL}/api/compliance/audit/thresholds",
