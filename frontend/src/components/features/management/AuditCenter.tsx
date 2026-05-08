@@ -9,7 +9,7 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { cn } from '@/utils';
-import { useAuditLogs } from '@/hooks';
+import { useAuditLogs, useUsers } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import {
@@ -67,6 +67,7 @@ type TabType = 'log' | 'analysis';
 
 export const AuditCenter: React.FC = () => {
   const language = useLanguage();
+  const { data: users, isLoading: usersLoading } = useUsers();
   const [activeTab, setActiveTab] = useState<TabType>('log');
 
   // --- Audit Log State ---
@@ -83,12 +84,36 @@ export const AuditCenter: React.FC = () => {
   // --- Audit Analysis State ---
   const [patterns, setPatterns] = useState<AuditPattern | null>(null);
   const [anomalies, setAnomalies] = useState<AuditAnomaly[]>([]);
+  const [anomalyPage, setAnomalyPage] = useState(1);
+  const ANOMALY_PAGE_SIZE = 10;
   const [securityScore, setSecurityScore] = useState<SecurityScore | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [days] = useState(30);
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
+
+  const handleAnomalyStatusUpdate = async (
+    anomalyType: string,
+    affectedUsers: number[],
+    status: 'processed' | 'ignored'
+  ) => {
+    try {
+      await complianceApi.updateAnomalyStatus(anomalyType, affectedUsers, status);
+      // Update local state
+      setAnomalies((prev) =>
+        prev.map((a) =>
+          a.anomaly_type === anomalyType &&
+          JSON.stringify([...(a.affected_users || [])].sort()) ===
+            JSON.stringify([...affectedUsers].sort())
+            ? { ...a, status, processed_at: new Date().toISOString() }
+            : a
+        )
+      );
+    } catch (err) {
+      console.error('Failed to update anomaly status:', err);
+    }
+  };
 
   // Fetch analysis data
   const fetchAnalysisData = React.useCallback(async () => {
@@ -669,35 +694,172 @@ export const AuditCenter: React.FC = () => {
           </div>
 
           {anomalies.length > 0 ? (
-            <div className="table-responsive">
-              <table className="table table-hover">
-                <thead>
-                  <tr>
-                    <th>{t('type', language)}</th>
-                    <th>{t('description', language)}</th>
-                    <th>{t('time', language)}</th>
-                    <th>{t('severity', language)}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {anomalies.slice(0, 10).map((anomaly, index) => (
-                    <tr key={index}>
-                      <td>
-                        <span className="badge bg-secondary">{anomaly.anomaly_type}</span>
-                      </td>
-                      <td>{anomaly.description}</td>
-                      <td>
-                        <small className="text-muted">{formatDateTime(anomaly.first_seen)}</small>
-                      </td>
-                      <td>
-                        <span className={cn('badge', `bg-${getSeverityVariant(anomaly.severity)}`)}>
-                          {anomaly.severity}
-                        </span>
-                      </td>
+            <div>
+              <div className="table-responsive">
+                <table className="table table-hover">
+                  <thead>
+                    <tr>
+                      <th>{t('type', language)}</th>
+                      <th>{t('description', language)}</th>
+                      <th>{t('affectedUsers', language)}</th>
+                      <th>{t('time', language)}</th>
+                      <th>{t('severity', language)}</th>
+                      <th>{t('status', language)}</th>
+                      <th>{t('actions', language)}</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {anomalies
+                      .slice(
+                        (anomalyPage - 1) * ANOMALY_PAGE_SIZE,
+                        anomalyPage * ANOMALY_PAGE_SIZE
+                      )
+                      .map((anomaly, index) => (
+                        <tr
+                          key={`${anomaly.anomaly_type}-${index}`}
+                          className={anomaly.status === 'processed' ? 'opacity-50' : ''}
+                        >
+                          <td>
+                            <span className="badge bg-secondary">{anomaly.anomaly_type}</span>
+                          </td>
+                          <td>{anomaly.description}</td>
+                          <td>
+                            {anomaly.affected_users?.length > 0
+                              ? anomaly.affected_users
+                                  .map(
+                                    (uid) =>
+                                      users?.find((u) => u.id === uid)?.username ??
+                                      `ID:${uid}`
+                                  )
+                                  .join(', ')
+                              : '-'}
+                          </td>
+                          <td>
+                            <small className="text-muted">
+                              {formatDateTime(anomaly.first_seen)}
+                            </small>
+                          </td>
+                          <td>
+                            <span
+                              className={cn(
+                                'badge',
+                                `bg-${getSeverityVariant(anomaly.severity)}`
+                              )}
+                            >
+                              {anomaly.severity}
+                            </span>
+                          </td>
+                          <td>
+                            <span
+                              className={cn('badge', {
+                                'bg-success': anomaly.status === 'processed',
+                                'bg-warning text-dark': anomaly.status === 'ignored',
+                                'bg-secondary': !anomaly.status || anomaly.status === 'pending',
+                              })}
+                            >
+                              {t(anomaly.status || 'pending', language)}
+                            </span>
+                          </td>
+                          <td>
+                            {(!anomaly.status || anomaly.status === 'pending') && (
+                              <div className="btn-group btn-group-sm">
+                                <button
+                                  className="btn btn-outline-success btn-sm"
+                                  title={t('markProcessed', language)}
+                                  onClick={() =>
+                                    handleAnomalyStatusUpdate(
+                                      anomaly.anomaly_type,
+                                      anomaly.affected_users || [],
+                                      'processed'
+                                    )
+                                  }
+                                >
+                                  <i className="bi bi-check-lg" />
+                                </button>
+                                <button
+                                  className="btn btn-outline-warning btn-sm"
+                                  title={t('ignoreAnomaly', language)}
+                                  onClick={() =>
+                                    handleAnomalyStatusUpdate(
+                                      anomaly.anomaly_type,
+                                      anomaly.affected_users || [],
+                                      'ignored'
+                                    )
+                                  }
+                                >
+                                  <i className="bi bi-eye-slash" />
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="d-flex justify-content-between align-items-center mt-2">
+                <small className="text-muted">
+                  {t('total', language)}: {anomalies.length} {t('anomalies', language)}
+                </small>
+                {Math.ceil(anomalies.length / ANOMALY_PAGE_SIZE) > 1 && (
+                  <nav>
+                    <ul className="pagination pagination-sm mb-0">
+                      <li className={`page-item ${anomalyPage === 1 ? 'disabled' : ''}`}>
+                        <button
+                          className="page-link"
+                          onClick={() => setAnomalyPage(anomalyPage - 1)}
+                          disabled={anomalyPage === 1}
+                        >
+                          {t('previous', language)}
+                        </button>
+                      </li>
+                      {(() => {
+                        const totalPages = Math.ceil(anomalies.length / ANOMALY_PAGE_SIZE);
+                        const startPage = Math.max(1, anomalyPage - 2);
+                        const endPage = Math.min(totalPages, startPage + 4);
+                        return Array.from(
+                          { length: endPage - startPage + 1 },
+                          (_, i) => {
+                            const pageNum = startPage + i;
+                            return (
+                              <li
+                                key={pageNum}
+                                className={`page-item ${anomalyPage === pageNum ? 'active' : ''}`}
+                              >
+                                <button
+                                  className="page-link"
+                                  onClick={() => setAnomalyPage(pageNum)}
+                                >
+                                  {pageNum}
+                                </button>
+                              </li>
+                            );
+                          }
+                        );
+                      })()}
+                      <li
+                        className={`page-item ${
+                          anomalyPage ===
+                          Math.ceil(anomalies.length / ANOMALY_PAGE_SIZE)
+                            ? 'disabled'
+                            : ''
+                        }`}
+                      >
+                        <button
+                          className="page-link"
+                          onClick={() => setAnomalyPage(anomalyPage + 1)}
+                          disabled={
+                            anomalyPage ===
+                            Math.ceil(anomalies.length / ANOMALY_PAGE_SIZE)
+                          }
+                        >
+                          {t('next', language)}
+                        </button>
+                      </li>
+                    </ul>
+                  </nav>
+                )}
+              </div>
             </div>
           ) : (
             <EmptyState icon="bi-check-circle" title={t('noAnomaliesDetected', language)} />
@@ -709,13 +871,19 @@ export const AuditCenter: React.FC = () => {
           <div className="row g-3 mb-3">
             <div className="col-md-4">
               <label className="form-label">{t('selectUser', language)}</label>
-              <input
-                type="number"
-                className="form-control"
-                placeholder={t('enterUserId', language)}
+              <select
+                className="form-select"
                 value={selectedUserId ?? ''}
-                onChange={(e) => setSelectedUserId(parseInt(e.target.value) || null)}
-              />
+                onChange={(e) => setSelectedUserId(e.target.value ? parseInt(e.target.value) : null)}
+                disabled={usersLoading}
+              >
+                <option value="">-- {t('selectUser', language)} --</option>
+                {users?.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.username} (ID: {u.id})
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
@@ -731,21 +899,21 @@ export const AuditCenter: React.FC = () => {
                 </div>
                 <div className="col-md-3">
                   <StatCard
-                    label={t('actionsPerDay', language) ?? 'Actions/Day'}
+                    label={t('actionsPerDay', language)}
                     value={userProfile.actions_per_day.toFixed(1)}
                     variant="info"
                   />
                 </div>
                 <div className="col-md-3">
                   <StatCard
-                    label={t('peakHour', language) ?? 'Peak Hour'}
+                    label={t('peakHour', language)}
                     value={`${userProfile.peak_activity_hour}:00`}
                     variant="warning"
                   />
                 </div>
                 <div className="col-md-3">
                   <StatCard
-                    label={t('peakDay', language) ?? 'Peak Day'}
+                    label={t('peakDay', language)}
                     value={userProfile.peak_activity_day}
                     variant="success"
                   />
@@ -799,20 +967,92 @@ export const AuditCenter: React.FC = () => {
     );
   };
 
+  const handleExportReport = () => {
+    const rows: string[][] = [];
+
+    // Security Score
+    if (securityScore) {
+      rows.push(['Section', 'Key', 'Value']);
+      rows.push(['Security Score', 'Score', String(securityScore.score)]);
+      rows.push(['Security Score', 'Grade', securityScore.grade]);
+      rows.push(['Security Score', 'Anomaly Count', String(securityScore.anomaly_count)]);
+      rows.push(['Security Score', 'High Severity', String(securityScore.high_severity_count)]);
+      rows.push(['Security Score', 'Medium Severity', String(securityScore.medium_severity_count)]);
+      rows.push(['Security Score', 'Low Severity', String(securityScore.low_severity_count)]);
+    }
+
+    // Anomalies
+    if (anomalies.length > 0) {
+      rows.push([]);
+      rows.push(['Anomaly Type', 'Description', 'Severity', 'Affected Users', 'First Seen']);
+      anomalies.forEach((a) => {
+        const userNames = a.affected_users
+          ?.map((uid) => users?.find((u) => u.id === uid)?.username ?? `ID:${uid}`)
+          .join('; ') ?? '';
+        rows.push([a.anomaly_type, a.description, a.severity, userNames, a.first_seen]);
+      });
+    }
+
+    // Patterns
+    if (patterns) {
+      rows.push([]);
+      rows.push(['Pattern', 'Value']);
+      rows.push(['Total Events', String(patterns.total_events)]);
+      rows.push(['Unique Users', String(patterns.unique_users)]);
+      if (patterns.action_distribution) {
+        Object.entries(patterns.action_distribution).forEach(([action, count]) => {
+          rows.push([`Action: ${action}`, String(count)]);
+        });
+      }
+      if (patterns.hourly_distribution) {
+        Object.entries(patterns.hourly_distribution).forEach(([hour, count]) => {
+          rows.push([`Hour ${hour}:00`, String(count)]);
+        });
+      }
+    }
+
+    // User Profile
+    if (userProfile) {
+      rows.push([]);
+      rows.push(['User Profile', 'Value']);
+      rows.push(['Total Actions', String(userProfile.total_actions)]);
+      rows.push(['Actions/Day', userProfile.actions_per_day.toFixed(1)]);
+      rows.push(['Peak Hour', `${userProfile.peak_activity_hour}:00`]);
+      rows.push(['Peak Day', userProfile.peak_activity_day]);
+    }
+
+    const csv = rows.map((r) => r.map((c) => `"${c.replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `audit-analysis-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="audit-center">
       {/* Header */}
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h2>{t('auditCenter', language)}</h2>
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={() => (activeTab === 'log' ? refetch() : fetchAnalysisData())}
-          loading={isFetching}
-        >
-          {isFetching ? null : <i className="bi bi-arrow-clockwise me-1" />}
-          {t('refresh', language)}
-        </Button>
+        <div className="d-flex gap-2">
+          {activeTab === 'analysis' && (
+            <Button variant="outline-success" size="sm" onClick={handleExportReport}>
+              <i className="bi bi-download me-1" />
+              {t('exportReport', language)}
+            </Button>
+          )}
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => (activeTab === 'log' ? refetch() : fetchAnalysisData())}
+            loading={isFetching}
+          >
+            {isFetching ? null : <i className="bi bi-arrow-clockwise me-1" />}
+            {t('refresh', language)}
+          </Button>
+        </div>
       </div>
 
       {/* Tab Navigation */}

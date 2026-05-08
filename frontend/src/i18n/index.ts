@@ -168,21 +168,6 @@ const translations: Record<Language, Translations> = {
     complianceManagement: 'Compliance',
     securityCenter: 'Security Center',
 
-    // Audit Thresholds
-    auditThresholds: 'Audit Thresholds',
-    anomalyDetectionThresholds: 'Anomaly Detection Thresholds',
-    failedLoginThreshold: 'Failed Login Threshold',
-    failedLoginThresholdHelp: 'Number of failed login attempts before triggering an anomaly alert',
-    rapidActionThreshold: 'Rapid Action Threshold',
-    rapidActionThresholdHelp: 'Number of actions per hour before triggering a rapid activity alert',
-    offHoursThreshold: 'Off-Hours Activity Threshold',
-    offHoursThresholdHelp: 'Number of off-hours actions (22:00-06:00) before triggering an alert',
-    roleChangeThreshold: 'Role Change Threshold',
-    roleChangeThresholdHelp: 'Number of role changes before triggering a frequent role change alert',
-    permissionChangeThreshold: 'Permission Change Threshold',
-    permissionChangeThresholdHelp: 'Number of permission changes before triggering an alert',
-    auditThresholdsSaved: 'Audit thresholds saved successfully',
-
     // Quota Management
     quotaUsage: 'Quota Usage',
     noQuotaData: 'No quota data available',
@@ -196,6 +181,21 @@ const translations: Record<Language, Translations> = {
     monthlyRequestQuota: 'Monthly Request Quota',
     quotaUpdated: 'Quota Updated',
     quotaUpdatedDesc: 'User quota settings have been saved successfully.',
+
+    // Audit Thresholds
+    auditThresholds: 'Audit Thresholds',
+    failedLoginThreshold: 'Failed Login Threshold',
+    failedLoginThresholdHelp: 'Number of failed login attempts before triggering an anomaly alert',
+    rapidActionThreshold: 'Rapid Action Threshold',
+    rapidActionThresholdHelp: 'Number of actions per hour before triggering a rapid activity alert',
+    auditThresholdsSaved: 'Audit thresholds saved successfully',
+    anomalyDetectionThresholds: 'Anomaly Detection Thresholds',
+    offHoursThreshold: 'Off-Hours Threshold',
+    offHoursThresholdHelp: 'Number of off-hours actions before triggering an anomaly alert',
+    roleChangeThreshold: 'Role Change Threshold',
+    roleChangeThresholdHelp: 'Number of role changes before triggering an anomaly alert',
+    permissionChangeThreshold: 'Permission Change Threshold',
+    permissionChangeThresholdHelp: 'Number of permission changes before triggering an anomaly alert',
 
     // Audit Log
     allActions: 'All Actions',
@@ -286,6 +286,13 @@ const translations: Record<Language, Translations> = {
     activeUsers: 'Active Users',
     activeTools: 'Active Tools',
     anomalies: 'Anomalies',
+    affectedUsers: 'Affected Users',
+    exportReport: 'Export Report',
+    markProcessed: 'Mark Processed',
+    ignoreAnomaly: 'Ignore',
+    processed: 'Processed',
+    ignored: 'Ignored',
+    pending: 'Pending',
     healthScore: 'Health Score',
     usageHeatmap: 'Usage Heatmap (24 Hours)',
     usageHeatmapDescription:
@@ -576,6 +583,9 @@ const translations: Record<Language, Translations> = {
     selectUser: 'Select User',
     enterUserId: 'Enter User ID',
     activeHours: 'Active Hours',
+    actionsPerDay: 'Actions/Day',
+    peakHour: 'Peak Hour',
+    peakDay: 'Peak Day',
     activity: 'Activity',
     commonOperations: 'Common Operations',
     selectUserToViewProfile: 'Select a user to view their behavior profile',
@@ -923,21 +933,6 @@ const translations: Record<Language, Translations> = {
     complianceManagement: '合规管理',
     securityCenter: '安全中心',
 
-    // Audit Thresholds
-    auditThresholds: '审计阈值',
-    anomalyDetectionThresholds: '异常检测阈值',
-    failedLoginThreshold: '失败登录阈值',
-    failedLoginThresholdHelp: '触发异常告警所需的失败登录次数',
-    rapidActionThreshold: '快速操作阈值',
-    rapidActionThresholdHelp: '每小时触发快速活动告警的操作次数',
-    offHoursThreshold: '非工作时间活动阈值',
-    offHoursThresholdHelp: '非工作时间（22:00-06:00）触发告警的操作次数',
-    roleChangeThreshold: '角色变更阈值',
-    roleChangeThresholdHelp: '触发频繁角色变更告警的变更次数',
-    permissionChangeThreshold: '权限变更阈值',
-    permissionChangeThresholdHelp: '触发告警的权限变更次数',
-    auditThresholdsSaved: '审计阈值保存成功',
-
     // Quota Management
     quotaUsage: '配额使用',
     noQuotaData: '暂无配额数据',
@@ -951,6 +946,21 @@ const translations: Record<Language, Translations> = {
     monthlyRequestQuota: '每月请求配额',
     quotaUpdated: '配额已更新',
     quotaUpdatedDesc: '用户配额设置已成功保存。',
+
+    // Audit Thresholds
+    auditThresholds: '审计阈值',
+    failedLoginThreshold: '失败登录阈值',
+    failedLoginThresholdHelp: '触发异常告警所需的失败登录次数',
+    rapidActionThreshold: '快速操作阈值',
+    rapidActionThresholdHelp: '每小时触发快速活动告警的操作次数',
+    auditThresholdsSaved: '审计阈值保存成功',
+    anomalyDetectionThresholds: '异常检测阈值',
+    offHoursThreshold: '非工作时段阈值',
+    offHoursThresholdHelp: '触发异常告警所需的非工作时段操作次数',
+    roleChangeThreshold: '角色变更阈值',
+    roleChangeThresholdHelp: '触发异常告警所需的角色变更次数',
+    permissionChangeThreshold: '权限变更阈值',
+    permissionChangeThresholdHelp: '触发异常告警所需的权限变更次数',
 
     // Audit Log
     allActions: '所有操作',
@@ -1040,6 +1050,13 @@ const translations: Record<Language, Translations> = {
     activeUsers: '活跃用户',
     activeTools: '活跃工具',
     anomalies: '异常',
+    affectedUsers: '受影响用户',
+    exportReport: '导出报告',
+    markProcessed: '标记已处理',
+    ignoreAnomaly: '忽略',
+    processed: '已处理',
+    ignored: '已忽略',
+    pending: '待处理',
     healthScore: '健康分数',
     usageHeatmap: '使用热力图（24小时）',
     usageHeatmapDescription:
@@ -1325,6 +1342,9 @@ const translations: Record<Language, Translations> = {
     selectUser: '选择用户',
     enterUserId: '输入用户 ID',
     activeHours: '活跃时段',
+    actionsPerDay: '日均操作',
+    peakHour: '高峰时段',
+    peakDay: '高峰日',
     activity: '活跃度',
     commonOperations: '常用操作',
     selectUserToViewProfile: '选择用户查看行为画像',
@@ -1659,21 +1679,6 @@ const translations: Record<Language, Translations> = {
     complianceManagement: 'コンプライアンス',
     securityCenter: 'セキュリティセンター',
 
-    // Audit Thresholds
-    auditThresholds: '監査しきい値',
-    anomalyDetectionThresholds: '異常検出しきい値',
-    failedLoginThreshold: 'ログイン失敗しきい値',
-    failedLoginThresholdHelp: '異常アラートをトリガーするログイン失敗回数',
-    rapidActionThreshold: '急速操作しきい値',
-    rapidActionThresholdHelp: '急速アクティビティアラートをトリガーする1時間あたりの操作回数',
-    offHoursThreshold: '非営業時間活動しきい値',
-    offHoursThresholdHelp: '非営業時間（22:00-06:00）にアラートをトリガーする操作回数',
-    roleChangeThreshold: '役割変更しきい値',
-    roleChangeThresholdHelp: '頻繁な役割変更アラートをトリガーする変更回数',
-    permissionChangeThreshold: '権限変更しきい値',
-    permissionChangeThresholdHelp: 'アラートをトリガーする権限変更回数',
-    auditThresholdsSaved: '監査しきい値が保存されました',
-
     // Quota Management
     quotaUsage: 'クォータ使用量',
     noQuotaData: 'クォータデータがありません',
@@ -1686,6 +1691,21 @@ const translations: Record<Language, Translations> = {
     dailyRequestQuota: '毎日のリクエストクォータ',
     monthlyRequestQuota: '月間リクエストクォータ',
 
+    // Audit Thresholds
+    auditThresholds: '監査しきい値',
+    failedLoginThreshold: 'ログイン失敗しきい値',
+    failedLoginThresholdHelp: '異常アラートをトリガーするログイン失敗回数',
+    rapidActionThreshold: '急速操作しきい値',
+    rapidActionThresholdHelp: '急速アクティビティアラートをトリガーする1時間あたりの操作回数',
+    auditThresholdsSaved: '監査しきい値が保存されました',
+    anomalyDetectionThresholds: '異常検出しきい値',
+    offHoursThreshold: '時間外しきい値',
+    offHoursThresholdHelp: '異常アラートをトリガーする時間外操作回数',
+    roleChangeThreshold: 'ロール変更しきい値',
+    roleChangeThresholdHelp: '異常アラートをトリガーするロール変更回数',
+    permissionChangeThreshold: '権限変更しきい値',
+    permissionChangeThresholdHelp: '異常アラートをトリガーする権限変更回数',
+
     // Audit Log
     allActions: 'すべてのアクション',
     allResourceTypes: 'すべてのリソースタイプ',
@@ -1696,6 +1716,24 @@ const translations: Record<Language, Translations> = {
     tableDetails: '詳細',
     noAuditLogs: '監査ログがありません',
     records: '件',
+
+    // Audit Analysis
+    securityScore: 'セキュリティスコア',
+    overallScore: '総合スコア',
+    categoryScores: 'カテゴリスコア',
+    loginPatterns: 'ログインパターン',
+    logins: 'ログイン回数',
+    operationDistribution: '操作分布',
+    userBehaviorProfile: 'ユーザー行動プロファイル',
+    selectUser: 'ユーザー選択',
+    enterUserId: 'ユーザーIDを入力',
+    activeHours: 'アクティブ時間',
+    actionsPerDay: '日別アクション',
+    peakHour: 'ピーク時間',
+    peakDay: 'ピーク日',
+    activity: 'アクティビティ',
+    commonOperations: 'よく使う操作',
+    selectUserToViewProfile: 'ユーザーを選択して行動プロファイルを表示',
 
     // Content Filter
     filterRules: 'フィルタールール',
@@ -1775,6 +1813,13 @@ const translations: Record<Language, Translations> = {
     activeUsers: 'アクティブユーザー',
     activeTools: 'アクティブツール',
     anomalies: '異常',
+    affectedUsers: '影響ユーザー',
+    exportReport: 'レポート出力',
+    markProcessed: '処理済みにする',
+    ignoreAnomaly: '無視',
+    processed: '処理済み',
+    ignored: '無視済み',
+    pending: '保留中',
     healthScore: 'ヘルススコア',
     usageHeatmap: '使用ヒートマップ（24時間）',
     usageHeatmapDescription:
@@ -2106,21 +2151,6 @@ const translations: Record<Language, Translations> = {
     complianceManagement: '규정 준수',
     securityCenter: '보안 센터',
 
-    // Audit Thresholds
-    auditThresholds: '감사 임계값',
-    anomalyDetectionThresholds: '이상 탐지 임계값',
-    failedLoginThreshold: '로그인 실패 임계값',
-    failedLoginThresholdHelp: '이상 알림을 트리거하는 로그인 실패 횟수',
-    rapidActionThreshold: '급속 작업 임계값',
-    rapidActionThresholdHelp: '급속 활동 알림을 트리거하는 시간당 작업 횟수',
-    offHoursThreshold: '비업무 시간 활동 임계값',
-    offHoursThresholdHelp: '비업무 시간(22:00-06:00) 알림을 트리거하는 작업 횟수',
-    roleChangeThreshold: '역할 변경 임계값',
-    roleChangeThresholdHelp: '빈번한 역할 변경 알림을 트리거하는 변경 횟수',
-    permissionChangeThreshold: '권한 변경 임계값',
-    permissionChangeThresholdHelp: '알림을 트리거하는 권한 변경 횟수',
-    auditThresholdsSaved: '감사 임계값이 저장되었습니다',
-
     // Quota Management
     quotaUsage: '할당량 사용',
     noQuotaData: '할당량 데이터가 없습니다',
@@ -2133,6 +2163,21 @@ const translations: Record<Language, Translations> = {
     dailyRequestQuota: '일일 요청 할당량',
     monthlyRequestQuota: '월간 요청 할당량',
 
+    // Audit Thresholds
+    auditThresholds: '감사 임계값',
+    failedLoginThreshold: '로그인 실패 임계값',
+    failedLoginThresholdHelp: '이상 경보를 트리거하는 로그인 실패 횟수',
+    rapidActionThreshold: '빠른 작업 임계값',
+    rapidActionThresholdHelp: '빠른 활동 경보를 트리거하는 시간당 작업 횟수',
+    auditThresholdsSaved: '감사 임계값이 저장되었습니다',
+    anomalyDetectionThresholds: '이상 탐지 임계값',
+    offHoursThreshold: '비업무 시간 임계값',
+    offHoursThresholdHelp: '이상 경보를 트리거하는 비업무 시간 작업 횟수',
+    roleChangeThreshold: '역할 변경 임계값',
+    roleChangeThresholdHelp: '이상 경보를 트리거하는 역할 변경 횟수',
+    permissionChangeThreshold: '권한 변경 임계값',
+    permissionChangeThresholdHelp: '이상 경보를 트리거하는 권한 변경 횟수',
+
     // Audit Log
     allActions: '모든 작업',
     allResourceTypes: '모든 리소스 유형',
@@ -2143,6 +2188,24 @@ const translations: Record<Language, Translations> = {
     tableDetails: '상세',
     noAuditLogs: '감사 로그가 없습니다',
     records: '건',
+
+    // Audit Analysis
+    securityScore: '보안 점수',
+    overallScore: '종합 점수',
+    categoryScores: '카테고리 점수',
+    loginPatterns: '로그인 패턴',
+    logins: '로그인 횟수',
+    operationDistribution: '작업 분포',
+    userBehaviorProfile: '사용자 행동 프로필',
+    selectUser: '사용자 선택',
+    enterUserId: '사용자 ID 입력',
+    activeHours: '활성 시간',
+    actionsPerDay: '일별 활동',
+    peakHour: '피크 시간',
+    peakDay: '피크 일',
+    activity: '활동',
+    commonOperations: '자주 사용하는 작업',
+    selectUserToViewProfile: '사용자를 선택하여 행동 프로필 보기',
 
     // Content Filter
     filterRules: '필터 규칙',
@@ -2223,6 +2286,13 @@ const translations: Record<Language, Translations> = {
     activeUsers: '활성 사용자',
     activeTools: '활성 도구',
     anomalies: '이상',
+    affectedUsers: '영향받은 사용자',
+    exportReport: '보고서 내보내기',
+    markProcessed: '처리됨으로 표시',
+    ignoreAnomaly: '무시',
+    processed: '처리됨',
+    ignored: '무시됨',
+    pending: '대기 중',
     healthScore: '건강 점수',
     usageHeatmap: '사용 히트맵 (24시간)',
     usageHeatmapDescription:
