@@ -12,6 +12,7 @@ export {
   useConversationHistory,
   useConversationTimeline,
   useSenders,
+  useTools,
 } from './useMessages';
 export {
   useRenderPerformance,

@@ -181,6 +181,8 @@ export const messagesApi = {
   async getConversationHistory(
     filters: {
       date?: string;
+      startDate?: string;
+      endDate?: string;
       tool?: string;
       host?: string;
       sender?: string;
@@ -196,6 +198,8 @@ export const messagesApi = {
     };
 
     if (filters.date) params.date = filters.date;
+    if (filters.startDate) params.start_date = filters.startDate;
+    if (filters.endDate) params.end_date = filters.endDate;
     if (filters.tool) params.tool = filters.tool;
     if (filters.host) params.host = filters.host;
     if (filters.sender) params.sender = filters.sender;
@@ -257,5 +261,12 @@ export const messagesApi = {
     if (host) params.host = host;
 
     return apiClient.get<string[]>('/api/senders', params);
+  },
+
+  /**
+   * Get list of all tools
+   */
+  async getTools(): Promise<string[]> {
+    return apiClient.get<string[]>('/api/tools');
   },
 };
