@@ -50,12 +50,21 @@
     "auth_type": "openai",
     "env": {
       "OPENAI_API_KEY": "<YOUR_API_KEY>",
-      "OPENAI_BASE_URL": "https://api.openai.com/v1"
+      "OPENAI_BASE_URL": "https://api.openai.com/v1",
+      "BAILIAN_CODING_PLAN_API_KEY": "<BAILIAN_API_KEY>"
     }
   },
   "insights": {
     "model": "glm-5",
     "temperature": 0.3,
     "max_tokens": 4096
+  },
+  "data_fetch": {
+    "interval": 300,
+    "enabled": true
+  },
+  "quota_enforcement": {
+    "interval": 60,
+    "enabled": true
   }
 }
