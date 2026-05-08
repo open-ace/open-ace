@@ -64,6 +64,8 @@ export function useMessageCount(filters: MessageFilters = {}, enabled: boolean =
 // Conversation History hooks
 interface UseConversationHistoryOptions {
   date?: string;
+  startDate?: string;
+  endDate?: string;
   tool?: string;
   host?: string;
   sender?: string;
@@ -72,11 +74,11 @@ interface UseConversationHistoryOptions {
 }
 
 export function useConversationHistory(options: UseConversationHistoryOptions = {}) {
-  const { date, tool, host, sender, pageSize = 20, page = 1 } = options;
+  const { date, startDate, endDate, tool, host, sender, pageSize = 20, page = 1 } = options;
 
   return useQuery({
-    queryKey: ['conversation-history', page, { date, tool, host, sender, pageSize }],
-    queryFn: () => messagesApi.getConversationHistory({ date, tool, host, sender }, page, pageSize),
+    queryKey: ['conversation-history', page, { date, startDate, endDate, tool, host, sender, pageSize }],
+    queryFn: () => messagesApi.getConversationHistory({ date, startDate, endDate, tool, host, sender }, page, pageSize),
     staleTime: 60 * 1000, // 1 minute cache
   });
 }
@@ -94,6 +96,14 @@ export function useSenders(host?: string) {
   return useQuery<string[]>({
     queryKey: ['senders', host],
     queryFn: () => messagesApi.getSenders(host),
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+}
+
+export function useTools() {
+  return useQuery<string[]>({
+    queryKey: ['tools'],
+    queryFn: () => messagesApi.getTools(),
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
 }

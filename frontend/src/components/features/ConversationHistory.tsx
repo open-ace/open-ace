@@ -8,13 +8,14 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { cn } from '@/utils';
-import { useConversationHistory, useConversationTimeline, useHosts } from '@/hooks';
+import { useConversationHistory, useConversationTimeline, useHosts, useSenders, useTools } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
 import {
   Card,
   Button,
   Select,
+  SearchableSelect,
   Loading,
   Error,
   EmptyState,
@@ -81,6 +82,8 @@ export const ConversationHistory: React.FC = () => {
   const language = useLanguage();
   const [filters, setFilters] = useState<{
     date?: string;
+    startDate?: string;
+    endDate?: string;
     tool?: string;
     host?: string;
     sender?: string;
@@ -111,6 +114,14 @@ export const ConversationHistory: React.FC = () => {
   const { data: hostsData } = useHosts();
   const hosts = hostsData ?? [];
 
+  // Get senders for filter
+  const { data: sendersData } = useSenders(filters.host);
+  const senders = sendersData ?? [];
+
+  // Get tools for filter
+  const { data: toolsData } = useTools();
+  const tools = toolsData ?? [];
+
   const { data, isLoading, isFetching, isError, error, refetch } = useConversationHistory({
     ...filters,
     page,
@@ -130,11 +141,18 @@ export const ConversationHistory: React.FC = () => {
   const toolOptions = useMemo(
     () => [
       { value: '', label: t('dashboardFilterAllTools', language) },
-      { value: 'openclaw', label: 'OpenClaw' },
-      { value: 'claude', label: 'Claude' },
-      { value: 'qwen', label: 'Qwen' },
+      ...tools.map((tool: string) => ({ value: tool, label: tool })),
     ],
-    [language]
+    [tools, language]
+  );
+
+  // Sender options
+  const senderOptions = useMemo(
+    () => [
+      { value: '', label: t('dashboardFilterAllSenders', language) ?? 'All Senders' },
+      ...senders.map((sender: string) => ({ value: sender, label: sender })),
+    ],
+    [senders, language]
   );
 
   // Host options
@@ -215,6 +233,34 @@ export const ConversationHistory: React.FC = () => {
       onClick: () => toggleColumn(col.key),
     }));
 
+  // Export CSV
+  const handleExportCSV = () => {
+    const visibleCols = columns.filter((col) => col.visible && col.key !== 'actions');
+    const headers = visibleCols.map((col) => t(col.label, language));
+    const escapeCSV = (val: string) => {
+      if (val.includes(',') || val.includes('"') || val.includes('\n')) {
+        return `"${val.replace(/"/g, '""')}"`;
+      }
+      return val;
+    };
+    const rows = sortedConversations.map((conv) =>
+      visibleCols
+        .map((col) => {
+          const val = conv[col.key as keyof ConversationHistoryType];
+          return escapeCSV(val != null ? String(val) : '');
+        })
+        .join(',')
+    );
+    const csv = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `conversation_history_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   if (isError) {
     return <Error message={error?.message ?? t('error', language)} onRetry={() => refetch()} />;
   }
@@ -225,12 +271,21 @@ export const ConversationHistory: React.FC = () => {
       <Card className="mb-3">
         <div className="row g-3">
           <div className="col-md-3">
-            <label className="form-label">{t('tableDate', language)}</label>
+            <label className="form-label">{t('startDate', language) ?? 'Start Date'}</label>
             <input
               type="date"
               className="form-control"
-              value={filters.date ?? ''}
-              onChange={(e) => handleFilterChange('date', e.target.value)}
+              value={filters.startDate ?? ''}
+              onChange={(e) => handleFilterChange('startDate', e.target.value)}
+            />
+          </div>
+          <div className="col-md-3">
+            <label className="form-label">{t('endDate', language) ?? 'End Date'}</label>
+            <input
+              type="date"
+              className="form-control"
+              value={filters.endDate ?? ''}
+              onChange={(e) => handleFilterChange('endDate', e.target.value)}
             />
           </div>
           <div className="col-md-3">
@@ -251,12 +306,12 @@ export const ConversationHistory: React.FC = () => {
           </div>
           <div className="col-md-3">
             <label className="form-label">{t('tableSender', language)}</label>
-            <input
-              type="text"
-              className="form-control"
-              placeholder={t('searchSender', language)}
+            <SearchableSelect
+              options={senderOptions}
               value={filters.sender ?? ''}
-              onChange={(e) => handleFilterChange('sender', e.target.value)}
+              onChange={(value) => handleFilterChange('sender', value)}
+              placeholder={t('dashboardFilterAllSenders', language) || 'All Senders'}
+              searchPlaceholder={t('searchSender', language)}
             />
           </div>
         </div>
@@ -294,9 +349,18 @@ export const ConversationHistory: React.FC = () => {
           {/* Table Header with Column Selector and Fullscreen */}
           <div className="d-flex justify-content-between align-items-center mb-3">
             <span className="text-muted">
-              {t('total', language)}: {sortedConversations.length} {t('conversations', language)}
+              {t('total', language)}: {data?.total ?? 0} {t('conversations', language)}
             </span>
             <div className="d-flex gap-2">
+              {/* Export Button */}
+              <Button
+                variant="outline-secondary"
+                size="sm"
+                onClick={handleExportCSV}
+              >
+                <i className="bi bi-download me-1" />
+                {t('export', language) ?? 'Export'}
+              </Button>
               {/* Column Selector */}
               <Dropdown
                 trigger={
@@ -356,6 +420,47 @@ export const ConversationHistory: React.FC = () => {
               </tbody>
             </table>
           </div>
+
+          {/* Pagination */}
+          {(() => {
+            const totalPages = Math.ceil((data?.total ?? 0) / ITEMS_PER_PAGE);
+            return totalPages > 1 ? (
+              <div className="d-flex justify-content-center mt-3">
+                <nav>
+                  <ul className="pagination pagination-sm mb-0">
+                    <li className={cn('page-item', page === 1 && 'disabled')}>
+                      <button
+                        className="page-link"
+                        onClick={() => setPage(page - 1)}
+                        disabled={page === 1}
+                      >
+                        {t('previous', language) ?? 'Previous'}
+                      </button>
+                    </li>
+                    {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                      const pageNum = i + 1;
+                      return (
+                        <li key={pageNum} className={cn('page-item', page === pageNum && 'active')}>
+                          <button className="page-link" onClick={() => setPage(pageNum)}>
+                            {pageNum}
+                          </button>
+                        </li>
+                      );
+                    })}
+                    <li className={cn('page-item', page === totalPages && 'disabled')}>
+                      <button
+                        className="page-link"
+                        onClick={() => setPage(page + 1)}
+                        disabled={page === totalPages}
+                      >
+                        {t('next', language) ?? 'Next'}
+                      </button>
+                    </li>
+                  </ul>
+                </nav>
+              </div>
+            ) : null;
+          })()}
         </Card>
       )}
     </>

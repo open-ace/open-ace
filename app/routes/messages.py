@@ -81,6 +81,8 @@ def api_senders():
 def api_conversation_history():
     """Get conversation history."""
     date = request.args.get("date")
+    start_date = request.args.get("start_date")
+    end_date = request.args.get("end_date")
     tool = request.args.get("tool")
     host = request.args.get("host")
     sender = request.args.get("sender")
@@ -88,10 +90,22 @@ def api_conversation_history():
     offset = request.args.get("offset", 0, type=int)
 
     conversations = message_service.get_conversation_history(
-        date=date, tool_name=tool, host_name=host, sender_name=sender, limit=limit, offset=offset
+        date=date,
+        start_date=start_date,
+        end_date=end_date,
+        tool_name=tool,
+        host_name=host,
+        sender_name=sender,
+        limit=limit,
+        offset=offset,
     )
     total = message_service.count_conversations(
-        date=date, tool_name=tool, host_name=host, sender_name=sender
+        date=date,
+        start_date=start_date,
+        end_date=end_date,
+        tool_name=tool,
+        host_name=host,
+        sender_name=sender,
     )
     return jsonify({"data": conversations, "total": total})
 
