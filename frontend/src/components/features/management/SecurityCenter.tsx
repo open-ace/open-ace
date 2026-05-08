@@ -1,10 +1,11 @@
 /**
- * SecurityCenter Component - Combined Content Filter and Security Settings
+ * SecurityCenter Component - Combined Content Filter, Security Settings, and Audit Thresholds
  *
  * Features:
- * - Tab navigation between Filter Rules and Security Settings views
+ * - Tab navigation between Filter Rules, Security Settings, and Audit Thresholds views
  * - Filter Rules: Manage content filtering rules
  * - Security Settings: Configure security policies
+ * - Audit Thresholds: Configure anomaly detection thresholds
  */
 
 import React, { useState } from 'react';
@@ -16,6 +17,8 @@ import {
   useDeleteFilterRule,
   useSecuritySettings,
   useUpdateSecuritySettings,
+  useAuditThresholds,
+  useUpdateAuditThresholds,
 } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
@@ -36,6 +39,7 @@ import type {
   ContentFilterRule,
   CreateFilterRuleRequest,
   SecuritySettings as SecuritySettingsType,
+  AuditThresholds as AuditThresholdsType,
 } from '@/api';
 
 const TYPE_OPTIONS = [
@@ -56,7 +60,15 @@ const ACTION_OPTIONS = [
   { value: 'redact', label: 'Redact' },
 ];
 
-type TabType = 'filter' | 'settings';
+type TabType = 'filter' | 'settings' | 'audit';
+
+const AUDIT_THRESHOLD_DEFAULTS: AuditThresholdsType = {
+  audit_failed_login_threshold: 5,
+  audit_rapid_action_threshold: 50,
+  audit_off_hours_threshold: 10,
+  audit_role_change_threshold: 5,
+  audit_permission_change_threshold: 10,
+};
 
 export const SecurityCenter: React.FC = () => {
   const language = useLanguage();
@@ -97,6 +109,18 @@ export const SecurityCenter: React.FC = () => {
   const updateSettings = useUpdateSecuritySettings();
 
   const [settingsFormData, setSettingsFormData] = useState<Partial<SecuritySettingsType>>({});
+
+  // --- Audit Thresholds State ---
+  const {
+    data: thresholds,
+    isLoading: thresholdsLoading,
+    isError: thresholdsError,
+    error: thresholdsErrorMsg,
+    refetch: refetchThresholds,
+  } = useAuditThresholds();
+  const updateThresholds = useUpdateAuditThresholds();
+
+  const [thresholdsFormData, setThresholdsFormData] = useState<Partial<AuditThresholdsType>>({});
 
   // --- Filter Rules Handlers ---
   const handleOpenCreateRule = () => {
@@ -204,6 +228,33 @@ export const SecurityCenter: React.FC = () => {
 
   const handleResetSettings = () => {
     setSettingsFormData({});
+  };
+
+  // --- Audit Thresholds Handlers ---
+  const handleThresholdsInputChange = (key: keyof AuditThresholdsType, value: string) => {
+    const numVal = parseInt(value) || 0;
+    setThresholdsFormData((prev) => ({ ...prev, [key]: numVal }));
+  };
+
+  const handleSaveThresholds = async () => {
+    try {
+      await updateThresholds.mutateAsync(thresholdsFormData);
+      toast.success(t('auditThresholdsSaved', language));
+      setThresholdsFormData({});
+    } catch (err) {
+      console.error('Failed to save thresholds:', err);
+      toast.error(t('error', language));
+    }
+  };
+
+  const handleResetThresholds = () => {
+    setThresholdsFormData({});
+  };
+
+  const currentThresholds: AuditThresholdsType = {
+    ...AUDIT_THRESHOLD_DEFAULTS,
+    ...thresholds,
+    ...thresholdsFormData,
   };
 
   // Merge current settings with form changes
@@ -592,6 +643,100 @@ export const SecurityCenter: React.FC = () => {
     );
   };
 
+  // --- Render Audit Thresholds Tab ---
+  const renderAuditThresholdsTab = () => {
+    if (thresholdsLoading) {
+      return <Loading size="lg" text={t('loading', language)} />;
+    }
+
+    if (thresholdsError) {
+      return (
+        <Error
+          message={thresholdsErrorMsg?.message || t('error', language)}
+          onRetry={() => refetchThresholds()}
+        />
+      );
+    }
+
+    return (
+      <>
+        <Card title={t('anomalyDetectionThresholds', language)} className="mb-4">
+          <div className="row g-3">
+            <div className="col-md-6">
+              <label className="form-label">{t('failedLoginThreshold', language)}</label>
+              <TextInput
+                type="number"
+                value={currentThresholds.audit_failed_login_threshold.toString()}
+                onChange={(value: string) =>
+                  handleThresholdsInputChange('audit_failed_login_threshold', value)
+                }
+              />
+              <small className="text-muted">{t('failedLoginThresholdHelp', language)}</small>
+            </div>
+            <div className="col-md-6">
+              <label className="form-label">{t('rapidActionThreshold', language)}</label>
+              <TextInput
+                type="number"
+                value={currentThresholds.audit_rapid_action_threshold.toString()}
+                onChange={(value: string) =>
+                  handleThresholdsInputChange('audit_rapid_action_threshold', value)
+                }
+              />
+              <small className="text-muted">{t('rapidActionThresholdHelp', language)}</small>
+            </div>
+            <div className="col-md-6">
+              <label className="form-label">{t('offHoursThreshold', language)}</label>
+              <TextInput
+                type="number"
+                value={currentThresholds.audit_off_hours_threshold.toString()}
+                onChange={(value: string) =>
+                  handleThresholdsInputChange('audit_off_hours_threshold', value)
+                }
+              />
+              <small className="text-muted">{t('offHoursThresholdHelp', language)}</small>
+            </div>
+            <div className="col-md-6">
+              <label className="form-label">{t('roleChangeThreshold', language)}</label>
+              <TextInput
+                type="number"
+                value={currentThresholds.audit_role_change_threshold.toString()}
+                onChange={(value: string) =>
+                  handleThresholdsInputChange('audit_role_change_threshold', value)
+                }
+              />
+              <small className="text-muted">{t('roleChangeThresholdHelp', language)}</small>
+            </div>
+            <div className="col-md-6">
+              <label className="form-label">{t('permissionChangeThreshold', language)}</label>
+              <TextInput
+                type="number"
+                value={currentThresholds.audit_permission_change_threshold.toString()}
+                onChange={(value: string) =>
+                  handleThresholdsInputChange('audit_permission_change_threshold', value)
+                }
+              />
+              <small className="text-muted">{t('permissionChangeThresholdHelp', language)}</small>
+            </div>
+          </div>
+        </Card>
+
+        {/* Save/Reset Buttons */}
+        <div className="d-flex gap-2 justify-content-end">
+          <Button variant="secondary" onClick={handleResetThresholds}>
+            {t('reset', language)}
+          </Button>
+          <Button
+            variant="primary"
+            onClick={handleSaveThresholds}
+            loading={updateThresholds.isPending}
+          >
+            {t('save', language)}
+          </Button>
+        </div>
+      </>
+    );
+  };
+
   return (
     <div className="security-center">
       {/* Header */}
@@ -625,10 +770,21 @@ export const SecurityCenter: React.FC = () => {
             {t('securitySettings', language)}
           </button>
         </li>
+        <li className="nav-item">
+          <button
+            className={cn('nav-link', activeTab === 'audit' && 'active')}
+            onClick={() => setActiveTab('audit')}
+          >
+            <i className="bi bi-sliders me-1" />
+            {t('auditThresholds', language)}
+          </button>
+        </li>
       </ul>
 
       {/* Tab Content */}
-      {activeTab === 'filter' ? renderFilterTab() : renderSettingsTab()}
+      {activeTab === 'filter' && renderFilterTab()}
+      {activeTab === 'settings' && renderSettingsTab()}
+      {activeTab === 'audit' && renderAuditThresholdsTab()}
     </div>
   );
 };

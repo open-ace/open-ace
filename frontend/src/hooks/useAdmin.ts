@@ -3,7 +3,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { adminApi, governanceApi } from '@/api';
+import { adminApi, governanceApi, complianceApi } from '@/api';
 import type {
   CreateUserRequest,
   UpdateUserRequest,
@@ -11,6 +11,7 @@ import type {
   AuditLogFilters,
   CreateFilterRuleRequest,
   SecuritySettings,
+  AuditThresholds,
 } from '@/api';
 
 // User Management Hooks
@@ -148,6 +149,25 @@ export function useUpdateSecuritySettings() {
     mutationFn: (data: Partial<SecuritySettings>) => governanceApi.updateSecuritySettings(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'security-settings'] });
+    },
+  });
+}
+
+// Audit Threshold Hooks
+export function useAuditThresholds() {
+  return useQuery({
+    queryKey: ['admin', 'audit-thresholds'],
+    queryFn: () => complianceApi.getAuditThresholds(),
+  });
+}
+
+export function useUpdateAuditThresholds() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: Partial<AuditThresholds>) => complianceApi.updateAuditThresholds(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'audit-thresholds'] });
     },
   });
 }

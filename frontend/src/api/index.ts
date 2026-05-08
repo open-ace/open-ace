@@ -79,6 +79,7 @@ export type {
   AuditAnomaly,
   UserProfile,
   SecurityScore,
+  AuditThresholds,
   RetentionRule,
   RetentionHistory,
   StorageEstimate,

@@ -5,6 +5,7 @@ Analyzes audit logs for compliance and security insights.
 """
 
 import logging
+import math
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -40,19 +41,30 @@ class AuditAnalyzer:
     - Security insights
     """
 
-    # Thresholds for anomaly detection
-    FAILED_LOGIN_THRESHOLD = 5  # Failed logins before alert
-    RAPID_ACTION_THRESHOLD = 50  # Actions per hour before alert
-    OFF_HOURS_THRESHOLD = 0.1  # Fraction of off-hours activity before alert
+    # Risk weights by anomaly type for scoring
+    RISK_WEIGHTS = {
+        "excessive_failed_logins": 1.5,
+        "rapid_activity": 1.2,
+        "off_hours_activity": 1.0,
+        "frequent_role_changes": 1.8,
+        "frequent_permission_changes": 1.6,
+    }
 
-    def __init__(self, audit_logger: Optional[AuditLogger] = None):
-        """
-        Initialize audit analyzer.
+    # Base deductions by severity level
+    BASE_DEDUCTIONS = {"high": 15, "medium": 8, "low": 3}
 
-        Args:
-            audit_logger: Optional AuditLogger instance.
-        """
+    def __init__(
+        self,
+        audit_logger: Optional[AuditLogger] = None,
+        settings: Optional[dict[str, Any]] = None,
+    ):
         self.audit_logger = audit_logger or AuditLogger()
+        settings = settings or {}
+        self.failed_login_threshold = settings.get("audit_failed_login_threshold", 5)
+        self.rapid_action_threshold = settings.get("audit_rapid_action_threshold", 50)
+        self.off_hours_threshold = settings.get("audit_off_hours_threshold", 10)
+        self.role_change_threshold = settings.get("audit_role_change_threshold", 5)
+        self.permission_change_threshold = settings.get("audit_permission_change_threshold", 10)
 
     def analyze_patterns(
         self, start_time: Optional[datetime] = None, end_time: Optional[datetime] = None
@@ -166,7 +178,7 @@ class AuditAnalyzer:
             limit=1000,
         )
 
-        if len(failed_logins) < self.FAILED_LOGIN_THRESHOLD:
+        if len(failed_logins) < self.failed_login_threshold:
             return None
 
         # Group by user
@@ -179,7 +191,7 @@ class AuditAnalyzer:
         affected_users = [
             user_id
             for user_id, logs in user_failures.items()
-            if len(logs) >= self.FAILED_LOGIN_THRESHOLD
+            if len(logs) >= self.failed_login_threshold
         ]
 
         if not affected_users:
@@ -194,7 +206,7 @@ class AuditAnalyzer:
             first_seen=min(l.timestamp for l in failed_logins if l.timestamp),
             last_seen=max(l.timestamp for l in failed_logins if l.timestamp),
             details={
-                "threshold": self.FAILED_LOGIN_THRESHOLD,
+                "threshold": self.failed_login_threshold,
                 "user_breakdown": {str(k): len(v) for k, v in user_failures.items()},
             },
         )
@@ -223,7 +235,7 @@ class AuditAnalyzer:
         # Find users with rapid activity
         for user_id, hourly in user_hourly_activity.items():
             for hour, count in hourly.items():
-                if count > self.RAPID_ACTION_THRESHOLD:
+                if count > self.rapid_action_threshold:
                     anomalies.append(
                         AnomalyDetection(
                             anomaly_type="rapid_activity",
@@ -237,7 +249,7 @@ class AuditAnalyzer:
                             details={
                                 "hour": hour,
                                 "action_count": count,
-                                "threshold": self.RAPID_ACTION_THRESHOLD,
+                                "threshold": self.rapid_action_threshold,
                             },
                         )
                     )
@@ -276,7 +288,7 @@ class AuditAnalyzer:
 
         anomalies = []
         for user_id, logs_list in user_off_hours.items():
-            if len(logs_list) > 10:  # Threshold for off-hours activity
+            if len(logs_list) > self.off_hours_threshold:
                 anomalies.append(
                     AnomalyDetection(
                         anomaly_type="off_hours_activity",
@@ -308,7 +320,7 @@ class AuditAnalyzer:
 
         # Check for role changes
         role_changes = [l for l in logs if l.action == "user_role_change"]
-        if len(role_changes) > 5:
+        if len(role_changes) > self.role_change_threshold:
             anomalies.append(
                 AnomalyDetection(
                     anomaly_type="frequent_role_changes",
@@ -326,7 +338,7 @@ class AuditAnalyzer:
         permission_changes = [
             l for l in logs if l.action in ("permission_grant", "permission_revoke")
         ]
-        if len(permission_changes) > 10:
+        if len(permission_changes) > self.permission_change_threshold:
             anomalies.append(
                 AnomalyDetection(
                     anomaly_type="frequent_permission_changes",
@@ -430,19 +442,18 @@ class AuditAnalyzer:
         anomalies = self.detect_anomalies(start_time, end_time)
 
         # Calculate score (100 = best, 0 = worst)
-        score = 100
+        score: float = 100
 
-        # Deduct points for anomalies
+        # Deduct points using risk-weighted frequency-based scoring
         for anomaly in anomalies:
-            if anomaly.severity == "high":
-                score -= 20
-            elif anomaly.severity == "medium":
-                score -= 10
-            else:
-                score -= 5
+            base = self.BASE_DEDUCTIONS.get(anomaly.severity, 3)
+            weight = self.RISK_WEIGHTS.get(anomaly.anomaly_type, 1.0)
+            # Frequency factor: log2 scaling, capped at 5x
+            freq_factor = min(1 + math.log2(max(anomaly.occurrences, 1)), 5)
+            score -= base * weight * freq_factor
 
         # Ensure score is in range
-        score = max(0, min(100, score))
+        score = max(0.0, min(100.0, score))
 
         # Determine grade
         if score >= 90:
@@ -457,7 +468,7 @@ class AuditAnalyzer:
             grade = "F"
 
         return {
-            "score": score,
+            "score": round(score),
             "grade": grade,
             "anomaly_count": len(anomalies),
             "high_severity_count": len([a for a in anomalies if a.severity == "high"]),

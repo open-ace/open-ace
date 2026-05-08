@@ -5,6 +5,7 @@ API endpoints for compliance reporting and data retention management.
 """
 
 import logging
+import time
 from datetime import datetime, timedelta
 
 from flask import Blueprint, Response, g, jsonify, request
@@ -13,6 +14,7 @@ from app.auth.decorators import admin_required
 from app.modules.compliance.audit import AuditAnalyzer
 from app.modules.compliance.report import ReportGenerator, ReportType
 from app.modules.compliance.retention import DataRetentionManager
+from app.repositories.governance_repo import GovernanceRepository
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +23,40 @@ compliance_bp = Blueprint("compliance", __name__, url_prefix="/api/compliance")
 
 # Services
 report_generator = ReportGenerator()
-audit_analyzer = AuditAnalyzer()
-
 _retention_manager = None
+
+# Audit threshold settings cache (60s TTL, similar to auth_service pattern)
+_audit_settings_cache: dict = {}
+_audit_settings_cache_time: float = 0
+_AUDIT_SETTINGS_CACHE_TTL = 60
+
+THRESHOLD_KEYS = [
+    "audit_failed_login_threshold",
+    "audit_rapid_action_threshold",
+    "audit_off_hours_threshold",
+    "audit_role_change_threshold",
+    "audit_permission_change_threshold",
+]
+
+
+def _get_audit_settings() -> dict:
+    """Load audit threshold settings with 60s in-memory cache."""
+    global _audit_settings_cache, _audit_settings_cache_time
+    now = time.time()
+    if _audit_settings_cache and (now - _audit_settings_cache_time) < _AUDIT_SETTINGS_CACHE_TTL:
+        return _audit_settings_cache
+
+    repo = GovernanceRepository()
+    all_settings = repo.get_security_settings()
+    _audit_settings_cache = {k: all_settings[k] for k in THRESHOLD_KEYS if k in all_settings}
+    _audit_settings_cache_time = now
+    return _audit_settings_cache
+
+
+def _get_audit_analyzer() -> AuditAnalyzer:
+    """Create an AuditAnalyzer with current threshold settings."""
+    settings = _get_audit_settings()
+    return AuditAnalyzer(settings=settings)
 
 
 def get_retention_manager():
@@ -204,7 +237,7 @@ def analyze_patterns():
     days = request.args.get("days", 30, type=int)
     start_time = datetime.utcnow() - timedelta(days=days)
 
-    patterns = audit_analyzer.analyze_patterns(start_time=start_time)
+    patterns = _get_audit_analyzer().analyze_patterns(start_time=start_time)
 
     return jsonify(patterns)
 
@@ -217,7 +250,7 @@ def detect_anomalies():
     days = request.args.get("days", 7, type=int)
     start_time = datetime.utcnow() - timedelta(days=days)
 
-    anomalies = audit_analyzer.detect_anomalies(start_time=start_time)
+    anomalies = _get_audit_analyzer().detect_anomalies(start_time=start_time)
 
     def serialize_anomaly(a):
         d = a.__dict__.copy()
@@ -241,7 +274,7 @@ def get_user_profile(user_id: int):
 
     days = request.args.get("days", 30, type=int)
 
-    profile = audit_analyzer.get_user_behavior_profile(user_id, days=days)
+    profile = _get_audit_analyzer().get_user_behavior_profile(user_id, days=days)
 
     return jsonify(profile)
 
@@ -254,9 +287,51 @@ def get_security_score():
     days = request.args.get("days", 30, type=int)
     start_time = datetime.utcnow() - timedelta(days=days)
 
-    score = audit_analyzer.generate_security_score(start_time=start_time)
+    score = _get_audit_analyzer().generate_security_score(start_time=start_time)
 
     return jsonify(score)
+
+
+@compliance_bp.route("/audit/thresholds", methods=["GET"])
+@admin_required
+def get_audit_thresholds():
+    """Get audit anomaly detection thresholds (admin only)."""
+    settings = _get_audit_settings()
+    return jsonify(settings)
+
+
+@compliance_bp.route("/audit/thresholds", methods=["PUT"])
+@admin_required
+def update_audit_thresholds():
+    """Update audit anomaly detection thresholds (admin only)."""
+    global _audit_settings_cache, _audit_settings_cache_time
+
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Request body required"}), 400
+
+    # Validate: only allow known threshold keys, values must be positive integers
+    updates = {}
+    for key in THRESHOLD_KEYS:
+        if key in data:
+            val = data[key]
+            if not isinstance(val, (int, float)) or val < 1:
+                return jsonify({"error": f"{key} must be a positive number"}), 400
+            updates[key] = int(val)
+
+    if not updates:
+        return jsonify({"error": "No valid threshold keys provided"}), 400
+
+    repo = GovernanceRepository()
+    success = repo.update_security_settings(updates)
+
+    if success:
+        # Invalidate cache
+        _audit_settings_cache = {}
+        _audit_settings_cache_time = 0
+        return jsonify({"success": True, "updated": updates})
+
+    return jsonify({"error": "Failed to update thresholds"}), 500
 
 
 # =============================================================================
