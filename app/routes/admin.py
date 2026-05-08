@@ -257,10 +257,35 @@ def api_update_user_quota(user_id):
 @admin_required
 def api_quota_usage():
     """Get quota usage for all users."""
-    users = user_repo.get_all_users()
+    from datetime import datetime
 
-    # Remove sensitive data
+    users = user_repo.get_all_users()
+    today = datetime.now().strftime("%Y-%m-%d")
+    month_start = datetime.now().replace(day=1).strftime("%Y-%m-%d")
+
     for user in users:
         user.pop("password_hash", None)
+        user_id: int = user["id"]
+        system_account = user.get("system_account") or user.get("username", "")
+
+        # Today's usage
+        today_combined = usage_repo.get_combined_usage(
+            user_id=user_id,
+            system_account=system_account,
+            start_date=today,
+            end_date=today,
+        )
+        user["tokens_used_today"] = today_combined["tokens"]
+        user["requests_today"] = today_combined["requests"]
+
+        # Monthly usage
+        monthly_combined = usage_repo.get_combined_usage(
+            user_id=user_id,
+            system_account=system_account,
+            start_date=month_start,
+            end_date=today,
+        )
+        user["tokens_used_month"] = monthly_combined["tokens"]
+        user["requests_month"] = monthly_combined["requests"]
 
     return jsonify(users)
