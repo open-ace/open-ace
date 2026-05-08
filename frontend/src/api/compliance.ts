@@ -176,7 +176,7 @@ export const complianceApi = {
     retention_days: number;
     action?: 'delete' | 'archive';
   }): Promise<RetentionRule> {
-    const response = await apiClient.post<{ rule: RetentionRule }>(
+    const response = await apiClient.put<{ rule: RetentionRule }>(
       '/api/compliance/retention/rules',
       data
     );

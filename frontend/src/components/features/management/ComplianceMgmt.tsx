@@ -257,49 +257,6 @@ export const ComplianceMgmt: React.FC = () => {
 
     return (
       <>
-        {/* Compliance Rules Overview */}
-        <Card title={t('complianceRules', language)} className="mb-4">
-          <div className="compliance-rules-list">
-            {Object.keys(rules).length === 0 ? (
-              <EmptyState icon="bi-shield-check" title={t('noComplianceRules', language)} />
-            ) : (
-              <div className="table-responsive">
-                <table className="table table-sm">
-                  <thead>
-                    <tr>
-                      <th>{t('dataType', language)}</th>
-                      <th>{t('retentionDays', language)}</th>
-                      <th>{t('action', language)}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {Object.entries(rules)
-                      .slice(0, 5)
-                      .map(([dataType, rule]) => (
-                        <tr key={dataType}>
-                          <td>{dataType}</td>
-                          <td>
-                            {(rule as { retention_days: number }).retention_days}{' '}
-                            {t('days', language)}
-                          </td>
-                          <td>
-                            <Badge
-                              variant={
-                                (rule as { action: string }).action === 'delete' ? 'danger' : 'info'
-                              }
-                            >
-                              {(rule as { action: string }).action}
-                            </Badge>
-                          </td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </Card>
-
         {/* Report Type Selection */}
         <Card title={t('selectReportType', language)} className="mb-4">
           <div className="row g-3">
