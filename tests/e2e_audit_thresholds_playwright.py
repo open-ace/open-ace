@@ -204,21 +204,27 @@ def main():
     test_api_thresholds(session)
     test_security_score(session)
 
-    # UI tests
+    # UI tests — use API session cookie for reliable login
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=HEADLESS)
         context = browser.new_context(viewport={"width": 1280, "height": 800})
-        page = context.new_page()
 
-        # Login
-        page.goto(f"{BASE_URL}/login", wait_until="domcontentloaded", timeout=30000)
-        pause(1)
-        page.fill(
-            'input[name="username"], input[placeholder*="admin"], input[type="text"]', "admin"
-        )
-        page.fill('input[name="password"], input[type="password"]', "admin123")
-        page.click('button[type="submit"], button:has-text("Login"), button:has-text("登录")')
-        pause(2)
+        # Inject session cookie from API login
+        api_session = requests.Session()
+        api_login(api_session)
+        for cookie in api_session.cookies:
+            context.add_cookies(
+                [
+                    {
+                        "name": cookie.name,
+                        "value": cookie.value,
+                        "domain": "localhost",
+                        "path": "/",
+                    }
+                ]
+            )
+
+        page = context.new_page()
 
         test_ui_thresholds(page)
 
