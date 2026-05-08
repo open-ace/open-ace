@@ -52,6 +52,8 @@ export interface AuditAnomaly {
   first_seen: string;
   last_seen: string;
   details?: Record<string, unknown>;
+  status?: 'pending' | 'processed' | 'ignored';
+  processed_at?: string | null;
 }
 
 export interface UserProfile {
@@ -158,6 +160,17 @@ export const complianceApi = {
     return apiClient.get<{ anomalies: AuditAnomaly[]; count: number }>(
       '/api/compliance/audit/anomalies',
       queryParams
+    );
+  },
+
+  async updateAnomalyStatus(
+    anomalyType: string,
+    affectedUsers: number[],
+    status: 'processed' | 'ignored'
+  ): Promise<{ success: boolean; status: string }> {
+    return apiClient.post<{ success: boolean; status: string }>(
+      '/api/compliance/audit/anomalies/status',
+      { anomaly_type: anomalyType, affected_users: affectedUsers, status }
     );
   },
 

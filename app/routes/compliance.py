@@ -4,6 +4,7 @@ Open ACE - Compliance Routes
 API endpoints for compliance reporting and data retention management.
 """
 
+import hashlib
 import logging
 import time
 from datetime import datetime, timedelta
@@ -14,6 +15,7 @@ from app.auth.decorators import admin_required
 from app.modules.compliance.audit import AuditAnalyzer
 from app.modules.compliance.report import ReportGenerator, ReportType
 from app.modules.compliance.retention import DataRetentionManager
+from app.repositories.database import Database
 from app.repositories.governance_repo import GovernanceRepository
 
 logger = logging.getLogger(__name__)
@@ -255,11 +257,19 @@ def detect_anomalies():
 
     anomalies = _get_audit_analyzer().detect_anomalies(start_time=start_time)
 
+    # Load status info for all anomalies
+    statuses = _get_anomaly_statuses()
+
     def serialize_anomaly(a):
         d = a.__dict__.copy()
         for key in ("first_seen", "last_seen"):
             if isinstance(d.get(key), datetime):
                 d[key] = d[key].isoformat()
+        # Attach status info
+        hash_val = _anomaly_hash(a.anomaly_type, a.affected_users)
+        status_row = statuses.get((a.anomaly_type, hash_val))
+        d["status"] = status_row["status"] if status_row else "pending"
+        d["processed_at"] = status_row["processed_at"] if status_row else None
         return d
 
     return jsonify(
@@ -430,6 +440,71 @@ def get_retention_status():
     status = get_retention_manager().get_compliance_status()
 
     return jsonify(status)
+
+
+def _anomaly_hash(anomaly_type: str, affected_users: list) -> str:
+    """Generate a hash for identifying an anomaly group."""
+    key = f"{anomaly_type}:{','.join(str(u) for u in sorted(affected_users or []))}"
+    return hashlib.sha256(key.encode()).hexdigest()[:16]
+
+
+def _get_anomaly_statuses() -> dict:
+    """Load all anomaly statuses as a dict keyed by (type, hash)."""
+    db = Database()
+    try:
+        rows = db.fetch_all(
+            "SELECT anomaly_type, affected_users_hash, status, processed_by, processed_at "
+            "FROM anomaly_status"
+        )
+        return {(r["anomaly_type"], r["affected_users_hash"]): r for r in rows}
+    except Exception:
+        return {}
+
+
+@compliance_bp.route("/audit/anomalies/status", methods=["POST"])
+@admin_required
+def update_anomaly_status():
+    """Update anomaly status (admin only).
+
+    Body: { "anomaly_type": str, "affected_users": list[int], "status": "processed"|"ignored" }
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Request body required"}), 400
+
+    anomaly_type = data.get("anomaly_type")
+    affected_users = data.get("affected_users", [])
+    new_status = data.get("status")
+
+    if not anomaly_type or new_status not in ("processed", "ignored"):
+        return jsonify({"error": "Invalid parameters"}), 400
+
+    hash_val = _anomaly_hash(anomaly_type, affected_users)
+    user_id = g.user.get("id") if hasattr(g, "user") else None
+    now = datetime.utcnow()
+
+    db = Database()
+    try:
+        existing = db.fetch_one(
+            "SELECT id FROM anomaly_status WHERE anomaly_type = ? AND affected_users_hash = ?",
+            (anomaly_type, hash_val),
+        )
+        if existing:
+            db.execute(
+                "UPDATE anomaly_status SET status = ?, processed_by = ?, processed_at = ? "
+                "WHERE anomaly_type = ? AND affected_users_hash = ?",
+                (new_status, user_id, now, anomaly_type, hash_val),
+            )
+        else:
+            db.execute(
+                "INSERT INTO anomaly_status (anomaly_type, affected_users_hash, status, processed_by, processed_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (anomaly_type, hash_val, new_status, user_id, now),
+            )
+        return jsonify({"success": True, "status": new_status})
+    except Exception as e:
+        logger.error(f"Failed to update anomaly status: {e}")
+        return jsonify({"error": "Database error"}), 500
 
 
 def register_compliance_routes(app):
