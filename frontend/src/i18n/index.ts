@@ -189,6 +189,13 @@ const translations: Record<Language, Translations> = {
     rapidActionThreshold: 'Rapid Action Threshold',
     rapidActionThresholdHelp: 'Number of actions per hour before triggering a rapid activity alert',
     auditThresholdsSaved: 'Audit thresholds saved successfully',
+    anomalyDetectionThresholds: 'Anomaly Detection Thresholds',
+    offHoursThreshold: 'Off-Hours Threshold',
+    offHoursThresholdHelp: 'Number of off-hours actions before triggering an anomaly alert',
+    roleChangeThreshold: 'Role Change Threshold',
+    roleChangeThresholdHelp: 'Number of role changes before triggering an anomaly alert',
+    permissionChangeThreshold: 'Permission Change Threshold',
+    permissionChangeThresholdHelp: 'Number of permission changes before triggering an anomaly alert',
 
     // Audit Log
     allActions: 'All Actions',
@@ -947,6 +954,13 @@ const translations: Record<Language, Translations> = {
     rapidActionThreshold: '快速操作阈值',
     rapidActionThresholdHelp: '每小时触发快速活动告警的操作次数',
     auditThresholdsSaved: '审计阈值保存成功',
+    anomalyDetectionThresholds: '异常检测阈值',
+    offHoursThreshold: '非工作时段阈值',
+    offHoursThresholdHelp: '触发异常告警所需的非工作时段操作次数',
+    roleChangeThreshold: '角色变更阈值',
+    roleChangeThresholdHelp: '触发异常告警所需的角色变更次数',
+    permissionChangeThreshold: '权限变更阈值',
+    permissionChangeThresholdHelp: '触发异常告警所需的权限变更次数',
 
     // Audit Log
     allActions: '所有操作',
@@ -1684,6 +1698,13 @@ const translations: Record<Language, Translations> = {
     rapidActionThreshold: '急速操作しきい値',
     rapidActionThresholdHelp: '急速アクティビティアラートをトリガーする1時間あたりの操作回数',
     auditThresholdsSaved: '監査しきい値が保存されました',
+    anomalyDetectionThresholds: '異常検出しきい値',
+    offHoursThreshold: '時間外しきい値',
+    offHoursThresholdHelp: '異常アラートをトリガーする時間外操作回数',
+    roleChangeThreshold: 'ロール変更しきい値',
+    roleChangeThresholdHelp: '異常アラートをトリガーするロール変更回数',
+    permissionChangeThreshold: '権限変更しきい値',
+    permissionChangeThresholdHelp: '異常アラートをトリガーする権限変更回数',
 
     // Audit Log
     allActions: 'すべてのアクション',
@@ -2149,6 +2170,13 @@ const translations: Record<Language, Translations> = {
     rapidActionThreshold: '빠른 작업 임계값',
     rapidActionThresholdHelp: '빠른 활동 경보를 트리거하는 시간당 작업 횟수',
     auditThresholdsSaved: '감사 임계값이 저장되었습니다',
+    anomalyDetectionThresholds: '이상 탐지 임계값',
+    offHoursThreshold: '비업무 시간 임계값',
+    offHoursThresholdHelp: '이상 경보를 트리거하는 비업무 시간 작업 횟수',
+    roleChangeThreshold: '역할 변경 임계값',
+    roleChangeThresholdHelp: '이상 경보를 트리거하는 역할 변경 횟수',
+    permissionChangeThreshold: '권한 변경 임계값',
+    permissionChangeThresholdHelp: '이상 경보를 트리거하는 권한 변경 횟수',
 
     // Audit Log
     allActions: '모든 작업',
