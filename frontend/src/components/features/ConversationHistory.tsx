@@ -439,6 +439,7 @@ export const ConversationHistory: React.FC = () => {
                   <ul className="pagination pagination-sm mb-0">
                     <li className={cn('page-item', page === 1 && 'disabled')}>
                       <button
+                        type="button"
                         className="page-link"
                         onClick={() => setPage(page - 1)}
                         disabled={page === 1}
@@ -448,13 +449,14 @@ export const ConversationHistory: React.FC = () => {
                     </li>
                     {pageNumbers.map((pageNum) => (
                       <li key={pageNum} className={cn('page-item', page === pageNum && 'active')}>
-                        <button className="page-link" onClick={() => setPage(pageNum)}>
+                        <button type="button" className="page-link" onClick={() => setPage(pageNum)}>
                           {pageNum}
                         </button>
                       </li>
                     ))}
                     <li className={cn('page-item', page === totalPages && 'disabled')}>
                       <button
+                        type="button"
                         className="page-link"
                         onClick={() => setPage(page + 1)}
                         disabled={page === totalPages}
