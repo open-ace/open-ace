@@ -17,6 +17,7 @@ import subprocess
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -89,9 +90,31 @@ class WebUIInstance:
             health_url = f"http://localhost:{self.port}/api/version"
             if self.token:
                 health_url += f"?token={self.token}"
-            req = urllib.request.Request(health_url)
-            with urllib.request.urlopen(req, timeout=3) as resp:
-                return cast("bool", resp.status == 200)
+            # Bypass system proxy for localhost — use direct socket connection
+            # to avoid proxy returning 502 on health checks
+            import socket as _socket
+
+            parsed = urllib.parse.urlparse(health_url)
+            host = parsed.hostname or "localhost"
+            port = parsed.port or 80
+            sock = _socket.create_connection((host, port), timeout=5)
+            try:
+                path = parsed.path
+                if parsed.query:
+                    path += f"?{parsed.query}"
+                request_line = f"GET {path} HTTP/1.0\r\nHost: {host}\r\nConnection: close\r\n\r\n"
+                sock.sendall(request_line.encode())
+                response = b""
+                while True:
+                    chunk = sock.recv(4096)
+                    if not chunk:
+                        break
+                    response += chunk
+                status_line = response.split(b"\r\n")[0].decode()
+                status_code = int(status_line.split(" ")[1])
+                return status_code == 200
+            finally:
+                sock.close()
         except Exception:
             return False
 
