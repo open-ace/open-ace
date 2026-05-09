@@ -68,19 +68,7 @@ def load_user():
             g.user = user
             g.user_id = user.get("id")
             g.user_role = user.get("role")
-
-            # Refresh session on activity to prevent premature expiry
-            try:
-                from app.repositories.user_repo import UserRepository
-                from app.services.auth_service import _get_session_timeout_hours
-
-                timeout_hours = _get_session_timeout_hours()
-                new_expires_at = datetime.utcnow() + timedelta(hours=timeout_hours)
-                UserRepository().extend_session_expiry(token, new_expires_at)
-                g._session_refresh_seconds = int(timeout_hours * 3600)
-            except Exception:
-                pass
-
+            _refresh_session(token)
             return None
 
         # Session token failed — try WebUI token validation
@@ -103,18 +91,7 @@ def load_user():
                     }
                     g.user_id = user_id
                     g.user_role = user_data.get("role")
-
-                    # Refresh session for WebUI-authenticated requests too
-                    try:
-                        from app.services.auth_service import _get_session_timeout_hours
-
-                        timeout_hours = _get_session_timeout_hours()
-                        new_expires_at = datetime.utcnow() + timedelta(hours=timeout_hours)
-                        user_repo.extend_session_expiry(token, new_expires_at)
-                        g._session_refresh_seconds = int(timeout_hours * 3600)
-                    except Exception:
-                        pass
-
+                    _refresh_session(token, user_repo=user_repo)
                     return None
         except Exception as e:
             logger.warning(f"Failed to validate URL token: {e}")
@@ -122,9 +99,45 @@ def load_user():
     return jsonify({"error": "Authentication required"}), 401
 
 
+# Only refresh when session has less than this many minutes remaining
+_SESSION_REFRESH_THRESHOLD_MINUTES = 10
+
+
+def _refresh_session(token: str, user_repo=None):
+    """Extend DB session and cookie expiry when close to expiration.
+
+    Only refreshes if the session has less than _SESSION_REFRESH_THRESHOLD_MINUTES
+    remaining, avoiding a DB write on every request.
+    """
+    try:
+        from app.repositories.user_repo import UserRepository
+        from app.services.auth_service import _get_session_timeout_hours
+
+        repo = user_repo or UserRepository()
+        timeout_hours = _get_session_timeout_hours()
+        threshold = timedelta(minutes=_SESSION_REFRESH_THRESHOLD_MINUTES)
+        new_expires_at = datetime.utcnow() + timedelta(hours=timeout_hours)
+
+        # Only refresh if current expiry is within threshold
+        session = repo.get_session_by_token(token)
+        if session and session.get("expires_at"):
+            expires_at = session["expires_at"]
+            if isinstance(expires_at, str):
+
+                expires_at = datetime.fromisoformat(expires_at).replace(tzinfo=None)
+            remaining = (expires_at - datetime.utcnow()).total_seconds()
+            if remaining > threshold.total_seconds():
+                return
+
+        repo.extend_session_expiry(token, new_expires_at)
+        g._session_refresh_seconds = int(timeout_hours * 3600)
+    except Exception as e:
+        logger.warning(f"Failed to refresh session: {e}")
+
+
 @workspace_bp.after_request
 def refresh_session_cookie(response):
-    """Refresh session cookie max_age on activity to prevent premature expiry."""
+    """Refresh session cookie max_age only when session was actually refreshed."""
     timeout_seconds = getattr(g, "_session_refresh_seconds", None)
     if timeout_seconds and request.cookies.get("session_token"):
         response.set_cookie(
@@ -135,6 +148,7 @@ def refresh_session_cookie(response):
             samesite="Lax",
             max_age=timeout_seconds,
         )
+        g._session_refresh_seconds = None
     return response
 
 
