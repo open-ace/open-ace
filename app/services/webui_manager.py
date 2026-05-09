@@ -480,7 +480,7 @@ class WebUIManager:
         process = None
 
         try:
-            process = self._launch_webui_process(system_account, port)
+            process = self._launch_webui_process(user_id, system_account, port)
             pid = process.pid if process else None
 
             if process is None:
@@ -534,11 +534,14 @@ class WebUIManager:
         except Exception:
             return {}
 
-    def _launch_webui_process(self, system_account: str, port: int) -> Optional[subprocess.Popen]:
+    def _launch_webui_process(
+        self, user_id: int, system_account: str, port: int
+    ) -> Optional[subprocess.Popen]:
         """
         Launch a webui process as the specified user.
 
         Args:
+            user_id: User ID for log directory naming.
             system_account: System account to run the process as.
             port: Port for the webui to listen on.
 
@@ -616,6 +619,12 @@ class WebUIManager:
         # Build child environment: inherit current + inject auth env vars
         child_env = os.environ.copy()
         child_env.update(self.config.auth_env)
+
+        # Set OPENACE_LOG_DIR to /tmp to avoid HOME permission issues
+        # Each user gets a unique subdirectory under /tmp
+        webui_log_dir = f"/tmp/qwen-code-webui-{user_id}"
+        os.makedirs(webui_log_dir, mode=0o755, exist_ok=True)
+        child_env["OPENACE_LOG_DIR"] = webui_log_dir
 
         # Ensure PATH includes /usr/local/bin for qwen and qwen-code-webui
         if "PATH" not in child_env or "/usr/local/bin" not in child_env.get("PATH", ""):
