@@ -69,21 +69,12 @@ def load_user():
             g.user_role = user.get("role")
             return None
 
-    # Fallback: try query param token (for SSE/EventSource which can't send cookies)
-    url_token = request.args.get("token")
-    if url_token and url_token != token:
-        user = _load_user_from_token(url_token)
-        if user:
-            g.user = user
-            g.user_id = user.get("id")
-            g.user_role = user.get("role")
-            return None
-        # Try WebUI token validation
+        # Session token failed — try WebUI token validation
         try:
             from app.services.webui_manager import WebUIManager
 
             webui_manager = WebUIManager()
-            is_valid, user_id, error = webui_manager.validate_token(url_token)
+            is_valid, user_id, error = webui_manager.validate_token(token)
             if is_valid and user_id:
                 from app.repositories.user_repo import UserRepository
 
