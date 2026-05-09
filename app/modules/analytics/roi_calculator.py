@@ -102,22 +102,47 @@ class ROICalculator:
 
     # Model pricing (per 1K tokens, USD)
     MODEL_PRICING = {
+        # Claude models
         "claude-3-opus": ModelPricing(input_price=0.015, output_price=0.075),
         "claude-3-sonnet": ModelPricing(input_price=0.003, output_price=0.015),
         "claude-3-haiku": ModelPricing(input_price=0.00025, output_price=0.00125),
         "claude-3-5-sonnet": ModelPricing(input_price=0.003, output_price=0.015),
         "claude-3-5-haiku": ModelPricing(input_price=0.001, output_price=0.005),
+        # Qwen models
         "qwen-max": ModelPricing(input_price=0.02, output_price=0.06),
         "qwen-plus": ModelPricing(input_price=0.004, output_price=0.012),
         "qwen-turbo": ModelPricing(input_price=0.002, output_price=0.006),
+        "qwen3-coder-next": ModelPricing(input_price=0.002, output_price=0.006),
+        "qwen3.5-plus": ModelPricing(input_price=0.004, output_price=0.012),
+        "qwen3.6-plus": ModelPricing(input_price=0.004, output_price=0.012),
+        "qwen3-coder-plus": ModelPricing(input_price=0.002, output_price=0.006),
+        # GLM models
+        "glm-4": ModelPricing(input_price=0.001, output_price=0.001),
+        "glm-4-plus": ModelPricing(input_price=0.005, output_price=0.005),
+        "glm-4-flash": ModelPricing(input_price=0.0001, output_price=0.0001),
+        "glm-4.7": ModelPricing(input_price=0.001, output_price=0.001),
+        "glm-5": ModelPricing(input_price=0.002, output_price=0.002),
+        "glm-5.1": ModelPricing(input_price=0.003, output_price=0.003),
+        # Mimo models (智谱)
+        "mimo-v2-pro": ModelPricing(input_price=0.002, output_price=0.002),
+        "mimo-v2.5-pro": ModelPricing(input_price=0.003, output_price=0.003),
+        # Other Chinese models
+        "MiniMax-M2.5": ModelPricing(input_price=0.002, output_price=0.002),
+        "kimi-k2.5": ModelPricing(input_price=0.008, output_price=0.008),
+        "coder-model": ModelPricing(input_price=0.002, output_price=0.002),
+        # GPT models
         "gpt-4": ModelPricing(input_price=0.03, output_price=0.06),
         "gpt-4-turbo": ModelPricing(input_price=0.01, output_price=0.03),
         "gpt-4o": ModelPricing(input_price=0.005, output_price=0.015),
         "gpt-4o-mini": ModelPricing(input_price=0.00015, output_price=0.0006),
         "gpt-3.5-turbo": ModelPricing(input_price=0.0005, output_price=0.0015),
+        # Gemini models
         "gemini-pro": ModelPricing(input_price=0.00025, output_price=0.0005),
         "gemini-1.5-pro": ModelPricing(input_price=0.0035, output_price=0.0105),
         "gemini-1.5-flash": ModelPricing(input_price=0.000075, output_price=0.0003),
+        # DeepSeek models
+        "deepseek-chat": ModelPricing(input_price=0.00014, output_price=0.00028),
+        "deepseek-coder": ModelPricing(input_price=0.00014, output_price=0.00028),
     }
 
     # Default pricing for unknown models
@@ -240,7 +265,25 @@ class ROICalculator:
         total_output_cost = 0.0
 
         for model_row in model_rows:
-            model = model_row.get("model") or "default"
+            model_raw = model_row.get("model") or "default"
+
+            # Parse JSON string format for model field
+            if isinstance(model_raw, str):
+                try:
+                    import json
+
+                    model_parsed = json.loads(model_raw)
+                    if isinstance(model_parsed, list):
+                        model = model_parsed[0] if model_parsed else "default"
+                    elif isinstance(model_parsed, str):
+                        model = model_parsed
+                    else:
+                        model = str(model_parsed)
+                except (json.JSONDecodeError, TypeError):
+                    model = model_raw
+            else:
+                model = str(model_raw)
+
             input_tokens = model_row.get("input_tokens") or 0
             output_tokens = model_row.get("output_tokens") or 0
 

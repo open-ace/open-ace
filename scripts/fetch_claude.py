@@ -722,12 +722,9 @@ def fetch_and_save(
     saved = 0
     for date, stats in aggregated.items():
         if start_date <= date <= today:
-            total = (
-                stats["input_tokens"]
-                + stats["output_tokens"]
-                + stats["cache_read_tokens"]
-                + stats["cache_creation_tokens"]
-            )
+            # tokens_used should only include actual input + output
+            # cache_read is much cheaper (90% discount) and should not be counted as full tokens
+            total = stats["input_tokens"] + stats["output_tokens"]
 
             if db.save_usage(
                 date=date,
