@@ -716,19 +716,32 @@ def update_agent_sessions_stats(messages: list) -> int:
                         if not timestamp:
                             timestamp = now
 
-                        # Deduplicate by (session_id, role, timestamp, message_id)
-                        check_sql = f"""
-                            SELECT id FROM session_messages
-                            WHERE session_id = {placeholder}
-                            AND role = {placeholder}
-                            AND timestamp = {placeholder}
-                            AND (metadata->>'message_id') = {placeholder}
-                        """
-                        _execute(
-                            cursor,
-                            check_sql,
-                            (session_id, msg.get("role"), timestamp, msg_id or ""),
-                        )
+                        # Deduplicate by (session_id, role, timestamp) + message_id if available
+                        if msg_id:
+                            check_sql = f"""
+                                SELECT id FROM session_messages
+                                WHERE session_id = {placeholder}
+                                AND role = {placeholder}
+                                AND timestamp = {placeholder}
+                                AND (metadata->>'message_id') = {placeholder}
+                            """
+                            _execute(
+                                cursor,
+                                check_sql,
+                                (session_id, msg.get("role"), timestamp, msg_id),
+                            )
+                        else:
+                            check_sql = f"""
+                                SELECT id FROM session_messages
+                                WHERE session_id = {placeholder}
+                                AND role = {placeholder}
+                                AND timestamp = {placeholder}
+                            """
+                            _execute(
+                                cursor,
+                                check_sql,
+                                (session_id, msg.get("role"), timestamp),
+                            )
                         existing = cursor.fetchone()
 
                         if not existing:
