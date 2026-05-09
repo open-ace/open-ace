@@ -28,6 +28,9 @@ logger = logging.getLogger(__name__)
 # Convert to actual tokens when comparing with usage
 TOKEN_QUOTA_MULTIPLIER = 1_000_000
 
+# Only refresh session when it has less than this many minutes remaining
+_SESSION_REFRESH_THRESHOLD_MINUTES = 10
+
 
 def format_datetime(dt):
     """Convert datetime to ISO 8601 string for proper timezone handling in frontend.
@@ -99,10 +102,6 @@ def load_user():
     return jsonify({"error": "Authentication required"}), 401
 
 
-# Only refresh when session has less than this many minutes remaining
-_SESSION_REFRESH_THRESHOLD_MINUTES = 10
-
-
 def _refresh_session(token: str, user_repo=None):
     """Extend DB session and cookie expiry when close to expiration.
 
@@ -114,21 +113,23 @@ def _refresh_session(token: str, user_repo=None):
         from app.services.auth_service import _get_session_timeout_hours
 
         repo = user_repo or UserRepository()
+
+        # Lightweight query — only need expires_at, no JOIN
+        row = repo.db.fetch_one("SELECT expires_at FROM sessions WHERE token = ?", (token,))
+        if not row or not row.get("expires_at"):
+            return
+
+        expires_at = row["expires_at"]
+        if isinstance(expires_at, str):
+            expires_at = datetime.fromisoformat(expires_at).replace(tzinfo=None)
+
+        remaining = (expires_at - datetime.utcnow()).total_seconds()
+        threshold = timedelta(minutes=_SESSION_REFRESH_THRESHOLD_MINUTES).total_seconds()
+        if remaining > threshold:
+            return
+
         timeout_hours = _get_session_timeout_hours()
-        threshold = timedelta(minutes=_SESSION_REFRESH_THRESHOLD_MINUTES)
         new_expires_at = datetime.utcnow() + timedelta(hours=timeout_hours)
-
-        # Only refresh if current expiry is within threshold
-        session = repo.get_session_by_token(token)
-        if session and session.get("expires_at"):
-            expires_at = session["expires_at"]
-            if isinstance(expires_at, str):
-
-                expires_at = datetime.fromisoformat(expires_at).replace(tzinfo=None)
-            remaining = (expires_at - datetime.utcnow()).total_seconds()
-            if remaining > threshold.total_seconds():
-                return
-
         repo.extend_session_expiry(token, new_expires_at)
         g._session_refresh_seconds = int(timeout_hours * 3600)
     except Exception as e:
