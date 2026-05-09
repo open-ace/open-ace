@@ -93,5 +93,27 @@ if __name__ == "__main__":
     from gevent.pywsgi import WSGIServer
 
     server = WSGIServer((WEB_HOST, WEB_PORT), app)
+
+    # Graceful shutdown: stop webui instances on SIGTERM/SIGINT
+    import signal
+
+    import gevent
+
+    def _shutdown_and_stop():
+        try:
+            from app.services.webui_manager import shutdown_webui_manager
+
+            shutdown_webui_manager()
+        except Exception as e:
+            print(f"Error during shutdown: {e}")
+        server.stop()
+
+    def handle_shutdown(signum, frame):
+        print(f"\nReceived signal {signum}, shutting down gracefully...")
+        gevent.spawn(_shutdown_and_stop)
+
+    signal.signal(signal.SIGTERM, handle_shutdown)
+    signal.signal(signal.SIGINT, handle_shutdown)
+
     print(f"Starting Open ACE on {WEB_HOST}:{WEB_PORT} (gevent)")
     server.serve_forever()
