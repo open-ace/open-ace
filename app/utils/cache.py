@@ -11,11 +11,12 @@ import hashlib
 import logging
 import os
 import pickle
-import threading
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Callable, TypeVar, cast
+
+from gevent.lock import RLock, Semaphore
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +82,7 @@ class MemoryCache(CacheBackend):
         self.max_size = max_size
         self.default_ttl = default_ttl
         self._cache: dict[str, CacheEntry] = {}
-        self._lock = threading.RLock()
+        self._lock = RLock()  # gevent-safe reentrant lock
         self._hits = 0
         self._misses = 0
 
@@ -315,7 +316,7 @@ class CacheManager:
     """
 
     _instance: CacheManager | None = None
-    _lock = threading.Lock()
+    _lock = Semaphore(1)  # gevent-safe semaphore for singleton
     _initialized: bool
     _backend: MemoryCache | RedisCache
 

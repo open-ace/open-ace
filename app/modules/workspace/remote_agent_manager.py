@@ -7,12 +7,14 @@ command dispatching, and message routing for remote workspace sessions.
 
 import json
 import logging
-import threading
 import time
 import uuid
 from contextlib import suppress
 from datetime import datetime, timedelta
 from typing import Any, Optional, cast
+
+import gevent
+from gevent.lock import Semaphore
 
 from app.repositories.database import DB_PATH, Database, is_postgresql
 
@@ -59,8 +61,8 @@ class RemoteAgentManager:
         self._session_end_flags: dict[str, bool] = {}
         # Heartbeat rate limiter: {machine_id: last_db_write_timestamp}
         self._last_heartbeat_db_write: dict[str, float] = {}
-        # Lock for thread safety
-        self._lock = threading.Lock()
+        # Lock for gevent coroutine safety
+        self._lock = Semaphore(1)
         self._restore_in_memory_state()
         self._cleanup_offline_sessions()
         self._start_heartbeat_monitor()
@@ -157,10 +159,9 @@ class RemoteAgentManager:
                     self._check_heartbeats()
                 except Exception as e:
                     logger.error(f"Heartbeat monitor error: {e}")
-                time.sleep(self.HEARTBEAT_CHECK_INTERVAL)
+                gevent.sleep(self.HEARTBEAT_CHECK_INTERVAL)
 
-        thread = threading.Thread(target=monitor, daemon=True, name="heartbeat-monitor")
-        thread.start()
+        gevent.spawn(monitor)
         logger.info("Heartbeat monitor started")
 
     def _check_heartbeats(self) -> None:

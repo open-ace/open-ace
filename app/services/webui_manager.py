@@ -14,15 +14,16 @@ import platform
 import secrets
 import socket
 import subprocess
-import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from threading import RLock
 from typing import Any, Optional, cast
+
+import gevent
+from gevent import lock as gevent_lock
 
 logger = logging.getLogger(__name__)
 
@@ -167,8 +168,8 @@ class WebUIManager:
         self.config = config or self._load_config()
         self._instances: dict[int, WebUIInstance] = {}  # user_id -> instance
         self._port_allocations: dict[int, int] = {}  # port -> user_id
-        self._lock = RLock()  # Use reentrant lock to avoid deadlock
-        self._cleanup_thread: Optional[threading.Thread] = None
+        self._lock = gevent_lock.RLock()  # gevent-safe reentrant lock
+        self._cleanup_greenlet: Optional[gevent.Greenlet] = None
         self._running = False
 
         # Generate token secret if not configured
@@ -226,22 +227,21 @@ class WebUIManager:
             return WorkspaceConfig()
 
     def start_cleanup_thread(self):
-        """Start the background cleanup thread."""
-        if self._cleanup_thread is not None:
+        """Start the background cleanup greenlet."""
+        if self._cleanup_greenlet is not None:
             return
 
         self._running = True
-        self._cleanup_thread = threading.Thread(target=self._cleanup_loop, daemon=True)
-        self._cleanup_thread.start()
-        logger.info("Cleanup thread started")
+        self._cleanup_greenlet = gevent.spawn(self._cleanup_loop)
+        logger.info("Cleanup greenlet started")
 
     def stop_cleanup_thread(self):
-        """Stop the background cleanup thread."""
+        """Stop the background cleanup greenlet."""
         self._running = False
-        if self._cleanup_thread is not None:
-            self._cleanup_thread.join(timeout=5)
-            self._cleanup_thread = None
-        logger.info("Cleanup thread stopped")
+        if self._cleanup_greenlet is not None:
+            self._cleanup_greenlet.kill()
+            self._cleanup_greenlet = None
+        logger.info("Cleanup greenlet stopped")
 
     def _cleanup_loop(self):
         """Periodically clean up idle instances."""
@@ -827,9 +827,8 @@ class WebUIManager:
             except Exception as e:
                 logger.error(f"Failed to pre-start webui for user {user_id}: {e}")
 
-        thread = threading.Thread(target=start_in_background, daemon=True)
-        thread.start()
-        logger.info(f"Started background thread to pre-start webui for user {user_id}")
+        gevent.spawn(start_in_background)
+        logger.info(f"Spawned greenlet to pre-start webui for user {user_id}")
 
 
 # Global manager instance
