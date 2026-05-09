@@ -211,6 +211,110 @@ find_webui_executable() {
     return 1
 }
 
+# Install Node.js and npm for qwen-code-webui
+install_nodejs() {
+    print_header "安装 Node.js 和 npm"
+
+    local os_type=$(detect_os)
+
+    # Check if npm is already installed
+    if command -v npm &>/dev/null; then
+        print_success "npm 已安装: $(npm --version)"
+        if command -v node &>/dev/null; then
+            print_success "Node.js 已安装: $(node --version)"
+        fi
+        return 0
+    fi
+
+    print_info "检测到系统: $os_type"
+
+    case "$os_type" in
+        debian)
+            print_info "通过 apt 安装 Node.js..."
+            # Try to add NodeSource repository for newer Node.js
+            if curl -fsSL https://deb.nodesource.com/setup_20.x | sudo bash - 2>/dev/null; then
+                sudo apt-get install -y nodejs
+            else
+                print_warning "NodeSource 连接失败，使用默认版本..."
+                sudo apt-get update
+                sudo apt-get install -y nodejs npm
+            fi
+            ;;
+        redhat|centos)
+            print_info "通过 yum 安装 Node.js..."
+            # Try to add NodeSource repository
+            if curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash - 2>/dev/null; then
+                sudo yum install -y nodejs
+            else
+                print_warning "NodeSource 连接失败，使用默认版本..."
+                sudo yum install -y nodejs npm
+            fi
+            ;;
+        fedora)
+            print_info "通过 dnf 安装 Node.js..."
+            sudo dnf install -y nodejs npm
+            ;;
+        macos)
+            print_info "通过 Homebrew 安装 Node.js..."
+            if command -v brew &>/dev/null; then
+                brew install node
+            else
+                print_error "Homebrew 未安装，无法自动安装 Node.js"
+                return 1
+            fi
+            ;;
+        *)
+            print_error "不支持的操作系统: $os_type"
+            print_info "请手动安装 Node.js: https://nodejs.org/"
+            return 1
+            ;;
+    esac
+
+    # Verify installation
+    if command -v npm &>/dev/null; then
+        print_success "npm 安装成功: $(npm --version)"
+        if command -v node &>/dev/null; then
+            print_success "Node.js 安装成功: $(node --version)"
+        fi
+        return 0
+    else
+        print_error "Node.js/npm 安装失败"
+        return 1
+    fi
+}
+
+# Install qwen-code-webui via npm
+install_qwen_code_webui() {
+    print_header "安装 qwen-code-webui"
+
+    # Check if npm is available
+    if ! command -v npm &>/dev/null; then
+        print_warning "npm 未安装，尝试自动安装 Node.js..."
+        install_nodejs
+        if ! command -v npm &>/dev/null; then
+            print_error "Node.js/npm 安装失败，无法安装 qwen-code-webui"
+            return 1
+        fi
+    fi
+
+    # Check if already installed
+    if command -v qwen-code-webui &>/dev/null; then
+        print_success "qwen-code-webui 已安装"
+        return 0
+    fi
+
+    print_info "通过 npm 安装 qwen-code-webui..."
+    npm install -g qwen-code-webui
+
+    if command -v qwen-code-webui &>/dev/null; then
+        print_success "qwen-code-webui 安装成功"
+        return 0
+    else
+        print_error "qwen-code-webui 安装失败"
+        return 1
+    fi
+}
+
 # Configure sudoers for multi-user workspace mode
 configure_sudoers() {
     print_header "配置 Sudo 权限"
@@ -226,20 +330,37 @@ configure_sudoers() {
     local webui_path=$(find_webui_executable)
     if [ -z "$webui_path" ]; then
         print_warning "未找到 qwen-code-webui 可执行文件"
-        print_info "请先安装 qwen-code-webui:"
-        print_info "  npm install -g @ivycomputing/qwen-code-webui"
-        print_info ""
-        print_info "安装完成后，重新运行此脚本或手动配置 sudoers:"
-        print_info "  sudo visudo -f /etc/sudoers.d/open-ace-webui"
-        print_info "  添加: $RUN_USER ALL=(ALL) NOPASSWD: /path/to/qwen-code-webui *"
 
-        if [ "$NON_INTERACTIVE" = false ]; then
-            prompt_yesno "是否继续安装（稍后手动配置 sudoers）?" "y" continue_without_sudoers
-            if [ "$continue_without_sudoers" != "yes" ]; then
-                return 1
+        # Try to auto-install Node.js and qwen-code-webui
+        if [ "$NON_INTERACTIVE" = true ]; then
+            print_info "尝试自动安装 Node.js 和 qwen-code-webui..."
+            install_qwen_code_webui
+            webui_path=$(find_webui_executable)
+        else
+            prompt_yesno "是否自动安装 Node.js 和 qwen-code-webui?" "y" auto_install_webui
+            if [ "$auto_install_webui" = "yes" ]; then
+                install_qwen_code_webui
+                webui_path=$(find_webui_executable)
             fi
         fi
-        return 0
+
+        # If still not found after auto-install attempt
+        if [ -z "$webui_path" ]; then
+            print_info "请手动安装 qwen-code-webui:"
+            print_info "  npm install -g qwen-code-webui"
+            print_info ""
+            print_info "安装完成后，重新运行此脚本或手动配置 sudoers:"
+            print_info "  sudo visudo -f /etc/sudoers.d/open-ace-webui"
+            print_info "  添加: $RUN_USER ALL=(ALL) NOPASSWD: /path/to/qwen-code-webui *"
+
+            if [ "$NON_INTERACTIVE" = false ]; then
+                prompt_yesno "是否继续安装（稍后手动配置 sudoers）?" "y" continue_without_sudoers
+                if [ "$continue_without_sudoers" != "yes" ]; then
+                    return 1
+                fi
+            fi
+            return 0
+        fi
     fi
 
     print_success "找到 qwen-code-webui: $webui_path"
@@ -418,6 +539,44 @@ install_docker_macos() {
     return 0
 }
 
+# Configure Docker Hub mirror for China network environment
+configure_docker_mirror() {
+    print_info "配置 Docker Hub 镜像加速器..."
+
+    local daemon_json="/etc/docker/daemon.json"
+    local mirror_config='{
+  "registry-mirrors": [
+    "https://docker.1ms.run",
+    "https://docker.xuanyuan.me"
+  ]
+}'
+
+    # Check if daemon.json exists
+    if [ -f "$daemon_json" ]; then
+        # Check if registry-mirrors already configured
+        if grep -q "registry-mirrors" "$daemon_json" 2>/dev/null; then
+            print_success "Docker Hub 镜像加速器已配置"
+            return 0
+        fi
+        print_warning "daemon.json 已存在，需要手动配置镜像加速器"
+        print_info "请在 $daemon_json 中添加 registry-mirrors 配置"
+        return 0
+    fi
+
+    # Create daemon.json with mirror configuration
+    echo "$mirror_config" | sudo tee "$daemon_json" > /dev/null
+    print_success "Docker Hub 镜像加速器配置完成"
+
+    # Restart Docker to apply configuration
+    if command -v systemctl &>/dev/null && systemctl is-active --quiet docker; then
+        print_info "重启 Docker 服务以应用配置..."
+        sudo systemctl restart docker
+        print_success "Docker 服务已重启"
+    fi
+
+    return 0
+}
+
 install_docker_debian() {
     print_info "检测到 Debian/Ubuntu 系统"
 
@@ -469,6 +628,9 @@ install_docker_debian() {
     sudo systemctl start docker
     sudo systemctl enable docker
 
+    # Configure Docker Hub mirror for China network
+    configure_docker_mirror
+
     # Add current user to docker group
     print_info "将当前用户添加到 docker 组..."
     sudo usermod -aG docker "$USER"
@@ -512,6 +674,9 @@ install_docker_redhat() {
     sudo systemctl start docker
     sudo systemctl enable docker
 
+    # Configure Docker Hub mirror for China network
+    configure_docker_mirror
+
     # Add current user to docker group
     print_info "将当前用户添加到 docker 组..."
     sudo usermod -aG docker "$USER"
@@ -553,6 +718,9 @@ install_docker_fedora() {
     sudo systemctl start docker
     sudo systemctl enable docker
 
+    # Configure Docker Hub mirror for China network
+    configure_docker_mirror
+
     # Add current user to docker group
     print_info "将当前用户添加到 docker 组..."
     sudo usermod -aG docker "$USER"
@@ -586,10 +754,12 @@ install_docker() {
             return 1
             ;;
     esac
+
+    # Configure Docker Hub mirror for China network (after successful installation)
+    configure_docker_mirror
 }
 
-# ============================================================================
-# Firewall Configuration
+# Configure Docker Hub mirror for China network
 # ============================================================================
 
 configure_firewall() {
@@ -658,6 +828,21 @@ configure_firewall() {
     if command -v iptables &>/dev/null; then
         print_info "检测到 iptables"
 
+        # Check if iptables has active rules (indicates firewall is enabled)
+        local has_rules=false
+        if sudo iptables -L INPUT -n 2>/dev/null | grep -qE "Chain INPUT|policy|DROP|REJECT"; then
+            # Check if there are actual rules (not just default policy)
+            if sudo iptables -L INPUT -n 2>/dev/null | grep -v "Chain INPUT" | grep -v "policy" | grep -q "ACCEPT\|DROP\|REJECT"; then
+                has_rules=true
+            fi
+        fi
+
+        if [ "$has_rules" = false ]; then
+            print_info "iptables 无活跃规则，防火墙可能未启用"
+            print_info "端口默认开放，跳过防火墙配置"
+            return 0
+        fi
+
         # Check if port is already open
         if sudo iptables -L INPUT -n | grep -q "dpt:${port}"; then
             print_success "端口 $port 已开放"
@@ -668,10 +853,16 @@ configure_firewall() {
         print_info "开放端口 $port/tcp..."
         sudo iptables -I INPUT -p tcp --dport ${port} -j ACCEPT
 
-        # Try to save iptables rules
+        # Try to save iptables rules (only if directory exists)
         if command -v iptables-save &>/dev/null; then
-            sudo iptables-save > /etc/iptables/rules.v4 2>/dev/null || \
-            sudo iptables-save > /etc/sysconfig/iptables 2>/dev/null || true
+            if [ -d /etc/iptables ]; then
+                sudo iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+            elif [ -d /etc/sysconfig ]; then
+                sudo iptables-save > /etc/sysconfig/iptables 2>/dev/null || true
+            else
+                print_warning "iptables 规则未能持久化保存（目录不存在）"
+                print_info "如需持久化，请手动创建目录或使用其他防火墙工具"
+            fi
         fi
 
         print_success "防火墙端口 $port 已开放"
@@ -731,6 +922,21 @@ configure_firewall_range() {
     # Try iptables as fallback
     if command -v iptables &>/dev/null; then
         print_info "检测到 iptables"
+
+        # Check if iptables has active rules (indicates firewall is enabled)
+        local has_rules=false
+        if sudo iptables -L INPUT -n 2>/dev/null | grep -qE "Chain INPUT|policy|DROP|REJECT"; then
+            if sudo iptables -L INPUT -n 2>/dev/null | grep -v "Chain INPUT" | grep -v "policy" | grep -q "ACCEPT\|DROP\|REJECT"; then
+                has_rules=true
+            fi
+        fi
+
+        if [ "$has_rules" = false ]; then
+            print_info "iptables 无活跃规则，防火墙可能未启用"
+            print_info "端口默认开放，跳过防火墙配置"
+            return 0
+        fi
+
         print_info "开放端口范围 ${start_port}-${end_port}/tcp..."
         # Use multiport for efficiency
         sudo iptables -I INPUT -p tcp -m multiport --dports ${start_port}:${end_port} -j ACCEPT 2>/dev/null || {
@@ -768,6 +974,9 @@ check_prerequisites() {
                 exit 1
             fi
 
+            # Configure Docker Hub mirror for China network environment
+            configure_docker_mirror
+
             # On macOS, Docker Desktop needs to be started manually
             if [[ "$OSTYPE" == "darwin"* ]]; then
                 print_info "请启动 Docker Desktop 后重新运行此脚本"
@@ -779,6 +988,9 @@ check_prerequisites() {
         fi
     fi
     print_success "Docker 已安装: $(docker --version)"
+
+    # Configure Docker Hub mirror for China network environment (always configure)
+    configure_docker_mirror
 
     # Check Docker Compose
     if ! docker compose version &>/dev/null; then
@@ -821,12 +1033,13 @@ build_docker_image() {
         return 0
     fi
 
-    # Image not found - prompt to load
+    # Image not found - prompt to load or build
     print_warning "镜像 $IMAGE_NAME 不存在"
     echo ""
     echo "请选择:"
     echo "  1) 加载镜像文件 (包含应用和 PostgreSQL)"
-    echo "  2) 跳过 (稍后手动处理)"
+    echo "  2) 从源码构建镜像 (需要 Node.js 环境)"
+    echo "  3) 跳过 (稍后手动处理)"
     echo ""
 
     prompt_input "请选择" "1" build_choice
@@ -875,6 +1088,62 @@ build_docker_image() {
             fi
             ;;
         2)
+            # Build from source
+            prompt_input "源码目录路径" "$(dirname "$(dirname "$(dirname "$(dirname "$0")")")")" source_dir
+            
+            if [ ! -d "$source_dir" ]; then
+                print_error "目录不存在: $source_dir"
+                return 1
+            fi
+            
+            if [ ! -f "$source_dir/Dockerfile" ]; then
+                print_error "未找到 Dockerfile: $source_dir/Dockerfile"
+                return 1
+            fi
+            
+            # Check if npm is available for frontend build
+            if ! command -v npm &>/dev/null; then
+                print_warning "npm 未安装，无法构建前端"
+                print_info "正在安装 Node.js..."
+                install_nodejs
+                if ! command -v npm &>/dev/null; then
+                    print_error "Node.js 安装失败，无法构建镜像"
+                    return 1
+                fi
+            fi
+            
+            # Build frontend
+            if [ -d "$source_dir/frontend" ]; then
+                print_header "构建前端"
+                cd "$source_dir/frontend"
+                print_info "安装前端依赖..."
+                npm install
+                print_info "构建前端..."
+                npm run build
+                if [ $? -eq 0 ]; then
+                    print_success "前端构建完成"
+                else
+                    print_error "前端构建失败"
+                    return 1
+                fi
+                cd "$source_dir"
+            else
+                print_warning "未找到 frontend 目录，跳过前端构建"
+            fi
+            
+            # Build Docker image
+            print_header "构建 Docker 镜像"
+            print_info "构建镜像: $IMAGE_NAME"
+            docker build -t "$IMAGE_NAME" --target production "$source_dir"
+            
+            if docker image inspect "$IMAGE_NAME" &>/dev/null; then
+                print_success "镜像构建完成: $IMAGE_NAME"
+            else
+                print_error "镜像构建失败"
+                return 1
+            fi
+            ;;
+        3)
             print_info "请手动加载镜像后重新运行此脚本"
             print_info "加载命令: docker load -i open-ace-images.tar.gz"
             return 1
@@ -1090,6 +1359,13 @@ create_docker_compose() {
     # Build ports section - only WEB_PORT, workspace runs in separate container
     local ports_section="      - \"$WEB_PORT:$INTERNAL_WEB_PORT\""
 
+    # Multi-user workspace: add port range mapping for qwen-code-webui instances
+    if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
+        ports_section="$ports_section
+      - "$WORKSPACE_PORT_RANGE_START-$WORKSPACE_PORT_RANGE_END:$WORKSPACE_PORT_RANGE_START-$WORKSPACE_PORT_RANGE_END""
+        print_info "  - 多用户工作区端口范围: $WORKSPACE_PORT_RANGE_START-$WORKSPACE_PORT_RANGE_END"
+    fi
+
     # Build volumes section based on enabled tools
     local volumes_section="      - ./config:/home/open-ace/.open-ace:ro"
     local user_home="/home/$RUN_USER"
@@ -1112,6 +1388,22 @@ create_docker_compose() {
         print_info "  - 映射 .openclaw 目录"
     fi
 
+    # Multi-user workspace: add workspace-data volume
+    if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
+        volumes_section="$volumes_section
+      - workspace-data:/workspace"
+        print_info "  - 映射工作区目录 /workspace"
+    fi
+
+    # Build volumes definition section
+    local volumes_def="  postgres-data:
+    driver: local"
+    if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
+        volumes_def="$volumes_def
+  workspace-data:
+    driver: local"
+    fi
+
     # Note: We don't specify 'platform' in docker-compose.yml to allow using locally loaded images
     # The platform detection is just for information purposes
     cat > "$compose_file" << EOF
@@ -1130,6 +1422,8 @@ $ports_section
       - SECRET_KEY=$SECRET_KEY
       - UPLOAD_AUTH_KEY=$UPLOAD_AUTH_KEY
       - DATABASE_URL=postgresql://$DB_USER:$DB_PASSWORD@postgres:5432/$DB_NAME
+      - WORKSPACE_MULTI_USER_MODE=$WORKSPACE_MULTI_USER_MODE
+      - WORKSPACE_BASE_DIR=/workspace
     volumes:
 $volumes_section
     depends_on:
@@ -1168,8 +1462,7 @@ $volumes_section
         max-file: "3"
 
 volumes:
-  postgres-data:
-    driver: local
+$volumes_def
 EOF
 
     print_success "Docker Compose 配置创建完成"
