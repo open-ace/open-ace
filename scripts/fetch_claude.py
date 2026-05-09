@@ -8,6 +8,7 @@ Fetches daily token usage from Claude Code local JSONL logs.
 import argparse
 import getpass
 import json
+import logging
 import os
 import re
 import socket
@@ -16,6 +17,8 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 
 def get_default_sender_name(tool: str = "claude") -> str:
@@ -217,6 +220,9 @@ def process_jsonl_file(
     except (ValueError, IndexError):
         pass  # If path parsing fails, project_path remains None
 
+    # Extract session_id from JSONL filename (e.g. 2675a43d-7920-4450-8983-a4b8363786ef.jsonl)
+    file_session_id = filepath.stem if filepath.suffix == ".jsonl" else None
+
     daily: dict[str, dict[str, Any]] = defaultdict(
         lambda: {
             "input_tokens": 0,
@@ -335,14 +341,10 @@ def process_jsonl_file(
                             # Save full entry as JSON for complete original data
                             full_entry_json = json.dumps(entry, ensure_ascii=False)
 
-                            # Extract agent_session_id from project directory path
-                            agent_session_id = None
-                            if "project_path" in entry:
-                                agent_session_id = get_agent_session_id_from_path(
-                                    entry["project_path"]
-                                )
-                            elif "project" in entry:
-                                agent_session_id = get_agent_session_id_from_path(entry["project"])
+                            # Extract agent_session_id:
+                            # 1. Prefer entry's sessionId field
+                            # 2. Fallback to JSONL filename (which is the session UUID)
+                            agent_session_id = entry.get("sessionId") or file_session_id
 
                             # Determine conversation_id: find root message of this conversation
                             uuid = entry.get("uuid")
@@ -552,6 +554,242 @@ def find_claude_project_dir() -> Optional[Path]:
     return None
 
 
+def update_agent_sessions_stats(messages: list) -> int:
+    """
+    Update agent_sessions table statistics from collected messages.
+    Also inserts messages into session_messages table for session detail view.
+
+    Groups messages by agent_session_id and creates/updates agent_sessions records.
+
+    Args:
+        messages: List of message dicts with agent_session_id and tokens_used
+
+    Returns:
+        Number of sessions updated
+    """
+    from shared.db import _execute, _placeholder, get_connection
+
+    # Group messages by agent_session_id
+    session_stats: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {
+            "message_count": 0,
+            "total_tokens": 0,
+            "request_count": 0,
+            "models": [],
+            "messages": [],
+            "last_timestamp": None,
+        }
+    )
+
+    for msg in messages:
+        session_id = msg.get("agent_session_id")
+        if not session_id:
+            continue
+
+        role = msg.get("role", "")
+        tokens = msg.get("tokens_used", 0) or 0
+        model = msg.get("model")
+
+        session_stats[session_id]["message_count"] += 1
+        session_stats[session_id]["total_tokens"] += tokens
+
+        # Count assistant messages as requests (one assistant response = one request)
+        if role == "assistant":
+            session_stats[session_id]["request_count"] += 1
+
+        if model:
+            session_stats[session_id]["models"].append(model)
+
+        session_stats[session_id]["messages"].append(msg)
+
+        timestamp = msg.get("timestamp")
+        if timestamp:
+            current_last = session_stats[session_id]["last_timestamp"]
+            if current_last is None or timestamp > current_last:
+                session_stats[session_id]["last_timestamp"] = timestamp
+
+    if not session_stats:
+        return 0
+
+    updated = 0
+    messages_inserted = 0
+    now = datetime.utcnow().isoformat()
+    placeholder = _placeholder()
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    try:
+        for session_id, stats in session_stats.items():
+            try:
+                # Check if session exists in agent_sessions table
+                check_session_sql = (
+                    f"SELECT id, user_id FROM agent_sessions WHERE session_id = {placeholder}"
+                )
+                _execute(cursor, check_session_sql, (session_id,))
+                session_row = cursor.fetchone()
+
+                if not session_row:
+                    # Session doesn't exist - create a new record
+                    first_msg = stats["messages"][0] if stats["messages"] else {}
+
+                    project_path = first_msg.get("project_path", "")
+                    tool_name = first_msg.get("tool_name", "claude")
+                    host_name = first_msg.get("host_name", "localhost")
+                    sender_name = first_msg.get("sender_name", "")
+
+                    # Extract system_account from sender_name (format: {system_account}-{hostname}-{tool})
+                    system_account = sender_name.split("-")[0] if sender_name else "unknown"
+
+                    # Find user_id by system_account
+                    user_sql = f"SELECT id FROM users WHERE system_account = {placeholder} OR username = {placeholder}"
+                    _execute(cursor, user_sql, (system_account, system_account))
+                    user_row = cursor.fetchone()
+                    user_id = user_row["id"] if user_row else None
+
+                    title = f"claude - {session_id[:8]}"
+
+                    insert_sql = f"""
+                        INSERT INTO agent_sessions
+                        (session_id, session_type, title, tool_name, host_name, user_id, status, project_path,
+                         message_count, total_tokens, request_count, model, created_at, updated_at)
+                        VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder},
+                                {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder},
+                                {placeholder}, {placeholder}, {placeholder}, {placeholder})
+                    """
+                    # Use the most recently seen model (last in list)
+                    model = stats["models"][-1] if stats["models"] else None
+                    _execute(
+                        cursor,
+                        insert_sql,
+                        (
+                            session_id,
+                            "chat",
+                            title,
+                            tool_name,
+                            host_name,
+                            user_id,
+                            "completed",
+                            project_path,
+                            stats["message_count"],
+                            stats["total_tokens"],
+                            stats["request_count"],
+                            model,
+                            now,
+                            now,
+                        ),
+                    )
+                    updated += 1
+                else:
+                    # Update existing session
+                    model = stats["models"][-1] if stats["models"] else None
+                    session_updated_at = stats["last_timestamp"] or now
+                    sql = f"""
+                        UPDATE agent_sessions
+                        SET message_count = GREATEST(COALESCE(message_count, 0), {placeholder}),
+                            total_tokens = GREATEST(COALESCE(total_tokens, 0), {placeholder}),
+                            request_count = GREATEST(COALESCE(request_count, 0), {placeholder}),
+                            model = COALESCE(model, {placeholder}),
+                            updated_at = {placeholder}
+                        WHERE session_id = {placeholder}
+                    """
+                    _execute(
+                        cursor,
+                        sql,
+                        (
+                            stats["message_count"],
+                            stats["total_tokens"],
+                            stats["request_count"],
+                            model,
+                            session_updated_at,
+                            session_id,
+                        ),
+                    )
+                    if cursor.rowcount > 0:
+                        updated += 1
+
+                # Insert messages into session_messages table
+                for msg in stats["messages"]:
+                    try:
+                        msg_id = msg.get("message_id")
+                        timestamp = msg.get("timestamp")
+                        if not timestamp:
+                            timestamp = now
+
+                        # Deduplicate by (session_id, role, timestamp) + message_id if available
+                        if msg_id:
+                            check_sql = f"""
+                                SELECT id FROM session_messages
+                                WHERE session_id = {placeholder}
+                                AND role = {placeholder}
+                                AND timestamp = {placeholder}
+                                AND (metadata->>'message_id') = {placeholder}
+                            """
+                            _execute(
+                                cursor,
+                                check_sql,
+                                (session_id, msg.get("role"), timestamp, msg_id),
+                            )
+                        else:
+                            check_sql = f"""
+                                SELECT id FROM session_messages
+                                WHERE session_id = {placeholder}
+                                AND role = {placeholder}
+                                AND timestamp = {placeholder}
+                            """
+                            _execute(
+                                cursor,
+                                check_sql,
+                                (session_id, msg.get("role"), timestamp),
+                            )
+                        existing = cursor.fetchone()
+
+                        if not existing:
+                            insert_sql = f"""
+                                INSERT INTO session_messages
+                                (session_id, role, content, tokens_used, model, timestamp, metadata)
+                                VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
+                            """
+                            metadata = {
+                                "message_id": msg_id,
+                                "project_path": msg.get("project_path"),
+                            }
+                            _execute(
+                                cursor,
+                                insert_sql,
+                                (
+                                    session_id,
+                                    msg.get("role"),
+                                    msg.get("content"),
+                                    msg.get("tokens_used", 0),
+                                    msg.get("model"),
+                                    timestamp,
+                                    json.dumps(metadata) if metadata else None,
+                                ),
+                            )
+                            messages_inserted += 1
+
+                    except Exception as e:
+                        if (
+                            "duplicate" not in str(e).lower()
+                            and "foreign key" not in str(e).lower()
+                            and "not present" not in str(e).lower()
+                        ):
+                            logger.warning("Failed to insert message: %s", e)
+
+            except Exception as e:
+                logger.warning("Failed to update session %s: %s", session_id, e)
+
+        conn.commit()
+
+    finally:
+        cursor.close()
+        conn.close()
+
+    print(f"  Updated {updated} session statistics, inserted {messages_inserted} messages")
+    return updated
+
+
 def fetch_and_save(
     days: int = 7,
     project_dir: Optional[Path] = None,
@@ -741,6 +979,12 @@ def fetch_and_save(
             print(f"  {date}: {total:,} tokens, {stats['request_count']} requests")
 
     print(f"\nSaved {saved} days of Claude usage data")
+
+    # Update agent_sessions and session_messages from collected messages
+    if all_messages:
+        print("\nUpdating agent sessions...")
+        update_agent_sessions_stats(all_messages)
+
     return True
 
 
