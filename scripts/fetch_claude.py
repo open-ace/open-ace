@@ -593,8 +593,8 @@ def update_agent_sessions_stats(messages: list) -> int:
         session_stats[session_id]["message_count"] += 1
         session_stats[session_id]["total_tokens"] += tokens
 
-        # Count user messages as requests (one user turn = one request)
-        if role == "user":
+        # Count assistant messages as requests (one assistant response = one request)
+        if role == "assistant":
             session_stats[session_id]["request_count"] += 1
 
         if model:
