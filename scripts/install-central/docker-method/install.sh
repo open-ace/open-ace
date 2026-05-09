@@ -12,12 +12,6 @@
 
 set -e
 
-# Fix terminal settings for better input handling (Backspace key issue)
-# This ensures Backspace works correctly in some SSH environments
-if [ -t 0 ]; then
-    stty -echoctl 2>/dev/null || true
-fi
-
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -102,70 +96,13 @@ prompt_input() {
         echo -ne "${BLUE}$prompt: ${NC}"
     fi
 
-    # Use -e for readline mode to allow Backspace/Delete keys
-    read -e -r value
+    read -r value
 
     if [ -z "$value" ] && [ -n "$default" ]; then
         value="$default"
     fi
 
-    # Print confirmation to prevent next prompt from overwriting this line
-    echo -e "\r\033[K${GREEN}✓${NC} $prompt: ${value}"
-
     eval "$var_name='$value'"
-}
-
-# Input validation for URL
-prompt_input_url() {
-    local prompt="$1"
-    local default="$2"
-    local var_name="$3"
-
-    while true; do
-        prompt_input "$prompt" "$default" temp_url
-        if [[ "$temp_url" =~ ^https?:// ]]; then
-            eval "$var_name='$temp_url'"
-            return 0
-        else
-            print_error "无效的 URL 格式，请输入完整的 URL (如 http://localhost:3000)"
-        fi
-    done
-}
-
-# Input validation for port numbers (1-65535)
-prompt_input_port() {
-    local prompt="$1"
-    local default="$2"
-    local var_name="$3"
-
-    while true; do
-        prompt_input "$prompt" "$default" temp_port
-        if [[ "$temp_port" =~ ^[0-9]+$ ]] && [ "$temp_port" -ge 1 ] && [ "$temp_port" -le 65535 ]; then
-            eval "$var_name='$temp_port'"
-            return 0
-        else
-            print_error "无效的端口，请输入 1-65535 之间的数字"
-        fi
-    done
-}
-
-# Input validation for positive integers
-prompt_input_number() {
-    local prompt="$1"
-    local default="$2"
-    local var_name="$3"
-    local min="${4:-1}"
-    local max="${5:-99999}"
-
-    while true; do
-        prompt_input "$prompt" "$default" temp_num
-        if [[ "$temp_num" =~ ^[0-9]+$ ]] && [ "$temp_num" -ge "$min" ] && [ "$temp_num" -le "$max" ]; then
-            eval "$var_name='$temp_num'"
-            return 0
-        else
-            print_error "无效输入，请输入 $min - $max 之间的数字"
-        fi
-    done
 }
 
 prompt_yesno() {
@@ -182,8 +119,7 @@ prompt_yesno() {
     [ "$default" = "n" ] && options="[y/N]"
 
     echo -ne "${BLUE}$prompt ${options}: ${NC}"
-    # Use -e for readline mode to allow Backspace/Delete keys
-    read -e -r value
+    read -r value
 
     value=$(echo "$value" | tr '[:upper:]' '[:lower:]')
 
@@ -192,11 +128,8 @@ prompt_yesno() {
     fi
 
     if [ "$value" = "y" ] || [ "$value" = "yes" ]; then
-        # Print confirmation to prevent next prompt from overwriting this line
-        echo -e "\r\033[K${GREEN}✓${NC} $prompt: 是"
         eval "$var_name='yes'"
     else
-        echo -e "\r\033[K${GREEN}✓${NC} $prompt: 否"
         eval "$var_name='no'"
     fi
 }
@@ -294,7 +227,7 @@ configure_sudoers() {
     if [ -z "$webui_path" ]; then
         print_warning "未找到 qwen-code-webui 可执行文件"
         print_info "请先安装 qwen-code-webui:"
-        print_info "  npm install -g qwen-code-webui @qwen-code/qwen-code"
+        print_info "  npm install -g @ivycomputing/qwen-code-webui"
         print_info ""
         print_info "安装完成后，重新运行此脚本或手动配置 sudoers:"
         print_info "  sudo visudo -f /etc/sudoers.d/open-ace-webui"
@@ -656,115 +589,6 @@ install_docker() {
 }
 
 # ============================================================================
-# Docker Hub Mirror Configuration (for China network environment)
-# ============================================================================
-
-configure_docker_mirror() {
-    local os_type=$(detect_os)
-    if [[ "$os_type" == "macos" ]]; then
-        return 0
-    fi
-
-    if ! docker info &>/dev/null; then
-        print_warning "Docker daemon 未运行，跳过镜像加速器配置"
-        return 0
-    fi
-
-    if docker info 2>/dev/null | grep -q "Registry Mirrors"; then
-        print_success "Docker Hub 镜像加速器已配置"
-        return 0
-    fi
-
-    print_info "配置 Docker Hub 镜像加速器..."
-
-    local daemon_json="/etc/docker/daemon.json"
-    # Use more reliable mirror sources for China network environment
-    local mirrors='["https://docker.1ms.run", "https://docker.xueryuan.me", "https://docker.m.daocloud.io", "https://dockerpull.org", "https://dockerhub.icu"]'
-
-    if [ -f "$daemon_json" ]; then
-        if grep -q "registry-mirrors" "$daemon_json"; then
-            print_success "镜像加速器配置已存在"
-            return 0
-        fi
-        # Merge with existing config - use | as sed delimiter to avoid conflict with URLs
-        local existing=$(cat "$daemon_json")
-        echo "$existing" | sed "s|}|, \"registry-mirrors\": $mirrors}|" | sudo tee "$daemon_json" > /dev/null
-    else
-        sudo mkdir -p /etc/docker
-        echo "{\"registry-mirrors\": $mirrors}" | sudo tee "$daemon_json" > /dev/null
-    fi
-
-    print_info "重启 Docker 服务..."
-    sudo systemctl restart docker
-
-    # Wait for Docker to restart
-    sleep 5
-
-    if docker info 2>/dev/null | grep -q "Registry Mirrors"; then
-        print_success "Docker Hub 镜像加速器配置完成"
-    else
-        print_warning "镜像加速器配置可能未生效"
-    fi
-}
-
-# ============================================================================
-# Node.js Installation
-# ============================================================================
-
-install_nodejs() {
-    local os_type=$(detect_os)
-    print_info "检测到系统: $os_type"
-
-    case "$os_type" in
-        debian)
-            print_info "通过 apt 安装 Node.js..."
-            curl -fsSL https://deb.nodesource.com/setup_20.x | sudo bash -
-            sudo apt-get install -y nodejs
-            ;;
-        redhat|centos)
-            print_info "通过 yum 安装 Node.js..."
-            curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -
-            sudo yum install -y nodejs
-            ;;
-        fedora)
-            print_info "通过 dnf 安装 Node.js..."
-            curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -
-            sudo dnf install -y nodejs
-            ;;
-        *)
-            print_error "不支持的操作系统，请手动安装 Node.js"
-            return 1
-            ;;
-    esac
-
-    if command -v npm &>/dev/null; then
-        print_success "npm 安装成功: $(npm --version)"
-        print_success "Node.js 安装成功: $(node --version)"
-    else
-        print_error "Node.js 安装失败"
-    fi
-}
-
-install_qwen_code_webui() {
-    npm config set registry https://registry.npmmirror.com/
-    print_info "安装 qwen-code-webui 和 qwen-code..."
-    npm install -g qwen-code-webui @qwen-code/qwen-code
-
-    # Check both packages
-    if command -v qwen-code-webui &>/dev/null; then
-        print_success "qwen-code-webui 安装成功: $(which qwen-code-webui)"
-    else
-        print_warning "qwen-code-webui 安装可能失败"
-    fi
-
-    if command -v qwen &>/dev/null; then
-        print_success "qwen-code CLI 安装成功: $(which qwen)"
-    else
-        print_warning "qwen-code CLI 安装可能失败"
-    fi
-}
-
-# ============================================================================
 # Firewall Configuration
 # ============================================================================
 
@@ -834,17 +658,6 @@ configure_firewall() {
     if command -v iptables &>/dev/null; then
         print_info "检测到 iptables"
 
-        # Check if iptables has active rules (firewall enabled)
-        # If no rules beyond default chains, firewall is likely not enabled
-        local has_rules=$(sudo iptables -L INPUT -n 2>/dev/null | grep -c "^ *[0-9]" 2>/dev/null || echo "0")
-        # Clean the value to ensure it's a valid integer (remove newlines/spaces)
-        has_rules=$(echo "$has_rules" | tr -d '\n' | tr -d ' ' | head -1)
-        if [ "$has_rules" -le 1 ]; then
-            print_warning "iptables 无活跃规则，防火墙可能未启用"
-            print_info "端口默认开放，跳过防火墙配置"
-            return 0
-        fi
-
         # Check if port is already open
         if sudo iptables -L INPUT -n | grep -q "dpt:${port}"; then
             print_success "端口 $port 已开放"
@@ -855,9 +668,8 @@ configure_firewall() {
         print_info "开放端口 $port/tcp..."
         sudo iptables -I INPUT -p tcp --dport ${port} -j ACCEPT
 
-        # Try to save iptables rules (create directory if needed)
+        # Try to save iptables rules
         if command -v iptables-save &>/dev/null; then
-            sudo mkdir -p /etc/iptables 2>/dev/null || true
             sudo iptables-save > /etc/iptables/rules.v4 2>/dev/null || \
             sudo iptables-save > /etc/sysconfig/iptables 2>/dev/null || true
         fi
@@ -968,9 +780,6 @@ check_prerequisites() {
     fi
     print_success "Docker 已安装: $(docker --version)"
 
-    # Configure Docker Hub mirror for China network environment (always configure)
-    configure_docker_mirror
-
     # Check Docker Compose
     if ! docker compose version &>/dev/null; then
         print_error "Docker Compose 未安装"
@@ -1012,49 +821,15 @@ build_docker_image() {
         return 0
     fi
 
-    # Image not found - prompt to load or build
+    # Image not found - prompt to load
     print_warning "镜像 $IMAGE_NAME 不存在"
     echo ""
-    echo "请选择获取 Docker 镜像的方式:"
-    echo ""
-    echo "  1) 加载镜像文件"
-    echo "     - 从预打包的 tar.gz 文件加载镜像"
-    echo "     - 适用: 无外网环境、需要快速部署"
-    echo "     - 需要: 镜像文件 open-ace-images.tar.gz"
-    echo ""
-    echo "  2) 从源码构建镜像 [推荐]"
-    echo "     - 自动安装 Node.js、构建前端、编译镜像"
-    echo "     - 适用: 有外网环境、源码已存在、首次部署"
-    echo "     - 需要: 源码目录包含 Dockerfile"
-    echo ""
-    echo "  3) 跳过"
-    echo "     - 只生成配置文件，不处理镜像"
-    echo "     - 适用: 镜像已存在或稍后手动处理"
-    echo ""
-    echo "提示: 如果不确定，选择 2 从源码构建"
+    echo "请选择:"
+    echo "  1) 加载镜像文件 (包含应用和 PostgreSQL)"
+    echo "  2) 跳过 (稍后手动处理)"
     echo ""
 
-    prompt_input "请选择" "2" build_choice
-
-    # Auto-detect source directory based on script location
-    local default_source_dir
-    # Get script's absolute path
-    local script_path=$(realpath "$0")
-    local script_dir=$(dirname "$script_path")
-
-    if [[ "$script_path" == *"scripts/install-central/docker-method"* ]]; then
-        # Script is in scripts/install-central/docker-method/
-        # Source root is 3 levels up: docker-method -> install-central -> scripts -> (open-ace root)
-        default_source_dir=$(dirname "$(dirname "$(dirname "$script_dir")")")
-    else
-        # Fallback: try to find source root by looking for Dockerfile
-        default_source_dir=$(pwd)
-        local parent_dir=$(dirname "$default_source_dir")
-        while [ "$parent_dir" != "/" ] && [ ! -f "$parent_dir/Dockerfile" ]; do
-            parent_dir=$(dirname "$parent_dir")
-        done
-        [ -f "$parent_dir/Dockerfile" ] && default_source_dir="$parent_dir"
-    fi
+    prompt_input "请选择" "1" build_choice
 
     case "$build_choice" in
         1)
@@ -1100,96 +875,8 @@ build_docker_image() {
             fi
             ;;
         2)
-            # Build from source
-            prompt_input "源码目录路径" "$default_source_dir" source_dir
-
-            if [ ! -d "$source_dir" ]; then
-                print_error "目录不存在: $source_dir"
-                return 1
-            fi
-
-            if [ ! -f "$source_dir/Dockerfile" ]; then
-                print_error "未找到 Dockerfile: $source_dir/Dockerfile"
-                return 1
-            fi
-
-            # Check if npm is available for frontend build
-            if ! command -v npm &>/dev/null; then
-                print_warning "npm 未安装，无法构建前端"
-                print_info "正在安装 Node.js..."
-                install_nodejs
-                if ! command -v npm &>/dev/null; then
-                    print_error "Node.js 安装失败，无法构建镜像"
-                    return 1
-                fi
-            fi
-
-            # Build frontend
-            if [ -d "$source_dir/frontend" ]; then
-                print_header "构建前端"
-                cd "$source_dir/frontend"
-                print_info "安装前端依赖..."
-                npm install
-                print_info "构建前端..."
-                npm run build
-                print_success "前端构建完成"
-                cd "$source_dir"
-            else
-                print_warning "未找到 frontend 目录，跳过前端构建"
-            fi
-
-            # Build Docker image
-            print_header "构建 Docker 镜像"
-
-            # Pull base image first (python:3.11-slim)
-            local base_image="python:3.11-slim"
-            if ! docker image inspect "$base_image" &>/dev/null; then
-                print_info "拉取基础镜像: $base_image"
-                # Try multiple mirror sources
-                local mirrors=(
-                    "$base_image"
-                    "docker.m.daocloud.io/library/python:3.11-slim"
-                    "dockerpull.org/library/python:3.11-slim"
-                    "dockerhub.icu/library/python:3.11-slim"
-                )
-                local pulled=false
-                for mirror in "${mirrors[@]}"; do
-                    print_info "尝试从 $mirror 拉取..."
-                    if docker pull "$mirror"; then
-                        if [[ "$mirror" != "$base_image" ]]; then
-                            docker tag "$mirror" "$base_image"
-                            docker rmi "$mirror" 2>/dev/null || true
-                        fi
-                        print_success "基础镜像拉取成功: $base_image"
-                        pulled=true
-                        break
-                    fi
-                done
-
-                if [ "$pulled" = false ]; then
-                    print_error "基础镜像拉取失败"
-                    print_info "请手动拉取或加载镜像后重试"
-                    return 1
-                fi
-            else
-                print_success "基础镜像已存在: $base_image"
-            fi
-
-            print_info "构建镜像: $IMAGE_NAME"
-            docker build -t "$IMAGE_NAME" --target production "$source_dir"
-
-            if docker image inspect "$IMAGE_NAME" &>/dev/null; then
-                print_success "镜像构建完成: $IMAGE_NAME"
-                return 0
-            else
-                print_error "镜像构建失败"
-                return 1
-            fi
-            ;;
-        3)
-            print_info "请手动处理镜像后重新运行此脚本"
+            print_info "请手动加载镜像后重新运行此脚本"
             print_info "加载命令: docker load -i open-ace-images.tar.gz"
-            print_info "构建命令: cd <源码目录> && docker build -t open-ace:latest --target production ."
             return 1
             ;;
         *)
@@ -1400,17 +1087,11 @@ create_docker_compose() {
     local arch=$(detect_arch)
     print_info "检测到平台: $docker_platform (架构: $arch)"
 
-    # Build ports section - WEB_PORT plus workspace port range for multi-user mode
+    # Build ports section - only WEB_PORT, workspace runs in separate container
     local ports_section="      - \"$WEB_PORT:$INTERNAL_WEB_PORT\""
-    if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
-        ports_section="$ports_section
-      - \"$WORKSPACE_PORT_RANGE_START-$WORKSPACE_PORT_RANGE_END:$WORKSPACE_PORT_RANGE_START-$WORKSPACE_PORT_RANGE_END\""
-        print_info "  - 多用户工作区端口范围: $WORKSPACE_PORT_RANGE_START-$WORKSPACE_PORT_RANGE_END"
-    fi
 
     # Build volumes section based on enabled tools
-    local volumes_section="      - ./config:/home/open-ace/.open-ace:ro
-      - ./logs:/app/logs"
+    local volumes_section="      - ./config:/root/.open-ace:ro"
     local user_home="/home/$RUN_USER"
 
     if [ "$QWEN_ENABLED" = "true" ]; then
@@ -1431,36 +1112,6 @@ create_docker_compose() {
         print_info "  - 映射 .openclaw 目录"
     fi
 
-    # Add workspace-data volume for multi-user mode
-    if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
-        volumes_section="$volumes_section
-      - workspace-data:/workspace"
-        print_info "  - 多用户工作区数据卷: workspace-data"
-    fi
-
-    # Build environment variables section
-    local env_section="      - SECRET_KEY=$SECRET_KEY
-      - UPLOAD_AUTH_KEY=$UPLOAD_AUTH_KEY
-      - DATABASE_URL=postgresql://$DB_USER:$DB_PASSWORD@postgres:5432/$DB_NAME"
-
-    # Add workspace environment variables for multi-user mode
-    if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
-        env_section="$env_section
-      - WORKSPACE_MULTI_USER_MODE=true
-      - WORKSPACE_BASE_DIR=/workspace"
-        print_info "  - 多用户工作区环境变量已配置"
-    fi
-
-    # Build volumes definition section
-    local volumes_def="  postgres-data:
-    driver: local"
-
-    if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
-        volumes_def="$volumes_def
-  workspace-data:
-    driver: local"
-    fi
-
     # Note: We don't specify 'platform' in docker-compose.yml to allow using locally loaded images
     # The platform detection is just for information purposes
     cat > "$compose_file" << EOF
@@ -1476,7 +1127,9 @@ services:
     ports:
 $ports_section
     environment:
-$env_section
+      - SECRET_KEY=$SECRET_KEY
+      - UPLOAD_AUTH_KEY=$UPLOAD_AUTH_KEY
+      - DATABASE_URL=postgresql://$DB_USER:$DB_PASSWORD@postgres:5432/$DB_NAME
     volumes:
 $volumes_section
     depends_on:
@@ -1515,7 +1168,8 @@ $volumes_section
         max-file: "3"
 
 volumes:
-$volumes_def
+  postgres-data:
+    driver: local
 EOF
 
     print_success "Docker Compose 配置创建完成"
@@ -1568,46 +1222,13 @@ start_postgres() {
     # Check if PostgreSQL image exists locally
     local postgres_image="postgres:15-alpine"
     if ! docker image inspect "$postgres_image" &>/dev/null; then
-        print_warning "PostgreSQL 镜像不存在: $postgres_image"
-        prompt_yesno "是否尝试从网络拉取镜像?" "y" pull_image
-        if [ "$pull_image" = "yes" ]; then
-            # Try multiple mirror sources
-            local mirrors=(
-                "$postgres_image"
-                "docker.m.daocloud.io/library/postgres:15-alpine"
-                "dockerpull.org/library/postgres:15-alpine"
-                "dockerhub.icu/library/postgres:15-alpine"
-            )
-            local pulled=false
-            for mirror in "${mirrors[@]}"; do
-                print_info "尝试从 $mirror 拉取..."
-                if docker pull "$mirror"; then
-                    # If pulled from mirror, re-tag to original name
-                    if [[ "$mirror" != "$postgres_image" ]]; then
-                        docker tag "$mirror" "$postgres_image"
-                        docker rmi "$mirror" 2>/dev/null || true
-                    fi
-                    print_success "PostgreSQL 镜像拉取成功"
-                    pulled=true
-                    break
-                else
-                    print_warning "从 $mirror 拉取失败，尝试下一个镜像源..."
-                fi
-            done
-
-            if [ "$pulled" = false ]; then
-                print_error "所有镜像源拉取失败"
-                print_info "请手动加载镜像文件:"
-                print_info "  gunzip -c open-ace-images.tar.gz | docker load"
-                return 1
-            fi
-        else
-            print_info "请手动加载镜像文件:"
-            print_info "  gunzip -c open-ace-images.tar.gz | docker load"
-            return 1
-        fi
+        print_error "PostgreSQL 镜像不存在: $postgres_image"
+        print_info "请先加载镜像文件:"
+        print_info "  gunzip -c open-ace-images.tar.gz | docker load"
+        print_info "或从有网络的环境拉取镜像后重新打包"
+        return 1
     fi
-    print_success "PostgreSQL 镙像已存在: $postgres_image"
+    print_success "PostgreSQL 镜像已存在: $postgres_image"
 
     # Check if PostgreSQL data volume already exists
     local volume_name="open-ace_postgres-data"
@@ -1946,12 +1567,10 @@ if [ "$NON_INTERACTIVE" = false ]; then
         if [ -z "$OPENCLAW_PORT" ]; then
             OPENCLAW_PORT="18789"
         fi
-        echo ""
     fi
 
     prompt_yesno "启用 Claude 工具?" "y" enable_claude
     CLAUDE_ENABLED=$([ "$enable_claude" = "yes" ] && echo "true" || echo "false")
-    echo ""
 
     prompt_yesno "启用 Qwen 工具?" "y" enable_qwen
     QWEN_ENABLED=$([ "$enable_qwen" = "yes" ] && echo "true" || echo "false")
@@ -1961,8 +1580,7 @@ if [ "$NON_INTERACTIVE" = false ]; then
     prompt_yesno "启用 Workspace?" "y" enable_workspace
     WORKSPACE_ENABLED=$([ "$enable_workspace" = "yes" ] && echo "true" || echo "false")
     if [ "$WORKSPACE_ENABLED" = "true" ]; then
-        echo ""
-        prompt_input_url "Workspace URL" "$WORKSPACE_URL" WORKSPACE_URL
+        prompt_input "Workspace URL" "$WORKSPACE_URL" WORKSPACE_URL
         # Extract port from URL (e.g., http://localhost:3000 -> 3000)
         WORKSPACE_PORT=$(echo "$WORKSPACE_URL" | sed -n 's/.*:\([0-9]*\).*/\1/p')
         if [ -z "$WORKSPACE_PORT" ]; then
@@ -1978,10 +1596,10 @@ if [ "$NON_INTERACTIVE" = false ]; then
         prompt_yesno "启用多用户模式?" "y" enable_multi_user
         WORKSPACE_MULTI_USER_MODE=$([ "$enable_multi_user" = "yes" ] && echo "true" || echo "false")
         if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
-            prompt_input_port "端口池起始端口" "$WORKSPACE_PORT_RANGE_START" WORKSPACE_PORT_RANGE_START
-            prompt_input_port "端口池结束端口" "$WORKSPACE_PORT_RANGE_END" WORKSPACE_PORT_RANGE_END
-            prompt_input_number "最大实例数" "$WORKSPACE_MAX_INSTANCES" WORKSPACE_MAX_INSTANCES 1 100
-            prompt_input_number "空闲超时时间(分钟)" "$WORKSPACE_IDLE_TIMEOUT" WORKSPACE_IDLE_TIMEOUT 1 1440
+            prompt_input "端口池起始端口" "$WORKSPACE_PORT_RANGE_START" WORKSPACE_PORT_RANGE_START
+            prompt_input "端口池结束端口" "$WORKSPACE_PORT_RANGE_END" WORKSPACE_PORT_RANGE_END
+            prompt_input "最大实例数" "$WORKSPACE_MAX_INSTANCES" WORKSPACE_MAX_INSTANCES
+            prompt_input "空闲超时时间(分钟)" "$WORKSPACE_IDLE_TIMEOUT" WORKSPACE_IDLE_TIMEOUT
             # Generate token secret automatically
             WORKSPACE_TOKEN_SECRET=$(openssl rand -hex 32)
             print_info "自动生成 Token Secret: $WORKSPACE_TOKEN_SECRET"
@@ -2035,38 +1653,6 @@ fi
 
 # Configure sudoers for multi-user workspace mode
 if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
-    # Check and install qwen-code-webui and qwen-code CLI if not present
-    need_install=false
-    if ! command -v qwen-code-webui &>/dev/null; then
-        print_warning "未找到 qwen-code-webui"
-        need_install=true
-    fi
-    if ! command -v qwen &>/dev/null; then
-        print_warning "未找到 qwen-code CLI"
-        need_install=true
-    fi
-
-    if [ "$need_install" = true ]; then
-        prompt_yesno "是否自动安装 qwen-code-webui 和 qwen-code CLI?" "y" install_webui
-        if [ "$install_webui" = "yes" ]; then
-            # Ensure Node.js is installed first
-            if ! command -v npm &>/dev/null; then
-                print_info "先安装 Node.js..."
-                install_nodejs
-            fi
-            install_qwen_code_webui
-            # Verify both packages are installed
-            if ! command -v qwen-code-webui &>/dev/null || ! command -v qwen &>/dev/null; then
-                print_error "安装失败，多用户模式无法启用"
-                print_info "请手动安装: npm install -g qwen-code-webui @qwen-code/qwen-code"
-                WORKSPACE_MULTI_USER_MODE="false"
-            fi
-        else
-            print_warning "跳过安装，多用户模式无法启用"
-            WORKSPACE_MULTI_USER_MODE="false"
-        fi
-    fi
-
     # Stop existing qwen-code-webui systemd service first
     stop_webui_systemd_service
     configure_sudoers
