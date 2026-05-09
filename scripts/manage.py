@@ -337,6 +337,14 @@ def stop_webui_processes():
                         found.append(pid)
         return found
 
+    def is_pid_alive(pid):
+        """Check if a PID is still running."""
+        try:
+            os.kill(int(pid), 0)
+            return True
+        except (OSError, ProcessLookupError, ValueError):
+            return False
+
     # Phase 1: SIGTERM — give processes a chance to shut down gracefully
     sigterm_pids = find_and_signal("")
     stopped_pids.extend(sigterm_pids)
@@ -345,10 +353,10 @@ def stop_webui_processes():
         # Wait up to 5 seconds for graceful shutdown
         time.sleep(5)
 
-        # Phase 2: SIGKILL any survivors
-        sigkill_pids = find_and_signal("-9")
-        for pid in sigkill_pids:
-            if pid not in stopped_pids:
+        # Phase 2: SIGKILL only Phase 1 survivors (no re-discovery)
+        for pid in sigterm_pids:
+            if is_pid_alive(pid):
+                run_command(f"kill -9 {pid}", check=False)
                 stopped_pids.append(pid)
 
     return stopped_pids
@@ -369,9 +377,13 @@ def stop_service():
             run_command(f"kill {pid}", check=False)
         # Wait up to 5 seconds for graceful shutdown
         time.sleep(5)
-        # SIGKILL any survivors
+        # SIGKILL any survivors (check liveness to avoid killing recycled PIDs)
         for pid in web_pids:
-            run_command(f"kill -9 {pid}", check=False)
+            try:
+                os.kill(int(pid), 0)
+                run_command(f"kill -9 {pid}", check=False)
+            except (OSError, ProcessLookupError, ValueError):
+                pass  # Already exited
         print_success(f"Web server stopped (killed PIDs: {', '.join(web_pids)})")
     else:
         print("Web server is not running")

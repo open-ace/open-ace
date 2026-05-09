@@ -583,16 +583,18 @@ class WebUIManager:
             log_dir = os.path.expanduser("~/.open-ace/logs")
             os.makedirs(log_dir, exist_ok=True)
             log_path = os.path.join(log_dir, f"webui-{port}.log")
-            log_file = open(log_path, "a")
+            log_fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND)
 
             process = subprocess.Popen(
                 cmd,
                 start_new_session=True,  # Detach from parent process group
                 cwd=cwd,
                 env=child_env,
-                stdout=log_file,
+                stdout=log_fd,
                 stderr=subprocess.STDOUT,
             )
+            # Child has inherited the FD; parent no longer needs it
+            os.close(log_fd)
             return process
         except Exception as e:
             logger.error(f"Failed to launch webui process: {e}")
