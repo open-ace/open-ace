@@ -42,6 +42,8 @@ class WebUIInstance:
 
     _last_health_check: float = 0.0
     _health_check_ttl: float = 30.0  # Cache health check result for 30s
+    _consecutive_health_failures: int = 0
+    _max_consecutive_failures: int = 10  # 10 × 30s = ~5min before declaring dead
 
     def is_alive(self) -> bool:
         """Check if the process is still running and responsive."""
@@ -52,15 +54,34 @@ class WebUIInstance:
         except (OSError, ProcessLookupError):
             return False
 
-        # PID exists, but verify HTTP health (cached for _health_check_ttl seconds)
+        # Cached: don't re-check within TTL window
         now = time.time()
         if now - self._last_health_check < self._health_check_ttl:
             return True
 
         healthy = self._check_http_health()
         if healthy:
+            self._consecutive_health_failures = 0
             self._last_health_check = now
-        return healthy
+            return True
+
+        # HTTP failed — count consecutive failures
+        self._consecutive_health_failures += 1
+        self._last_health_check = now
+        if self._consecutive_health_failures >= self._max_consecutive_failures:
+            logger.warning(
+                f"WebUI instance (pid={self.pid}, port={self.port}) "
+                f"unresponsive for {self._consecutive_health_failures} consecutive checks "
+                f"(~{self._consecutive_health_failures * 30}s), declaring dead"
+            )
+            return False
+
+        logger.info(
+            f"WebUI health check failed ({self._consecutive_health_failures}/"
+            f"{self._max_consecutive_failures}) for pid={self.pid}, port={self.port}"
+            f" — still alive, will retry"
+        )
+        return True
 
     def _check_http_health(self) -> bool:
         """Make an HTTP request to verify the webui is actually responding."""
@@ -387,10 +408,11 @@ class WebUIManager:
                     instance.update_activity()
                     return instance.url, instance.token
                 else:
-                    # Process exists but HTTP health check failed — restart
+                    # Process declared dead after consecutive health check failures
                     logger.warning(
-                        f"WebUI instance for user {user_id} (pid={instance.pid}, port={instance.port}) "
-                        f"is alive but not responding to HTTP requests, restarting"
+                        f"Restarting webui for user {user_id}: "
+                        f"pid={instance.pid}, port={instance.port}, "
+                        f"consecutive_failures={instance._consecutive_health_failures}"
                     )
                     self._stop_instance_internal(user_id)
 
