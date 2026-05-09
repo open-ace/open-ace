@@ -8,6 +8,7 @@ Fetches daily token usage from Claude Code local JSONL logs.
 import argparse
 import getpass
 import json
+import logging
 import os
 import re
 import socket
@@ -16,6 +17,8 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 
 def get_default_sender_name(tool: str = "claude") -> str:
@@ -564,8 +567,6 @@ def update_agent_sessions_stats(messages: list) -> int:
     Returns:
         Number of sessions updated
     """
-    from collections import defaultdict
-
     from shared.db import _execute, _placeholder, get_connection
 
     # Group messages by agent_session_id
@@ -574,7 +575,7 @@ def update_agent_sessions_stats(messages: list) -> int:
             "message_count": 0,
             "total_tokens": 0,
             "request_count": 0,
-            "models": set(),
+            "models": [],
             "messages": [],
             "last_timestamp": None,
         }
@@ -592,11 +593,12 @@ def update_agent_sessions_stats(messages: list) -> int:
         session_stats[session_id]["message_count"] += 1
         session_stats[session_id]["total_tokens"] += tokens
 
-        if role == "assistant":
+        # Count user messages as requests (one user turn = one request)
+        if role == "user":
             session_stats[session_id]["request_count"] += 1
 
         if model:
-            session_stats[session_id]["models"].add(model)
+            session_stats[session_id]["models"].append(model)
 
         session_stats[session_id]["messages"].append(msg)
 
@@ -655,7 +657,8 @@ def update_agent_sessions_stats(messages: list) -> int:
                                 {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder},
                                 {placeholder}, {placeholder}, {placeholder}, {placeholder})
                     """
-                    model = sorted(stats["models"])[0] if stats["models"] else None
+                    # Use the most recently seen model (last in list)
+                    model = stats["models"][-1] if stats["models"] else None
                     _execute(
                         cursor,
                         insert_sql,
@@ -679,7 +682,7 @@ def update_agent_sessions_stats(messages: list) -> int:
                     updated += 1
                 else:
                     # Update existing session
-                    model = sorted(stats["models"])[0] if stats["models"] else None
+                    model = stats["models"][-1] if stats["models"] else None
                     session_updated_at = stats["last_timestamp"] or now
                     sql = f"""
                         UPDATE agent_sessions
@@ -713,13 +716,19 @@ def update_agent_sessions_stats(messages: list) -> int:
                         if not timestamp:
                             timestamp = now
 
+                        # Deduplicate by (session_id, role, timestamp, message_id)
                         check_sql = f"""
                             SELECT id FROM session_messages
                             WHERE session_id = {placeholder}
                             AND role = {placeholder}
                             AND timestamp = {placeholder}
+                            AND (metadata->>'message_id') = {placeholder}
                         """
-                        _execute(cursor, check_sql, (session_id, msg.get("role"), timestamp))
+                        _execute(
+                            cursor,
+                            check_sql,
+                            (session_id, msg.get("role"), timestamp, msg_id or ""),
+                        )
                         existing = cursor.fetchone()
 
                         if not existing:
@@ -753,10 +762,10 @@ def update_agent_sessions_stats(messages: list) -> int:
                             and "foreign key" not in str(e).lower()
                             and "not present" not in str(e).lower()
                         ):
-                            print(f"  Warning: Failed to insert message: {e}")
+                            logger.warning("Failed to insert message: %s", e)
 
             except Exception as e:
-                print(f"  Warning: Failed to update session {session_id}: {e}")
+                logger.warning("Failed to update session %s: %s", session_id, e)
 
         conn.commit()
 
@@ -930,10 +939,6 @@ def fetch_and_save(
         print("Saving messages to database...")
         saved_count = db.save_messages_batch(all_messages, batch_size=500)
         print(f"Saved {saved_count} messages")
-
-        # Update agent_sessions table with session statistics
-        print("Updating agent session statistics...")
-        update_agent_sessions_stats(all_messages)
 
     # Filter by date range
     today = datetime.now().strftime("%Y-%m-%d")
