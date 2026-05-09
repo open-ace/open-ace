@@ -314,34 +314,41 @@ def start_service(dev_mode: bool = False):
 
 
 def stop_webui_processes():
-    """Stop all qwen-code-webui processes."""
+    """Stop all qwen-code-webui processes gracefully."""
+    import time
+
     stopped_pids = []
 
-    # Method 1: Find by process name
-    result = run_command("pgrep -f 'qwen-code-webui'", capture=True, check=False)
-    if result and result.stdout.strip():
-        pids = result.stdout.strip().split("\n")
-        for pid in pids:
-            if pid:
-                run_command(f"kill -9 {pid}", check=False)
-                stopped_pids.append(pid)
+    def find_and_signal(signal_flag):
+        """Send signal to all matching webui processes."""
+        found = []
+        patterns = [
+            "pgrep -f 'qwen-code-webui'",
+            "pgrep -f 'node.*webui.*backend'",
+            "pgrep -f 'node.*cli.*node\\.js'",
+        ]
+        for pattern in patterns:
+            result = run_command(pattern, capture=True, check=False)
+            if result and result.stdout.strip():
+                pids = result.stdout.strip().split("\n")
+                for pid in pids:
+                    if pid and pid not in found:
+                        run_command(f"kill {signal_flag} {pid}", check=False)
+                        found.append(pid)
+        return found
 
-    # Method 2: Find by node processes running webui backend
-    result = run_command("pgrep -f 'node.*webui.*backend'", capture=True, check=False)
-    if result and result.stdout.strip():
-        pids = result.stdout.strip().split("\n")
-        for pid in pids:
-            if pid and pid not in stopped_pids:
-                run_command(f"kill -9 {pid}", check=False)
-                stopped_pids.append(pid)
+    # Phase 1: SIGTERM — give processes a chance to shut down gracefully
+    sigterm_pids = find_and_signal("")
+    stopped_pids.extend(sigterm_pids)
 
-    # Method 3: Find by node processes with qwen-code-webui in command line
-    result = run_command("pgrep -f 'node.*cli.*node\\.js'", capture=True, check=False)
-    if result and result.stdout.strip():
-        pids = result.stdout.strip().split("\n")
-        for pid in pids:
-            if pid and pid not in stopped_pids:
-                run_command(f"kill -9 {pid}", check=False)
+    if sigterm_pids:
+        # Wait up to 5 seconds for graceful shutdown
+        time.sleep(5)
+
+        # Phase 2: SIGKILL any survivors
+        sigkill_pids = find_and_signal("-9")
+        for pid in sigkill_pids:
+            if pid not in stopped_pids:
                 stopped_pids.append(pid)
 
     return stopped_pids
@@ -349,13 +356,20 @@ def stop_webui_processes():
 
 def stop_service():
     """Stop local web server and all webui processes."""
+    import time
+
     print_header("Stopping Web Server")
 
-    # Find and kill process on web port
+    # Find process on web port and send SIGTERM first
     result = run_command(f"lsof -ti :{WEB_PORT}", capture=True, check=False)
     web_pids = []
     if result and result.stdout.strip():
         web_pids = result.stdout.strip().split("\n")
+        for pid in web_pids:
+            run_command(f"kill {pid}", check=False)
+        # Wait up to 5 seconds for graceful shutdown
+        time.sleep(5)
+        # SIGKILL any survivors
         for pid in web_pids:
             run_command(f"kill -9 {pid}", check=False)
         print_success(f"Web server stopped (killed PIDs: {', '.join(web_pids)})")

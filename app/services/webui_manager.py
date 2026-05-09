@@ -579,13 +579,19 @@ class WebUIManager:
         logger.debug(f"Launching webui: {cmd}, cwd: {cwd}")
 
         try:
-            # Don't capture stdout/stderr to avoid blocking on pipe buffer
-            # In production, consider redirecting to log files
+            # Redirect stdout/stderr to log file for debugging
+            log_dir = os.path.expanduser("~/.open-ace/logs")
+            os.makedirs(log_dir, exist_ok=True)
+            log_path = os.path.join(log_dir, f"webui-{port}.log")
+            log_file = open(log_path, "a")
+
             process = subprocess.Popen(
                 cmd,
                 start_new_session=True,  # Detach from parent process group
                 cwd=cwd,
                 env=child_env,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
             )
             return process
         except Exception as e:
