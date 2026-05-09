@@ -283,6 +283,9 @@ export const Dashboard: React.FC = () => {
                         />
                       )}
                     </th>
+                    <th className="text-end">
+                      {t('tableRatio', language) || 'Ratio'}
+                    </th>
                     <th
                       className="text-end sortable"
                       onClick={() => handleSort('days_count')}
@@ -311,6 +314,11 @@ export const Dashboard: React.FC = () => {
                       <td className="text-end">{(stats.avg_tokens / 1000000).toFixed(2)} M/day</td>
                       <td className="text-end">{formatTokens(stats.total_input_tokens ?? 0)}</td>
                       <td className="text-end">{formatTokens(stats.total_output_tokens ?? 0)}</td>
+                      <td className="text-end">
+                        {(stats.total_output_tokens ?? 0) > 0
+                          ? ((stats.total_input_tokens ?? 0) / (stats.total_output_tokens ?? 1)).toFixed(1)
+                          : '-'}
+                      </td>
                       <td className="text-end">{stats.days_count}</td>
                       <td>
                         <small className="text-muted">
