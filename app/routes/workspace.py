@@ -10,6 +10,7 @@ API endpoints for workspace functionality including:
 """
 
 import logging
+from datetime import datetime, timedelta
 
 from flask import Blueprint, g, jsonify, request
 
@@ -26,6 +27,9 @@ logger = logging.getLogger(__name__)
 # Token quotas are stored in M (millions) units
 # Convert to actual tokens when comparing with usage
 TOKEN_QUOTA_MULTIPLIER = 1_000_000
+
+# Only refresh session when it has less than this many minutes remaining
+_SESSION_REFRESH_THRESHOLD_MINUTES = 10
 
 
 def format_datetime(dt):
@@ -67,6 +71,7 @@ def load_user():
             g.user = user
             g.user_id = user.get("id")
             g.user_role = user.get("role")
+            _refresh_session(token)
             return None
 
         # Session token failed — try WebUI token validation
@@ -89,11 +94,63 @@ def load_user():
                     }
                     g.user_id = user_id
                     g.user_role = user_data.get("role")
+                    _refresh_session(token, user_repo=user_repo)
                     return None
         except Exception as e:
             logger.warning(f"Failed to validate URL token: {e}")
 
     return jsonify({"error": "Authentication required"}), 401
+
+
+def _refresh_session(token: str, user_repo=None):
+    """Extend DB session and cookie expiry when close to expiration.
+
+    Only refreshes if the session has less than _SESSION_REFRESH_THRESHOLD_MINUTES
+    remaining, avoiding a DB write on every request.
+    """
+    try:
+        from app.repositories.user_repo import UserRepository
+        from app.services.auth_service import _get_session_timeout_hours
+
+        repo = user_repo or UserRepository()
+
+        # Lightweight query — only need expires_at, no JOIN
+        row = repo.db.fetch_one("SELECT expires_at FROM sessions WHERE token = ?", (token,))
+        if not row or not row.get("expires_at"):
+            return
+
+        expires_at = row["expires_at"]
+        if isinstance(expires_at, str):
+            expires_at = datetime.fromisoformat(expires_at).replace(tzinfo=None)
+
+        remaining = (expires_at - datetime.utcnow()).total_seconds()
+        threshold = timedelta(minutes=_SESSION_REFRESH_THRESHOLD_MINUTES).total_seconds()
+        if remaining > threshold:
+            return
+
+        timeout_hours = _get_session_timeout_hours()
+        new_expires_at = datetime.utcnow() + timedelta(hours=timeout_hours)
+        repo.extend_session_expiry(token, new_expires_at)
+        g._session_refresh_seconds = int(timeout_hours * 3600)
+    except Exception as e:
+        logger.warning(f"Failed to refresh session: {e}")
+
+
+@workspace_bp.after_request
+def refresh_session_cookie(response):
+    """Refresh session cookie max_age only when session was actually refreshed."""
+    timeout_seconds = getattr(g, "_session_refresh_seconds", None)
+    if timeout_seconds and request.cookies.get("session_token"):
+        response.set_cookie(
+            "session_token",
+            request.cookies["session_token"],
+            httponly=True,
+            secure=request.is_secure,
+            samesite="Lax",
+            max_age=timeout_seconds,
+        )
+        g._session_refresh_seconds = None
+    return response
 
 
 # ==================== Prompt Templates ====================

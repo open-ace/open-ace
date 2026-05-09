@@ -463,6 +463,25 @@ class UserRepository:
             logger.error(f"Error deleting session: {e}")
             return False
 
+    def extend_session_expiry(self, token: str, new_expires_at: datetime) -> bool:
+        """Extend session expiry time.
+
+        Args:
+            token: Session token.
+            new_expires_at: New expiration time.
+
+        Returns:
+            bool: True if successful.
+        """
+        query = "UPDATE sessions SET expires_at = ? WHERE token = ?"
+
+        try:
+            self.db.execute(query, (new_expires_at, token))
+            return True
+        except Exception as e:
+            logger.error(f"Error extending session: {e}")
+            return False
+
     def cleanup_expired_sessions(self) -> int:
         """
         Delete expired sessions.
