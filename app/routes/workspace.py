@@ -10,6 +10,7 @@ API endpoints for workspace functionality including:
 """
 
 import logging
+from datetime import datetime, timedelta
 
 from flask import Blueprint, g, jsonify, request
 
@@ -67,6 +68,19 @@ def load_user():
             g.user = user
             g.user_id = user.get("id")
             g.user_role = user.get("role")
+
+            # Refresh session on activity to prevent premature expiry
+            try:
+                from app.repositories.user_repo import UserRepository
+                from app.services.auth_service import _get_session_timeout_hours
+
+                timeout_hours = _get_session_timeout_hours()
+                new_expires_at = datetime.utcnow() + timedelta(hours=timeout_hours)
+                UserRepository().extend_session_expiry(token, new_expires_at)
+                g._session_refresh_seconds = int(timeout_hours * 3600)
+            except Exception:
+                pass
+
             return None
 
         # Session token failed — try WebUI token validation
@@ -89,11 +103,39 @@ def load_user():
                     }
                     g.user_id = user_id
                     g.user_role = user_data.get("role")
+
+                    # Refresh session for WebUI-authenticated requests too
+                    try:
+                        from app.services.auth_service import _get_session_timeout_hours
+
+                        timeout_hours = _get_session_timeout_hours()
+                        new_expires_at = datetime.utcnow() + timedelta(hours=timeout_hours)
+                        user_repo.extend_session_expiry(token, new_expires_at)
+                        g._session_refresh_seconds = int(timeout_hours * 3600)
+                    except Exception:
+                        pass
+
                     return None
         except Exception as e:
             logger.warning(f"Failed to validate URL token: {e}")
 
     return jsonify({"error": "Authentication required"}), 401
+
+
+@workspace_bp.after_request
+def refresh_session_cookie(response):
+    """Refresh session cookie max_age on activity to prevent premature expiry."""
+    timeout_seconds = getattr(g, "_session_refresh_seconds", None)
+    if timeout_seconds and request.cookies.get("session_token"):
+        response.set_cookie(
+            "session_token",
+            request.cookies["session_token"],
+            httponly=True,
+            secure=request.is_secure,
+            samesite="Lax",
+            max_age=timeout_seconds,
+        )
+    return response
 
 
 # ==================== Prompt Templates ====================
@@ -661,8 +703,11 @@ def get_session(session_id):
             except Exception as e:
                 logger.warning(f"Failed to enrich session stats from daily_messages: {e}")
 
-            # If include_messages but session has no messages, try daily_messages
-            if include_messages and not session.messages:
+            # If include_messages but session has no messages, or messages lack content, try daily_messages
+            has_empty_content = session.messages and all(
+                not (m.content and m.content.strip()) for m in session.messages
+            )
+            if include_messages and (not session.messages or has_empty_content):
                 try:
                     msg_query = f"""
                         SELECT id, agent_session_id as session_id, role, content,
