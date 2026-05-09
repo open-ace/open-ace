@@ -670,8 +670,11 @@ def get_session(session_id):
             except Exception as e:
                 logger.warning(f"Failed to enrich session stats from daily_messages: {e}")
 
-            # If include_messages but session has no messages, try daily_messages
-            if include_messages and not session.messages:
+            # If include_messages but session has no messages, or messages lack content, try daily_messages
+            has_empty_content = session.messages and all(
+                not (m.content and m.content.strip()) for m in session.messages
+            )
+            if include_messages and (not session.messages or has_empty_content):
                 try:
                     msg_query = f"""
                         SELECT id, agent_session_id as session_id, role, content,
