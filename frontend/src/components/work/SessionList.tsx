@@ -37,6 +37,7 @@ interface SessionItem {
   requests: number;
   workspace_type?: string;
   machine_name?: string;
+  firstMessage?: string; // First user message preview (truncated to 100 chars)
 }
 
 interface GroupedSessions {
@@ -356,7 +357,6 @@ const SessionGroup: React.FC<SessionGroupProps> = ({
             <button
               className={`session-item w-100 p-2 ${selectedSessionId === session.id ? 'selected' : ''}`}
               onClick={() => onSessionClick(session.id)}
-              title={session.title} // Issue #66: Show session name on hover
             >
               <span className="session-id text-truncate">
                 {session.workspace_type === 'remote' ? (
@@ -377,6 +377,13 @@ const SessionGroup: React.FC<SessionGroupProps> = ({
                 </span>{' '}
                 {/* Issue #66: i18n for "req" */}
               </span>
+              {/* Custom tooltip with delay */}
+              <div className="session-tooltip">
+                <div className="session-tooltip-title">{session.title}</div>
+                {session.firstMessage && (
+                  <div className="session-tooltip-preview">{session.firstMessage}</div>
+                )}
+              </div>
             </button>
           </li>
         ))}

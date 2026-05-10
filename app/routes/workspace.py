@@ -497,6 +497,7 @@ def list_sessions():
         # Compute real-time stats from session_messages for accuracy
         session_ids = [s["session_id"] for s in sessions]
         session_stats_map = {}
+        first_message_map = {}
         if session_ids:
             try:
                 p = get_param_placeholder()
@@ -514,6 +515,42 @@ def list_sessions():
                 stats_rows = db.fetch_all(stats_query, tuple(session_ids))
                 for row in stats_rows:
                     session_stats_map[row["session_id"]] = row
+
+                # Get first user message for each session (for tooltip preview)
+                if is_postgresql():
+                    # PostgreSQL: use DISTINCT ON for efficient first-row-per-group
+                    first_msg_query = f"""
+                        SELECT DISTINCT ON (session_id) session_id, content
+                        FROM session_messages
+                        WHERE session_id IN ({sid_placeholders})
+                          AND role = 'user'
+                          AND content IS NOT NULL
+                          AND content != ''
+                        ORDER BY session_id, timestamp ASC
+                    """
+                    first_msg_rows = db.fetch_all(first_msg_query, tuple(session_ids))
+                else:
+                    # SQLite: use subquery with MIN(timestamp)
+                    first_msg_query = f"""
+                        SELECT sm.session_id, sm.content
+                        FROM session_messages sm
+                        INNER JOIN (
+                            SELECT session_id, MIN(timestamp) as first_ts
+                            FROM session_messages
+                            WHERE session_id IN ({sid_placeholders})
+                              AND role = 'user'
+                              AND content IS NOT NULL
+                              AND content != ''
+                            GROUP BY session_id
+                        ) first ON sm.session_id = first.session_id AND sm.timestamp = first.first_ts
+                    """
+                    first_msg_rows = db.fetch_all(first_msg_query, tuple(session_ids))
+
+                for row in first_msg_rows:
+                    # Truncate content to 100 chars for tooltip preview
+                    content = row.get("content", "")
+                    if content:
+                        first_message_map[row["session_id"]] = content[:100] if len(content) > 100 else content
             except Exception as e:
                 logger.warning(f"Failed to compute session stats from session_messages: {e}")
 
@@ -525,6 +562,7 @@ def list_sessions():
             actual_request_count = int(stats["actual_request_count"] or 0) if stats else 0
             actual_total_tokens = int(stats["actual_total_tokens"] or 0) if stats else 0
             actual_updated_at = stats["actual_updated_at"] if stats else None
+            first_message = first_message_map.get(s["session_id"])
 
             formatted_sessions.append(
                 {
@@ -532,6 +570,7 @@ def list_sessions():
                     "session_id": s["session_id"],
                     "session_type": s.get("session_type") or "chat",
                     "title": s.get("title") or f"{s['tool_name']} - {s['session_id'][:8]}",
+                    "first_message": first_message,
                     "tool_name": s["tool_name"],
                     "host_name": s.get("host_name") or "localhost",
                     "user_id": s.get("user_id"),
