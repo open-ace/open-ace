@@ -48,6 +48,14 @@
         "message": "Route /api/workspace/prompts/<int:template_id>/render has ID param(s) ['template_id'] but no ownership check"
     },
     {
+        "key": "SEC002|app/routes/workspace.py|/api/workspace/prompts/<int:template_id>/copy",
+        "rule": "SEC002",
+        "file": "app/routes/workspace.py",
+        "line": 332,
+        "endpoint": "/api/workspace/prompts/<int:template_id>/copy",
+        "message": "Route /api/workspace/prompts/<int:template_id>/copy has ID param(s) ['template_id'] but no ownership check"
+    },
+    {
         "key": "SEC002|app/routes/workspace.py|/api/workspace/shares/<share_id>",
         "rule": "SEC002",
         "file": "app/routes/workspace.py",

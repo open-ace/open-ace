@@ -2,41 +2,85 @@
  * AssistPanel Component - Right panel for Work Mode
  *
  * Features:
- * - Quick access to prompts
+ * - Quick access to prompts with search and category filter
  * - AI tools shortcuts
  * - Help documentation
  */
 
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { cn } from '@/utils';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import { promptsApi } from '@/api';
-import type { PromptTemplate } from '@/api';
+import type { PromptTemplate, CategoryInfo } from '@/api/prompts';
 import { Loading, EmptyState, SimpleTabs, useToast } from '@/components/common';
 import { DocumentViewer } from './DocumentViewer';
-import './DocumentViewer.css';
+import { PromptDetailModal } from './PromptDetailModal';
+import './AssistPanel.css';
 
 interface AssistPanelProps {
   collapsed?: boolean;
 }
 
+// Debounce delay in milliseconds
+const DEBOUNCE_DELAY = 300;
+
 export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) => {
   const language = useLanguage();
-  const navigate = useNavigate();
   const toast = useToast();
   const [activeTab, setActiveTab] = useState('prompts');
   const [prompts, setPrompts] = useState<PromptTemplate[]>([]);
+  const [categories, setCategories] = useState<CategoryInfo[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState<string>('');
+  const [searchInput, setSearchInput] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [promptsLoading, setPromptsLoading] = useState(true);
   const [docViewerOpen, setDocViewerOpen] = useState(false);
   const [selectedDocId, setSelectedDocId] = useState<string>('');
+  const [selectedPrompt, setSelectedPrompt] = useState<PromptTemplate | null>(null);
+  const [promptModalOpen, setPromptModalOpen] = useState(false);
+  const [copiedPromptId, setCopiedPromptId] = useState<number | null>(null);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Debounce search input
+  useEffect(() => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    debounceTimerRef.current = setTimeout(() => {
+      setDebouncedSearch(searchInput);
+    }, DEBOUNCE_DELAY);
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, [searchInput]);
+
+  // Fetch categories
+  useEffect(() => {
+    const fetchCategories = async () => {
+      try {
+        const result = await promptsApi.getCategories();
+        setCategories(result);
+      } catch (err) {
+        console.error('Failed to fetch categories:', err);
+      }
+    };
+    fetchCategories();
+  }, []);
 
   // Fetch prompts
   useEffect(() => {
     const fetchPrompts = async () => {
       try {
-        const result = await promptsApi.list({ page: 1, limit: 10 });
+        setPromptsLoading(true);
+        const result = await promptsApi.list({
+          page: 1,
+          limit: 100, // Show all prompts
+          category: selectedCategory || undefined,
+          search: debouncedSearch || undefined,
+        });
+        // Already sorted by use_count DESC from backend
         setPrompts(result.templates);
       } catch (err) {
         console.error('Failed to fetch prompts:', err);
@@ -45,7 +89,22 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
       }
     };
     fetchPrompts();
-  }, []);
+  }, [selectedCategory, debouncedSearch]);
+
+  // Refetch prompts after copy (to update use_count order)
+  const refetchPrompts = async () => {
+    try {
+      const result = await promptsApi.list({
+        page: 1,
+        limit: 100,
+        category: selectedCategory || undefined,
+        search: debouncedSearch || undefined,
+      });
+      setPrompts(result.templates);
+    } catch (err) {
+      console.error('Failed to refetch prompts:', err);
+    }
+  };
 
   // AI Tools list
   const aiTools = [
@@ -106,8 +165,21 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
     },
   ];
 
+  // Check if prompt has required variables
+  const hasRequiredVariables = (prompt: PromptTemplate): boolean => {
+    return prompt.variables?.some((v) => v.required) ?? false;
+  };
+
+  const handleSearchChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchInput(e.target.value);
+  }, []);
+
+  const handleCategoryClick = (category: string) => {
+    setSelectedCategory(category === selectedCategory ? '' : category);
+  };
+
   const handleToolClick = (url: string) => {
-    navigate(url);
+    window.location.href = url;
   };
 
   const handleDocClick = (docId: string) => {
@@ -115,19 +187,38 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
     setDocViewerOpen(true);
   };
 
-  const handleCopyPrompt = async (content: string, promptName: string) => {
+  // Open prompt detail modal
+  const handlePromptClick = (prompt: PromptTemplate) => {
+    setSelectedPrompt(prompt);
+    setPromptModalOpen(true);
+  };
+
+  // Direct copy (for prompts without required variables)
+  const handleDirectCopy = async (e: React.MouseEvent, prompt: PromptTemplate) => {
+    e.stopPropagation();
+    if (hasRequiredVariables(prompt)) return; // Cannot copy directly
+
     try {
-      await navigator.clipboard.writeText(content);
-      toast.success(t('copied', language) || 'Copied!', promptName);
+      await navigator.clipboard.writeText(prompt.content);
+      // Increment use count
+      await promptsApi.copy(prompt.id);
+      // Show copied feedback on button
+      setCopiedPromptId(prompt.id);
+      setTimeout(() => setCopiedPromptId(null), 1500);
+      // Show toast
+      toast.success(t('copied', language), prompt.name);
+      // Refetch to update order
+      refetchPrompts();
     } catch (err) {
       console.error('Failed to copy:', err);
-      toast.error(t('copyFailed', language) || 'Copy failed', promptName);
+      toast.error(t('copyFailed', language) || 'Copy failed');
     }
   };
 
-  const handlePromptClick = (promptId: number) => {
-    // Open in new window to avoid unloading the workspace iframe
-    window.open(`/work/prompts?highlight=${promptId}`, '_blank');
+  // Truncate content for tooltip preview
+  const truncateContent = (content: string, maxLength: number = 150): string => {
+    if (content.length <= maxLength) return content;
+    return content.slice(0, maxLength) + '...';
   };
 
   if (collapsed) {
@@ -137,31 +228,93 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
   // Prompts Tab Content
   const PromptsContent = (
     <div className="assist-prompts">
+      {/* Search Box */}
+      <div className="prompt-search mb-2">
+        <div className="input-group input-group-sm">
+          <span className="input-group-text">
+            <i className="bi bi-search" />
+          </span>
+          <input
+            type="text"
+            className="form-control"
+            placeholder={t('searchPrompts', language) || 'Search prompts...'}
+            value={searchInput}
+            onChange={handleSearchChange}
+          />
+        </div>
+      </div>
+
+      {/* Category Filters */}
+      {categories.length > 0 && (
+        <div className="prompt-categories mb-2">
+          {categories.map((cat) => (
+            <button
+              key={cat.category}
+              className={`category-filter-btn ${selectedCategory === cat.category ? 'active' : ''}`}
+              onClick={() => handleCategoryClick(cat.category)}
+            >
+              {cat.category}
+              <span className="category-count">{cat.count}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Prompts List */}
       {promptsLoading ? (
         <Loading size="sm" text={t('loading', language)} />
       ) : prompts.length > 0 ? (
-        <ul className="assist-items list-unstyled">
-          {prompts.slice(0, 5).map((prompt) => (
+        <ul className="prompt-list list-unstyled">
+          {prompts.map((prompt) => (
             <li key={prompt.id}>
               <div
-                className="assist-item assist-item-clickable"
-                onClick={() => handlePromptClick(prompt.id)}
-                title={t('clickToView', language) || 'Click to view details'}
+                className="prompt-item"
+                onClick={() => handlePromptClick(prompt)}
               >
-                <div className="assist-item-header">
-                  <span className="assist-item-title">{prompt.name}</span>
+                {/* Left: Name with tooltip */}
+                <div className="prompt-item-name-wrapper">
+                  <span className="prompt-item-name">{prompt.name}</span>
+                  {/* Fast CSS tooltip */}
+                  <div className="prompt-tooltip-fast">
+                    <div className="prompt-tooltip-content">
+                      {truncateContent(prompt.content)}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right: Action buttons */}
+                <div className="prompt-item-actions">
+                  {/* Fill variables button */}
                   <button
-                    className="btn btn-sm btn-link p-0"
+                    className={`prompt-action-btn ${hasRequiredVariables(prompt) ? 'active' : 'disabled'}`}
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleCopyPrompt(prompt.content, prompt.name);
+                      handlePromptClick(prompt);
                     }}
-                    title={t('copy', language)}
+                    title={t('fillVariables', language) || 'Fill variables'}
+                    disabled={false}
                   >
-                    <i className="bi bi-clipboard" />
+                    <i className="bi bi-input-cursor-text" />
+                  </button>
+
+                  {/* Copy button */}
+                  <button
+                    className={`prompt-action-btn ${copiedPromptId === prompt.id ? 'copied' : hasRequiredVariables(prompt) ? 'disabled' : 'active'}`}
+                    onClick={(e) => handleDirectCopy(e, prompt)}
+                    title={hasRequiredVariables(prompt)
+                      ? (t('fillVariablesFirst', language) || 'Fill variables first')
+                      : copiedPromptId === prompt.id
+                        ? t('copied', language)
+                        : (t('copy', language) || 'Copy')}
+                    disabled={hasRequiredVariables(prompt)}
+                  >
+                    {copiedPromptId === prompt.id ? (
+                      <span className="copied-text">{t('copied', language)}</span>
+                    ) : (
+                      <i className="bi bi-clipboard" />
+                    )}
                   </button>
                 </div>
-                {prompt.category && <span className="badge bg-secondary">{prompt.category}</span>}
               </div>
             </li>
           ))}
@@ -169,13 +322,6 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
       ) : (
         <EmptyState icon="bi-file-text" title={t('noPromptsFound', language)} />
       )}
-      <button
-        className="btn btn-link btn-sm mt-2"
-        onClick={() => window.open('/work/prompts', '_blank')}
-      >
-        <i className="bi bi-arrow-right me-1" />
-        {t('viewAll', language)}
-      </button>
     </div>
   );
 
@@ -189,7 +335,7 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
               className="assist-item assist-item-clickable"
               onClick={() => handleToolClick(tool.url)}
             >
-              <i className={cn('bi', tool.icon, 'me-2')} />
+              <i className={`bi ${tool.icon} me-2`} />
               <span>{tool.name}</span>
             </button>
           </li>
@@ -208,7 +354,7 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
               className="assist-item assist-item-clickable"
               onClick={() => handleDocClick(doc.id)}
             >
-              <i className={cn('bi', doc.icon, 'me-2')} />
+              <i className={`bi ${doc.icon} me-2`} />
               <span>{doc.title}</span>
             </button>
           </li>
@@ -246,6 +392,12 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
         isOpen={docViewerOpen}
         onClose={() => setDocViewerOpen(false)}
         docId={selectedDocId}
+      />
+      <PromptDetailModal
+        isOpen={promptModalOpen}
+        onClose={() => setPromptModalOpen(false)}
+        prompt={selectedPrompt}
+        onCopySuccess={refetchPrompts}
       />
     </div>
   );

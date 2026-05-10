@@ -328,6 +328,25 @@ def render_prompt(template_id):
         return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
+@workspace_bp.route("/prompts/<int:template_id>/copy", methods=["POST"])
+def copy_prompt(template_id):
+    """Record a prompt copy action (increments use count)."""
+    try:
+        library = get_prompt_library()
+        template = library.get_template(template_id)
+
+        if not template:
+            return jsonify({"success": False, "error": "Template not found"}), 404
+
+        # Increment use count
+        library.increment_use_count(template_id)
+
+        return jsonify({"success": True})
+    except Exception as e:
+        logger.error(f"Error recording prompt copy: {e}")
+        return jsonify({"success": False, "error": "Internal server error"}), 500
+
+
 @workspace_bp.route("/prompts/categories", methods=["GET"])
 def get_prompt_categories():
     """Get prompt categories with counts."""
@@ -550,7 +569,9 @@ def list_sessions():
                     # Truncate content to 100 chars for tooltip preview
                     content = row.get("content", "")
                     if content:
-                        first_message_map[row["session_id"]] = content[:100] if len(content) > 100 else content
+                        first_message_map[row["session_id"]] = (
+                            content[:100] if len(content) > 100 else content
+                        )
             except Exception as e:
                 logger.warning(f"Failed to compute session stats from session_messages: {e}")
 

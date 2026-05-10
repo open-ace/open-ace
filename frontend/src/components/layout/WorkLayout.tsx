@@ -154,7 +154,6 @@ export const WorkLayout: React.FC<WorkLayoutProps> = ({ children }) => {
         {/* Right Panel - Assist Panel */}
         <aside className={cn('work-right-panel', rightPanelCollapsed && 'collapsed')}>
           <div className="panel-header">
-            <span className="panel-title">{t('tools', language)}</span>
             <button
               className="panel-toggle"
               onClick={() => setRightPanelCollapsed(!rightPanelCollapsed)}

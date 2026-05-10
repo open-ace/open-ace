@@ -2,3 +2,5 @@
 {"rule": "SQL003", "file": "app/routes/workspace.py", "line": 436, "message": "LIKE query without escape_like() — special characters in user input will be treated as wildcards"}
 {"rule": "SQL003", "file": "app/routes/workspace.py", "line": 455, "message": "LIKE query without escape_like() — special characters in user input will be treated as wildcards"}
 {"rule": "SQL003", "file": "app/routes/workspace.py", "line": 456, "message": "LIKE query without escape_like() — special characters in user input will be treated as wildcards"}
+{"rule": "SQL003", "file": "app/routes/workspace.py", "line": 475, "message": "LIKE query without escape_like() — special characters in user input will be treated as wildcards"}
+{"rule": "SQL003", "file": "app/routes/workspace.py", "line": 476, "message": "LIKE query without escape_like() — special characters in user input will be treated as wildcards"}

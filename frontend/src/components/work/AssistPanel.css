@@ -1,0 +1,404 @@
+/**
+ * AssistPanel Styles
+ */
+
+/* Assist Panel Container - styles defined in main.css */
+
+/* Prompts Tab Content */
+.assist-prompts {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Prompt Search - Match session list style */
+.prompt-search {
+  margin-bottom: var(--spacing-sm);
+
+  .input-group {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    overflow: hidden;
+  }
+
+  .input-group-text {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    padding: var(--spacing-sm) var(--spacing-sm);
+  }
+
+  .form-control {
+    background: transparent;
+    border: none;
+    padding: var(--spacing-sm);
+    font-size: var(--font-size-sm);
+
+    &:focus {
+      outline: none;
+      box-shadow: none;
+    }
+
+    &::placeholder {
+      color: var(--text-muted);
+      opacity: 0.7;
+    }
+  }
+}
+
+/* Category Filters */
+.prompt-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: var(--spacing-sm);
+  flex-shrink: 0;
+}
+
+.category-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+
+  &:hover {
+    background: var(--bg-hover);
+    border-color: var(--color-primary);
+  }
+
+  &.active {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+    color: white;
+
+    .category-count {
+      background: rgba(255, 255, 255, 0.3);
+    }
+  }
+
+  .category-count {
+    font-size: 10px;
+    background: var(--bg-muted);
+    padding: 1px 4px;
+    border-radius: 6px;
+    min-width: 18px;
+    text-align: center;
+  }
+}
+
+/* Prompt List - Full height like session list */
+.prompt-list {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  padding: var(--spacing-xs) 0;
+
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 3px;
+
+    &:hover {
+      background: var(--text-muted);
+    }
+  }
+}
+
+.prompt-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-sm) var(--spacing-md);
+  margin-bottom: 4px;
+  background: var(--bg-secondary);
+  border-radius: var(--border-radius);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  border: 1px solid transparent;
+  min-height: 40px;
+
+  &:hover {
+    background: var(--bg-hover);
+    border-color: var(--color-primary-light);
+
+    .prompt-item-name {
+      color: var(--color-primary);
+    }
+
+    .prompt-tooltip-fast {
+      opacity: 1;
+      visibility: visible;
+      transform: translateY(0);
+    }
+  }
+
+  &:active {
+    background: var(--bg-tertiary);
+  }
+}
+
+/* Prompt Item Name with Tooltip */
+.prompt-item-name-wrapper {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.prompt-item-name {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+  max-width: 100%;
+  transition: color var(--transition-fast);
+}
+
+/* Fast CSS Tooltip - Show below to avoid being clipped at top */
+.prompt-tooltip-fast {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 1000;
+  min-width: 200px;
+  max-width: 280px;
+  padding: 8px 12px;
+  background: var(--bg-tooltip, #212529);
+  color: white;
+  border-radius: var(--border-radius);
+  font-size: 12px;
+  line-height: 1.4;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(4px);
+  transition: opacity 0.05s ease, visibility 0.05s ease, transform 0.05s ease;
+  pointer-events: none;
+  margin-top: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+
+  /* Arrow pointing up */
+  &::before {
+    content: '';
+    position: absolute;
+    bottom: 100%;
+    left: 12px;
+    border: 6px solid transparent;
+    border-bottom-color: var(--bg-tooltip, #212529);
+  }
+}
+
+.prompt-tooltip-content {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Prompt Item Actions - Fixed position */
+.prompt-item-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: 8px;
+  flex-shrink: 0;
+}
+
+.prompt-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--border-radius-sm);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  overflow: hidden;
+
+  &.active {
+    color: var(--color-primary);
+
+    &:hover {
+      background: var(--color-primary-light);
+    }
+
+    &:active {
+      background: var(--bg-tertiary);
+    }
+  }
+
+  &.copied {
+    color: var(--color-success, #198754);
+    background: rgba(25, 135, 84, 0.15);
+    width: 60px;
+    border-radius: var(--border-radius);
+
+    .copied-text {
+      font-size: 12px;
+      font-weight: 500;
+    }
+  }
+
+  &.disabled {
+    color: var(--text-muted);
+    opacity: 0.5;
+    cursor: not-allowed;
+
+    &:hover {
+      background: transparent;
+    }
+  }
+
+  i {
+    font-size: 14px;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Dark mode support */
+[data-theme="dark"] {
+  .prompt-search .input-group {
+    background: var(--bg-secondary);
+    border-color: var(--border-color);
+  }
+
+  .category-filter-btn {
+    background: var(--bg-secondary);
+    border-color: var(--border-color);
+    color: var(--text-secondary);
+
+    &:hover {
+      background: var(--bg-hover);
+    }
+
+    .category-count {
+      background: var(--bg-muted);
+    }
+  }
+
+  .prompt-item {
+    background: var(--bg-secondary);
+
+    &:hover {
+      background: var(--bg-hover);
+    }
+  }
+
+  .prompt-tooltip-fast {
+    background: var(--bg-tooltip);
+
+    &::before {
+      border-bottom-color: var(--bg-tooltip);
+    }
+  }
+}
+
+/* Prompt Detail Modal Styles */
+.prompt-detail {
+  .prompt-variables-section {
+    background: var(--bg-secondary);
+    padding: var(--spacing-md);
+    border-radius: var(--border-radius);
+
+    h6 {
+      color: var(--text-primary);
+      margin-bottom: var(--spacing-md);
+    }
+  }
+
+  .prompt-variables-grid {
+    display: grid;
+    gap: var(--spacing-md);
+  }
+
+  .prompt-variable-item {
+    label {
+      display: block;
+      margin-bottom: var(--spacing-xs);
+
+      .text-danger {
+        color: var(--color-danger);
+      }
+
+      .text-muted {
+        color: var(--text-muted);
+        font-size: 11px;
+      }
+    }
+
+    input {
+      width: 100%;
+    }
+  }
+
+  .prompt-content-section {
+    h6 {
+      color: var(--text-primary);
+    }
+  }
+
+  .prompt-content-box {
+    background: var(--bg-code);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    padding: var(--spacing-md);
+    max-height: 300px;
+    overflow-y: auto;
+  }
+
+  .prompt-content-text {
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: var(--font-size-sm);
+    line-height: 1.5;
+    color: var(--text-primary);
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin: 0;
+  }
+}
+
+/* Dark mode for prompt detail */
+[data-theme="dark"] .prompt-detail {
+  .prompt-variables-section {
+    background: var(--bg-secondary);
+
+    h6 {
+      color: var(--text-primary);
+    }
+  }
+
+  .prompt-content-box {
+    background: var(--bg-code);
+    border-color: var(--border-color);
+  }
+
+  .prompt-content-text {
+    color: var(--text-primary);
+  }
+}

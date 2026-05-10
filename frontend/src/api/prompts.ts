@@ -171,4 +171,14 @@ export const promptsApi = {
     );
     return response.data;
   },
+
+  /**
+   * Record a prompt copy (increments use count)
+   */
+  async copy(id: number): Promise<boolean> {
+    const response = await apiClient.post<{ success: boolean }>(
+      `/api/workspace/prompts/${id}/copy`
+    );
+    return response.success;
+  },
 };
