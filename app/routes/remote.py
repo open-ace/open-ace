@@ -622,7 +622,19 @@ def stream_session_output(session_id):
                             last_index += 1
                             continue
                         if stream == "stderr":
-                            # Forward stderr as error events so the frontend
+                            # Skip harmless Node.js warnings to avoid triggering
+                            # the frontend's "reconnect" error state.
+                            if any(
+                                pat in data
+                                for pat in (
+                                    "trace-warnings",
+                                    "ExperimentalWarning",
+                                    "DeprecationWarning",
+                                )
+                            ):
+                                last_index += 1
+                                continue
+                            # Forward genuine stderr as error events so the frontend
                             # can display CLI errors instead of silently hanging.
                             yield f"data: {json.dumps({'type': 'error', 'data': data})}\n\n"
                             last_index += 1
@@ -798,6 +810,19 @@ def agent_message():
     data = request.get_json() or {}
     msg_type = data.get("type")
 
+    # Debug: log all non-poll agent messages
+    if msg_type not in ("poll", "heartbeat"):
+        import sys
+
+        status = data.get("status", "")
+        stream = data.get("stream", "")
+        d = (data.get("data") or "")[:200]
+        print(
+            f"AGENT-DEBUG type={msg_type} sid={(data.get('session_id') or '')[:8]} status={status} stream={stream} data={d}",
+            file=sys.stderr,
+            flush=True,
+        )
+
     if not msg_type:
         return jsonify({"error": "type is required"}), 400
 
@@ -833,6 +858,9 @@ def agent_message():
         stream = data.get("stream", "stdout")
         is_complete = data.get("is_complete", False)
 
+        if stream == "stderr" and output_data:
+            logger.info("Agent stderr [%s]: %s", (session_id or "")[:8], output_data[:200])
+
         if session_id:
             session_mgr = get_remote_session_manager()
             session_mgr.process_session_output(
@@ -848,6 +876,8 @@ def agent_message():
         session_id = data.get("session_id")
         status = data.get("status")
         pid = data.get("pid")
+
+        logger.info("Agent session_status [%s]: status=%s", (session_id or "")[:8], status)
 
         if session_id and status:
             session_mgr = get_remote_session_manager()
@@ -997,15 +1027,29 @@ def llm_proxy(path=""):
         target_base = provider_urls.get(provider, "https://api.openai.com")
 
     if path:
-        # Avoid double version prefix (e.g., base_url=.../v1 + path=v1/...)
+        # Strip OpenAI-style /v1 prefix — the SDK adds it but base_url
+        # already includes the provider's own version prefix (e.g. /v4)
+        import re as _re
+
         path_parts = path.split("/", 1)
-        if len(path_parts) > 1 and target_base.endswith("/" + path_parts[0]):
+        if len(path_parts) > 1 and _re.match(r"v\d+", path_parts[0]):
             target_url = f"{target_base}/{path_parts[1]}"
         else:
             target_url = f"{target_base}/{path}"
     else:
         # Handle direct path in the request URL
         target_url = f"{target_base}{request.path.split('/llm-proxy')[-1]}"
+
+    # Log model from request body
+    try:
+        _body_json = json.loads(request.get_data())
+        _model = _body_json.get("model", "?")
+    except Exception:
+        _model = "?"
+    logger.info(f"LLM proxy: {request.method} -> {target_url} model={_model} provider={provider}")
+
+    # Log response status for debugging
+    _orig_target_url = target_url
 
     # Forward the request
     try:
@@ -1037,6 +1081,16 @@ def llm_proxy(path=""):
             timeout=120,
             proxies={"http": None, "https": None},  # type: ignore[dict-item]
         )
+
+        if resp.status_code >= 400:
+            peek = (
+                resp.content[:500]
+                if not resp.headers.get("Content-Type", "").startswith("text/event-stream")
+                else b""
+            )
+            logger.error(
+                f"LLM proxy error {resp.status_code} from {_orig_target_url}: {peek.decode('utf-8', errors='replace')}"
+            )
 
         # Handle streaming response
         content_type = resp.headers.get("Content-Type", "")
