@@ -717,18 +717,20 @@ def update_agent_sessions_stats(messages: list) -> int:
                             timestamp = now
 
                         # Deduplicate by (session_id, role, timestamp) + message_id if available
+                        # Note: metadata is TEXT type, use LIKE pattern matching instead of JSONB ->>
                         if msg_id:
+                            # Pattern match for message_id in JSON-like metadata string
                             check_sql = f"""
                                 SELECT id FROM session_messages
                                 WHERE session_id = {placeholder}
                                 AND role = {placeholder}
                                 AND timestamp = {placeholder}
-                                AND (metadata->>'message_id') = {placeholder}
+                                AND metadata LIKE {placeholder}
                             """
                             _execute(
                                 cursor,
                                 check_sql,
-                                (session_id, msg.get("role"), timestamp, msg_id),
+                                (session_id, msg.get("role"), timestamp, f'%"message_id": "{msg_id}"%'),
                             )
                         else:
                             check_sql = f"""
