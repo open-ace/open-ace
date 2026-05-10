@@ -50,6 +50,7 @@ export interface SessionFilters {
   status?: string;
   session_type?: string;
   search?: string;
+  search_days?: number;  // Limit message search to recent N days
 }
 
 export interface SessionsListResponse {
@@ -96,6 +97,7 @@ export const sessionsApi = {
     if (filters.status) params.status = filters.status;
     if (filters.session_type) params.session_type = filters.session_type;
     if (filters.search) params.search = filters.search;
+    if (filters.search_days) params.search_days = String(filters.search_days);
 
     const response = await apiClient.get<SessionsListResponse>('/api/workspace/sessions', params);
     return response;

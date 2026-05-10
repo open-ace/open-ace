@@ -27,6 +27,7 @@ DEFAULTS = {
     "output_buffer_size": 4096,
     "max_sessions": 5,
     "log_level": "INFO",
+    "skip_ssl_verify": True,
 }
 
 CONFIG_DIR = Path.home() / ".open-ace-agent"
@@ -75,6 +76,10 @@ class AgentConfig:
             "OPENACE_RECONNECT_MAX_DELAY": ("reconnect_max_delay", float),
             "OPENACE_MAX_SESSIONS": ("max_sessions", int),
             "OPENACE_LOG_LEVEL": ("log_level", str),
+            "OPENACE_SKIP_SSL_VERIFY": (
+                "skip_ssl_verify",
+                lambda v: v.lower() in ("true", "1", "yes"),
+            ),
         }
 
         for env_key, (config_key, type_fn) in env_overrides.items():
@@ -155,6 +160,11 @@ class AgentConfig:
     def output_buffer_size(self) -> int:
         """Read buffer size for subprocess stdout/stderr."""
         return self._data.get("output_buffer_size", DEFAULTS["output_buffer_size"])
+
+    @property
+    def skip_ssl_verify(self) -> bool:
+        """Skip SSL certificate verification (for self-signed certs)."""
+        return self._data.get("skip_ssl_verify", DEFAULTS["skip_ssl_verify"])
 
     @property
     def max_sessions(self) -> int:

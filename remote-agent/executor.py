@@ -601,6 +601,15 @@ class ProcessExecutor:
         adapter_env = adapter.get_env_vars(proxy_url, proxy_token)
         env.update(adapter_env)
 
+        # Disable SSL verification for Node.js CLI tools when using HTTPS
+        # (needed for self-signed or private CA certificates)
+        if self.server_url.startswith("https://"):
+            env["NODE_TLS_REJECT_UNAUTHORIZED"] = "0"
+
+        # Silence Node.js deprecation/experimental warnings so they don't
+        # pollute stderr and show up as errors in the frontend UI.
+        env["NODE_NO_WARNINGS"] = "1"
+
         # Force UTF-8 encoding for subprocess I/O (important on Windows)
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUTF8"] = "1"

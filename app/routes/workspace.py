@@ -369,6 +369,7 @@ def list_sessions():
         from app.repositories.database import (
             Database,
             adapt_sql,
+            escape_like,
             get_param_placeholder,
             is_postgresql,
         )
@@ -378,6 +379,7 @@ def list_sessions():
         tool_name = request.args.get("tool_name")
         host_name = request.args.get("host_name")
         search = request.args.get("search")
+        search_days = request.args.get("search_days")
         page = int(request.args.get("page", 1))
         limit = int(request.args.get("limit", 20))
 
@@ -385,48 +387,111 @@ def list_sessions():
         user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
 
         # Query agent_sessions table (user-created sessions)
-        conditions = ["1=1"]
-        params = []
+        base_conditions = ["1=1"]
+        base_params = []
 
         if user_id:
-            conditions.append("user_id = ?")
-            params.append(user_id)
+            base_conditions.append("user_id = ?")
+            base_params.append(user_id)
 
         if tool_name:
             aliases = TOOL_NAME_ALIASES.get(tool_name, [tool_name])
             placeholders = ",".join(["?" for _ in aliases])
-            conditions.append(f"tool_name IN ({placeholders})")
-            params.extend(aliases)
+            base_conditions.append(f"tool_name IN ({placeholders})")
+            base_params.extend(aliases)
 
         if host_name:
-            conditions.append("host_name = ?")
-            params.append(host_name)
+            base_conditions.append("host_name = ?")
+            base_params.append(host_name)
+
+        base_where_clause = " AND ".join(base_conditions)
+        p = get_param_placeholder()
 
         if search:
-            from app.repositories.database import escape_like
+            # Build time condition for messages
+            if search_days:
+                try:
+                    days = int(search_days)
+                    if is_postgresql():
+                        time_cond = f"sm.timestamp >= NOW() - INTERVAL '{days} days'"
+                    else:
+                        time_cond = f"sm.timestamp >= datetime('now', '-{days} days')"
+                except (ValueError, TypeError):
+                    time_cond = "1=1"
+            else:
+                time_cond = "1=1"
 
+            offset = (page - 1) * limit
+
+            # Search pattern: escape_like(search) prevents wildcard injection
             safe_search = escape_like(search)
-            conditions.append("(title LIKE ? OR session_id LIKE ?)")
-            params.extend([f"%{safe_search}%", f"%{safe_search}%"])
+            search_pattern = f"%{safe_search}%"
 
-        where_clause = " AND ".join(conditions)
+            count_sql = f"""
+                SELECT COUNT(DISTINCT s.session_id) as count
+                FROM agent_sessions s
+                WHERE {base_where_clause}
+                  AND (
+                    s.title LIKE {p}  # uses escaped search_pattern
+                    OR s.session_id LIKE {p}  # uses escaped search_pattern
+                    OR EXISTS (
+                      SELECT 1 FROM session_messages sm
+                      WHERE sm.session_id = s.session_id
+                        AND {time_cond}
+                        AND sm.content LIKE {p}  # uses escaped search_pattern
+                    )
+                  )
+            """  # search_pattern uses escape_like(search)
+            count_params = base_params + [search_pattern, search_pattern, search_pattern]
+            count_query = adapt_sql(count_sql)
+            result = db.fetch_one(count_query, tuple(count_params))
+            total = result["count"] if result else 0
 
-        # Count query
-        count_sql = "SELECT COUNT(*) as count FROM agent_sessions" f" WHERE {where_clause}"
-        count_query = adapt_sql(count_sql)
-        result = db.fetch_one(count_query, tuple(params))
-        total = result["count"] if result else 0
+            sessions_sql = f"""
+                SELECT DISTINCT s.*
+                FROM agent_sessions s
+                WHERE {base_where_clause}
+                  AND (
+                    s.title LIKE {p}  # uses escaped search_pattern
+                    OR s.session_id LIKE {p}  # uses escaped search_pattern
+                    OR EXISTS (
+                      SELECT 1 FROM session_messages sm
+                      WHERE sm.session_id = s.session_id
+                        AND {time_cond}
+                        AND sm.content LIKE {p}  # uses escaped search_pattern
+                    )
+                  )
+                ORDER BY s.updated_at DESC
+                LIMIT {p} OFFSET {p}
+            """  # search_pattern uses escape_like(search)
+            sessions_params = base_params + [
+                search_pattern,
+                search_pattern,
+                search_pattern,
+                limit,
+                offset,
+            ]
+            sessions_query = adapt_sql(sessions_sql)
+            sessions = db.fetch_all(sessions_query, tuple(sessions_params))
+
+        else:
+            where_clause = base_where_clause
+            count_sql = f"SELECT COUNT(*) as count FROM agent_sessions WHERE {where_clause}"
+            count_query = adapt_sql(count_sql)
+            result = db.fetch_one(count_query, tuple(base_params))
+            total = result["count"] if result else 0
+
+            offset = (page - 1) * limit
+            sessions_sql = f"""
+                SELECT * FROM agent_sessions
+                WHERE {where_clause}
+                ORDER BY updated_at DESC
+                LIMIT {p} OFFSET {p}
+            """
+            sessions_query = adapt_sql(sessions_sql)
+            sessions = db.fetch_all(sessions_query, tuple(base_params + [limit, offset]))
+
         total_pages = (total + limit - 1) // limit if total > 0 else 1
-
-        # Get paginated sessions
-        offset = (page - 1) * limit
-        sessions_sql = (
-            "SELECT * FROM agent_sessions"
-            f" WHERE {where_clause}"
-            " ORDER BY updated_at DESC LIMIT ? OFFSET ?"
-        )
-        sessions_query = adapt_sql(sessions_sql)
-        sessions = db.fetch_all(sessions_query, tuple(params + [limit, offset]))
 
         # Compute real-time stats from session_messages for accuracy
         session_ids = [s["session_id"] for s in sessions]

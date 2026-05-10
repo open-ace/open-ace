@@ -219,7 +219,7 @@ try {
 
     $responseFile = "$env:TEMP\agent_response_$([System.Guid]::NewGuid()).json"
     $curlPath = "$env:SYSTEMROOT\System32\curl.exe"
-    & $curlPath -s -X POST -H "Content-Type: application/json" -d "@$bodyFile" -o $responseFile "$ServerUrl/api/remote/agent/register" 2>&1 | Out-Null
+    & $curlPath -s --ssl-no-revoke -X POST -H "Content-Type: application/json" -d "@$bodyFile" -o $responseFile "$ServerUrl/api/remote/agent/register"
 
     if (-not (Test-Path $responseFile)) {
         Write-Host "[ERROR] Registration failed: no response from server" -ForegroundColor Red

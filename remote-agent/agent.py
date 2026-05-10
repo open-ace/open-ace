@@ -178,6 +178,7 @@ class RemoteAgent:
                 json=message,
                 headers=headers,
                 timeout=30,
+                verify=not self.config.skip_ssl_verify,
             )
             if resp.status_code == 200:
                 return resp.json()
