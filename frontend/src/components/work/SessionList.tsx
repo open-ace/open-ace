@@ -4,11 +4,11 @@
  * Features:
  * - Display user's AI session history
  * - Group by date (Today, Yesterday, This Week, Earlier)
- * - Search and filter
+ * - Search with debounce (searches title and message content within 3 days)
  * - Click to open session in main area
  */
 
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import { useSessions, useSession, useRestoreSession } from '@/hooks';
@@ -16,6 +16,11 @@ import { Loading, EmptyState, Modal, SessionDetailContent } from '@/components/c
 import { formatRelativeTime } from '@/utils';
 import { NewSessionModal } from './NewSessionModal';
 import type { AgentSession } from '@/api/sessions';
+
+// Default search range: 3 days
+const DEFAULT_SEARCH_DAYS = 3;
+// Debounce delay in milliseconds
+const DEBOUNCE_DELAY = 300;
 
 interface SessionListProps {
   collapsed?: boolean;
@@ -43,7 +48,24 @@ interface GroupedSessions {
 
 export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onSelectSession }) => {
   const language = useLanguage();
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchInput, setSearchInput] = useState('');  // User input in search box
+  const [debouncedSearch, setDebouncedSearch] = useState('');  // Debounced value for API
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Debounce search input
+  useEffect(() => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    debounceTimerRef.current = setTimeout(() => {
+      setDebouncedSearch(searchInput);
+    }, DEBOUNCE_DELAY);
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, [searchInput]);| null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showNewSessionModal, setShowNewSessionModal] = useState(false);
@@ -59,6 +81,10 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
   } = useSessions({
     page: 1,
     pageSize: 50,
+    filters: debouncedSearch ? {
+      search: debouncedSearch,
+      search_days: DEFAULT_SEARCH_DAYS,
+    } : undefined,
   });
 
   // Auto refresh session list every 1 minute (Issue #64)
@@ -108,7 +134,7 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
       earlier: [],
     };
 
-    filteredSessions.forEach((session: AgentSession) => {
+    sessions.forEach((session: AgentSession) => {
       const sessionDate = new Date(session.updated_at ?? session.created_at ?? now);
       const sessionItem: SessionItem = {
         id: session.session_id,
@@ -148,6 +174,10 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
       selectedRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
   }, [selectedSessionId]);
+
+  const handleSearchChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchInput(e.target.value);
+  }, []);
 
   const handleSessionClick = (sessionId: string) => {
     setSelectedSessionId(sessionId);
@@ -203,8 +233,8 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
             type="text"
             className="form-control"
             placeholder={t('search', language)}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            value={searchInput}
+            onChange={handleSearchChange}
           />
         </div>
       </div>
@@ -262,10 +292,10 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
           )}
 
           {/* Empty State */}
-          {filteredSessions.length === 0 && (
+          {sessions.length === 0 && (
             <EmptyState
               icon="bi-chat-dots"
-              title={searchQuery ? t('noResults', language) : t('noSessionsFound', language)}
+              title={debouncedSearch ? t('noResults', language) : t('noSessionsFound', language)}
             />
           )}
         </div>

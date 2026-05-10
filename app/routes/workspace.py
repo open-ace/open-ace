@@ -369,6 +369,7 @@ def list_sessions():
         from app.repositories.database import (
             Database,
             adapt_sql,
+            escape_like,
             get_param_placeholder,
             is_postgresql,
         )
@@ -403,11 +404,11 @@ def list_sessions():
             params.append(host_name)
 
         if search:
-            from app.repositories.database import escape_like
-
+            # Escape search pattern for LIKE to prevent wildcard injection
             safe_search = escape_like(search)
+            search_pattern = f"%{safe_search}%"
             conditions.append("(title LIKE ? OR session_id LIKE ?)")
-            params.extend([f"%{safe_search}%", f"%{safe_search}%"])
+            params.extend([search_pattern, search_pattern])
 
         where_clause = " AND ".join(conditions)
 
