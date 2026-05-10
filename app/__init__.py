@@ -9,6 +9,7 @@ import os
 
 from flask import Flask, jsonify, request
 from werkzeug.exceptions import HTTPException
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 # Configure logging
 logging.basicConfig(
@@ -28,6 +29,12 @@ def create_app(config=None):
         Flask application instance.
     """
     app = Flask(__name__, static_folder="../static", template_folder="../templates")
+
+    # Trust nginx proxy headers for correct scheme detection
+    # x_proto=1: trust X-Forwarded-Proto header (https/http)
+    # x_for=1: trust X-Forwarded-For header
+    # This is needed for HTTPS iframe URL generation in multi-user mode
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 
     # Load configuration
     app.config["TEMPLATES_AUTO_RELOAD"] = True

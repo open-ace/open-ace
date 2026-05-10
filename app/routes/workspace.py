@@ -1572,6 +1572,17 @@ def get_user_webui_url():
 
         openace_url = flask_request.host_url.rstrip("/")
 
+        # For HTTPS requests in multi-user mode, convert URL to relative path
+        # to avoid mixed content blocking (HTTP iframe in HTTPS page)
+        if manager.config.multi_user_mode and flask_request.scheme == "https":
+            # Extract port from URL like "http://117.72.38.96:3100"
+            import re
+
+            port_match = re.search(r":(\d+)$", url)
+            if port_match:
+                port = port_match.group(1)
+                url = f"/webui/{port}/"
+
         return jsonify(
             {
                 "success": True,
