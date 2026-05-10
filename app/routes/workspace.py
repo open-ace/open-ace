@@ -424,7 +424,8 @@ def list_sessions():
             offset = (page - 1) * limit
 
             # Search pattern: escape_like(search) prevents wildcard injection
-            safe_search = escape_like(search)
+            # Use lowercase for case-insensitive search (compatible with PostgreSQL and SQLite)
+            safe_search = escape_like(search.lower())
             search_pattern = f"%{safe_search}%"
 
             count_sql = f"""
@@ -432,16 +433,16 @@ def list_sessions():
                 FROM agent_sessions s
                 WHERE {base_where_clause}
                   AND (
-                    s.title LIKE {p}
-                    OR s.session_id LIKE {p}
+                    LOWER(s.title) LIKE {p}
+                    OR LOWER(s.session_id) LIKE {p}
                     OR EXISTS (
                       SELECT 1 FROM session_messages sm
                       WHERE sm.session_id = s.session_id
                         AND {time_cond}
-                        AND sm.content LIKE {p}
+                        AND LOWER(sm.content) LIKE {p}
                     )
                   )
-            """  # search_pattern uses escape_like(search)
+            """  # search_pattern uses escape_like(search.lower())
             count_params = base_params + [search_pattern, search_pattern, search_pattern]
             count_query = adapt_sql(count_sql)
             result = db.fetch_one(count_query, tuple(count_params))
@@ -452,18 +453,18 @@ def list_sessions():
                 FROM agent_sessions s
                 WHERE {base_where_clause}
                   AND (
-                    s.title LIKE {p}
-                    OR s.session_id LIKE {p}
+                    LOWER(s.title) LIKE {p}
+                    OR LOWER(s.session_id) LIKE {p}
                     OR EXISTS (
                       SELECT 1 FROM session_messages sm
                       WHERE sm.session_id = s.session_id
                         AND {time_cond}
-                        AND sm.content LIKE {p}
+                        AND LOWER(sm.content) LIKE {p}
                     )
                   )
                 ORDER BY s.updated_at DESC
                 LIMIT {p} OFFSET {p}
-            """  # search_pattern uses escape_like(search)
+            """  # search_pattern uses escape_like(search.lower())
             sessions_params = base_params + [
                 search_pattern,
                 search_pattern,
