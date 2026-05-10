@@ -31,6 +31,7 @@ export interface AgentSession {
   workspace_type?: string;
   remote_machine_id?: string;
   machine_name?: string;
+  first_message?: string; // First user message preview (for tooltip)
   messages: SessionMessage[];
 }
 

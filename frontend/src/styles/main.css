@@ -2426,9 +2426,9 @@ link[rel='dns-prefetch'] {
   bottom: 100%;
   left: 50%;
   transform: translateX(-50%);
-  background: var(--bg-tooltip, #1a1a2e);
-  border: 1px solid var(--border-color, #3a3a5e);
-  border-radius: var(--border-radius, 8px);
+  background: #1a1a2e;
+  border: 1px solid #3a3a5e;
+  border-radius: 8px;
   padding: 8px 12px;
   min-width: 200px;
   max-width: 300px;
@@ -2449,8 +2449,8 @@ link[rel='dns-prefetch'] {
 
 .session-tooltip-title {
   font-weight: 600;
-  font-size: var(--font-size-sm);
-  color: var(--text-primary, #e0e0e0);
+  font-size: 0.875rem;
+  color: #e0e0e0;
   margin-bottom: 4px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2458,12 +2458,12 @@ link[rel='dns-prefetch'] {
 }
 
 .session-tooltip-preview {
-  font-size: var(--font-size-xs, 0.75rem);
-  color: var(--text-muted, #8a8a9a);
+  font-size: 0.75rem;
+  color: #8a8a9a;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  border-top: 1px solid var(--border-color, #3a3a5e);
+  border-top: 1px solid #3a3a5e;
   padding-top: 4px;
   margin-top: 4px;
 }
