@@ -432,13 +432,13 @@ def list_sessions():
                 FROM agent_sessions s
                 WHERE {base_where_clause}
                   AND (
-                    s.title LIKE {p}  # uses escaped search_pattern
-                    OR s.session_id LIKE {p}  # uses escaped search_pattern
+                    s.title LIKE {p}
+                    OR s.session_id LIKE {p}
                     OR EXISTS (
                       SELECT 1 FROM session_messages sm
                       WHERE sm.session_id = s.session_id
                         AND {time_cond}
-                        AND sm.content LIKE {p}  # uses escaped search_pattern
+                        AND sm.content LIKE {p}
                     )
                   )
             """  # search_pattern uses escape_like(search)
@@ -452,13 +452,13 @@ def list_sessions():
                 FROM agent_sessions s
                 WHERE {base_where_clause}
                   AND (
-                    s.title LIKE {p}  # uses escaped search_pattern
-                    OR s.session_id LIKE {p}  # uses escaped search_pattern
+                    s.title LIKE {p}
+                    OR s.session_id LIKE {p}
                     OR EXISTS (
                       SELECT 1 FROM session_messages sm
                       WHERE sm.session_id = s.session_id
                         AND {time_cond}
-                        AND sm.content LIKE {p}  # uses escaped search_pattern
+                        AND sm.content LIKE {p}
                     )
                   )
                 ORDER BY s.updated_at DESC
