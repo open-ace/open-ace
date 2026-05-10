@@ -66,6 +66,7 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
       }
     };
   }, [searchInput]);
+
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showNewSessionModal, setShowNewSessionModal] = useState(false);
@@ -109,8 +110,7 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
   const sessions = sessionsData?.data?.sessions ?? [];
   const restoreSession = useRestoreSession();
 
-  // Sessions are already filtered by API
-  // Group sessions by date
+  // Group sessions by date (API already filtered based on search)
   const groupedSessions = useMemo((): GroupedSessions => {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
