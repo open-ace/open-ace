@@ -98,7 +98,6 @@ export const sessionsApi = {
     if (filters.session_type) params.session_type = filters.session_type;
     if (filters.search) params.search = filters.search;
     if (filters.search_days) params.search_days = String(filters.search_days);
-    if (filters.search_days) params.search_days = String(filters.search_days);
 
     const response = await apiClient.get<SessionsListResponse>('/api/workspace/sessions', params);
     return response;

@@ -65,7 +65,7 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
         clearTimeout(debounceTimerRef.current);
       }
     };
-  }, [searchInput]);| null>(null);
+  }, [searchInput]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showNewSessionModal, setShowNewSessionModal] = useState(false);
@@ -109,17 +109,7 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
   const sessions = sessionsData?.data?.sessions ?? [];
   const restoreSession = useRestoreSession();
 
-  // Filter sessions by search query
-  const filteredSessions = useMemo(() => {
-    if (!searchQuery.trim()) return sessions;
-    const query = searchQuery.toLowerCase();
-    return sessions.filter(
-      (s: { title?: string; tool_name?: string }) =>
-        (s.title ?? '').toLowerCase().includes(query) ||
-        (s.tool_name ?? '').toLowerCase().includes(query)
-    );
-  }, [sessions, searchQuery]);
-
+  // Sessions are already filtered by API
   // Group sessions by date
   const groupedSessions = useMemo((): GroupedSessions => {
     const now = new Date();
@@ -165,7 +155,7 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
     });
 
     return groups;
-  }, [filteredSessions, language]);
+  }, [sessions, language]);
 
   // Scroll selected session into view (only within the session list container)
   useEffect(() => {
