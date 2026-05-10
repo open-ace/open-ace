@@ -159,7 +159,6 @@
   flex: 1;
   min-width: 0;
   position: relative;
-  overflow: hidden;
 }
 
 .prompt-item-name {
