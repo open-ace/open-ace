@@ -2445,6 +2445,26 @@ link[rel='dns-prefetch'] {
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
+/* First session item: show tooltip below instead of above */
+.session-group-items li:first-child .session-tooltip {
+  bottom: auto;
+  top: calc(100% + 6px);
+  transform: translateX(-50%) translateY(-4px);
+}
+
+.session-group-items li:first-child .session-tooltip::after {
+  top: auto;
+  bottom: 100%;
+  border-top: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.session-group-items li:first-child .session-item:hover .session-tooltip {
+  transform: translateX(-50%) translateY(0);
+}
+
 .session-tooltip::after {
   content: '';
   position: absolute;
