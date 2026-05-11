@@ -633,10 +633,8 @@ class WebUIManager:
         logger.debug(f"Launching webui: {cmd}, cwd: {cwd}")
 
         try:
-            # Redirect stdout/stderr to log file for debugging
-            log_dir = os.path.expanduser("~/.open-ace/logs")
-            os.makedirs(log_dir, exist_ok=True)
-            log_path = os.path.join(log_dir, f"webui-{port}.log")
+            # Redirect stdout/stderr to the same directory as OPENACE_LOG_DIR
+            log_path = os.path.join(webui_log_dir, f"webui-{port}.log")
             log_fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND)
 
             process = subprocess.Popen(
