@@ -226,7 +226,7 @@ class TestEnrichmentLogic:
                       SUM(tokens_used) as total_tokens,
                       SUM(input_tokens) as input_tokens,
                       SUM(output_tokens) as output_tokens,
-                      SUM(CASE WHEN role IN ('assistant', 'toolResult') THEN 1 ELSE 0 END) as req_count,
+                      SUM(CASE WHEN role = 'assistant' THEN 1 ELSE 0 END) as req_count,
                       MAX(model) as model
                FROM daily_messages WHERE agent_session_id = ?""",
             (sid,),

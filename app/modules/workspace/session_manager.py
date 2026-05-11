@@ -121,7 +121,7 @@ class AgentSession:
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     message_count: int = 0
-    request_count: int = 0  # Number of API requests (assistant/toolResult messages)
+    request_count: int = 0  # Number of API requests (assistant messages only)
     model: Optional[str] = None
     tags: list[str] = field(default_factory=list)
     created_at: Optional[datetime] = None
@@ -664,7 +664,8 @@ class SessionManager:
         )
 
         # Update session message count, request count and token count
-        request_count_increment = 1 if role in ("assistant", "toolResult") else 0
+        # Only assistant messages represent actual API requests (toolResult is local execution)
+        request_count_increment = 1 if role == "assistant" else 0
         cursor.execute(
             f"""
             UPDATE agent_sessions
