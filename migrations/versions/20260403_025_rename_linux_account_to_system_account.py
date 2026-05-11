@@ -26,32 +26,42 @@ def upgrade():
 
     if bind.dialect.name == "postgresql":
         # PostgreSQL: Use ALTER COLUMN with RENAME
-        op.execute("""
+        op.execute(
+            """
             ALTER TABLE users RENAME COLUMN linux_account TO system_account
-        """)
+        """
+        )
     else:
         # SQLite: Check if column exists first
         # SQLite doesn't support RENAME COLUMN in older versions
         # Use a safer approach
-        op.execute("""
+        op.execute(
+            """
             -- First check if linux_account exists and system_account doesn't
             -- This is handled by the column detection logic
-        """)
+        """
+        )
 
         # Try to rename (works in SQLite 3.25.0+)
         try:
-            op.execute("""
+            op.execute(
+                """
                 ALTER TABLE users RENAME COLUMN linux_account TO system_account
-            """)
+            """
+            )
         except Exception:
             # Fallback for older SQLite: add new column, copy data, drop old column
             # This is more complex and requires table recreation
-            op.execute("""
+            op.execute(
+                """
                 ALTER TABLE users ADD COLUMN system_account TEXT
-            """)
-            op.execute("""
+            """
+            )
+            op.execute(
+                """
                 UPDATE users SET system_account = linux_account
-            """)
+            """
+            )
             # Note: SQLite doesn't easily support DROP COLUMN before 3.35.0
             # We keep the old column for compatibility
 
@@ -62,18 +72,26 @@ def downgrade():
     bind = op.get_bind()
 
     if bind.dialect.name == "postgresql":
-        op.execute("""
+        op.execute(
+            """
             ALTER TABLE users RENAME COLUMN system_account TO linux_account
-        """)
+        """
+        )
     else:
         try:
-            op.execute("""
+            op.execute(
+                """
                 ALTER TABLE users RENAME COLUMN system_account TO linux_account
-            """)
+            """
+            )
         except Exception:
-            op.execute("""
+            op.execute(
+                """
                 ALTER TABLE users ADD COLUMN linux_account TEXT
-            """)
-            op.execute("""
+            """
+            )
+            op.execute(
+                """
                 UPDATE users SET linux_account = system_account
-            """)
+            """
+            )

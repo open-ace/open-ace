@@ -77,8 +77,17 @@ export function useConversationHistory(options: UseConversationHistoryOptions = 
   const { date, startDate, endDate, tool, host, sender, pageSize = 20, page = 1 } = options;
 
   return useQuery({
-    queryKey: ['conversation-history', page, { date, startDate, endDate, tool, host, sender, pageSize }],
-    queryFn: () => messagesApi.getConversationHistory({ date, startDate, endDate, tool, host, sender }, page, pageSize),
+    queryKey: [
+      'conversation-history',
+      page,
+      { date, startDate, endDate, tool, host, sender, pageSize },
+    ],
+    queryFn: () =>
+      messagesApi.getConversationHistory(
+        { date, startDate, endDate, tool, host, sender },
+        page,
+        pageSize
+      ),
     staleTime: 60 * 1000, // 1 minute cache
   });
 }

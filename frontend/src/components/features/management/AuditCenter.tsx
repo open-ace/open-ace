@@ -710,10 +710,7 @@ export const AuditCenter: React.FC = () => {
                   </thead>
                   <tbody>
                     {anomalies
-                      .slice(
-                        (anomalyPage - 1) * ANOMALY_PAGE_SIZE,
-                        anomalyPage * ANOMALY_PAGE_SIZE
-                      )
+                      .slice((anomalyPage - 1) * ANOMALY_PAGE_SIZE, anomalyPage * ANOMALY_PAGE_SIZE)
                       .map((anomaly, index) => (
                         <tr
                           key={`${anomaly.anomaly_type}-${index}`}
@@ -728,8 +725,7 @@ export const AuditCenter: React.FC = () => {
                               ? anomaly.affected_users
                                   .map(
                                     (uid) =>
-                                      users?.find((u) => u.id === uid)?.username ??
-                                      `ID:${uid}`
+                                      users?.find((u) => u.id === uid)?.username ?? `ID:${uid}`
                                   )
                                   .join(', ')
                               : '-'}
@@ -741,10 +737,7 @@ export const AuditCenter: React.FC = () => {
                           </td>
                           <td>
                             <span
-                              className={cn(
-                                'badge',
-                                `bg-${getSeverityVariant(anomaly.severity)}`
-                              )}
+                              className={cn('badge', `bg-${getSeverityVariant(anomaly.severity)}`)}
                             >
                               {anomaly.severity}
                             </span>
@@ -817,30 +810,23 @@ export const AuditCenter: React.FC = () => {
                         const totalPages = Math.ceil(anomalies.length / ANOMALY_PAGE_SIZE);
                         const startPage = Math.max(1, anomalyPage - 2);
                         const endPage = Math.min(totalPages, startPage + 4);
-                        return Array.from(
-                          { length: endPage - startPage + 1 },
-                          (_, i) => {
-                            const pageNum = startPage + i;
-                            return (
-                              <li
-                                key={pageNum}
-                                className={`page-item ${anomalyPage === pageNum ? 'active' : ''}`}
-                              >
-                                <button
-                                  className="page-link"
-                                  onClick={() => setAnomalyPage(pageNum)}
-                                >
-                                  {pageNum}
-                                </button>
-                              </li>
-                            );
-                          }
-                        );
+                        return Array.from({ length: endPage - startPage + 1 }, (_, i) => {
+                          const pageNum = startPage + i;
+                          return (
+                            <li
+                              key={pageNum}
+                              className={`page-item ${anomalyPage === pageNum ? 'active' : ''}`}
+                            >
+                              <button className="page-link" onClick={() => setAnomalyPage(pageNum)}>
+                                {pageNum}
+                              </button>
+                            </li>
+                          );
+                        });
                       })()}
                       <li
                         className={`page-item ${
-                          anomalyPage ===
-                          Math.ceil(anomalies.length / ANOMALY_PAGE_SIZE)
+                          anomalyPage === Math.ceil(anomalies.length / ANOMALY_PAGE_SIZE)
                             ? 'disabled'
                             : ''
                         }`}
@@ -848,10 +834,7 @@ export const AuditCenter: React.FC = () => {
                         <button
                           className="page-link"
                           onClick={() => setAnomalyPage(anomalyPage + 1)}
-                          disabled={
-                            anomalyPage ===
-                            Math.ceil(anomalies.length / ANOMALY_PAGE_SIZE)
-                          }
+                          disabled={anomalyPage === Math.ceil(anomalies.length / ANOMALY_PAGE_SIZE)}
                         >
                           {t('next', language)}
                         </button>
@@ -874,7 +857,9 @@ export const AuditCenter: React.FC = () => {
               <select
                 className="form-select"
                 value={selectedUserId ?? ''}
-                onChange={(e) => setSelectedUserId(e.target.value ? parseInt(e.target.value) : null)}
+                onChange={(e) =>
+                  setSelectedUserId(e.target.value ? parseInt(e.target.value) : null)
+                }
                 disabled={usersLoading}
               >
                 <option value="">-- {t('selectUser', language)} --</option>
@@ -986,9 +971,10 @@ export const AuditCenter: React.FC = () => {
       rows.push([]);
       rows.push(['Anomaly Type', 'Description', 'Severity', 'Affected Users', 'First Seen']);
       anomalies.forEach((a) => {
-        const userNames = a.affected_users
-          ?.map((uid) => users?.find((u) => u.id === uid)?.username ?? `ID:${uid}`)
-          .join('; ') ?? '';
+        const userNames =
+          a.affected_users
+            ?.map((uid) => users?.find((u) => u.id === uid)?.username ?? `ID:${uid}`)
+            .join('; ') ?? '';
         rows.push([a.anomaly_type, a.description, a.severity, userNames, a.first_seen]);
       });
     }

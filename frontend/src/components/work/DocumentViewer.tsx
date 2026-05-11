@@ -24,9 +24,14 @@ const generateHeadingId = (children: React.ReactNode): string => {
     })
     .join('')
     .trim();
-  
+
   // Generate slug: lowercase for English, keep original for CJK
-  return text.toLowerCase().replace(/\s+/g, '-').replace(/[^\w\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af-]/g, '') || text;
+  return (
+    text
+      .toLowerCase()
+      .replace(/\s+/g, '-')
+      .replace(/[^\w\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af-]/g, '') || text
+  );
 };
 
 interface DocumentViewerProps {

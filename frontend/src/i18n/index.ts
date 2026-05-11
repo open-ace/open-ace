@@ -196,7 +196,8 @@ const translations: Record<Language, Translations> = {
     roleChangeThreshold: 'Role Change Threshold',
     roleChangeThresholdHelp: 'Number of role changes before triggering an anomaly alert',
     permissionChangeThreshold: 'Permission Change Threshold',
-    permissionChangeThresholdHelp: 'Number of permission changes before triggering an anomaly alert',
+    permissionChangeThresholdHelp:
+      'Number of permission changes before triggering an anomaly alert',
 
     // Audit Log
     allActions: 'All Actions',
@@ -597,7 +598,8 @@ const translations: Record<Language, Translations> = {
     roiPercentage: 'ROI %',
     roiDataAnomaly: 'Data anomaly detected',
     dataAnomalyDetected: 'Data Anomaly Detected',
-    tokenAccumulationWarning: 'Token counts may be inflated due to cumulative counting. Cost and ROI calculations may be inaccurate.',
+    tokenAccumulationWarning:
+      'Token counts may be inflated due to cumulative counting. Cost and ROI calculations may be inaccurate.',
     efficiencyScore: 'Efficiency Score',
     roiTrend: 'ROI Trend',
     roi: 'ROI',

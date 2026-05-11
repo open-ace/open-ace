@@ -393,8 +393,7 @@ export const ROIAnalysis: React.FC = () => {
       {roiMetrics && roiMetrics.roi_percentage < -100 && (
         <div className="alert alert-warning mb-4" role="alert">
           <i className="bi bi-exclamation-triangle me-2" />
-          <strong>{t('dataAnomalyDetected', language) || 'Data Anomaly Detected'}:</strong>
-          {' '}
+          <strong>{t('dataAnomalyDetected', language) || 'Data Anomaly Detected'}:</strong>{' '}
           {t('tokenAccumulationWarning', language) ||
             'Token counts may be inflated due to cumulative counting. Cost and ROI calculations may be inaccurate.'}
         </div>

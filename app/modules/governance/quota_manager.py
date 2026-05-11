@@ -185,14 +185,16 @@ class QuotaManager:
 
                 # Use db.execute with adapt_sql for cross-DB compatibility (? → %s for PostgreSQL)
                 cursor.execute(
-                    adapt_sql("""
+                    adapt_sql(
+                        """
                     INSERT INTO quota_usage (user_id, date, period, tokens_used, requests_used)
                     VALUES (?, ?, 'daily', ?, ?)
                     ON CONFLICT(user_id, date, period) DO UPDATE SET
                         tokens_used = quota_usage.tokens_used + ?,
                         requests_used = quota_usage.requests_used + ?,
                         updated_at = CURRENT_TIMESTAMP
-                """),
+                """
+                    ),
                     (user_id, date, tokens, requests, tokens, requests),
                 )
 
@@ -605,13 +607,15 @@ class QuotaManager:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    adapt_sql("""
+                    adapt_sql(
+                        """
                     UPDATE quota_alerts
                     SET acknowledged = ?,
                         acknowledged_at = ?,
                         acknowledged_by = ?
                     WHERE id = ?
-                """),
+                """
+                    ),
                     (adapt_boolean_value(True), datetime.utcnow(), acknowledged_by, alert_id),
                 )
                 conn.commit()
@@ -645,7 +649,9 @@ class QuotaManager:
             WHERE user_id IN ({}) AND workspace_type = 'remote'
               AND CAST(created_at AS DATE) >= ? AND CAST(created_at AS DATE) <= ?
             GROUP BY user_id
-        """.format(",".join(["?"] * len(user_ids))),
+        """.format(
+                ",".join(["?"] * len(user_ids))
+            ),
             tuple(user_ids) + (start_date, end_date),
         )
 
@@ -677,7 +683,9 @@ class QuotaManager:
                   AND role = 'assistant'
                   AND (message_source IS NULL OR message_source != 'remote_workspace')
                 GROUP BY sender_name
-            """.format(" OR ".join(sender_conditions)),
+            """.format(
+                    " OR ".join(sender_conditions)
+                ),
                 tuple(sender_params) + (start_date, end_date),
             )
 
@@ -701,7 +709,9 @@ class QuotaManager:
             SELECT * FROM quota_alerts
             WHERE user_id IN ({})
             ORDER BY created_at DESC
-        """.format(",".join(["?"] * len(user_ids))),
+        """.format(
+                ",".join(["?"] * len(user_ids))
+            ),
             tuple(user_ids),
         )
 
@@ -789,12 +799,14 @@ class QuotaManager:
         """Get all quota alerts."""
         if unacknowledged_only:
             rows = self.db.fetch_all(
-                adapt_sql(f"""
+                adapt_sql(
+                    f"""
                 SELECT * FROM quota_alerts
                 WHERE {adapt_boolean_condition('acknowledged', False)}
                 ORDER BY created_at DESC
                 LIMIT ?
-            """),
+            """
+                ),
                 (limit,),
             )
         else:
@@ -846,10 +858,12 @@ class QuotaManager:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    adapt_sql(f"""
+                    adapt_sql(
+                        f"""
                     DELETE FROM quota_alerts
                     WHERE {adapt_boolean_condition('acknowledged', True)} AND created_at < ?
-                """),
+                """
+                    ),
                     (cutoff,),
                 )
                 deleted = cursor.rowcount

@@ -8,7 +8,13 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { cn } from '@/utils';
-import { useConversationHistory, useConversationTimeline, useHosts, useSenders, useTools } from '@/hooks';
+import {
+  useConversationHistory,
+  useConversationTimeline,
+  useHosts,
+  useSenders,
+  useTools,
+} from '@/hooks';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
 import {
@@ -353,11 +359,7 @@ export const ConversationHistory: React.FC = () => {
             <div className="d-flex gap-2">
               {/* Export Button */}
               <span title={t('exportCurrentPage', language)}>
-                <Button
-                  variant="outline-secondary"
-                  size="sm"
-                  onClick={handleExportCSV}
-                >
+                <Button variant="outline-secondary" size="sm" onClick={handleExportCSV}>
                   <i className="bi bi-download me-1" />
                   {t('export', language)}
                 </Button>
@@ -449,7 +451,11 @@ export const ConversationHistory: React.FC = () => {
                     </li>
                     {pageNumbers.map((pageNum) => (
                       <li key={pageNum} className={cn('page-item', page === pageNum && 'active')}>
-                        <button type="button" className="page-link" onClick={() => setPage(pageNum)}>
+                        <button
+                          type="button"
+                          className="page-link"
+                          onClick={() => setPage(pageNum)}
+                        >
                           {pageNum}
                         </button>
                       </li>
