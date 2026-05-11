@@ -516,7 +516,7 @@ class QuotaManager:
                 COALESCE(SUM(
                     (SELECT COUNT(*) FROM session_messages sm
                      WHERE sm.session_id = agent_sessions.session_id
-                       AND sm.role IN ('assistant', 'toolResult'))
+                       AND sm.role = 'assistant'))
                 ), 0) as requests
             FROM agent_sessions
             WHERE user_id = ?
@@ -639,7 +639,7 @@ class QuotaManager:
                    COALESCE(SUM(
                        (SELECT COUNT(*) FROM session_messages sm
                         WHERE sm.session_id = agent_sessions.session_id
-                          AND sm.role IN ('assistant', 'toolResult'))
+                          AND sm.role = 'assistant'))
                    ), 0) as requests
             FROM agent_sessions
             WHERE user_id IN ({}) AND workspace_type = 'remote'

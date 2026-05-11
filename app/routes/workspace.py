@@ -524,7 +524,7 @@ def list_sessions():
                 stats_query = f"""
                     SELECT session_id,
                            COUNT(*) as actual_message_count,
-                           SUM(CASE WHEN role IN ('assistant', 'toolResult') THEN 1 ELSE 0 END) as actual_request_count,
+                           SUM(CASE WHEN role = 'assistant' THEN 1 ELSE 0 END) as actual_request_count,
                            SUM(tokens_used) as actual_total_tokens,
                            MAX(timestamp) as actual_updated_at
                     FROM session_messages
@@ -632,7 +632,7 @@ def list_sessions():
                         SUM(tokens_used) as dm_total_tokens,
                         SUM(input_tokens) as dm_input_tokens,
                         SUM(output_tokens) as dm_output_tokens,
-                        SUM(CASE WHEN role IN ('assistant', 'toolResult') THEN 1 ELSE 0 END) as dm_request_count,
+                        SUM(CASE WHEN role = 'assistant' THEN 1 ELSE 0 END) as dm_request_count,
                         MAX(timestamp) as dm_last_active,
                         MAX(model) as dm_model
                     FROM daily_messages
@@ -789,9 +789,10 @@ def get_session(session_id):
             p = get_param_placeholder()
 
             # Calculate request_count from messages if available
+            # Only assistant messages represent actual API requests (toolResult is local execution)
             if include_messages and session.messages:
                 session.request_count = sum(
-                    1 for m in session.messages if m.role in ("assistant", "toolResult")
+                    1 for m in session.messages if m.role == "assistant"
                 )
             else:
                 # Query request_count from session_messages table
@@ -802,7 +803,7 @@ def get_session(session_id):
                     SELECT COUNT(*) as request_count
                     FROM session_messages
                     WHERE session_id = {_param()}
-                    AND role IN ('assistant', 'toolResult')
+                    AND role = 'assistant'
                     """,
                     (session_id,),
                 )
@@ -818,7 +819,7 @@ def get_session(session_id):
                         SUM(tokens_used) as dm_total_tokens,
                         SUM(input_tokens) as dm_input_tokens,
                         SUM(output_tokens) as dm_output_tokens,
-                        SUM(CASE WHEN role IN ('assistant', 'toolResult') THEN 1 ELSE 0 END) as dm_request_count,
+                        SUM(CASE WHEN role = 'assistant' THEN 1 ELSE 0 END) as dm_request_count,
                         MAX(timestamp) as dm_last_active,
                         MAX(model) as dm_model
                     FROM daily_messages
@@ -905,7 +906,7 @@ def get_session(session_id):
                     MAX(sender_id) as sender_id,
                     MAX(date) as date,
                     COUNT(*) as message_count,
-                    SUM(CASE WHEN role IN ('assistant', 'toolResult') THEN 1 ELSE 0 END) as request_count,
+                    SUM(CASE WHEN role = 'assistant' THEN 1 ELSE 0 END) as request_count,
                     SUM(tokens_used) as total_tokens,
                     SUM(input_tokens) as total_input_tokens,
                     SUM(output_tokens) as total_output_tokens,
