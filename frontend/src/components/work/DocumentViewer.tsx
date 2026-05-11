@@ -8,6 +8,10 @@ import gettingStartedEn from './docs/getting-started-en.md?raw';
 import gettingStartedZh from './docs/getting-started-zh.md?raw';
 import gettingStartedJa from './docs/getting-started-ja.md?raw';
 import gettingStartedKo from './docs/getting-started-ko.md?raw';
+import keyboardShortcutsEn from './docs/keyboard-shortcuts-en.md?raw';
+import keyboardShortcutsZh from './docs/keyboard-shortcuts-zh.md?raw';
+import keyboardShortcutsJa from './docs/keyboard-shortcuts-ja.md?raw';
+import keyboardShortcutsKo from './docs/keyboard-shortcuts-ko.md?raw';
 import './DocumentViewer.css';
 
 interface DocumentViewerProps {
@@ -25,8 +29,10 @@ const documents: Record<string, Record<string, string>> = {
   },
   'prompts-guide': { en: '# Prompts Guide\n\nComing soon...', zh: '# 提示词指南\n\n即将推出...' },
   'keyboard-shortcuts': {
-    en: '# Keyboard Shortcuts\n\nComing soon...',
-    zh: '# 键盘快捷键\n\n即将推出...',
+    en: keyboardShortcutsEn,
+    zh: keyboardShortcutsZh,
+    ja: keyboardShortcutsJa,
+    ko: keyboardShortcutsKo,
   },
   faq: { en: '# FAQ\n\nComing soon...', zh: '# 常见问题\n\n即将推出...' },
 };
@@ -38,6 +44,12 @@ const docTitles: Record<string, Record<string, string>> = {
     zh: '快速上手指南',
     ja: 'クイックスタートガイド',
     ko: '빠른 시작 가이드',
+  },
+  'keyboard-shortcuts': {
+    en: 'Keyboard Shortcuts',
+    zh: '键盘快捷键',
+    ja: 'キーボードショートカット',
+    ko: '키보드 단축키',
   },
 };
 
