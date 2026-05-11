@@ -231,9 +231,9 @@ export const Workspace: React.FC = () => {
             }
           }
 
-          // If we couldn't find the source, use currentActiveTabId as fallback
-          sourceTabId ??= useAppStore.getState().workspaceActiveTabId;
-
+          // Only process notification if we can identify the source tab
+          // Do NOT use fallback to activeTabId - this prevents notifications from being
+          // incorrectly assigned to the current active tab when source cannot be matched
           if (sourceTabId) {
             setTabs((prev) =>
               prev.map((tab) =>
@@ -802,22 +802,41 @@ export const Workspace: React.FC = () => {
   // Switch to a tab
   const switchTab = useCallback(
     (tabId: string) => {
+      const previousTabId = activeTabId;
       setActiveTabId(tabId);
       // Update store (Issue #65)
       setStoredActiveTabId(tabId);
 
-      // Send focus message to iframe after tab switch
+      // Clear notification state for the tab we're leaving
+      // This prevents stale notifications when AI response completes after user switched away
+      if (previousTabId && previousTabId !== tabId) {
+        // Send tab-activated message to the previous tab's iframe to clear its internal state
+        const prevIframe = iframeRefs.current.get(previousTabId);
+        if (prevIframe?.contentWindow) {
+          prevIframe.contentWindow.postMessage({ type: 'openace-tab-activated' }, '*');
+        }
+        // Clear local notification state
+        setTabs((prev) =>
+          prev.map((tab) =>
+            tab.id === previousTabId ? { ...tab, waitingForUser: false, waitingType: null } : tab
+          )
+        );
+        useAppStore.getState().updateWorkspaceTab(previousTabId, {
+          waitingForUser: false,
+          waitingType: null,
+        });
+      }
+
+      // Send focus message to the new active iframe
       // Use setTimeout to ensure the iframe is visible before sending message
       setTimeout(() => {
         const iframe = iframeRefs.current.get(tabId);
         if (iframe?.contentWindow) {
           iframe.contentWindow.postMessage({ type: 'openace-focus-input' }, '*');
-          // Also send tab-activated to clear notification
-          iframe.contentWindow.postMessage({ type: 'openace-tab-activated' }, '*');
         }
       }, 100);
     },
-    [setStoredActiveTabId]
+    [activeTabId, setStoredActiveTabId]
   );
 
   // Rename a tab
