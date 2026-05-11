@@ -3,9 +3,9 @@
  * Provides offline support and caching for PWA
  */
 
-const CACHE_NAME = 'open-ace-v3';
-const STATIC_CACHE_NAME = 'open-ace-static-v3';
-const API_CACHE_NAME = 'open-ace-api-v3';
+const CACHE_NAME = 'open-ace-v4';
+const STATIC_CACHE_NAME = 'open-ace-static-v4';
+const API_CACHE_NAME = 'open-ace-api-v4';
 
 // Static assets to cache immediately
 const STATIC_ASSETS = [
