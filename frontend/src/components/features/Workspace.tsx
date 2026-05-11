@@ -279,7 +279,7 @@ export const Workspace: React.FC = () => {
               const iframe = iframeRefs.current.get(targetTab.id);
               if (iframe?.contentWindow) {
                 iframe.contentWindow.postMessage({ type: 'openace-focus-input' }, '*');
-                iframe.contentWindow.postMessage({ type: 'openace-tab-activated' }, '*');
+                iframe.contentWindow.postMessage({ type: 'openace-clear-notification-state' }, '*');
               }
             }, 100);
           }
@@ -813,7 +813,7 @@ export const Workspace: React.FC = () => {
         // Send tab-activated message to the previous tab's iframe to clear its internal state
         const prevIframe = iframeRefs.current.get(previousTabId);
         if (prevIframe?.contentWindow) {
-          prevIframe.contentWindow.postMessage({ type: 'openace-tab-activated' }, '*');
+          prevIframe.contentWindow.postMessage({ type: 'openace-clear-notification-state' }, '*');
         }
         // Clear local notification state
         setTabs((prev) =>
