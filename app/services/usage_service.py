@@ -32,65 +32,90 @@ class UsageService:
         self, tool_name: Optional[str] = None, host_name: Optional[str] = None
     ) -> list[dict]:
         """
-        Get today's usage data, merged by tool_name.
+        Get today's usage data, aggregated from daily_usage table.
+
+        Queries daily_usage directly (few rows) instead of JOIN with
+        daily_messages (hundreds of thousands of rows) to avoid
+        request_count multiplication and improve performance.
 
         Args:
             tool_name: Optional tool name filter.
             host_name: Optional host name filter.
 
         Returns:
-            List[Dict]: List of merged usage records.
+            List[Dict]: List of usage records merged by tool_name.
         """
         today = datetime.now().strftime("%Y-%m-%d")
-        entries = self.usage_repo.get_usage_by_date(today, tool_name, host_name)
 
-        # Merge entries by tool_name (combine all hosts)
-        # Use sets for O(1) lookup instead of O(n) list lookup
-        merged: dict[str, dict] = {}
-        for entry in entries:
-            tool = normalize_tool_name(entry.get("tool_name", "unknown"))
-            if tool not in merged:
-                merged[tool] = {
-                    "date": entry.get("date"),
-                    "tool_name": tool,
-                    "tokens_used": 0,
-                    "input_tokens": 0,
-                    "output_tokens": 0,
-                    "cache_tokens": 0,
-                    "request_count": 0,
-                    "models_used_set": set(),  # Use set for O(1) lookup
-                    "hosts_set": set(),  # Use set for O(1) lookup
-                }
+        conditions = ["date = ?"]
+        params: list = [today]
+        if tool_name:
+            conditions.append("tool_name = ?")
+            params.append(tool_name)
+        if host_name:
+            conditions.append("host_name = ?")
+            params.append(host_name)
 
-            merged[tool]["tokens_used"] += entry.get("tokens_used", 0)
-            merged[tool]["input_tokens"] += entry.get("input_tokens", 0)
-            merged[tool]["output_tokens"] += entry.get("output_tokens", 0)
-            merged[tool]["cache_tokens"] += entry.get("cache_tokens", 0)
-            merged[tool]["request_count"] += entry.get("request_count", 0)
+        where_clause = " AND ".join(conditions)
+        query = f"""
+            SELECT
+                tool_name,
+                SUM(tokens_used) as tokens_used,
+                SUM(input_tokens) as input_tokens,
+                SUM(output_tokens) as output_tokens,
+                SUM(cache_tokens) as cache_tokens,
+                SUM(request_count) as request_count
+            FROM daily_usage
+            WHERE {where_clause}
+            GROUP BY tool_name
+        """
 
-            if entry.get("models_used"):
-                merged[tool]["models_used_set"].update(entry.get("models_used", []))
+        rows = self.usage_repo.db.fetch_all(query, tuple(params))
 
-            host = entry.get("host_name", "unknown")
-            merged[tool]["hosts_set"].add(host)
+        # Also collect models_used and hosts per tool from daily_usage
+        detail_query = f"""
+            SELECT tool_name, host_name, models_used
+            FROM daily_usage
+            WHERE {where_clause}
+        """
+        detail_rows = self.usage_repo.db.fetch_all(detail_query, tuple(params))
 
-        # Convert to list and clean up
+        models_by_tool: dict[str, set] = {}
+        hosts_by_tool: dict[str, set] = {}
+        for row in detail_rows:
+            tool = normalize_tool_name(row["tool_name"])
+            if tool not in models_by_tool:
+                models_by_tool[tool] = set()
+                hosts_by_tool[tool] = set()
+            hosts_by_tool[tool].add(row["host_name"] or "unknown")
+            if row.get("models_used"):
+                try:
+                    import json
+
+                    models = (
+                        json.loads(row["models_used"])
+                        if isinstance(row["models_used"], str)
+                        else row["models_used"]
+                    )
+                    if isinstance(models, list):
+                        models_by_tool[tool].update(models)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
         result = []
-        for tool, data in merged.items():
-            # Convert sets to lists for output
-            models_used = list(data["models_used_set"]) if data["models_used_set"] else None
-            hosts = list(data["hosts_set"])
+        for row in rows:
+            tool = normalize_tool_name(row["tool_name"])
             result.append(
                 {
-                    "date": data["date"],
-                    "tool_name": data["tool_name"],
-                    "tokens_used": data["tokens_used"],
-                    "input_tokens": data["input_tokens"],
-                    "output_tokens": data["output_tokens"],
-                    "cache_tokens": data["cache_tokens"],
-                    "request_count": data["request_count"],
-                    "models_used": models_used,
-                    "hosts": hosts,
+                    "date": today,
+                    "tool_name": tool,
+                    "tokens_used": row["tokens_used"] or 0,
+                    "input_tokens": row["input_tokens"] or 0,
+                    "output_tokens": row["output_tokens"] or 0,
+                    "cache_tokens": row["cache_tokens"] or 0,
+                    "request_count": row["request_count"] or 0,
+                    "models_used": list(models_by_tool.get(tool, set())) or None,
+                    "hosts": list(hosts_by_tool.get(tool, set())),
                 }
             )
 
