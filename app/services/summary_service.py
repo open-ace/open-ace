@@ -173,6 +173,10 @@ class SummaryService:
         with self.db.connection() as conn:
             cursor = conn.cursor()
 
+            # Clean up stale NULL host_name rows (prevents accumulation
+            # from older versions that used NULL instead of empty string)
+            cursor.execute("DELETE FROM usage_summary WHERE host_name IS NULL")
+
             for agg in aggregates:
                 tool_name = agg["tool_name"]
                 host = agg["host_name"]
