@@ -180,7 +180,7 @@ class TestLaunchWebuiProcessAuth:
 
             mock_popen.return_value = MagicMock(pid=12345)
 
-            manager._launch_webui_process("testuser", 9000)
+            manager._launch_webui_process(1, "testuser", 9000)
 
             # Verify --auth-type was added to command
             call_args = mock_popen.call_args
@@ -217,7 +217,7 @@ class TestLaunchWebuiProcessAuth:
 
             mock_popen.return_value = MagicMock(pid=12345)
 
-            manager._launch_webui_process("testuser", 9000)
+            manager._launch_webui_process(1, "testuser", 9000)
 
             # Verify env was passed to Popen
             call_kwargs = mock_popen.call_args[1]
@@ -252,7 +252,7 @@ class TestLaunchWebuiProcessAuth:
 
             mock_popen.return_value = MagicMock(pid=12345)
 
-            manager._launch_webui_process("testuser", 9000)
+            manager._launch_webui_process(1, "testuser", 9000)
 
             cmd = mock_popen.call_args[0][0]
             assert "--auth-type" not in cmd
@@ -286,7 +286,7 @@ class TestLaunchWebuiProcessAuth:
 
                 mock_popen.return_value = MagicMock(pid=12345)
 
-                manager._launch_webui_process("testuser", 9000)
+                manager._launch_webui_process(1, "testuser", 9000)
 
                 child_env = mock_popen.call_args[1]["env"]
                 assert child_env["EXISTING_VAR"] == "existing_value"
@@ -323,7 +323,7 @@ class TestLaunchWebuiProcessAuth:
 
                 mock_popen.return_value = MagicMock(pid=12345)
 
-                manager._launch_webui_process("testuser", 9000)
+                manager._launch_webui_process(1, "testuser", 9000)
 
                 child_env = mock_popen.call_args[1]["env"]
                 assert child_env["OVERRIDE_VAR"] == "new_value"

@@ -730,7 +730,12 @@ def update_agent_sessions_stats(messages: list) -> int:
                             _execute(
                                 cursor,
                                 check_sql,
-                                (session_id, msg.get("role"), timestamp, f'%"message_id": "{msg_id}"%'),
+                                (
+                                    session_id,
+                                    msg.get("role"),
+                                    timestamp,
+                                    f'%"message_id": "{msg_id}"%',
+                                ),
                             )
                         else:
                             check_sql = f"""
