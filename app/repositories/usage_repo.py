@@ -135,6 +135,48 @@ class UsageRepository:
         logger.debug(f"Saved usage: {date} - {tool_name} - {host_name}")
         return True
 
+    def get_today_aggregated(
+        self, date: str, tool_name: Optional[str] = None, host_name: Optional[str] = None
+    ) -> list[dict]:
+        """
+        Get aggregated usage from daily_usage for a specific date.
+
+        Queries daily_usage directly (few rows) instead of JOIN with
+        daily_messages to avoid request_count multiplication.
+
+        Args:
+            date: Date string (YYYY-MM-DD).
+            tool_name: Optional tool name filter.
+            host_name: Optional host name filter.
+
+        Returns:
+            List[Dict]: Raw rows from daily_usage with token and host/model details.
+        """
+        conditions = ["date = ?"]
+        params: list = [date]
+        if tool_name:
+            conditions.append("tool_name = ?")
+            params.append(tool_name)
+        if host_name:
+            conditions.append("host_name = ?")
+            params.append(host_name)
+
+        where_clause = " AND ".join(conditions)
+        query = f"""
+            SELECT
+                tool_name,
+                host_name,
+                tokens_used,
+                input_tokens,
+                output_tokens,
+                cache_tokens,
+                request_count,
+                models_used
+            FROM daily_usage
+            WHERE {where_clause}
+        """
+        return self.db.fetch_all(query, tuple(params))
+
     def get_usage_by_date(
         self, date: str, tool_name: Optional[str] = None, host_name: Optional[str] = None
     ) -> list[dict]:
