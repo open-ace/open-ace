@@ -4,6 +4,7 @@ Open ACE - AI Computing Explorer - Usage Service
 Business logic for usage data operations.
 """
 
+import json
 import logging
 from datetime import datetime
 from typing import Optional
@@ -32,54 +33,60 @@ class UsageService:
         self, tool_name: Optional[str] = None, host_name: Optional[str] = None
     ) -> list[dict]:
         """
-        Get today's usage data, merged by tool_name.
+        Get today's usage data, aggregated from daily_usage table.
+
+        Queries daily_usage directly via repository layer (few rows)
+        instead of daily_messages (hundreds of thousands of rows) to
+        avoid request_count multiplication and improve performance.
 
         Args:
             tool_name: Optional tool name filter.
             host_name: Optional host name filter.
 
         Returns:
-            List[Dict]: List of merged usage records.
+            List[Dict]: List of usage records merged by normalized tool_name.
         """
         today = datetime.now().strftime("%Y-%m-%d")
-        entries = self.usage_repo.get_usage_by_date(today, tool_name, host_name)
+        rows = self.usage_repo.get_today_aggregated(today, tool_name, host_name)
 
-        # Merge entries by tool_name (combine all hosts)
-        # Use sets for O(1) lookup instead of O(n) list lookup
+        # Aggregate by normalized tool name using dict for deduplication
         merged: dict[str, dict] = {}
-        for entry in entries:
-            tool = normalize_tool_name(entry.get("tool_name", "unknown"))
+        for row in rows:
+            tool = normalize_tool_name(row["tool_name"])
             if tool not in merged:
                 merged[tool] = {
-                    "date": entry.get("date"),
+                    "date": today,
                     "tool_name": tool,
                     "tokens_used": 0,
                     "input_tokens": 0,
                     "output_tokens": 0,
                     "cache_tokens": 0,
                     "request_count": 0,
-                    "models_used_set": set(),  # Use set for O(1) lookup
-                    "hosts_set": set(),  # Use set for O(1) lookup
+                    "models_used_set": set(),
+                    "hosts_set": set(),
                 }
 
-            merged[tool]["tokens_used"] += entry.get("tokens_used", 0)
-            merged[tool]["input_tokens"] += entry.get("input_tokens", 0)
-            merged[tool]["output_tokens"] += entry.get("output_tokens", 0)
-            merged[tool]["cache_tokens"] += entry.get("cache_tokens", 0)
-            merged[tool]["request_count"] += entry.get("request_count", 0)
+            merged[tool]["tokens_used"] += row.get("tokens_used") or 0
+            merged[tool]["input_tokens"] += row.get("input_tokens") or 0
+            merged[tool]["output_tokens"] += row.get("output_tokens") or 0
+            merged[tool]["cache_tokens"] += row.get("cache_tokens") or 0
+            merged[tool]["request_count"] += row.get("request_count") or 0
+            merged[tool]["hosts_set"].add(row.get("host_name") or "unknown")
 
-            if entry.get("models_used"):
-                merged[tool]["models_used_set"].update(entry.get("models_used", []))
+            if row.get("models_used"):
+                try:
+                    models = (
+                        json.loads(row["models_used"])
+                        if isinstance(row["models_used"], str)
+                        else row["models_used"]
+                    )
+                    if isinstance(models, list):
+                        merged[tool]["models_used_set"].update(models)
+                except (json.JSONDecodeError, TypeError):
+                    pass
 
-            host = entry.get("host_name", "unknown")
-            merged[tool]["hosts_set"].add(host)
-
-        # Convert to list and clean up
         result = []
-        for tool, data in merged.items():
-            # Convert sets to lists for output
-            models_used = list(data["models_used_set"]) if data["models_used_set"] else None
-            hosts = list(data["hosts_set"])
+        for data in merged.values():
             result.append(
                 {
                     "date": data["date"],
@@ -89,8 +96,8 @@ class UsageService:
                     "output_tokens": data["output_tokens"],
                     "cache_tokens": data["cache_tokens"],
                     "request_count": data["request_count"],
-                    "models_used": models_used,
-                    "hosts": hosts,
+                    "models_used": list(data["models_used_set"]) or None,
+                    "hosts": list(data["hosts_set"]),
                 }
             )
 

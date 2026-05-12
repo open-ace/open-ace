@@ -791,9 +791,7 @@ def get_session(session_id):
             # Calculate request_count from messages if available
             # Only assistant messages represent actual API requests (toolResult is local execution)
             if include_messages and session.messages:
-                session.request_count = sum(
-                    1 for m in session.messages if m.role == "assistant"
-                )
+                session.request_count = sum(1 for m in session.messages if m.role == "assistant")
             else:
                 # Query request_count from session_messages table
                 conn = manager._get_connection()

@@ -138,7 +138,7 @@ def run_fetch_scripts():
                         "--days",
                         "1",
                         "--mode",
-                        "messages",
+                        "both",
                         "--multi-user",
                         "--recent",
                         "--config",
