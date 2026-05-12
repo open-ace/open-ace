@@ -135,11 +135,11 @@ class UsageRepository:
         logger.debug(f"Saved usage: {date} - {tool_name} - {host_name}")
         return True
 
-    def get_today_aggregated(
+    def get_usage_rows_by_date(
         self, date: str, tool_name: Optional[str] = None, host_name: Optional[str] = None
     ) -> list[dict]:
         """
-        Get aggregated usage from daily_usage for a specific date.
+        Get raw usage rows from daily_usage for a specific date.
 
         Queries daily_usage directly (few rows) instead of JOIN with
         daily_messages to avoid request_count multiplication.

@@ -47,7 +47,7 @@ class UsageService:
             List[Dict]: List of usage records merged by normalized tool_name.
         """
         today = datetime.now().strftime("%Y-%m-%d")
-        rows = self.usage_repo.get_today_aggregated(today, tool_name, host_name)
+        rows = self.usage_repo.get_usage_rows_by_date(today, tool_name, host_name)
 
         # Aggregate by normalized tool name using dict for deduplication
         merged: dict[str, dict] = {}

@@ -113,7 +113,7 @@ class SummaryService:
             query_global = """
                 SELECT
                     tool_name,
-                    NULL as host_name,
+                    '' as host_name,
                     COUNT(DISTINCT date) as days_count,
                     SUM(tokens_used) as total_tokens,
                     SUM(tokens_used) / COUNT(DISTINCT date) as avg_tokens,
@@ -172,6 +172,10 @@ class SummaryService:
 
         with self.db.connection() as conn:
             cursor = conn.cursor()
+
+            # Clean up stale NULL host_name rows (prevents accumulation
+            # from older versions that used NULL instead of empty string)
+            cursor.execute("DELETE FROM usage_summary WHERE host_name IS NULL")
 
             for agg in aggregates:
                 tool_name = agg["tool_name"]
@@ -268,10 +272,10 @@ class SummaryService:
             """
             rows = self.db.fetch_all(query, (host_name,))
         else:
-            # Get global summary (host_name IS NULL)
+            # Get global summary (host_name = '' for global rows)
             query = """
                 SELECT * FROM usage_summary
-                WHERE host_name IS NULL
+                WHERE host_name = ''
                 ORDER BY total_tokens DESC
             """
             rows = self.db.fetch_all(query, ())
@@ -308,7 +312,7 @@ class SummaryService:
         """
         query = """
             SELECT * FROM usage_summary
-            WHERE host_name IS NOT NULL
+            WHERE host_name != ''
             ORDER BY host_name, total_tokens DESC
         """
         rows = self.db.fetch_all(query, ())
@@ -376,7 +380,7 @@ class SummaryService:
         query = """
             SELECT DISTINCT host_name
             FROM usage_summary
-            WHERE host_name IS NOT NULL
+            WHERE host_name != ''
             ORDER BY host_name
         """
         rows = self.db.fetch_all(query)
