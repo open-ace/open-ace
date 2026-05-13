@@ -9,7 +9,7 @@ cryptography>=41.0.0
 filetype>=1.2.0
 
 # Production server
-gunicorn>=21.0.0
+gunicorn>=23.0.0
 
 # WebSocket support (removed gevent-websocket, using HTTP polling)
 gevent>=23.0.0
