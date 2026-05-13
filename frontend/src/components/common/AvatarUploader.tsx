@@ -2,7 +2,7 @@
  * AvatarUploader Component - Upload and crop user avatar
  */
 
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { Avatar } from './Avatar';
 import { Modal } from './Modal';
 import { t } from '@/i18n';
@@ -116,6 +116,37 @@ export const AvatarUploader: React.FC<AvatarUploaderProps> = ({
     setDragging(false);
   }, []);
 
+  const handleTouchStart = useCallback(
+    (e: React.TouchEvent) => {
+      const touch = e.touches[0];
+      setDragging(true);
+      setDragStart({ x: touch.clientX - crop.x, y: touch.clientY - crop.y });
+    },
+    [crop.x, crop.y]
+  );
+
+  const handleTouchMove = useCallback(
+    (e: React.TouchEvent) => {
+      if (!dragging) return;
+      e.preventDefault();
+
+      const touch = e.touches[0];
+      let newX = touch.clientX - dragStart.x;
+      let newY = touch.clientY - dragStart.y;
+
+      // Constrain to image bounds
+      newX = Math.max(0, Math.min(newX, imageSize.width - crop.size));
+      newY = Math.max(0, Math.min(newY, imageSize.height - crop.size));
+
+      setCrop((prev) => ({ ...prev, x: newX, y: newY }));
+    },
+    [dragging, dragStart, imageSize, crop.size]
+  );
+
+  const handleTouchEnd = useCallback(() => {
+    setDragging(false);
+  }, []);
+
   const handleCropConfirm = useCallback(async () => {
     if (!imageRef.current || !canvasRef.current) return;
 
@@ -157,12 +188,6 @@ export const AvatarUploader: React.FC<AvatarUploaderProps> = ({
     setShowCropModal(false);
     setImageSrc(null);
   }, []);
-
-  // Draw crop overlay
-  useEffect(() => {
-    if (!showCropModal || !canvasRef.current) return;
-    // Canvas is used for final output only
-  }, [showCropModal]);
 
   return (
     <div className="avatar-uploader d-flex flex-column align-items-center">
@@ -220,10 +245,12 @@ export const AvatarUploader: React.FC<AvatarUploaderProps> = ({
             {/* Image with crop overlay */}
             <div
               className="position-relative d-inline-block overflow-hidden"
-              style={{ maxWidth: '100%', maxHeight: '300px' }}
+              style={{ maxWidth: '100%', maxHeight: '300px', touchAction: 'none' }}
               onMouseMove={handleMouseMove}
               onMouseUp={handleMouseUp}
               onMouseLeave={handleMouseUp}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
             >
               <img
                 src={imageSrc}
@@ -261,6 +288,7 @@ export const AvatarUploader: React.FC<AvatarUploaderProps> = ({
                       backgroundSize: `${imageSize.width}px ${imageSize.height}px`,
                     }}
                     onMouseDown={handleMouseDown}
+                    onTouchStart={handleTouchStart}
                   />
                 </>
               )}
@@ -276,7 +304,7 @@ export const AvatarUploader: React.FC<AvatarUploaderProps> = ({
             {t('cancel', language)}
           </button>
           <button className="btn btn-primary" onClick={handleCropConfirm}>
-            {t('confirm', language)}
+            {t('cropConfirm', language)}
           </button>
         </div>
       </Modal>

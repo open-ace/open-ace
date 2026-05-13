@@ -540,7 +540,7 @@ const translations: Record<Language, Translations> = {
     fileTooLarge: 'File too large. Maximum size: 2MB',
     cropAvatar: 'Crop Avatar',
     uploading: 'Uploading...',
-    confirm: 'Confirm',
+    cropConfirm: 'Confirm',
 
     // Alert Management
     totalAlerts: 'Total Alerts',
@@ -1329,7 +1329,7 @@ const translations: Record<Language, Translations> = {
     fileTooLarge: '文件过大。最大 2MB',
     cropAvatar: '裁剪头像',
     uploading: '上传中...',
-    confirm: '确认',
+    cropConfirm: '确认',
 
     // Alert Management
     totalAlerts: '总告警数',
@@ -2029,7 +2029,7 @@ const translations: Record<Language, Translations> = {
     fileTooLarge: 'ファイルが大きすぎます。最大2MB',
     cropAvatar: 'アバターをトリミング',
     uploading: 'アップロード中...',
-    confirm: '確認',
+    cropConfirm: '確認',
 
     // Theme
     lightTheme: 'ライト',
@@ -2527,7 +2527,7 @@ const translations: Record<Language, Translations> = {
     fileTooLarge: '파일이 너무 큽니다. 최대 2MB',
     cropAvatar: '아바타 자르기',
     uploading: '업로드 중...',
-    confirm: '확인',
+    cropConfirm: '확인',
 
     // Theme
     lightTheme: '라이트',

@@ -70,6 +70,11 @@ export const authApi = {
       credentials: 'include',
     });
 
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({ error: 'Upload failed' }));
+      return data;
+    }
+
     return response.json();
   },
 

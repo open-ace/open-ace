@@ -170,8 +170,7 @@ export const TenantManagement: React.FC = () => {
       handleCloseModal();
       fetchTenants();
     } catch (err) {
-      const errorMessage =
-        err instanceof Error ? (err as Error).message : 'Failed to save tenant';
+      const errorMessage = err instanceof Error ? (err as Error).message : 'Failed to save tenant';
       setFormError(errorMessage);
     }
   };
@@ -360,11 +359,11 @@ export const TenantManagement: React.FC = () => {
                                 'progress-bar',
                                 (tenant.total_tokens_used / tenant.quota.monthly_token_limit) *
                                   100 >=
-                                90
+                                  90
                                   ? 'bg-danger'
                                   : (tenant.total_tokens_used / tenant.quota.monthly_token_limit) *
-                                      100 >=
-                                    70
+                                        100 >=
+                                      70
                                     ? 'bg-warning'
                                     : 'bg-success'
                               )}

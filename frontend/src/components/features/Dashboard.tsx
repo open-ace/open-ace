@@ -179,7 +179,12 @@ export const Dashboard: React.FC = () => {
           <div className="col-md-8 mb-4">
             <Card title={t('trendChart', language)}>
               {trendData && trendData.length > 0 ? (
-                <TokenTrendChart data={trendData} startDate={startDate} endDate={endDate} height={300} />
+                <TokenTrendChart
+                  data={trendData}
+                  startDate={startDate}
+                  endDate={endDate}
+                  height={300}
+                />
               ) : (
                 <EmptyState icon="bi-graph-up" title={t('noData', language)} />
               )}
@@ -283,9 +288,7 @@ export const Dashboard: React.FC = () => {
                         />
                       )}
                     </th>
-                    <th className="text-end">
-                      {t('tableRatio', language) || 'Ratio'}
-                    </th>
+                    <th className="text-end">{t('tableRatio', language) || 'Ratio'}</th>
                     <th
                       className="text-end sortable"
                       onClick={() => handleSort('days_count')}
@@ -316,7 +319,9 @@ export const Dashboard: React.FC = () => {
                       <td className="text-end">{formatTokens(stats.total_output_tokens ?? 0)}</td>
                       <td className="text-end">
                         {(stats.total_output_tokens ?? 0) > 0
-                          ? ((stats.total_input_tokens ?? 0) / (stats.total_output_tokens ?? 1)).toFixed(1)
+                          ? (
+                              (stats.total_input_tokens ?? 0) / (stats.total_output_tokens ?? 1)
+                            ).toFixed(1)
                           : '-'}
                       </td>
                       <td className="text-end">{stats.days_count}</td>

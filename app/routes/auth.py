@@ -10,6 +10,7 @@ import uuid
 from typing import cast
 
 import bcrypt
+import filetype
 from flask import Blueprint, jsonify, make_response, request
 
 from app.auth.decorators import public_endpoint
@@ -17,6 +18,7 @@ from app.repositories.user_repo import UserRepository
 from app.services.auth_service import AuthService
 
 ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "webp"}
+ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
 MAX_FILE_SIZE = 2 * 1024 * 1024  # 2MB
 
 logger = logging.getLogger(__name__)
@@ -219,7 +221,7 @@ def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
-@auth_bp.route("/api/user/avatar", methods=["POST"])
+@auth_bp.route("/user/avatar", methods=["POST"])
 def api_upload_avatar():
     """Upload user avatar."""
     token = request.cookies.get("session_token") or request.headers.get(
@@ -245,6 +247,10 @@ def api_upload_avatar():
     if not allowed_file(file.filename):
         return jsonify({"error": "Invalid file type. Allowed: jpg, jpeg, png, gif, webp"}), 400
 
+    # Check MIME type
+    if not file.content_type or file.content_type not in ALLOWED_MIME_TYPES:
+        return jsonify({"error": "Invalid content type"}), 400
+
     # Check file size
     file.seek(0, os.SEEK_END)
     file_size = file.tell()
@@ -262,8 +268,27 @@ def api_upload_avatar():
     avatars_dir = os.path.join(static_dir, "avatars")
     os.makedirs(avatars_dir, exist_ok=True)
 
+    # Delete old avatar file if exists
+    profile = auth_service.get_user_profile(user_id)
+    if profile and profile.get("avatar_url"):
+        old_filepath = os.path.join(static_dir, profile["avatar_url"].removeprefix("/static/"))
+        try:
+            if os.path.exists(old_filepath):
+                os.remove(old_filepath)
+        except OSError:
+            pass
+
     filepath = os.path.join(avatars_dir, filename)
     file.save(filepath)
+
+    # Verify actual image content (not just extension)
+    kind = filetype.guess(filepath)
+    if not kind or kind.mime not in ALLOWED_MIME_TYPES:
+        try:
+            os.remove(filepath)
+        except OSError:
+            pass
+        return jsonify({"error": "Invalid image content"}), 400
 
     # Update user avatar_url in database
     avatar_url = f"/static/avatars/{filename}"
@@ -281,7 +306,7 @@ def api_upload_avatar():
     return jsonify({"error": "Failed to update avatar"}), 500
 
 
-@auth_bp.route("/api/user/avatar", methods=["DELETE"])
+@auth_bp.route("/user/avatar", methods=["DELETE"])
 def api_delete_avatar():
     """Delete user avatar."""
     token = request.cookies.get("session_token") or request.headers.get(

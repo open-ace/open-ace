@@ -51,7 +51,7 @@ export interface SessionFilters {
   status?: string;
   session_type?: string;
   search?: string;
-  search_days?: number;  // Limit message search to recent N days
+  search_days?: number; // Limit message search to recent N days
 }
 
 export interface SessionsListResponse {

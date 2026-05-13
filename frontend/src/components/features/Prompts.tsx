@@ -180,7 +180,12 @@ export const Prompts: React.FC = () => {
       {error && templates.length > 0 && (
         <div className="alert alert-danger alert-dismissible fade show" role="alert">
           {error}
-          <button type="button" className="btn-close" onClick={() => setError(null)} aria-label="Close" />
+          <button
+            type="button"
+            className="btn-close"
+            onClick={() => setError(null)}
+            aria-label="Close"
+          />
         </div>
       )}
 

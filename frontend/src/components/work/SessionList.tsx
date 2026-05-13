@@ -49,8 +49,8 @@ interface GroupedSessions {
 
 export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onSelectSession }) => {
   const language = useLanguage();
-  const [searchInput, setSearchInput] = useState('');  // User input in search box
-  const [debouncedSearch, setDebouncedSearch] = useState('');  // Debounced value for API
+  const [searchInput, setSearchInput] = useState(''); // User input in search box
+  const [debouncedSearch, setDebouncedSearch] = useState(''); // Debounced value for API
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Debounce search input
@@ -83,10 +83,12 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
   } = useSessions({
     page: 1,
     pageSize: 50,
-    filters: debouncedSearch ? {
-      search: debouncedSearch,
-      search_days: DEFAULT_SEARCH_DAYS,
-    } : undefined,
+    filters: debouncedSearch
+      ? {
+          search: debouncedSearch,
+          search_days: DEFAULT_SEARCH_DAYS,
+        }
+      : undefined,
   });
 
   // Auto refresh session list every 1 minute (Issue #64)

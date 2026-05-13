@@ -267,18 +267,13 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
         <ul className="prompt-list list-unstyled">
           {prompts.map((prompt) => (
             <li key={prompt.id}>
-              <div
-                className="prompt-item"
-                onClick={() => handlePromptClick(prompt)}
-              >
+              <div className="prompt-item" onClick={() => handlePromptClick(prompt)}>
                 {/* Left: Name with tooltip */}
                 <div className="prompt-item-name-wrapper">
                   <span className="prompt-item-name">{prompt.name}</span>
                   {/* Fast CSS tooltip */}
                   <div className="prompt-tooltip-fast">
-                    <div className="prompt-tooltip-content">
-                      {truncateContent(prompt.content)}
-                    </div>
+                    <div className="prompt-tooltip-content">{truncateContent(prompt.content)}</div>
                   </div>
                 </div>
 
@@ -301,11 +296,13 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
                   <button
                     className={`prompt-action-btn ${copiedPromptId === prompt.id ? 'copied' : hasRequiredVariables(prompt) ? 'disabled' : 'active'}`}
                     onClick={(e) => handleDirectCopy(e, prompt)}
-                    title={hasRequiredVariables(prompt)
-                      ? (t('fillVariablesFirst', language) || 'Fill variables first')
-                      : copiedPromptId === prompt.id
-                        ? t('copied', language)
-                        : (t('copy', language) || 'Copy')}
+                    title={
+                      hasRequiredVariables(prompt)
+                        ? t('fillVariablesFirst', language) || 'Fill variables first'
+                        : copiedPromptId === prompt.id
+                          ? t('copied', language)
+                          : t('copy', language) || 'Copy'
+                    }
                     disabled={hasRequiredVariables(prompt)}
                   >
                     {copiedPromptId === prompt.id ? (
