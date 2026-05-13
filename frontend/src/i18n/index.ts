@@ -196,7 +196,8 @@ const translations: Record<Language, Translations> = {
     roleChangeThreshold: 'Role Change Threshold',
     roleChangeThresholdHelp: 'Number of role changes before triggering an anomaly alert',
     permissionChangeThreshold: 'Permission Change Threshold',
-    permissionChangeThresholdHelp: 'Number of permission changes before triggering an anomaly alert',
+    permissionChangeThresholdHelp:
+      'Number of permission changes before triggering an anomaly alert',
 
     // Audit Log
     allActions: 'All Actions',
@@ -517,6 +518,16 @@ const translations: Record<Language, Translations> = {
     complianceReport: 'Compliance Report',
     settings: 'Settings',
 
+    // Personal Settings (Issue #121)
+    personalSettings: 'Personal Settings',
+    workspaceSettings: 'Workspace Settings',
+    autoFullscreenOnEnterChat: 'Auto fullscreen when entering chat',
+    autoFullscreenOnEnterChatDesc:
+      'Automatically enter fullscreen mode when selecting a project to chat',
+    tabNotifications: 'Tab notifications',
+    tabNotificationsDesc: 'Show notifications when other tabs need attention',
+    moreSettingsComingSoon: 'More settings coming soon...',
+
     // Alert Management
     totalAlerts: 'Total Alerts',
     unreadAlerts: 'Unread Alerts',
@@ -598,7 +609,8 @@ const translations: Record<Language, Translations> = {
     roiPercentage: 'ROI %',
     roiDataAnomaly: 'Data anomaly detected',
     dataAnomalyDetected: 'Data Anomaly Detected',
-    tokenAccumulationWarning: 'Token counts may be inflated due to cumulative counting. Cost and ROI calculations may be inaccurate.',
+    tokenAccumulationWarning:
+      'Token counts may be inflated due to cumulative counting. Cost and ROI calculations may be inaccurate.',
     efficiencyScore: 'Efficiency Score',
     roiTrend: 'ROI Trend',
     roi: 'ROI',
@@ -1282,6 +1294,15 @@ const translations: Record<Language, Translations> = {
     complianceReport: '合规报告',
     settings: '设置',
 
+    // Personal Settings (Issue #121)
+    personalSettings: '个人设置',
+    workspaceSettings: '工作区设置',
+    autoFullscreenOnEnterChat: '进入聊天时自动全屏',
+    autoFullscreenOnEnterChatDesc: '选择项目进入聊天时自动进入全屏模式',
+    tabNotifications: '标签页通知',
+    tabNotificationsDesc: '当其他标签页需要关注时显示通知',
+    moreSettingsComingSoon: '更多设置即将推出...',
+
     // Alert Management
     totalAlerts: '总告警数',
     unreadAlerts: '未读告警',
@@ -1958,6 +1979,16 @@ const translations: Record<Language, Translations> = {
     loginError: 'ユーザー名またはパスワードが無効です',
     adminOnly: '管理者のみ',
 
+    // Personal Settings (Issue #121)
+    personalSettings: '個人設定',
+    workspaceSettings: 'ワークスペース設定',
+    autoFullscreenOnEnterChat: 'チャット入時に自動フルスクリーン',
+    autoFullscreenOnEnterChatDesc:
+      'プロジェクトを選択してチャット入時に自動的にフルスクリーンモードに入る',
+    tabNotifications: 'タブ通知',
+    tabNotificationsDesc: '他のタブが注目を必要とする時に通知を表示',
+    moreSettingsComingSoon: '近日中に更多の設定が追加されます...',
+
     // Theme
     lightTheme: 'ライト',
     darkTheme: 'ダーク',
@@ -2431,6 +2462,16 @@ const translations: Record<Language, Translations> = {
     password: '비밀번호',
     loginError: '사용자 이름 또는 비밀번호가 잘못되었습니다',
     adminOnly: '관리자 전용',
+
+    // Personal Settings (Issue #121)
+    personalSettings: '개인 설정',
+    workspaceSettings: '워크스페이스 설정',
+    autoFullscreenOnEnterChat: '채팅 вход 시 자동 전체 화면',
+    autoFullscreenOnEnterChatDesc:
+      '프로젝트를 선택하여 채팅에 입장할 때 자동으로 전체 화면 모드로 전환',
+    tabNotifications: '탭 알림',
+    tabNotificationsDesc: '다른 탭이 주의가 필요할 때 알림 표시',
+    moreSettingsComingSoon: '더 많은 설정이 곧 추가됩니다...',
 
     // Theme
     lightTheme: '라이트',

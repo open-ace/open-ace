@@ -2,12 +2,12 @@
  * Header Component - Top navigation header
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { cn } from '@/utils';
 import { useAuth, useTheme, useLanguage, useGlobalFetch, useAppMode } from '@/hooks';
 import { useAppStore } from '@/store';
 import { t } from '@/i18n';
-import { Button } from '@/components/common';
+import { Button, UserSettingsModal } from '@/components/common';
 
 interface HeaderProps {
   compact?: boolean;
@@ -19,6 +19,7 @@ export const Header: React.FC<HeaderProps> = ({ compact = false }) => {
   const language = useLanguage();
   const appMode = useAppMode();
   const { status, autoRefresh, setAutoRefresh, refreshAll } = useGlobalFetch();
+  const [showSettings, setShowSettings] = useState(false);
 
   const handleThemeToggle = () => {
     const newTheme = theme === 'light' ? 'dark' : 'light';
@@ -114,6 +115,12 @@ export const Header: React.FC<HeaderProps> = ({ compact = false }) => {
               <hr className="dropdown-divider" />
             </li>
             <li>
+              <button className="dropdown-item" onClick={() => setShowSettings(true)}>
+                <i className="bi bi-gear me-2" />
+                {t('settings', language)}
+              </button>
+            </li>
+            <li>
               <button className="dropdown-item" onClick={logout}>
                 <i className="bi bi-box-arrow-right me-2" />
                 {t('logout', language)}
@@ -131,7 +138,12 @@ export const Header: React.FC<HeaderProps> = ({ compact = false }) => {
 
   // In compact mode (WorkLayout), just return the right content without wrapper
   if (compact) {
-    return rightContent;
+    return (
+      <>
+        {rightContent}
+        <UserSettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} />
+      </>
+    );
   }
 
   // In normal mode (ManageLayout), return full header with left and right content
@@ -184,6 +196,9 @@ export const Header: React.FC<HeaderProps> = ({ compact = false }) => {
 
       {/* Right side */}
       {rightContent}
+
+      {/* User Settings Modal */}
+      <UserSettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} />
     </header>
   );
 };
