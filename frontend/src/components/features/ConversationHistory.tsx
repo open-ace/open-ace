@@ -252,7 +252,7 @@ export const ConversationHistory: React.FC = () => {
       visibleCols
         .map((col) => {
           const val = conv[col.key as keyof ConversationHistoryType];
-          return escapeCSV(val !== null && val !== undefined ? String(val) : '');
+          return escapeCSV(val != null ? String(val) : '');
         })
         .join(',')
     );

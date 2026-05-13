@@ -750,7 +750,7 @@ export const AuditCenter: React.FC = () => {
                                 'bg-secondary': !anomaly.status || anomaly.status === 'pending',
                               })}
                             >
-                              {t(anomaly.status ?? 'pending', language)}
+                              {t(anomaly.status || 'pending', language)}
                             </span>
                           </td>
                           <td>
