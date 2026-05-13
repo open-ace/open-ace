@@ -55,8 +55,7 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({ isOpen, on
       if (result.success) {
         // Update user in store
         if (user) {
-          const { avatar_url, ...rest } = user;
-          setUser(rest as typeof user);
+          setUser({ ...user, avatar_url: undefined });
         }
         toast.success(t('avatarDeleteSuccess', language));
       } else {

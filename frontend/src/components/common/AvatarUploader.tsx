@@ -5,6 +5,7 @@
 import React, { useState, useRef, useCallback } from 'react';
 import { Avatar } from './Avatar';
 import { Modal } from './Modal';
+import { useToast } from './Toast';
 import { t } from '@/i18n';
 import { useLanguage } from '@/store';
 
@@ -27,6 +28,7 @@ export const AvatarUploader: React.FC<AvatarUploaderProps> = ({
   uploading = false,
 }) => {
   const language = useLanguage();
+  const toast = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [showCropModal, setShowCropModal] = useState(false);
@@ -45,13 +47,13 @@ export const AvatarUploader: React.FC<AvatarUploaderProps> = ({
       // Validate file type
       const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
       if (!allowedTypes.includes(file.type)) {
-        alert(t('invalidFileType', language));
+        toast.error(t('invalidFileType', language));
         return;
       }
 
       // Validate file size (2MB)
       if (file.size > 2 * 1024 * 1024) {
-        alert(t('fileTooLarge', language));
+        toast.error(t('fileTooLarge', language));
         return;
       }
 
