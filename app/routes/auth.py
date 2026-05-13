@@ -5,6 +5,8 @@ API routes for authentication operations.
 """
 
 import logging
+import os
+import uuid
 from typing import cast
 
 import bcrypt
@@ -13,6 +15,9 @@ from flask import Blueprint, jsonify, make_response, request
 from app.auth.decorators import public_endpoint
 from app.repositories.user_repo import UserRepository
 from app.services.auth_service import AuthService
+
+ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "webp"}
+MAX_FILE_SIZE = 2 * 1024 * 1024  # 2MB
 
 logger = logging.getLogger(__name__)
 
@@ -207,3 +212,108 @@ def api_change_password():
         return jsonify({"success": True, "message": "Password changed successfully"})
 
     return jsonify({"error": error}), 400
+
+
+def allowed_file(filename: str) -> bool:
+    """Check if file extension is allowed."""
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+@auth_bp.route("/api/user/avatar", methods=["POST"])
+def api_upload_avatar():
+    """Upload user avatar."""
+    token = request.cookies.get("session_token") or request.headers.get(
+        "Authorization", ""
+    ).replace("Bearer ", "")
+
+    is_auth, session_or_error = auth_service.require_auth(token)
+    if not is_auth:
+        return jsonify(session_or_error), 401
+
+    if session_or_error is None:
+        return jsonify({"error": "Invalid session"}), 401
+
+    user_id = int(session_or_error.get("user_id", 0))
+
+    if "file" not in request.files:
+        return jsonify({"error": "No file provided"}), 400
+
+    file = request.files["file"]
+    if file.filename is None or file.filename == "":
+        return jsonify({"error": "No file selected"}), 400
+
+    if not allowed_file(file.filename):
+        return jsonify({"error": "Invalid file type. Allowed: jpg, jpeg, png, gif, webp"}), 400
+
+    # Check file size
+    file.seek(0, os.SEEK_END)
+    file_size = file.tell()
+    file.seek(0)
+
+    if file_size > MAX_FILE_SIZE:
+        return jsonify({"error": "File too large. Maximum size: 2MB"}), 400
+
+    # Generate unique filename
+    ext = file.filename.rsplit(".", 1)[1].lower()
+    filename = f"user_{user_id}_{uuid.uuid4().hex[:8]}.{ext}"
+
+    # Save to static/avatars/
+    static_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "static")
+    avatars_dir = os.path.join(static_dir, "avatars")
+    os.makedirs(avatars_dir, exist_ok=True)
+
+    filepath = os.path.join(avatars_dir, filename)
+    file.save(filepath)
+
+    # Update user avatar_url in database
+    avatar_url = f"/static/avatars/{filename}"
+    success = user_repo.update_avatar(user_id, avatar_url)
+
+    if success:
+        return jsonify({"success": True, "avatar_url": avatar_url})
+
+    # Clean up file if database update failed
+    try:
+        os.remove(filepath)
+    except OSError:
+        pass
+
+    return jsonify({"error": "Failed to update avatar"}), 500
+
+
+@auth_bp.route("/api/user/avatar", methods=["DELETE"])
+def api_delete_avatar():
+    """Delete user avatar."""
+    token = request.cookies.get("session_token") or request.headers.get(
+        "Authorization", ""
+    ).replace("Bearer ", "")
+
+    is_auth, session_or_error = auth_service.require_auth(token)
+    if not is_auth:
+        return jsonify(session_or_error), 401
+
+    if session_or_error is None:
+        return jsonify({"error": "Invalid session"}), 401
+
+    user_id = int(session_or_error.get("user_id", 0))
+
+    # Get current avatar URL to delete file
+    profile = auth_service.get_user_profile(user_id)
+    if profile and profile.get("avatar_url"):
+        static_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "static"
+        )
+        old_filepath = os.path.join(static_dir, profile["avatar_url"].removeprefix("/static/"))
+        try:
+            if os.path.exists(old_filepath):
+                os.remove(old_filepath)
+        except OSError:
+            pass
+
+    # Update database
+    success = user_repo.update_avatar(user_id, None)
+
+    if success:
+        return jsonify({"success": True})
+
+    return jsonify({"error": "Failed to delete avatar"}), 500
