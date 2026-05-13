@@ -280,9 +280,11 @@ def delete_prompt(template_id):
     """Delete a prompt template."""
     try:
         user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
+        user_role = g.user.get("role") if hasattr(g, "user") and g.user else None
 
         library = get_prompt_library()
-        success = library.delete_template(template_id, user_id)
+        # Admin users can delete any template; others can only delete their own
+        success = library.delete_template(template_id, None if user_role == "admin" else user_id)
 
         if not success:
             return jsonify({"success": False, "error": "Template not found or not authorized"}), 404

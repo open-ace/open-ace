@@ -137,9 +137,8 @@ export const Prompts: React.FC = () => {
       if (selectedTemplate?.id === id) {
         setSelectedTemplate(null);
       }
-    } catch (err) {
-      const error = err as Error;
-      setError(error?.message || t('error', language));
+    } catch {
+      setError(t('deletePromptFailed', language) || 'Failed to delete prompt');
     }
   };
 
@@ -177,6 +176,14 @@ export const Prompts: React.FC = () => {
 
   return (
     <div className="prompts">
+      {/* Error alert for non-empty list */}
+      {error && templates.length > 0 && (
+        <div className="alert alert-danger alert-dismissible fade show" role="alert">
+          {error}
+          <button type="button" className="btn-close" onClick={() => setError(null)} aria-label="Close" />
+        </div>
+      )}
+
       {/* Header */}
       <div className="prompts-header d-flex justify-content-between align-items-center mb-4">
         <h2>{t('prompts', language)}</h2>

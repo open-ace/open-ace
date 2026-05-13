@@ -56,6 +56,9 @@ interface AppState {
   // Tab notification settings
   enableTabNotifications: boolean;
 
+  // Auto fullscreen on enter chat setting (Issue #121)
+  autoFullscreenOnEnterChat: boolean;
+
   // Actions
   setUser: (user: User | null) => void;
   setAuthenticated: (isAuthenticated: boolean) => void;
@@ -108,6 +111,9 @@ export const useAppStore = create<AppState>()(
 
       // Tab notification settings
       enableTabNotifications: true,
+
+      // Auto fullscreen on enter chat setting (Issue #121)
+      autoFullscreenOnEnterChat: true,
 
       // Actions
       setUser: (user) => set({ user }),
