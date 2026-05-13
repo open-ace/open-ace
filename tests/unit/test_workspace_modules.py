@@ -121,6 +121,38 @@ class TestPromptLibrary:
         retrieved = prompt_library.get_template(template_id)
         assert retrieved is None
 
+    def test_delete_template_by_author(self, prompt_library):
+        """Test that the author can delete their own template."""
+        template = PromptTemplate(name="Author Delete", content="Owned", author_id=42)
+        template_id = prompt_library.create_template(template)
+
+        success = prompt_library.delete_template(template_id, user_id=42)
+        assert success
+
+    def test_delete_template_by_non_author_denied(self, prompt_library):
+        """Test that a non-author cannot delete another user's template."""
+        template = PromptTemplate(name="Protected", content="Owned by 42", author_id=42)
+        template_id = prompt_library.create_template(template)
+
+        success = prompt_library.delete_template(template_id, user_id=99)
+        assert not success
+
+        # Template should still exist
+        retrieved = prompt_library.get_template(template_id)
+        assert retrieved is not None
+
+    def test_delete_template_by_admin(self, prompt_library):
+        """Test that admin (user_id=None) can delete any template."""
+        template = PromptTemplate(name="Admin Target", content="Owned by 42", author_id=42)
+        template_id = prompt_library.create_template(template)
+
+        # Passing None as user_id simulates admin bypassing author check
+        success = prompt_library.delete_template(template_id, user_id=None)
+        assert success
+
+        retrieved = prompt_library.get_template(template_id)
+        assert retrieved is None
+
     def test_render_template(self, prompt_library):
         """Test rendering a template with variables."""
         template = PromptTemplate(
