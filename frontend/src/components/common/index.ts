@@ -32,6 +32,7 @@ export { Avatar, AvatarGroup } from './Avatar';
 export { Dropdown, SplitButton } from './Dropdown';
 export { Divider } from './Divider';
 export { SessionDetailContent } from './SessionDetailContent';
+export { UserSettingsModal } from './UserSettingsModal';
 
 // Mode Switcher - Dual-track system
 export { ModeSwitcher } from './ModeSwitcher';
