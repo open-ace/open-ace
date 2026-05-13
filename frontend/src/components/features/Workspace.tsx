@@ -86,7 +86,6 @@ export const Workspace: React.FC = () => {
 
   // Tab notifications setting
   const enableTabNotifications = useEnableTabNotifications();
-  const { toggleTabNotifications } = useAppStore();
 
   // Refs for iframe elements (to send focus messages)
   const iframeRefs = useRef<Map<string, HTMLIFrameElement>>(new Map());
@@ -159,8 +158,11 @@ export const Workspace: React.FC = () => {
   useEffect(() => {
     const handleIframeMessage = (event: MessageEvent) => {
       // Validate message type for fullscreen request
+      // Issue #121: Only auto-fullscreen if setting is enabled
       if (event.data?.type === 'openace-enter-chat') {
-        useAppStore.getState().enterWorkspaceFullscreen(false, false);
+        if (useAppStore.getState().autoFullscreenOnEnterChat) {
+          useAppStore.getState().enterWorkspaceFullscreen(false, false);
+        }
       }
 
       // Listen for session ID update from qwen-code-webui iframe (Issue #65)
@@ -1206,28 +1208,6 @@ export const Workspace: React.FC = () => {
           )}
         </div>
         <div className="d-flex align-items-center gap-2">
-          {/* Tab notifications toggle */}
-          <button
-            className={cn(
-              'btn btn-sm',
-              enableTabNotifications ? 'btn-outline-primary' : 'btn-outline-secondary'
-            )}
-            onClick={toggleTabNotifications}
-            title={
-              enableTabNotifications
-                ? t('disableTabNotifications', language) || 'Disable tab notifications'
-                : t('enableTabNotifications', language) || 'Enable tab notifications'
-            }
-          >
-            <i
-              className={cn('bi me-1', enableTabNotifications ? 'bi-bell-fill' : 'bi-bell-slash')}
-            />
-            <span className="d-none d-sm-inline">
-              {enableTabNotifications
-                ? t('tabNotificationsOn', language) || 'Notifications On'
-                : t('tabNotificationsOff', language) || 'Off'}
-            </span>
-          </button>
           {/* Fullscreen toggle button */}
           <button
             className="btn btn-sm btn-outline-secondary fullscreen-toggle-btn"
@@ -1364,28 +1344,6 @@ export const Workspace: React.FC = () => {
             </button>
           </div>
 
-          {/* Tab notifications toggle - Show in fullscreen mode */}
-          {workspaceFullscreen && (
-            <button
-              className={cn(
-                'btn btn-sm px-3 py-1 mx-2',
-                enableTabNotifications ? 'btn-outline-primary' : 'btn-outline-secondary'
-              )}
-              onClick={toggleTabNotifications}
-              title={
-                enableTabNotifications
-                  ? t('disableTabNotifications', language)
-                  : t('enableTabNotifications', language)
-              }
-            >
-              <i
-                className={cn('bi me-1', enableTabNotifications ? 'bi-bell-fill' : 'bi-bell-slash')}
-              />
-              {enableTabNotifications
-                ? t('tabNotificationsOn', language)
-                : t('tabNotificationsOff', language)}
-            </button>
-          )}
           {/* Exit Fullscreen Button - Only show in fullscreen mode */}
           {workspaceFullscreen && (
             <button

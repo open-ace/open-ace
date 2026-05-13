@@ -86,6 +86,10 @@ interface AppState {
   // Tab notification actions
   setEnableTabNotifications: (enabled: boolean) => void;
   toggleTabNotifications: () => void;
+
+  // Auto fullscreen actions (Issue #121)
+  setAutoFullscreenOnEnterChat: (enabled: boolean) => void;
+  toggleAutoFullscreenOnEnterChat: () => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -113,7 +117,7 @@ export const useAppStore = create<AppState>()(
       enableTabNotifications: true,
 
       // Auto fullscreen on enter chat setting (Issue #121)
-      autoFullscreenOnEnterChat: true,
+      autoFullscreenOnEnterChat: false,
 
       // Actions
       setUser: (user) => set({ user }),
@@ -201,6 +205,11 @@ export const useAppStore = create<AppState>()(
       setEnableTabNotifications: (enabled) => set({ enableTabNotifications: enabled }),
       toggleTabNotifications: () =>
         set((state) => ({ enableTabNotifications: !state.enableTabNotifications })),
+
+      // Auto fullscreen actions (Issue #121)
+      setAutoFullscreenOnEnterChat: (enabled) => set({ autoFullscreenOnEnterChat: enabled }),
+      toggleAutoFullscreenOnEnterChat: () =>
+        set((state) => ({ autoFullscreenOnEnterChat: !state.autoFullscreenOnEnterChat })),
     }),
     {
       name: 'open-ace-store',
@@ -210,6 +219,7 @@ export const useAppStore = create<AppState>()(
         sidebarCollapsed: state.sidebarCollapsed,
         appMode: state.appMode,
         enableTabNotifications: state.enableTabNotifications,
+        autoFullscreenOnEnterChat: state.autoFullscreenOnEnterChat,
         // Issue #65: Persist workspace tabs state
         workspaceTabs: state.workspaceTabs,
         workspaceActiveTabId: state.workspaceActiveTabId,
@@ -228,6 +238,8 @@ export const useSidebarCollapsed = () => useAppStore((state) => state.sidebarCol
 export const useAppMode = () => useAppStore((state) => state.appMode);
 export const useWorkspaceFullscreen = () => useAppStore((state) => state.workspaceFullscreen);
 export const useEnableTabNotifications = () => useAppStore((state) => state.enableTabNotifications);
+export const useAutoFullscreenOnEnterChat = () =>
+  useAppStore((state) => state.autoFullscreenOnEnterChat);
 export const usePreviousPanelState = () =>
   useAppStore((state) => ({
     left: state.previousLeftPanelCollapsed,
