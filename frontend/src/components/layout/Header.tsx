@@ -7,7 +7,7 @@ import { cn } from '@/utils';
 import { useAuth, useTheme, useLanguage, useGlobalFetch, useAppMode } from '@/hooks';
 import { useAppStore } from '@/store';
 import { t } from '@/i18n';
-import { Button, UserSettingsModal } from '@/components/common';
+import { Button, UserSettingsModal, Avatar } from '@/components/common';
 
 interface HeaderProps {
   compact?: boolean;
@@ -104,8 +104,12 @@ export const Header: React.FC<HeaderProps> = ({ compact = false }) => {
             data-bs-toggle="dropdown"
             aria-expanded="false"
           >
-            <i className="bi bi-person-circle fs-4 me-1" />
-            <span className="d-none d-md-inline">{user.username}</span>
+            {user.avatar_url ? (
+              <Avatar src={user.avatar_url} name={user.username} size="sm" shape="circle" />
+            ) : (
+              <i className="bi bi-person-circle fs-4 me-1" />
+            )}
+            <span className="d-none d-md-inline ms-1">{user.username}</span>
           </button>
           <ul className="dropdown-menu dropdown-menu-end">
             <li>

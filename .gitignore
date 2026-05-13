@@ -14,6 +14,9 @@ videos/
 # Database
 *.db
 
+# User uploads
+static/avatars/
+
 # Python
 __pycache__/
 *.py[cod]

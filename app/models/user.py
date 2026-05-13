@@ -52,6 +52,9 @@ class User:
     # Password change requirement
     must_change_password: bool = False
 
+    # Avatar
+    avatar_url: Optional[str] = None
+
     def to_dict(self) -> dict:
         """Convert to dictionary."""
         return {
@@ -68,6 +71,7 @@ class User:
             "daily_request_quota": self.daily_request_quota,
             "monthly_request_quota": self.monthly_request_quota,
             "must_change_password": self.must_change_password,
+            "avatar_url": self.avatar_url,
         }
 
     @classmethod
@@ -92,6 +96,7 @@ class User:
             daily_request_quota=data.get("daily_request_quota"),
             monthly_request_quota=data.get("monthly_request_quota"),
             must_change_password=data.get("must_change_password", False),
+            avatar_url=data.get("avatar_url"),
         )
 
     def has_permission(self, resource: str, action: str) -> bool:

@@ -2,11 +2,14 @@
  * UserSettingsModal - User personal settings dialog
  */
 
-import React from 'react';
+import React, { useState, useCallback } from 'react';
 import { Modal } from './Modal';
-import { useLanguage, useAppStore } from '@/store';
+import { AvatarUploader } from './AvatarUploader';
+import { useLanguage, useAppStore, useUser } from '@/store';
 import { useAutoFullscreenOnEnterChat, useEnableTabNotifications } from '@/store';
+import { authApi } from '@/api/auth';
 import { t } from '@/i18n';
+import { useToast } from './Toast';
 
 interface UserSettingsModalProps {
   isOpen: boolean;
@@ -15,13 +18,78 @@ interface UserSettingsModalProps {
 
 export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({ isOpen, onClose }) => {
   const language = useLanguage();
+  const user = useUser();
+  const toast = useToast();
   const autoFullscreenOnEnterChat = useAutoFullscreenOnEnterChat();
   const enableTabNotifications = useEnableTabNotifications();
-  const { toggleAutoFullscreenOnEnterChat, toggleTabNotifications } = useAppStore();
+  const { toggleAutoFullscreenOnEnterChat, toggleTabNotifications, setUser } = useAppStore();
+  const [uploading, setUploading] = useState(false);
+
+  const handleUpload = useCallback(
+    async (file: File) => {
+      setUploading(true);
+      try {
+        const result = await authApi.uploadAvatar(file);
+        if (result.success && result.avatar_url) {
+          // Update user in store
+          if (user) {
+            setUser({ ...user, avatar_url: result.avatar_url });
+          }
+          toast.success(t('avatarUploadSuccess', language));
+        } else {
+          toast.error(t('avatarUploadFailed', language));
+        }
+      } catch {
+        toast.error(t('avatarUploadFailed', language));
+      } finally {
+        setUploading(false);
+      }
+    },
+    [user, setUser, toast, language]
+  );
+
+  const handleDelete = useCallback(async () => {
+    setUploading(true);
+    try {
+      const result = await authApi.deleteAvatar();
+      if (result.success) {
+        // Update user in store
+        if (user) {
+          setUser({ ...user, avatar_url: undefined });
+        }
+        toast.success(t('avatarDeleteSuccess', language));
+      } else {
+        toast.error(t('avatarDeleteFailed', language));
+      }
+    } catch {
+      toast.error(t('avatarDeleteFailed', language));
+    } finally {
+      setUploading(false);
+    }
+  }, [user, setUser, toast, language]);
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={t('personalSettings', language)} size="md">
       <div className="user-settings">
+        {/* Avatar Section */}
+        <div className="mb-4">
+          <h6 className="text-muted mb-3">
+            <i className="bi bi-person-circle me-2" />
+            {t('avatar', language)}
+          </h6>
+
+          <AvatarUploader
+            currentAvatarUrl={user?.avatar_url}
+            username={user?.username}
+            onUpload={handleUpload}
+            onDelete={handleDelete}
+            uploading={uploading}
+          />
+        </div>
+
+        {/* Divider */}
+        <hr className="my-4" />
+
         {/* Workspace Settings Section */}
         <div className="mb-4">
           <h6 className="text-muted mb-3">
@@ -64,15 +132,6 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({ isOpen, on
               <p className="text-muted small mb-0 mt-1">{t('tabNotificationsDesc', language)}</p>
             </div>
           </div>
-        </div>
-
-        {/* Divider */}
-        <hr className="my-4" />
-
-        {/* Placeholder for future settings */}
-        <div className="text-muted small">
-          <i className="bi bi-person me-2" />
-          {t('moreSettingsComingSoon', language)}
         </div>
       </div>
     </Modal>

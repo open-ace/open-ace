@@ -284,6 +284,26 @@ class UserRepository:
             logger.error(f"Error updating last login: {e}")
             return False
 
+    def update_avatar(self, user_id: int, avatar_url: Optional[str]) -> bool:
+        """
+        Update user avatar URL.
+
+        Args:
+            user_id: User ID.
+            avatar_url: New avatar URL or None to remove.
+
+        Returns:
+            bool: True if successful.
+        """
+        query = "UPDATE users SET avatar_url = ? WHERE id = ?"
+
+        try:
+            cursor = self.db.execute(query, (avatar_url, user_id))
+            return cast("bool", cursor.rowcount > 0)
+        except Exception as e:
+            logger.error(f"Error updating avatar: {e}")
+            return False
+
     def delete_user(self, user_id: int, hard: bool = False) -> bool:
         """
         Delete a user (soft delete by default).

@@ -56,4 +56,33 @@ export const authApi = {
       return null;
     }
   },
+
+  /**
+   * Upload avatar
+   */
+  async uploadAvatar(file: File): Promise<{ success: boolean; avatar_url?: string }> {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await fetch('/api/user/avatar', {
+      method: 'POST',
+      body: formData,
+      credentials: 'include',
+    });
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({ error: 'Upload failed' }));
+      return data;
+    }
+
+    return response.json();
+  },
+
+  /**
+   * Delete avatar
+   */
+  async deleteAvatar(): Promise<{ success: boolean }> {
+    const response = await apiClient.delete<{ success: boolean }>('/api/user/avatar');
+    return response;
+  },
 };

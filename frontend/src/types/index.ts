@@ -10,6 +10,7 @@ export interface User {
   role: 'admin' | 'user' | 'viewer';
   createdAt: string;
   lastLogin?: string;
+  avatar_url?: string;
 }
 
 // Authentication types
