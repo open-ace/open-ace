@@ -1091,7 +1091,7 @@ create_docker_compose() {
     local ports_section="      - \"$WEB_PORT:$INTERNAL_WEB_PORT\""
 
     # Build volumes section based on enabled tools
-    local volumes_section="      - ./config:/home/open-ace/.open-ace:ro"
+    local volumes_section="      - ./config:/root/.open-ace:ro"
     local user_home="/home/$RUN_USER"
 
     if [ "$QWEN_ENABLED" = "true" ]; then
