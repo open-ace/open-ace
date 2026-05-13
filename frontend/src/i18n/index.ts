@@ -1982,12 +1982,12 @@ const translations: Record<Language, Translations> = {
     // Personal Settings (Issue #121)
     personalSettings: '個人設定',
     workspaceSettings: 'ワークスペース設定',
-    autoFullscreenOnEnterChat: 'チャット入時に自動フルスクリーン',
+    autoFullscreenOnEnterChat: 'チャット入室時に自動フルスクリーン',
     autoFullscreenOnEnterChatDesc:
-      'プロジェクトを選択してチャット入時に自動的にフルスクリーンモードに入る',
+      'プロジェクトを選択してチャットに入室する際に自動的にフルスクリーンモードに入る',
     tabNotifications: 'タブ通知',
     tabNotificationsDesc: '他のタブが注目を必要とする時に通知を表示',
-    moreSettingsComingSoon: '近日中に更多の設定が追加されます...',
+    moreSettingsComingSoon: 'さらに多くの設定が近日公開予定...',
 
     // Theme
     lightTheme: 'ライト',
@@ -2466,7 +2466,7 @@ const translations: Record<Language, Translations> = {
     // Personal Settings (Issue #121)
     personalSettings: '개인 설정',
     workspaceSettings: '워크스페이스 설정',
-    autoFullscreenOnEnterChat: '채팅 вход 시 자동 전체 화면',
+    autoFullscreenOnEnterChat: '채팅 입장 시 자동 전체 화면',
     autoFullscreenOnEnterChatDesc:
       '프로젝트를 선택하여 채팅에 입장할 때 자동으로 전체 화면 모드로 전환',
     tabNotifications: '탭 알림',

@@ -1,9 +1,5 @@
 /**
- * UserSettingsModal Component - User personal settings dialog
- *
- * Features:
- * - Workspace settings (auto fullscreen, tab notifications)
- * - Extensible for future settings (profile, avatar, etc.)
+ * UserSettingsModal - User personal settings dialog
  */
 
 import React from 'react';
