@@ -103,7 +103,7 @@ export const PromptDetailModal: React.FC<PromptDetailModalProps> = ({
 
   // Copy content to clipboard and close modal
   const handleCopy = async () => {
-    const contentToCopy = hasVariables && hasRendered ? renderedContent : prompt?.content ?? '';
+    const contentToCopy = hasVariables && hasRendered ? renderedContent : (prompt?.content ?? '');
     if (!contentToCopy) return;
 
     try {
@@ -188,9 +188,7 @@ export const PromptDetailModal: React.FC<PromptDetailModalProps> = ({
                 {t('generate', language)}
               </button>
               {!allRequiredFilled && (
-                <small className="text-muted ms-2">
-                  {t('fillRequiredFirst', language)}
-                </small>
+                <small className="text-muted ms-2">{t('fillRequiredFirst', language)}</small>
               )}
             </div>
           </div>

@@ -169,7 +169,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({ isOpen, onClose,
               pre: ({ children }) => <pre className="doc-pre">{children}</pre>,
               a: ({ href, children }) => {
                 // Handle anchor links for internal navigation
-                if (href && href.startsWith('#')) {
+                if (href?.startsWith('#')) {
                   const handleClick = (e: React.MouseEvent) => {
                     e.preventDefault();
                     const targetId = href.slice(1);
