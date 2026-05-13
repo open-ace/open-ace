@@ -741,6 +741,7 @@ export const Workspace: React.FC = () => {
   // Actually remove a tab (shared by closeTab and remote close confirmation)
   const doCloseTab = useCallback(
     (tabId: string) => {
+      const isLastTab = tabs.length === 1;
       setTabs((prev) => {
         const newTabs = prev.filter((tab) => tab.id !== tabId);
         if (activeTabId === tabId && newTabs.length > 0) {
@@ -751,8 +752,11 @@ export const Workspace: React.FC = () => {
         return newTabs;
       });
       removeStoredTab(tabId);
+      if (isLastTab) {
+        createNewTab();
+      }
     },
-    [activeTabId, removeStoredTab]
+    [tabs.length, activeTabId, removeStoredTab, createNewTab]
   );
 
   // Close a tab
@@ -1309,16 +1313,14 @@ export const Workspace: React.FC = () => {
                     >
                       <i className="bi bi-pencil" />
                     </button>
-                    {tabs.length > 1 && (
-                      <button
-                        className="btn btn-sm btn-link p-0 text-muted tab-action-btn"
-                        onClick={(e) => closeTab(tab.id, e)}
-                        title={t('close', language)}
-                        tabIndex={-1}
-                      >
-                        <i className="bi bi-x" />
-                      </button>
-                    )}
+                    <button
+                      className="btn btn-sm btn-link p-0 text-muted tab-action-btn"
+                      onClick={(e) => closeTab(tab.id, e)}
+                      title={t('close', language)}
+                      tabIndex={-1}
+                    >
+                      <i className="bi bi-x" />
+                    </button>
                   </div>
                   {/* Resize handle */}
                   <div
