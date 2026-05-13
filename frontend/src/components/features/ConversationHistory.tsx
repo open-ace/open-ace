@@ -8,7 +8,13 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { cn } from '@/utils';
-import { useConversationHistory, useConversationTimeline, useHosts, useSenders, useTools } from '@/hooks';
+import {
+  useConversationHistory,
+  useConversationTimeline,
+  useHosts,
+  useSenders,
+  useTools,
+} from '@/hooks';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
 import {
@@ -246,7 +252,7 @@ export const ConversationHistory: React.FC = () => {
       visibleCols
         .map((col) => {
           const val = conv[col.key as keyof ConversationHistoryType];
-          return escapeCSV(val != null ? String(val) : '');
+          return escapeCSV(val !== null && val !== undefined ? String(val) : '');
         })
         .join(',')
     );
@@ -353,11 +359,7 @@ export const ConversationHistory: React.FC = () => {
             <div className="d-flex gap-2">
               {/* Export Button */}
               <span title={t('exportCurrentPage', language)}>
-                <Button
-                  variant="outline-secondary"
-                  size="sm"
-                  onClick={handleExportCSV}
-                >
+                <Button variant="outline-secondary" size="sm" onClick={handleExportCSV}>
                   <i className="bi bi-download me-1" />
                   {t('export', language)}
                 </Button>
@@ -428,7 +430,7 @@ export const ConversationHistory: React.FC = () => {
             if (totalPages <= 1) return null;
             const maxVisible = 5;
             let start = Math.max(1, page - Math.floor(maxVisible / 2));
-            let end = Math.min(totalPages, start + maxVisible - 1);
+            const end = Math.min(totalPages, start + maxVisible - 1);
             if (end - start < maxVisible - 1) {
               start = Math.max(1, end - maxVisible + 1);
             }
@@ -449,7 +451,11 @@ export const ConversationHistory: React.FC = () => {
                     </li>
                     {pageNumbers.map((pageNum) => (
                       <li key={pageNum} className={cn('page-item', page === pageNum && 'active')}>
-                        <button type="button" className="page-link" onClick={() => setPage(pageNum)}>
+                        <button
+                          type="button"
+                          className="page-link"
+                          onClick={() => setPage(pageNum)}
+                        >
                           {pageNum}
                         </button>
                       </li>

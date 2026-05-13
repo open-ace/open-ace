@@ -2439,20 +2439,25 @@ link[rel='dns-prefetch'] {
   z-index: 1000;
   opacity: 0;
   visibility: hidden;
-  transition: opacity 0.15s ease, visibility 0.15s ease, transform 0.15s ease;
+  transition:
+    opacity 0.15s ease,
+    visibility 0.15s ease,
+    transform 0.15s ease;
   transition-delay: 0.3s;
   pointer-events: none;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.2);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.4),
+    0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
 /* First two session items: show tooltip below instead of above */
-.session-group-items li:nth-child(-n+2) .session-tooltip {
+.session-group-items li:nth-child(-n + 2) .session-tooltip {
   bottom: auto;
   top: calc(100% + 6px);
   transform: translateX(-50%) translateY(-4px);
 }
 
-.session-group-items li:nth-child(-n+2) .session-tooltip::after {
+.session-group-items li:nth-child(-n + 2) .session-tooltip::after {
   top: auto;
   bottom: 100%;
   border-top: none;
@@ -2461,7 +2466,7 @@ link[rel='dns-prefetch'] {
   border-right: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.session-group-items li:nth-child(-n+2) .session-item:hover .session-tooltip {
+.session-group-items li:nth-child(-n + 2) .session-item:hover .session-tooltip {
   transform: translateX(-50%) translateY(0);
 }
 

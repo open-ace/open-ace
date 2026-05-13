@@ -190,7 +190,10 @@
   opacity: 0;
   visibility: hidden;
   transform: translateY(4px);
-  transition: opacity 0.05s ease, visibility 0.05s ease, transform 0.05s ease;
+  transition:
+    opacity 0.05s ease,
+    visibility 0.05s ease,
+    transform 0.05s ease;
   pointer-events: none;
   margin-top: 6px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
@@ -281,7 +284,7 @@
 }
 
 /* Dark mode support */
-[data-theme="dark"] {
+[data-theme='dark'] {
   .prompt-search .input-group {
     background: var(--bg-secondary);
     border-color: var(--border-color);
@@ -383,7 +386,7 @@
 }
 
 /* Dark mode for prompt detail */
-[data-theme="dark"] .prompt-detail {
+[data-theme='dark'] .prompt-detail {
   .prompt-variables-section {
     background: var(--bg-secondary);
 
