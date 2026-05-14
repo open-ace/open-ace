@@ -10,9 +10,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
-import { promptsApi } from '@/api';
-import type { PromptTemplate, CategoryInfo } from '@/api/prompts';
-import { Loading, EmptyState, SimpleTabs, useToast } from '@/components/common';
+import { usePrompts, usePromptCategories, useCopyPrompt } from '@/hooks';
+import type { PromptTemplate } from '@/api/prompts';
+import { Loading, EmptyState, SimpleTabs, useToast, Tooltip } from '@/components/common';
 import { DocumentViewer } from './DocumentViewer';
 import { PromptDetailModal } from './PromptDetailModal';
 import './AssistPanel.css';
@@ -28,18 +28,16 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
   const language = useLanguage();
   const toast = useToast();
   const [activeTab, setActiveTab] = useState('prompts');
-  const [prompts, setPrompts] = useState<PromptTemplate[]>([]);
-  const [categories, setCategories] = useState<CategoryInfo[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [searchInput, setSearchInput] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [promptsLoading, setPromptsLoading] = useState(true);
   const [docViewerOpen, setDocViewerOpen] = useState(false);
   const [selectedDocId, setSelectedDocId] = useState<string>('');
   const [selectedPrompt, setSelectedPrompt] = useState<PromptTemplate | null>(null);
   const [promptModalOpen, setPromptModalOpen] = useState(false);
   const [copiedPromptId, setCopiedPromptId] = useState<number | null>(null);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copyPromptMutation = useCopyPrompt();
 
   // Debounce search input
   useEffect(() => {
@@ -56,55 +54,17 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
     };
   }, [searchInput]);
 
-  // Fetch categories
-  useEffect(() => {
-    const fetchCategories = async () => {
-      try {
-        const result = await promptsApi.getCategories();
-        setCategories(result);
-      } catch (err) {
-        console.error('Failed to fetch categories:', err);
-      }
-    };
-    fetchCategories();
-  }, []);
+  // Fetch categories via React Query
+  const { data: categories = [] } = usePromptCategories();
 
-  // Fetch prompts
-  useEffect(() => {
-    const fetchPrompts = async () => {
-      try {
-        setPromptsLoading(true);
-        const result = await promptsApi.list({
-          page: 1,
-          limit: 100, // Show all prompts
-          category: selectedCategory || undefined,
-          search: debouncedSearch || undefined,
-        });
-        // Already sorted by use_count DESC from backend
-        setPrompts(result.templates);
-      } catch (err) {
-        console.error('Failed to fetch prompts:', err);
-      } finally {
-        setPromptsLoading(false);
-      }
-    };
-    fetchPrompts();
-  }, [selectedCategory, debouncedSearch]);
-
-  // Refetch prompts after copy (to update use_count order)
-  const refetchPrompts = async () => {
-    try {
-      const result = await promptsApi.list({
-        page: 1,
-        limit: 100,
-        category: selectedCategory || undefined,
-        search: debouncedSearch || undefined,
-      });
-      setPrompts(result.templates);
-    } catch (err) {
-      console.error('Failed to refetch prompts:', err);
-    }
-  };
+  // Fetch prompts via React Query
+  const { data: promptsData, isLoading: promptsLoading } = usePrompts({
+    page: 1,
+    limit: 100,
+    category: selectedCategory || undefined,
+    search: debouncedSearch || undefined,
+  });
+  const prompts = promptsData?.templates ?? [];
 
   // AI Tools list
   const aiTools = [
@@ -196,19 +156,14 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
   // Direct copy (for prompts without required variables)
   const handleDirectCopy = async (e: React.MouseEvent, prompt: PromptTemplate) => {
     e.stopPropagation();
-    if (hasRequiredVariables(prompt)) return; // Cannot copy directly
+    if (hasRequiredVariables(prompt)) return;
 
     try {
       await navigator.clipboard.writeText(prompt.content);
-      // Increment use count
-      await promptsApi.copy(prompt.id);
-      // Show copied feedback on button
+      await copyPromptMutation.mutateAsync(prompt.id);
       setCopiedPromptId(prompt.id);
       setTimeout(() => setCopiedPromptId(null), 1500);
-      // Show toast
       toast.success(t('copied', language), prompt.name);
-      // Refetch to update order
-      refetchPrompts();
     } catch (err) {
       console.error('Failed to copy:', err);
       toast.error(t('copyFailed', language) || 'Copy failed');
@@ -269,13 +224,11 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
             <li key={prompt.id}>
               <div className="prompt-item" onClick={() => handlePromptClick(prompt)}>
                 {/* Left: Name with tooltip */}
-                <div className="prompt-item-name-wrapper">
-                  <span className="prompt-item-name">{prompt.name}</span>
-                  {/* Fast CSS tooltip */}
-                  <div className="prompt-tooltip-fast">
-                    <div className="prompt-tooltip-content">{truncateContent(prompt.content)}</div>
+                <Tooltip content={truncateContent(prompt.content)} placement="bottom" delay={100}>
+                  <div className="prompt-item-name-wrapper">
+                    <span className="prompt-item-name">{prompt.name}</span>
                   </div>
-                </div>
+                </Tooltip>
 
                 {/* Right: Action buttons */}
                 <div className="prompt-item-actions">
@@ -394,7 +347,6 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
         isOpen={promptModalOpen}
         onClose={() => setPromptModalOpen(false)}
         prompt={selectedPrompt}
-        onCopySuccess={refetchPrompts}
       />
     </div>
   );
