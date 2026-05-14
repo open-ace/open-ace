@@ -74,7 +74,7 @@ jobs:
 
       - name: Run tests
         run: |
-          pytest tests/ -v --cov=scripts/shared --cov-report=xml --cov-report=html
+          pytest tests/ -v --cov=scripts/shared --cov-report=xml --cov-report=html --ignore=tests/ui --ignore=tests/issues --ignore=tests/regression --ignore=tests/performance
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4

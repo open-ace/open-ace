@@ -147,6 +147,9 @@ def api_auth_check():
     if not session:
         return jsonify({"authenticated": False})
 
+    user_id = int(session.get("user_id", 0))
+    user_data = user_repo.get_user_by_id(user_id)
+
     return jsonify(
         {
             "authenticated": True,
@@ -155,6 +158,7 @@ def api_auth_check():
                 "username": session.get("username"),
                 "email": session.get("email"),
                 "role": session.get("role"),
+                "avatar_url": user_data.get("avatar_url") if user_data else None,
             },
         }
     )

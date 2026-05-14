@@ -249,6 +249,7 @@ class AuthService:
             "email": user.get("email"),
             "role": user["role"],
             "must_change_password": must_change_password,
+            "avatar_url": user.get("avatar_url"),
         }, token
 
     def logout(self, token: str) -> bool:
