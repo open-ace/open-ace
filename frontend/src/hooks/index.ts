@@ -81,6 +81,15 @@ export {
   useResumeRemoteSession,
 } from './useRemote';
 
+export {
+  usePrompts,
+  usePromptCategories,
+  useCreatePrompt,
+  useUpdatePrompt,
+  useDeletePrompt,
+  useCopyPrompt,
+} from './usePrompts';
+
 // Re-export store hooks
 export {
   useUser,

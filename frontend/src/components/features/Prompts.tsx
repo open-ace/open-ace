@@ -5,7 +5,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { cn } from '@/utils';
 import { promptsApi } from '@/api';
-import type { PromptTemplate, PromptVariable, CategoryInfo } from '@/api';
+import type { PromptTemplate, PromptVariable } from '@/api';
+import {
+  usePrompts,
+  usePromptCategories,
+  useCreatePrompt,
+  useUpdatePrompt,
+  useDeletePrompt,
+} from '@/hooks';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
 import {
@@ -37,62 +44,38 @@ const categoryColors: Record<string, BadgeVariant> = {
 
 export const Prompts: React.FC = () => {
   const language = useLanguage() as Language;
-  const [templates, setTemplates] = useState<PromptTemplate[]>([]);
-  const [categories, setCategories] = useState<CategoryInfo[]>([]);
-  const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isFetching, setIsFetching] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState<{ category?: string; search?: string }>({});
   const [selectedTemplate, setSelectedTemplate] = useState<PromptTemplate | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showRenderModal, setShowRenderModal] = useState(false);
   const [renderResult, setRenderResult] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  // Load categories on mount
+  // React Query hooks
+  const { data: categories = [] } = usePromptCategories();
+  const {
+    data: promptsData,
+    isLoading,
+    isFetching,
+    refetch,
+    error: queryError,
+  } = usePrompts({
+    ...filters,
+    page,
+    limit: ITEMS_PER_PAGE,
+  });
+  const deleteMutation = useDeletePrompt();
+
+  const templates = promptsData?.templates ?? [];
+  const total = promptsData?.total ?? 0;
+  const error = actionError ?? queryError?.message ?? null;
+
+  // Reset page when filters change
   useEffect(() => {
-    const loadCategories = async () => {
-      try {
-        const cats = await promptsApi.getCategories();
-        setCategories(cats);
-      } catch (err) {
-        console.error('Failed to load categories:', err);
-      }
-    };
-    loadCategories();
-  }, []);
-
-  // Load templates
-  const loadTemplates = async (resetPage = false) => {
-    try {
-      setIsFetching(true);
-      setError(null);
-      const currentPage = resetPage ? 1 : page;
-      if (resetPage) setPage(1);
-
-      const result = await promptsApi.list({
-        ...filters,
-        page: currentPage,
-        limit: ITEMS_PER_PAGE,
-      });
-
-      setTemplates(result.templates);
-      setTotal(result.total);
-    } catch (err) {
-      const error = err as Error;
-      setError(error?.message || t('error', language));
-    } finally {
-      setIsLoading(false);
-      setIsFetching(false);
-    }
-  };
-
-  // Load on mount and when filters change
-  useEffect(() => {
-    loadTemplates(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setPage(1);
+    setSelectedTemplate(null);
   }, [filters.category, filters.search]);
 
   // Category options
@@ -110,7 +93,6 @@ export const Prompts: React.FC = () => {
   // Handlers
   const handleFilterChange = (key: string, value: string) => {
     setFilters((prev) => ({ ...prev, [key]: value || undefined }));
-    setSelectedTemplate(null);
   };
 
   const handleSearch = (value: string) => {
@@ -132,26 +114,23 @@ export const Prompts: React.FC = () => {
       return;
     }
     try {
-      await promptsApi.delete(id);
-      loadTemplates();
+      setActionError(null);
+      await deleteMutation.mutateAsync(id);
       if (selectedTemplate?.id === id) {
         setSelectedTemplate(null);
       }
     } catch {
-      setError(t('deletePromptFailed', language) || 'Failed to delete prompt');
+      setActionError(t('deletePromptFailed', language) || 'Failed to delete prompt');
     }
   };
 
   const handleCreateSuccess = () => {
     setShowCreateModal(false);
-    loadTemplates();
   };
 
   const handleEditSuccess = () => {
     setShowEditModal(false);
-    loadTemplates();
     if (selectedTemplate) {
-      // Refresh selected template
       promptsApi.get(selectedTemplate.id).then(setSelectedTemplate);
     }
   };
@@ -162,7 +141,7 @@ export const Prompts: React.FC = () => {
       setRenderResult(result);
     } catch (err) {
       const error = err as Error;
-      setError(error?.message || t('error', language));
+      setActionError(error?.message || t('error', language));
     }
   };
 
@@ -171,7 +150,7 @@ export const Prompts: React.FC = () => {
   }
 
   if (error && templates.length === 0) {
-    return <Error message={error} onRetry={() => loadTemplates()} />;
+    return <Error message={error} onRetry={() => setFilters({})} />;
   }
 
   return (
@@ -183,7 +162,7 @@ export const Prompts: React.FC = () => {
           <button
             type="button"
             className="btn-close"
-            onClick={() => setError(null)}
+            onClick={() => setActionError(null)}
             aria-label="Close"
           />
         </div>
@@ -204,7 +183,7 @@ export const Prompts: React.FC = () => {
           <Button
             variant="outline-secondary"
             size="sm"
-            onClick={() => loadTemplates()}
+            onClick={() => refetch()}
             loading={isFetching}
             icon={isFetching ? undefined : <i className="bi bi-arrow-clockwise" />}
           >
@@ -283,10 +262,7 @@ export const Prompts: React.FC = () => {
                 variant="outline-secondary"
                 size="sm"
                 disabled={page === 1}
-                onClick={() => {
-                  setPage(page - 1);
-                  loadTemplates();
-                }}
+                onClick={() => setPage(page - 1)}
               >
                 {t('previous', language)}
               </Button>
@@ -297,10 +273,7 @@ export const Prompts: React.FC = () => {
                 variant="outline-secondary"
                 size="sm"
                 disabled={page >= Math.ceil(total / ITEMS_PER_PAGE)}
-                onClick={() => {
-                  setPage(page + 1);
-                  loadTemplates();
-                }}
+                onClick={() => setPage(page + 1)}
               >
                 {t('next', language)}
               </Button>
@@ -467,8 +440,11 @@ const PromptFormModal: React.FC<PromptFormModalProps> = ({
   const [tags, setTags] = useState(template?.tags.join(', ') ?? '');
   const [isPublic, setIsPublic] = useState(template?.is_public ?? false);
   const [variables, setVariables] = useState<PromptVariable[]>(template?.variables ?? []);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const createMutation = useCreatePrompt();
+  const updateMutation = useUpdatePrompt();
 
   const isEdit = !!template;
 
@@ -494,7 +470,7 @@ const PromptFormModal: React.FC<PromptFormModalProps> = ({
     }
 
     try {
-      setIsLoading(true);
+      setIsSubmitting(true);
       setError(null);
 
       const data = {
@@ -511,9 +487,9 @@ const PromptFormModal: React.FC<PromptFormModalProps> = ({
       };
 
       if (isEdit && template) {
-        await promptsApi.update(template.id, data);
+        await updateMutation.mutateAsync({ id: template.id, data });
       } else {
-        await promptsApi.create(data);
+        await createMutation.mutateAsync(data);
       }
 
       onSuccess();
@@ -521,7 +497,7 @@ const PromptFormModal: React.FC<PromptFormModalProps> = ({
       const error = err as Error;
       setError(error?.message || t('error', language));
     } finally {
-      setIsLoading(false);
+      setIsSubmitting(false);
     }
   };
 
@@ -693,7 +669,7 @@ const PromptFormModal: React.FC<PromptFormModalProps> = ({
           <Button type="button" variant="outline-secondary" onClick={onClose}>
             {t('cancel', language)}
           </Button>
-          <Button type="submit" variant="primary" loading={isLoading}>
+          <Button type="submit" variant="primary" loading={isSubmitting}>
             {isEdit ? t('save', language) : t('create', language) || 'Create'}
           </Button>
         </div>

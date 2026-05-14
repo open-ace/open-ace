@@ -95,12 +95,13 @@
   }
 }
 
-/* Prompt List - Full height like session list */
+/* Prompt List */
 .prompt-list {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: thin;
+  scrollbar-gutter: stable;
   padding: var(--spacing-xs) 0;
 
   &::-webkit-scrollbar {
@@ -141,12 +142,6 @@
     .prompt-item-name {
       color: var(--color-primary);
     }
-
-    .prompt-tooltip-fast {
-      opacity: 1;
-      visibility: visible;
-      transform: translateY(0);
-    }
   }
 
   &:active {
@@ -154,11 +149,10 @@
   }
 }
 
-/* Prompt Item Name with Tooltip */
+/* Prompt Item Name */
 .prompt-item-name-wrapper {
   flex: 1;
   min-width: 0;
-  position: relative;
 }
 
 .prompt-item-name {
@@ -173,48 +167,7 @@
   transition: color var(--transition-fast);
 }
 
-/* Fast CSS Tooltip - Show below to avoid being clipped at top */
-.prompt-tooltip-fast {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  z-index: 1000;
-  min-width: 200px;
-  max-width: 280px;
-  padding: 8px 12px;
-  background: var(--bg-tooltip, #212529);
-  color: white;
-  border-radius: var(--border-radius);
-  font-size: 12px;
-  line-height: 1.4;
-  opacity: 0;
-  visibility: hidden;
-  transform: translateY(4px);
-  transition:
-    opacity 0.05s ease,
-    visibility 0.05s ease,
-    transform 0.05s ease;
-  pointer-events: none;
-  margin-top: 6px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-
-  /* Arrow pointing up */
-  &::before {
-    content: '';
-    position: absolute;
-    bottom: 100%;
-    left: 12px;
-    border: 6px solid transparent;
-    border-bottom-color: var(--bg-tooltip, #212529);
-  }
-}
-
-.prompt-tooltip-content {
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-/* Prompt Item Actions - Fixed position */
+/* Prompt Item Actions */
 .prompt-item-actions {
   display: flex;
   gap: 4px;
@@ -309,14 +262,6 @@
 
     &:hover {
       background: var(--bg-hover);
-    }
-  }
-
-  .prompt-tooltip-fast {
-    background: var(--bg-tooltip);
-
-    &::before {
-      border-bottom-color: var(--bg-tooltip);
     }
   }
 }
