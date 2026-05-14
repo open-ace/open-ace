@@ -224,11 +224,7 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
             <li key={prompt.id}>
               <div className="prompt-item" onClick={() => handlePromptClick(prompt)}>
                 {/* Left: Name with tooltip */}
-                <Tooltip
-                  content={truncateContent(prompt.content)}
-                  placement="bottom"
-                  delay={100}
-                >
+                <Tooltip content={truncateContent(prompt.content)} placement="bottom" delay={100}>
                   <div className="prompt-item-name-wrapper">
                     <span className="prompt-item-name">{prompt.name}</span>
                   </div>

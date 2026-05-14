@@ -70,7 +70,7 @@ export const Prompts: React.FC = () => {
 
   const templates = promptsData?.templates ?? [];
   const total = promptsData?.total ?? 0;
-  const error = actionError || queryError?.message || null;
+  const error = actionError || (queryError?.message ?? null);
 
   // Reset page when filters change
   useEffect(() => {
