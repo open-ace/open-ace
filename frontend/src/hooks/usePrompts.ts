@@ -8,7 +8,7 @@ import type { PromptFilters, CreatePromptRequest, UpdatePromptRequest } from '@/
 
 export function usePrompts(filters?: PromptFilters) {
   return useQuery({
-    queryKey: ['prompts', filters],
+    queryKey: ['prompts', filters?.category, filters?.search, filters?.page, filters?.limit],
     queryFn: () => promptsApi.list(filters),
     staleTime: 30 * 1000,
   });

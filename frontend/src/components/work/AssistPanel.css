@@ -98,9 +98,10 @@
 /* Prompt List */
 .prompt-list {
   flex: 1;
-  overflow-y: overlay;
+  overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: thin;
+  scrollbar-gutter: stable;
   padding: var(--spacing-xs) 0;
 
   &::-webkit-scrollbar {

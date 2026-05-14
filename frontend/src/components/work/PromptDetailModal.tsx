@@ -7,23 +7,23 @@ import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import { promptsApi } from '@/api';
 import type { PromptTemplate, PromptVariable } from '@/api/prompts';
+import { useCopyPrompt } from '@/hooks';
 import { Modal, useToast } from '@/components/common';
 
 interface PromptDetailModalProps {
   isOpen: boolean;
   onClose: () => void;
   prompt: PromptTemplate | null;
-  onCopySuccess?: () => void;
 }
 
 export const PromptDetailModal: React.FC<PromptDetailModalProps> = ({
   isOpen,
   onClose,
   prompt,
-  onCopySuccess,
 }) => {
   const language = useLanguage();
   const toast = useToast();
+  const copyPromptMutation = useCopyPrompt();
   const [variableValues, setVariableValues] = useState<Record<string, string>>({});
   const [renderedContent, setRenderedContent] = useState<string>('');
   const [isRendering, setIsRendering] = useState(false);
@@ -87,11 +87,7 @@ export const PromptDetailModal: React.FC<PromptDetailModalProps> = ({
       const result = await promptsApi.render(prompt.id, variableValues);
       setRenderedContent(result);
       setHasRendered(true);
-      // Also increment use count via copy API
-      await promptsApi.copy(prompt.id);
-      if (onCopySuccess) {
-        onCopySuccess();
-      }
+      copyPromptMutation.mutate(prompt.id);
       toast.success(t('copied', language));
     } catch (err) {
       console.error('Failed to render prompt:', err);
@@ -108,16 +104,10 @@ export const PromptDetailModal: React.FC<PromptDetailModalProps> = ({
 
     try {
       await navigator.clipboard.writeText(contentToCopy);
-      // Increment use count and show toast
       if (prompt) {
-        await promptsApi.copy(prompt.id);
-        if (onCopySuccess) {
-          onCopySuccess();
-        }
+        copyPromptMutation.mutate(prompt.id);
       }
-      // Show copied state first
       setCopied(true);
-      // Close modal after delay so user can see the feedback
       setTimeout(() => {
         onClose();
       }, 800);

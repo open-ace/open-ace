@@ -51,13 +51,15 @@ export const Prompts: React.FC = () => {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showRenderModal, setShowRenderModal] = useState(false);
   const [renderResult, setRenderResult] = useState<string | null>(null);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // React Query hooks
   const { data: categories = [] } = usePromptCategories();
   const {
     data: promptsData,
     isLoading,
+    isFetching,
+    refetch,
     error: queryError,
   } = usePrompts({
     ...filters,
@@ -68,7 +70,7 @@ export const Prompts: React.FC = () => {
 
   const templates = promptsData?.templates ?? [];
   const total = promptsData?.total ?? 0;
-  const error = deleteError || queryError?.message || null;
+  const error = actionError || queryError?.message || null;
 
   // Reset page when filters change
   useEffect(() => {
@@ -112,13 +114,13 @@ export const Prompts: React.FC = () => {
       return;
     }
     try {
-      setDeleteError(null);
+      setActionError(null);
       await deleteMutation.mutateAsync(id);
       if (selectedTemplate?.id === id) {
         setSelectedTemplate(null);
       }
     } catch {
-      setDeleteError(t('deletePromptFailed', language) || 'Failed to delete prompt');
+      setActionError(t('deletePromptFailed', language) || 'Failed to delete prompt');
     }
   };
 
@@ -139,7 +141,7 @@ export const Prompts: React.FC = () => {
       setRenderResult(result);
     } catch (err) {
       const error = err as Error;
-      setDeleteError(error?.message || t('error', language));
+      setActionError(error?.message || t('error', language));
     }
   };
 
@@ -160,7 +162,7 @@ export const Prompts: React.FC = () => {
           <button
             type="button"
             className="btn-close"
-            onClick={() => setDeleteError(null)}
+            onClick={() => setActionError(null)}
             aria-label="Close"
           />
         </div>
@@ -177,6 +179,15 @@ export const Prompts: React.FC = () => {
             icon={<i className="bi bi-plus-lg" />}
           >
             {t('addPrompt', language) || 'Add Prompt'}
+          </Button>
+          <Button
+            variant="outline-secondary"
+            size="sm"
+            onClick={() => refetch()}
+            loading={isFetching}
+            icon={isFetching ? undefined : <i className="bi bi-arrow-clockwise" />}
+          >
+            {t('refresh', language)}
           </Button>
         </div>
       </div>
