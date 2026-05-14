@@ -160,7 +160,7 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
 
     try {
       await navigator.clipboard.writeText(prompt.content);
-      copyPromptMutation.mutate(prompt.id);
+      await copyPromptMutation.mutateAsync(prompt.id);
       setCopiedPromptId(prompt.id);
       setTimeout(() => setCopiedPromptId(null), 1500);
       toast.success(t('copied', language), prompt.name);

@@ -87,7 +87,7 @@ export const PromptDetailModal: React.FC<PromptDetailModalProps> = ({
       const result = await promptsApi.render(prompt.id, variableValues);
       setRenderedContent(result);
       setHasRendered(true);
-      copyPromptMutation.mutate(prompt.id);
+      await copyPromptMutation.mutateAsync(prompt.id);
       toast.success(t('copied', language));
     } catch (err) {
       console.error('Failed to render prompt:', err);
@@ -105,7 +105,7 @@ export const PromptDetailModal: React.FC<PromptDetailModalProps> = ({
     try {
       await navigator.clipboard.writeText(contentToCopy);
       if (prompt) {
-        copyPromptMutation.mutate(prompt.id);
+        await copyPromptMutation.mutateAsync(prompt.id);
       }
       setCopied(true);
       setTimeout(() => {
