@@ -187,9 +187,11 @@ test.describe('Comprehensive Application Test', () => {
       // Wait for chart to load
       await waitForChart(page, 3000);
 
-      // CI has empty database — canvas may be replaced by EmptyState
+      // CI has empty database — canvas may be replaced by EmptyState.
+      // EmptyState renders <div class="text-center py-5"> (see common/Error.tsx),
+      // not a .empty-state class.
       const canvas = page.locator('canvas');
-      const emptyState = page.locator('.empty-state');
+      const emptyState = page.locator('.card-body .text-center.py-5');
       const hasCanvas = await canvas.first().isVisible().catch(() => false);
       const hasEmpty = await emptyState.first().isVisible().catch(() => false);
       expect(hasCanvas || hasEmpty).toBeTruthy();
