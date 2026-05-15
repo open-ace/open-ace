@@ -48,8 +48,6 @@ export default defineConfig({
   },
 
   // Configure projects for major browsers
-  // Mobile viewports excluded from CI — sidebar is hidden on mobile (< 768px),
-  // causing consistent E2E failures. Run locally with: npx playwright test --project="Mobile Chrome"
   projects: [
     {
       name: 'chromium',
@@ -63,18 +61,15 @@ export default defineConfig({
       name: 'webkit',
       use: { ...devices['Desktop Safari'] },
     },
-    ...(!process.env.CI
-      ? [
-          {
-            name: 'Mobile Chrome',
-            use: { ...devices['Pixel 5'] },
-          },
-          {
-            name: 'Mobile Safari',
-            use: { ...devices['iPhone 12'] },
-          },
-        ]
-      : []),
+    // Mobile viewports — sidebar available via hamburger menu toggle
+    {
+      name: 'Mobile Chrome',
+      use: { ...devices['Pixel 5'] },
+    },
+    {
+      name: 'Mobile Safari',
+      use: { ...devices['iPhone 12'] },
+    },
   ],
 
   // Run local dev server before starting tests

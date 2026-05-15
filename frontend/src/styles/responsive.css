@@ -77,7 +77,6 @@ body {
 
 /* Mobile overlay for sidebar */
 .sidebar-overlay {
-  display: none;
   position: fixed;
   inset: 0;
   background: var(--bg-overlay);
@@ -86,8 +85,8 @@ body {
   animation: fadeIn 0.2s ease-out;
 }
 
-.sidebar.show + .sidebar-overlay {
-  display: block;
+body.sidebar-mobile-open {
+  overflow: hidden;
 }
 
 /* Header adjustments */
@@ -98,6 +97,25 @@ body {
 .header-title {
   font-size: 1.125rem;
   font-weight: var(--font-weight-semibold);
+}
+
+/* Hamburger button for mobile sidebar toggle */
+.hamburger-btn {
+  color: var(--text-primary);
+  font-size: 1.5rem;
+  line-height: 1;
+  border: none;
+  cursor: pointer;
+  padding: 0.25rem;
+}
+
+.hamburger-btn:hover {
+  color: var(--color-primary);
+}
+
+.hamburger-btn:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
 }
 
 /* Dashboard cards - Stack vertically with spacing */
