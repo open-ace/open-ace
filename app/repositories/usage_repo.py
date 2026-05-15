@@ -1093,7 +1093,7 @@ class UsageRepository:
                 SUM(
                     (SELECT COUNT(*) FROM session_messages sm
                      WHERE sm.session_id = s.session_id
-                       AND sm.role = 'assistant'))
+                       AND sm.role = 'assistant')
                 ) as request_count
             FROM agent_sessions s
             WHERE s.user_id = ?
