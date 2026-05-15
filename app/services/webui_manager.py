@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import platform
+import pwd
 import secrets
 import socket
 import subprocess
@@ -570,6 +571,17 @@ class WebUIManager:
         os.makedirs(webui_log_dir, mode=0o755, exist_ok=True)
         child_env["OPENACE_LOG_DIR"] = webui_log_dir
 
+        # Change log directory ownership to system_account (Linux/macOS only)
+        # This allows webui to create additional log files if needed
+        if self._platform in ("linux", "darwin"):
+            try:
+                pw_info = pwd.getpwnam(system_account)
+                os.chown(webui_log_dir, pw_info.pw_uid, pw_info.pw_gid)
+            except KeyError:
+                logger.warning(f"User '{system_account}' not found, skipping chown")
+            except OSError as e:
+                logger.warning(f"Failed to chown log dir: {e}")
+
         # Ensure PATH includes /usr/local/bin
         if "PATH" not in child_env or "/usr/local/bin" not in child_env.get("PATH", ""):
             child_env["PATH"] = "/usr/local/bin:" + child_env.get("PATH", "/usr/bin:/bin")
@@ -644,7 +656,7 @@ class WebUIManager:
                 cmd,
                 start_new_session=True,  # Detach from parent process group
                 cwd=cwd,
-                env=child_env,
+                env=child_env,  # Note: ignored for sudo; vars passed via 'env' cmd above
                 stdout=log_fd,
                 stderr=subprocess.STDOUT,
             )
