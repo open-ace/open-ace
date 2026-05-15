@@ -123,6 +123,73 @@ check_python_version_remote() {
     return 0
 }
 
+
+# ============================================================================
+# Build Dependencies Check
+# ============================================================================
+
+# Check and install build dependencies (gcc, python-dev) for packages like gevent, bcrypt
+# These packages require C compilation and will fail without proper build tools
+check_build_dependencies() {
+    print_info "Checking build dependencies..."
+    local missing_deps=()
+    local python_dev_pkg=""
+
+    # Check gcc
+    if ! command -v gcc &>/dev/null; then
+        missing_deps+=("gcc")
+    fi
+
+    # Check make (required by gevent's libev configure)
+    if ! command -v make &>/dev/null; then
+        missing_deps+=("make")
+    fi
+
+    # Determine python-dev package name based on OS
+    if command -v apt-get &>/dev/null; then
+        python_dev_pkg="python3-dev"
+    elif command -v dnf &>/dev/null || command -v yum &>/dev/null; then
+        python_dev_pkg="python3-devel"
+    fi
+
+    # Check Python development headers
+    local python_include=$(python3 -c "import sysconfig; print(sysconfig.get_config_var('INCLUDEPY'))" 2>/dev/null)
+    if [ -n "$python_include" ] && [ ! -f "$python_include/Python.h" ]; then
+        if [ -n "$python_dev_pkg" ]; then
+            missing_deps+=("$python_dev_pkg")
+        fi
+    fi
+
+    # All dependencies satisfied
+    if [ ${#missing_deps[@]} -eq 0 ]; then
+        print_success "Build dependencies already installed"
+        return 0
+    fi
+
+    print_info "Missing build dependencies: ${missing_deps[*]}"
+
+    # Check if running as root
+    if [ "$EUID" -ne 0 ]; then
+        print_error "Root privileges required to install: ${missing_deps[*]}"
+        print_info "Please run as root, or install manually"
+        return 1
+    fi
+
+    # Install missing dependencies
+    print_info "Installing build dependencies..."
+    if command -v apt-get &>/dev/null; then
+        apt-get update -qq && apt-get install -y ${missing_deps[*]}
+    elif command -v dnf &>/dev/null; then
+        dnf install -y ${missing_deps[*]}
+    elif command -v yum &>/dev/null; then
+        yum install -y ${missing_deps[*]}
+    else
+        print_error "Unsupported package manager"
+        return 1
+    fi
+    print_success "Build dependencies installed"
+}
+
 # ============================================================================
 # User Detection and Creation
 # ============================================================================
@@ -2560,6 +2627,9 @@ do_fresh_install() {
         fi
     fi
 
+    # Check build dependencies before installing Python packages (gevent, bcrypt need gcc)
+    check_build_dependencies
+
     # Install Python dependencies
     print_info "Installing Python dependencies..."
 
@@ -2920,6 +2990,9 @@ with open('$config_dir/config.json', 'w') as f:
         fi
         update_config_workspace "$config_dir/config.json" "$webui_path"
     fi
+
+    # Check build dependencies before installing Python packages (gevent, bcrypt need gcc)
+    check_build_dependencies
 
     # Install Python dependencies
     print_info "Installing Python dependencies..."
