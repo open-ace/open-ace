@@ -224,6 +224,142 @@ find_webui_executable() {
     return 1
 }
 
+# Install qwen-code-webui via npm
+install_qwen_code_webui() {
+    print_header "安装 qwen-code-webui"
+
+    # Check if npm is available
+    if ! command -v npm &>/dev/null; then
+        print_error "npm 未安装"
+        print_info "请先安装 Node.js (包含 npm)"
+        return 1
+    fi
+
+    print_info "检测到 npm 版本: $(npm --version)"
+    print_info "正在安装 qwen-code-webui..."
+
+    # Install qwen-code-webui
+    if npm install -g qwen-code-webui 2>&1; then
+        print_success "qwen-code-webui 安装完成"
+        
+        # Verify installation
+        if command -v qwen-code-webui &>/dev/null; then
+            local webui_path=$(which qwen-code-webui)
+            print_success "安装路径: $webui_path"
+            return 0
+        else
+            print_warning "安装完成但未找到可执行文件，请检查 npm 全局路径配置"
+            return 1
+        fi
+    else
+        print_error "qwen-code-webui 安装失败"
+        print_info "请手动安装: npm install -g qwen-code-webui"
+        return 1
+    fi
+}
+
+# Find qwen-code executable
+find_qwen_code_executable() {
+    local candidates=(
+        "/usr/local/bin/qwen-code"
+        "/usr/bin/qwen-code"
+        "/opt/qwen-code/bin/qwen-code"
+    )
+
+    for candidate in "${candidates[@]}"; do
+        if [ -x "$candidate" ]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+
+    # Try to find in PATH
+    if command -v qwen-code &>/dev/null; then
+        which qwen-code
+        return 0
+    fi
+
+    return 1
+}
+
+# Install qwen-code via npm
+install_qwen_code() {
+    print_header "安装 qwen-code"
+
+    # Check if npm is available
+    if ! command -v npm &>/dev/null; then
+        print_error "npm 未安装"
+        print_info "请先安装 Node.js (包含 npm)"
+        return 1
+    fi
+
+    print_info "检测到 npm 版本: $(npm --version)"
+    print_info "正在安装 qwen-code..."
+
+    # Install qwen-code (the correct package name is qwen-code)
+    if npm install -g qwen-code 2>&1; then
+        print_success "qwen-code 安装完成"
+        
+        # Verify installation
+        if command -v qwen-code &>/dev/null; then
+            local qwen_path=$(which qwen-code)
+            print_success "安装路径: $qwen_path"
+            return 0
+        else
+            print_warning "安装完成但未找到可执行文件，请检查 npm 全局路径配置"
+            return 1
+        fi
+    else
+        print_error "qwen-code 安装失败"
+        print_info "请手动安装: npm install -g qwen-code"
+        return 1
+    fi
+}
+
+# Check and prompt for qwen-code installation
+check_qwen_code() {
+    local qwen_path=$(find_qwen_code_executable)
+    if [ -n "$qwen_path" ]; then
+        print_success "找到 qwen-code: $qwen_path"
+        return 0
+    fi
+
+    print_warning "未找到 qwen-code 可执行文件"
+    echo ""
+    echo "请选择:"
+    echo "  1) 协助安装 (通过 npm 自动安装)"
+    echo "  2) 手动安装 (稍后自行安装)"
+    echo ""
+
+    prompt_input "请选择" "1" qwen_choice
+
+    case "$qwen_choice" in
+        1)
+            install_qwen_code
+            if [ $? -eq 0 ]; then
+                return 0
+            else
+                print_info "安装失败，请手动安装后重新运行此脚本"
+                return 1
+            fi
+            ;;
+        2)
+            print_info "请手动安装 qwen-code:"
+            print_info "  npm install -g qwen-code"
+            print_info ""
+            prompt_yesno "是否继续安装 Open ACE（稍后手动安装 qwen-code）?" "y" continue_without_qwen
+            if [ "$continue_without_qwen" != "yes" ]; then
+                return 1
+            fi
+            return 0
+            ;;
+        *)
+            print_error "无效选择"
+            return 1
+            ;;
+    esac
+}
+
 # Configure sudoers for multi-user workspace mode
 configure_sudoers() {
     print_header "配置 Sudo 权限"
@@ -239,20 +375,53 @@ configure_sudoers() {
     local webui_path=$(find_webui_executable)
     if [ -z "$webui_path" ]; then
         print_warning "未找到 qwen-code-webui 可执行文件"
-        print_info "请先安装 qwen-code-webui:"
-        print_info "  npm install -g qwen-code-webui"
-        print_info ""
-        print_info "安装完成后，重新运行此脚本或手动配置 sudoers:"
-        print_info "  sudo visudo -f /etc/sudoers.d/open-ace-webui"
-        print_info "  添加: $RUN_USER ALL=(ALL) NOPASSWD: /path/to/qwen-code-webui *"
+        echo ""
+        echo "请选择:"
+        echo "  1) 协助安装 (通过 npm 自动安装)"
+        echo "  2) 手动安装 (稍后自行安装)"
+        echo ""
 
-        if [ "$NON_INTERACTIVE" = false ]; then
-            prompt_yesno "是否继续安装（稍后手动配置 sudoers）?" "y" continue_without_sudoers
-            if [ "$continue_without_sudoers" != "yes" ]; then
+        prompt_input "请选择" "1" webui_choice
+
+        case "$webui_choice" in
+            1)
+                install_qwen_code_webui
+                if [ $? -eq 0 ]; then
+                    # Re-check for webui path after installation
+                    webui_path=$(find_webui_executable)
+                    if [ -z "$webui_path" ]; then
+                        print_error "安装成功但仍未找到可执行文件"
+                        print_info "请检查 npm 全局路径是否在 PATH 中"
+                        return 1
+                    fi
+                    # Continue with sudoers configuration
+                else
+                    print_info "安装失败，请手动安装后重新运行此脚本"
+                    print_info "  npm install -g qwen-code-webui"
+                    return 1
+                fi
+                ;;
+            2)
+                print_info "请手动安装 qwen-code-webui:"
+                print_info "  npm install -g qwen-code-webui"
+                print_info ""
+                print_info "安装完成后，重新运行此脚本或手动配置 sudoers:"
+                print_info "  sudo visudo -f /etc/sudoers.d/open-ace-webui"
+                print_info "  添加: $RUN_USER ALL=(ALL) NOPASSWD: /path/to/qwen-code-webui *"
+
+                if [ "$NON_INTERACTIVE" = false ]; then
+                    prompt_yesno "是否继续安装（稍后手动配置 sudoers）?" "y" continue_without_sudoers
+                    if [ "$continue_without_sudoers" != "yes" ]; then
+                        return 1
+                    fi
+                fi
+                return 0
+                ;;
+            *)
+                print_error "无效选择"
                 return 1
-            fi
-        fi
-        return 0
+                ;;
+        esac
     fi
 
     print_success "找到 qwen-code-webui: $webui_path"
@@ -1105,6 +1274,14 @@ check_prerequisites() {
         else
             print_info "可稍后手动安装: https://nodejs.org/"
         fi
+    fi
+
+    # Check qwen-code (optional, for workspace functionality)
+    # Only check if workspace is enabled or user wants to use it
+    print_info "检查 qwen-code..."
+    if ! check_qwen_code; then
+        print_warning "qwen-code 检查失败，但不影响基本部署"
+        print_info "如需使用 Workspace 功能，请确保安装 qwen-code"
     fi
 
     # Check/load Docker image
