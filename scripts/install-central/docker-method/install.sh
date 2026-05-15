@@ -258,12 +258,12 @@ install_qwen_code_webui() {
     fi
 }
 
-# Find qwen-code executable
+# Find qwen-code executable (note: npm package @qwen-code/qwen-code installs as 'qwen')
 find_qwen_code_executable() {
     local candidates=(
-        "/usr/local/bin/qwen-code"
-        "/usr/bin/qwen-code"
-        "/opt/qwen-code/bin/qwen-code"
+        "/usr/local/bin/qwen"
+        "/usr/bin/qwen"
+        "/opt/qwen-code/bin/qwen"
     )
 
     for candidate in "${candidates[@]}"; do
@@ -274,8 +274,8 @@ find_qwen_code_executable() {
     done
 
     # Try to find in PATH
-    if command -v qwen-code &>/dev/null; then
-        which qwen-code
+    if command -v qwen &>/dev/null; then
+        which qwen
         return 0
     fi
 
@@ -294,15 +294,15 @@ install_qwen_code() {
     fi
 
     print_info "检测到 npm 版本: $(npm --version)"
-    print_info "正在安装 qwen-code..."
+    print_info "正在安装 @qwen-code/qwen-code..."
 
-    # Install qwen-code (the official package name is @qwen-code/qwen-code)
+    # Install qwen-code (the official package name is @qwen-code/qwen-code, installs as 'qwen')
     if npm install -g @qwen-code/qwen-code 2>&1; then
-        print_success "qwen-code 安装完成"
-        
-        # Verify installation
-        if command -v qwen-code &>/dev/null; then
-            local qwen_path=$(which qwen-code)
+        print_success "@qwen-code/qwen-code 安装完成"
+
+        # Verify installation (note: the executable is named 'qwen', not 'qwen-code')
+        if command -v qwen &>/dev/null; then
+            local qwen_path=$(which qwen)
             print_success "安装路径: $qwen_path"
             return 0
         else
@@ -310,7 +310,7 @@ install_qwen_code() {
             return 1
         fi
     else
-        print_error "qwen-code 安装失败"
+        print_error "@qwen-code/qwen-code 安装失败"
         print_info "请手动安装: npm install -g @qwen-code/qwen-code"
         return 1
     fi
@@ -320,7 +320,7 @@ install_qwen_code() {
 check_qwen_code() {
     local qwen_path=$(find_qwen_code_executable)
     if [ -n "$qwen_path" ]; then
-        print_success "找到 qwen-code: $qwen_path"
+        print_success "找到 qwen-code (qwen): $qwen_path"
         return 0
     fi
 
