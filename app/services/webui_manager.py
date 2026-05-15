@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import platform
+import pwd
 import secrets
 import socket
 import subprocess
@@ -561,6 +562,30 @@ class WebUIManager:
         server_port = server_config.get("web_port", 5000)
         openace_api_url = f"{openace_api_url}:{server_port}"
 
+        # Build child environment first (needed for sudo env passing)
+        child_env = os.environ.copy()
+        child_env.update(self.config.auth_env)
+
+        # Set OPENACE_LOG_DIR to /tmp to avoid HOME permission issues
+        webui_log_dir = f"/tmp/qwen-code-webui-{user_id}"
+        os.makedirs(webui_log_dir, mode=0o755, exist_ok=True)
+        child_env["OPENACE_LOG_DIR"] = webui_log_dir
+
+        # Change log directory ownership to system_account (Linux/macOS only)
+        # This allows webui to create additional log files if needed
+        if self._platform in ("linux", "darwin"):
+            try:
+                pw_info = pwd.getpwnam(system_account)
+                os.chown(webui_log_dir, pw_info.pw_uid, pw_info.pw_gid)
+            except KeyError:
+                logger.warning(f"User '{system_account}' not found, skipping chown")
+            except OSError as e:
+                logger.warning(f"Failed to chown log dir: {e}")
+
+        # Ensure PATH includes /usr/local/bin
+        if "PATH" not in child_env or "/usr/local/bin" not in child_env.get("PATH", ""):
+            child_env["PATH"] = "/usr/local/bin:" + child_env.get("PATH", "/usr/bin:/bin")
+
         # Build command based on platform
         if webui_dir:
             # Running from project directory using node
@@ -579,11 +604,15 @@ class WebUIManager:
             ]
             cwd = webui_dir
         elif self._platform in ("linux", "darwin"):
-            # Linux/macOS: use sudo -u for global executable
+            # Linux/macOS: use sudo -u with env to pass environment variables
+            # Note: Must set child_env and webui_log_dir BEFORE this point
             cmd = [
                 "sudo",
                 "-u",
                 system_account,
+                "env",
+                f"OPENACE_LOG_DIR={webui_log_dir}",
+                f"PATH={child_env['PATH']}",
                 webui_cmd,
                 "--port",
                 str(port),
@@ -616,20 +645,6 @@ class WebUIManager:
         if self.config.auth_type:
             cmd.extend(["--auth-type", self.config.auth_type])
 
-        # Build child environment: inherit current + inject auth env vars
-        child_env = os.environ.copy()
-        child_env.update(self.config.auth_env)
-
-        # Set OPENACE_LOG_DIR to /tmp to avoid HOME permission issues
-        # Each user gets a unique subdirectory under /tmp
-        webui_log_dir = f"/tmp/qwen-code-webui-{user_id}"
-        os.makedirs(webui_log_dir, mode=0o755, exist_ok=True)
-        child_env["OPENACE_LOG_DIR"] = webui_log_dir
-
-        # Ensure PATH includes /usr/local/bin for qwen and qwen-code-webui
-        if "PATH" not in child_env or "/usr/local/bin" not in child_env.get("PATH", ""):
-            child_env["PATH"] = "/usr/local/bin:" + child_env.get("PATH", "/usr/bin:/bin")
-
         logger.debug(f"Launching webui: {cmd}, cwd: {cwd}")
 
         try:
@@ -641,7 +656,7 @@ class WebUIManager:
                 cmd,
                 start_new_session=True,  # Detach from parent process group
                 cwd=cwd,
-                env=child_env,
+                env=child_env,  # Note: ignored for sudo; vars passed via 'env' cmd above
                 stdout=log_fd,
                 stderr=subprocess.STDOUT,
             )
