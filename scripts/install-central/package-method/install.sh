@@ -190,6 +190,56 @@ check_build_dependencies() {
     print_success "Build dependencies installed"
 }
 
+
+# Check and install build dependencies on remote system (for deploy mode)
+check_build_dependencies_remote() {
+    local remote="$1"
+    print_info "Checking build dependencies on $remote..."
+
+    local missing_deps=""
+    local has_gcc=$(ssh "$remote" "command -v gcc >/dev/null 2>&1 && echo yes || echo no")
+    local has_make=$(ssh "$remote" "command -v make >/dev/null 2>&1 && echo yes || echo no")
+
+    # Determine remote package manager and python-dev package name
+    local remote_pkg=$(ssh "$remote" "command -v apt-get >/dev/null 2>&1 && echo apt || (command -v dnf >/dev/null 2>&1 && echo dnf) || (command -v yum >/dev/null 2>&1 && echo yum) || echo unknown")
+    local python_dev_pkg="python3-devel"
+    [ "$remote_pkg" = "apt" ] && python_dev_pkg="python3-dev"
+
+    # Check Python.h existence on remote
+    local has_python_h=$(ssh "$remote" 'python3 -c "import sysconfig,os; print(\"yes\" if os.path.exists(sysconfig.get_config_var(\"INCLUDEPY\")+\"/Python.h\") else \"no\")" 2>/dev/null || echo no')
+
+    # Build missing deps list
+    [ "$has_gcc" = "no" ] && missing_deps="$missing_deps gcc"
+    [ "$has_make" = "no" ] && missing_deps="$missing_deps make"
+    [ "$has_python_h" = "no" ] && missing_deps="$missing_deps $python_dev_pkg"
+    missing_deps=$(echo "$missing_deps" | sed 's/^ *//')
+
+    if [ -z "$missing_deps" ]; then
+        print_success "Build dependencies already installed on $remote"
+        return 0
+    fi
+
+    print_info "Missing build dependencies on $remote: $missing_deps"
+    print_info "Installing build dependencies on $remote..."
+
+    ssh "$remote" "
+        if [ '$remote_pkg' = 'apt' ]; then
+            sudo apt-get update -qq && sudo apt-get install -y $missing_deps
+        elif [ '$remote_pkg' = 'dnf' ]; then
+            sudo dnf install -y $missing_deps
+        elif [ '$remote_pkg' = 'yum' ]; then
+            sudo yum install -y $missing_deps
+        else
+            echo 'ERROR: Unsupported package manager on remote'
+            exit 1
+        fi
+    " || {
+        print_error "Failed to install build dependencies on $remote"
+        print_info "Please ensure sudo is available on remote, or install manually: $missing_deps"
+        return 1
+    }
+    print_success "Build dependencies installed on $remote"
+}
 # ============================================================================
 # User Detection and Creation
 # ============================================================================
@@ -3155,6 +3205,9 @@ do_fresh_install_remote() {
 
     # Create config directory
     ssh "$remote" "mkdir -p '~/.open-ace'"
+
+    # Check build dependencies before installing Python packages (gevent, bcrypt need gcc)
+    check_build_dependencies_remote "$remote"
 
     # Install Python dependencies
     print_info "Installing Python dependencies on remote..."
