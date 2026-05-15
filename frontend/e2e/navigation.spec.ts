@@ -69,11 +69,13 @@ test.describe('Navigation', () => {
   });
 
   test('should open and close sidebar via hamburger and overlay on mobile', async ({ page }) => {
-    await page.setViewportSize({ width: 375, height: 667 });
+    // Hamburger + overlay only works in Work mode Layout
+    await page.goto('/work');
     await waitForApp(page);
+    await page.setViewportSize({ width: 375, height: 667 });
 
     const hamburger = page.locator('.hamburger-btn');
-    const sidebar = getSidebarLocator(page);
+    const sidebar = page.locator('nav.sidebar').first();
     const overlay = page.locator('.sidebar-overlay');
 
     // Open via hamburger

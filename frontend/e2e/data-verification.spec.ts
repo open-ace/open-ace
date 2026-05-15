@@ -36,7 +36,7 @@ test.describe('Data Verification Test', () => {
     console.log(mainText?.substring(0, 500));
 
     // Check for empty state
-    const emptyState = await page.locator('.empty-state, .no-data, text=暂无数据').count();
+    const emptyState = await page.locator('.empty-state, .no-data').count();
     console.log(`Empty state elements: ${emptyState}`);
   });
 
@@ -51,7 +51,7 @@ test.describe('Data Verification Test', () => {
     console.log(`Message rows: ${messageRows}`);
 
     // Check for empty state
-    const emptyState = await page.locator('.empty-state, .no-data, text=暂无数据, text=No messages').count();
+    const emptyState = await page.locator('.empty-state, .no-data').count();
     console.log(`Empty state elements: ${emptyState}`);
 
     // Get visible text content
