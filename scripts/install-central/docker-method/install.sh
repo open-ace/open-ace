@@ -775,17 +775,30 @@ install_docker() {
 # ============================================================================
 
 NODEJS_VERSION="${NODEJS_VERSION:-20}"
+MIN_NODE_VERSION="${MIN_NODE_VERSION:-18}"
 
-# Check if Node.js and npm are installed
+# Check if Node.js and npm are installed with required version
 check_nodejs() {
-    if command -v node &>/dev/null && command -v npm &>/dev/null; then
-        local node_version=$(node --version 2>/dev/null || echo "unknown")
-        local npm_version=$(npm --version 2>/dev/null || echo "unknown")
-        print_success "Node.js 已安装: $node_version"
-        print_success "npm 已安装: $npm_version"
-        return 0
+    if ! command -v node &>/dev/null; then
+        return 1
     fi
-    return 1
+
+    local node_version=$(node --version 2>/dev/null || echo "unknown")
+    local npm_version=$(npm --version 2>/dev/null || echo "unknown")
+
+    # Check version requirement for frontend build
+    if [ "$node_version" != "unknown" ]; then
+        local major_version=$(echo "$node_version" | sed 's/^v//' | cut -d. -f1)
+        if [ "$major_version" -lt "$MIN_NODE_VERSION" ]; then
+            print_warning "Node.js 版本过低: $node_version (需要 >= v$MIN_NODE_VERSION)"
+            print_warning "前端构建依赖需要 Node.js >= v$MIN_NODE_VERSION"
+            return 1
+        fi
+    fi
+
+    print_success "Node.js 已安装: $node_version"
+    print_success "npm 已安装: $npm_version"
+    return 0
 }
 
 install_nodejs_macos() {
