@@ -2,7 +2,7 @@
  * Layout Component - Main application layout
  */
 
-import React, { useEffect } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { cn } from '@/utils';
 import { useSidebarCollapsed, useMobileSidebarOpen } from '@/store';
 import { useAppStore } from '@/store';
@@ -20,14 +20,31 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeSection, onNavig
   const collapsed = useSidebarCollapsed();
   const mobileOpen = useMobileSidebarOpen();
 
+  const closeMobileSidebar = useCallback(() => {
+    useAppStore.getState().setMobileSidebarOpen(false);
+  }, []);
+
   useEffect(() => {
     document.body.classList.toggle('sidebar-mobile-open', mobileOpen);
     return () => document.body.classList.remove('sidebar-mobile-open');
   }, [mobileOpen]);
 
-  const closeMobileSidebar = () => {
-    useAppStore.getState().setMobileSidebarOpen(false);
-  };
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeMobileSidebar();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [mobileOpen, closeMobileSidebar]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth >= 768) closeMobileSidebar();
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [closeMobileSidebar]);
 
   return (
     <div className={cn('app-layout', collapsed && 'sidebar-collapsed')}>

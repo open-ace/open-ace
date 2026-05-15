@@ -65,4 +65,32 @@ test.describe('Navigation', () => {
       await expect(sidebar).toBeVisible();
     }
   });
+
+  test('should open and close sidebar via hamburger and overlay on mobile', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 667 });
+    await waitForApp(page);
+
+    const hamburger = page.locator('.hamburger-btn');
+    const sidebar = page.locator('nav.sidebar').first();
+    const overlay = page.locator('.sidebar-overlay');
+
+    // Open via hamburger
+    await expect(hamburger).toBeVisible();
+    await hamburger.click();
+    await expect(sidebar).toBeVisible();
+    await expect(overlay).toBeVisible();
+
+    // Close via overlay click
+    await overlay.click();
+    await expect(sidebar).not.toBeVisible();
+
+    // Open again
+    await hamburger.click();
+    await expect(sidebar).toBeVisible();
+
+    // Close via nav item click
+    const navLink = sidebar.locator('.nav-item .nav-link').first();
+    await navLink.click();
+    await expect(sidebar).not.toBeVisible();
+  });
 });

@@ -113,6 +113,11 @@ body.sidebar-mobile-open {
   color: var(--color-primary);
 }
 
+.hamburger-btn:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
 /* Dashboard cards - Stack vertically with spacing */
 .dashboard .row,
 .messages .row,

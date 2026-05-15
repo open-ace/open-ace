@@ -137,7 +137,7 @@ export const useAppStore = create<AppState>()(
       toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
       setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
       toggleMobileSidebar: () => set((state) => ({ sidebarMobileOpen: !state.sidebarMobileOpen })),
-      setMobileSidebarOpen: (sidebarMobileOpen) => set({ sidebarMobileOpen }),
+      setMobileSidebarOpen: (open) => set({ sidebarMobileOpen: open }),
       setAppMode: (appMode) => set({ appMode }),
       logout: () =>
         set({
