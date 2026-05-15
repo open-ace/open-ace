@@ -3,7 +3,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { login, waitForApp } from './helpers';
+import { login, waitForApp, ensureSidebarVisible } from './helpers';
 
 test.describe('Navigation', () => {
   test.beforeEach(async ({ page }) => {
@@ -12,12 +12,14 @@ test.describe('Navigation', () => {
 
   test('should display sidebar navigation', async ({ page }) => {
     await waitForApp(page);
+    await ensureSidebarVisible(page);
     const sidebar = page.locator('nav.sidebar').first();
     await expect(sidebar).toBeVisible({ timeout: 10000 });
   });
 
   test('should navigate to messages page', async ({ page }) => {
     await waitForApp(page);
+    await ensureSidebarVisible(page);
 
     // Find and click messages link (second nav item)
     const messagesLink = page.locator('nav.sidebar .nav-item:nth-child(2) .nav-link').first();
@@ -33,6 +35,7 @@ test.describe('Navigation', () => {
 
   test('should navigate to analysis page', async ({ page }) => {
     await waitForApp(page);
+    await ensureSidebarVisible(page);
 
     // Find and click analysis link (third nav item)
     const analysisLink = page.locator('nav.sidebar .nav-item:nth-child(3) .nav-link').first();
@@ -51,12 +54,11 @@ test.describe('Navigation', () => {
     await page.setViewportSize({ width: 375, height: 667 });
     await waitForApp(page);
 
-    // Find menu toggle button in header
-    const menuToggle = page.locator('.header button:has(.bi-list)').first();
+    // Click hamburger button to open sidebar
+    const menuToggle = page.locator('.hamburger-btn');
 
     if (await menuToggle.isVisible()) {
       await menuToggle.click();
-      await page.waitForTimeout(500);
 
       // Sidebar should be visible after toggle
       const sidebar = page.locator('nav.sidebar').first();

@@ -7,7 +7,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { login, waitForApp } from './helpers';
+import { login, waitForApp, ensureSidebarVisible } from './helpers';
 
 test.describe('Workspace Page', () => {
   test.beforeEach(async ({ page }) => {
@@ -75,6 +75,7 @@ test.describe('Workspace Page - Navigation', () => {
 
   test('should navigate to workspace from sidebar', async ({ page }) => {
     await waitForApp(page);
+    await ensureSidebarVisible(page);
 
     // Find workspace link in sidebar (8th nav item)
     const workspaceLink = page.locator('nav.sidebar .nav-item:nth-child(8) .nav-link').first();

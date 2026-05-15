@@ -42,6 +42,7 @@ interface AppState {
   theme: Theme;
   language: Language;
   sidebarCollapsed: boolean;
+  sidebarMobileOpen: boolean;
   appMode: AppMode;
 
   // Workspace fullscreen state
@@ -67,6 +68,8 @@ interface AppState {
   setLanguage: (language: Language) => void;
   toggleSidebar: () => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
+  toggleMobileSidebar: () => void;
+  setMobileSidebarOpen: (open: boolean) => void;
   setAppMode: (mode: AppMode) => void;
   logout: () => void;
 
@@ -102,6 +105,7 @@ export const useAppStore = create<AppState>()(
       theme: 'light',
       language: 'en',
       sidebarCollapsed: false,
+      sidebarMobileOpen: false,
       appMode: 'work',
 
       // Workspace fullscreen state
@@ -132,6 +136,8 @@ export const useAppStore = create<AppState>()(
       setLanguage: (language) => set({ language }),
       toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
       setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
+      toggleMobileSidebar: () => set((state) => ({ sidebarMobileOpen: !state.sidebarMobileOpen })),
+      setMobileSidebarOpen: (sidebarMobileOpen) => set({ sidebarMobileOpen }),
       setAppMode: (appMode) => set({ appMode }),
       logout: () =>
         set({
@@ -235,6 +241,7 @@ export const useAuthLoading = () => useAppStore((state) => state.authLoading);
 export const useTheme = () => useAppStore((state) => state.theme);
 export const useLanguage = () => useAppStore((state) => state.language);
 export const useSidebarCollapsed = () => useAppStore((state) => state.sidebarCollapsed);
+export const useMobileSidebarOpen = () => useAppStore((state) => state.sidebarMobileOpen);
 export const useAppMode = () => useAppStore((state) => state.appMode);
 export const useWorkspaceFullscreen = () => useAppStore((state) => state.workspaceFullscreen);
 export const useEnableTabNotifications = () => useAppStore((state) => state.enableTabNotifications);

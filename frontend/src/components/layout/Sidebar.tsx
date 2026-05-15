@@ -31,9 +31,10 @@ const navItems: NavItem[] = [
 interface SidebarProps {
   activeSection: string;
   onNavigate: (section: string) => void;
+  mobileOpen?: boolean;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ activeSection, onNavigate }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ activeSection, onNavigate, mobileOpen }) => {
   const collapsed = useSidebarCollapsed();
   const language = useLanguage();
   const { user } = useAuth();
@@ -42,6 +43,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeSection, onNavigate }) =
 
   const handleNavClick = (id: string, href?: string, disabled?: boolean) => {
     if (disabled) return;
+    useAppStore.getState().setMobileSidebarOpen(false);
     if (href) {
       window.location.href = href;
     } else {
@@ -54,7 +56,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeSection, onNavigate }) =
   };
 
   return (
-    <nav className={cn('sidebar bg-dark text-white', collapsed ? 'sidebar-collapsed' : '')}>
+    <nav
+      className={cn(
+        'sidebar bg-dark text-white',
+        collapsed && 'sidebar-collapsed',
+        mobileOpen && 'show'
+      )}
+    >
       {/* Logo */}
       <div className="sidebar-header p-3 border-bottom border-secondary">
         <div className="d-flex align-items-center">

@@ -153,8 +153,15 @@ export const Header: React.FC<HeaderProps> = ({ compact = false }) => {
   // In normal mode (ManageLayout), return full header with left and right content
   return (
     <header className="header">
-      {/* Left side - Refresh controls (only in manage mode) */}
+      {/* Left side - Hamburger + Refresh controls */}
       <div className="d-flex align-items-center">
+        <button
+          className="hamburger-btn d-md-none btn btn-link p-0 me-2"
+          onClick={() => useAppStore.getState().toggleMobileSidebar()}
+          aria-label="Toggle menu"
+        >
+          <i className="bi bi-list fs-4" />
+        </button>
         {showRefreshControls && (
           <>
             {/* Global Auto-refresh toggle */}

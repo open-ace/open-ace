@@ -3,7 +3,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { login, waitForApp } from './helpers';
+import { login, waitForApp, ensureSidebarVisible } from './helpers';
 
 test.describe('Accessibility', () => {
   test.beforeEach(async ({ page }) => {
@@ -22,6 +22,7 @@ test.describe('Accessibility', () => {
 
   test('should have navigation landmark', async ({ page }) => {
     await waitForApp(page);
+    await ensureSidebarVisible(page);
     const nav = page.locator('nav.sidebar');
     await expect(nav).toBeVisible({ timeout: 10000 });
   });
