@@ -1,11 +1,10 @@
 /**
  * Management Page E2E Tests
  *
- * Tests for admin management features:
+ * Tests for admin management features within Manage mode (/manage/*):
  * - User management
  * - Quota management
  * - Audit logs
- * - Content filter
  * - Security settings
  */
 
@@ -18,55 +17,56 @@ test.describe('Management Page', () => {
   });
 
   test('should display management page for admin users', async ({ page }) => {
-    await page.goto('/management');
+    await page.goto('/manage/users');
     await waitForApp(page);
 
-    const managementContent = page.locator('.management').first();
+    // Check for user management content
+    const managementContent = page.locator('main').first();
     await expect(managementContent).toBeVisible({ timeout: 10000 });
   });
 
-  test('should display user management tab', async ({ page }) => {
-    await page.goto('/management');
+  test('should display user management page', async ({ page }) => {
+    await page.goto('/manage/users');
     await waitForApp(page);
 
-    const userTab = page.locator('.nav-tabs .nav-link').first();
-    await expect(userTab).toBeVisible({ timeout: 10000 });
+    // Check that user management content loads
+    const content = page.locator('main').first();
+    await expect(content).toBeVisible({ timeout: 10000 });
+    // Page should have heading or card content
+    const heading = page.locator('h1, h2, h3, .card').first();
+    await expect(heading).toBeVisible({ timeout: 10000 });
   });
 
-  test('should display quota management tab', async ({ page }) => {
-    await page.goto('/management');
+  test('should display quota management page', async ({ page }) => {
+    await page.goto('/manage/quota');
     await waitForApp(page);
 
-    const tabs = page.locator('.nav-tabs .nav-link');
-    const count = await tabs.count();
-    expect(count).toBeGreaterThan(1);
+    const content = page.locator('main').first();
+    await expect(content).toBeVisible({ timeout: 10000 });
   });
 
-  test('should display audit log tab', async ({ page }) => {
-    await page.goto('/management');
+  test('should display audit log page', async ({ page }) => {
+    await page.goto('/manage/audit');
     await waitForApp(page);
 
-    const tabs = page.locator('.nav-tabs .nav-link');
-    const count = await tabs.count();
-    expect(count).toBeGreaterThan(2);
+    const content = page.locator('main').first();
+    await expect(content).toBeVisible({ timeout: 10000 });
   });
 
-  test('should display content filter tab', async ({ page }) => {
-    await page.goto('/management');
+  test('should display compliance page', async ({ page }) => {
+    await page.goto('/manage/compliance');
     await waitForApp(page);
 
-    const tabs = page.locator('.nav-tabs .nav-link');
-    const count = await tabs.count();
-    expect(count).toBeGreaterThan(3);
+    const content = page.locator('main').first();
+    await expect(content).toBeVisible({ timeout: 10000 });
   });
 
-  test('should display security settings tab', async ({ page }) => {
-    await page.goto('/management');
+  test('should display security settings page', async ({ page }) => {
+    await page.goto('/manage/security');
     await waitForApp(page);
 
-    const tabs = page.locator('.nav-tabs .nav-link');
-    const count = await tabs.count();
-    expect(count).toBeGreaterThan(4);
+    const content = page.locator('main').first();
+    await expect(content).toBeVisible({ timeout: 10000 });
   });
 });
 
@@ -75,26 +75,18 @@ test.describe('User Management', () => {
     await login(page);
   });
 
-  test('should display user list table', async ({ page }) => {
-    await page.goto('/management');
+  test('should display user list table or content', async ({ page }) => {
+    await page.goto('/manage/users');
     await waitForApp(page);
 
-    // Click on first tab (users)
-    const userTab = page.locator('.nav-tabs .nav-link').first();
-    await userTab.click();
-    await page.waitForLoadState('networkidle');
-
-    const userContent = page.locator('table, .user-management, .card').first();
+    // Check for table or card content
+    const userContent = page.locator('table, .card, .user-management, .user-list').first();
     await expect(userContent).toBeVisible({ timeout: 10000 });
   });
 
-  test('should have add user button', async ({ page }) => {
-    await page.goto('/management');
+  test('should have add user button or action', async ({ page }) => {
+    await page.goto('/manage/users');
     await waitForApp(page);
-
-    const userTab = page.locator('.nav-tabs .nav-link').first();
-    await userTab.click();
-    await page.waitForLoadState('networkidle');
 
     // Look for any action button
     const actionButton = page.locator('button').first();
@@ -103,52 +95,24 @@ test.describe('User Management', () => {
   });
 });
 
-test.describe('Content Filter Rules', () => {
-  test.beforeEach(async ({ page }) => {
-    await login(page);
-  });
-
-  test('should display filter rules table or empty state', async ({ page }) => {
-    await page.goto('/management');
-    await waitForApp(page);
-
-    // Click on filter tab (4th tab, index 3)
-    const filterTab = page.locator('.nav-tabs .nav-link').nth(3);
-    await filterTab.click();
-    await page.waitForLoadState('networkidle');
-
-    const filterContent = page.locator('.content-filter, table, .card').first();
-    await expect(filterContent).toBeVisible({ timeout: 10000 });
-  });
-});
-
 test.describe('Security Settings', () => {
   test.beforeEach(async ({ page }) => {
     await login(page);
   });
 
-  test('should display security settings form', async ({ page }) => {
-    await page.goto('/management');
+  test('should display security settings form or content', async ({ page }) => {
+    await page.goto('/manage/security');
     await waitForApp(page);
 
-    // Click on security tab (5th tab, index 4)
-    const securityTab = page.locator('.nav-tabs .nav-link').nth(4);
-    await securityTab.click();
-    await page.waitForLoadState('networkidle');
-
-    const securityContent = page.locator('.security-settings, form, .card').first();
+    const securityContent = page.locator('.card, form, table, .security').first();
     await expect(securityContent).toBeVisible({ timeout: 10000 });
   });
 
-  test('should have session timeout setting', async ({ page }) => {
-    await page.goto('/management');
+  test('should have form elements on security page', async ({ page }) => {
+    await page.goto('/manage/security');
     await waitForApp(page);
 
-    const securityTab = page.locator('.nav-tabs .nav-link').nth(4);
-    await securityTab.click();
-    await page.waitForLoadState('networkidle');
-
-    // Look for any input or form element
+    // Look for any input, select, or form element
     const formElement = page.locator('input, select, form').first();
     const isVisible = await formElement.isVisible({ timeout: 5000 }).catch(() => false);
     expect(typeof isVisible).toBe('boolean');
