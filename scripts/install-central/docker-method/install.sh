@@ -821,7 +821,21 @@ install_nodejs_macos() {
     print_info "通过 Homebrew 安装 Node.js..."
     brew install node
 
+    # Check if installed version meets requirement
+    local installed_version=$(node --version 2>/dev/null | sed 's/^v//' | cut -d. -f1)
+    if [ "$installed_version" -lt "$MIN_NODE_VERSION" ]; then
+        print_warning "Homebrew 安装的版本过低: v$installed_version (需要 >= v$MIN_NODE_VERSION)"
+        print_info "尝试升级 Node.js..."
+        brew upgrade node
+        installed_version=$(node --version 2>/dev/null | sed 's/^v//' | cut -d. -f1)
+        if [ "$installed_version" -lt "$MIN_NODE_VERSION" ]; then
+            print_error "无法安装满足要求的 Node.js 版本"
+            return 1
+        fi
+    fi
+
     print_success "Node.js 安装完成"
+    print_info "Node.js 版本: $(node --version)"
     return 0
 }
 
@@ -841,9 +855,22 @@ install_nodejs_debian() {
     if ! curl -fsSL "$nodesource_url" | sudo -E bash 2>/dev/null; then
         print_warning "官方源连接失败，尝试使用清华镜像..."
         if ! curl -fsSL "$domestic_mirror_url" | sudo -E bash 2>/dev/null; then
-            print_warning "镜像源也失败，尝试直接安装..."
+            print_warning "镜像源也失败，尝试直接安装系统自带版本..."
             sudo apt-get install -y nodejs npm
             if [ $? -eq 0 ]; then
+                # Check if installed version meets requirement
+                local installed_version=$(node --version 2>/dev/null | sed 's/^v//' | cut -d. -f1)
+                if [ "$installed_version" -lt "$MIN_NODE_VERSION" ]; then
+                    print_warning "系统自带版本过低: v$installed_version (需要 >= v$MIN_NODE_VERSION)"
+                    print_info "建议手动安装更高版本:"
+                    print_info "  方法1: 使用 nvm (推荐)"
+                    print_info "    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash"
+                    print_info "    source ~/.bashrc"
+                    print_info "    nvm install $NODEJS_VERSION"
+                    print_info "  方法2: 从官网下载二进制包"
+                    print_info "    https://nodejs.org/dist/v$NODEJS_VERSION.0/"
+                    return 1
+                fi
                 print_success "Node.js 安装完成 (系统自带版本)"
                 return 0
             fi
@@ -881,9 +908,22 @@ install_nodejs_redhat() {
     if ! sudo curl -fsSL "$nodesource_url" -o /etc/yum.repos.d/nodesource.repo 2>/dev/null; then
         print_warning "官方源连接失败，尝试使用清华镜像..."
         if ! sudo curl -fsSL "$domestic_mirror_url" -o /etc/yum.repos.d/nodesource.repo 2>/dev/null; then
-            print_warning "镜像源也失败，尝试直接安装..."
+            print_warning "镜像源也失败，尝试直接安装系统自带版本..."
             sudo yum install -y nodejs npm
             if [ $? -eq 0 ]; then
+                # Check if installed version meets requirement
+                local installed_version=$(node --version 2>/dev/null | sed 's/^v//' | cut -d. -f1)
+                if [ "$installed_version" -lt "$MIN_NODE_VERSION" ]; then
+                    print_warning "系统自带版本过低: v$installed_version (需要 >= v$MIN_NODE_VERSION)"
+                    print_info "建议手动安装更高版本:"
+                    print_info "  方法1: 使用 nvm (推荐)"
+                    print_info "    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash"
+                    print_info "    source ~/.bashrc"
+                    print_info "    nvm install $NODEJS_VERSION"
+                    print_info "  方法2: 从官网下载二进制包"
+                    print_info "    https://nodejs.org/dist/v$NODEJS_VERSION.0/"
+                    return 1
+                fi
                 print_success "Node.js 安装完成 (系统自带版本)"
                 return 0
             fi
@@ -909,6 +949,17 @@ install_nodejs_fedora() {
     # Install Node.js from Fedora repositories
     print_info "安装 Node.js..."
     sudo dnf install -y nodejs npm
+
+    # Check if installed version meets requirement
+    local installed_version=$(node --version 2>/dev/null | sed 's/^v//' | cut -d. -f1)
+    if [ "$installed_version" -lt "$MIN_NODE_VERSION" ]; then
+        print_warning "Fedora 系统自带版本过低: v$installed_version (需要 >= v$MIN_NODE_VERSION)"
+        print_info "建议使用 nvm 安装更高版本:"
+        print_info "  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash"
+        print_info "  source ~/.bashrc"
+        print_info "  nvm install $NODEJS_VERSION"
+        return 1
+    fi
 
     print_success "Node.js 安装完成"
     print_info "Node.js 版本: $(node --version)"
