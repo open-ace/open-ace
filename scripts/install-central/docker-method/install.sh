@@ -296,8 +296,8 @@ install_qwen_code() {
     print_info "检测到 npm 版本: $(npm --version)"
     print_info "正在安装 qwen-code..."
 
-    # Install qwen-code (the correct package name is qwen-code)
-    if npm install -g qwen-code 2>&1; then
+    # Install qwen-code (the official package name is @qwen-code/qwen-code)
+    if npm install -g @qwen-code/qwen-code 2>&1; then
         print_success "qwen-code 安装完成"
         
         # Verify installation
@@ -311,7 +311,7 @@ install_qwen_code() {
         fi
     else
         print_error "qwen-code 安装失败"
-        print_info "请手动安装: npm install -g qwen-code"
+        print_info "请手动安装: npm install -g @qwen-code/qwen-code"
         return 1
     fi
 }
@@ -345,7 +345,7 @@ check_qwen_code() {
             ;;
         2)
             print_info "请手动安装 qwen-code:"
-            print_info "  npm install -g qwen-code"
+            print_info "  npm install -g @qwen-code/qwen-code"
             print_info ""
             prompt_yesno "是否继续安装 Open ACE（稍后手动安装 qwen-code）?" "y" continue_without_qwen
             if [ "$continue_without_qwen" != "yes" ]; then
