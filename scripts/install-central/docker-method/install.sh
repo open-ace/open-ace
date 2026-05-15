@@ -805,10 +805,8 @@ configure_docker_mirror() {
     sudo mkdir -p /etc/docker
 
     # Default mirror list (domestic mirrors for China)
-    local mirrors='[
-    "https://docker.1ms.run",
-    "https://docker.xuanyuan.me"
-  ]'
+    # Note: mirrors_json contains proper JSON array string
+    local mirrors_json='["https://docker.1ms.run","https://docker.xuanyuan.me"]'
 
     # Check existing config
     if [ -f "$daemon_json" ]; then
@@ -816,16 +814,17 @@ configure_docker_mirror() {
         local existing_config=$(cat "$daemon_json" 2>/dev/null || echo "{}")
         # Simple merge - add registry-mirrors to existing config
         print_info "更新现有 Docker 配置..."
-        if echo "$existing_config" | python3 -c "import json,sys; c=json.load(sys.stdin); c['registry-mirrors']=$mirrors; json.dump(c,sys.stdout,indent=2)" > /tmp/daemon.json.new 2>/dev/null; then
+        # Use printf to properly inject the mirrors_json variable into Python code
+        if printf '%s\n' "$existing_config" | python3 -c "import json,sys; c=json.load(sys.stdin); c['registry-mirrors']=json.loads('$mirrors_json'); json.dump(c,sys.stdout,indent=2)" > /tmp/daemon.json.new 2>/dev/null; then
             sudo mv /tmp/daemon.json.new "$daemon_json"
         else
             # Fallback: create new config with mirrors only
             print_warning "无法合并配置，创建新配置文件..."
-            echo '{"registry-mirrors": $mirrors}' | sudo tee "$daemon_json" > /dev/null
+            printf '%s\n' "{\"registry-mirrors\": $mirrors_json}" | sudo tee "$daemon_json" > /dev/null
         fi
     else
-        # Create new config
-        echo '{"registry-mirrors": $mirrors}' | sudo tee "$daemon_json" > /dev/null
+        # Create new config - use printf with double quotes for variable expansion
+        printf '%s\n' "{\"registry-mirrors\": $mirrors_json}" | sudo tee "$daemon_json" > /dev/null
     fi
 
     # Restart Docker daemon
