@@ -241,6 +241,80 @@ check_build_dependencies_remote() {
     print_success "Build dependencies installed on $remote"
 }
 # ============================================================================
+
+# Check and install PostgreSQL client (psql) for schema execution
+check_psql_client() {
+    print_info "Checking PostgreSQL client (psql)..."
+    
+    # Check if psql is available
+    if command -v psql >/dev/null 2>&1; then
+        print_success "psql client already installed"
+        return 0
+    fi
+    
+    print_info "psql client not found, installing..."
+    
+    # Check if running as root
+    if [ "$EUID" -ne 0 ]; then
+        print_error "Root privileges required to install PostgreSQL client"
+        print_info "Please install manually:"
+        print_info "  CentOS/RHEL/Rocky: yum install postgresql"
+        print_info "  Ubuntu/Debian: apt install postgresql-client"
+        return 1
+    fi
+    
+    # Install PostgreSQL client based on OS
+    if command -v apt-get >/dev/null 2>&1; then
+        apt-get update -qq && apt-get install -y postgresql-client
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y postgresql
+    elif command -v yum >/dev/null 2>&1; then
+        yum install -y postgresql
+    else
+        print_error "Unsupported package manager"
+        return 1
+    fi
+    
+    print_success "PostgreSQL client installed"
+}
+
+# Check and install PostgreSQL client on remote system (for deploy mode)
+check_psql_client_remote() {
+    local remote="$1"
+    print_info "Checking PostgreSQL client on $remote..."
+    
+    # Check if psql is available on remote
+    local has_psql=$(ssh "$remote" "command -v psql >/dev/null 2>&1 && echo yes || echo no")
+    
+    if [ "$has_psql" = "yes" ]; then
+        print_success "psql client already installed on $remote"
+        return 0
+    fi
+    
+    print_info "psql client not found on $remote, installing..."
+    
+    # Determine remote package manager
+    local remote_pkg=$(ssh "$remote" "command -v apt-get >/dev/null 2>&1 && echo apt || (command -v dnf >/dev/null 2>&1 && echo dnf) || (command -v yum >/dev/null 2>&1 && echo yum) || echo unknown")
+    
+    ssh "$remote" "
+        if [ '$remote_pkg' = 'apt' ]; then
+            sudo apt-get update -qq && sudo apt-get install -y postgresql-client
+        elif [ '$remote_pkg' = 'dnf' ]; then
+            sudo dnf install -y postgresql
+        elif [ '$remote_pkg' = 'yum' ]; then
+            sudo yum install -y postgresql
+        else
+            echo 'ERROR: Unsupported package manager on remote'
+            exit 1
+        fi
+    " || {
+        print_error "Failed to install PostgreSQL client on $remote"
+        print_info "Please ensure sudo is available on remote, or install manually"
+        return 1
+    }
+    
+    print_success "PostgreSQL client installed on $remote"
+}
 # User Detection and Creation
 # ============================================================================
 
@@ -2785,6 +2859,8 @@ do_fresh_install() {
     local schema_file=""
     if [ "$db_type" = "postgresql" ]; then
         schema_file="$target_path/schema/schema-postgres.sql"
+        # Check psql client before executing schema
+        check_psql_client
     else
         schema_file="$target_path/schema/schema-sqlite.sql"
     fi
@@ -3208,6 +3284,8 @@ do_fresh_install_remote() {
 
     # Check build dependencies before installing Python packages (gevent, bcrypt need gcc)
     check_build_dependencies_remote "$remote"
+    # Check PostgreSQL client for schema execution
+    check_psql_client_remote "$remote"
 
     # Install Python dependencies
     print_info "Installing Python dependencies on remote..."
