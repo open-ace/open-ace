@@ -23,8 +23,11 @@ export async function login(page: Page, username = 'admin', password = 'admin123
     await page.waitForURL(/\/(manage|work)\//, { timeout: 15000 });
   } catch {
     // Fallback: wait for any URL change away from /login
-    await page.waitForURL(/^(?!.*\/login).+$/, { timeout: 5000 }).catch(() => {});
-    await page.goto('/');
+    const navigated = await page.waitForURL(/^(?!.*\/login).+$/, { timeout: 5000 }).then(() => true).catch(() => false);
+    if (!navigated) {
+      console.warn(`Login redirect failed — still at ${page.url()}, navigating to /`);
+      await page.goto('/');
+    }
   }
 
   // Wait for page to be ready

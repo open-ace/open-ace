@@ -33,7 +33,8 @@ test.describe('Dashboard Page', () => {
 
   test('should display trend chart', async ({ page }) => {
     await waitForApp(page);
-    // Look for chart canvas — may not render if no data in CI
+    // CI has empty database so chart may not render.
+    // Verify canvas if present, otherwise verify page loaded correctly.
     const chart = page.locator('canvas');
     const isChartVisible = await chart.first().isVisible({ timeout: 15000 }).catch(() => false);
     if (!isChartVisible) {
