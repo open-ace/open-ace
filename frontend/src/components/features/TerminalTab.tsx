@@ -161,6 +161,11 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
 
       xtermRef.current = terminal;
       fitAddonRef.current = fitAddon;
+
+      // Auto-connect after terminal is ready
+      if (wsUrl && token) {
+        connect();
+      }
     };
 
     initTerminal();

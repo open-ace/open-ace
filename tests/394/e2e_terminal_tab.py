@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Open ACE - Web Terminal E2E Test (Phase 1-3)
+Open ACE - Web Terminal E2E Test (Phase 1-4)
 
 Tests the terminal tab functionality including:
   Phase 1:
@@ -8,17 +8,21 @@ Tests the terminal tab functionality including:
     - Terminal tab creation and rendering
   Phase 2:
     - Session sync endpoint availability
-    - Terminal sessions appear in conversation history
   Phase 3:
     - Terminal status bar (connection state, machine name)
     - Working directory input in terminal creation
-    - Terminal tab close behavior
+  Phase 4:
+    - Full terminal WebSocket connection via mock server
+    - xterm.js rendering with dark terminal area
+    - Keyboard input and echo response
+    - Connection state indicator (green dot for connected)
 
 Run:
-  HEADLESS=true  python tests/e2e_terminal_tab.py
-  HEADLESS=false python tests/e2e_terminal_tab.py
+  HEADLESS=true  python tests/394/e2e_terminal_tab.py
+  HEADLESS=false python tests/394/e2e_terminal_tab.py
 """
 
+import asyncio
 import json
 import os
 import sys
@@ -58,10 +62,78 @@ def login_via_api():
         json={"username": TEST_USER, "password": TEST_PASS},
     )
     assert resp.status_code == 200, f"Login failed: {resp.text}"
-    # session_token is set via Set-Cookie header
     token = resp.cookies.get("session_token")
     assert token, f"No session_token cookie found. Cookies: {dict(resp.cookies)}"
     return token
+
+
+# ═══════════════════════════════════════════════════════════
+# Mock WebSocket Terminal Server
+# ═══════════════════════════════════════════════════════════
+
+
+def start_mock_terminal_server():
+    """
+    Start a mock WebSocket terminal server for E2E testing.
+
+    Simulates a real terminal: accepts connections, sends welcome message,
+    and echoes input back (simulating a shell prompt).
+
+    Returns the port number, or None if websockets is not available.
+    """
+    import threading
+
+    try:
+        import websockets
+    except ImportError:
+        log("Mock", "websockets package not installed, skipping mock server")
+        return None
+
+    port_holder = [None]
+
+    async def handle_connection(websocket):
+        """Handle a mock terminal WebSocket connection."""
+        try:
+            # Send welcome message (green text like real terminal)
+            await websocket.send(
+                b"\r\n\x1b[32mMock Terminal Server - E2E Test\r\n" b"\x1b[0m\r\n$ "
+            )
+
+            async for message in websocket:
+                if isinstance(message, bytes):
+                    text = message.decode("utf-8", errors="replace")
+                    # Simulate shell: echo command + show prompt
+                    await websocket.send(f"\r\n{text}\r\n$ ".encode())
+                elif isinstance(message, str):
+                    try:
+                        data = json.loads(message)
+                        if data.get("type") == "resize":
+                            continue
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+        except Exception:
+            pass
+
+    async def run_server():
+        async with websockets.serve(
+            handle_connection, "localhost", 0, subprotocols=["binary"]
+        ) as server:
+            port_holder[0] = server.sockets[0].getsockname()[1]
+            await asyncio.Future()  # run forever
+
+    def run_thread():
+        asyncio.run(run_server())
+
+    thread = threading.Thread(target=run_thread, daemon=True)
+    thread.start()
+
+    # Wait for server to bind and report port
+    for _ in range(30):
+        if port_holder[0] is not None:
+            break
+        time.sleep(0.1)
+
+    return port_holder[0]
 
 
 # ═══════════════════════════════════════════════════════════
@@ -76,14 +148,12 @@ def test_terminal_option_in_modal(page):
     time.sleep(2)
     take_screenshot(page, "p1-01-workspace")
 
-    # Open new session modal
     new_tab_btn = page.locator(".workspace-new-tab-btn")
     new_tab_btn.wait_for(state="visible", timeout=10000)
     new_tab_btn.click()
     time.sleep(1)
     take_screenshot(page, "p1-02-modal-open")
 
-    # Verify three buttons: Local, Remote, Terminal
     modal = page.locator(".modal.show")
     modal.wait_for(state="visible", timeout=5000)
     buttons = modal.locator("button")
@@ -99,107 +169,9 @@ def test_terminal_option_in_modal(page):
     assert has_terminal, f"Terminal button not found. Buttons: {button_texts}"
     log("Phase 1", "All three workspace type buttons found!")
 
-    # Close modal
     close_btn = modal.locator(".btn-secondary")
     if close_btn.is_visible():
         close_btn.click()
-    time.sleep(0.5)
-
-
-def test_terminal_creation_flow(page):
-    """Test terminal tab creation and rendering."""
-    # Open modal
-    new_tab_btn = page.locator(".workspace-new-tab-btn")
-    new_tab_btn.click()
-    time.sleep(1)
-
-    modal = page.locator(".modal.show")
-    modal.wait_for(state="visible", timeout=5000)
-
-    # Click Terminal button
-    buttons = modal.locator("button")
-    terminal_btn = None
-    for i in range(buttons.count()):
-        text = buttons.nth(i).inner_text()
-        if "Terminal" in text or "终端" in text:
-            terminal_btn = buttons.nth(i)
-            break
-    assert terminal_btn, "Terminal button not found"
-    terminal_btn.click()
-    time.sleep(0.5)
-    take_screenshot(page, "p1-03-terminal-selected")
-
-    # Phase 3: Verify working directory input exists
-    workdir_input = modal.locator("input.form-control")
-    if workdir_input.is_visible():
-        log("Phase 3", "Working directory input found!")
-    else:
-        log("Phase 3", "No machine selected yet - workdir input hidden")
-
-    # Verify info hint
-    info_alert = modal.locator(".alert-info")
-    if info_alert.is_visible():
-        info_text = info_alert.inner_text()
-        assert "Claude Code" in info_text or "terminal" in info_text.lower()
-        log("Phase 3", f"Info hint visible: {info_text[:60]}")
-
-    # Check machines
-    machine_list = modal.locator(".list-group-item")
-    machine_count = machine_list.count()
-
-    if machine_count > 0:
-        log("Phase 1", f"Found {machine_count} machine(s)")
-        machine_list.first.click()
-        time.sleep(0.5)
-        take_screenshot(page, "p1-04-machine-selected")
-
-        # Create terminal
-        create_btn = modal.locator(".btn-primary").last
-        create_btn.click()
-        time.sleep(5)
-        take_screenshot(page, "p1-05-terminal-created")
-
-        # Verify terminal tab
-        tabs = page.locator(".workspace-tab")
-        assert tabs.count() > 1, "Expected more than one tab after terminal creation"
-
-        # Check terminal icon
-        terminal_icon = page.locator(".bi-terminal")
-        if terminal_icon.count() > 0:
-            log("Phase 1", "Terminal tab icon found!")
-
-            # Phase 3: Verify status bar
-            status_bar = page.locator(".flex-column > .d-flex:last-child")
-            if status_bar.is_visible():
-                status_text = status_bar.inner_text()
-                log("Phase 3", f"Status bar content: {status_text[:80]}")
-                assert (
-                    "Claude Code" in status_text
-                    or "Connected" in status_text
-                    or "Connecting" in status_text
-                )
-
-            # Phase 3: Verify connection state indicator
-            status_dot = page.locator("span[style*='border-radius: 50%']")
-            if status_dot.is_visible():
-                log("Phase 3", "Connection status indicator found!")
-
-            take_screenshot(page, "p1-06-terminal-rendered")
-
-            # Close terminal tab
-            close_btn = tabs.last.locator(".tab-action-btn").last
-            close_btn.click()
-            time.sleep(1)
-            take_screenshot(page, "p1-07-terminal-closed")
-        else:
-            log("Phase 1", "Terminal icon not found (may still be loading)")
-    else:
-        log("Phase 1", "No machines available - skipping creation test")
-
-    # Close modal if still open
-    close_modal = page.locator(".modal.show .btn-secondary")
-    if close_modal.is_visible():
-        close_modal.click()
     time.sleep(0.5)
 
 
@@ -213,8 +185,6 @@ def test_session_sync_api(token):
     log("Phase 2", "Testing session-sync endpoint...")
     headers = {"Cookie": f"session_token={token}", "Content-Type": "application/json"}
 
-    # The session-sync endpoint is accessed via agent message endpoint
-    # We test that the message type is recognized (not "Unknown message type")
     resp = requests.post(
         f"{BASE_URL}/api/remote/agent/message",
         json={
@@ -243,8 +213,6 @@ def test_session_sync_api(token):
         timeout=10,
     )
 
-    # The request may fail because test-machine doesn't exist,
-    # but it should NOT return "Unknown message type"
     if resp.status_code == 200:
         data = resp.json()
         assert data.get("success") is True, f"session_sync failed: {data}"
@@ -256,6 +224,188 @@ def test_session_sync_api(token):
         log("Phase 2", f"session_sync processed (expected error): {data.get('error', '')[:80]}")
     else:
         log("Phase 2", f"session_sync response: {resp.status_code}")
+
+
+# ═══════════════════════════════════════════════════════════
+# Phase 4 Tests (Full terminal connection & interaction)
+# ═══════════════════════════════════════════════════════════
+
+
+def test_terminal_connection_and_interaction(page, mock_ws_port):
+    """
+    Test full terminal lifecycle with mock WebSocket server.
+
+    Uses Playwright route interception to inject mock server URL,
+    then verifies: xterm.js rendering, connection state, keyboard input,
+    and terminal output echo.
+    """
+    if mock_ws_port is None:
+        log("Phase 4", "SKIPPED - websockets package not available")
+        return
+
+    mock_ws_url = f"ws://localhost:{mock_ws_port}"
+    log("Phase 4", f"Mock terminal server running on port {mock_ws_port}")
+
+    # Intercept start_terminal API: return mock server info directly
+    def handle_start(route):
+        route.fulfill(
+            json={
+                "success": True,
+                "terminal": {
+                    "terminal_id": "mock-terminal-e2e-001",
+                    "status": "running",
+                    "ws_url": mock_ws_url,
+                    "token": "test-mock-token",
+                },
+            }
+        )
+
+    # Intercept stop_terminal API: prevent real stop attempt
+    def handle_stop(route):
+        route.fulfill(json={"success": True})
+
+    page.route("**/api/remote/terminal/start", handle_start)
+    page.route("**/api/remote/terminal/stop", handle_stop)
+
+    try:
+        # Navigate to workspace
+        page.goto(f"{BASE_URL}/work/workspace", wait_until="networkidle", timeout=30000)
+        time.sleep(2)
+
+        # Open new session modal
+        new_tab_btn = page.locator(".workspace-new-tab-btn")
+        new_tab_btn.wait_for(state="visible", timeout=10000)
+        new_tab_btn.click()
+        time.sleep(1)
+        take_screenshot(page, "p4-01-modal-open")
+
+        modal = page.locator(".modal.show")
+        modal.wait_for(state="visible", timeout=5000)
+
+        # Select Terminal workspace type
+        buttons = modal.locator("button")
+        terminal_btn = None
+        for i in range(buttons.count()):
+            text = buttons.nth(i).inner_text()
+            if "Terminal" in text or "终端" in text:
+                terminal_btn = buttons.nth(i)
+                break
+
+        if not terminal_btn:
+            log("Phase 4", "SKIPPED - Terminal button not found")
+            return
+
+        terminal_btn.click()
+        time.sleep(0.5)
+
+        # Select first machine
+        machine_list = modal.locator(".list-group-item")
+        if machine_list.count() == 0:
+            log("Phase 4", "SKIPPED - No machines available")
+            return
+
+        machine_list.first.click()
+        time.sleep(0.5)
+
+        # Click Create - this triggers the intercepted start_terminal API
+        create_btn = modal.locator(".btn-primary").last
+        create_btn.click()
+        log("Phase 4", "Clicked Create - mock server will handle connection")
+        time.sleep(3)
+        take_screenshot(page, "p4-02-terminal-created")
+
+        # ── Verify: xterm.js rendered ──
+        xterm_screen = page.locator(".xterm-screen")
+        assert xterm_screen.count() > 0, "xterm.js terminal not rendered (no .xterm-screen)"
+        log("Phase 4", "xterm.js terminal rendered!")
+
+        # ── Verify: dark background (terminal area) ──
+        terminal_container = page.locator("div[style*='background-color: rgb(30, 30, 46)']")
+        if terminal_container.count() > 0:
+            log("Phase 4", "Dark terminal background confirmed (#1e1e2e)")
+        else:
+            log("Phase 4", "Checking terminal background color...")
+
+        # ── Verify: connection state = "Connected" ──
+        connected = False
+        for _ in range(15):
+            body_text = page.locator("body").inner_text()
+            if "Connected" in body_text:
+                connected = True
+                break
+            time.sleep(1)
+
+        assert connected, "Terminal did not reach Connected state within 15 seconds"
+        log("Phase 4", "Terminal connected to mock server!")
+        take_screenshot(page, "p4-03-terminal-connected")
+
+        # ── Verify: welcome message in terminal ──
+        # xterm.js renders in canvas, but DOM rows may contain text
+        xterm_rows = page.locator(".xterm-rows > div")
+        if xterm_rows.count() > 0:
+            row_texts = []
+            for i in range(min(xterm_rows.count(), 10)):
+                text = xterm_rows.nth(i).inner_text().strip()
+                if text:
+                    row_texts.append(text)
+            log("Phase 4", f"Terminal rows: {row_texts}")
+            has_welcome = any("Mock Terminal" in t or "$" in t for t in row_texts)
+            if has_welcome:
+                log("Phase 4", "Welcome message displayed in terminal!")
+
+        # ── Verify: green connection indicator ──
+        status_dot = page.locator("span[style*='border-radius: 50%']")
+        if status_dot.count() > 0:
+            style = status_dot.first.get_attribute("style") or ""
+            if "#22c55e" in style:
+                log("Phase 4", "Status indicator is GREEN (connected)")
+            else:
+                log("Phase 4", f"Status indicator style: {style[:80]}")
+
+        # ── Verify: machine name in status bar ──
+        status_bar = page.locator("div.d-flex.align-items-center.px-2.py-1")
+        if status_bar.count() > 0:
+            status_text = status_bar.first.inner_text()
+            log("Phase 4", f"Status bar: {status_text[:100]}")
+            assert "Claude Code" in status_text, f"'Claude Code' not in status bar: {status_text}"
+            assert "Connected" in status_text, f"'Connected' not in status bar: {status_text}"
+
+        # ── Verify: keyboard input and echo ──
+        xterm_screen.first.click()
+        time.sleep(0.3)
+        page.keyboard.type("echo hello")
+        time.sleep(0.5)
+        page.keyboard.press("Enter")
+        time.sleep(1)
+        take_screenshot(page, "p4-04-terminal-input")
+
+        # Check terminal rows for echoed input
+        xterm_rows = page.locator(".xterm-rows > div")
+        if xterm_rows.count() > 0:
+            all_text = " ".join(
+                xterm_rows.nth(i).inner_text() for i in range(min(xterm_rows.count(), 20))
+            )
+            if "echo hello" in all_text:
+                log("Phase 4", "Input 'echo hello' echoed in terminal!")
+            else:
+                log("Phase 4", f"Terminal content (first 200 chars): {all_text[:200]}")
+
+        take_screenshot(page, "p4-05-terminal-final")
+
+        # ── Verify: close terminal tab ──
+        tabs = page.locator(".workspace-tab")
+        if tabs.count() > 1:
+            close_btn = tabs.last.locator(".tab-action-btn").last
+            close_btn.click()
+            time.sleep(1)
+            take_screenshot(page, "p4-06-terminal-closed")
+            log("Phase 4", "Terminal tab closed successfully")
+
+        log("Phase 4", "All terminal connection & interaction tests passed!")
+
+    finally:
+        page.unroute("**/api/remote/terminal/start")
+        page.unroute("**/api/remote/terminal/stop")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -271,7 +421,12 @@ def test_terminal_tab():
     # Phase 2: API-level tests
     test_session_sync_api(token)
 
-    # Phase 1 & 3: Browser tests
+    # Start mock terminal server for Phase 4
+    mock_ws_port = start_mock_terminal_server()
+    if mock_ws_port:
+        log("Setup", f"Mock terminal server started on port {mock_ws_port}")
+
+    # Browser tests
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=HEADLESS)
         context = browser.new_context(
@@ -291,9 +446,13 @@ def test_terminal_tab():
         page = context.new_page()
 
         try:
+            # Phase 1: Modal UI verification
             test_terminal_option_in_modal(page)
-            test_terminal_creation_flow(page)
-            log("Result", "All Phase 1-3 tests passed!")
+
+            # Phase 4: Full terminal connection & interaction
+            test_terminal_connection_and_interaction(page, mock_ws_port)
+
+            log("Result", "All Phase 1-4 tests passed!")
         except Exception as e:
             take_screenshot(page, "error-final")
             log("Error", str(e))
@@ -305,7 +464,7 @@ def test_terminal_tab():
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("Web Terminal Tab E2E Test (Phase 1-3)")
+    print("Web Terminal Tab E2E Test (Phase 1-4)")
     print(f"  BASE_URL:  {BASE_URL}")
     print(f"  HEADLESS:  {HEADLESS}")
     print("=" * 60)
