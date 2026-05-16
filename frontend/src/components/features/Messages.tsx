@@ -108,11 +108,11 @@ export const Messages: React.FC = () => {
         <h2>{t('messages', language)}</h2>
       </div>
 
-      {/* Filters - CSS Grid for column alignment */}
+      {/* Filters - Nested flex for column alignment */}
       <Card className="mb-3">
-        <div style={{ display: 'grid', gridTemplateColumns: 'auto auto auto auto', gap: '0.5rem', alignItems: 'center' }}>
-          {/* Date Range Filter */}
-          <div className="d-flex align-items-center gap-1">
+        {/* Row 1: Date Range + Filters */}
+        <div className="d-flex align-items-center gap-2 mb-2">
+          <div className="d-flex align-items-center gap-1" style={{ minWidth: '440px' }}>
             <small className="text-muted">{t('startDate', language)}:</small>
             <input
               type="date"
@@ -132,46 +132,44 @@ export const Messages: React.FC = () => {
               onChange={(e) => handleFilterChange('endDate', e.target.value)}
             />
           </div>
-          {/* Host Filter */}
-          <div className="d-flex align-items-center gap-1">
-            <small className="text-muted">{t('tableHost', language)}:</small>
-            <Select
-              options={hostOptions}
-              value={filters.host ?? ''}
-              onChange={(value) => handleFilterChange('host', value)}
-              size="sm"
-              className="flex-grow-0"
-              style={{ width: '150px' } as React.CSSProperties}
-            />
+          <div className="d-flex align-items-center gap-2 flex-grow-1">
+            <div className="d-flex align-items-center gap-1">
+              <small className="text-muted">{t('tableHost', language)}:</small>
+              <Select
+                options={hostOptions}
+                value={filters.host ?? ''}
+                onChange={(value) => handleFilterChange('host', value)}
+                size="sm"
+                style={{ width: '150px' } as React.CSSProperties}
+              />
+            </div>
+            <div className="d-flex align-items-center gap-1">
+              <small className="text-muted">{t('tableTool', language)}:</small>
+              <Select
+                options={toolOptions}
+                value={filters.tool ?? ''}
+                onChange={(value) => handleFilterChange('tool', value)}
+                size="sm"
+                style={{ width: '150px' } as React.CSSProperties}
+              />
+            </div>
+            <div className="d-flex align-items-center gap-1 flex-grow-1">
+              <small className="text-muted">{t('tableSender', language)}:</small>
+              <SearchableSelect
+                options={senderOptions}
+                value={filters.sender ?? ''}
+                onChange={(value) => handleFilterChange('sender', value)}
+                placeholder={t('dashboardFilterAllSenders', language) || 'All Senders'}
+                searchPlaceholder={t('searchSender', language)}
+                size="sm"
+                className="flex-grow-1"
+              />
+            </div>
           </div>
-          {/* Tool Filter */}
-          <div className="d-flex align-items-center gap-1">
-            <small className="text-muted">{t('tableTool', language)}:</small>
-            <Select
-              options={toolOptions}
-              value={filters.tool ?? ''}
-              onChange={(value) => handleFilterChange('tool', value)}
-              size="sm"
-              className="flex-grow-0"
-              style={{ width: '150px' } as React.CSSProperties}
-            />
-          </div>
-          {/* Sender Filter */}
-          <div className="d-flex align-items-center gap-1">
-            <small className="text-muted">{t('tableSender', language)}:</small>
-            <SearchableSelect
-              options={senderOptions}
-              value={filters.sender ?? ''}
-              onChange={(value) => handleFilterChange('sender', value)}
-              placeholder={t('dashboardFilterAllSenders', language) || 'All Senders'}
-              searchPlaceholder={t('searchSender', language)}
-              size="sm"
-              className="flex-grow-0"
-              style={{ width: '150px' } as React.CSSProperties}
-            />
-          </div>
-          {/* Role Filter */}
-          <div className="d-flex align-items-center gap-1">
+        </div>
+        {/* Row 2: Role + Search */}
+        <div className="d-flex align-items-center gap-2">
+          <div className="d-flex align-items-center gap-1" style={{ minWidth: '440px' }}>
             <small className="text-muted">{t('role', language)}:</small>
             <div className="form-check form-check-inline mb-0">
               <input
@@ -210,17 +208,18 @@ export const Messages: React.FC = () => {
               </label>
             </div>
           </div>
-          {/* Search Filter - spans columns 2-4 to align with Sender end */}
-          <div className="d-flex align-items-center gap-1" style={{ gridColumn: '2 / -1', width: '100%' }}>
-            <small className="text-muted" style={{ whiteSpace: 'nowrap' }}>{t('search', language)}:</small>
-            <input
-              type="text"
-              className="form-control form-control-sm"
-              placeholder={t('searchMessages', language) ?? 'Search messages...'}
-              style={{ flex: 1, minWidth: 0 }}
-              value={filters.search ?? ''}
-              onChange={(e) => handleFilterChange('search', e.target.value)}
-            />
+          <div className="d-flex align-items-center gap-2 flex-grow-1">
+            <div className="d-flex align-items-center gap-1 flex-grow-1">
+              <small className="text-muted">{t('search', language)}:</small>
+              <input
+                type="text"
+                className="form-control form-control-sm"
+                placeholder={t('searchMessages', language) ?? 'Search messages...'}
+                style={{ flex: 1, minWidth: 0 }}
+                value={filters.search ?? ''}
+                onChange={(e) => handleFilterChange('search', e.target.value)}
+              />
+            </div>
           </div>
         </div>
       </Card>
