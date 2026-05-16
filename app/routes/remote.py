@@ -1149,8 +1149,8 @@ def get_terminal_status(terminal_id):
 # ==================== LLM Proxy ====================
 
 
-@remote_bp.route("/llm-proxy", methods=["POST"])
-@remote_bp.route("/llm-proxy/<path:path>", methods=["GET", "POST", "PUT", "DELETE"])
+@remote_bp.route("/llm-proxy", methods=["POST", "HEAD"])
+@remote_bp.route("/llm-proxy/<path:path>", methods=["GET", "POST", "PUT", "DELETE", "HEAD"])
 def llm_proxy(path=""):
     """
     Transparent LLM API proxy for remote CLI tools.
@@ -1164,9 +1164,15 @@ def llm_proxy(path=""):
     5. Streams the response back
     6. Records token usage
     """
-    # Extract proxy token from Authorization header
+    # Claude Code sends HEAD requests for health checks
+    if request.method == "HEAD":
+        return "", 200
+
+    # Extract proxy token from Authorization header or x-api-key (Claude Code)
     auth_header = request.headers.get("Authorization", "")
     proxy_token = auth_header.replace("Bearer ", "").strip()
+    if not proxy_token:
+        proxy_token = request.headers.get("x-api-key", "").strip()
 
     if not proxy_token:
         return (
