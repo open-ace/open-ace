@@ -156,7 +156,7 @@ export const Header: React.FC<HeaderProps> = ({ compact = false }) => {
       {/* Left side - Hamburger + Refresh controls */}
       <div className="d-flex align-items-center">
         <button
-          className="hamburger-btn d-md-none btn btn-link p-0 me-2"
+          className="hamburger-btn btn btn-link p-0 me-2"
           onClick={() => useAppStore.getState().toggleMobileSidebar()}
           aria-label="Toggle menu"
         >

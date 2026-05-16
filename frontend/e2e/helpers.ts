@@ -18,12 +18,16 @@ export async function login(page: Page, username = 'admin', password = 'admin123
   // Submit form
   await page.locator('button[type="submit"]').click();
 
-  // Wait for redirect to dashboard or messages
+  // Wait for redirect — admin goes to /manage/*, regular users to /work/*
   try {
-    await page.waitForURL(/\/(dashboard|messages|\/$)/, { timeout: 15000 });
+    await page.waitForURL(/\/(manage|work)\//, { timeout: 15000 });
   } catch {
-    // If redirect fails, try navigating to dashboard
-    await page.goto('/');
+    // Fallback: wait for any URL change away from /login
+    const navigated = await page.waitForURL(/^(?!.*\/login).+$/, { timeout: 5000 }).then(() => true).catch(() => false);
+    if (!navigated) {
+      console.warn(`Login redirect failed — still at ${page.url()}, navigating to /`);
+      await page.goto('/');
+    }
   }
 
   // Wait for page to be ready
@@ -40,6 +44,14 @@ export async function waitForApp(page: Page) {
 }
 
 /**
+ * Get a locator for the sidebar — works in both Work and Manage modes.
+ * Work mode uses `nav.sidebar`, Manage mode uses `nav.manage-sidebar`.
+ */
+export function getSidebarLocator(page: Page) {
+  return page.locator('nav.sidebar, nav.manage-sidebar').first();
+}
+
+/**
  * Open the sidebar on mobile viewports by clicking the hamburger button.
  * On desktop viewports, the sidebar is always visible so this is a no-op.
  */
@@ -49,7 +61,7 @@ export async function ensureSidebarVisible(page: Page) {
     const hamburger = page.locator('.hamburger-btn');
     if (await hamburger.isVisible()) {
       await hamburger.click();
-      await page.locator('nav.sidebar').waitFor({ state: 'visible', timeout: 5000 });
+      await getSidebarLocator(page).waitFor({ state: 'visible', timeout: 5000 });
     }
   }
 }

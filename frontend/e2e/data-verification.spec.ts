@@ -12,7 +12,7 @@ test.describe('Data Verification Test', () => {
   });
 
   test('verify Dashboard data', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/manage/dashboard');
     await page.waitForTimeout(3000);
 
     // Take full page screenshot
@@ -36,12 +36,12 @@ test.describe('Data Verification Test', () => {
     console.log(mainText?.substring(0, 500));
 
     // Check for empty state
-    const emptyState = await page.locator('.empty-state, .no-data, text=暂无数据').count();
+    const emptyState = await page.locator('.empty-state, .no-data').count();
     console.log(`Empty state elements: ${emptyState}`);
   });
 
   test('verify Messages data', async ({ page }) => {
-    await page.goto('/messages');
+    await page.goto('/manage/messages');
     await page.waitForTimeout(3000);
 
     await page.screenshot({ path: '../../screenshots/data-verification/messages-full.png', fullPage: true });
@@ -51,7 +51,7 @@ test.describe('Data Verification Test', () => {
     console.log(`Message rows: ${messageRows}`);
 
     // Check for empty state
-    const emptyState = await page.locator('.empty-state, .no-data, text=暂无数据, text=No messages').count();
+    const emptyState = await page.locator('.empty-state, .no-data').count();
     console.log(`Empty state elements: ${emptyState}`);
 
     // Get visible text content
@@ -61,7 +61,7 @@ test.describe('Data Verification Test', () => {
   });
 
   test('verify Analysis data', async ({ page }) => {
-    await page.goto('/analysis');
+    await page.goto('/manage/analysis/trend');
     await page.waitForTimeout(3000);
 
     await page.screenshot({ path: '../../screenshots/data-verification/analysis-full.png', fullPage: true });

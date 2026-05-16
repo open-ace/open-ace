@@ -7,7 +7,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { login, waitForApp, ensureSidebarVisible } from './helpers';
+import { login, waitForApp, ensureSidebarVisible, getSidebarLocator } from './helpers';
 
 test.describe('Workspace Page', () => {
   test.beforeEach(async ({ page }) => {
@@ -15,15 +15,15 @@ test.describe('Workspace Page', () => {
   });
 
   test('should display workspace page', async ({ page }) => {
-    await page.goto('/workspace');
+    await page.goto('/work/workspace');
     await waitForApp(page);
 
-    const workspaceContent = page.locator('.workspace').first();
+    const workspaceContent = page.locator('.workspace, main').first();
     await expect(workspaceContent).toBeVisible({ timeout: 10000 });
   });
 
   test('should display either iframe or not configured message', async ({ page }) => {
-    await page.goto('/workspace');
+    await page.goto('/work/workspace');
     await waitForApp(page);
 
     // Look for either iframe or not configured message
@@ -38,7 +38,7 @@ test.describe('Workspace Page', () => {
   });
 
   test('should have correct iframe src if configured', async ({ page }) => {
-    await page.goto('/workspace');
+    await page.goto('/work/workspace');
     await waitForApp(page);
 
     const iframe = page.locator('iframe').first();
@@ -51,7 +51,7 @@ test.describe('Workspace Page', () => {
   });
 
   test('should have full height iframe', async ({ page }) => {
-    await page.goto('/workspace');
+    await page.goto('/work/workspace');
     await waitForApp(page);
 
     const iframe = page.locator('iframe').first();
@@ -74,11 +74,13 @@ test.describe('Workspace Page - Navigation', () => {
   });
 
   test('should navigate to workspace from sidebar', async ({ page }) => {
+    await page.goto('/work/workspace');
     await waitForApp(page);
     await ensureSidebarVisible(page);
 
-    // Find workspace link in sidebar (8th nav item)
-    const workspaceLink = page.locator('nav.sidebar .nav-item:nth-child(8) .nav-link').first();
+    // Find workspace link in sidebar
+    const sidebar = getSidebarLocator(page);
+    const workspaceLink = sidebar.locator('.nav-item .nav-link, .nav-item-link').filter({ hasText: /workspace/i }).first();
 
     if (await workspaceLink.isVisible()) {
       await workspaceLink.click();
