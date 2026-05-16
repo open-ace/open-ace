@@ -113,7 +113,7 @@ export const Messages: React.FC = () => {
         {/* Row 1: Date Range, Host, Tool, Sender */}
         <div className="d-flex flex-wrap align-items-center gap-3 mb-3">
           {/* Date Range Filter */}
-          <div className="d-flex align-items-center gap-1">
+          <div className="d-flex align-items-center gap-1" style={{ minWidth: '382px' }}>
             <small className="text-muted">{t('startDate', language)}:</small>
             <input
               type="date"
@@ -123,7 +123,6 @@ export const Messages: React.FC = () => {
               aria-label={t('startDate', language)}
               onChange={(e) => handleFilterChange('startDate', e.target.value)}
             />
-            <span className="text-muted">-</span>
             <small className="text-muted">{t('endDate', language)}:</small>
             <input
               type="date"
@@ -176,7 +175,7 @@ export const Messages: React.FC = () => {
         {/* Row 2: Role, Search */}
         <div className="d-flex flex-wrap align-items-center gap-2">
           {/* Role Filter */}
-          <div className="d-flex align-items-center gap-1">
+          <div className="d-flex align-items-center gap-1" style={{ minWidth: '382px' }}>
             <small className="text-muted">{t('role', language)}:</small>
             <div className="form-check form-check-inline mb-0">
               <input
