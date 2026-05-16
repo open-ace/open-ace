@@ -577,6 +577,14 @@ class RemoteAgentManager:
         with self._lock:
             return self._command_queues.pop(machine_id, [])
 
+    def store_terminal_info(self, machine_id: str, terminal_id: str, info: dict) -> None:
+        """Store terminal status info reported by an agent."""
+        # Delegate to the module-level store in remote.py
+        # (We import here to avoid circular dependency)
+        from app.routes.remote import _terminal_info_store
+
+        _terminal_info_store[(machine_id, terminal_id)] = info
+
     # ==================== Session Tracking ====================
 
     def bind_session(self, session_id: str, machine_id: str) -> None:

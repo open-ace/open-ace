@@ -918,8 +918,169 @@ def agent_message():
         pending = agent_mgr.get_pending_commands(machine_id)
         return jsonify({"success": True, "pending_commands": pending})
 
+    elif msg_type == "terminal_status":
+        # Agent reports terminal server status
+        terminal_id = data.get("terminal_id", "")
+        status = data.get("status", "")
+        ws_url = data.get("ws_url", "")
+        term_token = data.get("token", "")
+        error = data.get("error", "")
+
+        logger.info(
+            "Terminal status [%s]: status=%s ws_url=%s",
+            terminal_id[:8],
+            status,
+            ws_url,
+        )
+
+        # Store terminal info in agent manager for later retrieval
+        agent_mgr.store_terminal_info(
+            machine_id,
+            terminal_id,
+            {
+                "status": status,
+                "ws_url": ws_url,
+                "token": term_token,
+                "error": error,
+            },
+        )
+
+        return jsonify({"success": True})
+
     else:
         return jsonify({"error": f"Unknown message type: {msg_type}"}), 400
+
+
+# ==================== Terminal Management ====================
+
+# In-memory store for terminal info: {(machine_id, terminal_id): info}
+_terminal_info_store: dict[tuple[str, str], dict] = {}
+
+
+@remote_bp.route("/terminal/start", methods=["POST"])
+def start_terminal():
+    """Start a web terminal on a remote machine."""
+    data = request.get_json() or {}
+    machine_id = data.get("machine_id")
+    work_dir = data.get("work_dir")
+
+    if not machine_id:
+        return jsonify({"error": "machine_id is required"}), 400
+
+    # Check access
+    agent_mgr = get_remote_agent_manager()
+    if g.user.get("role") != "admin":
+        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
+            return jsonify({"error": "Access denied"}), 403
+
+    # Generate terminal ID and proxy token
+    terminal_id = str(uuid.uuid4())
+
+    # Generate a proxy token for LLM API auth through the terminal
+    api_proxy = get_api_key_proxy_service()
+    proxy_token = api_proxy.generate_proxy_token(
+        user_id=g.user["id"],
+        session_id=terminal_id,
+        tenant_id=1,
+        provider="anthropic",
+    )
+
+    proxy_url = f"{request.host_url.rstrip('/')}/api/remote/llm-proxy"
+
+    # Send start_terminal command to agent
+    cmd = {
+        "type": "command",
+        "command": "start_terminal",
+        "terminal_id": terminal_id,
+        "proxy_url": proxy_url,
+        "proxy_token": proxy_token,
+        "work_dir": work_dir or "",
+    }
+    agent_mgr.send_command(machine_id, cmd)
+
+    # Wait briefly for the agent to respond (terminal_status message)
+    import time as _time
+
+    for _ in range(10):  # 5 seconds max
+        _time.sleep(0.5)
+        info = _terminal_info_store.get((machine_id, terminal_id))
+        if info and info.get("status") == "running":
+            return jsonify(
+                {
+                    "success": True,
+                    "terminal": {
+                        "terminal_id": terminal_id,
+                        "ws_url": info["ws_url"],
+                        "token": info["token"],
+                        "status": "running",
+                    },
+                }
+            )
+        if info and info.get("status") == "error":
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": info.get("error", "Failed to start terminal"),
+                    }
+                ),
+                500,
+            )
+
+    # Agent didn't respond in time — return pending status
+    return jsonify(
+        {
+            "success": True,
+            "terminal": {
+                "terminal_id": terminal_id,
+                "ws_url": "",
+                "token": "",
+                "status": "pending",
+            },
+        }
+    )
+
+
+@remote_bp.route("/terminal/stop", methods=["POST"])
+def stop_terminal():
+    """Stop a web terminal on a remote machine."""
+    data = request.get_json() or {}
+    terminal_id = data.get("terminal_id")
+    machine_id = data.get("machine_id")
+
+    if not terminal_id or not machine_id:
+        return jsonify({"error": "terminal_id and machine_id are required"}), 400
+
+    # Check access
+    agent_mgr = get_remote_agent_manager()
+    if g.user.get("role") != "admin":
+        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
+            return jsonify({"error": "Access denied"}), 403
+
+    cmd = {
+        "type": "command",
+        "command": "stop_terminal",
+        "terminal_id": terminal_id,
+    }
+    agent_mgr.send_command(machine_id, cmd)
+
+    # Clean up local store
+    _terminal_info_store.pop((machine_id, terminal_id), None)
+
+    return jsonify({"success": True})
+
+
+@remote_bp.route("/terminal/<terminal_id>/status", methods=["GET"])
+def get_terminal_status(terminal_id):
+    """Get terminal status."""
+    machine_id = request.args.get("machine_id")
+    if not machine_id:
+        return jsonify({"error": "machine_id query parameter is required"}), 400
+
+    info = _terminal_info_store.get((machine_id, terminal_id))
+    if info:
+        return jsonify({"success": True, "terminal": info})
+    return jsonify({"success": True, "terminal": {"status": "unknown"}})
 
 
 # ==================== LLM Proxy ====================

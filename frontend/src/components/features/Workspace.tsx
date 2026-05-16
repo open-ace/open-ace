@@ -32,6 +32,7 @@ import {
 import { t } from '@/i18n';
 import { Error, Button, Card, useToast, Modal } from '@/components/common';
 import { NewSessionModal } from '@/components/work/NewSessionModal';
+import { TerminalTab } from '@/components/features/TerminalTab';
 import { remoteApi } from '@/api/remote';
 import { cn } from '@/utils';
 
@@ -546,6 +547,17 @@ export const Workspace: React.FC = () => {
     } else if (storedTabs.length > 0) {
       // Case 2: Restore from store - regenerate URLs for each tab
       initialTabs = storedTabs.map((storedTab) => {
+        // Terminal tabs don't need URL regeneration
+        if (storedTab.tabType === 'terminal') {
+          return {
+            ...storedTab,
+            url: '',
+            token: '',
+            terminalWsUrl: storedTab.terminalWsUrl ?? '',
+            terminalToken: storedTab.terminalToken ?? '',
+          };
+        }
+
         // Regenerate URL based on sessionId if available
         // Include settings and remote params in URL for restoration
         const remoteParams = storedTab.workspaceType
@@ -764,8 +776,21 @@ export const Workspace: React.FC = () => {
     (tabId: string, e: React.MouseEvent) => {
       e.stopPropagation();
 
-      // For remote workspace tabs, show confirmation dialog
       const tab = tabs.find((t) => t.id === tabId);
+
+      // For terminal tabs, stop the terminal and close
+      if (tab?.tabType === 'terminal') {
+        if (tab.terminalId && tab.machineId) {
+          remoteApi.stopTerminal({
+            terminal_id: tab.terminalId,
+            machine_id: tab.machineId,
+          }).catch((err) => console.error('Failed to stop terminal:', err));
+        }
+        doCloseTab(tabId);
+        return;
+      }
+
+      // For remote workspace tabs, show confirmation dialog
       if (tab?.workspaceType === 'remote' && tab?.sessionId) {
         setRemoteCloseTabId(tabId);
         return;
@@ -1262,7 +1287,11 @@ export const Workspace: React.FC = () => {
                   <i
                     className={cn(
                       'bi me-2 flex-shrink-0',
-                      tab.waitingForUser ? 'bi-bell-fill text-info' : 'bi-chat-dots text-muted'
+                      tab.tabType === 'terminal'
+                        ? 'bi-terminal text-warning'
+                        : tab.waitingForUser
+                          ? 'bi-bell-fill text-info'
+                          : 'bi-chat-dots text-muted'
                     )}
                   />
                   <span
@@ -1272,7 +1301,12 @@ export const Workspace: React.FC = () => {
                     )}
                     style={{ minWidth: 0 }}
                   >
-                    {tab.workspaceType === 'remote' ? (
+                    {tab.tabType === 'terminal' ? (
+                      <i
+                        className="bi bi-terminal-fill text-warning me-1"
+                        title="Terminal"
+                      />
+                    ) : tab.workspaceType === 'remote' ? (
                       <i
                         className="bi bi-cloud-fill text-primary me-1"
                         title={`Remote: ${tab.machineName ?? tab.machineId}`}
@@ -1370,8 +1404,8 @@ export const Workspace: React.FC = () => {
               activeTabId === tab.id ? 'd-block' : 'd-none'
             )}
           >
-            {/* Loading overlay */}
-            {loadingTabs.has(tab.id) && (
+            {/* Loading overlay - only for workspace tabs */}
+            {loadingTabs.has(tab.id) && tab.tabType !== 'terminal' && (
               <div
                 className="position-absolute top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center bg-light"
                 style={{ zIndex: 10 }}
@@ -1384,21 +1418,35 @@ export const Workspace: React.FC = () => {
                 </div>
               </div>
             )}
-            <iframe
-              ref={(el) => {
-                if (el) {
-                  iframeRefs.current.set(tab.id, el);
-                } else {
-                  iframeRefs.current.delete(tab.id);
-                }
-              }}
-              src={tab.url}
-              title={`Workspace - ${tab.title}`}
-              className="w-100 h-100"
-              style={{ border: 'none' }}
-              allow="clipboard-read; clipboard-write"
-              onLoad={() => handleIframeLoad(tab.id)}
-            />
+            {tab.tabType === 'terminal' ? (
+              /* Terminal Tab */
+              <TerminalTab
+                wsUrl={tab.terminalWsUrl ?? ''}
+                token={tab.terminalToken ?? ''}
+                isActive={activeTabId === tab.id}
+                onError={(error) => {
+                  console.error('Terminal error:', error);
+                  toast.error(t('terminalError', language), error);
+                }}
+              />
+            ) : (
+              /* Workspace Tab (iframe) */
+              <iframe
+                ref={(el) => {
+                  if (el) {
+                    iframeRefs.current.set(tab.id, el);
+                  } else {
+                    iframeRefs.current.delete(tab.id);
+                  }
+                }}
+                src={tab.url}
+                title={`Workspace - ${tab.title}`}
+                className="w-100 h-100"
+                style={{ border: 'none' }}
+                allow="clipboard-read; clipboard-write"
+                onLoad={() => handleIframeLoad(tab.id)}
+              />
+            )}
           </div>
         ))}
       </div>
@@ -1591,6 +1639,65 @@ export const Workspace: React.FC = () => {
             sessionId: params.sessionId,
             projectPath: params.projectPath,
           });
+        }}
+        onCreateTerminal={async (params: {
+          machineId: string;
+          machineName: string;
+          workDir: string;
+        }) => {
+          setShowNewSessionModal(false);
+          try {
+            const result = await remoteApi.startTerminal({
+              machine_id: params.machineId,
+              work_dir: params.workDir,
+            });
+            if (result.success && result.terminal) {
+              const tabId = generateTabId();
+              const newTab: WorkspaceTab = {
+                id: tabId,
+                title: `Terminal - ${params.machineName}`,
+                tabType: 'terminal',
+                url: '',
+                token: '',
+                createdAt: Date.now(),
+                waitingForUser: false,
+                waitingType: null,
+                workspaceType: 'remote',
+                machineId: params.machineId,
+                machineName: params.machineName,
+                terminalId: result.terminal.terminal_id,
+                terminalWsUrl: result.terminal.ws_url,
+                terminalToken: result.terminal.token,
+              };
+              setTabs((prev) => [...prev, newTab]);
+              setActiveTabId(tabId);
+              addStoredTab({
+                id: tabId,
+                title: newTab.title,
+                tabType: 'terminal',
+                workspaceType: 'remote',
+                machineId: params.machineId,
+                machineName: params.machineName,
+                terminalId: result.terminal.terminal_id,
+                terminalWsUrl: result.terminal.ws_url,
+                terminalToken: result.terminal.token,
+                createdAt: newTab.createdAt,
+                waitingForUser: false,
+                waitingType: null,
+              });
+              setStoredActiveTabId(tabId);
+            } else {
+              toast.error(
+                t('terminalError', language) || 'Terminal Error',
+                result.error || 'Failed to start terminal'
+              );
+            }
+          } catch (err) {
+            toast.error(
+              t('terminalError', language) || 'Terminal Error',
+              (err as Error).message
+            );
+          }
         }}
       />
 

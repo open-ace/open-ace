@@ -2,8 +2,8 @@
 Open ACE Remote Agent - Main Daemon
 
 Connects to the Open ACE server via HTTP polling, handles commands
-(start_session, send_message, stop_session), manages CLI subprocesses
-through the executor module, and sends heartbeats.
+(start_session, send_message, stop_session, start_terminal, stop_terminal),
+manages CLI subprocesses through the executor module, and sends heartbeats.
 """
 
 from __future__ import annotations
@@ -11,7 +11,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import secrets
 import signal
+import socket
+import subprocess
 import sys
 import time
 from typing import Any
@@ -44,6 +47,10 @@ class RemoteAgent:
         self._capabilities = get_capabilities()
         self._running = False
         self._reconnect_delay = self.config.reconnect_base_delay
+        # Terminal server management
+        self._terminal_processes: dict[str, subprocess.Popen] = {}
+        self._terminal_tokens: dict[str, str] = {}
+        self._terminal_ports: dict[str, int] = {}
 
     # ----------------------------------------------------------------
     # Connection lifecycle
@@ -203,6 +210,7 @@ class RemoteAgent:
                 "machine_id": self.config.machine_id,
                 "status": "busy" if active else "idle",
                 "active_sessions": len(active),
+                "active_terminals": len(self._terminal_processes),
             }
         )
 
@@ -338,6 +346,10 @@ class RemoteAgent:
                     session_id[:8] if session_id else "N/A",
                     result.get("error"),
                 )
+        elif command == "start_terminal":
+            self._cmd_start_terminal(data)
+        elif command == "stop_terminal":
+            self._cmd_stop_terminal(data)
         else:
             logger.warning("Unknown command: %s", command)
 
@@ -476,6 +488,154 @@ class RemoteAgent:
             )
 
     # ----------------------------------------------------------------
+    # Terminal management
+    # ----------------------------------------------------------------
+
+    def _cmd_start_terminal(self, data: dict[str, Any]) -> None:
+        """Handle a start_terminal command."""
+        terminal_id = data.get("terminal_id", "")
+        proxy_url = data.get("proxy_url", "")
+        proxy_token = data.get("proxy_token", "")
+        work_dir = data.get("work_dir", os.path.expanduser("~"))
+
+        logger.info("Starting terminal %s: work_dir=%s", terminal_id[:8], work_dir)
+
+        # Stop existing terminal with same ID if any
+        if terminal_id in self._terminal_processes:
+            self._stop_terminal_process(terminal_id)
+
+        # Generate auth token for this terminal
+        term_token = secrets.token_hex(32)
+        self._terminal_tokens[terminal_id] = term_token
+
+        # Find terminal_server.py script path
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        server_script = os.path.join(script_dir, "terminal_server.py")
+
+        # Build command
+        cmd = [
+            sys.executable,
+            server_script,
+            "--token",
+            term_token,
+            "--port",
+            "0",  # Auto-select port
+            "--proxy-url",
+            proxy_url,
+            "--proxy-token",
+            proxy_token,
+            "--work-dir",
+            work_dir,
+        ]
+
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                start_new_session=True,
+            )
+            self._terminal_processes[terminal_id] = proc
+
+            # Wait for READY:port output (with timeout)
+            port = self._read_terminal_port(proc, terminal_id)
+            if port:
+                self._terminal_ports[terminal_id] = port
+                hostname = self._get_reachable_hostname()
+                ws_url = f"ws://{hostname}:{port}"
+
+                self._http_send(
+                    {
+                        "type": "terminal_status",
+                        "terminal_id": terminal_id,
+                        "machine_id": self.config.machine_id,
+                        "status": "running",
+                        "ws_url": ws_url,
+                        "token": term_token,
+                    }
+                )
+                logger.info("Terminal %s running on %s", terminal_id[:8], ws_url)
+            else:
+                stderr_output = proc.stderr.read().decode() if proc.stderr else "unknown"
+                logger.error("Terminal server failed to start: %s", stderr_output[:500])
+                self._http_send(
+                    {
+                        "type": "terminal_status",
+                        "terminal_id": terminal_id,
+                        "machine_id": self.config.machine_id,
+                        "status": "error",
+                        "error": f"Terminal server failed to start: {stderr_output[:200]}",
+                    }
+                )
+
+        except Exception as e:
+            logger.error("Failed to start terminal: %s", e)
+            self._http_send(
+                {
+                    "type": "terminal_status",
+                    "terminal_id": terminal_id,
+                    "machine_id": self.config.machine_id,
+                    "status": "error",
+                    "error": str(e),
+                }
+            )
+
+    def _cmd_stop_terminal(self, data: dict[str, Any]) -> None:
+        """Handle a stop_terminal command."""
+        terminal_id = data.get("terminal_id", "")
+        logger.info("Stopping terminal %s", terminal_id[:8])
+        self._stop_terminal_process(terminal_id)
+        self._http_send(
+            {
+                "type": "terminal_status",
+                "terminal_id": terminal_id,
+                "machine_id": self.config.machine_id,
+                "status": "stopped",
+            }
+        )
+
+    def _stop_terminal_process(self, terminal_id: str) -> None:
+        """Stop a terminal server process."""
+        proc = self._terminal_processes.pop(terminal_id, None)
+        if proc:
+            try:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+            except Exception as e:
+                logger.warning("Error stopping terminal process: %s", e)
+        self._terminal_tokens.pop(terminal_id, None)
+        self._terminal_ports.pop(terminal_id, None)
+
+    def _read_terminal_port(self, proc: subprocess.Popen, terminal_id: str) -> int | None:
+        """Read the port number from terminal server's READY:port stdout."""
+        try:
+            line = proc.stdout.readline().decode().strip()
+            if line.startswith("READY:"):
+                return int(line.split(":")[1])
+        except Exception as e:
+            logger.error("Failed to read terminal port: %s", e)
+        return None
+
+    def _get_reachable_hostname(self) -> str:
+        """Get a hostname/IP that the browser can use to reach this machine."""
+        # Try the machine's configured hostname first
+        hostname = self.config.hostname
+        if hostname and hostname != "localhost":
+            return hostname
+        # Fall back to IP address
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            return "127.0.0.1"
+
+    # ----------------------------------------------------------------
     # Shutdown
     # ----------------------------------------------------------------
 
@@ -488,6 +648,9 @@ class RemoteAgent:
         """Clean up all resources."""
         logger.info("Shutting down agent...")
         self._executor.stop_all()
+        # Stop all terminal server processes
+        for tid in list(self._terminal_processes.keys()):
+            self._stop_terminal_process(tid)
         logger.info("Agent shutdown complete")
 
 
