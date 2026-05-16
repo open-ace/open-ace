@@ -90,6 +90,14 @@ prompt_input() {
         return
     fi
 
+    # Enable Backspace key support for terminal input
+    # Save current terminal settings and restore after read
+    local stty_settings=""
+    if [ -t 0 ]; then
+        stty_settings=$(stty -g 2>/dev/null || true)
+        stty erase '^H' 2>/dev/null || true
+    fi
+
     if [ -n "$default" ]; then
         echo -ne "${BLUE}$prompt [${default}]: ${NC}"
     else
@@ -97,6 +105,11 @@ prompt_input() {
     fi
 
     read -r value
+
+    # Restore terminal settings
+    if [ -n "$stty_settings" ] && [ -t 0 ]; then
+        stty "$stty_settings" 2>/dev/null || true
+    fi
 
     if [ -z "$value" ] && [ -n "$default" ]; then
         value="$default"
@@ -211,6 +224,142 @@ find_webui_executable() {
     return 1
 }
 
+# Install qwen-code-webui via npm
+install_qwen_code_webui() {
+    print_header "安装 qwen-code-webui"
+
+    # Check if npm is available
+    if ! command -v npm &>/dev/null; then
+        print_error "npm 未安装"
+        print_info "请先安装 Node.js (包含 npm)"
+        return 1
+    fi
+
+    print_info "检测到 npm 版本: $(npm --version)"
+    print_info "正在安装 qwen-code-webui..."
+
+    # Install qwen-code-webui
+    if npm install -g qwen-code-webui 2>&1; then
+        print_success "qwen-code-webui 安装完成"
+        
+        # Verify installation
+        if command -v qwen-code-webui &>/dev/null; then
+            local webui_path=$(which qwen-code-webui)
+            print_success "安装路径: $webui_path"
+            return 0
+        else
+            print_warning "安装完成但未找到可执行文件，请检查 npm 全局路径配置"
+            return 1
+        fi
+    else
+        print_error "qwen-code-webui 安装失败"
+        print_info "请手动安装: npm install -g qwen-code-webui"
+        return 1
+    fi
+}
+
+# Find qwen-code executable (note: npm package @qwen-code/qwen-code installs as 'qwen')
+find_qwen_code_executable() {
+    local candidates=(
+        "/usr/local/bin/qwen"
+        "/usr/bin/qwen"
+        "/opt/qwen-code/bin/qwen"
+    )
+
+    for candidate in "${candidates[@]}"; do
+        if [ -x "$candidate" ]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+
+    # Try to find in PATH
+    if command -v qwen &>/dev/null; then
+        which qwen
+        return 0
+    fi
+
+    return 1
+}
+
+# Install qwen-code via npm
+install_qwen_code() {
+    print_header "安装 qwen-code"
+
+    # Check if npm is available
+    if ! command -v npm &>/dev/null; then
+        print_error "npm 未安装"
+        print_info "请先安装 Node.js (包含 npm)"
+        return 1
+    fi
+
+    print_info "检测到 npm 版本: $(npm --version)"
+    print_info "正在安装 @qwen-code/qwen-code..."
+
+    # Install qwen-code (the official package name is @qwen-code/qwen-code, installs as 'qwen')
+    if npm install -g @qwen-code/qwen-code 2>&1; then
+        print_success "@qwen-code/qwen-code 安装完成"
+
+        # Verify installation (note: the executable is named 'qwen', not 'qwen-code')
+        if command -v qwen &>/dev/null; then
+            local qwen_path=$(which qwen)
+            print_success "安装路径: $qwen_path"
+            return 0
+        else
+            print_warning "安装完成但未找到可执行文件，请检查 npm 全局路径配置"
+            return 1
+        fi
+    else
+        print_error "@qwen-code/qwen-code 安装失败"
+        print_info "请手动安装: npm install -g @qwen-code/qwen-code"
+        return 1
+    fi
+}
+
+# Check and prompt for qwen-code installation
+check_qwen_code() {
+    local qwen_path=$(find_qwen_code_executable)
+    if [ -n "$qwen_path" ]; then
+        print_success "找到 qwen-code (qwen): $qwen_path"
+        return 0
+    fi
+
+    print_warning "未找到 qwen-code 可执行文件"
+    echo ""
+    echo "请选择:"
+    echo "  1) 协助安装 (通过 npm 自动安装)"
+    echo "  2) 手动安装 (稍后自行安装)"
+    echo ""
+
+    prompt_input "请选择" "1" qwen_choice
+
+    case "$qwen_choice" in
+        1)
+            install_qwen_code
+            if [ $? -eq 0 ]; then
+                return 0
+            else
+                print_info "安装失败，请手动安装后重新运行此脚本"
+                return 1
+            fi
+            ;;
+        2)
+            print_info "请手动安装 qwen-code:"
+            print_info "  npm install -g @qwen-code/qwen-code"
+            print_info ""
+            prompt_yesno "是否继续安装 Open ACE（稍后手动安装 qwen-code）?" "y" continue_without_qwen
+            if [ "$continue_without_qwen" != "yes" ]; then
+                return 1
+            fi
+            return 0
+            ;;
+        *)
+            print_error "无效选择"
+            return 1
+            ;;
+    esac
+}
+
 # Configure sudoers for multi-user workspace mode
 configure_sudoers() {
     print_header "配置 Sudo 权限"
@@ -226,20 +375,53 @@ configure_sudoers() {
     local webui_path=$(find_webui_executable)
     if [ -z "$webui_path" ]; then
         print_warning "未找到 qwen-code-webui 可执行文件"
-        print_info "请先安装 qwen-code-webui:"
-        print_info "  npm install -g @ivycomputing/qwen-code-webui"
-        print_info ""
-        print_info "安装完成后，重新运行此脚本或手动配置 sudoers:"
-        print_info "  sudo visudo -f /etc/sudoers.d/open-ace-webui"
-        print_info "  添加: $RUN_USER ALL=(ALL) NOPASSWD: /path/to/qwen-code-webui *"
+        echo ""
+        echo "请选择:"
+        echo "  1) 协助安装 (通过 npm 自动安装)"
+        echo "  2) 手动安装 (稍后自行安装)"
+        echo ""
 
-        if [ "$NON_INTERACTIVE" = false ]; then
-            prompt_yesno "是否继续安装（稍后手动配置 sudoers）?" "y" continue_without_sudoers
-            if [ "$continue_without_sudoers" != "yes" ]; then
+        prompt_input "请选择" "1" webui_choice
+
+        case "$webui_choice" in
+            1)
+                install_qwen_code_webui
+                if [ $? -eq 0 ]; then
+                    # Re-check for webui path after installation
+                    webui_path=$(find_webui_executable)
+                    if [ -z "$webui_path" ]; then
+                        print_error "安装成功但仍未找到可执行文件"
+                        print_info "请检查 npm 全局路径是否在 PATH 中"
+                        return 1
+                    fi
+                    # Continue with sudoers configuration
+                else
+                    print_info "安装失败，请手动安装后重新运行此脚本"
+                    print_info "  npm install -g qwen-code-webui"
+                    return 1
+                fi
+                ;;
+            2)
+                print_info "请手动安装 qwen-code-webui:"
+                print_info "  npm install -g qwen-code-webui"
+                print_info ""
+                print_info "安装完成后，重新运行此脚本或手动配置 sudoers:"
+                print_info "  sudo visudo -f /etc/sudoers.d/open-ace-webui"
+                print_info "  添加: $RUN_USER ALL=(ALL) NOPASSWD: /path/to/qwen-code-webui *"
+
+                if [ "$NON_INTERACTIVE" = false ]; then
+                    prompt_yesno "是否继续安装（稍后手动配置 sudoers）?" "y" continue_without_sudoers
+                    if [ "$continue_without_sudoers" != "yes" ]; then
+                        return 1
+                    fi
+                fi
+                return 0
+                ;;
+            *)
+                print_error "无效选择"
                 return 1
-            fi
-        fi
-        return 0
+                ;;
+        esac
     fi
 
     print_success "找到 qwen-code-webui: $webui_path"
@@ -589,6 +771,357 @@ install_docker() {
 }
 
 # ============================================================================
+# Node.js Installation Functions
+# ============================================================================
+
+NODEJS_VERSION="${NODEJS_VERSION:-20}"
+MIN_NODE_VERSION="${MIN_NODE_VERSION:-18}"
+
+# Check if Node.js and npm are installed with required version
+check_nodejs() {
+    if ! command -v node &>/dev/null; then
+        return 1
+    fi
+
+    local node_version=$(node --version 2>/dev/null || echo "unknown")
+    local npm_version=$(npm --version 2>/dev/null || echo "unknown")
+
+    # Check version requirement for frontend build
+    if [ "$node_version" != "unknown" ]; then
+        local major_version=$(echo "$node_version" | sed 's/^v//' | cut -d. -f1)
+        if [ "$major_version" -lt "$MIN_NODE_VERSION" ]; then
+            print_warning "Node.js 版本过低: $node_version (需要 >= v$MIN_NODE_VERSION)"
+            print_warning "前端构建依赖需要 Node.js >= v$MIN_NODE_VERSION"
+            return 1
+        fi
+    fi
+
+    print_success "Node.js 已安装: $node_version"
+    print_success "npm 已安装: $npm_version"
+    return 0
+}
+
+install_nodejs_macos() {
+    print_info "检测到 macOS 系统"
+
+    # Check if Homebrew is installed
+    if ! command -v brew &>/dev/null; then
+        print_warning "Homebrew 未安装"
+        prompt_yesno "是否安装 Homebrew?" "y" install_brew
+        if [ "$install_brew" = "yes" ]; then
+            print_info "安装 Homebrew..."
+            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+            print_success "Homebrew 安装完成"
+        else
+            print_error "需要 Homebrew 来安装 Node.js"
+            return 1
+        fi
+    fi
+
+    print_info "通过 Homebrew 安装 Node.js..."
+    brew install node
+
+    # Check if installed version meets requirement
+    local installed_version=$(node --version 2>/dev/null | sed 's/^v//' | cut -d. -f1)
+    if [ "$installed_version" -lt "$MIN_NODE_VERSION" ]; then
+        print_warning "Homebrew 安装的版本过低: v$installed_version (需要 >= v$MIN_NODE_VERSION)"
+        print_info "尝试升级 Node.js..."
+        brew upgrade node
+        installed_version=$(node --version 2>/dev/null | sed 's/^v//' | cut -d. -f1)
+        if [ "$installed_version" -lt "$MIN_NODE_VERSION" ]; then
+            print_error "无法安装满足要求的 Node.js 版本"
+            return 1
+        fi
+    fi
+
+    print_success "Node.js 安装完成"
+    print_info "Node.js 版本: $(node --version)"
+    return 0
+}
+
+install_nodejs_debian() {
+    print_info "检测到 Debian/Ubuntu 系统"
+
+    # Install dependencies
+    print_info "安装依赖..."
+    sudo apt-get update
+    sudo apt-get install -y curl
+
+    # Try official NodeSource first, fallback to domestic mirror
+    print_info "添加 Node.js 软件源..."
+    local nodesource_url="https://deb.nodesource.com/setup_${NODEJS_VERSION}.x"
+    local domestic_mirror_url="https://mirrors.tuna.tsinghua.edu.cn/nodesource/deb/setup_${NODEJS_VERSION}.x"
+
+    if ! curl -fsSL "$nodesource_url" | sudo -E bash 2>/dev/null; then
+        print_warning "官方源连接失败，尝试使用清华镜像..."
+        if ! curl -fsSL "$domestic_mirror_url" | sudo -E bash 2>/dev/null; then
+            print_warning "镜像源也失败，尝试直接安装系统自带版本..."
+            sudo apt-get install -y nodejs npm
+            if [ $? -eq 0 ]; then
+                # Check if installed version meets requirement
+                local installed_version=$(node --version 2>/dev/null | sed 's/^v//' | cut -d. -f1)
+                if [ "$installed_version" -lt "$MIN_NODE_VERSION" ]; then
+                    print_warning "系统自带版本过低: v$installed_version (需要 >= v$MIN_NODE_VERSION)"
+                    print_info "建议手动安装更高版本:"
+                    print_info "  方法1: 使用 nvm (推荐)"
+                    print_info "    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash"
+                    print_info "    source ~/.bashrc"
+                    print_info "    nvm install $NODEJS_VERSION"
+                    print_info "  方法2: 从官网下载二进制包"
+                    print_info "    https://nodejs.org/dist/v$NODEJS_VERSION.0/"
+                    return 1
+                fi
+                print_success "Node.js 安装完成 (系统自带版本)"
+                return 0
+            fi
+            print_error "无法安装 Node.js"
+            print_info "请检查网络连接或手动安装: https://nodejs.org/"
+            return 1
+        fi
+    fi
+
+    # Install Node.js
+    print_info "安装 Node.js..."
+    sudo apt-get install -y nodejs
+
+    print_success "Node.js 安装完成"
+    print_info "Node.js 版本: $(node --version)"
+    print_info "npm 版本: $(npm --version)"
+    return 0
+}
+
+install_nodejs_redhat() {
+    print_info "检测到 RHEL/CentOS 系统"
+
+    # Install dependencies
+    print_info "安装依赖..."
+    sudo yum install -y curl
+
+    # Try official NodeSource first, fallback to domestic mirror
+    print_info "添加 Node.js 软件源..."
+    local nodesource_url="https://rpm.nodesource.com/pub_${NODEJS_VERSION}.x/nodistro/repo/nodesource-nodistro.repo"
+    local domestic_mirror_url="https://mirrors.tuna.tsinghua.edu.cn/nodesource/rpm/pub_${NODEJS_VERSION}.x/nodistro/repo/nodesource-nodistro.repo"
+
+    # Create repo directory
+    sudo mkdir -p /etc/yum.repos.d
+
+    if ! sudo curl -fsSL "$nodesource_url" -o /etc/yum.repos.d/nodesource.repo 2>/dev/null; then
+        print_warning "官方源连接失败，尝试使用清华镜像..."
+        if ! sudo curl -fsSL "$domestic_mirror_url" -o /etc/yum.repos.d/nodesource.repo 2>/dev/null; then
+            print_warning "镜像源也失败，尝试使用系统模块化安装..."
+            
+            # Try dnf module install for Rocky/RHEL 9+ (supports nodejs 18/20/22/24)
+            if command -v dnf &>/dev/null; then
+                # Check available nodejs modules
+                print_info "检查可用的 Node.js 模块版本..."
+                local module_versions=$(dnf module list nodejs --quiet 2>/dev/null | grep -E "^\s*nodejs" | awk '{print $2}' | sort -V)
+                
+                if [ -n "$module_versions" ]; then
+                    print_info "可用版本: $module_versions"
+                    
+                    # Try to install the target version first
+                    for target_version in "$NODEJS_VERSION" "20" "18"; do
+                        if echo "$module_versions" | grep -q "^${target_version}"; then
+                            print_info "尝试安装 Node.js $target_version 模块..."
+                            # Reset any existing module stream first
+                            sudo dnf module reset nodejs -y 2>/dev/null
+                            sudo dnf module install nodejs:${target_version} -y
+                            if [ $? -eq 0 ] && command -v node &>/dev/null; then
+                                local installed_version=$(node --version | sed 's/v//')
+                                local major_version=$(echo "$installed_version" | cut -d. -f1)
+                                if [ "$major_version" -ge "$MIN_NODE_VERSION" ]; then
+                                    print_success "Node.js 安装完成 (模块版本 $target_version)"
+                                    print_info "Node.js 版本: $(node --version)"
+                                    print_info "npm 版本: $(npm --version)"
+                                    return 0
+                                fi
+                                print_warning "模块版本仍过低: v$installed_version"
+                            fi
+                        fi
+                    done
+                fi
+            fi
+            
+            # Fallback to yum install (may install older version)
+            print_warning "模块安装失败，尝试系统自带版本..."
+            sudo yum install -y nodejs npm
+            if [ $? -eq 0 ]; then
+                # Check installed version
+                if command -v node &>/dev/null; then
+                    local installed_version=$(node --version | sed 's/v//')
+                    local major_version=$(echo "$installed_version" | cut -d. -f1)
+                    if [ "$major_version" -ge "$MIN_NODE_VERSION" ]; then
+                        print_success "Node.js 安装完成 (系统自带版本)"
+                        print_info "Node.js 版本: $(node --version)"
+                        print_info "npm 版本: $(npm --version)"
+                        return 0
+                    else
+                        print_warning "系统自带版本过低: v$installed_version (需要 >= v$MIN_NODE_VERSION)"
+                        print_info "请手动安装更高版本:"
+                        print_info "  方法1: 使用 nvm (推荐)"
+                        print_info "    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash"
+                        print_info "    source ~/.bashrc"
+                        print_info "    nvm install $NODEJS_VERSION"
+                        print_info "  方法2: 下载官方二进制包"
+                        print_info "    https://nodejs.org/dist/v$NODEJS_VERSION.0/"
+                        return 1
+                    fi
+                fi
+                print_success "Node.js 安装完成"
+                return 0
+            fi
+            print_error "无法安装 Node.js"
+            print_info "请检查网络连接或手动安装: https://nodejs.org/"
+            return 1
+        fi
+    fi
+
+    # Install Node.js
+    print_info "安装 Node.js..."
+    sudo yum install -y nodejs
+
+    print_success "Node.js 安装完成"
+    print_info "Node.js 版本: $(node --version)"
+    print_info "npm 版本: $(npm --version)"
+    return 0
+}
+
+install_nodejs_fedora() {
+    print_info "检测到 Fedora 系统"
+
+    # Install Node.js from Fedora repositories
+    print_info "安装 Node.js..."
+    sudo dnf install -y nodejs npm
+
+    # Check if installed version meets requirement
+    local installed_version=$(node --version 2>/dev/null | sed 's/^v//' | cut -d. -f1)
+    if [ "$installed_version" -lt "$MIN_NODE_VERSION" ]; then
+        print_warning "Fedora 系统自带版本过低: v$installed_version (需要 >= v$MIN_NODE_VERSION)"
+        print_info "建议使用 nvm 安装更高版本:"
+        print_info "  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash"
+        print_info "  source ~/.bashrc"
+        print_info "  nvm install $NODEJS_VERSION"
+        return 1
+    fi
+
+    print_success "Node.js 安装完成"
+    print_info "Node.js 版本: $(node --version)"
+    print_info "npm 版本: $(npm --version)"
+    return 0
+}
+
+install_nodejs() {
+    local os_type=$(detect_os)
+
+    print_header "安装 Node.js"
+
+    case "$os_type" in
+        macos)
+            install_nodejs_macos
+            ;;
+        debian)
+            install_nodejs_debian
+            ;;
+        redhat|centos)
+            install_nodejs_redhat
+            ;;
+        fedora)
+            install_nodejs_fedora
+            ;;
+        *)
+            print_error "不支持的操作系统: $OSTYPE"
+            print_info "请手动安装 Node.js: https://nodejs.org/"
+            return 1
+            ;;
+    esac
+}
+
+# ============================================================================
+# Docker Hub Mirror Configuration
+# ============================================================================
+
+configure_docker_mirror() {
+    local os_type=$(detect_os)
+
+    # Skip on macOS (Docker Desktop handles this)
+    if [[ "$os_type" == "macos" ]]; then
+        print_info "macOS Docker Desktop 可通过设置界面配置镜像加速器"
+        return 0
+    fi
+
+    print_header "配置 Docker Hub 镜像加速器"
+
+    # Check if Docker daemon is running
+    if ! docker info &>/dev/null; then
+        print_warning "Docker daemon 未运行，跳过镜像加速器配置"
+        return 0
+    fi
+
+    # Check if mirror is already configured
+    local daemon_json="/etc/docker/daemon.json"
+    if [ -f "$daemon_json" ]; then
+        if grep -q "registry-mirrors" "$daemon_json" 2>/dev/null; then
+            print_success "镜像加速器已配置"
+            print_info "当前配置: $(grep 'registry-mirrors' "$daemon_json")"
+            return 0
+        fi
+    fi
+
+    # Prompt to configure mirror
+    prompt_yesno "是否配置 Docker Hub 镜像加速器 (国内网络建议配置)?" "y" configure_mirror
+    if [ "$configure_mirror" != "yes" ]; then
+        print_info "跳过镜像加速器配置"
+        return 0
+    fi
+
+    # Create or update daemon.json
+    print_info "配置镜像加速器..."
+
+    # Create directory if not exists
+    sudo mkdir -p /etc/docker
+
+    # Default mirror list (domestic mirrors for China)
+    # Note: mirrors_json contains proper JSON array string
+    local mirrors_json='["https://docker.1ms.run","https://docker.xuanyuan.me"]'
+
+    # Check existing config
+    if [ -f "$daemon_json" ]; then
+        # Merge with existing config
+        local existing_config=$(cat "$daemon_json" 2>/dev/null || echo "{}")
+        # Simple merge - add registry-mirrors to existing config
+        print_info "更新现有 Docker 配置..."
+        # Use printf to properly inject the mirrors_json variable into Python code
+        if printf '%s\n' "$existing_config" | python3 -c "import json,sys; c=json.load(sys.stdin); c['registry-mirrors']=json.loads('$mirrors_json'); json.dump(c,sys.stdout,indent=2)" > /tmp/daemon.json.new 2>/dev/null; then
+            sudo mv /tmp/daemon.json.new "$daemon_json"
+        else
+            # Fallback: create new config with mirrors only
+            print_warning "无法合并配置，创建新配置文件..."
+            printf '%s\n' "{\"registry-mirrors\": $mirrors_json}" | sudo tee "$daemon_json" > /dev/null
+        fi
+    else
+        # Create new config - use printf with double quotes for variable expansion
+        printf '%s\n' "{\"registry-mirrors\": $mirrors_json}" | sudo tee "$daemon_json" > /dev/null
+    fi
+
+    # Restart Docker daemon
+    print_info "重启 Docker 服务以应用配置..."
+    sudo systemctl restart docker
+
+    # Wait for Docker to be ready
+    sleep 3
+    if docker info &>/dev/null; then
+        print_success "Docker Hub 镜像加速器配置完成"
+        print_info "已配置镜像源:"
+        print_info "  - docker.1ms.run"
+        print_info "  - docker.xuanyuan.me"
+    else
+        print_warning "Docker 重启后未恢复，请手动检查"
+    fi
+
+    return 0
+}
+
+# ============================================================================
 # Firewall Configuration
 # ============================================================================
 
@@ -658,6 +1191,16 @@ configure_firewall() {
     if command -v iptables &>/dev/null; then
         print_info "检测到 iptables"
 
+        # Check if iptables is actually being used (has active rules)
+        # If iptables has no active rules, firewall is likely disabled
+        local iptables_rules=$(sudo iptables -L INPUT -n 2>/dev/null | grep -v "^Chain\|^target" | wc -l)
+        if [ "$iptables_rules" -le 2 ]; then
+            # Very few or no rules means iptables is not actively managing firewall
+            print_info "iptables 未启用或无活跃规则，跳过防火墙配置"
+            print_info "端口默认开放，如需启用防火墙请手动配置"
+            return 0
+        fi
+
         # Check if port is already open
         if sudo iptables -L INPUT -n | grep -q "dpt:${port}"; then
             print_success "端口 $port 已开放"
@@ -668,10 +1211,19 @@ configure_firewall() {
         print_info "开放端口 $port/tcp..."
         sudo iptables -I INPUT -p tcp --dport ${port} -j ACCEPT
 
-        # Try to save iptables rules
+        # Try to save iptables rules (create directory if needed)
         if command -v iptables-save &>/dev/null; then
-            sudo iptables-save > /etc/iptables/rules.v4 2>/dev/null || \
-            sudo iptables-save > /etc/sysconfig/iptables 2>/dev/null || true
+            # Try Debian/Ubuntu path first
+            if [ -d "/etc/iptables" ]; then
+                sudo iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+            elif [ -d "/etc/sysconfig" ]; then
+                # Try RHEL/CentOS path
+                sudo iptables-save > /etc/sysconfig/iptables 2>/dev/null || true
+            else
+                # No standard save directory, just warn
+                print_warning "iptables 规则已添加但未持久化保存"
+                print_info "请手动保存规则或配置防火墙持久化"
+            fi
         fi
 
         print_success "防火墙端口 $port 已开放"
@@ -773,12 +1325,21 @@ check_prerequisites() {
                 print_info "请启动 Docker Desktop 后重新运行此脚本"
                 exit 0
             fi
+
+            # Configure Docker Hub mirror after installation
+            configure_docker_mirror
         else
             print_info "请手动安装 Docker: https://docs.docker.com/get-docker/"
             exit 1
         fi
+    else
+        print_success "Docker 已安装: $(docker --version)"
+
+        # Offer to configure Docker Hub mirror even if Docker is already installed
+        if [ "$NON_INTERACTIVE" = false ]; then
+            configure_docker_mirror
+        fi
     fi
-    print_success "Docker 已安装: $(docker --version)"
 
     # Check Docker Compose
     if ! docker compose version &>/dev/null; then
@@ -808,6 +1369,28 @@ check_prerequisites() {
     fi
     print_success "Docker daemon 运行中"
 
+    # Check Node.js (optional but recommended for multi-user mode and local build)
+    if ! check_nodejs; then
+        print_warning "Node.js 未安装"
+        print_info "Node.js 用于:"
+        print_info "  - 多用户模式: 安装 qwen-code-webui"
+        print_info "  - 本地构建镜像: 构建前端"
+        prompt_yesno "是否自动安装 Node.js?" "y" install_nodejs_confirm
+        if [ "$install_nodejs_confirm" = "yes" ]; then
+            install_nodejs
+        else
+            print_info "可稍后手动安装: https://nodejs.org/"
+        fi
+    fi
+
+    # Check qwen-code (optional, for workspace functionality)
+    # Only check if workspace is enabled or user wants to use it
+    print_info "检查 qwen-code..."
+    if ! check_qwen_code; then
+        print_warning "qwen-code 检查失败，但不影响基本部署"
+        print_info "如需使用 Workspace 功能，请确保安装 qwen-code"
+    fi
+
     # Check/load Docker image
     build_docker_image
 }
@@ -821,12 +1404,14 @@ build_docker_image() {
         return 0
     fi
 
-    # Image not found - prompt to load
+    # Image not found - prompt to load/build/pull
     print_warning "镜像 $IMAGE_NAME 不存在"
     echo ""
     echo "请选择:"
     echo "  1) 加载镜像文件 (包含应用和 PostgreSQL)"
-    echo "  2) 跳过 (稍后手动处理)"
+    echo "  2) 从 Docker Hub 拉取镜像"
+    echo "  3) 本地构建镜像 (自动构建前端)"
+    echo "  4) 跳过 (稍后手动处理)"
     echo ""
 
     prompt_input "请选择" "1" build_choice
@@ -875,8 +1460,138 @@ build_docker_image() {
             fi
             ;;
         2)
-            print_info "请手动加载镜像后重新运行此脚本"
-            print_info "加载命令: docker load -i open-ace-images.tar.gz"
+            print_info "从 Docker Hub 拉取镜像..."
+
+            # Pull application image
+            print_info "拉取镜像: $IMAGE_NAME"
+            if docker pull "$IMAGE_NAME"; then
+                print_success "应用镜像拉取完成: $IMAGE_NAME"
+            else
+                print_error "镜像拉取失败"
+                print_info "请检查:"
+                print_info "  1. Docker Hub 镜像加速器是否已配置"
+                print_info "  2. 网络连接是否正常"
+                print_info "  3. 镜像名称是否正确"
+                return 1
+            fi
+
+            # Pull PostgreSQL image
+            local postgres_image="postgres:15-alpine"
+            print_info "拉取 PostgreSQL 镜像: $postgres_image"
+            if docker pull "$postgres_image"; then
+                print_success "PostgreSQL 镜像拉取完成: $postgres_image"
+            else
+                print_warning "PostgreSQL 镜像拉取失败，后续部署时会再次尝试"
+            fi
+
+            return 0
+            ;;
+        3)
+            print_info "本地构建镜像..."
+
+            # Find Open ACE source directory
+            local source_dir=""
+            # Try to find from script location
+            if [ -f "$0" ]; then
+                local script_dir=$(cd "$(dirname "$0")" && pwd)
+                # script is at scripts/install-central/docker-method/install.sh
+                # source dir is at parent/parent/parent
+                local possible_source=$(cd "$script_dir/../../../.." && pwd)
+                if [ -f "$possible_source/Dockerfile" ] && [ -d "$possible_source/frontend" ]; then
+                    source_dir="$possible_source"
+                fi
+            fi
+
+            # Try current directory
+            if [ -z "$source_dir" ]; then
+                if [ -f "Dockerfile" ] && [ -d "frontend" ]; then
+                    source_dir="$(pwd)"
+                fi
+            fi
+
+            # Try common paths
+            if [ -z "$source_dir" ]; then
+                for path in "/opt/open-ace" "/root/open-ace" "/home/open-ace/open-ace" "/tools/open-ace"; do
+                    if [ -f "$path/Dockerfile" ] && [ -d "$path/frontend" ]; then
+                        source_dir="$path"
+                        break
+                    fi
+                done
+            fi
+
+            if [ -z "$source_dir" ]; then
+                print_error "未找到 Open ACE 源码目录"
+                print_info "请指定源码目录路径:"
+                prompt_input "源码目录路径" "" source_dir
+                if [ -z "$source_dir" ] || [ ! -f "$source_dir/Dockerfile" ]; then
+                    print_error "无效的源码目录或缺少 Dockerfile"
+                    return 1
+                fi
+            fi
+
+            print_success "找到源码目录: $source_dir"
+
+            # Check Node.js for frontend build
+            if ! check_nodejs; then
+                print_warning "Node.js 未安装，需要先安装才能构建前端"
+                prompt_yesno "是否自动安装 Node.js?" "y" install_nodejs_now
+                if [ "$install_nodejs_now" = "yes" ]; then
+                    install_nodejs
+                    if ! check_nodejs; then
+                        print_error "Node.js 安装失败"
+                        return 1
+                    fi
+                else
+                    print_error "构建镜像需要 Node.js，请手动安装后重新运行"
+                    return 1
+                fi
+            fi
+
+            # Build frontend
+            print_info "构建前端..."
+            cd "$source_dir/frontend"
+            if [ ! -d "node_modules" ]; then
+                print_info "安装前端依赖..."
+                npm install
+                if [ $? -ne 0 ]; then
+                    print_error "前端依赖安装失败"
+                    return 1
+                fi
+            fi
+
+            print_info "执行前端构建..."
+            npm run build
+            if [ $? -ne 0 ]; then
+                print_error "前端构建失败"
+                return 1
+            fi
+            print_success "前端构建完成"
+
+            # Build Docker image
+            cd "$source_dir"
+            print_info "构建 Docker 镜像..."
+            docker build -t "$IMAGE_NAME" --target production .
+            if [ $? -ne 0 ]; then
+                print_error "Docker 镜像构建失败"
+                return 1
+            fi
+            print_success "Docker 镜像构建完成: $IMAGE_NAME"
+
+            # Also pull PostgreSQL image if needed
+            local postgres_image="postgres:15-alpine"
+            if ! docker image inspect "$postgres_image" &>/dev/null; then
+                print_info "拉取 PostgreSQL 镜像: $postgres_image"
+                docker pull "$postgres_image" || print_warning "PostgreSQL 镜像拉取失败，后续部署时会再次尝试"
+            fi
+
+            return 0
+            ;;
+        4)
+            print_info "请手动处理镜像后重新运行此脚本"
+            print_info "选项:"
+            print_info "  - 加载镜像: docker load -i open-ace-images.tar.gz"
+            print_info "  - 拉取镜像: docker pull $IMAGE_NAME"
+            print_info "  - 构建镜像: cd <source-dir> && docker build -t $IMAGE_NAME --target production ."
             return 1
             ;;
         *)

@@ -109,6 +109,12 @@ body.sidebar-mobile-open {
   padding: 0.25rem;
 }
 
+@media (min-width: 768px) {
+  .hamburger-btn {
+    display: none !important;
+  }
+}
+
 .hamburger-btn:hover {
   color: var(--color-primary);
 }

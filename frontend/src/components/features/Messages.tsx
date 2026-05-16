@@ -87,7 +87,13 @@ export const Messages: React.FC = () => {
   };
 
   const handleFilterChange = (key: keyof MessageFilters, value: string) => {
-    setFilters((prev) => ({ ...prev, [key]: value || undefined }));
+    setFilters((prev) => {
+      const next = { ...prev, [key]: value || undefined };
+      if (next.startDate && next.endDate && next.endDate < next.startDate) {
+        next.endDate = undefined;
+      }
+      return next;
+    });
     setPage(1);
   };
 
@@ -102,76 +108,68 @@ export const Messages: React.FC = () => {
         <h2>{t('messages', language)}</h2>
       </div>
 
-      {/* Filters - Two row layout */}
+      {/* Filters - Nested flex for column alignment */}
       <Card className="mb-3">
-        {/* Row 1: Date, Host, Tool, Sender, Search */}
-        <div className="d-flex flex-wrap align-items-center gap-3 mb-3">
-          {/* Date Filter */}
-          <div className="d-flex align-items-center gap-1">
-            <small className="text-muted">{t('date', language)}:</small>
+        {/* Row 1: Date Range + Filters */}
+        <div className="d-flex align-items-center gap-2 mb-2">
+          <div className="d-flex align-items-center gap-1" style={{ minWidth: '440px' }}>
+            <small className="text-muted">{t('startDate', language)}:</small>
             <input
               type="date"
               className="form-control form-control-sm"
               style={{ width: '150px' }}
               value={filters.startDate ?? ''}
+              aria-label={t('startDate', language)}
               onChange={(e) => handleFilterChange('startDate', e.target.value)}
             />
-          </div>
-          {/* Host Filter */}
-          <div className="d-flex align-items-center gap-1">
-            <small className="text-muted">{t('tableHost', language)}:</small>
-            <Select
-              options={hostOptions}
-              value={filters.host ?? ''}
-              onChange={(value) => handleFilterChange('host', value)}
-              size="sm"
-              className="flex-grow-0"
-              style={{ width: '150px' } as React.CSSProperties}
-            />
-          </div>
-          {/* Tool Filter */}
-          <div className="d-flex align-items-center gap-1">
-            <small className="text-muted">{t('tableTool', language)}:</small>
-            <Select
-              options={toolOptions}
-              value={filters.tool ?? ''}
-              onChange={(value) => handleFilterChange('tool', value)}
-              size="sm"
-              className="flex-grow-0"
-              style={{ width: '150px' } as React.CSSProperties}
-            />
-          </div>
-          {/* Sender Filter */}
-          <div className="d-flex align-items-center gap-1">
-            <small className="text-muted">{t('tableSender', language)}:</small>
-            <SearchableSelect
-              options={senderOptions}
-              value={filters.sender ?? ''}
-              onChange={(value) => handleFilterChange('sender', value)}
-              placeholder={t('dashboardFilterAllSenders', language) || 'All Senders'}
-              searchPlaceholder={t('searchSender', language)}
-              size="sm"
-              className="flex-grow-0"
-              style={{ width: '150px' } as React.CSSProperties}
-            />
-          </div>
-          {/* Search Filter */}
-          <div className="d-flex align-items-center gap-1 ms-auto">
-            <small className="text-muted">{t('search', language)}:</small>
+            <small className="text-muted ms-2">{t('endDate', language)}:</small>
             <input
-              type="text"
+              type="date"
               className="form-control form-control-sm"
-              placeholder={t('searchMessages', language) ?? 'Search messages...'}
-              style={{ width: '250px' }}
-              value={filters.search ?? ''}
-              onChange={(e) => handleFilterChange('search', e.target.value)}
+              style={{ width: '150px' }}
+              value={filters.endDate ?? ''}
+              aria-label={t('endDate', language)}
+              onChange={(e) => handleFilterChange('endDate', e.target.value)}
             />
+          </div>
+          <div className="d-flex align-items-center gap-2 flex-grow-1">
+            <div className="d-flex align-items-center gap-1">
+              <small className="text-muted">{t('tableHost', language)}:</small>
+              <Select
+                options={hostOptions}
+                value={filters.host ?? ''}
+                onChange={(value) => handleFilterChange('host', value)}
+                size="sm"
+                style={{ width: '150px' } as React.CSSProperties}
+              />
+            </div>
+            <div className="d-flex align-items-center gap-1">
+              <small className="text-muted">{t('tableTool', language)}:</small>
+              <Select
+                options={toolOptions}
+                value={filters.tool ?? ''}
+                onChange={(value) => handleFilterChange('tool', value)}
+                size="sm"
+                style={{ width: '150px' } as React.CSSProperties}
+              />
+            </div>
+            <div className="d-flex align-items-center gap-1 flex-grow-1">
+              <small className="text-muted">{t('tableSender', language)}:</small>
+              <SearchableSelect
+                options={senderOptions}
+                value={filters.sender ?? ''}
+                onChange={(value) => handleFilterChange('sender', value)}
+                placeholder={t('dashboardFilterAllSenders', language) || 'All Senders'}
+                searchPlaceholder={t('searchSender', language)}
+                size="sm"
+                className="flex-grow-1"
+              />
+            </div>
           </div>
         </div>
-        {/* Row 2: Role */}
-        <div className="d-flex flex-wrap align-items-center gap-2">
-          {/* Role Filter */}
-          <div className="d-flex align-items-center gap-1">
+        {/* Row 2: Role + Search */}
+        <div className="d-flex align-items-center gap-2">
+          <div className="d-flex align-items-center gap-1" style={{ minWidth: '440px' }}>
             <small className="text-muted">{t('role', language)}:</small>
             <div className="form-check form-check-inline mb-0">
               <input
@@ -208,6 +206,19 @@ export const Messages: React.FC = () => {
               <label className="form-check-label" htmlFor="roleSystem">
                 System
               </label>
+            </div>
+          </div>
+          <div className="d-flex align-items-center gap-2 flex-grow-1">
+            <div className="d-flex align-items-center gap-1 flex-grow-1">
+              <small className="text-muted">{t('search', language)}:</small>
+              <input
+                type="text"
+                className="form-control form-control-sm"
+                placeholder={t('searchMessages', language) ?? 'Search messages...'}
+                style={{ flex: 1, minWidth: 0 }}
+                value={filters.search ?? ''}
+                onChange={(e) => handleFilterChange('search', e.target.value)}
+              />
             </div>
           </div>
         </div>
