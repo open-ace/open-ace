@@ -1654,6 +1654,9 @@ export const Workspace: React.FC = () => {
             });
             if (result.success && result.terminal) {
               const tabId = generateTabId();
+              const terminalId = result.terminal.terminal_id;
+              const isPending = result.terminal.status === 'pending';
+
               const newTab: WorkspaceTab = {
                 id: tabId,
                 title: `Terminal - ${params.machineName}`,
@@ -1666,27 +1669,70 @@ export const Workspace: React.FC = () => {
                 workspaceType: 'remote',
                 machineId: params.machineId,
                 machineName: params.machineName,
-                terminalId: result.terminal.terminal_id,
-                terminalWsUrl: result.terminal.ws_url,
-                terminalToken: result.terminal.token,
+                terminalId,
+                terminalWsUrl: result.terminal.ws_url || '',
+                terminalToken: result.terminal.token || '',
               };
               setTabs((prev) => [...prev, newTab]);
               setActiveTabId(tabId);
-              addStoredTab({
+              setStoredActiveTabId(tabId);
+
+              const storeTab = {
                 id: tabId,
                 title: newTab.title,
-                tabType: 'terminal',
-                workspaceType: 'remote',
+                tabType: 'terminal' as const,
+                workspaceType: 'remote' as const,
                 machineId: params.machineId,
                 machineName: params.machineName,
-                terminalId: result.terminal.terminal_id,
-                terminalWsUrl: result.terminal.ws_url,
-                terminalToken: result.terminal.token,
+                terminalId,
+                terminalWsUrl: result.terminal.ws_url || '',
+                terminalToken: result.terminal.token || '',
                 createdAt: newTab.createdAt,
                 waitingForUser: false,
-                waitingType: null,
-              });
+                waitingType: null as 'input' | 'permission' | 'plan' | null,
+              };
+              addStoredTab(storeTab);
               setStoredActiveTabId(tabId);
+
+              // Poll for terminal status if pending
+              if (isPending) {
+                const pollStatus = async (attempt: number) => {
+                  if (attempt > 20) {
+                    toast.error(
+                      t('terminalError', language) || 'Terminal Error',
+                      'Timed out waiting for terminal to start'
+                    );
+                    return;
+                  }
+                  await new Promise((r) => setTimeout(r, 1000));
+                  try {
+                    const status = await remoteApi.getTerminalStatus(terminalId, params.machineId);
+                    if (status.terminal.status === 'running' && status.terminal.ws_url) {
+                      setTabs((prev) =>
+                        prev.map((t) =>
+                          t.id === tabId
+                            ? { ...t, terminalWsUrl: status.terminal.ws_url!, terminalToken: status.terminal.token! }
+                            : t
+                        )
+                      );
+                      updateStoredTab(tabId, {
+                        terminalWsUrl: status.terminal.ws_url!,
+                        terminalToken: status.terminal.token!,
+                      });
+                    } else if (status.terminal.status === 'error') {
+                      toast.error(
+                        t('terminalError', language) || 'Terminal Error',
+                        status.terminal.error || 'Failed to start terminal'
+                      );
+                    } else {
+                      pollStatus(attempt + 1);
+                    }
+                  } catch {
+                    pollStatus(attempt + 1);
+                  }
+                };
+                pollStatus(0);
+              }
             } else {
               toast.error(
                 t('terminalError', language) || 'Terminal Error',

@@ -21,6 +21,7 @@ from app.auth.decorators import _extract_token, _load_user_from_token, admin_req
 from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
 from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
 from app.modules.workspace.remote_session_manager import get_remote_session_manager
+from app.modules.workspace.terminal_store import terminal_info_store
 
 logger = logging.getLogger(__name__)
 
@@ -1043,7 +1044,7 @@ def agent_message():
 # ==================== Terminal Management ====================
 
 # In-memory store for terminal info: {(machine_id, terminal_id): info}
-_terminal_info_store: dict[tuple[str, str], dict] = {}
+_terminal_info_store = terminal_info_store  # alias for backward compat
 
 
 @remote_bp.route("/terminal/start", methods=["POST"])
@@ -1087,43 +1088,13 @@ def start_terminal():
     }
     agent_mgr.send_command(machine_id, cmd)
 
-    # Wait briefly for the agent to respond (terminal_status message)
-    import time as _time
-
-    for _ in range(10):  # 5 seconds max
-        _time.sleep(0.5)
-        info = _terminal_info_store.get((machine_id, terminal_id))
-        if info and info.get("status") == "running":
-            return jsonify(
-                {
-                    "success": True,
-                    "terminal": {
-                        "terminal_id": terminal_id,
-                        "ws_url": info["ws_url"],
-                        "token": info["token"],
-                        "status": "running",
-                    },
-                }
-            )
-        if info and info.get("status") == "error":
-            return (
-                jsonify(
-                    {
-                        "success": False,
-                        "error": info.get("error", "Failed to start terminal"),
-                    }
-                ),
-                500,
-            )
-
-    # Agent didn't respond in time — return pending status
+    # Return immediately with pending status; frontend polls status endpoint
     return jsonify(
         {
             "success": True,
             "terminal": {
                 "terminal_id": terminal_id,
-                "ws_url": "",
-                "token": "",
+                "machine_id": machine_id,
                 "status": "pending",
             },
         }
@@ -1154,7 +1125,7 @@ def stop_terminal():
     agent_mgr.send_command(machine_id, cmd)
 
     # Clean up local store
-    _terminal_info_store.pop((machine_id, terminal_id), None)
+    _terminal_info_store.pop(machine_id, terminal_id)
 
     return jsonify({"success": True})
 
@@ -1166,7 +1137,13 @@ def get_terminal_status(terminal_id):
     if not machine_id:
         return jsonify({"error": "machine_id query parameter is required"}), 400
 
-    info = _terminal_info_store.get((machine_id, terminal_id))
+    # Check access: user must have access to this machine
+    agent_mgr = get_remote_agent_manager()
+    if g.user.get("role") != "admin":
+        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
+            return jsonify({"error": "Access denied"}), 403
+
+    info = _terminal_info_store.get(machine_id, terminal_id)
     if info:
         return jsonify({"success": True, "terminal": info})
     return jsonify({"success": True, "terminal": {"status": "unknown"}})

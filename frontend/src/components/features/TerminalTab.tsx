@@ -7,6 +7,7 @@
  */
 
 import React, { useEffect, useRef, useCallback, useState } from 'react';
+import '@xterm/xterm/css/xterm.css';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 
@@ -205,17 +206,6 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
-  // Import xterm CSS
-  useEffect(() => {
-    const link = document.createElement('link');
-    link.rel = 'stylesheet';
-    link.href = 'https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css';
-    document.head.appendChild(link);
-    return () => {
-      document.head.removeChild(link);
-    };
   }, []);
 
   // Connection status indicator

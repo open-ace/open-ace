@@ -154,7 +154,6 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
 
     setIsStartingTerminal(true);
     try {
-      onClose();
       const machineName = selectedMachine?.machine_name ?? selectedMachineId.slice(0, 8);
 
       if (onCreateTerminal) {
@@ -169,6 +168,7 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
       setSelectedMachineId('');
       setProjectPath('');
       setWorkspaceType('local');
+      onClose();
     }
   };
 

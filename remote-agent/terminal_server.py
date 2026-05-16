@@ -215,10 +215,11 @@ async def _handle_connection(websocket: WebSocketServerProtocol, path: str = "")
 
 async def _run_server(port: int) -> None:
     """Start the WebSocket server."""
-    async with serve(_handle_connection, "0.0.0.0", port, subprotocols=["binary"]):
-        logger.info("Terminal server listening on ws://0.0.0.0:%d", port)
-        print(f"READY:{port}", flush=True)
-        await asyncio.Future()  # Block forever
+    server = await serve(_handle_connection, "0.0.0.0", port, subprotocols=["binary"])
+    actual_port = server.sockets[0].getsockname()[1]
+    logger.info("Terminal server listening on ws://0.0.0.0:%d", actual_port)
+    print(f"READY:{actual_port}", flush=True)
+    await asyncio.Future()  # Block forever
 
 
 def main() -> None:
@@ -245,13 +246,6 @@ def main() -> None:
     )
 
     port = args.port
-    if port == 0:
-        # Let OS pick a free port
-        import socket
-
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.bind(("", 0))
-            port = s.getsockname()[1]
 
     asyncio.run(_run_server(port))
 
