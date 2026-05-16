@@ -104,9 +104,9 @@ export const Messages: React.FC = () => {
 
       {/* Filters - Two row layout */}
       <Card className="mb-3">
-        {/* Row 1: Date, Host, Tool, Sender, Search */}
+        {/* Row 1: Start Date, End Date, Host, Tool, Sender */}
         <div className="d-flex flex-wrap align-items-center gap-3 mb-3">
-          {/* Date Filter */}
+          {/* Date Range Filter */}
           <div className="d-flex align-items-center gap-1">
             <small className="text-muted">{t('date', language)}:</small>
             <input
@@ -115,6 +115,14 @@ export const Messages: React.FC = () => {
               style={{ width: '150px' }}
               value={filters.startDate ?? ''}
               onChange={(e) => handleFilterChange('startDate', e.target.value)}
+            />
+            <span className="text-muted">-</span>
+            <input
+              type="date"
+              className="form-control form-control-sm"
+              style={{ width: '150px' }}
+              value={filters.endDate ?? ''}
+              onChange={(e) => handleFilterChange('endDate', e.target.value)}
             />
           </div>
           {/* Host Filter */}
@@ -155,20 +163,8 @@ export const Messages: React.FC = () => {
               style={{ width: '150px' } as React.CSSProperties}
             />
           </div>
-          {/* Search Filter */}
-          <div className="d-flex align-items-center gap-1 ms-auto">
-            <small className="text-muted">{t('search', language)}:</small>
-            <input
-              type="text"
-              className="form-control form-control-sm"
-              placeholder={t('searchMessages', language) ?? 'Search messages...'}
-              style={{ width: '250px' }}
-              value={filters.search ?? ''}
-              onChange={(e) => handleFilterChange('search', e.target.value)}
-            />
-          </div>
         </div>
-        {/* Row 2: Role */}
+        {/* Row 2: Role, Search */}
         <div className="d-flex flex-wrap align-items-center gap-2">
           {/* Role Filter */}
           <div className="d-flex align-items-center gap-1">
@@ -209,6 +205,18 @@ export const Messages: React.FC = () => {
                 System
               </label>
             </div>
+          </div>
+          {/* Search Filter */}
+          <div className="d-flex align-items-center gap-1 ms-auto">
+            <small className="text-muted">{t('search', language)}:</small>
+            <input
+              type="text"
+              className="form-control form-control-sm"
+              placeholder={t('searchMessages', language) ?? 'Search messages...'}
+              style={{ width: '250px' }}
+              value={filters.search ?? ''}
+              onChange={(e) => handleFilterChange('search', e.target.value)}
+            />
           </div>
         </div>
       </Card>
