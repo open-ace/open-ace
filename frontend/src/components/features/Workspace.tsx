@@ -1424,6 +1424,7 @@ export const Workspace: React.FC = () => {
                 wsUrl={tab.terminalWsUrl ?? ''}
                 token={tab.terminalToken ?? ''}
                 isActive={activeTabId === tab.id}
+                machineName={tab.machineName}
                 onError={(error) => {
                   console.error('Terminal error:', error);
                   toast.error(t('terminalError', language), error);

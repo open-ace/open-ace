@@ -2,17 +2,21 @@
  * TerminalTab Component - Web terminal using xterm.js
  *
  * Connects to a remote machine's terminal WebSocket server
- * and provides an interactive terminal experience.
+ * and provides an interactive terminal experience with
+ * a status bar showing connection state and machine info.
  */
 
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback, useState } from 'react';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
+
+type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'error';
 
 interface TerminalTabProps {
   wsUrl: string;
   token: string;
   isActive: boolean;
+  machineName?: string;
   onError?: (error: string) => void;
 }
 
@@ -20,6 +24,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   wsUrl,
   token,
   isActive,
+  machineName,
   onError,
 }) => {
   const language = useLanguage();
@@ -28,15 +33,19 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   const wsRef = useRef<WebSocket | null>(null);
   const fitAddonRef = useRef<any>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectCountRef = useRef(0);
+
+  const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
 
   const connect = useCallback(() => {
     if (!wsUrl || !token || !xtermRef.current) return;
 
-    // Close existing connection
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
     }
+
+    setConnectionState('connecting');
 
     const wsUrlWithToken = wsUrl.includes('?')
       ? `${wsUrl}&token=${encodeURIComponent(token)}`
@@ -47,10 +56,11 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
       ws.binaryType = 'arraybuffer';
 
       ws.onopen = () => {
+        setConnectionState('connected');
+        reconnectCountRef.current = 0;
         if (xtermRef.current) {
           xtermRef.current.writeln('\r\n\x1b[32mConnected to remote terminal.\x1b[0m\r\n');
         }
-        // Send initial terminal size
         if (fitAddonRef.current && xtermRef.current) {
           const dims = fitAddonRef.current.proposeDimensions();
           if (dims) {
@@ -76,14 +86,17 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
       };
 
       ws.onclose = () => {
+        setConnectionState('disconnected');
         if (xtermRef.current) {
           xtermRef.current.writeln('\r\n\x1b[33mConnection closed. Reconnecting...\x1b[0m\r\n');
         }
-        // Auto-reconnect after 3 seconds
-        reconnectTimerRef.current = setTimeout(connect, 3000);
+        reconnectCountRef.current += 1;
+        const delay = Math.min(3000 * Math.pow(1.5, reconnectCountRef.current - 1), 30000);
+        reconnectTimerRef.current = setTimeout(connect, delay);
       };
 
       ws.onerror = () => {
+        setConnectionState('error');
         if (xtermRef.current) {
           xtermRef.current.writeln('\r\n\x1b[31mConnection error.\x1b[0m\r\n');
         }
@@ -93,6 +106,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
       wsRef.current = ws;
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+      setConnectionState('error');
       if (xtermRef.current) {
         xtermRef.current.writeln(`\r\n\x1b[31mConnection failed: ${errorMsg}\x1b[0m\r\n`);
       }
@@ -105,7 +119,6 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
     if (!terminalRef.current) return;
 
     let terminal: any;
-    let fitAddon: any;
 
     const initTerminal = async () => {
       const { Terminal } = await import('@xterm/xterm');
@@ -125,14 +138,13 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
         allowProposedApi: true,
       });
 
-      fitAddon = new FitAddon();
+      const fitAddon = new FitAddon();
       terminal.loadAddon(fitAddon);
       terminal.loadAddon(new WebLinksAddon());
 
       terminal.open(terminalRef.current!);
       fitAddon.fit();
 
-      // Handle user input -> send to WebSocket
       terminal.onData((data: string) => {
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
           const encoder = new TextEncoder();
@@ -140,7 +152,6 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
         }
       });
 
-      // Handle resize
       terminal.onResize(({ cols, rows }: { cols: number; rows: number }) => {
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
           wsRef.current.send(JSON.stringify({ type: 'resize', cols, rows }));
@@ -207,6 +218,20 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
     };
   }, []);
 
+  // Connection status indicator
+  const statusColor: Record<ConnectionState, string> = {
+    connecting: '#f59e0b',
+    connected: '#22c55e',
+    disconnected: '#6b7280',
+    error: '#ef4444',
+  };
+  const statusText: Record<ConnectionState, string> = {
+    connecting: t('terminalConnecting', language) || 'Connecting...',
+    connected: t('terminalConnected', language) || 'Connected',
+    disconnected: t('terminalDisconnected', language) || 'Disconnected',
+    error: t('terminalError', language) || 'Error',
+  };
+
   if (!wsUrl) {
     return (
       <div className="d-flex align-items-center justify-content-center h-100">
@@ -219,14 +244,68 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   }
 
   return (
-    <div
-      ref={terminalRef}
-      style={{
-        width: '100%',
-        height: '100%',
-        backgroundColor: '#1e1e2e',
-        padding: '4px',
-      }}
-    />
+    <div className="d-flex flex-column h-100">
+      {/* Terminal area */}
+      <div
+        ref={terminalRef}
+        className="flex-grow-1"
+        style={{
+          backgroundColor: '#1e1e2e',
+          padding: '4px',
+          minHeight: 0,
+        }}
+      />
+
+      {/* Status bar */}
+      <div
+        className="d-flex align-items-center px-2 py-1"
+        style={{
+          backgroundColor: '#181825',
+          borderTop: '1px solid #313244',
+          fontSize: '0.75rem',
+          color: '#a6adc8',
+          flexShrink: 0,
+        }}
+      >
+        {/* Connection status dot */}
+        <span
+          style={{
+            display: 'inline-block',
+            width: '8px',
+            height: '8px',
+            borderRadius: '50%',
+            backgroundColor: statusColor[connectionState],
+            marginRight: '6px',
+            animation: connectionState === 'connecting' ? 'pulse 1.5s ease-in-out infinite' : 'none',
+          }}
+        />
+        <span className="me-3">{statusText[connectionState]}</span>
+
+        {/* Machine name */}
+        {machineName && (
+          <span className="me-3">
+            <i className="bi bi-cloud-fill text-primary me-1" style={{ fontSize: '0.65rem' }} />
+            {machineName}
+          </span>
+        )}
+
+        {/* Spacer */}
+        <span className="flex-grow-1" />
+
+        {/* Right side info */}
+        <span className="text-muted" style={{ fontSize: '0.7rem' }}>
+          <i className="bi bi-terminal me-1" />
+          Claude Code
+        </span>
+      </div>
+
+      {/* Pulse animation */}
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.4; }
+        }
+      `}</style>
+    </div>
   );
 };

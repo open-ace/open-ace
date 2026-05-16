@@ -947,6 +947,95 @@ def agent_message():
 
         return jsonify({"success": True})
 
+    elif msg_type == "session_sync":
+        # Agent reports Claude Code session data from web terminal
+        session_id = data.get("session_id", "")
+        tool_name = data.get("tool_name", "claude-code")
+        model = data.get("model")
+        project_path = data.get("project_path")
+        message_count = data.get("message_count", 0)
+        total_input_tokens = data.get("total_input_tokens", 0)
+        total_output_tokens = data.get("total_output_tokens", 0)
+        messages = data.get("messages", [])
+
+        logger.info(
+            "Session sync [%s]: tool=%s msgs=%d tokens=%d/%d",
+            session_id[:8],
+            tool_name,
+            message_count,
+            total_input_tokens,
+            total_output_tokens,
+        )
+
+        try:
+            sync_session_mgr = get_remote_session_manager()._session_manager
+
+            # Upsert the session record
+            existing = sync_session_mgr.get_session(session_id)
+            if not existing:
+                sync_session_mgr.create_session(
+                    session_id=session_id,
+                    tool_name=tool_name,
+                    project_path=project_path or "",
+                    model=model,
+                    host_name=machine_id[:8],
+                    context={
+                        "workspace_type": "remote",
+                        "remote_machine_id": machine_id,
+                    },
+                )
+
+            # Mirror messages to daily_messages for ConversationHistory visibility
+            try:
+                from app.repositories.database import adapt_sql, get_db_connection
+
+                for msg in messages:
+                    role = msg.get("role", "")
+                    content = msg.get("content", "")
+                    timestamp = msg.get("timestamp")
+                    msg_model = msg.get("model") or model
+
+                    if not content or len(content) > 100000:
+                        continue
+
+                    date_str = (timestamp or time.strftime("%Y-%m-%d"))[:10]
+                    message_id = f"{session_id}-{msg.get('timestamp', '')}"
+
+                    try:
+                        with get_db_connection() as conn:
+                            cursor = conn.cursor()
+                            cursor.execute(
+                                adapt_sql("""INSERT OR IGNORE INTO daily_messages
+                                    (date, tool_name, host_name, message_id, role, content,
+                                     tokens_used, model, timestamp, message_source,
+                                     conversation_id, agent_session_id)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""),
+                                (
+                                    date_str,
+                                    tool_name,
+                                    machine_id[:8],
+                                    message_id,
+                                    role,
+                                    content[:50000],
+                                    0,
+                                    msg_model,
+                                    timestamp,
+                                    "web_terminal",
+                                    session_id,
+                                    session_id,
+                                ),
+                            )
+                            conn.commit()
+                    except Exception as e:
+                        logger.debug("Failed to insert daily_message: %s", e)
+            except Exception as e:
+                logger.debug("Failed to mirror messages: %s", e)
+
+        except Exception as e:
+            logger.error("Failed to process session_sync: %s", e)
+
+        return jsonify({"success": True})
+
     else:
         return jsonify({"error": f"Unknown message type: {msg_type}"}), 400
 

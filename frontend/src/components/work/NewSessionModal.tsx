@@ -293,13 +293,33 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
             </div>
           )}
 
-          {/* Terminal info */}
+          {/* Terminal options */}
           {workspaceType === 'terminal' && selectedMachineId && (
-            <div className="alert alert-info small">
-              <i className="bi bi-info-circle me-1" />
-              {t('terminalInfoHint', language) ||
-                'Opens a web terminal on the remote machine. Claude Code is pre-configured with proxy authentication.'}
-            </div>
+            <>
+              {/* Working directory for terminal */}
+              <div className="mb-3">
+                <label className="form-label">{t('terminalWorkDir', language) || 'Working Directory'}</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  value={projectPath}
+                  onChange={(e) => setProjectPath(e.target.value)}
+                  placeholder={
+                    selectedMachine ? getDefaultPath(selectedMachine.os_type) : '/root/workspace'
+                  }
+                />
+                <div className="form-text text-muted small">
+                  {t('terminalWorkDirHint', language) || 'Terminal will open in this directory'}
+                </div>
+              </div>
+
+              {/* Info hint */}
+              <div className="alert alert-info small">
+                <i className="bi bi-info-circle me-1" />
+                {t('terminalInfoHint', language) ||
+                  'Opens a web terminal on the remote machine. Claude Code is pre-configured with proxy authentication.'}
+              </div>
+            </>
           )}
 
           {/* Error Display */}

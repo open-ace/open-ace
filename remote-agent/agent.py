@@ -21,6 +21,7 @@ from typing import Any
 
 import requests
 from executor import ProcessExecutor
+from session_sync import SessionSyncService
 from system_info import get_capabilities
 
 from config import AgentConfig
@@ -51,6 +52,8 @@ class RemoteAgent:
         self._terminal_processes: dict[str, subprocess.Popen] = {}
         self._terminal_tokens: dict[str, str] = {}
         self._terminal_ports: dict[str, int] = {}
+        # Session sync service
+        self._session_sync = SessionSyncService(self._http_send, self.config)
 
     # ----------------------------------------------------------------
     # Connection lifecycle
@@ -80,6 +83,9 @@ class RemoteAgent:
             logger.info("Restored %d session(s) from crash recovery", len(restored))
             for sid in restored:
                 self._send_session_status(sid, "running")
+
+        # Start session sync service
+        self._session_sync.start()
 
         while self._running:
             try:
@@ -555,6 +561,7 @@ class RemoteAgent:
                     }
                 )
                 logger.info("Terminal %s running on %s", terminal_id[:8], ws_url)
+                self._session_sync.notify_terminal_active(terminal_id)
             else:
                 stderr_output = proc.stderr.read().decode() if proc.stderr else "unknown"
                 logger.error("Terminal server failed to start: %s", stderr_output[:500])
@@ -647,6 +654,7 @@ class RemoteAgent:
     def _shutdown(self) -> None:
         """Clean up all resources."""
         logger.info("Shutting down agent...")
+        self._session_sync.stop()
         self._executor.stop_all()
         # Stop all terminal server processes
         for tid in list(self._terminal_processes.keys()):
