@@ -108,12 +108,11 @@ export const Messages: React.FC = () => {
         <h2>{t('messages', language)}</h2>
       </div>
 
-      {/* Filters - Two row layout */}
+      {/* Filters - CSS Grid for column alignment */}
       <Card className="mb-3">
-        {/* Row 1: Date Range, Host, Tool, Sender */}
-        <div className="d-flex flex-wrap align-items-center gap-3 mb-3">
+        <div style={{ display: 'grid', gridTemplateColumns: 'auto auto auto auto', gap: '1rem', alignItems: 'center' }}>
           {/* Date Range Filter */}
-          <div className="d-flex align-items-center gap-1" style={{ minWidth: '395px' }}>
+          <div className="d-flex align-items-center gap-1">
             <small className="text-muted">{t('startDate', language)}:</small>
             <input
               type="date"
@@ -171,11 +170,8 @@ export const Messages: React.FC = () => {
               style={{ width: '150px' } as React.CSSProperties}
             />
           </div>
-        </div>
-        {/* Row 2: Role, Search */}
-        <div className="d-flex flex-wrap align-items-center gap-3">
           {/* Role Filter */}
-          <div className="d-flex align-items-center gap-1" style={{ minWidth: '395px' }}>
+          <div className="d-flex align-items-center gap-1">
             <small className="text-muted">{t('role', language)}:</small>
             <div className="form-check form-check-inline mb-0">
               <input
