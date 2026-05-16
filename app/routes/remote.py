@@ -1257,15 +1257,9 @@ def llm_proxy(path=""):
         target_base = provider_urls.get(provider, "https://api.openai.com")
 
     if path:
-        # Strip OpenAI-style /v1 prefix — the SDK adds it but base_url
-        # already includes the provider's own version prefix (e.g. /v4)
-        import re as _re
-
-        path_parts = path.split("/", 1)
-        if len(path_parts) > 1 and _re.match(r"v\d+", path_parts[0]):
-            target_url = f"{target_base}/{path_parts[1]}"
-        else:
-            target_url = f"{target_base}/{path}"
+        # For Anthropic provider, keep the full path including /v1 prefix
+        # (z.ai proxy needs /v1/messages, not /messages)
+        target_url = f"{target_base}/{path}"
     else:
         # Handle direct path in the request URL
         target_url = f"{target_base}{request.path.split('/llm-proxy')[-1]}"
