@@ -1095,7 +1095,10 @@ def start_terminal():
         provider="anthropic",
     )
 
-    proxy_url = f"{request.host_url.rstrip('/')}/api/remote/llm-proxy"
+    # Use external URL for LLM proxy (remote machine needs to access it)
+    # Fall back to request.host_url if external_url not configured
+    backend_url = agent_mgr._get_backend_url()
+    proxy_url = f"{backend_url}/api/remote/llm-proxy"
 
     # Send start_terminal command to agent
     cmd = {
