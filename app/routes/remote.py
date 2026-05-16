@@ -70,6 +70,29 @@ def load_user():
             g.user_role = user.get("role")
             return None  # Authenticated
 
+    # Special case: WebSocket proxy token for terminal status endpoint
+    # The WebSocket proxy process uses its own token (stored in terminal_info_store)
+    # to fetch terminal info for connecting to the remote terminal server
+    if request.path.startswith("/api/remote/terminal/") and request.path.endswith("/status"):
+        from app.modules.workspace.terminal_store import terminal_info_store
+
+        # Extract terminal_id from path: /api/remote/terminal/{terminal_id}/status
+        path_parts = request.path.split("/")
+        if len(path_parts) >= 5:
+            terminal_id = path_parts[4]
+            machine_id = request.args.get("machine_id", "")
+            if machine_id and token:
+                info = terminal_info_store.get(machine_id, terminal_id)
+                if info:
+                    stored_token = info.get("token", "")
+                    if token == stored_token:
+                        # Proxy token matched - set a minimal g.user for access check
+                        g.user = {"role": "proxy", "id": None}
+                        g.user_id = None
+                        g.user_role = "proxy"
+                        logger.info("Proxy token authenticated for terminal %s", terminal_id[:8])
+                        return None  # Authenticated as proxy
+
     # Fallback: try WebUI token validation (for iframe requests from qwen-code-webui)
     url_token = request.args.get("token")
     if url_token:
@@ -1129,18 +1152,44 @@ def stop_terminal():
 
 @remote_bp.route("/terminal/<terminal_id>/status", methods=["GET"])
 def get_terminal_status(terminal_id):
-    """Get terminal status."""
+    """Get terminal status.
+
+    Supports two authentication methods:
+    1. Standard user session (via session_token cookie)
+    2. WebSocket proxy token (for proxy processes to fetch remote terminal info)
+    """
     machine_id = request.args.get("machine_id")
     if not machine_id:
         return jsonify({"error": "machine_id query parameter is required"}), 400
 
-    # Check access: user must have access to this machine
     agent_mgr = get_remote_agent_manager()
+    proxy_token = request.cookies.get("session_token", "")
+    logger.info(
+        "get_terminal_status: terminal=%s, machine=%s, proxy_token=%s",
+        terminal_id[:8],
+        machine_id[:8],
+        proxy_token[:20] if proxy_token else "none",
+    )
+
+    # Check if this is a WebSocket proxy token
+    # The terminal info store contains the proxy token (stored when proxy was started)
+    info = terminal_info_store.get(machine_id, terminal_id)
+    if info:
+        stored_token = info.get("token", "")
+        logger.info(
+            "get_terminal_status: found info, stored_token=%s",
+            stored_token[:20] if stored_token else "none",
+        )
+        # If the provided token matches the stored proxy token, allow access
+        if proxy_token and proxy_token == stored_token:
+            logger.info("get_terminal_status: proxy token matched, returning info")
+            return jsonify({"success": True, "terminal": info})
+
+    # Standard user authentication
     if g.user.get("role") != "admin":
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
 
-    info = terminal_info_store.get(machine_id, terminal_id)
     if info:
         return jsonify({"success": True, "terminal": info})
     return jsonify({"success": True, "terminal": {"status": "unknown"}})

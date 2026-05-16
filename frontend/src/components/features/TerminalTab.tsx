@@ -39,7 +39,11 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
 
   const connect = useCallback(() => {
-    if (!wsUrl || !token || !xtermRef.current) return;
+    console.log('[TerminalTab] connect called:', { wsUrl, token: token?.substring(0, 20), hasXterm: !!xtermRef.current });
+    if (!wsUrl || !token || !xtermRef.current) {
+      console.log('[TerminalTab] Skipping connect - missing requirements');
+      return;
+    }
 
     if (wsRef.current) {
       wsRef.current.close();
@@ -54,9 +58,11 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
 
     try {
       const ws = new WebSocket(wsUrlWithToken, ['binary']);
+      console.log('[TerminalTab] WebSocket created, URL length:', wsUrlWithToken.length, 'token length:', token.length);
       ws.binaryType = 'arraybuffer';
 
       ws.onopen = () => {
+        console.log('[TerminalTab] WebSocket OPENED');
         setConnectionState('connected');
         reconnectCountRef.current = 0;
         if (xtermRef.current) {
@@ -86,7 +92,8 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
         }
       };
 
-      ws.onclose = () => {
+      ws.onclose = (event) => {
+        console.log('[TerminalTab] WebSocket CLOSED:', event.code, event.reason);
         setConnectionState('disconnected');
         if (xtermRef.current) {
           xtermRef.current.writeln('\r\n\x1b[33mConnection closed. Reconnecting...\x1b[0m\r\n');
@@ -96,7 +103,8 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
         reconnectTimerRef.current = setTimeout(connect, delay);
       };
 
-      ws.onerror = () => {
+      ws.onerror = (error) => {
+        console.log('[TerminalTab] WebSocket ERROR:', error);
         setConnectionState('error');
         if (xtermRef.current) {
           xtermRef.current.writeln('\r\n\x1b[31mConnection error.\x1b[0m\r\n');
@@ -118,6 +126,8 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   // Initialize xterm.js
   useEffect(() => {
     if (!terminalRef.current) return;
+
+    console.log('[TerminalTab] Initializing xterm.js');
 
     let terminal: any;
 
@@ -162,8 +172,12 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
       xtermRef.current = terminal;
       fitAddonRef.current = fitAddon;
 
+      console.log('[TerminalTab] xterm.js initialized, ready to connect');
+      console.log('[TerminalTab] Current wsUrl:', wsUrl, 'token:', token?.substring(0, 20));
+
       // Auto-connect after terminal is ready
       if (wsUrl && token) {
+        console.log('[TerminalTab] Calling connect() after init');
         connect();
       }
     };
@@ -184,9 +198,15 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
     };
   }, []);
 
-  // Connect when xterm is ready
+  // Connect when xterm is ready or wsUrl/token change
   useEffect(() => {
+    console.log('[TerminalTab] Connect effect triggered:', {
+      hasXterm: !!xtermRef.current,
+      wsUrl,
+      token: token?.substring(0, 20),
+    });
     if (xtermRef.current && wsUrl && token) {
+      console.log('[TerminalTab] Calling connect() from effect');
       connect();
     }
   }, [connect, wsUrl, token]);
@@ -227,16 +247,8 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
     error: t('terminalError', language) || 'Error',
   };
 
-  if (!wsUrl) {
-    return (
-      <div className="d-flex align-items-center justify-content-center h-100">
-        <div className="text-center text-muted">
-          <i className="bi bi-terminal fs-1" />
-          <p className="mt-2">{t('terminalWaitingForConnection', language)}</p>
-        </div>
-      </div>
-    );
-  }
+  // Always render terminal div to allow xterm.js initialization
+  // The terminal will show "waiting for connection" state if wsUrl is empty
 
   return (
     <div className="d-flex flex-column h-100">
