@@ -68,6 +68,7 @@ class ClaudeCodeAdapter(BaseCLIAdapter):
             "stream-json",
             "--output-format",
             "stream-json",
+            "--verbose",
         ]
 
         if resume:

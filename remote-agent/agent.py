@@ -628,11 +628,7 @@ class RemoteAgent:
 
     def _get_reachable_hostname(self) -> str:
         """Get a hostname/IP that the browser can use to reach this machine."""
-        # Try the machine's configured hostname first
-        hostname = self.config.hostname
-        if hostname and hostname != "localhost":
-            return hostname
-        # Fall back to IP address
+        # Prefer IP address (hostname may not be resolvable from browser)
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.connect(("8.8.8.8", 80))
@@ -640,7 +636,12 @@ class RemoteAgent:
             s.close()
             return ip
         except Exception:
-            return "127.0.0.1"
+            pass
+        # Fall back to configured hostname
+        hostname = self.config.hostname
+        if hostname and hostname != "localhost":
+            return hostname
+        return "127.0.0.1"
 
     # ----------------------------------------------------------------
     # Shutdown
