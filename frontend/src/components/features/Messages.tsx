@@ -110,7 +110,7 @@ export const Messages: React.FC = () => {
 
       {/* Filters - CSS Grid for column alignment */}
       <Card className="mb-3">
-        <div style={{ display: 'grid', gridTemplateColumns: 'auto auto auto auto', gap: '1rem', alignItems: 'center' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'auto auto auto auto', gap: '0.5rem', alignItems: 'center' }}>
           {/* Date Range Filter */}
           <div className="d-flex align-items-center gap-1">
             <small className="text-muted">{t('startDate', language)}:</small>
@@ -211,13 +211,13 @@ export const Messages: React.FC = () => {
             </div>
           </div>
           {/* Search Filter - spans columns 2-4 to align with Sender end */}
-          <div className="d-flex align-items-center gap-1" style={{ gridColumn: '2 / -1' }}>
-            <small className="text-muted">{t('search', language)}:</small>
+          <div className="d-flex align-items-center gap-1" style={{ gridColumn: '2 / -1', width: '100%' }}>
+            <small className="text-muted" style={{ whiteSpace: 'nowrap' }}>{t('search', language)}:</small>
             <input
               type="text"
               className="form-control form-control-sm"
               placeholder={t('searchMessages', language) ?? 'Search messages...'}
-              style={{ flex: 1 }}
+              style={{ flex: 1, minWidth: 0 }}
               value={filters.search ?? ''}
               onChange={(e) => handleFilterChange('search', e.target.value)}
             />
