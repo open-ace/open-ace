@@ -57,13 +57,15 @@ class ClaudeCodeAdapter(BaseCLIAdapter):
         """
         Build command-line arguments to start Claude Code.
 
-        Uses --print for non-interactive (piped) mode and --output-format
-        stream-json for machine-parseable output. The CLI is launched with
-        its working directory set to project_path (handled by the caller).
+        Uses --print for non-interactive (piped) mode with --input-format
+        stream-json for SDK-compatible stdin communication and --output-format
+        stream-json for machine-parseable output.
         """
         args = [
             self.EXECUTABLE,
             "--print",
+            "--input-format",
+            "stream-json",
             "--output-format",
             "stream-json",
         ]
