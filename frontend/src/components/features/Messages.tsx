@@ -210,14 +210,14 @@ export const Messages: React.FC = () => {
               </label>
             </div>
           </div>
-          {/* Search Filter */}
-          <div className="d-flex align-items-center gap-1">
+          {/* Search Filter - spans columns 2-4 to align with Sender end */}
+          <div className="d-flex align-items-center gap-1" style={{ gridColumn: '2 / -1' }}>
             <small className="text-muted">{t('search', language)}:</small>
             <input
               type="text"
               className="form-control form-control-sm"
               placeholder={t('searchMessages', language) ?? 'Search messages...'}
-              style={{ width: '250px' }}
+              style={{ flex: 1 }}
               value={filters.search ?? ''}
               onChange={(e) => handleFilterChange('search', e.target.value)}
             />
