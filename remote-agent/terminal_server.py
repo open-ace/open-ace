@@ -25,7 +25,7 @@ import urllib.parse
 
 try:
     import websockets
-    from websockets.server import WebSocketServerProtocol, serve
+    from websockets.server import serve
 except ImportError:
     print("Error: 'websockets' package is required.", file=sys.stderr)
     print("Install with: pip install websockets>=12.0", file=sys.stderr)
@@ -44,7 +44,7 @@ SHELL_CMD = ""
 class TerminalSession:
     """Manages a PTY process bridged to a single WebSocket connection."""
 
-    def __init__(self, websocket: WebSocketServerProtocol, master_fd: int, pid: int):
+    def __init__(self, websocket, master_fd: int, pid: int):
         self.websocket = websocket
         self.master_fd = master_fd
         self.pid = pid
@@ -166,10 +166,12 @@ def _write_banner(master_fd: int) -> None:
         pass
 
 
-async def _handle_connection(websocket: WebSocketServerProtocol, path: str = "") -> None:
+async def _handle_connection(websocket) -> None:
     """Handle a new WebSocket connection."""
-    # Authenticate via query parameter
-    params = urllib.parse.parse_qs(urllib.parse.urlparse(path).query)
+    # Get request path - websockets 15.0.1 uses websocket.path attribute
+    # (remove_path_argument skips the path param when it has a default value)
+    raw_path = getattr(websocket, "path", "")
+    params = urllib.parse.parse_qs(urllib.parse.urlparse(raw_path).query)
     token = params.get("token", [None])[0]
     if not token or token != AUTH_TOKEN:
         logger.warning("Rejected connection: invalid token")
@@ -215,11 +217,11 @@ async def _handle_connection(websocket: WebSocketServerProtocol, path: str = "")
 
 async def _run_server(port: int) -> None:
     """Start the WebSocket server."""
-    server = await serve(_handle_connection, "0.0.0.0", port, subprotocols=["binary"])
-    actual_port = server.sockets[0].getsockname()[1]
-    logger.info("Terminal server listening on ws://0.0.0.0:%d", actual_port)
-    print(f"READY:{actual_port}", flush=True)
-    await asyncio.Future()  # Block forever
+    async with serve(_handle_connection, "0.0.0.0", port, subprotocols=["binary"]) as server:
+        actual_port = server.sockets[0].getsockname()[1]
+        logger.info("Terminal server listening on ws://0.0.0.0:%d", actual_port)
+        print(f"READY:{actual_port}", flush=True)
+        await asyncio.Future()  # Block forever
 
 
 def main() -> None:
