@@ -160,6 +160,7 @@ class SessionSyncService:
         self._synced_files: set[str] = set()
         self._last_sync_times: dict[str, float] = {}
         self._running = False
+        self._active_terminal_id: str = ""
 
     def start(self) -> None:
         """Start the sync service in a background thread."""

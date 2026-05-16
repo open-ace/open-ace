@@ -3,23 +3,43 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 
 logger = logging.getLogger(__name__)
 
 # Entries older than this (seconds) are considered stale and removed.
 TTL_SECONDS = 24 * 3600  # 24 hours
+CLEANUP_INTERVAL = 10 * 60  # 10 minutes
 
 
 class TerminalInfoStore:
     """Thread-safe store keyed by (machine_id, terminal_id)."""
 
     def __init__(self, ttl: float = TTL_SECONDS):
-        import threading
-
         self._lock = threading.Lock()
         self._store: dict[tuple[str, str], dict] = {}
         self._ttl = ttl
+        self._cleanup_timer: threading.Timer | None = None
+
+    def start_cleanup_timer(self) -> None:
+        """Start periodic cleanup of stale entries."""
+        self._schedule_cleanup()
+
+    def stop_cleanup_timer(self) -> None:
+        """Stop the periodic cleanup timer."""
+        if self._cleanup_timer:
+            self._cleanup_timer.cancel()
+            self._cleanup_timer = None
+
+    def _schedule_cleanup(self) -> None:
+        self._cleanup_timer = threading.Timer(CLEANUP_INTERVAL, self._cleanup_loop)
+        self._cleanup_timer.daemon = True
+        self._cleanup_timer.start()
+
+    def _cleanup_loop(self) -> None:
+        self.cleanup_stale()
+        self._schedule_cleanup()
 
     def put(self, machine_id: str, terminal_id: str, info: dict) -> None:
         with self._lock:
@@ -52,3 +72,4 @@ class TerminalInfoStore:
 
 # Module-level singleton
 terminal_info_store = TerminalInfoStore()
+terminal_info_store.start_cleanup_timer()

@@ -1043,9 +1043,6 @@ def agent_message():
 
 # ==================== Terminal Management ====================
 
-# In-memory store for terminal info: {(machine_id, terminal_id): info}
-_terminal_info_store = terminal_info_store  # alias for backward compat
-
 
 @remote_bp.route("/terminal/start", methods=["POST"])
 def start_terminal():
@@ -1125,7 +1122,7 @@ def stop_terminal():
     agent_mgr.send_command(machine_id, cmd)
 
     # Clean up local store
-    _terminal_info_store.pop(machine_id, terminal_id)
+    terminal_info_store.pop(machine_id, terminal_id)
 
     return jsonify({"success": True})
 
@@ -1143,7 +1140,7 @@ def get_terminal_status(terminal_id):
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
 
-    info = _terminal_info_store.get(machine_id, terminal_id)
+    info = terminal_info_store.get(machine_id, terminal_id)
     if info:
         return jsonify({"success": True, "terminal": info})
     return jsonify({"success": True, "terminal": {"status": "unknown"}})

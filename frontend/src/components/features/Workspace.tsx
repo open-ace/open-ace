@@ -91,6 +91,9 @@ export const Workspace: React.FC = () => {
   // Refs for iframe elements (to send focus messages)
   const iframeRefs = useRef<Map<string, HTMLIFrameElement>>(new Map());
 
+  // Track terminal polling that should be cancelled on tab close
+  const terminalPollCancelRefs = useRef<Map<string, boolean>>(new Map());
+
   // Fullscreen state from global store
   const workspaceFullscreen = useWorkspaceFullscreen();
   const { toggleWorkspaceFullscreen, exitWorkspaceFullscreen } = useAppStore();
@@ -780,6 +783,8 @@ export const Workspace: React.FC = () => {
 
       // For terminal tabs, stop the terminal and close
       if (tab?.tabType === 'terminal') {
+        // Cancel any pending terminal status polling
+        terminalPollCancelRefs.current.set(tabId, true);
         if (tab.terminalId && tab.machineId) {
           remoteApi.stopTerminal({
             terminal_id: tab.terminalId,
@@ -1696,7 +1701,9 @@ export const Workspace: React.FC = () => {
 
               // Poll for terminal status if pending
               if (isPending) {
+                terminalPollCancelRefs.current.delete(tabId);
                 const pollStatus = async (attempt: number) => {
+                  if (terminalPollCancelRefs.current.get(tabId)) return;
                   if (attempt > 20) {
                     toast.error(
                       t('terminalError', language) || 'Terminal Error',
@@ -1705,6 +1712,7 @@ export const Workspace: React.FC = () => {
                     return;
                   }
                   await new Promise((r) => setTimeout(r, 1000));
+                  if (terminalPollCancelRefs.current.get(tabId)) return;
                   try {
                     const status = await remoteApi.getTerminalStatus(terminalId, params.machineId);
                     if (status.terminal.status === 'running' && status.terminal.ws_url) {
