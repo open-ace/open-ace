@@ -116,16 +116,18 @@ export const Workspace: React.FC = () => {
         const workspaceConfig = await workspaceApi.getConfig();
         setConfig(workspaceConfig);
 
-        // If multi-user mode is enabled, get user-specific URL
-        if (workspaceConfig.enabled && workspaceConfig.multi_user_mode) {
+        // Get user-specific URL (needed for token and openace_url in both modes)
+        if (workspaceConfig.enabled) {
           setLoadingStage('startingWorkspace');
-          const userWebUIResponse = await workspaceApi.getUserWebUIUrl();
-          if (userWebUIResponse.success) {
-            setUserWebUI(userWebUIResponse);
-            setLoadingStage('ready');
-          } else {
-            setError(userWebUIResponse.error ?? 'Failed to get user workspace URL');
+          try {
+            const userWebUIResponse = await workspaceApi.getUserWebUIUrl();
+            if (userWebUIResponse.success) {
+              setUserWebUI(userWebUIResponse);
+            }
+          } catch {
+            // In single-user mode, token may not be critical for local tabs
           }
+          setLoadingStage('ready');
         } else {
           setLoadingStage('ready');
         }
@@ -367,8 +369,8 @@ export const Workspace: React.FC = () => {
         return result;
       };
 
-      // Multi-user mode: use user-specific URL with token and openace_url
-      if (config.multi_user_mode && userWebUI?.success) {
+      // Use user-specific URL with token and openace_url when available
+      if (userWebUI?.success) {
         const baseUrl = userWebUI.url;
         const token = userWebUI.token;
         const openaceUrl = userWebUI.openace_url;
@@ -438,11 +440,11 @@ export const Workspace: React.FC = () => {
 
   // Initialize tabs when config is loaded (Issue #65: Restore from store if available)
   useEffect(() => {
-    // Wait for both config and userWebUI (in multi-user mode) to be loaded
+    // Wait for config and userWebUI to be loaded
     if (!config?.enabled) return;
 
-    // In multi-user mode, wait for userWebUI to be loaded
-    if (config.multi_user_mode && !userWebUI?.success) return;
+    // Wait for userWebUI to finish loading (it's loaded in both modes now)
+    if (isLoading) return;
 
     // Skip if tabs already initialized
     if (tabsInitialized) return;
