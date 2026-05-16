@@ -58,8 +58,10 @@ def login_via_api():
         json={"username": TEST_USER, "password": TEST_PASS},
     )
     assert resp.status_code == 200, f"Login failed: {resp.text}"
-    data = resp.json()
-    return data.get("token") or resp.cookies.get("session")
+    # session_token is set via Set-Cookie header
+    token = resp.cookies.get("session_token")
+    assert token, f"No session_token cookie found. Cookies: {dict(resp.cookies)}"
+    return token
 
 
 # ═══════════════════════════════════════════════════════════
