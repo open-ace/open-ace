@@ -1099,6 +1099,7 @@ def start_terminal():
     # Fall back to request.host_url if external_url not configured
     backend_url = agent_mgr._get_backend_url()
     proxy_url = f"{backend_url}/api/remote/llm-proxy"
+    logger.info("start_terminal: backend_url=%s, proxy_url=%s", backend_url, proxy_url)
 
     # Send start_terminal command to agent
     cmd = {
