@@ -8,6 +8,8 @@
 
 import React, { useEffect, useRef, useCallback, useState } from 'react';
 import '@xterm/xterm/css/xterm.css';
+import type { Terminal } from '@xterm/xterm';
+import type { FitAddon } from '@xterm/addon-fit';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 
@@ -30,9 +32,9 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
 }) => {
   const language = useLanguage();
   const terminalRef = useRef<HTMLDivElement>(null);
-  const xtermRef = useRef<any>(null);
+  const xtermRef = useRef<Terminal | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
-  const fitAddonRef = useRef<any>(null);
+  const fitAddonRef = useRef<FitAddon | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectCountRef = useRef(0);
 

@@ -25,6 +25,9 @@ from app.modules.workspace.terminal_store import terminal_info_store
 
 logger = logging.getLogger(__name__)
 
+MAX_RAW_CONTENT_LENGTH = 100000
+MAX_MESSAGE_LENGTH = 50000
+
 remote_bp = Blueprint("remote", __name__)
 
 
@@ -999,7 +1002,7 @@ def agent_message():
                     content_blocks = msg.get("content_blocks")
                     usage = msg.get("usage", {})
 
-                    if not content or len(content) > 100000:
+                    if not content or len(content) > MAX_RAW_CONTENT_LENGTH:
                         continue
 
                     input_tokens = usage.get("input_tokens", 0) if isinstance(usage, dict) else 0
@@ -1021,7 +1024,7 @@ def agent_message():
                         sync_session_mgr.add_message(
                             session_id=session_id,
                             role=role,
-                            content=content[:50000],
+                            content=content[:MAX_MESSAGE_LENGTH],
                             tokens_used=tokens_used,
                             model=msg_model,
                             metadata=metadata,
@@ -1035,7 +1038,7 @@ def agent_message():
                         {
                             "session_id": session_id,
                             "role": role,
-                            "content": content[:50000],
+                            "content": content[:MAX_MESSAGE_LENGTH],
                             "content_blocks": content_blocks,
                         },
                         ensure_ascii=False,
@@ -1057,7 +1060,7 @@ def agent_message():
                                     machine_id[:8],
                                     message_id,
                                     role,
-                                    content[:50000],
+                                    content[:MAX_MESSAGE_LENGTH],
                                     full_entry_json,
                                     tokens_used,
                                     input_tokens,
