@@ -969,6 +969,20 @@ def agent_message():
             },
         )
 
+        # Update agent_sessions status
+        from app.modules.workspace.session_manager import get_session_manager
+
+        sm = get_session_manager()
+        if terminal_id and status:
+            if status == "stopped":
+                sm.complete_session(terminal_id)
+                logger.info(f"Terminal session {terminal_id[:8]} marked as completed")
+            elif status == "running":
+                sm.update_session_fields(terminal_id, {"status": "active"})
+            elif status == "error":
+                sm.update_session_fields(terminal_id, {"status": "error"})
+                logger.warning(f"Terminal session {terminal_id[:8]} error: {error}")
+
         return jsonify({"success": True})
 
     elif msg_type == "session_sync":
@@ -1083,8 +1097,37 @@ def start_terminal():
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
 
+    # Get machine info for title/hostname
+    machine = agent_mgr.get_machine(machine_id)
+    machine_name = machine.get("machine_name", machine_id[:8]) if machine else machine_id[:8]
+    hostname = machine.get("hostname", machine_id[:8]) if machine else machine_id[:8]
+
     # Generate terminal ID and proxy tokens for multiple providers
     terminal_id = str(uuid.uuid4())
+
+    # Create agent_sessions record for terminal
+    from app.modules.workspace.session_manager import get_session_manager
+
+    sm = get_session_manager()
+    sm.create_session(
+        session_id=terminal_id,
+        tool_name="claude-code",
+        user_id=g.user["id"],
+        title=f"Terminal: {machine_name}",
+        host_name=hostname,
+        project_path=work_dir or "",
+    )
+    # Update workspace_type and remote_machine_id columns
+    sm.update_session_fields(
+        terminal_id,
+        {
+            "workspace_type": "terminal",
+            "remote_machine_id": machine_id,
+        },
+    )
+    logger.info(
+        f"Created terminal session {terminal_id} for user {g.user['id']} on machine {machine_id}"
+    )
 
     # Generate proxy tokens for LLM API auth through the terminal
     api_proxy = get_api_key_proxy_service()
@@ -1159,6 +1202,13 @@ def stop_terminal():
 
     # Clean up local store
     terminal_info_store.pop(machine_id, terminal_id)
+
+    # Update session status to completed
+    from app.modules.workspace.session_manager import get_session_manager
+
+    sm = get_session_manager()
+    sm.complete_session(terminal_id)
+    logger.info(f"Completed terminal session {terminal_id}")
 
     return jsonify({"success": True})
 
@@ -1533,9 +1583,13 @@ def _record_llm_usage(
             sm = get_session_manager()
             session = sm.get_session(session_id)
             if session:
-                session.total_input_tokens += input_tokens
-                session.total_output_tokens += output_tokens
-                session.total_tokens += input_tokens + output_tokens
+                # Handle None values for token counts (new sessions)
+                session.total_input_tokens = (session.total_input_tokens or 0) + input_tokens
+                session.total_output_tokens = (session.total_output_tokens or 0) + output_tokens
+                session.total_tokens = (session.total_tokens or 0) + input_tokens + output_tokens
+                session.request_count = (
+                    session.request_count or 0
+                ) + 1  # Increment request count for each API call
                 sm.update_session(session)
 
             # Refresh user_daily_stats so quota checks see up-to-date data

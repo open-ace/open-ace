@@ -1023,7 +1023,7 @@ class UsageRepository:
             (f"{escape_like(system_account)}%", start_date, end_date),
         )
 
-        # Remote session usage from agent_sessions
+        # Remote session usage from agent_sessions (includes terminal sessions)
         remote_row = self.db.fetch_one(
             """
             SELECT
@@ -1035,7 +1035,7 @@ class UsageRepository:
                 ), 0) as requests
             FROM agent_sessions
             WHERE user_id = ?
-              AND workspace_type = 'remote'
+              AND workspace_type IN ('remote', 'terminal')
               AND CAST(created_at AS DATE) >= ? AND CAST(created_at AS DATE) <= ?
         """,
             (user_id, start_date, end_date),
@@ -1081,12 +1081,12 @@ class UsageRepository:
             (f"{escape_like(system_account)}%", start_date, end_date),
         )
 
-        # Remote session usage from agent_sessions + session_messages
+        # Remote session usage from agent_sessions + session_messages (includes terminal)
         remote_rows = self.db.fetch_all(
             """
             SELECT
                 CAST(s.created_at AS DATE) as date,
-                'remote' as tool_name,
+                s.workspace_type as tool_name,
                 SUM(s.total_tokens) as tokens_used,
                 SUM(s.total_input_tokens) as input_tokens,
                 SUM(s.total_output_tokens) as output_tokens,
@@ -1097,9 +1097,9 @@ class UsageRepository:
                 ) as request_count
             FROM agent_sessions s
             WHERE s.user_id = ?
-              AND s.workspace_type = 'remote'
+              AND s.workspace_type IN ('remote', 'terminal')
               AND CAST(s.created_at AS DATE) >= ? AND CAST(s.created_at AS DATE) <= ?
-            GROUP BY CAST(s.created_at AS DATE)
+            GROUP BY CAST(s.created_at AS DATE), s.workspace_type
             ORDER BY CAST(s.created_at AS DATE) DESC
         """,
             (user_id, start_date, end_date),

@@ -440,8 +440,9 @@ class SessionManager:
             f"""
             INSERT INTO agent_sessions
             (session_id, session_type, title, tool_name, host_name, user_id, project_id,
-             project_path, status, context, settings, model, expires_at, created_at, updated_at)
-            VALUES ({_params(15)})
+             project_path, status, context, settings, model, expires_at, created_at, updated_at,
+             request_count, total_tokens, total_input_tokens, total_output_tokens, message_count)
+            VALUES ({_params(20)})
         """,
             (
                 session.session_id,
@@ -459,6 +460,11 @@ class SessionManager:
                 session.expires_at.isoformat() if session.expires_at else None,
                 session.created_at.isoformat() if session.created_at else None,
                 session.updated_at.isoformat() if session.updated_at else None,
+                session.request_count or 0,
+                session.total_tokens or 0,
+                session.total_input_tokens or 0,
+                session.total_output_tokens or 0,
+                session.message_count or 0,
             ),
         )
 
@@ -557,6 +563,51 @@ class SessionManager:
                 session.paused_at.isoformat() if session.paused_at else None,
                 session.session_id,
             ),
+        )
+
+        success = cursor.rowcount > 0
+        conn.commit()
+        conn.close()
+
+        return success
+
+    def update_session_fields(self, session_id: str, fields: dict[str, Any]) -> bool:
+        """
+        Update specific fields of a session.
+
+        Args:
+            session_id: Session ID to update.
+            fields: Dictionary of field names and values to update.
+
+        Returns:
+            bool: True if update was successful.
+        """
+        if not session_id or not fields:
+            return False
+
+        p = _param()
+        # Build SET clause
+        sets = ", ".join([f"{k} = {p}" for k in fields])
+        # Add updated_at
+        sets += f", updated_at = {p}"
+        values = [fields[k] for k in fields]
+        # Handle JSON fields
+        json_fields = ["context", "settings", "tags"]
+        for i, k in enumerate(fields.keys()):
+            if k in json_fields and isinstance(values[i], (dict, list)):
+                values[i] = json.dumps(values[i])
+            elif k in ["updated_at", "completed_at", "paused_at", "expires_at"] and values[i]:
+                if isinstance(values[i], datetime):
+                    values[i] = values[i].isoformat()
+        values.append(datetime.utcnow().isoformat())
+        values.append(session_id)
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            f"UPDATE agent_sessions SET {sets} WHERE session_id = {p}",
+            values,
         )
 
         success = cursor.rowcount > 0
