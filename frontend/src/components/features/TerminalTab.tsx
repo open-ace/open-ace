@@ -19,6 +19,7 @@ interface TerminalTabProps {
   isActive: boolean;
   machineName?: string;
   onError?: (error: string) => void;
+  onAuthFailed?: () => void;
 }
 
 export const TerminalTab: React.FC<TerminalTabProps> = ({
@@ -27,6 +28,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   isActive,
   machineName,
   onError,
+  onAuthFailed,
 }) => {
   const language = useLanguage();
   const terminalRef = useRef<HTMLDivElement>(null);
@@ -101,6 +103,13 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
       ws.onclose = (event) => {
         console.log('[TerminalTab] WebSocket CLOSED:', event.code, event.reason);
         setConnectionState('disconnected');
+        if (event.code === 4001) {
+          if (xtermRef.current) {
+            xtermRef.current.writeln('\r\n\x1b[33mAuthentication failed. Reconnecting...\x1b[0m\r\n');
+          }
+          onAuthFailed?.();
+          return;
+        }
         if (xtermRef.current) {
           xtermRef.current.writeln('\r\n\x1b[33mConnection closed. Reconnecting...\x1b[0m\r\n');
         }
@@ -127,7 +136,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
       }
       onError?.(errorMsg);
     }
-  }, [wsUrl, token, onError]);
+  }, [wsUrl, token, onError, onAuthFailed]);
 
   // Initialize xterm.js
   useEffect(() => {

@@ -599,8 +599,8 @@ export const Workspace: React.FC = () => {
             ...storedTab,
             url: '',
             token: '',
-            terminalWsUrl: storedTab.terminalWsUrl ?? '',
-            terminalToken: storedTab.terminalToken ?? '',
+            terminalWsUrl: '',
+            terminalToken: '',
           };
         }
 
@@ -1704,6 +1704,12 @@ export const Workspace: React.FC = () => {
                 onError={(error) => {
                   console.error('Terminal error:', error);
                   toast.error(t('terminalError', language), error);
+                }}
+                onAuthFailed={() => {
+                  setTabs(prev => prev.map(t =>
+                    t.id === tab.id ? { ...t, terminalWsUrl: '', terminalToken: '' } : t
+                  ));
+                  terminalAttachAttemptedRefs.current.delete(tab.id);
                 }}
               />
             ) : (
