@@ -143,18 +143,22 @@ def _build_env() -> dict[str, str]:
 
 def _write_banner(master_fd: int) -> None:
     """Write a welcome banner to the terminal."""
+    # Use simpler formatting without ANSI codes to avoid encoding issues
     banner_lines = [
         "",
-        "\033[1;36m========================================\033[0m",
-        "\033[1;36m  Open ACE Remote Terminal\033[0m",
-        "\033[1;36m========================================\033[0m",
+        "========================================",
+        "  Open ACE Remote Terminal",
+        "========================================",
     ]
     if PROXY_URL:
         banner_lines.extend(
             [
                 "",
-                "\033[2m  Claude Code is pre-configured.\033[0m",
-                "\033[2m  Run: claude\033[0m",
+                "  AI assistants available:",
+                "    claude  - Anthropic Claude Code CLI",
+                "    qwen    - Qwen Code CLI",
+                "",
+                "  Run 'claude' or 'qwen' to start.",
                 "",
             ]
         )
@@ -189,21 +193,26 @@ async def _handle_connection(websocket) -> None:
     env = _build_env()
     work_dir = WORK_DIR or os.path.expanduser("~")
 
-    # Create bashrc with claude alias if proxy is configured
+    # Update bashrc with aliases if proxy is configured
     if PROXY_URL and PROXY_TOKEN:
         bashrc_path = os.path.join(os.path.expanduser("~"), ".bashrc")
         try:
-            # Append alias to .bashrc if not already present
-            alias_line = "alias claude='claude --bare'"
+            # Append aliases to .bashrc if not already present
+            aliases = [
+                "alias claude='claude --bare'",
+                "alias qwen='qwen-code'",
+            ]
             try:
                 with open(bashrc_path) as f:
                     existing = f.read()
             except FileNotFoundError:
                 existing = ""
-            if alias_line not in existing:
+            new_aliases = [a for a in aliases if a not in existing]
+            if new_aliases:
                 with open(bashrc_path, "a") as f:
-                    f.write("\n# Open ACE: use --bare mode for proxy\n")
-                    f.write(alias_line + "\n")
+                    f.write("\n# Open ACE: AI assistant aliases for proxy\n")
+                    for alias in new_aliases:
+                        f.write(alias + "\n")
         except Exception as e:
             logger.warning("Failed to update bashrc: %s", e)
 
