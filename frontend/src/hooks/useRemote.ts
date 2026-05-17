@@ -4,7 +4,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { remoteApi } from '@/api';
-import type { StoreApiKeyRequest, CreateRemoteSessionRequest } from '@/api';
+import type { StoreApiKeyRequest, UpdateApiKeyRequest, CreateRemoteSessionRequest } from '@/api';
 
 // ==================== Machine Hooks ====================
 

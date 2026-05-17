@@ -33,7 +33,7 @@ const providerOptions = [
 
 const providerBadgeVariant: Record<string, BadgeVariant> = {
   openai: 'success',
-  anthropic: 'danger',
+  anthropic: 'primary',
   google: 'primary',
 };
 
@@ -57,15 +57,14 @@ const defaultQwenSettings = `{
     "openai": [
       {
         "id": "glm-5",
-        "name": "[z.ai] glm-5",
-        "envKey": "ZAI_API_KEY",
-        "generationConfig": {
-          "extra_body": {"enable_thinking": true}
-        }
+        "name": "glm-5",
+        "envKey": "BAILIAN_CODING_PLAN_API_KEY"
       }
     ]
   },
-  "model": {"name": "glm-5"}
+  "model": {
+    "name": "glm-5"
+  }
 }`;
 
 export const APIKeyManagement: React.FC = () => {
