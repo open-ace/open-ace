@@ -865,8 +865,8 @@ export const Workspace: React.FC = () => {
       const machineId = tab.machineId!;
 
       // Skip if already attempted attach
-      if (terminalAttachAttemptedRefs.current.get(tabId)) continue;
-      terminalAttachAttemptedRefs.current.set(tabId, true);
+      if (terminalAttachAttemptedRefs.current.get(terminalId)) continue;
+      terminalAttachAttemptedRefs.current.set(terminalId, true);
 
       console.log('[Terminal] Attaching to existing terminal:', {
         tabId,
@@ -929,6 +929,73 @@ export const Workspace: React.FC = () => {
                       : t
                   )
                 );
+              } else if (status.terminal.status === 'not_found') {
+                // Terminal no longer exists on agent - create a new one
+                console.log('[Terminal] Terminal not found on agent, creating new');
+                try {
+                  const startResult = await remoteApi.startTerminal({
+                    machine_id: machineId,
+                    work_dir: '',
+                  });
+                  if (startResult.success && startResult.terminal) {
+                    const newTerminalId = startResult.terminal.terminal_id;
+                    const newWsUrl = startResult.terminal.ws_url || '';
+                    const newToken = startResult.terminal.token || '';
+
+                    setTabs((prev) =>
+                      prev.map((t) =>
+                        t.id === tabId
+                          ? {
+                              ...t,
+                              terminalId: newTerminalId,
+                              terminalWsUrl: newWsUrl,
+                              terminalToken: newToken,
+                            }
+                          : t
+                      )
+                    );
+                    updateStoredTab(tabId, {
+                      terminalId: newTerminalId,
+                      terminalWsUrl: newWsUrl,
+                      terminalToken: newToken,
+                    } as any);
+
+                    // Poll for proxy URL
+                    const pollNewTerminal = async (pollAttempt: number) => {
+                      if (pollAttempt > 30) return;
+                      if (pollAttempt > 0) await new Promise((r) => setTimeout(r, 1000));
+                      try {
+                        const newStatus = await remoteApi.getTerminalStatus(newTerminalId, machineId);
+                        const newWs = newStatus.terminal.ws_url || '';
+                        const hasProxy = newWs.includes('localhost') || newWs.includes('127.0.0.1');
+                        if (newStatus.terminal.status === 'running' && hasProxy) {
+                          setTabs((prev) =>
+                            prev.map((t) =>
+                              t.id === tabId
+                                ? {
+                                    ...t,
+                                    terminalWsUrl: newStatus.terminal.ws_url!,
+                                    terminalToken: newStatus.terminal.token!,
+                                  }
+                                : t
+                            )
+                          );
+                          updateStoredTab(tabId, {
+                            terminalWsUrl: newStatus.terminal.ws_url!,
+                            terminalToken: newStatus.terminal.token!,
+                          });
+                        } else if (newStatus.terminal.status !== 'error') {
+                          pollNewTerminal(pollAttempt + 1);
+                        }
+                      } catch {
+                        pollNewTerminal(pollAttempt + 1);
+                      }
+                    };
+                    pollNewTerminal(0);
+                  }
+                } catch (startErr) {
+                  console.error('[Terminal] Failed to create new terminal:', startErr);
+                }
               } else {
                 pollForAttach(attempt + 1);
               }
@@ -1709,7 +1776,9 @@ export const Workspace: React.FC = () => {
                   setTabs(prev => prev.map(t =>
                     t.id === tab.id ? { ...t, terminalWsUrl: '', terminalToken: '' } : t
                   ));
-                  terminalAttachAttemptedRefs.current.delete(tab.id);
+                  if (tab.terminalId) {
+                    terminalAttachAttemptedRefs.current.delete(tab.terminalId);
+                  }
                 }}
               />
             ) : (

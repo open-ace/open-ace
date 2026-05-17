@@ -758,9 +758,16 @@ class RemoteAgent:
                 self._terminal_tokens.pop(terminal_id, None)
                 self._terminal_ws_urls.pop(terminal_id, None)
 
-        # Terminal not found or exited - start a new one
-        logger.info("Terminal %s not found or exited, starting new", terminal_id[:8])
-        self._cmd_start_terminal(data)
+        # Terminal not found - report back so frontend can decide
+        logger.info("Terminal %s not found or exited", terminal_id[:8])
+        self._http_send(
+            {
+                "type": "terminal_status",
+                "terminal_id": terminal_id,
+                "machine_id": self.config.machine_id,
+                "status": "not_found",
+            }
+        )
 
     def _stop_terminal_process(self, terminal_id: str) -> None:
         """Stop a terminal server process."""
