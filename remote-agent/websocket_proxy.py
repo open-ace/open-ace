@@ -18,6 +18,10 @@ import logging
 import sys
 import urllib.parse
 
+# Force default asyncio event loop policy to avoid gevent interference
+# when spawned from a gevent-patched parent process
+asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
+
 try:
     import websockets
 except ImportError:

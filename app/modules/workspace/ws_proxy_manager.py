@@ -203,13 +203,20 @@ class WebSocketProxyManager:
         start = time.time()
 
         while time.time() - start < timeout:
-            if process.poll() is not None:
+            poll_result = process.poll()
+            if poll_result is not None:
                 # Process exited
                 try:
                     stderr = process.stderr.read().decode() if process.stderr else ""
-                    logger.error("Proxy process exited early: %s", stderr[:500])
-                except Exception:
-                    pass
+                    stdout = process.stdout.read().decode() if process.stdout else ""
+                    logger.error(
+                        "Proxy process exited early (code=%s): stderr=%s stdout=%s",
+                        poll_result,
+                        stderr[:500],
+                        stdout[:200],
+                    )
+                except Exception as read_err:
+                    logger.error("Proxy process exited, read error: %s", read_err)
                 return False
 
             # Check stdout for READY signal (non-blocking read)
