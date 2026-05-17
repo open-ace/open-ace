@@ -43,8 +43,21 @@ export interface SessionMessage {
   tokens_used: number;
   model: string | null;
   timestamp: string | null;
-  metadata: Record<string, unknown>;
+  metadata: SessionMessageMetadata;
 }
+
+export interface SessionMessageMetadata {
+  content_blocks?: ContentBlock[];
+  input_tokens?: number;
+  output_tokens?: number;
+  [key: string]: unknown;
+}
+
+export type ContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'thinking'; thinking: string }
+  | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
+  | { type: 'tool_result'; tool_use_id: string; content: string | ContentBlock[] };
 
 export interface SessionFilters {
   tool_name?: string;

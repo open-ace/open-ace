@@ -40,6 +40,7 @@ class RemoteSessionManager:
 
     # Class-level buffer for accumulating assistant text across requests
     _assistant_text_buffer: dict[str, str] = {}
+    _content_blocks_buffer: dict[str, list[dict]] = {}
     _buffer_lock = threading.Lock()
 
     def __init__(self):
@@ -502,17 +503,26 @@ class RemoteSessionManager:
                 return
 
             text_parts = []
+            structured_blocks = []
             for block in content:
-                if isinstance(block, dict) and block.get("type") == "text":
+                if not isinstance(block, dict):
+                    continue
+                block_type = block.get("type")
+                if block_type == "text":
                     text = block.get("text", "")
                     if text:
                         text_parts.append(text)
+                if block_type in ("text", "tool_use", "thinking", "tool_result"):
+                    structured_blocks.append(block)
 
             if text_parts:
                 combined = "".join(text_parts)
                 with self._buffer_lock:
                     buf = self._assistant_text_buffer.get(session_id, "")
                     self._assistant_text_buffer[session_id] = buf + combined
+                    blocks_buf = self._content_blocks_buffer.get(session_id, [])
+                    blocks_buf.extend(structured_blocks)
+                    self._content_blocks_buffer[session_id] = blocks_buf
 
         elif msg_type == "message":
             role = parsed.get("role")
@@ -522,14 +532,29 @@ class RemoteSessionManager:
                     with self._buffer_lock:
                         buf = self._assistant_text_buffer.get(session_id, "")
                         self._assistant_text_buffer[session_id] = buf + content
+                        blocks_buf = self._content_blocks_buffer.get(session_id, [])
+                        blocks_buf.append({"type": "text", "text": content})
+                        self._content_blocks_buffer[session_id] = blocks_buf
                 elif isinstance(content, list):
+                    text_parts = []
+                    structured_blocks = []
                     for block in content:
-                        if isinstance(block, dict) and block.get("type") == "text":
+                        if not isinstance(block, dict):
+                            continue
+                        block_type = block.get("type")
+                        if block_type == "text":
                             text = block.get("text", "")
                             if text:
-                                with self._buffer_lock:
-                                    buf = self._assistant_text_buffer.get(session_id, "")
-                                    self._assistant_text_buffer[session_id] = buf + text
+                                text_parts.append(text)
+                        if block_type in ("text", "tool_use", "thinking", "tool_result"):
+                            structured_blocks.append(block)
+                    if text_parts:
+                        with self._buffer_lock:
+                            buf = self._assistant_text_buffer.get(session_id, "")
+                            self._assistant_text_buffer[session_id] = buf + "".join(text_parts)
+                            blocks_buf = self._content_blocks_buffer.get(session_id, [])
+                            blocks_buf.extend(structured_blocks)
+                            self._content_blocks_buffer[session_id] = blocks_buf
 
         elif msg_type == "result":
             # End of turn — flush accumulated assistant text
@@ -539,12 +564,17 @@ class RemoteSessionManager:
         """Flush accumulated assistant text to DB."""
         with self._buffer_lock:
             text = self._assistant_text_buffer.pop(session_id, "")
+            blocks = self._content_blocks_buffer.pop(session_id, [])
 
         if text.strip():
+            metadata = {}
+            if blocks:
+                metadata["content_blocks"] = blocks
             self._session_manager.add_message(
                 session_id=session_id,
                 role="assistant",
                 content=text,
+                metadata=metadata if metadata else None,
             )
             self._save_to_daily_messages(session_id, "assistant", text)
 

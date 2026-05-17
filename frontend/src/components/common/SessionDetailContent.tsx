@@ -12,7 +12,7 @@ import { Badge } from './Badge';
 import type { BadgeVariant } from './Badge';
 import { formatDateTime, formatTokens } from '@/utils';
 import { useRemoteSession } from '@/hooks';
-import type { AgentSession, SessionMessage } from '@/api/sessions';
+import type { AgentSession, SessionMessage, ContentBlock } from '@/api/sessions';
 
 interface SessionDetailContentProps {
   session: AgentSession;
@@ -209,10 +209,10 @@ export const SessionDetailContent: React.FC<SessionDetailContentProps> = ({
                   {msg.tokens_used > 0 && ` • ${formatTokens(msg.tokens_used)} tokens`}
                 </small>
               </div>
-              <div
-                className="message-content"
-                style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
-                dangerouslySetInnerHTML={{ __html: highlightText(msg.content, searchText) }}
+              <MessageContent
+                msg={msg}
+                searchText={searchText}
+                highlightText={highlightText}
               />
             </div>
           ))
@@ -388,3 +388,140 @@ const RemoteOutputSection: React.FC<{ sessionId: string; language: Language }> =
     </div>
   );
 };
+
+/**
+ * MessageContent - Renders message content with structured block support.
+ * Falls back to plain text when no content_blocks are available.
+ */
+const MessageContent: React.FC<{
+  msg: SessionMessage;
+  searchText: string;
+  highlightText: (text: string, search: string) => string;
+}> = ({ msg, searchText, highlightText }) => {
+  const blocks = msg.metadata?.content_blocks as ContentBlock[] | undefined;
+
+  if (!blocks || blocks.length === 0) {
+    return (
+      <div
+        className="message-content"
+        style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
+        dangerouslySetInnerHTML={{ __html: highlightText(msg.content, searchText) }}
+      />
+    );
+  }
+
+  return (
+    <div className="message-content">
+      {blocks.map((block, idx) => (
+        <ContentBlockRenderer key={idx} block={block} searchText={searchText} highlightText={highlightText} />
+      ))}
+    </div>
+  );
+};
+
+/**
+ * ContentBlockRenderer - Renders a single content block based on its type.
+ */
+const ContentBlockRenderer: React.FC<{
+  block: ContentBlock;
+  searchText: string;
+  highlightText: (text: string, search: string) => string;
+}> = ({ block, searchText, highlightText }) => {
+  switch (block.type) {
+    case 'text':
+      return (
+        <div
+          style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
+          dangerouslySetInnerHTML={{ __html: highlightText(block.text, searchText) }}
+        />
+      );
+
+    case 'thinking':
+      return (
+        <details className="border-start border-3 border-secondary ps-2 mb-1">
+          <summary className="small text-muted" style={{ cursor: 'pointer' }}>
+            <i className="bi bi-lightbulb me-1" />
+            Thinking
+          </summary>
+          <div
+            className="mt-1 small text-muted"
+            style={{
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              maxHeight: '200px',
+              overflowY: 'auto',
+            }}
+          >
+            {block.thinking}
+          </div>
+        </details>
+      );
+
+    case 'tool_use':
+      return (
+        <details className="border-start border-3 border-info ps-2 mb-1">
+          <summary className="small" style={{ cursor: 'pointer' }}>
+            <Badge variant="info" className="me-1">Tool</Badge>
+            <span className="fw-medium">{block.name}</span>
+          </summary>
+          <div
+            className="mt-1 bg-dark text-light rounded p-2 small"
+            style={{
+              fontFamily: 'monospace',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              maxHeight: '200px',
+              overflowY: 'auto',
+            }}
+          >
+            {formatToolInput(block.input)}
+          </div>
+        </details>
+      );
+
+    case 'tool_result':
+      return (
+        <details className="border-start border-3 border-success ps-2 mb-1">
+          <summary className="small" style={{ cursor: 'pointer' }}>
+            <Badge variant="success" className="me-1">Result</Badge>
+          </summary>
+          <div
+            className="mt-1 bg-dark text-light rounded p-2 small"
+            style={{
+              fontFamily: 'monospace',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              maxHeight: '200px',
+              overflowY: 'auto',
+            }}
+          >
+            {typeof block.content === 'string'
+              ? block.content
+              : block.content
+                  ?.filter((b) => b.type === 'text')
+                  .map((b) => b.text)
+                  .join('\n') ?? ''}
+          </div>
+        </details>
+      );
+
+    default:
+      return null;
+  }
+};
+
+function formatToolInput(input: Record<string, unknown>): string {
+  try {
+    const sanitized: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(input)) {
+      if (typeof value === 'string' && value.length > 500) {
+        sanitized[key] = value.slice(0, 500) + '... [truncated]';
+      } else {
+        sanitized[key] = value;
+      }
+    }
+    return JSON.stringify(sanitized, null, 2);
+  } catch {
+    return String(input);
+  }
+}
