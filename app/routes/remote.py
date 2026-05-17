@@ -1083,16 +1083,24 @@ def start_terminal():
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
 
-    # Generate terminal ID and proxy token
+    # Generate terminal ID and proxy tokens for multiple providers
     terminal_id = str(uuid.uuid4())
 
-    # Generate a proxy token for LLM API auth through the terminal
+    # Generate proxy tokens for LLM API auth through the terminal
     api_proxy = get_api_key_proxy_service()
-    proxy_token = api_proxy.generate_proxy_token(
+    anthropic_token = api_proxy.generate_proxy_token(
         user_id=g.user["id"],
         session_id=terminal_id,
         tenant_id=1,
         provider="anthropic",
+        session_type="terminal",
+    )
+    openai_token = api_proxy.generate_proxy_token(
+        user_id=g.user["id"],
+        session_id=terminal_id,
+        tenant_id=1,
+        provider="openai",
+        session_type="terminal",
     )
 
     # Use external URL for LLM proxy (remote machine needs to access it)
@@ -1101,13 +1109,14 @@ def start_terminal():
     proxy_url = f"{backend_url}/api/remote/llm-proxy"
     logger.info("start_terminal: backend_url=%s, proxy_url=%s", backend_url, proxy_url)
 
-    # Send start_terminal command to agent
+    # Send start_terminal command to agent with tokens for both providers
     cmd = {
         "type": "command",
         "command": "start_terminal",
         "terminal_id": terminal_id,
         "proxy_url": proxy_url,
-        "proxy_token": proxy_token,
+        "anthropic_token": anthropic_token,
+        "openai_token": openai_token,
         "work_dir": work_dir or "",
     }
     agent_mgr.send_command(machine_id, cmd)
@@ -1300,6 +1309,9 @@ def llm_proxy(path=""):
     # Determine target URL
     if base_url:
         target_base = base_url.rstrip("/")
+        # If base_url already ends with /v1, strip the /v1 prefix from path
+        if target_base.endswith("/v1"):
+            target_base = target_base[:-3]  # Remove trailing /v1
     else:
         # Default provider URLs
         provider_urls = {

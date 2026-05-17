@@ -324,6 +324,7 @@ class APIKeyProxyService:
         tenant_id: int,
         provider: str,
         expires_minutes: int = 1440,
+        session_type: str = "agent",
     ) -> str:
         """
         Generate a proxy token for a remote agent session.
@@ -337,6 +338,7 @@ class APIKeyProxyService:
             tenant_id: Tenant ID for API key lookup.
             provider: LLM provider name.
             expires_minutes: Token validity in minutes (default 24 hours).
+            session_type: Type of session - "agent" or "terminal".
 
         Returns:
             Proxy token string.
@@ -348,6 +350,7 @@ class APIKeyProxyService:
             "session_id": session_id,
             "tenant_id": tenant_id,
             "provider": provider,
+            "session_type": session_type,
             "exp": (datetime.utcnow() + timedelta(minutes=expires_minutes)).isoformat(),
             "jti": secrets.token_hex(16),
         }
@@ -402,9 +405,10 @@ class APIKeyProxyService:
                 logger.warning("Proxy token expired")
                 return None
 
-            # Check session is still active
+            # Check session is still active (skip for terminal sessions)
             session_id = payload.get("session_id")
-            if session_id:
+            session_type = payload.get("session_type", "agent")
+            if session_id and session_type == "agent":
                 try:
                     from app.repositories.database import adapt_sql, get_db_connection
 

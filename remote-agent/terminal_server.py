@@ -19,6 +19,7 @@ import pty
 import select
 import signal
 import struct
+import subprocess
 import sys
 import termios
 import urllib.parse
@@ -36,7 +37,8 @@ logger = logging.getLogger("openace-terminal-server")
 # Globals set from CLI args
 AUTH_TOKEN = ""
 PROXY_URL = ""
-PROXY_TOKEN = ""
+ANTHROPIC_TOKEN = ""
+OPENAI_TOKEN = ""
 WORK_DIR = ""
 SHELL_CMD = ""
 
@@ -133,16 +135,40 @@ def _spawn_pty(shell_cmd: list[str], env: dict[str, str], work_dir: str) -> tupl
 def _build_env() -> dict[str, str]:
     """Build environment variables for the terminal process."""
     env = dict(os.environ)
-    if PROXY_URL and PROXY_TOKEN:
-        env["ANTHROPIC_API_KEY"] = PROXY_TOKEN
-        env["ANTHROPIC_BASE_URL"] = PROXY_URL
-        env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
+    if PROXY_URL:
+        # Anthropic/Claude Code configuration
+        if ANTHROPIC_TOKEN:
+            env["ANTHROPIC_API_KEY"] = ANTHROPIC_TOKEN
+            env["ANTHROPIC_BASE_URL"] = PROXY_URL
+            env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
+        # OpenAI/Qwen configuration
+        if OPENAI_TOKEN:
+            env["OPENAI_API_KEY"] = OPENAI_TOKEN
+            env["OPENAI_BASE_URL"] = PROXY_URL
     env["TERM"] = "xterm-256color"
     return env
 
 
+def _check_cli_installed(cli_name: str) -> bool:
+    """Check if a CLI tool is installed."""
+    try:
+        result = subprocess.run(
+            ["which", cli_name],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
 def _write_banner(master_fd: int) -> None:
     """Write a welcome banner to the terminal."""
+    # Check which CLI tools are installed
+    claude_installed = _check_cli_installed("claude")
+    qwen_installed = _check_cli_installed("qwen")
+
     # Use simpler formatting without ANSI codes to avoid encoding issues
     banner_lines = [
         "",
@@ -151,17 +177,41 @@ def _write_banner(master_fd: int) -> None:
         "========================================",
     ]
     if PROXY_URL:
-        banner_lines.extend(
-            [
-                "",
-                "  AI assistants available:",
-                "    claude  - Anthropic Claude Code CLI",
-                "    qwen    - Qwen Code CLI",
-                "",
-                "  Run 'claude' or 'qwen' to start.",
-                "",
-            ]
-        )
+        banner_lines.append("")
+        if ANTHROPIC_TOKEN or OPENAI_TOKEN:
+            banner_lines.append("  AI assistants:")
+            if ANTHROPIC_TOKEN:
+                status = "[installed]" if claude_installed else "[NOT installed]"
+                banner_lines.append(f"    claude  {status}")
+            if OPENAI_TOKEN:
+                status = "[installed]" if qwen_installed else "[NOT installed]"
+                banner_lines.append(f"    qwen    {status}")
+            banner_lines.append("")
+
+            # Show run commands or install hints
+            installed_clis = []
+            missing_clis = []
+            if ANTHROPIC_TOKEN:
+                if claude_installed:
+                    installed_clis.append("claude")
+                else:
+                    missing_clis.append(
+                        ("claude", "curl -fsSL https://claude.ai/install.sh | bash")
+                    )
+            if OPENAI_TOKEN:
+                if qwen_installed:
+                    installed_clis.append("qwen")
+                else:
+                    missing_clis.append(("qwen", "pip install qwen-code"))
+
+            if installed_clis:
+                banner_lines.append(f"  Run: {', '.join(installed_clis)}")
+            if missing_clis:
+                banner_lines.append("")
+                banner_lines.append("  Install missing tools:")
+                for name, cmd in missing_clis:
+                    banner_lines.append(f"    {cmd}")
+        banner_lines.append("")
     banner_lines.append("")
     banner = "\r\n".join(banner_lines)
     try:
@@ -193,28 +243,28 @@ async def _handle_connection(websocket) -> None:
     env = _build_env()
     work_dir = WORK_DIR or os.path.expanduser("~")
 
-    # Update bashrc with aliases if proxy is configured
-    if PROXY_URL and PROXY_TOKEN:
-        bashrc_path = os.path.join(os.path.expanduser("~"), ".bashrc")
+    # Update bashrc with aliases if tokens are configured
+    bashrc_path = os.path.join(os.path.expanduser("~"), ".bashrc")
+    try:
+        aliases = []
+        if ANTHROPIC_TOKEN:
+            aliases.append("alias claude='claude --bare'")
+        if OPENAI_TOKEN:
+            # qwen uses --auth-type openai and reads OPENAI_API_KEY env var
+            aliases.append("alias qwen='qwen --auth-type openai'")
         try:
-            # Append aliases to .bashrc if not already present
-            aliases = [
-                "alias claude='claude --bare'",
-                "alias qwen='qwen-code'",
-            ]
-            try:
-                with open(bashrc_path) as f:
-                    existing = f.read()
-            except FileNotFoundError:
-                existing = ""
-            new_aliases = [a for a in aliases if a not in existing]
-            if new_aliases:
-                with open(bashrc_path, "a") as f:
-                    f.write("\n# Open ACE: AI assistant aliases for proxy\n")
-                    for alias in new_aliases:
-                        f.write(alias + "\n")
-        except Exception as e:
-            logger.warning("Failed to update bashrc: %s", e)
+            with open(bashrc_path) as f:
+                existing = f.read()
+        except FileNotFoundError:
+            existing = ""
+        new_aliases = [a for a in aliases if a not in existing]
+        if new_aliases:
+            with open(bashrc_path, "a") as f:
+                f.write("\n# Open ACE: AI assistant aliases for proxy\n")
+                for alias in new_aliases:
+                    f.write(alias + "\n")
+    except Exception as e:
+        logger.warning("Failed to update bashrc: %s", e)
 
     try:
         master_fd, pid = _spawn_pty(cmd, env, work_dir)
@@ -252,20 +302,32 @@ async def _run_server(port: int) -> None:
 
 
 def main() -> None:
-    global AUTH_TOKEN, PROXY_URL, PROXY_TOKEN, WORK_DIR, SHELL_CMD
+    global AUTH_TOKEN, PROXY_URL, ANTHROPIC_TOKEN, OPENAI_TOKEN, WORK_DIR, SHELL_CMD
 
     parser = argparse.ArgumentParser(description="Open ACE WebSocket Terminal Server")
     parser.add_argument("--token", required=True, help="Authentication token")
     parser.add_argument("--port", type=int, default=0, help="Port to listen on (0=auto)")
     parser.add_argument("--proxy-url", default="", help="Open ACE LLM proxy URL")
-    parser.add_argument("--proxy-token", default="", help="Proxy token for LLM auth")
+    parser.add_argument(
+        "--anthropic-token",
+        default="",
+        help="Proxy token for Anthropic/Claude API (or --proxy-token for backward compat)",
+    )
+    parser.add_argument("--openai-token", default="", help="Proxy token for OpenAI/Qwen API")
+    parser.add_argument(
+        "--proxy-token",
+        default="",
+        help="(Deprecated) Single proxy token, use --anthropic-token instead",
+    )
     parser.add_argument("--work-dir", default="", help="Working directory")
     parser.add_argument("--shell", default="", help="Shell command")
     args = parser.parse_args()
 
     AUTH_TOKEN = args.token
     PROXY_URL = args.proxy_url
-    PROXY_TOKEN = args.proxy_token
+    # Support backward compat: --proxy-token maps to --anthropic-token
+    ANTHROPIC_TOKEN = args.anthropic_token or args.proxy_token
+    OPENAI_TOKEN = args.openai_token
     WORK_DIR = args.work_dir
     SHELL_CMD = args.shell
 

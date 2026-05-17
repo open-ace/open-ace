@@ -501,7 +501,9 @@ class RemoteAgent:
         """Handle a start_terminal command."""
         terminal_id = data.get("terminal_id", "")
         proxy_url = data.get("proxy_url", "")
-        proxy_token = data.get("proxy_token", "")
+        # Support both old single-token format and new multi-token format
+        anthropic_token = data.get("anthropic_token", data.get("proxy_token", ""))
+        openai_token = data.get("openai_token", "")
         work_dir = data.get("work_dir", os.path.expanduser("~"))
 
         logger.info("Starting terminal %s: work_dir=%s", terminal_id[:8], work_dir)
@@ -518,7 +520,7 @@ class RemoteAgent:
         script_dir = os.path.dirname(os.path.abspath(__file__))
         server_script = os.path.join(script_dir, "terminal_server.py")
 
-        # Build command
+        # Build command with tokens for multiple providers
         cmd = [
             sys.executable,
             server_script,
@@ -528,11 +530,12 @@ class RemoteAgent:
             "0",  # Auto-select port
             "--proxy-url",
             proxy_url,
-            "--proxy-token",
-            proxy_token,
-            "--work-dir",
-            work_dir,
+            "--anthropic-token",
+            anthropic_token,
         ]
+        if openai_token:
+            cmd.extend(["--openai-token", openai_token])
+        cmd.extend(["--work-dir", work_dir])
 
         try:
             proc = subprocess.Popen(
