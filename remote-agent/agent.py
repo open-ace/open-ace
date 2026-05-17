@@ -816,14 +816,18 @@ class RemoteAgent:
         self._running = False
 
     def _shutdown(self) -> None:
-        """Clean up all resources."""
+        """Clean up all resources.
+
+        Note: Terminal server processes are NOT killed on shutdown.
+        They are started with start_new_session=True and run independently,
+        allowing users to reconnect after agent restarts (browser refresh case).
+        """
         logger.info("Shutting down agent...")
         self._session_sync.stop()
         self._executor.stop_all()
-        # Stop all terminal server processes
-        for tid in list(self._terminal_processes.keys()):
-            self._stop_terminal_process(tid)
-        logger.info("Agent shutdown complete")
+        # Clear terminal process tracking (but don't kill them - they persist)
+        self._terminal_processes.clear()
+        logger.info("Agent shutdown complete (terminal servers left running)")
 
 
 def fix_stdin_for_service() -> None:
