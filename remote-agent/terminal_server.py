@@ -202,7 +202,7 @@ def _write_banner(master_fd: int) -> None:
                 if qwen_installed:
                     installed_clis.append("qwen")
                 else:
-                    missing_clis.append(("qwen", "pip install qwen-code"))
+                    missing_clis.append(("qwen", "npm install -g @qwen-code/qwen-code@latest"))
 
             if installed_clis:
                 banner_lines.append(f"  Run: {', '.join(installed_clis)}")
