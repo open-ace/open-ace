@@ -42,6 +42,14 @@ OPENAI_TOKEN = ""
 WORK_DIR = ""
 SHELL_CMD = ""
 
+# Track active connections for auto-shutdown
+_active_connections = 0
+_connections_lock = asyncio.Lock()
+
+# Timeout settings
+INITIAL_CONN_TIMEOUT_SECONDS = 120  # Wait 2 minutes for first connection
+IDLE_TIMEOUT_SECONDS = 60  # Exit after 60 seconds with no connections
+
 
 class TerminalSession:
     """Manages a PTY process bridged to a single WebSocket connection."""
@@ -222,83 +230,142 @@ def _write_banner(master_fd: int) -> None:
 
 async def _handle_connection(websocket) -> None:
     """Handle a new WebSocket connection."""
-    # Get request path - websockets 15.0.1 uses websocket.path attribute
-    # (remove_path_argument skips the path param when it has a default value)
-    raw_path = getattr(websocket, "path", "")
-    params = urllib.parse.parse_qs(urllib.parse.urlparse(raw_path).query)
-    token = params.get("token", [None])[0]
-    if not token or token != AUTH_TOKEN:
-        logger.warning("Rejected connection: invalid token")
-        await websocket.close(4001, "Authentication failed")
-        return
+    global _active_connections
 
-    # Parse terminal size from query params
-    cols = int(params.get("cols", ["80"])[0])
-    rows = int(params.get("rows", ["24"])[0])
+    # Track connection count
+    async with _connections_lock:
+        _active_connections += 1
+    logger.debug("Connection opened, active: %d", _active_connections)
 
-    # Build shell command
-    shell = SHELL_CMD or os.environ.get("SHELL", "/bin/bash")
-    cmd = [shell, "-l"]  # -l for login shell to load profiles
-
-    env = _build_env()
-    work_dir = WORK_DIR or os.path.expanduser("~")
-
-    # Update bashrc with aliases if tokens are configured
-    bashrc_path = os.path.join(os.path.expanduser("~"), ".bashrc")
     try:
-        aliases = []
-        if ANTHROPIC_TOKEN:
-            aliases.append("alias claude='claude --bare'")
-        if OPENAI_TOKEN:
-            # qwen uses --auth-type openai and reads OPENAI_API_KEY env var
-            aliases.append("alias qwen='qwen --auth-type openai'")
+        # Get request path - websockets 15.0.1 uses websocket.path attribute
+        # (remove_path_argument skips the path param when it has a default value)
+        raw_path = getattr(websocket, "path", "")
+        params = urllib.parse.parse_qs(urllib.parse.urlparse(raw_path).query)
+        token = params.get("token", [None])[0]
+        if not token or token != AUTH_TOKEN:
+            logger.warning("Rejected connection: invalid token")
+            await websocket.close(4001, "Authentication failed")
+            return
+
+        # Parse terminal size from query params
+        cols = int(params.get("cols", ["80"])[0])
+        rows = int(params.get("rows", ["24"])[0])
+
+        # Build shell command
+        shell = SHELL_CMD or os.environ.get("SHELL", "/bin/bash")
+        cmd = [shell, "-l"]  # -l for login shell to load profiles
+
+        env = _build_env()
+        work_dir = WORK_DIR or os.path.expanduser("~")
+
+        # Update bashrc with aliases if tokens are configured
+        bashrc_path = os.path.join(os.path.expanduser("~"), ".bashrc")
         try:
-            with open(bashrc_path) as f:
-                existing = f.read()
-        except FileNotFoundError:
-            existing = ""
-        new_aliases = [a for a in aliases if a not in existing]
-        if new_aliases:
-            with open(bashrc_path, "a") as f:
-                f.write("\n# Open ACE: AI assistant aliases for proxy\n")
-                for alias in new_aliases:
-                    f.write(alias + "\n")
-    except Exception as e:
-        logger.warning("Failed to update bashrc: %s", e)
+            aliases = []
+            if ANTHROPIC_TOKEN:
+                aliases.append("alias claude='claude --bare'")
+            if OPENAI_TOKEN:
+                # qwen uses --auth-type openai and reads OPENAI_API_KEY env var
+                aliases.append("alias qwen='qwen --auth-type openai'")
+            try:
+                with open(bashrc_path) as f:
+                    existing = f.read()
+            except FileNotFoundError:
+                existing = ""
+            new_aliases = [a for a in aliases if a not in existing]
+            if new_aliases:
+                with open(bashrc_path, "a") as f:
+                    f.write("\n# Open ACE: AI assistant aliases for proxy\n")
+                    for alias in new_aliases:
+                        f.write(alias + "\n")
+        except Exception as e:
+            logger.warning("Failed to update bashrc: %s", e)
 
-    try:
-        master_fd, pid = _spawn_pty(cmd, env, work_dir)
-    except Exception as e:
-        logger.error("Failed to spawn PTY: %s", e)
-        await websocket.close(1011, "Failed to create terminal")
-        return
+        try:
+            master_fd, pid = _spawn_pty(cmd, env, work_dir)
+        except Exception as e:
+            logger.error("Failed to spawn PTY: %s", e)
+            await websocket.close(1011, "Failed to create terminal")
+            return
 
-    session = TerminalSession(websocket, master_fd, pid)
-    session.resize(cols, rows)
+        session = TerminalSession(websocket, master_fd, pid)
+        session.resize(cols, rows)
 
-    # Write welcome banner
-    _write_banner(master_fd)
+        # Write welcome banner
+        _write_banner(master_fd)
 
-    logger.info("Terminal session started: pid=%d cols=%d rows=%d", pid, cols, rows)
+        logger.info("Terminal session started: pid=%d cols=%d rows=%d", pid, cols, rows)
 
-    try:
-        await asyncio.gather(session.relay_output(), session.relay_input())
+        try:
+            await asyncio.gather(session.relay_output(), session.relay_input())
+        finally:
+            session.kill()
+            try:
+                os.close(master_fd)
+            except OSError:
+                pass
+            logger.info("Terminal session ended: pid=%d", pid)
     finally:
-        session.kill()
-        try:
-            os.close(master_fd)
-        except OSError:
-            pass
-        logger.info("Terminal session ended: pid=%d", pid)
+        # Decrement connection count
+        async with _connections_lock:
+            _active_connections -= 1
+            logger.debug("Connection closed, active: %d", _active_connections)
 
 
 async def _run_server(port: int) -> None:
-    """Start the WebSocket server."""
+    """Start the WebSocket server.
+
+    Auto-shutdown after idle timeout with no active connections.
+    This prevents zombie processes when users refresh browser or close tabs
+    without explicitly calling stop_terminal.
+    """
     async with serve(_handle_connection, "0.0.0.0", port, subprotocols=["binary"]) as server:
         actual_port = server.sockets[0].getsockname()[1]
         logger.info("Terminal server listening on ws://0.0.0.0:%d", actual_port)
         print(f"READY:{actual_port}", flush=True)
-        await asyncio.Future()  # Block forever
+
+        # Phase 1: Wait for first connection
+        logger.info(
+            "Waiting for initial connection (timeout: %ds)...", INITIAL_CONN_TIMEOUT_SECONDS
+        )
+        start_time = asyncio.get_event_loop().time()
+        while True:
+            async with _connections_lock:
+                if _active_connections > 0:
+                    logger.info("First connection established")
+                    break
+            await asyncio.sleep(1)
+            elapsed = asyncio.get_event_loop().time() - start_time
+            if elapsed > INITIAL_CONN_TIMEOUT_SECONDS:
+                logger.info("No connection within %ds, exiting", INITIAL_CONN_TIMEOUT_SECONDS)
+                return
+
+        # Phase 2: Monitor for idle periods after having connections
+        idle_start: float | None = None
+        while True:
+            async with _connections_lock:
+                conn_count = _active_connections
+
+            if conn_count > 0:
+                # Active connections - reset idle timer
+                idle_start = None
+            else:
+                # No connections - start/continue idle timer
+                if idle_start is None:
+                    idle_start = asyncio.get_event_loop().time()
+                    logger.info(
+                        "All connections closed, starting idle timer (%ds)", IDLE_TIMEOUT_SECONDS
+                    )
+                else:
+                    idle_elapsed = asyncio.get_event_loop().time() - idle_start
+                    if idle_elapsed >= IDLE_TIMEOUT_SECONDS:
+                        logger.info(
+                            "Idle timeout (%ds) reached, shutting down", IDLE_TIMEOUT_SECONDS
+                        )
+                        return
+
+            await asyncio.sleep(2)
 
 
 def main() -> None:
