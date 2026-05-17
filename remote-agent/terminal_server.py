@@ -1,9 +1,9 @@
 """
-Open ACE Remote Agent - WebSocket Terminal Server
+Open ACE Remote Agent - WebSocket Terminal Server (Single-PTY Mode)
 
 Standalone asyncio WebSocket server that provides web-based terminal access.
-Each WebSocket connection spawns a PTY process with pre-configured environment
-for Claude Code (ANTHROPIC_API_KEY/BASE_URL pointing to Open-ACE proxy).
+PTY process is created once at startup and persists across WebSocket reconnections.
+This allows users to refresh browser and resume their terminal session.
 
 Started as a subprocess by the remote agent when a terminal session is requested.
 """
@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import fcntl
+import json
 import logging
 import os
 import pty
@@ -42,84 +43,239 @@ OPENAI_TOKEN = ""
 WORK_DIR = ""
 SHELL_CMD = ""
 
-# Track active connections for auto-shutdown
-_active_connections = 0
-_connections_lock = asyncio.Lock()
-
-# Timeout settings
-INITIAL_CONN_TIMEOUT_SECONDS = 120  # Wait 2 minutes for first connection
-IDLE_TIMEOUT_SECONDS = 60  # Exit after 60 seconds with no connections
+# Output history buffer size (for reconnection screen restore)
+OUTPUT_HISTORY_SIZE = 64 * 1024  # 64 KB
 
 
-class TerminalSession:
-    """Manages a PTY process bridged to a single WebSocket connection."""
+class SinglePtyTerminalServer:
+    """
+    Single-PTY terminal server with WebSocket reconnection support.
 
-    def __init__(self, websocket, master_fd: int, pid: int):
-        self.websocket = websocket
-        self.master_fd = master_fd
-        self.pid = pid
-        self._running = True
+    PTY is created at startup and persists across WebSocket connections.
+    When a WebSocket disconnects (browser refresh), the PTY continues running.
+    New WebSocket connections receive buffered output history for screen restore.
+    """
 
-    async def relay_output(self) -> None:
-        """Read PTY output and send to WebSocket."""
-        while self._running:
+    def __init__(self):
+        self.master_fd: int | None = None
+        self.pty_pid: int | None = None
+        self._output_buffer: bytearray = bytearray()
+        self._active_websockets: set = set()
+        self._pty_alive = True
+        self._output_lock = asyncio.Lock()
+        self._ws_lock = asyncio.Lock()
+        self._pty_cols = 80
+        self._pty_rows = 24
+
+    def spawn_pty(self) -> bool:
+        """Spawn PTY process once at startup."""
+        shell = SHELL_CMD or os.environ.get("SHELL", "/bin/bash")
+        cmd = [shell, "-l"]  # -l for login shell to load profiles
+        env = _build_env()
+        work_dir = WORK_DIR or os.path.expanduser("~")
+
+        # Update bashrc with aliases
+        self._update_bashrc()
+
+        try:
+            self.master_fd, self.pty_pid = _spawn_pty(cmd, env, work_dir)
+            logger.info(
+                "PTY spawned: pid=%d fd=%d work_dir=%s", self.pty_pid, self.master_fd, work_dir
+            )
+            return True
+        except Exception as e:
+            logger.error("Failed to spawn PTY: %s", e)
+            return False
+
+    def _update_bashrc(self) -> None:
+        """Update bashrc with AI CLI aliases."""
+        bashrc_path = os.path.join(os.path.expanduser("~"), ".bashrc")
+        try:
+            aliases = []
+            if ANTHROPIC_TOKEN:
+                aliases.append("alias claude='claude --bare'")
+            if OPENAI_TOKEN:
+                aliases.append("alias qwen='qwen --auth-type openai'")
             try:
-                ready, _, _ = select.select([self.master_fd], [], [], 0.05)
+                with open(bashrc_path) as f:
+                    existing = f.read()
+            except FileNotFoundError:
+                existing = ""
+            new_aliases = [a for a in aliases if a not in existing]
+            if new_aliases:
+                with open(bashrc_path, "a") as f:
+                    f.write("\n# Open ACE: AI assistant aliases for proxy\n")
+                    for alias in new_aliases:
+                        f.write(alias + "\n")
+        except Exception as e:
+            logger.warning("Failed to update bashrc: %s", e)
+
+    def resize_pty(self, cols: int, rows: int) -> None:
+        """Resize the PTY terminal."""
+        self._pty_cols = cols
+        self._pty_rows = rows
+        if self.master_fd is not None:
+            try:
+                winsize = struct.pack("HHHH", rows, cols, 0, 0)
+                fcntl.ioctl(self.master_fd, termios.TIOCSWINSZ, winsize)
+            except Exception as e:
+                logger.debug("Resize failed: %s", e)
+
+    def write_banner(self) -> None:
+        """Write welcome banner to PTY."""
+        if self.master_fd is not None:
+            _write_banner(self.master_fd)
+
+    async def add_websocket(self, websocket) -> bool:
+        """Add a WebSocket connection to the terminal."""
+        async with self._ws_lock:
+            self._active_websockets.add(websocket)
+            logger.info("WebSocket connected, active count: %d", len(self._active_websockets))
+        return True
+
+    async def remove_websocket(self, websocket) -> None:
+        """Remove a WebSocket connection (PTY keeps running)."""
+        async with self._ws_lock:
+            self._active_websockets.discard(websocket)
+            logger.info("WebSocket disconnected, active count: %d", len(self._active_websockets))
+
+    async def send_history_to_websocket(self, websocket) -> None:
+        """Send buffered output history to a new WebSocket connection."""
+        async with self._output_lock:
+            if len(self._output_buffer) > 0:
+                # Send last N bytes of history for screen restore
+                history = bytes(self._output_buffer[-OUTPUT_HISTORY_SIZE:])
+                try:
+                    await websocket.send(history)
+                    logger.debug("Sent %d bytes of history to new connection", len(history))
+                except Exception as e:
+                    logger.warning("Failed to send history: %s", e)
+
+    async def broadcast_output(self, data: bytes) -> None:
+        """Broadcast PTY output to all active WebSockets and buffer it."""
+        # Buffer the output for reconnection
+        async with self._output_lock:
+            self._output_buffer.extend(data)
+            # Limit buffer size
+            if len(self._output_buffer) > OUTPUT_HISTORY_SIZE * 2:
+                self._output_buffer = self._output_buffer[-OUTPUT_HISTORY_SIZE:]
+
+        # Broadcast to all active WebSockets
+        async with self._ws_lock:
+            dead_sockets = []
+            for ws in self._active_websockets:
+                try:
+                    await ws.send(data)
+                except Exception:
+                    dead_sockets.append(ws)
+            # Remove dead sockets
+            for ws in dead_sockets:
+                self._active_websockets.discard(ws)
+
+    async def relay_output_loop(self) -> None:
+        """Read PTY output continuously and broadcast to WebSockets."""
+        while self._pty_alive and self.master_fd is not None:
+            try:
+                ready, _, _ = select.select([self.master_fd], [], [], 0.1)
                 if ready:
-                    data = os.read(self.master_fd, 65536)
-                    if data:
-                        await self.websocket.send(data)
-                    else:
-                        self._running = False
+                    try:
+                        data = os.read(self.master_fd, 65536)
+                        if data:
+                            await self.broadcast_output(data)
+                        else:
+                            # PTY closed (process exited)
+                            logger.info("PTY output stream closed (process likely exited)")
+                            self._pty_alive = False
+                            break
+                    except OSError as e:
+                        logger.info("PTY read error: %s (process likely exited)", e)
+                        self._pty_alive = False
                         break
                 await asyncio.sleep(0.01)
-            except OSError:
-                self._running = False
+            except Exception as e:
+                logger.error("Output relay error: %s", e)
+                self._pty_alive = False
                 break
 
-    async def relay_input(self) -> None:
-        """Read WebSocket messages and write to PTY."""
-        while self._running:
-            try:
-                message = await self.websocket.recv()
+        # PTY exited - notify all WebSockets
+        if not self._pty_alive:
+            await self._notify_pty_exit()
+
+    async def _notify_pty_exit(self) -> None:
+        """Notify all WebSockets that PTY has exited."""
+        async with self._ws_lock:
+            for ws in self._active_websockets:
+                try:
+                    await ws.send(b"\r\n\x1b[33m[Terminal process exited]\x1b[0m\r\n")
+                except Exception:
+                    pass
+
+    async def handle_websocket_input(self, websocket) -> None:
+        """Handle input from a single WebSocket connection."""
+        try:
+            async for message in websocket:
+                if not self._pty_alive or self.master_fd is None:
+                    break
+
                 if isinstance(message, str):
                     # JSON control message (resize, etc.)
                     try:
-                        import json
-
                         ctrl = json.loads(message)
                         if ctrl.get("type") == "resize":
                             cols = ctrl.get("cols", 80)
                             rows = ctrl.get("rows", 24)
-                            self.resize(cols, rows)
+                            self.resize_pty(cols, rows)
                         continue
                     except (json.JSONDecodeError, ValueError):
                         # Not JSON, treat as raw text input
                         message = message.encode("utf-8")
+
                 if isinstance(message, bytes):
-                    os.write(self.master_fd, message)
-            except websockets.exceptions.ConnectionClosed:
-                self._running = False
-                break
-            except Exception:
-                self._running = False
-                break
-
-    def resize(self, cols: int, rows: int) -> None:
-        """Resize the PTY terminal."""
-        try:
-            winsize = struct.pack("HHHH", rows, cols, 0, 0)
-            fcntl.ioctl(self.master_fd, termios.TIOCSWINSZ, winsize)
+                    try:
+                        os.write(self.master_fd, message)
+                    except OSError as e:
+                        logger.warning("PTY write error: %s", e)
+                        break
+        except websockets.exceptions.ConnectionClosed:
+            logger.debug("WebSocket connection closed normally")
         except Exception as e:
-            logger.debug("Resize failed: %s", e)
+            logger.warning("WebSocket input error: %s", e)
 
-    def kill(self) -> None:
+    def kill_pty(self) -> None:
         """Terminate the PTY process."""
-        self._running = False
+        self._pty_alive = False
+        if self.pty_pid is not None:
+            try:
+                os.kill(self.pty_pid, signal.SIGTERM)
+                logger.info("Sent SIGTERM to PTY pid=%d", self.pty_pid)
+            except ProcessLookupError:
+                pass
+            except Exception as e:
+                logger.warning("Failed to kill PTY: %s", e)
+        if self.master_fd is not None:
+            try:
+                os.close(self.master_fd)
+            except OSError:
+                pass
+            self.master_fd = None
+
+    def is_pty_alive(self) -> bool:
+        """Check if PTY process is still running."""
+        if self.pty_pid is None:
+            return False
         try:
-            os.kill(self.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
+            # Check if process exists (doesn't raise if process is zombie)
+            pid, status = os.waitpid(self.pty_pid, os.WNOHANG)
+            if pid != 0:
+                # Process has exited
+                logger.info("PTY process %d exited with status %d", pid, status)
+                self._pty_alive = False
+                return False
+            return True
+        except ChildProcessError:
+            # No child process
+            self._pty_alive = False
+            return False
 
 
 def _spawn_pty(shell_cmd: list[str], env: dict[str, str], work_dir: str) -> tuple[int, int]:
@@ -228,144 +384,92 @@ def _write_banner(master_fd: int) -> None:
         pass
 
 
-async def _handle_connection(websocket) -> None:
-    """Handle a new WebSocket connection."""
-    global _active_connections
+# Global terminal server instance
+_terminal_server: SinglePtyTerminalServer | None = None
 
-    # Track connection count
-    async with _connections_lock:
-        _active_connections += 1
-    logger.debug("Connection opened, active: %d", _active_connections)
+
+async def _handle_connection(websocket) -> None:
+    """Handle a new WebSocket connection - attach to existing PTY."""
+    global _terminal_server
+
+    if _terminal_server is None:
+        logger.error("Terminal server not initialized")
+        await websocket.close(1011, "Server not ready")
+        return
+
+    # Authenticate
+    raw_path = getattr(websocket, "path", "")
+    params = urllib.parse.parse_qs(urllib.parse.urlparse(raw_path).query)
+    token = params.get("token", [None])[0]
+    if not token or token != AUTH_TOKEN:
+        logger.warning("Rejected connection: invalid token")
+        await websocket.close(4001, "Authentication failed")
+        return
+
+    # Check if PTY is alive
+    if not _terminal_server.is_pty_alive():
+        logger.warning("PTY has exited, rejecting connection")
+        await websocket.close(1011, "Terminal process has exited")
+        return
+
+    # Parse terminal size from query params
+    cols = int(params.get("cols", ["80"])[0])
+    rows = int(params.get("rows", ["24"])[0])
+
+    # Resize PTY to match client
+    _terminal_server.resize_pty(cols, rows)
+
+    # Add this WebSocket to active set
+    await _terminal_server.add_websocket(websocket)
 
     try:
-        # Get request path - websockets 15.0.1 uses websocket.path attribute
-        # (remove_path_argument skips the path param when it has a default value)
-        raw_path = getattr(websocket, "path", "")
-        params = urllib.parse.parse_qs(urllib.parse.urlparse(raw_path).query)
-        token = params.get("token", [None])[0]
-        if not token or token != AUTH_TOKEN:
-            logger.warning("Rejected connection: invalid token")
-            await websocket.close(4001, "Authentication failed")
-            return
+        # Send buffered history for screen restore
+        await _terminal_server.send_history_to_websocket(websocket)
 
-        # Parse terminal size from query params
-        cols = int(params.get("cols", ["80"])[0])
-        rows = int(params.get("rows", ["24"])[0])
-
-        # Build shell command
-        shell = SHELL_CMD or os.environ.get("SHELL", "/bin/bash")
-        cmd = [shell, "-l"]  # -l for login shell to load profiles
-
-        env = _build_env()
-        work_dir = WORK_DIR or os.path.expanduser("~")
-
-        # Update bashrc with aliases if tokens are configured
-        bashrc_path = os.path.join(os.path.expanduser("~"), ".bashrc")
-        try:
-            aliases = []
-            if ANTHROPIC_TOKEN:
-                aliases.append("alias claude='claude --bare'")
-            if OPENAI_TOKEN:
-                # qwen uses --auth-type openai and reads OPENAI_API_KEY env var
-                aliases.append("alias qwen='qwen --auth-type openai'")
-            try:
-                with open(bashrc_path) as f:
-                    existing = f.read()
-            except FileNotFoundError:
-                existing = ""
-            new_aliases = [a for a in aliases if a not in existing]
-            if new_aliases:
-                with open(bashrc_path, "a") as f:
-                    f.write("\n# Open ACE: AI assistant aliases for proxy\n")
-                    for alias in new_aliases:
-                        f.write(alias + "\n")
-        except Exception as e:
-            logger.warning("Failed to update bashrc: %s", e)
-
-        try:
-            master_fd, pid = _spawn_pty(cmd, env, work_dir)
-        except Exception as e:
-            logger.error("Failed to spawn PTY: %s", e)
-            await websocket.close(1011, "Failed to create terminal")
-            return
-
-        session = TerminalSession(websocket, master_fd, pid)
-        session.resize(cols, rows)
-
-        # Write welcome banner
-        _write_banner(master_fd)
-
-        logger.info("Terminal session started: pid=%d cols=%d rows=%d", pid, cols, rows)
-
-        try:
-            await asyncio.gather(session.relay_output(), session.relay_input())
-        finally:
-            session.kill()
-            try:
-                os.close(master_fd)
-            except OSError:
-                pass
-            logger.info("Terminal session ended: pid=%d", pid)
+        # Handle input from this WebSocket
+        await _terminal_server.handle_websocket_input(websocket)
     finally:
-        # Decrement connection count
-        async with _connections_lock:
-            _active_connections -= 1
-            logger.debug("Connection closed, active: %d", _active_connections)
+        # Remove WebSocket (PTY keeps running for reconnection)
+        await _terminal_server.remove_websocket(websocket)
 
 
 async def _run_server(port: int) -> None:
-    """Start the WebSocket server.
+    """Start the WebSocket server with a persistent PTY."""
+    global _terminal_server
 
-    Auto-shutdown after idle timeout with no active connections.
-    This prevents zombie processes when users refresh browser or close tabs
-    without explicitly calling stop_terminal.
-    """
-    async with serve(_handle_connection, "0.0.0.0", port, subprotocols=["binary"]) as server:
-        actual_port = server.sockets[0].getsockname()[1]
-        logger.info("Terminal server listening on ws://0.0.0.0:%d", actual_port)
-        print(f"READY:{actual_port}", flush=True)
+    # Create and spawn PTY once
+    _terminal_server = SinglePtyTerminalServer()
+    if not _terminal_server.spawn_pty():
+        logger.error("Failed to spawn PTY, exiting")
+        return
 
-        # Phase 1: Wait for first connection
-        logger.info(
-            "Waiting for initial connection (timeout: %ds)...", INITIAL_CONN_TIMEOUT_SECONDS
-        )
-        start_time = asyncio.get_event_loop().time()
-        while True:
-            async with _connections_lock:
-                if _active_connections > 0:
-                    logger.info("First connection established")
-                    break
-            await asyncio.sleep(1)
-            elapsed = asyncio.get_event_loop().time() - start_time
-            if elapsed > INITIAL_CONN_TIMEOUT_SECONDS:
-                logger.info("No connection within %ds, exiting", INITIAL_CONN_TIMEOUT_SECONDS)
-                return
+    # Write welcome banner
+    _terminal_server.write_banner()
 
-        # Phase 2: Monitor for idle periods after having connections
-        idle_start: float | None = None
-        while True:
-            async with _connections_lock:
-                conn_count = _active_connections
+    # Start output relay loop
+    output_task = asyncio.create_task(_terminal_server.relay_output_loop())
 
-            if conn_count > 0:
-                # Active connections - reset idle timer
-                idle_start = None
-            else:
-                # No connections - start/continue idle timer
-                if idle_start is None:
-                    idle_start = asyncio.get_event_loop().time()
-                    logger.info(
-                        "All connections closed, starting idle timer (%ds)", IDLE_TIMEOUT_SECONDS
-                    )
-                else:
-                    idle_elapsed = asyncio.get_event_loop().time() - idle_start
-                    if idle_elapsed >= IDLE_TIMEOUT_SECONDS:
-                        logger.info(
-                            "Idle timeout (%ds) reached, shutting down", IDLE_TIMEOUT_SECONDS
-                        )
-                        return
+    try:
+        async with serve(_handle_connection, "0.0.0.0", port, subprotocols=["binary"]) as server:
+            actual_port = server.sockets[0].getsockname()[1]
+            logger.info("Terminal server listening on ws://0.0.0.0:%d", actual_port)
+            logger.info("PTY pid=%d ready for connections", _terminal_server.pty_pid)
+            print(f"READY:{actual_port}", flush=True)
 
-            await asyncio.sleep(2)
+            # Wait until PTY exits or server is stopped
+            while _terminal_server.is_pty_alive():
+                await asyncio.sleep(1)
+
+            logger.info("PTY process exited, shutting down server")
+
+    finally:
+        # Cancel output task and clean up
+        output_task.cancel()
+        try:
+            await output_task
+        except asyncio.CancelledError:
+            pass
+        _terminal_server.kill_pty()
 
 
 def main() -> None:

@@ -1163,6 +1163,47 @@ def stop_terminal():
     return jsonify({"success": True})
 
 
+@remote_bp.route("/terminal/<terminal_id>/attach", methods=["POST"])
+def attach_terminal(terminal_id):
+    """Attach to existing terminal session (after browser refresh).
+
+    Allows user to reconnect to the same terminal session without losing
+    PTY state (e.g., Claude Code chat history).
+    """
+    data = request.get_json() or {}
+    machine_id = data.get("machine_id")
+
+    if not machine_id:
+        return jsonify({"error": "machine_id is required"}), 400
+
+    # Check access
+    agent_mgr = get_remote_agent_manager()
+    if g.user.get("role") != "admin":
+        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
+            return jsonify({"error": "Access denied"}), 403
+
+    # Send attach_terminal command to agent
+    cmd = {
+        "type": "command",
+        "command": "attach_terminal",
+        "terminal_id": terminal_id,
+        "machine_id": machine_id,
+    }
+    agent_mgr.send_command(machine_id, cmd)
+
+    # Return immediately with pending status; frontend polls status endpoint
+    return jsonify(
+        {
+            "success": True,
+            "terminal": {
+                "terminal_id": terminal_id,
+                "machine_id": machine_id,
+                "status": "pending",
+            },
+        }
+    )
+
+
 @remote_bp.route("/terminal/<terminal_id>/status", methods=["GET"])
 def get_terminal_status(terminal_id):
     """Get terminal status.

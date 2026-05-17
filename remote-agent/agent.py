@@ -356,6 +356,8 @@ class RemoteAgent:
             self._cmd_start_terminal(data)
         elif command == "stop_terminal":
             self._cmd_stop_terminal(data)
+        elif command == "attach_terminal":
+            self._cmd_attach_terminal(data)
         else:
             logger.warning("Unknown command: %s", command)
 
@@ -603,6 +605,42 @@ class RemoteAgent:
                 "status": "stopped",
             }
         )
+
+    def _cmd_attach_terminal(self, data: dict[str, Any]) -> None:
+        """Handle an attach_terminal command (reconnect to existing terminal).
+
+        Called when user refreshes browser and wants to reconnect to the same
+        terminal session without losing PTY state (e.g., Claude Code chat history).
+        """
+        terminal_id = data.get("terminal_id", "")
+        logger.info("Attaching to terminal %s", terminal_id[:8])
+
+        # Check if terminal server is still running
+        if terminal_id in self._terminal_processes:
+            proc = self._terminal_processes[terminal_id]
+            if proc.poll() is None:
+                # Terminal server still running - return existing info
+                port = self._terminal_ports.get(terminal_id)
+                term_token = self._terminal_tokens.get(terminal_id)
+                hostname = self._get_reachable_hostname()
+                ws_url = f"ws://{hostname}:{port}"
+
+                self._http_send(
+                    {
+                        "type": "terminal_status",
+                        "terminal_id": terminal_id,
+                        "machine_id": self.config.machine_id,
+                        "status": "running",
+                        "ws_url": ws_url,
+                        "token": term_token,
+                    }
+                )
+                logger.info("Terminal %s attached: %s", terminal_id[:8], ws_url)
+                return
+
+        # Terminal not found or exited - start a new one
+        logger.info("Terminal %s not found or exited, starting new", terminal_id[:8])
+        self._cmd_start_terminal(data)
 
     def _stop_terminal_process(self, terminal_id: str) -> None:
         """Stop a terminal server process."""

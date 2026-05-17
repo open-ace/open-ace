@@ -94,6 +94,9 @@ export const Workspace: React.FC = () => {
   // Track terminal polling that should be cancelled on tab close
   const terminalPollCancelRefs = useRef<Map<string, boolean>>(new Map());
 
+  // Track terminal attach attempts (to avoid duplicate attach calls)
+  const terminalAttachAttemptedRefs = useRef<Map<string, boolean>>(new Map());
+
   // Fullscreen state from global store
   const workspaceFullscreen = useWorkspaceFullscreen();
   const { toggleWorkspaceFullscreen, exitWorkspaceFullscreen } = useAppStore();
@@ -808,6 +811,111 @@ export const Workspace: React.FC = () => {
       }
     }
   }, [searchParams, tabsInitialized, config, toast, language, setSearchParams, updateStoredTab]);
+
+  // Attach to existing terminal tabs (restored from localStorage)
+  // This handles browser refresh: reconnect to the same terminal session
+  useEffect(() => {
+    if (!tabsInitialized || !config?.enabled) return;
+
+    // Find terminal tabs that need attach
+    const terminalTabs = tabs.filter(
+      (t) => t.tabType === 'terminal' && t.terminalId && t.machineId
+    );
+
+    for (const tab of terminalTabs) {
+      const tabId = tab.id;
+      const terminalId = tab.terminalId!;
+      const machineId = tab.machineId!;
+
+      // Skip if already attempted attach
+      if (terminalAttachAttemptedRefs.current.get(tabId)) continue;
+      terminalAttachAttemptedRefs.current.set(tabId, true);
+
+      console.log('[Terminal] Attaching to existing terminal:', {
+        tabId,
+        terminalId,
+        machineId,
+      });
+
+      // Call attach API to get current ws_url and token
+      remoteApi.attachTerminal({
+        terminal_id: terminalId,
+        machine_id: machineId,
+      }).then((result) => {
+        if (result.success && result.terminal?.status === 'pending') {
+          // Terminal exists, poll for status
+          const pollForAttach = async (attempt: number) => {
+            if (terminalPollCancelRefs.current.get(tabId)) return;
+            if (attempt > 30) {
+              console.log('[Terminal] Attach polling timed out');
+              return;
+            }
+            if (attempt > 0) {
+              await new Promise((r) => setTimeout(r, 1000));
+            }
+            if (terminalPollCancelRefs.current.get(tabId)) return;
+            try {
+              const status = await remoteApi.getTerminalStatus(terminalId, machineId);
+              const wsUrl = status.terminal.ws_url || '';
+              const hasProxyUrl = wsUrl.includes('localhost') || wsUrl.includes('127.0.0.1');
+
+              console.log('[Terminal] Attach poll:', {
+                attempt,
+                status: status.terminal.status,
+                wsUrl,
+              });
+
+              if (status.terminal.status === 'running' && hasProxyUrl) {
+                // Update tab with fresh ws_url and token
+                setTabs((prev) =>
+                  prev.map((t) =>
+                    t.id === tabId
+                      ? {
+                          ...t,
+                          terminalWsUrl: status.terminal.ws_url!,
+                          terminalToken: status.terminal.token!,
+                        }
+                      : t
+                  )
+                );
+                updateStoredTab(tabId, {
+                  terminalWsUrl: status.terminal.ws_url!,
+                  terminalToken: status.terminal.token!,
+                });
+                console.log('[Terminal] Attached successfully:', wsUrl);
+              } else if (status.terminal.status === 'error') {
+                // Terminal exited, need to show error
+                setTabs((prev) =>
+                  prev.map((t) =>
+                    t.id === tabId
+                      ? { ...t, terminalWsUrl: '', terminalToken: '' }
+                      : t
+                  )
+                );
+              } else {
+                pollForAttach(attempt + 1);
+              }
+            } catch {
+              pollForAttach(attempt + 1);
+            }
+          };
+          terminalPollCancelRefs.current.delete(tabId);
+          pollForAttach(0);
+        } else {
+          // Terminal not found, clear ws_url
+          console.log('[Terminal] Attach failed, terminal not found');
+          setTabs((prev) =>
+            prev.map((t) =>
+              t.id === tabId ? { ...t, terminalWsUrl: '', terminalToken: '' } : t
+            )
+          );
+        }
+      }).catch((err) => {
+        console.error('[Terminal] Attach failed:', err);
+        // Keep stored values as fallback
+      });
+    }
+  }, [tabs, tabsInitialized, config, setTabs, updateStoredTab]);
 
   // Create a new tab
   const createNewTab = useCallback(

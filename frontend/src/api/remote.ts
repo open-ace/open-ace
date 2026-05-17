@@ -198,6 +198,21 @@ export const remoteApi = {
     return apiClient.post('/api/remote/terminal/stop', data);
   },
 
+  attachTerminal(data: {
+    terminal_id: string;
+    machine_id: string;
+  }): Promise<{
+    success: boolean;
+    terminal?: {
+      terminal_id: string;
+      machine_id: string;
+      status: string;
+    };
+    error?: string;
+  }> {
+    return apiClient.post(`/api/remote/terminal/${data.terminal_id}/attach`, data);
+  },
+
   getTerminalStatus(
     terminalId: string,
     machineId: string
