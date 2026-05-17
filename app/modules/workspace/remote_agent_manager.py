@@ -616,7 +616,7 @@ class RemoteAgentManager:
                 original_token = info.get("token", "")
 
                 # Start proxy
-                port, proxy_ws_url = proxy_mgr.start_proxy(
+                port, proxy_ws_url, actual_token = proxy_mgr.start_proxy(
                     terminal_id=terminal_id,
                     machine_id=machine_id,
                     auth_token=proxy_token,
@@ -624,9 +624,10 @@ class RemoteAgentManager:
                 )
 
                 # Update info with proxy URL and token for browser
+                # Use actual_token (may be existing token if proxy already running)
                 # Keep original values for proxy to connect to remote
                 info["ws_url"] = proxy_ws_url
-                info["token"] = proxy_token  # Token for browser to connect to proxy
+                info["token"] = actual_token  # Token for browser to connect to proxy
                 info["original_ws_url"] = original_ws_url  # Remote terminal's ws_url
                 info["original_token"] = original_token  # Token for proxy to connect to remote
 

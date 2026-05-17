@@ -94,7 +94,7 @@ class WebSocketProxyManager:
         machine_id: str,
         auth_token: str,
         backend_url: str,
-    ) -> tuple[int, str]:
+    ) -> tuple[int, str, str]:
         """
         Start a WebSocket proxy for a terminal session.
 
@@ -105,14 +105,16 @@ class WebSocketProxyManager:
             backend_url: Open ACE backend URL (for fetching remote WS info)
 
         Returns:
-            Tuple of (proxy_port, proxy_ws_url)
+            Tuple of (proxy_port, proxy_ws_url, auth_token)
+            If proxy already exists, returns existing auth_token instead of provided one.
         """
         with self._lock:
             # Check if proxy already exists
             if terminal_id in self._proxies:
                 proxy = self._proxies[terminal_id]
                 if proxy.process and proxy.process.poll() is None:
-                    return proxy.port, f"ws://localhost:{proxy.port}"
+                    # Return existing proxy port, URL, and token
+                    return proxy.port, f"ws://localhost:{proxy.port}", proxy.auth_token
                 else:
                     # Process died, clean up
                     self._cleanup_proxy(terminal_id)
@@ -191,7 +193,7 @@ class WebSocketProxyManager:
                     port,
                 )
 
-                return port, proxy_ws_url
+                return port, proxy_ws_url, auth_token
 
             except Exception as e:
                 logger.error("Failed to start WebSocket proxy: %s", e)
