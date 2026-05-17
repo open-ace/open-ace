@@ -68,23 +68,56 @@ class WebSocketProxyManager:
 
     def _allocate_port(self) -> int:
         """Allocate an available port for a new proxy."""
+        import socket
+
         with self._lock:
-            # Find next available port
+            # Find next available port (both in internal tracking and actually free)
             while self._next_port <= PROXY_PORT_END:
-                if self._next_port not in self._port_allocations:
-                    port = self._next_port
+                # Check if port is in internal allocations
+                if self._next_port in self._port_allocations:
                     self._next_port += 1
-                    return port
+                    continue
+
+                # Check if port is actually free (not used by orphaned processes)
+                try:
+                    test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    test_socket.settimeout(1)
+                    result = test_socket.connect_ex(("127.0.0.1", self._next_port))
+                    test_socket.close()
+                    if result == 0:
+                        # Port is in use by some process (orphaned proxy)
+                        logger.info("Port %d is in use (orphaned proxy), skipping", self._next_port)
+                        self._next_port += 1
+                        continue
+                except Exception as e:
+                    logger.debug("Port check error: %s", e)
+
+                # Port is free
+                port = self._next_port
                 self._next_port += 1
+                return port
 
             # Wrap around if we hit the end
             self._next_port = PROXY_PORT_START
             while self._next_port <= PROXY_PORT_END:
-                if self._next_port not in self._port_allocations:
-                    port = self._next_port
+                if self._next_port in self._port_allocations:
                     self._next_port += 1
-                    return port
+                    continue
+
+                try:
+                    test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    test_socket.settimeout(1)
+                    result = test_socket.connect_ex(("127.0.0.1", self._next_port))
+                    test_socket.close()
+                    if result == 0:
+                        self._next_port += 1
+                        continue
+                except Exception:
+                    pass
+
+                port = self._next_port
                 self._next_port += 1
+                return port
 
             raise RuntimeError("No available ports for WebSocket proxy")
 
