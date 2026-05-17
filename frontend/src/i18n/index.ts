@@ -764,6 +764,7 @@ const translations: Record<Language, Translations> = {
 
     // API Key Management
     addApiKey: 'Add API Key',
+    editApiKey: 'Edit API Key',
     deleteApiKey: 'Delete API Key',
     deleteApiKeyConfirm: 'Are you sure you want to delete this API key?',
     provider: 'Provider',
@@ -1556,6 +1557,7 @@ const translations: Record<Language, Translations> = {
 
     // API 密钥管理
     addApiKey: '添加 API 密钥',
+    editApiKey: '编辑 API 密钥',
     deleteApiKey: '删除 API 密钥',
     deleteApiKeyConfirm: '确定要删除此 API 密钥吗？',
     provider: '提供商',

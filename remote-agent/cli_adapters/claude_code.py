@@ -85,3 +85,41 @@ class ClaudeCodeAdapter(BaseCLIAdapter):
     def get_executable_name(self) -> str:
         """Return the executable name."""
         return self.EXECUTABLE
+
+    def build_settings(
+        self,
+        base_settings: dict,
+        api_key: str,
+        base_url: str,
+    ) -> dict:
+        """
+        Build complete settings.json for Claude Code.
+
+        Merges user-configured settings with system-injected credentials.
+        User settings should not contain sensitive fields like ANTHROPIC_API_KEY.
+
+        Args:
+            base_settings: User-configured settings (model mappings, etc.)
+            api_key: Real API key from api_key_store (or proxy token)
+            base_url: Base URL for API requests
+
+        Returns:
+            Complete settings dict ready to write to ~/.claude/settings.json
+        """
+        settings = base_settings.copy()
+        settings.setdefault("env", {})
+
+        # Inject API credentials (from api_key_store, not user config)
+        settings["env"]["ANTHROPIC_API_KEY"] = api_key
+        settings["env"]["ANTHROPIC_BASE_URL"] = base_url.rstrip("/")
+
+        # Preserve user-configured model mappings if present:
+        # env.ANTHROPIC_MODEL, env.ANTHROPIC_DEFAULT_HAIKU_MODEL, etc.
+
+        return settings
+
+    def get_settings_path(self) -> str:
+        """Return the path to Claude Code settings.json."""
+        import os
+
+        return os.path.expanduser("~/.claude/settings.json")

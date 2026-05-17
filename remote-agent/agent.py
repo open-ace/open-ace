@@ -18,6 +18,7 @@ import subprocess
 import sys
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import requests
@@ -454,6 +455,7 @@ class RemoteAgent:
         proxy_token = data.get("proxy_token", "")
         model = data.get("model")
         permission_mode = data.get("permission_mode")
+        cli_settings = data.get("cli_settings", {})
 
         logger.info(
             "Starting session %s: cli=%s path=%s model=%s mode=%s",
@@ -463,6 +465,10 @@ class RemoteAgent:
             model,
             permission_mode,
         )
+
+        # Apply CLI settings before starting session
+        if cli_settings:
+            self._apply_cli_settings(cli_settings)
 
         result = self._executor.start_session(
             session_id=session_id,
@@ -592,8 +598,13 @@ class RemoteAgent:
         anthropic_token = data.get("anthropic_token", data.get("proxy_token", ""))
         openai_token = data.get("openai_token", "")
         work_dir = data.get("work_dir", os.path.expanduser("~"))
+        cli_settings = data.get("cli_settings", {})
 
         logger.info("Starting terminal %s: work_dir=%s", terminal_id[:8], work_dir)
+
+        # Apply CLI settings before starting terminal
+        if cli_settings:
+            self._apply_cli_settings(cli_settings)
 
         # Stop existing terminal with same ID if any
         if terminal_id in self._terminal_processes:
@@ -884,6 +895,94 @@ class RemoteAgent:
         if hostname and hostname != "localhost":
             return hostname
         return "127.0.0.1"
+
+    # ----------------------------------------------------------------
+    # CLI Settings Application
+    # ----------------------------------------------------------------
+
+    def _apply_cli_settings(self, cli_settings: dict[str, Any]) -> None:
+        """
+        Write settings.json files for configured CLI tools.
+
+        Args:
+            cli_settings: Dict with tool_name -> settings mapping
+                         e.g., {"claude-code": {...}, "qwen-code": {...}}
+        """
+        if not cli_settings:
+            return
+
+        for tool_name, settings in cli_settings.items():
+            try:
+                if tool_name == "claude-code":
+                    self._write_claude_settings(settings)
+                elif tool_name == "qwen-code":
+                    self._write_qwen_settings(settings)
+                else:
+                    logger.warning("Unknown tool name for settings: %s", tool_name)
+            except Exception as e:
+                logger.error("Failed to write settings for %s: %s", tool_name, e)
+
+    def _write_claude_settings(self, settings: dict[str, Any]) -> None:
+        """
+        Write ~/.claude/settings.json for Claude Code.
+
+        Settings should already contain injected API credentials
+        (ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL) from build_settings().
+        """
+        claude_dir = Path.home() / ".claude"
+        claude_dir.mkdir(parents=True, exist_ok=True)
+
+        settings_path = claude_dir / "settings.json"
+
+        # Preserve existing settings, merge new ones
+        existing = {}
+        if settings_path.exists():
+            try:
+                existing = json.loads(settings_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                existing = {}
+
+        # Merge: new settings override existing, but keep non-conflicting existing
+        merged = {**existing, **settings}
+
+        settings_path.write_text(
+            json.dumps(merged, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        logger.info("Wrote Claude Code settings to %s", settings_path)
+
+    def _write_qwen_settings(self, settings: dict[str, Any]) -> None:
+        """
+        Write ~/.qwen/settings.json for Qwen Code (bailian format).
+
+        Settings should already contain injected API credentials
+        (env.ZAI_API_KEY etc.) from build_settings().
+        """
+        qwen_dir = Path.home() / ".qwen"
+        qwen_dir.mkdir(parents=True, exist_ok=True)
+
+        settings_path = qwen_dir / "settings.json"
+
+        # Preserve existing settings, merge new ones
+        existing = {}
+        if settings_path.exists():
+            try:
+                existing = json.loads(settings_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                existing = {}
+
+        # Merge: new settings override existing, but keep non-conflicting existing
+        merged = {**existing, **settings}
+
+        # Ensure $version is set for Qwen settings format
+        if "$version" not in merged:
+            merged["$version"] = 3
+
+        settings_path.write_text(
+            json.dumps(merged, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        logger.info("Wrote Qwen Code settings to %s", settings_path)
 
     # ----------------------------------------------------------------
     # Shutdown

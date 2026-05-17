@@ -117,6 +117,17 @@ export function useDeleteApiKey() {
   });
 }
 
+export function useUpdateApiKey() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: UpdateApiKeyRequest) => remoteApi.updateApiKey(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['remote', 'api-keys'] });
+    },
+  });
+}
+
 // ==================== Available Machines Hooks ====================
 
 export function useAvailableMachines() {

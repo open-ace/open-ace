@@ -328,6 +328,10 @@ def store_api_key():
     api_key = data.get("api_key")
     base_url = data.get("base_url")
     tenant_id = int(data.get("tenant_id", 1))
+    cli_tools = data.get("cli_tools")  # JSON array: ["claude-code", "qwen-code"]
+    cli_settings = data.get(
+        "cli_settings"
+    )  # JSON object: {"claude-code": {...}, "qwen-code": {...}}
 
     if not provider or not key_name or not api_key:
         return jsonify({"error": "provider, key_name, and api_key are required"}), 400
@@ -340,11 +344,40 @@ def store_api_key():
         api_key=api_key,
         base_url=base_url,
         created_by=g.user["id"],
+        cli_tools=cli_tools,
+        cli_settings=cli_settings,
     )
 
     if result.get("success"):
         return jsonify({"success": True, "key": result})
     return jsonify({"error": result.get("error", "Failed to store API key")}), 400
+
+
+@remote_bp.route("/api-keys/<int:key_id>", methods=["PUT"])
+@admin_required
+def update_api_key(key_id):
+    """Update an API key by ID. Admin only."""
+
+    data = request.get_json() or {}
+    key_name = data.get("key_name")
+    base_url = data.get("base_url")
+    cli_tools = data.get("cli_tools")
+    cli_settings = data.get("cli_settings")
+    tenant_id = int(data.get("tenant_id", 1))
+
+    api_proxy = get_api_key_proxy_service()
+    success = api_proxy.update_api_key_by_id(
+        key_id=key_id,
+        tenant_id=tenant_id,
+        key_name=key_name,
+        base_url=base_url,
+        cli_tools=cli_tools,
+        cli_settings=cli_settings,
+    )
+
+    if success:
+        return jsonify({"success": True, "message": "API key updated"})
+    return jsonify({"error": "API key not found or update failed"}), 404
 
 
 @remote_bp.route("/api-keys/<int:key_id>", methods=["DELETE"])
@@ -1152,6 +1185,14 @@ def start_terminal():
     proxy_url = f"{backend_url}/api/remote/llm-proxy"
     logger.info("start_terminal: backend_url=%s, proxy_url=%s", backend_url, proxy_url)
 
+    # Get CLI settings for both Claude Code and Qwen Code
+    cli_settings = {}
+    tenant_id = machine.get("tenant_id", 1) if machine else 1
+    for tool_name in ["claude-code", "qwen-code"]:
+        tool_settings = api_proxy.get_cli_settings_for_tool(tenant_id, tool_name)
+        if tool_settings:
+            cli_settings[tool_name] = tool_settings
+
     # Send start_terminal command to agent with tokens for both providers
     cmd = {
         "type": "command",
@@ -1161,6 +1202,7 @@ def start_terminal():
         "anthropic_token": anthropic_token,
         "openai_token": openai_token,
         "work_dir": work_dir or "",
+        "cli_settings": cli_settings,
     }
     agent_mgr.send_command(machine_id, cmd)
 

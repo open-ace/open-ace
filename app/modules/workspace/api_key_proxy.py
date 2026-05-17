@@ -148,6 +148,8 @@ class APIKeyProxyService:
         api_key: str,
         base_url: Optional[str] = None,
         created_by: Optional[int] = None,
+        cli_tools: Optional[str] = None,
+        cli_settings: Optional[str] = None,
     ) -> dict[str, Any]:
         """
         Store an encrypted API key for a tenant/provider.
@@ -159,6 +161,8 @@ class APIKeyProxyService:
             api_key: The plaintext API key to encrypt and store.
             base_url: Optional custom base URL for the provider.
             created_by: User ID who created this key.
+            cli_tools: JSON array of CLI tool names (e.g., ["claude-code", "qwen-code"]).
+            cli_settings: JSON object with settings for each tool.
 
         Returns:
             Dict with success status and key info.
@@ -172,13 +176,15 @@ class APIKeyProxyService:
         try:
             cursor.execute(
                 f"""
-                INSERT INTO api_key_store (tenant_id, provider, key_name, encrypted_key, key_hash, base_url, created_by)
-                VALUES ({_params(7)})
+                INSERT INTO api_key_store (tenant_id, provider, key_name, encrypted_key, key_hash, base_url, created_by, cli_tools, cli_settings)
+                VALUES ({_params(9)})
                 ON CONFLICT (tenant_id, provider, key_name) DO UPDATE SET
                     encrypted_key = EXCLUDED.encrypted_key,
                     key_hash = EXCLUDED.key_hash,
                     base_url = EXCLUDED.base_url,
                     is_active = TRUE,
+                    cli_tools = EXCLUDED.cli_tools,
+                    cli_settings = EXCLUDED.cli_settings,
                     updated_at = CURRENT_TIMESTAMP
             """,
                 (
@@ -189,6 +195,8 @@ class APIKeyProxyService:
                     key_hash,
                     base_url,
                     created_by,
+                    cli_tools,
+                    cli_settings,
                 ),
             )
 
@@ -255,7 +263,7 @@ class APIKeyProxyService:
 
         cursor.execute(
             f"""
-            SELECT id, provider, key_name, base_url, is_active, created_at, updated_at
+            SELECT id, provider, key_name, base_url, is_active, created_at, updated_at, cli_tools, cli_settings
             FROM api_key_store
             WHERE tenant_id = {_param()}
             ORDER BY provider, key_name
@@ -277,6 +285,8 @@ class APIKeyProxyService:
                     "is_active": bool(row["is_active"]),
                     "created_at": row["created_at"],
                     "updated_at": row["updated_at"],
+                    "cli_tools": row["cli_tools"],
+                    "cli_settings": row["cli_settings"],
                 }
             )
         return result
@@ -298,6 +308,188 @@ class APIKeyProxyService:
         conn.commit()
         conn.close()
         return success
+
+    def update_api_key_by_id(
+        self,
+        key_id: int,
+        tenant_id: int,
+        key_name: Optional[str] = None,
+        base_url: Optional[str] = None,
+        cli_tools: Optional[str] = None,
+        cli_settings: Optional[str] = None,
+    ) -> bool:
+        """
+        Update an API key by its ID.
+
+        Args:
+            key_id: The key ID to update.
+            tenant_id: Tenant ID for security check.
+            key_name: Optional new key name.
+            base_url: Optional new base URL.
+            cli_tools: Optional JSON array of CLI tool names.
+            cli_settings: Optional JSON object with settings for each tool.
+
+        Returns:
+            True if updated successfully, False otherwise.
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # Build dynamic UPDATE query
+        updates = []
+        values: list[Any] = []
+        if key_name is not None:
+            updates.append(f"key_name = {_param()}")
+            values.append(key_name)
+        if base_url is not None:
+            updates.append(f"base_url = {_param()}")
+            values.append(base_url)
+        if cli_tools is not None:
+            updates.append(f"cli_tools = {_param()}")
+            values.append(cli_tools)
+        if cli_settings is not None:
+            updates.append(f"cli_settings = {_param()}")
+            values.append(cli_settings)
+
+        if not updates:
+            conn.close()
+            return False
+
+        updates.append("updated_at = CURRENT_TIMESTAMP")
+        values.extend([key_id, tenant_id])
+
+        cursor.execute(
+            f"""
+            UPDATE api_key_store
+            SET {', '.join(updates)}
+            WHERE id = {_param()} AND tenant_id = {_param()}
+        """,
+            values,
+        )
+
+        success = cursor.rowcount > 0
+        conn.commit()
+        conn.close()
+        return success
+
+    def get_cli_settings_for_tool(self, tenant_id: int, tool_name: str) -> Optional[dict[str, Any]]:
+        """
+        Get CLI settings for a specific tool from active API keys.
+
+        Searches api_key_store where cli_tools contains the tool_name.
+        Returns the tool-specific settings from cli_settings, merged with
+        the actual API key and base_url.
+
+        Args:
+            tenant_id: Tenant ID.
+            tool_name: CLI tool name (e.g., "claude-code", "qwen-code").
+
+        Returns:
+            Dict with complete settings ready for agent to write to settings.json,
+            or None if no matching API key found.
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # Find API key where cli_tools contains the tool_name
+        cursor.execute(
+            f"""
+            SELECT id, provider, encrypted_key, base_url, cli_tools, cli_settings
+            FROM api_key_store
+            WHERE tenant_id = {_param()} AND is_active = TRUE
+            ORDER BY id DESC
+            LIMIT 10
+        """,
+            (tenant_id,),
+        )
+
+        rows = cursor.fetchall()
+        conn.close()
+
+        # Find matching row
+        for row in rows:
+            cli_tools_str = row["cli_tools"] or ""
+            cli_settings_str = row["cli_settings"] or "{}"
+
+            # Parse cli_tools JSON array
+            try:
+                cli_tools = json.loads(cli_tools_str) if cli_tools_str else []
+            except json.JSONDecodeError:
+                cli_tools = []
+
+            if tool_name not in cli_tools:
+                continue
+
+            # Found matching key - build settings
+            try:
+                cli_settings = json.loads(cli_settings_str) if cli_settings_str else {}
+            except json.JSONDecodeError:
+                cli_settings = {}
+
+            # Get tool-specific settings from cli_settings
+            tool_settings = cli_settings.get(tool_name, {})
+
+            # Decrypt the API key
+            api_key = self._decrypt_key(row["encrypted_key"])
+            base_url = row["base_url"] or ""
+
+            # Build complete settings using CLI adapter logic
+            # Import adapters to build settings
+            return self._build_cli_settings_for_tool(
+                tool_name, tool_settings, api_key, base_url, row["provider"]
+            )
+
+        return None
+
+    def _build_cli_settings_for_tool(
+        self,
+        tool_name: str,
+        base_settings: dict,
+        api_key: str,
+        base_url: str,
+        provider: str,
+    ) -> dict[str, Any]:
+        """
+        Build complete CLI settings by merging user settings with API credentials.
+
+        Args:
+            tool_name: CLI tool name.
+            base_settings: User-configured settings (from cli_settings column).
+            api_key: Decrypted API key.
+            base_url: Base URL for API requests.
+            provider: Provider name (anthropic, openai, etc.).
+
+        Returns:
+            Complete settings dict ready for settings.json.
+        """
+        settings = base_settings.copy()
+        settings.setdefault("env", {})
+
+        if tool_name == "claude-code":
+            # Claude Code settings format
+            settings["env"]["ANTHROPIC_API_KEY"] = api_key
+            if base_url:
+                settings["env"]["ANTHROPIC_BASE_URL"] = base_url.rstrip("/")
+        elif tool_name == "qwen-code":
+            # Qwen Code settings (bailian format)
+            settings.setdefault("modelProviders", {})
+            settings.setdefault("security", {"auth": {"selectedType": "openai"}})
+            settings["$version"] = 3
+
+            provider_name = "openai"
+            settings["modelProviders"].setdefault(provider_name, [])
+
+            # Determine env key name
+            env_key_name = f"{provider_name.upper()}_API_KEY"
+            for model_config in settings["modelProviders"].get(provider_name, []):
+                if "envKey" in model_config:
+                    env_key_name = model_config["envKey"]
+                if "baseUrl" not in model_config:
+                    model_config["baseUrl"] = base_url.rstrip("/") if base_url else ""
+
+            settings["env"][env_key_name] = api_key
+
+        return settings
 
     def delete_api_key_by_id(self, key_id: int, tenant_id: int) -> bool:
         """Delete an API key by its ID."""
