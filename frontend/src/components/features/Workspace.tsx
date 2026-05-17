@@ -467,6 +467,7 @@ export const Workspace: React.FC = () => {
     const urlWorkspaceType = searchParams.get('workspaceType') as 'local' | 'remote' | 'terminal' | null;
     const urlMachineId = searchParams.get('machineId');
     const urlMachineName = searchParams.get('machineName');
+    const urlTerminalId = searchParams.get('terminalId');
     const restoreSessionId = urlSessionId ?? restoreSession;
 
     // Determine if we should restore from store or create new
@@ -500,25 +501,18 @@ export const Workspace: React.FC = () => {
           }
         : undefined;
 
-      const effectiveUrl = getEffectiveUrl(
-        restoreSessionId,
-        urlEncodedProjectName ?? undefined,
-        urlToolName ?? undefined,
-        urlSettings,
-        remoteParams
-      );
-      if (effectiveUrl) {
+      // Handle terminal session restoration separately
+      if (urlWorkspaceType === 'terminal' && urlTerminalId && urlMachineId) {
+        // Create terminal tab
         const tab: WorkspaceTab = {
           id: generateTabId(),
           title: t('restoredSession', language),
-          url: effectiveUrl,
-          token: userWebUI?.token ?? '',
+          url: '', // Terminal tabs don't use iframe URL
+          token: '',
           sessionId: restoreSessionId,
-          encodedProjectName: urlEncodedProjectName ?? undefined,
-          toolName: urlToolName ?? undefined,
-          settings: urlSettings,
-          workspaceType: (urlWorkspaceType !== 'terminal' ? urlWorkspaceType : undefined) ?? undefined,
-          machineId: urlMachineId ?? undefined,
+          tabType: 'terminal',
+          terminalId: urlTerminalId,
+          machineId: urlMachineId,
           machineName: urlMachineName ?? undefined,
           createdAt: Date.now(),
           waitingForUser: false,
@@ -527,32 +521,75 @@ export const Workspace: React.FC = () => {
         initialTabs = [tab];
         initialActiveTabId = tab.id;
 
-        // Save to store (this replaces any previous stored tabs)
+        // Save to store
         addStoredTab({
           id: tab.id,
           title: tab.title,
-          sessionId: tab.sessionId,
-          encodedProjectName: tab.encodedProjectName,
-          toolName: tab.toolName,
-          settings: tab.settings,
-          workspaceType: tab.workspaceType,
-          machineId: tab.machineId,
-          machineName: tab.machineName,
+          tabType: 'terminal',
+          terminalId: urlTerminalId,
+          machineId: urlMachineId,
+          machineName: urlMachineName ?? undefined,
           createdAt: tab.createdAt,
-          waitingForUser: tab.waitingForUser,
-          waitingType: tab.waitingType,
+          waitingForUser: false,
+          waitingType: null,
         });
+      } else {
+        // Regular session (local or remote)
+        const effectiveUrl = getEffectiveUrl(
+          restoreSessionId,
+          urlEncodedProjectName ?? undefined,
+          urlToolName ?? undefined,
+          urlSettings,
+          remoteParams
+        );
+        if (effectiveUrl) {
+          const tab: WorkspaceTab = {
+            id: generateTabId(),
+            title: t('restoredSession', language),
+            url: effectiveUrl,
+            token: userWebUI?.token ?? '',
+            sessionId: restoreSessionId,
+            encodedProjectName: urlEncodedProjectName ?? undefined,
+            toolName: urlToolName ?? undefined,
+            settings: urlSettings,
+            workspaceType: urlWorkspaceType && urlWorkspaceType !== 'terminal' ? urlWorkspaceType : undefined,
+            machineId: urlMachineId ?? undefined,
+            machineName: urlMachineName ?? undefined,
+            createdAt: Date.now(),
+            waitingForUser: false,
+            waitingType: null,
+          };
+          initialTabs = [tab];
+          initialActiveTabId = tab.id;
 
-        // Clear the restore parameters after using it
-        searchParams.delete('sessionId');
-        searchParams.delete('restoreSession');
-        searchParams.delete('encodedProjectName');
-        searchParams.delete('toolName');
-        searchParams.delete('workspaceType');
-        searchParams.delete('machineId');
-        searchParams.delete('machineName');
-        setSearchParams(searchParams, { replace: true });
+          // Save to store (this replaces any previous stored tabs)
+          addStoredTab({
+            id: tab.id,
+            title: tab.title,
+            sessionId: tab.sessionId,
+            encodedProjectName: tab.encodedProjectName,
+            toolName: tab.toolName,
+            settings: tab.settings,
+            workspaceType: tab.workspaceType,
+            machineId: tab.machineId,
+            machineName: tab.machineName,
+            createdAt: tab.createdAt,
+            waitingForUser: tab.waitingForUser,
+            waitingType: tab.waitingType,
+          });
+        }
       }
+
+      // Clear the restore parameters after using it
+      searchParams.delete('sessionId');
+      searchParams.delete('restoreSession');
+      searchParams.delete('encodedProjectName');
+      searchParams.delete('toolName');
+      searchParams.delete('workspaceType');
+      searchParams.delete('machineId');
+      searchParams.delete('machineName');
+      searchParams.delete('terminalId');
+      setSearchParams(searchParams, { replace: true });
     } else if (storedTabs.length > 0) {
       // Case 2: Restore from store - regenerate URLs for each tab
       initialTabs = storedTabs.map((storedTab) => {
