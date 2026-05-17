@@ -123,9 +123,12 @@ class SinglePtyTerminalServer:
                 logger.debug("Resize failed: %s", e)
 
     def write_banner(self) -> None:
-        """Write welcome banner to PTY."""
-        if self.master_fd is not None:
-            _write_banner(self.master_fd)
+        """Write welcome banner to the output buffer.
+
+        Writes directly to the output buffer so the banner appears as
+        terminal output rather than being interpreted as shell input.
+        """
+        _write_banner(self._output_buffer)
 
     async def add_websocket(self, websocket) -> bool:
         """Add a WebSocket connection to the terminal."""
@@ -328,13 +331,16 @@ def _check_cli_installed(cli_name: str) -> bool:
         return False
 
 
-def _write_banner(master_fd: int) -> None:
-    """Write a welcome banner to the terminal."""
+def _write_banner(output_buffer: bytearray) -> None:
+    """Write a welcome banner to the PTY output buffer.
+
+    Writes banner via the output buffer so it appears as terminal output
+    rather than being interpreted as shell input by bash.
+    """
     # Check which CLI tools are installed
     claude_installed = _check_cli_installed("claude")
     qwen_installed = _check_cli_installed("qwen")
 
-    # Use simpler formatting without ANSI codes to avoid encoding issues
     banner_lines = [
         "",
         "========================================",
@@ -379,10 +385,7 @@ def _write_banner(master_fd: int) -> None:
         banner_lines.append("")
     banner_lines.append("")
     banner = "\r\n".join(banner_lines)
-    try:
-        os.write(master_fd, banner.encode("utf-8"))
-    except OSError:
-        pass
+    output_buffer.extend(banner.encode("utf-8"))
 
 
 # Global terminal server instance
