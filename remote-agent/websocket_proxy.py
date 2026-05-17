@@ -186,17 +186,17 @@ def main():
     MACHINE_ID = args.machine_id
     TERMINAL_ID = args.terminal_id
 
-    # Log to file for debugging
+    # Log to file for debugging (stdout reserved for READY signal only)
     log_file = f"/tmp/ws_proxy_{TERMINAL_ID[:8]}.log"
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
         handlers=[
             logging.FileHandler(log_file),
-            logging.StreamHandler(sys.stdout),
         ],
     )
-    logger.info("WebSocket proxy starting, AUTH_TOKEN=%s", AUTH_TOKEN[:20] + "...")
+    # Print startup message to stderr (stdout reserved for READY signal)
+    print(f"WebSocket proxy starting, AUTH_TOKEN={AUTH_TOKEN[:20]}...", file=sys.stderr, flush=True)
 
     asyncio.run(run_server(args.port))
 

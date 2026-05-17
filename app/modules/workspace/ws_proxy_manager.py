@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+import subprocess as stdlib_subprocess
 import threading
 import time
 from dataclasses import dataclass, field
@@ -22,7 +23,6 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 import gevent
-from gevent import subprocess as gevent_subprocess
 
 if TYPE_CHECKING:
     import subprocess
@@ -154,10 +154,10 @@ class WebSocketProxyManager:
             try:
                 # Redirect proxy output to log file for debugging
                 proxy_log_path = f"/tmp/ws_proxy_{terminal_id[:8]}.log"
-                process = gevent_subprocess.Popen(
+                process = stdlib_subprocess.Popen(
                     cmd,
-                    stdout=gevent_subprocess.PIPE,
-                    stderr=gevent_subprocess.PIPE,
+                    stdout=stdlib_subprocess.PIPE,
+                    stderr=stdlib_subprocess.PIPE,
                 )
                 logger.info(
                     "Proxy process started with PID %d, logs at %s", process.pid, proxy_log_path
@@ -203,6 +203,7 @@ class WebSocketProxyManager:
         """Wait for proxy to signal it's ready (gevent-compatible)."""
         timeout = 10  # seconds
         start = time.time()
+        ready_line = ""
 
         while time.time() - start < timeout:
             poll_result = process.poll()
@@ -223,19 +224,33 @@ class WebSocketProxyManager:
 
             # Check stdout for READY signal (non-blocking read)
             try:
-                # Use gevent's communicate with timeout to avoid blocking
-                line = process.stdout.readline()
-                if line:
-                    line_str = line.decode().strip()
-                    if line_str.startswith("READY:"):
-                        logger.info("Proxy READY signal received: %s", line_str)
-                        return True
+                # Try to read a line - use a timeout approach
+                # In gevent subprocess, readline may block, so we check poll first
+                if process.stdout:
+                    # Read available bytes without blocking
+
+                    # Check if stdout has data available (non-blocking)
+                    # Note: select doesn't work well with pipes on all platforms
+                    # Use gevent-based approach instead
+                    line = process.stdout.readline()
+                    if line:
+                        line_str = line.decode().strip()
+                        logger.debug("Read from stdout: %s", line_str)
+                        if line_str.startswith("READY:"):
+                            logger.info("Proxy READY signal received: %s", line_str)
+                            return True
+                        # Accumulate output for debugging
+                        ready_line += line_str + "\n"
             except Exception as e:
                 logger.debug("Read error: %s", e)
 
             gevent.sleep(0.1)  # Use gevent sleep instead of blocking time.sleep
 
-        logger.warning("Timeout waiting for proxy READY signal (terminal %s)", terminal_id[:8])
+        logger.warning(
+            "Timeout waiting for proxy READY signal (terminal %s). Accumulated output: %s",
+            terminal_id[:8],
+            ready_line[:200],
+        )
         return False
 
     def stop_proxy(self, terminal_id: str) -> bool:
