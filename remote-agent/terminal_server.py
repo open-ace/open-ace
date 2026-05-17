@@ -70,12 +70,17 @@ class SinglePtyTerminalServer:
 
     def spawn_pty(self) -> bool:
         """Spawn PTY process once at startup."""
-        shell = SHELL_CMD or os.environ.get("SHELL", "/bin/bash")
-        cmd = [shell, "-l"]  # -l for login shell to load profiles
+        if SHELL_CMD:
+            cmd = [SHELL_CMD]
+        else:
+            menu_script = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "terminal_menu.py"
+            )
+            cmd = [sys.executable, menu_script]
         env = _build_env()
         work_dir = WORK_DIR or os.path.expanduser("~")
 
-        # Update bashrc with aliases
+        # Update bashrc with aliases (for "Exit to shell" option)
         self._update_bashrc()
 
         try:
@@ -121,14 +126,6 @@ class SinglePtyTerminalServer:
                 fcntl.ioctl(self.master_fd, termios.TIOCSWINSZ, winsize)
             except Exception as e:
                 logger.debug("Resize failed: %s", e)
-
-    def write_banner(self) -> None:
-        """Write welcome banner to the output buffer.
-
-        Writes directly to the output buffer so the banner appears as
-        terminal output rather than being interpreted as shell input.
-        """
-        _write_banner(self._output_buffer)
 
     async def add_websocket(self, websocket) -> bool:
         """Add a WebSocket connection to the terminal."""
@@ -331,63 +328,6 @@ def _check_cli_installed(cli_name: str) -> bool:
         return False
 
 
-def _write_banner(output_buffer: bytearray) -> None:
-    """Write a welcome banner to the PTY output buffer.
-
-    Writes banner via the output buffer so it appears as terminal output
-    rather than being interpreted as shell input by bash.
-    """
-    # Check which CLI tools are installed
-    claude_installed = _check_cli_installed("claude")
-    qwen_installed = _check_cli_installed("qwen")
-
-    banner_lines = [
-        "",
-        "========================================",
-        "  Open ACE Remote Terminal",
-        "========================================",
-    ]
-    if PROXY_URL:
-        banner_lines.append("")
-        if ANTHROPIC_TOKEN or OPENAI_TOKEN:
-            banner_lines.append("  AI assistants:")
-            if ANTHROPIC_TOKEN:
-                status = "[installed]" if claude_installed else "[NOT installed]"
-                banner_lines.append(f"    claude  {status}")
-            if OPENAI_TOKEN:
-                status = "[installed]" if qwen_installed else "[NOT installed]"
-                banner_lines.append(f"    qwen    {status}")
-            banner_lines.append("")
-
-            # Show run commands or install hints
-            installed_clis = []
-            missing_clis = []
-            if ANTHROPIC_TOKEN:
-                if claude_installed:
-                    installed_clis.append("claude")
-                else:
-                    missing_clis.append(
-                        ("claude", "curl -fsSL https://claude.ai/install.sh | bash")
-                    )
-            if OPENAI_TOKEN:
-                if qwen_installed:
-                    installed_clis.append("qwen")
-                else:
-                    missing_clis.append(("qwen", "npm install -g @qwen-code/qwen-code@latest"))
-
-            if installed_clis:
-                banner_lines.append(f"  Run: {', '.join(installed_clis)}")
-            if missing_clis:
-                banner_lines.append("")
-                banner_lines.append("  Install missing tools:")
-                for name, cmd in missing_clis:
-                    banner_lines.append(f"    {cmd}")
-        banner_lines.append("")
-    banner_lines.append("")
-    banner = "\r\n".join(banner_lines)
-    output_buffer.extend(banner.encode("utf-8"))
-
-
 # Global terminal server instance
 _terminal_server: SinglePtyTerminalServer | None = None
 
@@ -446,9 +386,6 @@ async def _run_server(port: int) -> None:
     if not _terminal_server.spawn_pty():
         logger.error("Failed to spawn PTY, exiting")
         return
-
-    # Write welcome banner
-    _terminal_server.write_banner()
 
     # Start output relay loop
     output_task = asyncio.create_task(_terminal_server.relay_output_loop())
