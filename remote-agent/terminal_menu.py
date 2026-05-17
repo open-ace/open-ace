@@ -21,7 +21,7 @@ TOOLS = [
     {
         "name": "Claude Code",
         "cli": "claude",
-        "cmd": "claude --bare --permission-mode bypassPermissions",
+        "cmd": "claude --bare",
         "install_cmd": "curl -fsSL https://claude.ai/install.sh | bash",
         "env_key": "ANTHROPIC_API_KEY",
     },
