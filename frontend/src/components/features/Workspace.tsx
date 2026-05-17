@@ -1768,6 +1768,8 @@ export const Workspace: React.FC = () => {
                 token={tab.terminalToken ?? ''}
                 isActive={activeTabId === tab.id}
                 machineName={tab.machineName}
+                terminalId={tab.terminalId}
+                machineId={tab.machineId}
                 onError={(error) => {
                   console.error('Terminal error:', error);
                   toast.error(t('terminalError', language), error);
@@ -1778,6 +1780,110 @@ export const Workspace: React.FC = () => {
                   ));
                   if (tab.terminalId) {
                     terminalAttachAttemptedRefs.current.delete(tab.terminalId);
+                  }
+                }}
+                onReattachNeeded={() => {
+                  if (tab.terminalId && tab.machineId) {
+                    console.log('[Terminal] Reattach needed, calling attach_terminal API');
+                    // Reset reconnect counter
+                    terminalAttachAttemptedRefs.current.delete(tab.terminalId);
+                    // Clear current wsUrl/token
+                    setTabs(prev => prev.map(t =>
+                      t.id === tab.id ? { ...t, terminalWsUrl: '', terminalToken: '' } : t
+                    ));
+                    // Call attach_terminal API to restart terminal_server if needed
+                    remoteApi.attachTerminal({
+                      terminal_id: tab.terminalId,
+                      machine_id: tab.machineId,
+                    }).then((result) => {
+                      console.log('[Terminal] Attach result:', result);
+                      if (result.success && result.terminal?.status === 'pending') {
+                        // Poll for new ws_url
+                        const pollForReattach = async (attempt: number) => {
+                          if (attempt > 30) {
+                            console.log('[Terminal] Reattach polling timed out');
+                            return;
+                          }
+                          if (attempt > 0) {
+                            await new Promise((r) => setTimeout(r, 1000));
+                          }
+                          try {
+                            const status = await remoteApi.getTerminalStatus(tab.terminalId!, tab.machineId!);
+                            const wsUrl = status.terminal.ws_url || '';
+                            const hasProxyUrl = wsUrl.includes('localhost') || wsUrl.includes('127.0.0.1');
+                            if (status.terminal.status === 'running' && hasProxyUrl) {
+                              setTabs(prev => prev.map(t =>
+                                t.id === tab.id ? {
+                                  ...t,
+                                  terminalWsUrl: status.terminal.ws_url!,
+                                  terminalToken: status.terminal.token!,
+                                } : t
+                              ));
+                              updateStoredTab(tab.id, {
+                                terminalWsUrl: status.terminal.ws_url!,
+                                terminalToken: status.terminal.token!,
+                              });
+                              console.log('[Terminal] Reattached successfully:', wsUrl);
+                            } else if (status.terminal.status === 'not_found' || status.terminal.status === 'error') {
+                              // Terminal gone, need to create new one
+                              console.log('[Terminal] Terminal not found, creating new');
+                              remoteApi.startTerminal({
+                                machine_id: tab.machineId!,
+                                work_dir: '',
+                              }).then((newResult) => {
+                                if (newResult.success && newResult.terminal) {
+                                  const newTerminalId = newResult.terminal.terminal_id;
+                                  setTabs(prev => prev.map(t =>
+                                    t.id === tab.id ? {
+                                      ...t,
+                                      terminalId: newTerminalId,
+                                      terminalWsUrl: newResult.terminal?.ws_url || '',
+                                      terminalToken: newResult.terminal?.token || '',
+                                    } : t
+                                  ));
+                                  updateStoredTab(tab.id, {
+                                    terminalId: newTerminalId,
+                                    terminalWsUrl: newResult.terminal?.ws_url || '',
+                                    terminalToken: newResult.terminal?.token || '',
+                                  });
+                                }
+                              });
+                            } else {
+                              pollForReattach(attempt + 1);
+                            }
+                          } catch {
+                            pollForReattach(attempt + 1);
+                          }
+                        };
+                        pollForReattach(0);
+                      } else if (result.terminal?.status === 'not_found') {
+                        // Terminal gone, create new
+                        console.log('[Terminal] Terminal not found, creating new');
+                        remoteApi.startTerminal({
+                          machine_id: tab.machineId!,
+                          work_dir: '',
+                        }).then((newResult) => {
+                          if (newResult.success && newResult.terminal) {
+                            const newTerminalId = newResult.terminal.terminal_id;
+                            const newWsUrl = newResult.terminal.ws_url || '';
+                            const newToken = newResult.terminal.token || '';
+                            setTabs(prev => prev.map(t =>
+                              t.id === tab.id ? {
+                                ...t,
+                                terminalId: newTerminalId,
+                                terminalWsUrl: newWsUrl,
+                                terminalToken: newToken,
+                              } : t
+                            ));
+                            updateStoredTab(tab.id, {
+                              terminalId: newTerminalId,
+                              terminalWsUrl: newWsUrl,
+                              terminalToken: newToken,
+                            });
+                          }
+                        });
+                      }
+                    });
                   }
                 }}
               />

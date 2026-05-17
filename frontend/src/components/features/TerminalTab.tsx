@@ -18,8 +18,11 @@ interface TerminalTabProps {
   token: string;
   isActive: boolean;
   machineName?: string;
+  terminalId?: string;
+  machineId?: string;
   onError?: (error: string) => void;
   onAuthFailed?: () => void;
+  onReattachNeeded?: () => void;
 }
 
 export const TerminalTab: React.FC<TerminalTabProps> = ({
@@ -27,8 +30,11 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   token,
   isActive,
   machineName,
+  terminalId: _terminalId, // eslint-disable-line @typescript-eslint/no-unused-vars
+  machineId: _machineId, // eslint-disable-line @typescript-eslint/no-unused-vars
   onError,
   onAuthFailed,
+  onReattachNeeded,
 }) => {
   const language = useLanguage();
   const terminalRef = useRef<HTMLDivElement>(null);
@@ -114,6 +120,15 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
           xtermRef.current.writeln('\r\n\x1b[33mConnection closed. Reconnecting...\x1b[0m\r\n');
         }
         reconnectCountRef.current += 1;
+        // After 5 failed reconnects, trigger reattach
+        if (reconnectCountRef.current >= 5 && onReattachNeeded) {
+          console.log('[TerminalTab] Too many reconnect failures, triggering reattach');
+          if (xtermRef.current) {
+            xtermRef.current.writeln('\r\n\x1b[36mRequesting new terminal connection...\x1b[0m\r\n');
+          }
+          onReattachNeeded();
+          return;
+        }
         const delay = Math.min(3000 * Math.pow(1.5, reconnectCountRef.current - 1), 30000);
         reconnectTimerRef.current = setTimeout(connect, delay);
       };
