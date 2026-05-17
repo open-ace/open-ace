@@ -110,7 +110,10 @@ def test_terminal_restore_full(headless=False):
         page.fill("input[type='text']", "admin")
         page.fill("input[type='password']", "admin123")
         page.click("button[type='submit']")
+        # Wait for redirect after login (admin goes to dashboard)
+        time.sleep(3)
         page.wait_for_load_state("networkidle")
+        print(f"After login URL: {page.url}")
         print("✓ Logged in")
         page.screenshot(path="/tmp/test_01_login.png")
 

@@ -703,9 +703,16 @@ class RemoteAgent:
 
         Called when user refreshes browser and wants to reconnect to the same
         terminal session without losing PTY state (e.g., Claude Code chat history).
+
+        If terminal_server is not running, restart it with fresh API tokens.
         """
         terminal_id = data.get("terminal_id", "")
-        logger.info("Attaching to terminal %s", terminal_id[:8])
+        anthropic_token = data.get("anthropic_token", "")
+        openai_token = data.get("openai_token", "")
+        proxy_url = data.get("proxy_url", "")
+        logger.info(
+            "Attaching to terminal %s (tokens provided: %s)", terminal_id[:8], bool(anthropic_token)
+        )
 
         # Check if terminal server is still running (from process tracking)
         if terminal_id in self._terminal_processes:
@@ -758,8 +765,73 @@ class RemoteAgent:
                 self._terminal_tokens.pop(terminal_id, None)
                 self._terminal_ws_urls.pop(terminal_id, None)
 
-        # Terminal not found - report back so frontend can decide
-        logger.info("Terminal %s not found or exited", terminal_id[:8])
+        # Terminal not found - restart with fresh tokens if provided
+        if anthropic_token and proxy_url:
+            logger.info("Terminal %s not found, restarting with fresh tokens", terminal_id[:8])
+
+            # Use start_terminal logic to restart
+            work_dir = ""  # Default work dir
+            term_token = secrets.token_hex(32)
+
+            # Build command with fresh tokens
+            server_script = os.path.join(self._agent_dir, "terminal_server.py")
+            cmd = [
+                sys.executable,
+                server_script,
+                "--token",
+                term_token,
+                "--terminal-id",
+                terminal_id,
+                "--port",
+                "0",
+                "--proxy-url",
+                proxy_url,
+                "--anthropic-token",
+                anthropic_token,
+            ]
+            if openai_token:
+                cmd.extend(["--openai-token", openai_token])
+            cmd.extend(["--work-dir", work_dir])
+
+            try:
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    start_new_session=True,
+                )
+                self._terminal_processes[terminal_id] = proc
+
+                # Wait for READY:port output
+                port = self._read_terminal_port(proc, terminal_id)
+                if port:
+                    self._terminal_ports[terminal_id] = port
+                    hostname = self._get_reachable_hostname()
+                    ws_url = f"ws://{hostname}:{port}"
+
+                    self._terminal_tokens[terminal_id] = term_token
+                    self._terminal_ws_urls[terminal_id] = ws_url
+
+                    self._save_terminal_info(terminal_id, port, term_token, ws_url)
+
+                    self._http_send(
+                        {
+                            "type": "terminal_status",
+                            "terminal_id": terminal_id,
+                            "machine_id": self.config.machine_id,
+                            "status": "running",
+                            "ws_url": ws_url,
+                            "token": term_token,
+                        }
+                    )
+                    logger.info("Terminal %s restarted: %s", terminal_id[:8], ws_url)
+                    self._session_sync.notify_terminal_active(terminal_id)
+                    return
+            except Exception as e:
+                logger.error("Failed to restart terminal %s: %s", terminal_id[:8], e)
+
+        # Terminal not found and no tokens provided
+        logger.info("Terminal %s not found and no tokens provided", terminal_id[:8])
         self._http_send(
             {
                 "type": "terminal_status",

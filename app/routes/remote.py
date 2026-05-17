@@ -1232,14 +1232,43 @@ def attach_terminal(terminal_id):
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
 
-    # Send attach_terminal command to agent
+    # Generate fresh API tokens for LLM proxy auth
+    api_proxy = get_api_key_proxy_service()
+    anthropic_token = api_proxy.generate_proxy_token(
+        user_id=g.user["id"],
+        session_id=terminal_id,
+        tenant_id=1,
+        provider="anthropic",
+        session_type="terminal",
+    )
+    openai_token = api_proxy.generate_proxy_token(
+        user_id=g.user["id"],
+        session_id=terminal_id,
+        tenant_id=1,
+        provider="openai",
+        session_type="terminal",
+    )
+
+    # Get proxy URL for LLM API
+    backend_url = agent_mgr._get_backend_url()
+    proxy_url = f"{backend_url}/api/remote/llm-proxy"
+
+    # Send attach_terminal command to agent with fresh tokens
     cmd = {
         "type": "command",
         "command": "attach_terminal",
         "terminal_id": terminal_id,
         "machine_id": machine_id,
+        "anthropic_token": anthropic_token,
+        "openai_token": openai_token,
+        "proxy_url": proxy_url,
     }
     agent_mgr.send_command(machine_id, cmd)
+
+    logger.info(
+        "Sent attach_terminal command for %s with fresh API tokens",
+        terminal_id[:8],
+    )
 
     # Return immediately with pending status; frontend polls status endpoint
     return jsonify(
@@ -1567,6 +1596,14 @@ def _record_llm_usage(
         input_tokens = usage.get("prompt_tokens", 0)
         output_tokens = usage.get("completion_tokens", 0)
 
+        logger.info(
+            "Recording LLM usage: session_id=%s, input=%d, output=%d, provider=%s",
+            session_id[:8],
+            input_tokens,
+            output_tokens,
+            provider,
+        )
+
         if input_tokens or output_tokens:
             from app.modules.governance.quota_manager import QuotaManager
 
@@ -1591,6 +1628,18 @@ def _record_llm_usage(
                     session.request_count or 0
                 ) + 1  # Increment request count for each API call
                 sm.update_session(session)
+                logger.info(
+                    "Updated session %s tokens: input=%d, output=%d, requests=%d",
+                    session_id[:8],
+                    session.total_input_tokens,
+                    session.total_output_tokens,
+                    session.request_count,
+                )
+            else:
+                logger.warning(
+                    "Session %s not found for usage recording",
+                    session_id[:8],
+                )
 
             # Refresh user_daily_stats so quota checks see up-to-date data
             try:
