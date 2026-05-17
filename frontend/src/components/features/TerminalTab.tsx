@@ -45,6 +45,12 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
       return;
     }
 
+    // Skip if already connecting or connected
+    if (wsRef.current && (wsRef.current.readyState === WebSocket.CONNECTING || wsRef.current.readyState === WebSocket.OPEN)) {
+      console.log('[TerminalTab] Skipping connect - already connected/connecting');
+      return;
+    }
+
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
@@ -175,11 +181,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
       console.log('[TerminalTab] xterm.js initialized, ready to connect');
       console.log('[TerminalTab] Current wsUrl:', wsUrl, 'token:', token?.substring(0, 20));
 
-      // Auto-connect after terminal is ready
-      if (wsUrl && token) {
-        console.log('[TerminalTab] Calling connect() after init');
-        connect();
-      }
+      // Don't auto-connect here - let the connect effect handle it
     };
 
     initTerminal();

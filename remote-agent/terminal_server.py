@@ -189,6 +189,24 @@ async def _handle_connection(websocket) -> None:
     env = _build_env()
     work_dir = WORK_DIR or os.path.expanduser("~")
 
+    # Create bashrc with claude alias if proxy is configured
+    if PROXY_URL and PROXY_TOKEN:
+        bashrc_path = os.path.join(os.path.expanduser("~"), ".bashrc")
+        try:
+            # Append alias to .bashrc if not already present
+            alias_line = "alias claude='claude --bare'"
+            try:
+                with open(bashrc_path) as f:
+                    existing = f.read()
+            except FileNotFoundError:
+                existing = ""
+            if alias_line not in existing:
+                with open(bashrc_path, "a") as f:
+                    f.write("\n# Open ACE: use --bare mode for proxy\n")
+                    f.write(alias_line + "\n")
+        except Exception as e:
+            logger.warning("Failed to update bashrc: %s", e)
+
     try:
         master_fd, pid = _spawn_pty(cmd, env, work_dir)
     except Exception as e:

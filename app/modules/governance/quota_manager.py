@@ -509,20 +509,17 @@ class QuotaManager:
 
         # Legacy path: agent_sessions (remote) + daily_messages (local)
         # Remote session usage from agent_sessions
+        # Use a simpler query: sum tokens and count sessions (each session = 1 request batch)
         remote_result = self.db.fetch_one(
-            """
+            adapt_sql("""
             SELECT
                 COALESCE(SUM(total_tokens), 0) as tokens,
-                COALESCE(SUM(
-                    (SELECT COUNT(*) FROM session_messages sm
-                     WHERE sm.session_id = agent_sessions.session_id
-                       AND sm.role = 'assistant'))
-                ), 0) as requests
+                COUNT(*) as requests
             FROM agent_sessions
             WHERE user_id = ?
               AND workspace_type = 'remote'
               AND CAST(created_at AS DATE) >= ? AND CAST(created_at AS DATE) <= ?
-        """,
+        """),
             (user_id, start_date, end_date),
         )
 
@@ -537,7 +534,7 @@ class QuotaManager:
             system_account = user.get("system_account") or user.get("username", "")
             if system_account:
                 local_result = self.db.fetch_one(
-                    """
+                    adapt_sql("""
                     SELECT
                         COALESCE(SUM(tokens_used), 0) as tokens,
                         COUNT(*) as requests
@@ -545,7 +542,7 @@ class QuotaManager:
                     WHERE sender_name LIKE ? AND date >= ? AND date <= ?
                       AND role = 'assistant'
                       AND (message_source IS NULL OR message_source != 'remote_workspace')
-                """,
+                """),
                     (f"{escape_like(system_account)}%", start_date, end_date),
                 )
                 local_tokens = int(local_result["tokens"]) if local_result else 0
@@ -559,12 +556,12 @@ class QuotaManager:
     def _get_recent_alerts(self, user_id: int, limit: int = 10) -> list[QuotaAlert]:
         """Get recent alerts for a user."""
         rows = self.db.fetch_all(
-            """
+            adapt_sql("""
             SELECT * FROM quota_alerts
             WHERE user_id = ?
             ORDER BY created_at DESC
             LIMIT ?
-        """,
+        """),
             (user_id, limit),
         )
 
