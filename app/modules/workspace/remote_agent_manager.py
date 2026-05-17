@@ -577,6 +577,12 @@ class RemoteAgentManager:
         with self._lock:
             return self._command_queues.pop(machine_id, [])
 
+    def store_terminal_info(self, machine_id: str, terminal_id: str, info: dict) -> None:
+        """Store terminal status info reported by an agent."""
+        from app.modules.workspace.terminal_store import terminal_info_store
+
+        terminal_info_store.put(machine_id, terminal_id, info)
+
     # ==================== Session Tracking ====================
 
     def bind_session(self, session_id: str, machine_id: str) -> None:

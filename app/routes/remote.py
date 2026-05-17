@@ -21,6 +21,7 @@ from app.auth.decorators import _extract_token, _load_user_from_token, admin_req
 from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
 from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
 from app.modules.workspace.remote_session_manager import get_remote_session_manager
+from app.modules.workspace.terminal_store import terminal_info_store
 
 logger = logging.getLogger(__name__)
 
@@ -918,8 +919,231 @@ def agent_message():
         pending = agent_mgr.get_pending_commands(machine_id)
         return jsonify({"success": True, "pending_commands": pending})
 
+    elif msg_type == "terminal_status":
+        # Agent reports terminal server status
+        terminal_id = data.get("terminal_id", "")
+        status = data.get("status", "")
+        ws_url = data.get("ws_url", "")
+        term_token = data.get("token", "")
+        error = data.get("error", "")
+
+        logger.info(
+            "Terminal status [%s]: status=%s ws_url=%s",
+            terminal_id[:8],
+            status,
+            ws_url,
+        )
+
+        # Store terminal info in agent manager for later retrieval
+        agent_mgr.store_terminal_info(
+            machine_id,
+            terminal_id,
+            {
+                "status": status,
+                "ws_url": ws_url,
+                "token": term_token,
+                "error": error,
+            },
+        )
+
+        return jsonify({"success": True})
+
+    elif msg_type == "session_sync":
+        # Agent reports Claude Code session data from web terminal
+        session_id = data.get("session_id", "")
+        tool_name = data.get("tool_name", "claude-code")
+        model = data.get("model")
+        project_path = data.get("project_path")
+        message_count = data.get("message_count", 0)
+        total_input_tokens = data.get("total_input_tokens", 0)
+        total_output_tokens = data.get("total_output_tokens", 0)
+        messages = data.get("messages", [])
+
+        logger.info(
+            "Session sync [%s]: tool=%s msgs=%d tokens=%d/%d",
+            session_id[:8],
+            tool_name,
+            message_count,
+            total_input_tokens,
+            total_output_tokens,
+        )
+
+        try:
+            sync_session_mgr = get_remote_session_manager()._session_manager
+
+            # Upsert the session record
+            existing = sync_session_mgr.get_session(session_id)
+            if not existing:
+                sync_session_mgr.create_session(
+                    session_id=session_id,
+                    tool_name=tool_name,
+                    project_path=project_path or "",
+                    model=model,
+                    host_name=machine_id[:8],
+                    context={
+                        "workspace_type": "remote",
+                        "remote_machine_id": machine_id,
+                    },
+                )
+
+            # Mirror messages to daily_messages for ConversationHistory visibility
+            try:
+                from app.repositories.database import adapt_sql, get_db_connection
+
+                for msg in messages:
+                    role = msg.get("role", "")
+                    content = msg.get("content", "")
+                    timestamp = msg.get("timestamp")
+                    msg_model = msg.get("model") or model
+
+                    if not content or len(content) > 100000:
+                        continue
+
+                    date_str = (timestamp or time.strftime("%Y-%m-%d"))[:10]
+                    message_id = f"{session_id}-{msg.get('timestamp', '')}"
+
+                    try:
+                        with get_db_connection() as conn:
+                            cursor = conn.cursor()
+                            cursor.execute(
+                                adapt_sql("""INSERT OR IGNORE INTO daily_messages
+                                    (date, tool_name, host_name, message_id, role, content,
+                                     tokens_used, model, timestamp, message_source,
+                                     conversation_id, agent_session_id)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""),
+                                (
+                                    date_str,
+                                    tool_name,
+                                    machine_id[:8],
+                                    message_id,
+                                    role,
+                                    content[:50000],
+                                    0,
+                                    msg_model,
+                                    timestamp,
+                                    "web_terminal",
+                                    session_id,
+                                    session_id,
+                                ),
+                            )
+                            conn.commit()
+                    except Exception as e:
+                        logger.debug("Failed to insert daily_message: %s", e)
+            except Exception as e:
+                logger.debug("Failed to mirror messages: %s", e)
+
+        except Exception as e:
+            logger.error("Failed to process session_sync: %s", e)
+
+        return jsonify({"success": True})
+
     else:
         return jsonify({"error": f"Unknown message type: {msg_type}"}), 400
+
+
+# ==================== Terminal Management ====================
+
+
+@remote_bp.route("/terminal/start", methods=["POST"])
+def start_terminal():
+    """Start a web terminal on a remote machine."""
+    data = request.get_json() or {}
+    machine_id = data.get("machine_id")
+    work_dir = data.get("work_dir")
+
+    if not machine_id:
+        return jsonify({"error": "machine_id is required"}), 400
+
+    # Check access
+    agent_mgr = get_remote_agent_manager()
+    if g.user.get("role") != "admin":
+        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
+            return jsonify({"error": "Access denied"}), 403
+
+    # Generate terminal ID and proxy token
+    terminal_id = str(uuid.uuid4())
+
+    # Generate a proxy token for LLM API auth through the terminal
+    api_proxy = get_api_key_proxy_service()
+    proxy_token = api_proxy.generate_proxy_token(
+        user_id=g.user["id"],
+        session_id=terminal_id,
+        tenant_id=1,
+        provider="anthropic",
+    )
+
+    proxy_url = f"{request.host_url.rstrip('/')}/api/remote/llm-proxy"
+
+    # Send start_terminal command to agent
+    cmd = {
+        "type": "command",
+        "command": "start_terminal",
+        "terminal_id": terminal_id,
+        "proxy_url": proxy_url,
+        "proxy_token": proxy_token,
+        "work_dir": work_dir or "",
+    }
+    agent_mgr.send_command(machine_id, cmd)
+
+    # Return immediately with pending status; frontend polls status endpoint
+    return jsonify(
+        {
+            "success": True,
+            "terminal": {
+                "terminal_id": terminal_id,
+                "machine_id": machine_id,
+                "status": "pending",
+            },
+        }
+    )
+
+
+@remote_bp.route("/terminal/stop", methods=["POST"])
+def stop_terminal():
+    """Stop a web terminal on a remote machine."""
+    data = request.get_json() or {}
+    terminal_id = data.get("terminal_id")
+    machine_id = data.get("machine_id")
+
+    if not terminal_id or not machine_id:
+        return jsonify({"error": "terminal_id and machine_id are required"}), 400
+
+    # Check access
+    agent_mgr = get_remote_agent_manager()
+    if g.user.get("role") != "admin":
+        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
+            return jsonify({"error": "Access denied"}), 403
+
+    cmd = {
+        "type": "command",
+        "command": "stop_terminal",
+        "terminal_id": terminal_id,
+    }
+    agent_mgr.send_command(machine_id, cmd)
+
+    # Clean up local store
+    terminal_info_store.pop(machine_id, terminal_id)
+
+    return jsonify({"success": True})
+
+
+@remote_bp.route("/terminal/<terminal_id>/status", methods=["GET"])
+def get_terminal_status(terminal_id):
+    """Get terminal status."""
+    machine_id = request.args.get("machine_id")
+    if not machine_id:
+        return jsonify({"error": "machine_id query parameter is required"}), 400
+
+    # Check access: user must have access to this machine
+    agent_mgr = get_remote_agent_manager()
+    if g.user.get("role") != "admin":
+        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
+            return jsonify({"error": "Access denied"}), 403
+
+    info = terminal_info_store.get(machine_id, terminal_id)
+    if info:
+        return jsonify({"success": True, "terminal": info})
+    return jsonify({"success": True, "terminal": {"status": "unknown"}})
 
 
 # ==================== LLM Proxy ====================

@@ -173,4 +173,45 @@ export const remoteApi = {
   resumeSession(sessionId: string): Promise<{ success: boolean }> {
     return apiClient.post(`/api/remote/sessions/${sessionId}/resume`, {});
   },
+
+  // Terminal management
+  startTerminal(data: {
+    machine_id: string;
+    work_dir?: string;
+  }): Promise<{
+    success: boolean;
+    terminal?: {
+      terminal_id: string;
+      ws_url: string;
+      token: string;
+      status: string;
+    };
+    error?: string;
+  }> {
+    return apiClient.post('/api/remote/terminal/start', data);
+  },
+
+  stopTerminal(data: {
+    terminal_id: string;
+    machine_id: string;
+  }): Promise<{ success: boolean }> {
+    return apiClient.post('/api/remote/terminal/stop', data);
+  },
+
+  getTerminalStatus(
+    terminalId: string,
+    machineId: string
+  ): Promise<{
+    success: boolean;
+    terminal: {
+      status: string;
+      ws_url?: string;
+      token?: string;
+      error?: string;
+    };
+  }> {
+    return apiClient.get(`/api/remote/terminal/${terminalId}/status`, {
+      machine_id: machineId,
+    });
+  },
 };

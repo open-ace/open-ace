@@ -1,8 +1,8 @@
 /**
- * NewSessionModal Component - Modal for creating new sessions (local or remote)
+ * NewSessionModal Component - Modal for creating new sessions (local, remote, or terminal)
  *
  * Features:
- * - Workspace type selection: Local / Remote
+ * - Workspace type selection: Local / Remote / Terminal
  * - Machine selector for remote workspaces
  * - Project path input with auto-fill from machine work_dir
  *
@@ -29,6 +29,11 @@ interface NewSessionModalProps {
     sessionId: string;
     projectPath: string;
   }) => void;
+  onCreateTerminal?: (params: {
+    machineId: string;
+    machineName: string;
+    workDir: string;
+  }) => void;
 }
 
 export const NewSessionModal: React.FC<NewSessionModalProps> = ({
@@ -37,6 +42,7 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
   onClose,
   onCreateLocal,
   onCreateRemote,
+  onCreateTerminal,
 }) => {
   const language = useLanguage();
   const navigate = useNavigate();
@@ -44,9 +50,10 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
 
   const modalOpen = isOpen ?? show ?? false;
 
-  const [workspaceType, setWorkspaceType] = useState<'local' | 'remote'>('local');
+  const [workspaceType, setWorkspaceType] = useState<'local' | 'remote' | 'terminal'>('local');
   const [selectedMachineId, setSelectedMachineId] = useState<string>('');
   const [projectPath, setProjectPath] = useState('');
+  const [isStartingTerminal, setIsStartingTerminal] = useState(false);
 
   const { data: machinesData, isLoading: machinesLoading } = useAvailableMachines();
   const createRemoteSession = useCreateRemoteSession();
@@ -142,15 +149,45 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
     }
   };
 
+  const handleCreateTerminal = async () => {
+    if (!selectedMachineId) return;
+
+    setIsStartingTerminal(true);
+    try {
+      const machineName = selectedMachine?.machine_name ?? selectedMachineId.slice(0, 8);
+
+      if (onCreateTerminal) {
+        onCreateTerminal({
+          machineId: selectedMachineId,
+          machineName,
+          workDir: projectPath || getDefaultPath(selectedMachine?.os_type),
+        });
+      }
+    } finally {
+      setIsStartingTerminal(false);
+      setSelectedMachineId('');
+      setProjectPath('');
+      setWorkspaceType('local');
+      onClose();
+    }
+  };
+
   const handleCreate = () => {
     if (workspaceType === 'local') {
       handleCreateLocal();
+    } else if (workspaceType === 'terminal') {
+      handleCreateTerminal();
     } else {
       handleCreateRemote();
     }
   };
 
-  const canCreate = workspaceType === 'local' || (selectedMachineId && projectPath);
+  const canCreate =
+    workspaceType === 'local' ||
+    (workspaceType === 'terminal' && selectedMachineId) ||
+    (workspaceType === 'remote' && selectedMachineId && projectPath);
+
+  const isLoading = createRemoteSession.isPending || isStartingTerminal;
 
   return (
     <Modal
@@ -166,7 +203,7 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
             variant="primary"
             onClick={handleCreate}
             disabled={!canCreate}
-            loading={createRemoteSession.isPending}
+            loading={isLoading}
           >
             {t('create', language)}
           </Button>
@@ -191,11 +228,18 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
             <i className="bi bi-cloud me-1" />
             {t('remoteWorkspace', language)}
           </button>
+          <button
+            className={`btn flex-fill ${workspaceType === 'terminal' ? 'btn-primary' : 'btn-outline-primary'}`}
+            onClick={() => setWorkspaceType('terminal')}
+          >
+            <i className="bi bi-terminal me-1" />
+            {t('terminalWorkspace', language) || 'Terminal'}
+          </button>
         </div>
       </div>
 
-      {/* Remote Options */}
-      {workspaceType === 'remote' && (
+      {/* Remote / Terminal Options */}
+      {(workspaceType === 'remote' || workspaceType === 'terminal') && (
         <>
           {/* Machine List */}
           <div className="mb-3">
@@ -233,7 +277,7 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
           </div>
 
           {/* Project Path */}
-          {selectedMachineId && (
+          {selectedMachineId && workspaceType === 'remote' && (
             <div className="mb-3">
               <label className="form-label">{t('projectPath', language)}</label>
               <input
@@ -249,8 +293,37 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
             </div>
           )}
 
+          {/* Terminal options */}
+          {workspaceType === 'terminal' && selectedMachineId && (
+            <>
+              {/* Working directory for terminal */}
+              <div className="mb-3">
+                <label className="form-label">{t('terminalWorkDir', language) || 'Working Directory'}</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  value={projectPath}
+                  onChange={(e) => setProjectPath(e.target.value)}
+                  placeholder={
+                    selectedMachine ? getDefaultPath(selectedMachine.os_type) : '/root/workspace'
+                  }
+                />
+                <div className="form-text text-muted small">
+                  {t('terminalWorkDirHint', language) || 'Terminal will open in this directory'}
+                </div>
+              </div>
+
+              {/* Info hint */}
+              <div className="alert alert-info small">
+                <i className="bi bi-info-circle me-1" />
+                {t('terminalInfoHint', language) ||
+                  'Opens a web terminal on the remote machine. Claude Code is pre-configured with proxy authentication.'}
+              </div>
+            </>
+          )}
+
           {/* Error Display */}
-          {createRemoteSession.isError && (
+          {createRemoteSession.isError && workspaceType === 'remote' && (
             <div className="alert alert-danger small">
               {t('error', language)}:{' '}
               {(createRemoteSession.error as Error)?.message || t('error', language)}
