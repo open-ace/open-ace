@@ -42,6 +42,7 @@ ANTHROPIC_TOKEN = ""
 OPENAI_TOKEN = ""
 WORK_DIR = ""
 SHELL_CMD = ""
+TERMINAL_ID = ""  # For identification in logs and persistence
 
 # Output history buffer size (for reconnection screen restore)
 OUTPUT_HISTORY_SIZE = 64 * 1024  # 64 KB
@@ -473,10 +474,11 @@ async def _run_server(port: int) -> None:
 
 
 def main() -> None:
-    global AUTH_TOKEN, PROXY_URL, ANTHROPIC_TOKEN, OPENAI_TOKEN, WORK_DIR, SHELL_CMD
+    global AUTH_TOKEN, PROXY_URL, ANTHROPIC_TOKEN, OPENAI_TOKEN, WORK_DIR, SHELL_CMD, TERMINAL_ID
 
     parser = argparse.ArgumentParser(description="Open ACE WebSocket Terminal Server")
     parser.add_argument("--token", required=True, help="Authentication token")
+    parser.add_argument("--terminal-id", default="", help="Terminal session ID for persistence")
     parser.add_argument("--port", type=int, default=0, help="Port to listen on (0=auto)")
     parser.add_argument("--proxy-url", default="", help="Open ACE LLM proxy URL")
     parser.add_argument(
@@ -495,6 +497,7 @@ def main() -> None:
     args = parser.parse_args()
 
     AUTH_TOKEN = args.token
+    TERMINAL_ID = args.terminal_id
     PROXY_URL = args.proxy_url
     # Support backward compat: --proxy-token maps to --anthropic-token
     ANTHROPIC_TOKEN = args.anthropic_token or args.proxy_token

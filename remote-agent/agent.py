@@ -17,6 +17,7 @@ import socket
 import subprocess
 import sys
 import time
+from datetime import datetime
 from typing import Any
 
 import requests
@@ -52,8 +53,92 @@ class RemoteAgent:
         self._terminal_processes: dict[str, subprocess.Popen] = {}
         self._terminal_tokens: dict[str, str] = {}
         self._terminal_ports: dict[str, int] = {}
+        self._terminal_ws_urls: dict[str, str] = {}  # Store ws_url for attach
+        # Terminal info persistence directory
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        self._terminal_info_dir = os.path.join(script_dir, ".terminal_sessions")
         # Session sync service
         self._session_sync = SessionSyncService(self._http_send, self.config)
+        # Restore terminal sessions from files
+        self._restore_terminal_sessions()
+
+    def _restore_terminal_sessions(self) -> None:
+        """Restore terminal session info from persisted files."""
+        if not os.path.exists(self._terminal_info_dir):
+            return
+        try:
+            for filename in os.listdir(self._terminal_info_dir):
+                if filename.endswith(".json"):
+                    filepath = os.path.join(self._terminal_info_dir, filename)
+                    try:
+                        with open(filepath) as f:
+                            info = json.load(f)
+                        terminal_id = info.get("terminal_id")
+                        if terminal_id:
+                            self._terminal_ports[terminal_id] = info.get("port", 0)
+                            self._terminal_tokens[terminal_id] = info.get("token", "")
+                            self._terminal_ws_urls[terminal_id] = info.get("ws_url", "")
+                            # Check if port is still listening
+                            port = info.get("port", 0)
+                            if self._check_port_listening(port):
+                                logger.info(
+                                    "Restored terminal session %s: port=%d",
+                                    terminal_id[:8],
+                                    port,
+                                )
+                            else:
+                                # Port not listening, remove stale info file
+                                logger.info(
+                                    "Terminal %s port %d not listening, removing stale file",
+                                    terminal_id[:8],
+                                    port,
+                                )
+                                os.remove(filepath)
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to restore terminal session from %s: %s", filename, e
+                        )
+        except Exception as e:
+            logger.warning("Failed to restore terminal sessions: %s", e)
+
+    def _check_port_listening(self, port: int) -> bool:
+        """Check if a port is still listening."""
+        if port <= 0:
+            return False
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(1)
+                result = s.connect_ex(("127.0.0.1", port))
+                return result == 0
+        except Exception:
+            return False
+
+    def _save_terminal_info(self, terminal_id: str, port: int, token: str, ws_url: str) -> None:
+        """Save terminal session info to a file for persistence."""
+        os.makedirs(self._terminal_info_dir, exist_ok=True)
+        filepath = os.path.join(self._terminal_info_dir, f"{terminal_id}.json")
+        try:
+            info = {
+                "terminal_id": terminal_id,
+                "port": port,
+                "token": token,
+                "ws_url": ws_url,
+                "created_at": datetime.utcnow().isoformat(),
+            }
+            with open(filepath, "w") as f:
+                json.dump(info, f)
+            logger.debug("Saved terminal info for %s to %s", terminal_id[:8], filepath)
+        except Exception as e:
+            logger.warning("Failed to save terminal info: %s", e)
+
+    def _remove_terminal_info(self, terminal_id: str) -> None:
+        """Remove terminal session info file."""
+        filepath = os.path.join(self._terminal_info_dir, f"{terminal_id}.json")
+        try:
+            if os.path.exists(filepath):
+                os.remove(filepath)
+        except Exception as e:
+            logger.warning("Failed to remove terminal info file: %s", e)
 
     # ----------------------------------------------------------------
     # Connection lifecycle
@@ -521,6 +606,8 @@ class RemoteAgent:
         # Find terminal_server.py script path
         script_dir = os.path.dirname(os.path.abspath(__file__))
         server_script = os.path.join(script_dir, "terminal_server.py")
+        terminal_info_dir = os.path.join(script_dir, ".terminal_sessions")
+        os.makedirs(terminal_info_dir, exist_ok=True)
 
         # Build command with tokens for multiple providers
         cmd = [
@@ -528,6 +615,8 @@ class RemoteAgent:
             server_script,
             "--token",
             term_token,
+            "--terminal-id",
+            terminal_id,
             "--port",
             "0",  # Auto-select port
             "--proxy-url",
@@ -554,6 +643,9 @@ class RemoteAgent:
                 self._terminal_ports[terminal_id] = port
                 hostname = self._get_reachable_hostname()
                 ws_url = f"ws://{hostname}:{port}"
+
+                # Save terminal info to file for persistence across agent restarts
+                self._save_terminal_info(terminal_id, port, term_token, ws_url)
 
                 self._http_send(
                     {
@@ -615,7 +707,7 @@ class RemoteAgent:
         terminal_id = data.get("terminal_id", "")
         logger.info("Attaching to terminal %s", terminal_id[:8])
 
-        # Check if terminal server is still running
+        # Check if terminal server is still running (from process tracking)
         if terminal_id in self._terminal_processes:
             proc = self._terminal_processes[terminal_id]
             if proc.poll() is None:
@@ -623,7 +715,7 @@ class RemoteAgent:
                 port = self._terminal_ports.get(terminal_id)
                 term_token = self._terminal_tokens.get(terminal_id)
                 hostname = self._get_reachable_hostname()
-                ws_url = f"ws://{hostname}:{port}"
+                ws_url = self._terminal_ws_urls.get(terminal_id) or f"ws://{hostname}:{port}"
 
                 self._http_send(
                     {
@@ -635,8 +727,36 @@ class RemoteAgent:
                         "token": term_token,
                     }
                 )
-                logger.info("Terminal %s attached: %s", terminal_id[:8], ws_url)
+                logger.info("Terminal %s attached (from process): %s", terminal_id[:8], ws_url)
                 return
+
+        # Check if we have persisted terminal info (agent restart case)
+        if terminal_id in self._terminal_ports:
+            port = self._terminal_ports.get(terminal_id)
+            term_token = self._terminal_tokens.get(terminal_id)
+            ws_url = self._terminal_ws_urls.get(terminal_id)
+
+            # Verify port is still listening
+            if port and self._check_port_listening(port):
+                self._http_send(
+                    {
+                        "type": "terminal_status",
+                        "terminal_id": terminal_id,
+                        "machine_id": self.config.machine_id,
+                        "status": "running",
+                        "ws_url": ws_url,
+                        "token": term_token,
+                    }
+                )
+                logger.info("Terminal %s attached (from persistence): %s", terminal_id[:8], ws_url)
+                return
+            else:
+                # Port not listening, clean up stale data
+                logger.info("Terminal %s port %d not listening, cleaning up", terminal_id[:8], port)
+                self._remove_terminal_info(terminal_id)
+                self._terminal_ports.pop(terminal_id, None)
+                self._terminal_tokens.pop(terminal_id, None)
+                self._terminal_ws_urls.pop(terminal_id, None)
 
         # Terminal not found or exited - start a new one
         logger.info("Terminal %s not found or exited, starting new", terminal_id[:8])
@@ -656,6 +776,8 @@ class RemoteAgent:
                 logger.warning("Error stopping terminal process: %s", e)
         self._terminal_tokens.pop(terminal_id, None)
         self._terminal_ports.pop(terminal_id, None)
+        self._terminal_ws_urls.pop(terminal_id, None)
+        self._remove_terminal_info(terminal_id)
 
     def _read_terminal_port(self, proc: subprocess.Popen, terminal_id: str) -> int | None:
         """Read the port number from terminal server's READY:port stdout."""
