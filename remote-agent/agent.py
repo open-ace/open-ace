@@ -940,10 +940,20 @@ class RemoteAgent:
         """
         settings = settings.copy()
 
+        # Collect dynamic env key names from modelProviders (qwen-code)
+        # e.g. envKey: "ZAI_API_KEY" or "BAILIAN_CODING_PLAN_API_KEY"
+        dynamic_env_keys: set[str] = set()
+        for provider_models in settings.get("modelProviders", {}).values():
+            if isinstance(provider_models, list):
+                for model in provider_models:
+                    if isinstance(model, dict) and "envKey" in model:
+                        dynamic_env_keys.add(model["envKey"])
+
         # Remove sensitive keys from env block
+        all_sensitive = SENSITIVE_ENV_KEYS | dynamic_env_keys
         env = settings.get("env", {})
         if env:
-            env = {k: v for k, v in env.items() if k not in SENSITIVE_ENV_KEYS}
+            env = {k: v for k, v in env.items() if k not in all_sensitive}
             settings["env"] = env
 
         # Remove baseUrl from modelProviders (qwen-code)
