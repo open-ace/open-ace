@@ -436,7 +436,7 @@ export const APIKeyManagement: React.FC = () => {
                             role="switch"
                             checked={key.is_active}
                             onChange={() => {
-                              updateApiKey.mutateAsync({
+                              updateApiKey.mutate({
                                 keyId: key.id,
                                 is_active: !key.is_active,
                               });
