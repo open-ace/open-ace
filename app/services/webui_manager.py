@@ -573,6 +573,10 @@ class WebUIManager:
         os.makedirs(webui_log_dir, mode=0o755, exist_ok=True)
         child_env["OPENACE_LOG_DIR"] = webui_log_dir
 
+        # Set SESSION_TIMEOUT_MS for webui (Issue #351)
+        # Default: 24 hours = 86400000 ms
+        child_env["SESSION_TIMEOUT_MS"] = "86400000"
+
         # Change log directory ownership to system_account (Linux/macOS only)
         # This allows webui to create additional log files if needed
         if self._platform in ("linux", "darwin"):
@@ -614,6 +618,7 @@ class WebUIManager:
                 system_account,
                 "env",
                 f"OPENACE_LOG_DIR={webui_log_dir}",
+                f"SESSION_TIMEOUT_MS={child_env['SESSION_TIMEOUT_MS']}",
                 f"PATH={child_env['PATH']}",
                 webui_cmd,
                 "--port",

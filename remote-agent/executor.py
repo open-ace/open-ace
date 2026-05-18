@@ -1495,9 +1495,21 @@ class ProcessExecutor:
                 process.pid,
             )
 
-        # Clear metadata file after successful restore
-        with contextlib.suppress(OSError):
-            self._META_FILE.write_text("{}", encoding="utf-8")
+        # Only clear successfully restored sessions from metadata
+        # Keep failed sessions for potential manual recovery (Issue #316)
+        if restored:
+            remaining_meta = {k: v for k, v in meta.items() if k not in restored}
+            try:
+                self._META_FILE.write_text(
+                    json.dumps(remaining_meta, indent=2), encoding="utf-8"
+                )
+                logger.debug(
+                    "Cleared %d restored session(s) from metadata, %d remaining",
+                    len(restored),
+                    len(remaining_meta),
+                )
+            except OSError as e:
+                logger.warning("Failed to update metadata file: %s", e)
 
         self._save_sessions_meta()
         return restored

@@ -5,6 +5,8 @@
  * - Workspace type selection: Local / Remote / Terminal
  * - Machine selector for remote workspaces
  * - Project path input with auto-fill from machine work_dir
+ * - Enhanced machine selector (Issue #317)
+ * - Path history support (Issue #317)
  *
  * Supports two modes:
  * 1. Standalone (default): navigates to /work with URL params
@@ -17,6 +19,7 @@ import { useAvailableMachines, useCreateRemoteSession } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import { Modal, Button, Badge, EmptyState, Loading } from '@/components/common';
+import { RemoteMachineSelector } from './RemoteMachineSelector';
 
 interface NewSessionModalProps {
   isOpen?: boolean;

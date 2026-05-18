@@ -72,6 +72,12 @@ class QwenCodeAdapter(BaseCLIAdapter):
         ]
 
         if resume:
+            # Log resume session ID for debugging (Issue #316)
+            logger.info(
+                "Building resume command for session_id=%s (project=%s)",
+                session_id[:8] if session_id else "N/A",
+                project_path,
+            )
             args.extend(["--resume", session_id])
         if permission_mode:
             args.extend(["--approval-mode", permission_mode])
