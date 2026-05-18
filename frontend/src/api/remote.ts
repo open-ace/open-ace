@@ -45,6 +45,8 @@ export interface ApiKey {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  cli_tools: string | null; // JSON array: ["claude-code", "qwen-code"]
+  cli_settings: string | null; // JSON object: {"claude-code": {...}, "qwen-code": {...}}
 }
 
 export interface StoreApiKeyRequest {
@@ -52,6 +54,17 @@ export interface StoreApiKeyRequest {
   key_name: string;
   api_key: string;
   base_url?: string;
+  tenant_id?: number;
+  cli_tools?: string; // JSON array: ["claude-code", "qwen-code"]
+  cli_settings?: string; // JSON object: {"claude-code": {...}, "qwen-code": {...}}
+}
+
+export interface UpdateApiKeyRequest {
+  keyId: number;
+  key_name?: string;
+  base_url?: string;
+  cli_tools?: string;
+  cli_settings?: string;
   tenant_id?: number;
 }
 
@@ -142,6 +155,11 @@ export const remoteApi = {
     return apiClient.delete(`/api/remote/api-keys/${keyId}`, { tenant_id: tenantId ?? 1 });
   },
 
+  updateApiKey(data: UpdateApiKeyRequest): Promise<{ success: boolean; message: string }> {
+    const { keyId, ...body } = data;
+    return apiClient.put(`/api/remote/api-keys/${keyId}`, body);
+  },
+
   // Available machines (for session creation)
   getAvailableMachines(): Promise<{ success: boolean; machines: RemoteMachine[] }> {
     return apiClient.get('/api/remote/machines/available');
@@ -172,5 +190,52 @@ export const remoteApi = {
 
   resumeSession(sessionId: string): Promise<{ success: boolean }> {
     return apiClient.post(`/api/remote/sessions/${sessionId}/resume`, {});
+  },
+
+  // Terminal management
+  startTerminal(data: { machine_id: string; work_dir?: string }): Promise<{
+    success: boolean;
+    terminal?: {
+      terminal_id: string;
+      ws_url: string;
+      token: string;
+      status: string;
+    };
+    error?: string;
+  }> {
+    return apiClient.post('/api/remote/terminal/start', data);
+  },
+
+  stopTerminal(data: { terminal_id: string; machine_id: string }): Promise<{ success: boolean }> {
+    return apiClient.post('/api/remote/terminal/stop', data);
+  },
+
+  attachTerminal(data: { terminal_id: string; machine_id: string }): Promise<{
+    success: boolean;
+    terminal?: {
+      terminal_id: string;
+      machine_id: string;
+      status: string;
+    };
+    error?: string;
+  }> {
+    return apiClient.post(`/api/remote/terminal/${data.terminal_id}/attach`, data);
+  },
+
+  getTerminalStatus(
+    terminalId: string,
+    machineId: string
+  ): Promise<{
+    success: boolean;
+    terminal: {
+      status: string;
+      ws_url?: string;
+      token?: string;
+      error?: string;
+    };
+  }> {
+    return apiClient.get(`/api/remote/terminal/${terminalId}/status`, {
+      machine_id: machineId,
+    });
   },
 };

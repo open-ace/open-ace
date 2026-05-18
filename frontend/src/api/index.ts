@@ -130,6 +130,7 @@ export type {
   MachineAssignment,
   ApiKey,
   StoreApiKeyRequest,
+  UpdateApiKeyRequest,
   RemoteSession,
   RemoteSessionOutput,
   CreateRemoteSessionRequest,

@@ -2,8 +2,8 @@
 Open ACE Remote Agent - Main Daemon
 
 Connects to the Open ACE server via HTTP polling, handles commands
-(start_session, send_message, stop_session), manages CLI subprocesses
-through the executor module, and sends heartbeats.
+(start_session, send_message, stop_session, start_terminal, stop_terminal),
+manages CLI subprocesses through the executor module, and sends heartbeats.
 """
 
 from __future__ import annotations
@@ -11,13 +11,20 @@ from __future__ import annotations
 import json
 import logging
 import os
+import secrets
 import signal
+import socket
+import subprocess
 import sys
+import tempfile
 import time
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import requests
 from executor import ProcessExecutor
+from session_sync import SessionSyncService
 from system_info import get_capabilities
 
 from config import AgentConfig
@@ -44,6 +51,108 @@ class RemoteAgent:
         self._capabilities = get_capabilities()
         self._running = False
         self._reconnect_delay = self.config.reconnect_base_delay
+        # Terminal server management
+        self._terminal_processes: dict[str, subprocess.Popen] = {}
+        self._terminal_tokens: dict[str, str] = {}
+        self._terminal_ports: dict[str, int] = {}
+        self._terminal_ws_urls: dict[str, str] = {}  # Store ws_url for attach
+        # Terminal info persistence directory
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        self._terminal_info_dir = os.path.join(script_dir, ".terminal_sessions")
+        # Session sync service
+        self._session_sync = SessionSyncService(self._http_send, self.config)
+        # Restore terminal sessions from files
+        self._restore_terminal_sessions()
+
+    def _restore_terminal_sessions(self) -> None:
+        """Restore terminal session info from persisted files."""
+        if not os.path.exists(self._terminal_info_dir):
+            return
+        try:
+            for filename in os.listdir(self._terminal_info_dir):
+                if filename.endswith(".json"):
+                    filepath = os.path.join(self._terminal_info_dir, filename)
+                    try:
+                        with open(filepath) as f:
+                            info = json.load(f)
+                        terminal_id = info.get("terminal_id")
+                        if terminal_id:
+                            self._terminal_ports[terminal_id] = info.get("port", 0)
+                            self._terminal_tokens[terminal_id] = info.get("token", "")
+                            self._terminal_ws_urls[terminal_id] = info.get("ws_url", "")
+                            # Check if port is still listening
+                            port = info.get("port", 0)
+                            if self._check_port_listening(port):
+                                logger.info(
+                                    "Restored terminal session %s: port=%d",
+                                    terminal_id[:8],
+                                    port,
+                                )
+                            else:
+                                # Port not listening, remove stale info file
+                                logger.info(
+                                    "Terminal %s port %d not listening, removing stale file",
+                                    terminal_id[:8],
+                                    port,
+                                )
+                                os.remove(filepath)
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to restore terminal session from %s: %s", filename, e
+                        )
+        except Exception as e:
+            logger.warning("Failed to restore terminal sessions: %s", e)
+
+    def _check_port_listening(self, port: int) -> bool:
+        """Check if a port is still listening."""
+        if port <= 0:
+            return False
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(1)
+                result = s.connect_ex(("127.0.0.1", port))
+                return result == 0
+        except Exception:
+            return False
+
+    def _atomic_write_json(self, filepath: str, data: dict | list) -> None:
+        """Write JSON to file atomically using temp file + rename."""
+        dir_path = os.path.dirname(filepath)
+        fd, tmp_path = tempfile.mkstemp(dir=dir_path, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(data, f, indent=2)
+            os.rename(tmp_path, filepath)
+            os.chmod(filepath, 0o600)
+        except Exception:
+            os.unlink(tmp_path)
+            raise
+
+    def _save_terminal_info(self, terminal_id: str, port: int, token: str, ws_url: str) -> None:
+        """Save terminal session info to a file for persistence."""
+        os.makedirs(self._terminal_info_dir, exist_ok=True)
+        filepath = os.path.join(self._terminal_info_dir, f"{terminal_id}.json")
+        try:
+            info = {
+                "terminal_id": terminal_id,
+                "port": port,
+                "token": token,
+                "ws_url": ws_url,
+                "created_at": datetime.utcnow().isoformat(),
+            }
+            self._atomic_write_json(filepath, info)
+            logger.debug("Saved terminal info for %s to %s", terminal_id[:8], filepath)
+        except Exception as e:
+            logger.warning("Failed to save terminal info: %s", e)
+
+    def _remove_terminal_info(self, terminal_id: str) -> None:
+        """Remove terminal session info file."""
+        filepath = os.path.join(self._terminal_info_dir, f"{terminal_id}.json")
+        try:
+            if os.path.exists(filepath):
+                os.remove(filepath)
+        except Exception as e:
+            logger.warning("Failed to remove terminal info file: %s", e)
 
     # ----------------------------------------------------------------
     # Connection lifecycle
@@ -73,6 +182,9 @@ class RemoteAgent:
             logger.info("Restored %d session(s) from crash recovery", len(restored))
             for sid in restored:
                 self._send_session_status(sid, "running")
+
+        # Start session sync service
+        self._session_sync.start()
 
         while self._running:
             try:
@@ -203,6 +315,7 @@ class RemoteAgent:
                 "machine_id": self.config.machine_id,
                 "status": "busy" if active else "idle",
                 "active_sessions": len(active),
+                "active_terminals": len(self._terminal_processes),
             }
         )
 
@@ -338,6 +451,12 @@ class RemoteAgent:
                     session_id[:8] if session_id else "N/A",
                     result.get("error"),
                 )
+        elif command == "start_terminal":
+            self._cmd_start_terminal(data)
+        elif command == "stop_terminal":
+            self._cmd_stop_terminal(data)
+        elif command == "attach_terminal":
+            self._cmd_attach_terminal(data)
         else:
             logger.warning("Unknown command: %s", command)
 
@@ -349,6 +468,7 @@ class RemoteAgent:
         proxy_token = data.get("proxy_token", "")
         model = data.get("model")
         permission_mode = data.get("permission_mode")
+        cli_settings = data.get("cli_settings", {})
 
         logger.info(
             "Starting session %s: cli=%s path=%s model=%s mode=%s",
@@ -358,6 +478,10 @@ class RemoteAgent:
             model,
             permission_mode,
         )
+
+        # Apply CLI settings before starting session
+        if cli_settings:
+            self._apply_cli_settings(cli_settings)
 
         result = self._executor.start_session(
             session_id=session_id,
@@ -476,6 +600,413 @@ class RemoteAgent:
             )
 
     # ----------------------------------------------------------------
+    # Terminal management
+    # ----------------------------------------------------------------
+
+    def _cmd_start_terminal(self, data: dict[str, Any]) -> None:
+        """Handle a start_terminal command."""
+        terminal_id = data.get("terminal_id", "")
+        proxy_url = data.get("proxy_url", "")
+        # Support both old single-token format and new multi-token format
+        anthropic_token = data.get("anthropic_token", data.get("proxy_token", ""))
+        openai_token = data.get("openai_token", "")
+        work_dir = data.get("work_dir", os.path.expanduser("~"))
+        cli_settings = data.get("cli_settings", {})
+
+        logger.info("Starting terminal %s: work_dir=%s", terminal_id[:8], work_dir)
+
+        # Apply CLI settings before starting terminal
+        if cli_settings:
+            self._apply_cli_settings(cli_settings)
+
+        # Stop existing terminal with same ID if any
+        if terminal_id in self._terminal_processes:
+            self._stop_terminal_process(terminal_id)
+
+        # Generate auth token for this terminal
+        term_token = secrets.token_hex(32)
+        self._terminal_tokens[terminal_id] = term_token
+
+        # Find terminal_server.py script path
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        server_script = os.path.join(script_dir, "terminal_server.py")
+        terminal_info_dir = os.path.join(script_dir, ".terminal_sessions")
+        os.makedirs(terminal_info_dir, exist_ok=True)
+
+        # Build command - pass tokens via environment variables (not CLI args)
+        cmd = [
+            sys.executable,
+            server_script,
+            "--terminal-id",
+            terminal_id,
+            "--port",
+            "0",  # Auto-select port
+            "--proxy-url",
+            proxy_url,
+            "--work-dir",
+            work_dir,
+        ]
+        env = os.environ.copy()
+        env["OPEN_ACE_TERMINAL_TOKEN"] = term_token
+        env["OPEN_ANTHROPIC_TOKEN"] = anthropic_token or ""
+        if openai_token:
+            env["OPEN_OPENAI_TOKEN"] = openai_token
+
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+                start_new_session=True,
+            )
+            self._terminal_processes[terminal_id] = proc
+
+            # Wait for READY:port output (with timeout)
+            port = self._read_terminal_port(proc, terminal_id)
+            # Redirect remaining output to DEVNULL to prevent pipe buffer deadlock
+            proc.stdout = open(os.devnull, "wb")
+            proc.stderr = open(os.devnull, "wb")
+            if port:
+                self._terminal_ports[terminal_id] = port
+                hostname = self._get_reachable_hostname()
+                ws_url = f"ws://{hostname}:{port}"
+
+                # Save terminal info to file for persistence across agent restarts
+                self._save_terminal_info(terminal_id, port, term_token, ws_url)
+
+                self._http_send(
+                    {
+                        "type": "terminal_status",
+                        "terminal_id": terminal_id,
+                        "machine_id": self.config.machine_id,
+                        "status": "running",
+                        "ws_url": ws_url,
+                        "token": term_token,
+                    }
+                )
+                logger.info("Terminal %s running on %s", terminal_id[:8], ws_url)
+                self._session_sync.notify_terminal_active(terminal_id)
+            else:
+                stderr_output = proc.stderr.read().decode() if proc.stderr else "unknown"
+                logger.error("Terminal server failed to start: %s", stderr_output[:500])
+                self._http_send(
+                    {
+                        "type": "terminal_status",
+                        "terminal_id": terminal_id,
+                        "machine_id": self.config.machine_id,
+                        "status": "error",
+                        "error": f"Terminal server failed to start: {stderr_output[:200]}",
+                    }
+                )
+
+        except Exception as e:
+            logger.error("Failed to start terminal: %s", e)
+            self._http_send(
+                {
+                    "type": "terminal_status",
+                    "terminal_id": terminal_id,
+                    "machine_id": self.config.machine_id,
+                    "status": "error",
+                    "error": str(e),
+                }
+            )
+
+    def _cmd_stop_terminal(self, data: dict[str, Any]) -> None:
+        """Handle a stop_terminal command."""
+        terminal_id = data.get("terminal_id", "")
+        logger.info("Stopping terminal %s", terminal_id[:8])
+        self._stop_terminal_process(terminal_id)
+        self._http_send(
+            {
+                "type": "terminal_status",
+                "terminal_id": terminal_id,
+                "machine_id": self.config.machine_id,
+                "status": "stopped",
+            }
+        )
+
+    def _cmd_attach_terminal(self, data: dict[str, Any]) -> None:
+        """Handle an attach_terminal command (reconnect to existing terminal).
+
+        Called when user refreshes browser and wants to reconnect to the same
+        terminal session without losing PTY state (e.g., Claude Code chat history).
+
+        If terminal_server is not running, restart it with fresh API tokens.
+        """
+        terminal_id = data.get("terminal_id", "")
+        anthropic_token = data.get("anthropic_token", "")
+        openai_token = data.get("openai_token", "")
+        proxy_url = data.get("proxy_url", "")
+        logger.info(
+            "Attaching to terminal %s (tokens provided: %s)", terminal_id[:8], bool(anthropic_token)
+        )
+
+        # Check if terminal server is still running (from process tracking)
+        if terminal_id in self._terminal_processes:
+            proc = self._terminal_processes[terminal_id]
+            if proc.poll() is None:
+                # Terminal server still running - return existing info
+                port = self._terminal_ports.get(terminal_id)
+                term_token = self._terminal_tokens.get(terminal_id)
+                hostname = self._get_reachable_hostname()
+                ws_url = self._terminal_ws_urls.get(terminal_id) or f"ws://{hostname}:{port}"
+
+                self._http_send(
+                    {
+                        "type": "terminal_status",
+                        "terminal_id": terminal_id,
+                        "machine_id": self.config.machine_id,
+                        "status": "running",
+                        "ws_url": ws_url,
+                        "token": term_token,
+                    }
+                )
+                logger.info("Terminal %s attached (from process): %s", terminal_id[:8], ws_url)
+                return
+
+        # Check if we have persisted terminal info (agent restart case)
+        if terminal_id in self._terminal_ports:
+            port = self._terminal_ports.get(terminal_id)
+            term_token = self._terminal_tokens.get(terminal_id)
+            ws_url = self._terminal_ws_urls.get(terminal_id)
+
+            # Verify port is still listening
+            if port and self._check_port_listening(port):
+                self._http_send(
+                    {
+                        "type": "terminal_status",
+                        "terminal_id": terminal_id,
+                        "machine_id": self.config.machine_id,
+                        "status": "running",
+                        "ws_url": ws_url,
+                        "token": term_token,
+                    }
+                )
+                logger.info("Terminal %s attached (from persistence): %s", terminal_id[:8], ws_url)
+                return
+            else:
+                # Port not listening, clean up stale data
+                logger.info("Terminal %s port %d not listening, cleaning up", terminal_id[:8], port)
+                self._remove_terminal_info(terminal_id)
+                self._terminal_ports.pop(terminal_id, None)
+                self._terminal_tokens.pop(terminal_id, None)
+                self._terminal_ws_urls.pop(terminal_id, None)
+
+        # Terminal not found - restart with fresh tokens if provided
+        if anthropic_token and proxy_url:
+            logger.info("Terminal %s not found, restarting with fresh tokens", terminal_id[:8])
+
+            # Use start_terminal logic to restart
+            work_dir = ""  # Default work dir
+            term_token = secrets.token_hex(32)
+
+            # Build command - pass tokens via environment variables
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            server_script = os.path.join(script_dir, "terminal_server.py")
+            cmd = [
+                sys.executable,
+                server_script,
+                "--terminal-id",
+                terminal_id,
+                "--port",
+                "0",
+                "--proxy-url",
+                proxy_url,
+                "--work-dir",
+                work_dir,
+            ]
+            env = os.environ.copy()
+            env["OPEN_ACE_TERMINAL_TOKEN"] = term_token
+            env["OPEN_ANTHROPIC_TOKEN"] = anthropic_token or ""
+            if openai_token:
+                env["OPEN_OPENAI_TOKEN"] = openai_token
+
+            try:
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    env=env,
+                    start_new_session=True,
+                )
+                self._terminal_processes[terminal_id] = proc
+
+                # Wait for READY:port output
+                port = self._read_terminal_port(proc, terminal_id)
+                # Redirect remaining output to DEVNULL to prevent pipe buffer deadlock
+                proc.stdout = open(os.devnull, "wb")
+                proc.stderr = open(os.devnull, "wb")
+                if port:
+                    self._terminal_ports[terminal_id] = port
+                    hostname = self._get_reachable_hostname()
+                    ws_url = f"ws://{hostname}:{port}"
+
+                    self._terminal_tokens[terminal_id] = term_token
+                    self._terminal_ws_urls[terminal_id] = ws_url
+
+                    self._save_terminal_info(terminal_id, port, term_token, ws_url)
+
+                    self._http_send(
+                        {
+                            "type": "terminal_status",
+                            "terminal_id": terminal_id,
+                            "machine_id": self.config.machine_id,
+                            "status": "running",
+                            "ws_url": ws_url,
+                            "token": term_token,
+                        }
+                    )
+                    logger.info("Terminal %s restarted: %s", terminal_id[:8], ws_url)
+                    self._session_sync.notify_terminal_active(terminal_id)
+                    return
+            except Exception as e:
+                logger.error("Failed to restart terminal %s: %s", terminal_id[:8], e)
+
+        # Terminal not found and no tokens provided
+        logger.info("Terminal %s not found and no tokens provided", terminal_id[:8])
+        self._http_send(
+            {
+                "type": "terminal_status",
+                "terminal_id": terminal_id,
+                "machine_id": self.config.machine_id,
+                "status": "not_found",
+            }
+        )
+
+    def _stop_terminal_process(self, terminal_id: str) -> None:
+        """Stop a terminal server process."""
+        proc = self._terminal_processes.pop(terminal_id, None)
+        if proc:
+            try:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+            except Exception as e:
+                logger.warning("Error stopping terminal process: %s", e)
+        self._terminal_tokens.pop(terminal_id, None)
+        self._terminal_ports.pop(terminal_id, None)
+        self._terminal_ws_urls.pop(terminal_id, None)
+        self._remove_terminal_info(terminal_id)
+
+    def _read_terminal_port(self, proc: subprocess.Popen, terminal_id: str) -> int | None:
+        """Read the port number from terminal server's READY:port stdout."""
+        import select as _select
+
+        try:
+            # Use select to avoid blocking indefinitely
+            ready, _, _ = _select.select([proc.stdout], [], [], 10.0)
+            if not ready:
+                logger.warning("Timeout waiting for terminal port from %s", terminal_id[:8])
+                return None
+            line = proc.stdout.readline().decode().strip()
+            if line.startswith("READY:"):
+                return int(line.split(":")[1])
+        except Exception as e:
+            logger.error("Failed to read terminal port: %s", e)
+        return None
+
+    def _get_reachable_hostname(self) -> str:
+        """Get a hostname/IP that the browser can use to reach this machine."""
+        # Prefer IP address (hostname may not be resolvable from browser)
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect(("8.8.8.8", 80))
+                ip = s.getsockname()[0]
+                return ip
+        except Exception:
+            pass
+        # Fall back to configured hostname
+        hostname = self.config.hostname
+        if hostname and hostname != "localhost":
+            return hostname
+        return "127.0.0.1"
+
+    # ----------------------------------------------------------------
+    # CLI Settings Application
+    # ----------------------------------------------------------------
+
+    def _apply_cli_settings(self, cli_settings: dict[str, Any]) -> None:
+        """
+        Write settings.json files for configured CLI tools.
+
+        Args:
+            cli_settings: Dict with tool_name -> settings mapping
+                         e.g., {"claude-code": {...}, "qwen-code": {...}}
+        """
+        if not cli_settings:
+            return
+
+        for tool_name, settings in cli_settings.items():
+            try:
+                if tool_name == "claude-code":
+                    self._write_claude_settings(settings)
+                elif tool_name == "qwen-code":
+                    self._write_qwen_settings(settings)
+                else:
+                    logger.warning("Unknown tool name for settings: %s", tool_name)
+            except Exception as e:
+                logger.error("Failed to write settings for %s: %s", tool_name, e)
+
+    def _write_claude_settings(self, settings: dict[str, Any]) -> None:
+        """
+        Write ~/.claude/settings.json for Claude Code.
+
+        Settings should already contain injected API credentials
+        (ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL) from build_settings().
+        """
+        claude_dir = Path.home() / ".claude"
+        claude_dir.mkdir(parents=True, exist_ok=True)
+
+        settings_path = claude_dir / "settings.json"
+
+        # Preserve existing settings, merge new ones
+        existing = {}
+        if settings_path.exists():
+            try:
+                existing = json.loads(settings_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                existing = {}
+
+        merged = {**existing, **settings}
+
+        # Atomic write via temp file + rename
+        self._atomic_write_json(str(settings_path), merged)
+        logger.info("Wrote Claude Code settings to %s", settings_path)
+
+    def _write_qwen_settings(self, settings: dict[str, Any]) -> None:
+        """
+        Write ~/.qwen/settings.json for Qwen Code (bailian format).
+
+        Settings should already contain injected API credentials
+        (env.ZAI_API_KEY etc.) from build_settings().
+        """
+        qwen_dir = Path.home() / ".qwen"
+        qwen_dir.mkdir(parents=True, exist_ok=True)
+
+        settings_path = qwen_dir / "settings.json"
+
+        # Preserve existing settings, merge new ones
+        existing = {}
+        if settings_path.exists():
+            try:
+                existing = json.loads(settings_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                existing = {}
+
+        merged = {**existing, **settings}
+
+        # Ensure $version is set for Qwen settings format
+        if "$version" not in merged:
+            merged["$version"] = 3
+
+        # Atomic write via temp file + rename
+        self._atomic_write_json(str(settings_path), merged)
+        logger.info("Wrote Qwen Code settings to %s", settings_path)
+
+    # ----------------------------------------------------------------
     # Shutdown
     # ----------------------------------------------------------------
 
@@ -485,10 +1016,18 @@ class RemoteAgent:
         self._running = False
 
     def _shutdown(self) -> None:
-        """Clean up all resources."""
+        """Clean up all resources.
+
+        Note: Terminal server processes are NOT killed on shutdown.
+        They are started with start_new_session=True and run independently,
+        allowing users to reconnect after agent restarts (browser refresh case).
+        """
         logger.info("Shutting down agent...")
+        self._session_sync.stop()
         self._executor.stop_all()
-        logger.info("Agent shutdown complete")
+        # Clear terminal process tracking (but don't kill them - they persist)
+        self._terminal_processes.clear()
+        logger.info("Agent shutdown complete (terminal servers left running)")
 
 
 def fix_stdin_for_service() -> None:

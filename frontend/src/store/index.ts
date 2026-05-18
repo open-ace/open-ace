@@ -14,7 +14,9 @@ import type { User, Theme, Language, AppMode } from '@/types';
 export interface WorkspaceTab {
   id: string;
   title: string;
+  tabType?: 'workspace' | 'terminal'; // Tab type: workspace (iframe) or terminal (xterm.js)
   sessionId?: string; // Session ID from qwen-code-webui (extracted from URL or backend)
+  terminalId?: string; // Terminal ID for terminal tabs
   encodedProjectName?: string; // Encoded project path for session restoration
   toolName?: string; // Tool name for session restoration
   createdAt: number;
@@ -30,6 +32,9 @@ export interface WorkspaceTab {
   workspaceType?: 'local' | 'remote';
   machineId?: string; // Remote machine ID
   machineName?: string; // Remote machine display name
+  // Terminal fields
+  terminalWsUrl?: string; // WebSocket URL for terminal connection
+  terminalToken?: string; // Auth token for terminal WebSocket
 }
 
 interface AppState {
@@ -226,8 +231,11 @@ export const useAppStore = create<AppState>()(
         appMode: state.appMode,
         enableTabNotifications: state.enableTabNotifications,
         autoFullscreenOnEnterChat: state.autoFullscreenOnEnterChat,
-        // Issue #65: Persist workspace tabs state
-        workspaceTabs: state.workspaceTabs,
+        // Issue #65: Persist workspace tabs state (exclude sensitive fields)
+        workspaceTabs: state.workspaceTabs.map(
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          ({ terminalToken, terminalWsUrl, ...rest }) => rest
+        ),
         workspaceActiveTabId: state.workspaceActiveTabId,
       }),
     }

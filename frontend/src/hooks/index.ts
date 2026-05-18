@@ -71,6 +71,7 @@ export {
   useRevokeUser,
   useApiKeys,
   useStoreApiKey,
+  useUpdateApiKey,
   useDeleteApiKey,
   useAvailableMachines,
   useCreateRemoteSession,

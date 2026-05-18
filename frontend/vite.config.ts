@@ -123,6 +123,11 @@ export default defineConfig({
     // 启用最小化
     minify: 'esbuild',
 
+    // Remove console.log in production builds
+    esbuild: {
+      drop: ['console'],
+    },
+
     // 目标浏览器
     target: 'es2020',
   },
