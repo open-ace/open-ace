@@ -620,30 +620,31 @@ class RemoteAgent:
         terminal_info_dir = os.path.join(script_dir, ".terminal_sessions")
         os.makedirs(terminal_info_dir, exist_ok=True)
 
-        # Build command with tokens for multiple providers
+        # Build command - pass tokens via environment variables (not CLI args)
         cmd = [
             sys.executable,
             server_script,
-            "--token",
-            term_token,
             "--terminal-id",
             terminal_id,
             "--port",
             "0",  # Auto-select port
             "--proxy-url",
             proxy_url,
-            "--anthropic-token",
-            anthropic_token,
+            "--work-dir",
+            work_dir,
         ]
+        env = os.environ.copy()
+        env["OPEN_ACE_TERMINAL_TOKEN"] = term_token
+        env["OPEN_ANTHROPIC_TOKEN"] = anthropic_token or ""
         if openai_token:
-            cmd.extend(["--openai-token", openai_token])
-        cmd.extend(["--work-dir", work_dir])
+            env["OPEN_OPENAI_TOKEN"] = openai_token
 
         try:
             proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                env=env,
                 start_new_session=True,
             )
             self._terminal_processes[terminal_id] = proc
@@ -784,31 +785,33 @@ class RemoteAgent:
             work_dir = ""  # Default work dir
             term_token = secrets.token_hex(32)
 
-            # Build command with fresh tokens
-            server_script = os.path.join(self._agent_dir, "terminal_server.py")
+            # Build command - pass tokens via environment variables
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            server_script = os.path.join(script_dir, "terminal_server.py")
             cmd = [
                 sys.executable,
                 server_script,
-                "--token",
-                term_token,
                 "--terminal-id",
                 terminal_id,
                 "--port",
                 "0",
                 "--proxy-url",
                 proxy_url,
-                "--anthropic-token",
-                anthropic_token,
+                "--work-dir",
+                work_dir,
             ]
+            env = os.environ.copy()
+            env["OPEN_ACE_TERMINAL_TOKEN"] = term_token
+            env["OPEN_ANTHROPIC_TOKEN"] = anthropic_token or ""
             if openai_token:
-                cmd.extend(["--openai-token", openai_token])
-            cmd.extend(["--work-dir", work_dir])
+                env["OPEN_OPENAI_TOKEN"] = openai_token
 
             try:
                 proc = subprocess.Popen(
                     cmd,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
+                    env=env,
                     start_new_session=True,
                 )
                 self._terminal_processes[terminal_id] = proc

@@ -14,7 +14,9 @@ Started as a subprocess by the backend when a terminal session is requested.
 
 import argparse
 import asyncio
+import hmac
 import logging
+import os
 import sys
 import urllib.parse
 
@@ -131,14 +133,10 @@ async def handle_browser_connection(browser_ws):
     params = urllib.parse.parse_qs(urllib.parse.urlparse(raw_path).query)
     token = params.get("token", [None])[0]
 
-    logger.info(
-        "Received token: %s (expecting: %s)", token[:20] if token else "None", AUTH_TOKEN[:20]
-    )
+    logger.info("Token validation: %s", "provided" if token else "missing")
 
-    if not token or token != AUTH_TOKEN:
-        logger.warning(
-            "Rejected connection: invalid token (received=%s, expected=%s)", token, AUTH_TOKEN
-        )
+    if not token or not hmac.compare_digest(token, AUTH_TOKEN):
+        logger.warning("Rejected connection: invalid token")
         await browser_ws.close(4001, "Authentication failed")
         return
 
@@ -174,14 +172,14 @@ def main():
     global AUTH_TOKEN, BACKEND_URL, MACHINE_ID, TERMINAL_ID
 
     parser = argparse.ArgumentParser(description="Open ACE WebSocket Terminal Proxy")
-    parser.add_argument("--token", required=True, help="Authentication token for browser")
     parser.add_argument("--backend-url", required=True, help="Open ACE backend URL")
     parser.add_argument("--machine-id", required=True, help="Remote machine ID")
     parser.add_argument("--terminal-id", required=True, help="Terminal session ID")
     parser.add_argument("--port", type=int, default=0, help="Port to listen on (0=auto)")
     args = parser.parse_args()
 
-    AUTH_TOKEN = args.token
+    # Read token from environment variable (not CLI arg, to avoid ps aux exposure)
+    AUTH_TOKEN = os.environ.get("OPEN_ACE_PROXY_TOKEN", "")
     BACKEND_URL = args.backend_url
     MACHINE_ID = args.machine_id
     TERMINAL_ID = args.terminal_id
@@ -196,7 +194,7 @@ def main():
         ],
     )
     # Print startup message to stderr (stdout reserved for READY signal)
-    print(f"WebSocket proxy starting, AUTH_TOKEN={AUTH_TOKEN[:20]}...", file=sys.stderr, flush=True)
+    print("WebSocket proxy starting", file=sys.stderr, flush=True)
 
     asyncio.run(run_server(args.port))
 

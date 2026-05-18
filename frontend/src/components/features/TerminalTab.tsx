@@ -47,7 +47,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
 
   const connect = useCallback(() => {
-    console.log('[TerminalTab] connect called:', { wsUrl, token: token?.substring(0, 20), hasXterm: !!xtermRef.current });
+    console.log('[TerminalTab] connect called:', { wsUrl, hasToken: !!token, hasXterm: !!xtermRef.current });
     if (!wsUrl || !token || !xtermRef.current) {
       console.log('[TerminalTab] Skipping connect - missing requirements');
       return;
@@ -72,7 +72,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
 
     try {
       const ws = new WebSocket(wsUrlWithToken, ['binary']);
-      console.log('[TerminalTab] WebSocket created, URL length:', wsUrlWithToken.length, 'token length:', token.length);
+      console.log('[TerminalTab] WebSocket created, URL length:', wsUrlWithToken.length);
       ws.binaryType = 'arraybuffer';
 
       ws.onopen = () => {
@@ -203,7 +203,6 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
       fitAddonRef.current = fitAddon;
 
       console.log('[TerminalTab] xterm.js initialized, ready to connect');
-      console.log('[TerminalTab] Current wsUrl:', wsUrl, 'token:', token?.substring(0, 20));
 
       // Don't auto-connect here - let the connect effect handle it
     };

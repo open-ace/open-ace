@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import fcntl
+import hmac
 import json
 import logging
 import os
@@ -20,7 +21,6 @@ import pty
 import select
 import signal
 import struct
-import subprocess
 import sys
 import termios
 import urllib.parse
@@ -314,20 +314,6 @@ def _build_env() -> dict[str, str]:
     return env
 
 
-def _check_cli_installed(cli_name: str) -> bool:
-    """Check if a CLI tool is installed."""
-    try:
-        result = subprocess.run(
-            ["which", cli_name],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        return result.returncode == 0
-    except Exception:
-        return False
-
-
 # Global terminal server instance
 _terminal_server: SinglePtyTerminalServer | None = None
 
@@ -345,7 +331,7 @@ async def _handle_connection(websocket) -> None:
     raw_path = getattr(websocket, "path", "")
     params = urllib.parse.parse_qs(urllib.parse.urlparse(raw_path).query)
     token = params.get("token", [None])[0]
-    if not token or token != AUTH_TOKEN:
+    if not token or not hmac.compare_digest(token, AUTH_TOKEN):
         logger.warning("Rejected connection: invalid token")
         await websocket.close(4001, "Authentication failed")
         return
@@ -417,31 +403,19 @@ def main() -> None:
     global AUTH_TOKEN, PROXY_URL, ANTHROPIC_TOKEN, OPENAI_TOKEN, WORK_DIR, SHELL_CMD, TERMINAL_ID
 
     parser = argparse.ArgumentParser(description="Open ACE WebSocket Terminal Server")
-    parser.add_argument("--token", required=True, help="Authentication token")
     parser.add_argument("--terminal-id", default="", help="Terminal session ID for persistence")
     parser.add_argument("--port", type=int, default=0, help="Port to listen on (0=auto)")
     parser.add_argument("--proxy-url", default="", help="Open ACE LLM proxy URL")
-    parser.add_argument(
-        "--anthropic-token",
-        default="",
-        help="Proxy token for Anthropic/Claude API (or --proxy-token for backward compat)",
-    )
-    parser.add_argument("--openai-token", default="", help="Proxy token for OpenAI/Qwen API")
-    parser.add_argument(
-        "--proxy-token",
-        default="",
-        help="(Deprecated) Single proxy token, use --anthropic-token instead",
-    )
     parser.add_argument("--work-dir", default="", help="Working directory")
     parser.add_argument("--shell", default="", help="Shell command")
     args = parser.parse_args()
 
-    AUTH_TOKEN = args.token
+    # Read tokens from environment variables (not CLI args, to avoid ps aux exposure)
+    AUTH_TOKEN = os.environ.get("OPEN_ACE_TERMINAL_TOKEN", "")
     TERMINAL_ID = args.terminal_id
     PROXY_URL = args.proxy_url
-    # Support backward compat: --proxy-token maps to --anthropic-token
-    ANTHROPIC_TOKEN = args.anthropic_token or args.proxy_token
-    OPENAI_TOKEN = args.openai_token
+    ANTHROPIC_TOKEN = os.environ.get("OPEN_ANTHROPIC_TOKEN", "")
+    OPENAI_TOKEN = os.environ.get("OPEN_OPENAI_TOKEN", "")
     WORK_DIR = args.work_dir
     SHELL_CMD = args.shell
 

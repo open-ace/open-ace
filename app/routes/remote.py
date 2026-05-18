@@ -9,6 +9,7 @@ API endpoints for remote workspace management including:
 - Usage reporting from remote agents
 """
 
+import hmac
 import json
 import logging
 import os
@@ -85,7 +86,7 @@ def load_user():
                 info = terminal_info_store.get(machine_id, terminal_id)
                 if info:
                     stored_token = info.get("token", "")
-                    if token == stored_token:
+                    if stored_token and hmac.compare_digest(token, stored_token):
                         # Proxy token matched - set a minimal g.user for access check
                         g.user = {"role": "proxy", "id": None}
                         g.user_id = None
@@ -1340,10 +1341,10 @@ def get_terminal_status(terminal_id):
     agent_mgr = get_remote_agent_manager()
     proxy_token = request.cookies.get("session_token", "")
     logger.info(
-        "get_terminal_status: terminal=%s, machine=%s, proxy_token=%s",
+        "get_terminal_status: terminal=%s, machine=%s, has_proxy_token=%s",
         terminal_id[:8],
         machine_id[:8],
-        proxy_token[:20] if proxy_token else "none",
+        bool(proxy_token),
     )
 
     # Check if this is a WebSocket proxy token
@@ -1351,12 +1352,9 @@ def get_terminal_status(terminal_id):
     info = terminal_info_store.get(machine_id, terminal_id)
     if info:
         stored_token = info.get("token", "")
-        logger.info(
-            "get_terminal_status: found info, stored_token=%s",
-            stored_token[:20] if stored_token else "none",
-        )
+        logger.info("get_terminal_status: found info, has_stored_token=%s", bool(stored_token))
         # If the provided token matches the stored proxy token, allow access
-        if proxy_token and proxy_token == stored_token:
+        if proxy_token and stored_token and hmac.compare_digest(proxy_token, stored_token):
             logger.info("get_terminal_status: proxy token matched, returning info")
             return jsonify({"success": True, "terminal": info})
 
@@ -1388,15 +1386,19 @@ def llm_proxy(path=""):
     5. Streams the response back
     6. Records token usage
     """
-    # Claude Code sends HEAD requests for health checks
-    if request.method == "HEAD":
-        return "", 200
-
     # Extract proxy token from Authorization header or x-api-key (Claude Code)
     auth_header = request.headers.get("Authorization", "")
     proxy_token = auth_header.replace("Bearer ", "").strip()
     if not proxy_token:
         proxy_token = request.headers.get("x-api-key", "").strip()
+
+    if not proxy_token:
+        if request.method == "HEAD":
+            return "", 401
+        return (
+            jsonify({"error": {"message": "Missing authorization token", "type": "auth_error"}}),
+            401,
+        )
 
     if not proxy_token:
         return (

@@ -804,7 +804,7 @@ export const Workspace: React.FC = () => {
                   status: status.terminal.status,
                   wsUrl,
                   hasProxyUrl,
-                  token: status.terminal.token?.substring(0, 20),
+                  hasToken: !!status.terminal.token,
                 });
 
                 if (status.terminal.status === 'running' && hasProxyUrl) {
@@ -2187,7 +2187,7 @@ export const Workspace: React.FC = () => {
                     status: status.terminal.status,
                     wsUrl,
                     hasProxyUrl,
-                    token: status.terminal.token?.substring(0, 20),
+                    hasToken: !!status.terminal.token,
                   });
 
                   if (status.terminal.status === 'running' && hasProxyUrl) {

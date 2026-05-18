@@ -13,6 +13,7 @@ Each terminal session gets its own proxy process on a dynamically allocated port
 
 from __future__ import annotations
 
+import hmac
 import logging
 import os
 import subprocess as stdlib_subprocess
@@ -168,12 +169,10 @@ class WebSocketProxyManager:
                 logger.error("WebSocket proxy script not found: %s", proxy_script)
                 raise RuntimeError("WebSocket proxy script not found")
 
-            # Start proxy process (use gevent subprocess to avoid blocking)
+            # Start proxy process - pass token via env var to avoid ps aux exposure
             cmd = [
                 "python3",
                 proxy_script,
-                "--token",
-                auth_token,
                 "--backend-url",
                 backend_url,
                 "--machine-id",
@@ -183,6 +182,8 @@ class WebSocketProxyManager:
                 "--port",
                 str(port),
             ]
+            env = os.environ.copy()
+            env["OPEN_ACE_PROXY_TOKEN"] = auth_token
 
             try:
                 # Redirect proxy output to log file for debugging
@@ -191,6 +192,7 @@ class WebSocketProxyManager:
                     cmd,
                     stdout=stdlib_subprocess.PIPE,
                     stderr=stdlib_subprocess.PIPE,
+                    env=env,
                 )
                 logger.info(
                     "Proxy process started with PID %d, logs at %s", process.pid, proxy_log_path
@@ -328,7 +330,7 @@ class WebSocketProxyManager:
         with self._lock:
             if terminal_id in self._proxies:
                 proxy = self._proxies[terminal_id]
-                return proxy.auth_token == token
+                return hmac.compare_digest(proxy.auth_token, token)
         return False
 
     def stop_all(self) -> None:

@@ -231,8 +231,11 @@ export const useAppStore = create<AppState>()(
         appMode: state.appMode,
         enableTabNotifications: state.enableTabNotifications,
         autoFullscreenOnEnterChat: state.autoFullscreenOnEnterChat,
-        // Issue #65: Persist workspace tabs state
-        workspaceTabs: state.workspaceTabs,
+        // Issue #65: Persist workspace tabs state (exclude sensitive fields)
+        workspaceTabs: state.workspaceTabs.map(
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          ({ terminalToken, terminalWsUrl, ...rest }) => rest
+        ),
         workspaceActiveTabId: state.workspaceActiveTabId,
       }),
     }
