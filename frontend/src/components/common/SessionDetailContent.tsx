@@ -34,7 +34,7 @@ export const SessionDetailContent: React.FC<SessionDetailContentProps> = ({
   // Filter state: default to show user and assistant messages
   const [showUser, setShowUser] = useState(true);
   const [showAssistant, setShowAssistant] = useState(true);
-  const [showSystem, setShowSystem] = useState(false);
+  const [showSystem, setShowSystem] = useState(true);
   const [searchText, setSearchText] = useState('');
 
   // Filter messages based on role and search text
