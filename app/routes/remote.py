@@ -367,6 +367,9 @@ def update_api_key(key_id):
     base_url = data.get("base_url")
     cli_tools = data.get("cli_tools")
     cli_settings = data.get("cli_settings")
+    is_active = data.get("is_active")
+    if is_active is not None and not isinstance(is_active, bool):
+        return jsonify({"error": "is_active must be a boolean"}), 400
     tenant_id = int(data.get("tenant_id", 1))
 
     api_proxy = get_api_key_proxy_service()
@@ -377,6 +380,7 @@ def update_api_key(key_id):
         base_url=base_url,
         cli_tools=cli_tools,
         cli_settings=cli_settings,
+        is_active=is_active,
     )
 
     if success:

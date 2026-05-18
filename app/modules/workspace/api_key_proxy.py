@@ -99,8 +99,7 @@ class APIKeyProxyService:
 
         # api_key_store table is created by migration, but ensure it exists for
         # environments that don't run migrations
-        cursor.execute(
-            f"""
+        cursor.execute(f"""
             CREATE TABLE IF NOT EXISTS api_key_store (
                 id {id_type},
                 tenant_id INTEGER,
@@ -115,8 +114,7 @@ class APIKeyProxyService:
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(tenant_id, provider, key_name)
             )
-        """
-        )
+        """)
 
         conn.commit()
         conn.close()
@@ -332,6 +330,7 @@ class APIKeyProxyService:
         base_url: Optional[str] = None,
         cli_tools: Optional[str] = None,
         cli_settings: Optional[str] = None,
+        is_active: Optional[bool] = None,
     ) -> bool:
         """
         Update an API key by its ID.
@@ -365,6 +364,9 @@ class APIKeyProxyService:
         if cli_settings is not None:
             updates.append(f"cli_settings = {_param()}")
             values.append(cli_settings)
+        if is_active is not None:
+            updates.append(f"is_active = {_param()}")
+            values.append(is_active if is_postgresql() else (1 if is_active else 0))
 
         if not updates:
             conn.close()

@@ -65,6 +65,7 @@ export interface UpdateApiKeyRequest {
   base_url?: string;
   cli_tools?: string;
   cli_settings?: string;
+  is_active?: boolean;
   tenant_id?: number;
 }
 
