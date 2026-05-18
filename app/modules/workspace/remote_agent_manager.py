@@ -716,7 +716,11 @@ class RemoteAgentManager:
     # ==================== Heartbeat ====================
 
     def process_heartbeat(
-        self, machine_id: str, status: str = "idle", active_sessions: int = 0
+        self,
+        machine_id: str,
+        status: str = "idle",
+        active_sessions: int = 0,
+        capabilities: Optional[dict[str, Any]] = None,
     ) -> None:
         """Process a heartbeat from a remote agent."""
         # Ensure HTTP polling agents are tracked in _connections
@@ -737,15 +741,42 @@ class RemoteAgentManager:
             cursor = conn.cursor()
             now = datetime.utcnow().isoformat()
 
+            if capabilities:
+                cursor.execute(
+                    f"""
+                    UPDATE remote_machines
+                    SET last_heartbeat = {_param()}, status = {_param()}, updated_at = {_param()},
+                        capabilities = {_param()}
+                    WHERE machine_id = {_param()}
+                """,
+                    (now, status, now, json.dumps(capabilities), machine_id),
+                )
+            else:
+                cursor.execute(
+                    f"""
+                    UPDATE remote_machines
+                    SET last_heartbeat = {_param()}, status = {_param()}, updated_at = {_param()}
+                    WHERE machine_id = {_param()}
+                """,
+                    (now, status, now, machine_id),
+                )
+            conn.commit()
+
+    def update_capabilities(self, machine_id: str, capabilities: dict[str, Any]) -> None:
+        """Update capabilities for a remote machine."""
+        with self.db.connection() as conn:
+            cursor = conn.cursor()
+            now = datetime.utcnow().isoformat()
             cursor.execute(
                 f"""
                 UPDATE remote_machines
-                SET last_heartbeat = {_param()}, status = {_param()}, updated_at = {_param()}
+                SET capabilities = {_param()}, updated_at = {_param()}
                 WHERE machine_id = {_param()}
             """,
-                (now, status, now, machine_id),
+                (json.dumps(capabilities), now, machine_id),
             )
             conn.commit()
+            logger.info("Updated capabilities for machine %s", machine_id[:8])
 
     # ==================== Machine Queries ====================
 

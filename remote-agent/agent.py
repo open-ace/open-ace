@@ -317,6 +317,7 @@ class RemoteAgent:
                 "status": "busy" if active else "idle",
                 "active_sessions": len(active),
                 "active_terminals": len(self._terminal_processes),
+                "capabilities": self._capabilities,
             }
         )
 
