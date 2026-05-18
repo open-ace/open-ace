@@ -115,7 +115,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
           }
         }
         if (isActiveRef.current) {
-          xtermRef.current?.focus();
+          try { xtermRef.current?.focus(); } catch {}
         }
       };
 
@@ -268,7 +268,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
     if (isActive && fitAddonRef.current && terminalRef.current) {
       const timer = setTimeout(() => {
         fitAddonRef.current?.fit();
-        xtermRef.current?.focus();
+        try { xtermRef.current?.focus(); } catch {}
       }, 100);
       return () => clearTimeout(timer);
     }
