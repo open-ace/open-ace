@@ -35,12 +35,14 @@ def upgrade():
     op.add_column("daily_messages", sa.Column("user_id", sa.Integer(), nullable=True))
 
     # Index for user_id queries (covering index for quota queries)
-    op.execute("""
+    op.execute(
+        """
         CREATE INDEX idx_messages_user_date_role_covering
         ON daily_messages (user_id, date, role)
         INCLUDE (tokens_used)
         WHERE user_id IS NOT NULL AND role = 'assistant'
-    """)
+    """
+    )
 
     # ===========================================
     # Step 2: Create user_tool_accounts table
@@ -79,22 +81,31 @@ def upgrade():
     account_column = "system_account"  # default to new name
 
     # Check if system_account exists
-    result = conn.execute(sa.text("""
+    result = conn.execute(
+        sa.text(
+            """
         SELECT column_name FROM information_schema.columns
         WHERE table_name = 'users' AND column_name = 'system_account'
-    """))
+    """
+        )
+    )
     if result.fetchone() is None:
         # Check if linux_account exists (old name)
-        result = conn.execute(sa.text("""
+        result = conn.execute(
+            sa.text(
+                """
             SELECT column_name FROM information_schema.columns
             WHERE table_name = 'users' AND column_name = 'linux_account'
-        """))
+        """
+            )
+        )
         if result.fetchone() is not None:
             account_column = "linux_account"
 
     # Extract unique sender_names that match account pattern
     # Pattern: {account}-{hostname}-{tool}
-    op.execute(f"""
+    op.execute(
+        f"""
         INSERT INTO user_tool_accounts (user_id, tool_account, tool_type)
         SELECT DISTINCT
             u.id as user_id,
@@ -114,14 +125,16 @@ def upgrade():
               SELECT 1 FROM user_tool_accounts uta
               WHERE uta.tool_account = dm.sender_name
           )
-    """)
+    """
+    )
 
     # ===========================================
     # Step 4: Populate user_id in daily_messages
     # ===========================================
 
     # Update daily_messages.user_id based on user_tool_accounts mapping
-    op.execute("""
+    op.execute(
+        """
         UPDATE daily_messages dm
         SET user_id = (
             SELECT uta.user_id
@@ -134,10 +147,12 @@ def upgrade():
               SELECT 1 FROM user_tool_accounts uta
               WHERE uta.tool_account = dm.sender_name
           )
-    """)
+    """
+    )
 
     # Also update based on direct username match (for Feishu users)
-    op.execute("""
+    op.execute(
+        """
         UPDATE daily_messages dm
         SET user_id = (
             SELECT u.id
@@ -151,7 +166,8 @@ def upgrade():
               SELECT 1 FROM users u
               WHERE u.username = dm.sender_name
           )
-    """)
+    """
+    )
 
 
 def downgrade():
