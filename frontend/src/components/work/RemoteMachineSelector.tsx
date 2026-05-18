@@ -96,11 +96,12 @@ export const RemoteMachineSelector: React.FC<RemoteMachineSelectorProps> = ({
         case 'status':
           // Connected machines first
           return (b.connected ? 1 : 0) - (a.connected ? 1 : 0);
-        case 'lastHeartbeat':
+        case 'lastHeartbeat': {
           // Most recent heartbeat first
           const aTime = a.last_heartbeat ? new Date(a.last_heartbeat).getTime() : 0;
           const bTime = b.last_heartbeat ? new Date(b.last_heartbeat).getTime() : 0;
           return bTime - aTime;
+        }
         default:
           return 0;
       }
@@ -149,7 +150,8 @@ export const RemoteMachineSelector: React.FC<RemoteMachineSelectorProps> = ({
 
     if (diffMins < 1) return t('justNow', language) || 'Just now';
     if (diffMins < 60) return `${diffMins} ${t('minutesAgo', language) || 'min ago'}`;
-    if (diffMins < 1440) return `${Math.floor(diffMins / 60)} ${t('hoursAgo', language) || 'h ago'}`;
+    if (diffMins < 1440)
+      return `${Math.floor(diffMins / 60)} ${t('hoursAgo', language) || 'h ago'}`;
     return date.toLocaleDateString();
   };
 
@@ -240,9 +242,7 @@ export const RemoteMachineSelector: React.FC<RemoteMachineSelectorProps> = ({
                 <div className="text-end">
                   {getStatusBadge(machine)}
                   {machine.agent_version && (
-                    <div className="text-muted small mt-1">
-                      v{machine.agent_version}
-                    </div>
+                    <div className="text-muted small mt-1">v{machine.agent_version}</div>
                   )}
                 </div>
               </div>
@@ -250,7 +250,8 @@ export const RemoteMachineSelector: React.FC<RemoteMachineSelectorProps> = ({
               {/* Last heartbeat */}
               <div className="mt-2 small text-muted">
                 <i className="bi bi-clock me-1" />
-                {t('lastActive', language) || 'Last active'}: {formatLastHeartbeat(machine.last_heartbeat)}
+                {t('lastActive', language) || 'Last active'}:{' '}
+                {formatLastHeartbeat(machine.last_heartbeat)}
               </div>
 
               {/* Selected indicator */}
