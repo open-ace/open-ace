@@ -1046,6 +1046,11 @@ def agent_message():
                 session_id = terminal_id
             else:
                 session_id = claude_session_id
+                logger.warning(
+                    "session_sync: terminal_id=%s not found, " "fall back to claude_session_id=%s",
+                    terminal_id[:8],
+                    claude_session_id[:8],
+                )
         else:
             session_id = claude_session_id
 
@@ -1084,15 +1089,31 @@ def agent_message():
                 if updates:
                     sync_session_mgr.update_session_fields(session_id, updates)
 
-            # Fetch existing message uuids for dedup
+            # Fetch existing message uuids for dedup (lightweight query)
             existing_uuids: set[str] = set()
             try:
-                existing_msgs = sync_session_mgr.get_messages(session_id)
-                for em in existing_msgs:
-                    em_meta = em.metadata if isinstance(em.metadata, dict) else {}
-                    em_uuid = em_meta.get("uuid", "")
-                    if em_uuid:
-                        existing_uuids.add(em_uuid)
+                from app.repositories.database import adapt_sql, get_db_connection
+
+                with get_db_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        adapt_sql("SELECT metadata FROM session_messages WHERE session_id = ?"),
+                        (session_id,),
+                    )
+                    for row in cursor.fetchall():
+                        meta_raw = row["metadata"]
+                        if isinstance(meta_raw, str):
+                            try:
+                                meta = json.loads(meta_raw)
+                            except (json.JSONDecodeError, TypeError):
+                                continue
+                        elif isinstance(meta_raw, dict):
+                            meta = meta_raw
+                        else:
+                            continue
+                        em_uuid = meta.get("uuid", "")
+                        if em_uuid:
+                            existing_uuids.add(em_uuid)
             except Exception:
                 pass
 

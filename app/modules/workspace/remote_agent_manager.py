@@ -730,6 +730,10 @@ class RemoteAgentManager:
                 self._connections[machine_id] = None
                 logger.info(f"Re-registered HTTP polling agent via heartbeat: {machine_id}")
 
+        # Update capabilities separately if provided
+        if capabilities:
+            self.update_capabilities(machine_id, capabilities)
+
         # Rate-limit DB writes: skip if last write was within HEARTBEAT_DB_WRITE_INTERVAL
         now_ts = time.time()
         last_write = self._last_heartbeat_db_write.get(machine_id, 0)
@@ -741,25 +745,14 @@ class RemoteAgentManager:
             cursor = conn.cursor()
             now = datetime.utcnow().isoformat()
 
-            if capabilities:
-                cursor.execute(
-                    f"""
-                    UPDATE remote_machines
-                    SET last_heartbeat = {_param()}, status = {_param()}, updated_at = {_param()},
-                        capabilities = {_param()}
-                    WHERE machine_id = {_param()}
-                """,
-                    (now, status, now, json.dumps(capabilities), machine_id),
-                )
-            else:
-                cursor.execute(
-                    f"""
-                    UPDATE remote_machines
-                    SET last_heartbeat = {_param()}, status = {_param()}, updated_at = {_param()}
-                    WHERE machine_id = {_param()}
-                """,
-                    (now, status, now, machine_id),
-                )
+            cursor.execute(
+                f"""
+                UPDATE remote_machines
+                SET last_heartbeat = {_param()}, status = {_param()}, updated_at = {_param()}
+                WHERE machine_id = {_param()}
+            """,
+                (now, status, now, machine_id),
+            )
             conn.commit()
 
     def update_capabilities(self, machine_id: str, capabilities: dict[str, Any]) -> None:
