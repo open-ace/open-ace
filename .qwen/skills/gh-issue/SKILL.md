@@ -19,7 +19,7 @@ description: 将当前处理的问题记录到 GitHub issue，包括问题描述
 **如果 issue 已存在且已关闭**，添加修复记录评论：
 
 ```bash
-gh issue comment <issue-number> --body "$(cat <<'HEREDOC'
+gh issue comment <issue-number> --body "$(cat <<'GH_ISSUE_BODY'
 ## 修复完成 ✅
 
 ### 问题原因
@@ -45,14 +45,14 @@ gh issue comment <issue-number> --body "$(cat <<'HEREDOC'
 ### 修复后效果
 
 <描述修复后的效果>
-HEREDOC
+GH_ISSUE_BODY
 )"
 ```
 
 **如果 issue 不存在**，创建新 issue：
 
 ```bash
-gh issue create --title "<问题标题>" --body "$(cat <<'HEREDOC'
+gh issue create --title "<问题标题>" --body "$(cat <<'GH_ISSUE_BODY'
 ## 问题描述
 
 <详细描述问题>
@@ -75,7 +75,7 @@ gh issue create --title "<问题标题>" --body "$(cat <<'HEREDOC'
 ## 修复后效果
 
 <描述修复后的效果>
-HEREDOC
+GH_ISSUE_BODY
 )" --label "bug"
 ```
 
