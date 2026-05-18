@@ -726,6 +726,82 @@ def list_sessions():
         return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
+@workspace_bp.route("/remote-projects", methods=["GET"])
+def get_remote_projects():
+    """Get user's remote workspace projects list.
+
+    Returns distinct project paths from user's remote sessions,
+    sorted by most recent usage. Used to populate 'Your Projects'
+    in qwen-code-webui for remote workspace.
+    """
+    try:
+        from app.repositories.database import Database, get_param_placeholder
+
+        db = Database()
+        p = get_param_placeholder()
+
+        user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
+        if not user_id:
+            return jsonify({"success": False, "error": "Authentication required"}), 401
+
+        # Query distinct remote projects with their latest session info
+        # Only include remote workspace sessions (workspace_type = 'remote')
+        query = f"""
+            SELECT
+                project_path,
+                MAX(updated_at) as last_used,
+                MAX(remote_machine_id) as machine_id,
+                COUNT(*) as session_count
+            FROM agent_sessions
+            WHERE user_id = {p}
+              AND workspace_type = 'remote'
+              AND project_path IS NOT NULL
+              AND project_path != ''
+              AND status != 'deleted'
+            GROUP BY project_path
+            ORDER BY last_used DESC
+            LIMIT 50
+        """
+        results = db.fetch_all(query, [user_id])
+
+        projects = []
+        for r in results:
+            project_path = r.get("project_path")
+            if project_path:
+                # Convert path to encoded project name format
+                # /home/user/demo-project -> -home-user-demo-project
+                encoded_name = project_path.replace("/", "-") if project_path.startswith("/") else project_path
+
+                # Look up machine name if available
+                machine_name = None
+                machine_id = r.get("machine_id")
+                if machine_id:
+                    try:
+                        machine_query = f"SELECT machine_name FROM remote_machines WHERE machine_id = {p} LIMIT 1"
+                        machine_row = db.fetch_one(machine_query, [machine_id])
+                        if machine_row:
+                            machine_name = machine_row["machine_name"]
+                    except Exception:
+                        pass
+
+                projects.append({
+                    "project_path": project_path,
+                    "encoded_project_name": encoded_name,
+                    "last_used": format_datetime(r.get("last_used")),
+                    "session_count": r.get("session_count", 0),
+                    "machine_id": machine_id,
+                    "machine_name": machine_name,
+                })
+
+        return jsonify({
+            "success": True,
+            "projects": projects,
+        })
+    except Exception as e:
+        logger.error(f"Error getting remote projects: {e}")
+        return jsonify({"success": False, "error": "Internal server error"}), 500
+
+
 @workspace_bp.route("/sessions", methods=["POST"])
 def create_session():
     """Create a new agent session."""

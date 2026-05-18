@@ -43,6 +43,20 @@ export interface WebUIInstancesResponse {
   max_instances: number;
 }
 
+export interface RemoteProject {
+  project_path: string;
+  encoded_project_name: string;
+  last_used: string | null;
+  session_count: number;
+  machine_id: string | null;
+  machine_name: string | null;
+}
+
+export interface RemoteProjectsResponse {
+  success: boolean;
+  projects: RemoteProject[];
+}
+
 // API
 export const workspaceApi = {
   /**
@@ -119,6 +133,22 @@ export const workspaceApi = {
       return true;
     } catch {
       return false;
+    }
+  },
+
+  /**
+   * Get user's remote workspace projects list
+   * Used to populate 'Your Projects' in qwen-code-webui
+   */
+  async getRemoteProjects(): Promise<RemoteProjectsResponse> {
+    try {
+      const response = await apiClient.get<RemoteProjectsResponse>('/api/workspace/remote-projects');
+      return response;
+    } catch {
+      return {
+        success: false,
+        projects: [],
+      };
     }
   },
 };

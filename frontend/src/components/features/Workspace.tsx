@@ -13,7 +13,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { workspaceApi, type WorkspaceConfig, type UserWebUIResponse } from '@/api';
+import { workspaceApi, type WorkspaceConfig, type UserWebUIResponse, type RemoteProject } from '@/api';
 import { requestApi, type QuotaStatusResponse } from '@/api/request';
 import { sessionsApi } from '@/api/sessions';
 import {
@@ -84,6 +84,9 @@ export const Workspace: React.FC = () => {
 
   // Flag to track if tabs have been initialized (Issue #65)
   const [tabsInitialized, setTabsInitialized] = useState(false);
+
+  // Remote projects list (Issue #417: Populate "Your Projects" for remote workspace)
+  const [remoteProjects, setRemoteProjects] = useState<RemoteProject[]>([]);
 
   // Tab notifications setting
   const enableTabNotifications = useEnableTabNotifications();
@@ -195,6 +198,22 @@ export const Workspace: React.FC = () => {
     };
 
     loadConfig();
+  }, []);
+
+  // Fetch remote projects list (Issue #417)
+  useEffect(() => {
+    const fetchRemoteProjects = async () => {
+      try {
+        const response = await workspaceApi.getRemoteProjects();
+        if (response.success && response.projects.length > 0) {
+          setRemoteProjects(response.projects);
+        }
+      } catch (err) {
+        console.error('Failed to fetch remote projects:', err);
+      }
+    };
+
+    fetchRemoteProjects();
   }, []);
 
   // Activity heartbeat for multi-user mode
@@ -424,8 +443,19 @@ export const Workspace: React.FC = () => {
         return result;
       };
 
-      // Use user-specific URL with token and openace_url when available
-      if (userWebUI?.success) {
+// Helper to append recent remote projects (Issue #417)
+      const appendRecentProjects = (url: string) => {
+        if (remoteProjects.length === 0) return url;
+        // Format: project_path:encoded_name pairs, separated by comma
+        // Example: "/home/user/demo:-home-user-demo,/root/workspace:-root-workspace"
+        const projectsParam = remoteProjects
+          .map((p) => `${p.project_path}:${p.encoded_project_name}`)
+          .join(',');
+        return appendParam(url, 'recentProjects', projectsParam);
+      };
+
+      // Multi-user mode: use user-specific URL with token and openace_url
+      if (config.multi_user_mode && userWebUI?.success) {
         const baseUrl = userWebUI.url;
         const token = userWebUI.token;
         const openaceUrl = userWebUI.openace_url;
@@ -459,6 +489,8 @@ export const Workspace: React.FC = () => {
         }
         // Remote workspace parameters
         url = appendRemoteParams(url);
+        // Recent remote projects (Issue #417)
+        url = appendRecentProjects(url);
         return url;
       }
 
@@ -488,9 +520,11 @@ export const Workspace: React.FC = () => {
       }
       // Remote workspace parameters
       url = appendRemoteParams(url);
+      // Recent remote projects (Issue #417)
+      url = appendRecentProjects(url);
       return url;
     },
-    [config, userWebUI, language]
+    [config, userWebUI, language, remoteProjects]
   );
 
   // Initialize tabs when config is loaded (Issue #65: Restore from store if available)
