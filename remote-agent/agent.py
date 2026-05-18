@@ -616,6 +616,7 @@ class RemoteAgent:
         logger.info("Starting terminal %s: work_dir=%s", terminal_id[:8], work_dir)
 
         # Apply CLI settings before starting terminal
+        # (non-sensitive config only; API credentials are set via env vars)
         if cli_settings:
             self._apply_cli_settings(cli_settings)
 
@@ -928,9 +929,46 @@ class RemoteAgent:
     # CLI Settings Application
     # ----------------------------------------------------------------
 
+    # Fields that should never appear in settings.json — API credentials
+    # are injected via environment variables instead.
+    _SENSITIVE_ENV_KEYS = {
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_BASE_URL",
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
+    }
+
+    def _strip_sensitive_fields(self, settings: dict[str, Any]) -> dict[str, Any]:
+        """Remove API key and base URL fields from settings dict.
+
+        These credentials are injected via environment variables by
+        terminal_server.py (web terminal) and executor._build_env()
+        (remote session), so they must not be written to settings.json.
+        """
+        settings = settings.copy()
+
+        # Remove sensitive keys from env block
+        env = settings.get("env", {})
+        if env:
+            env = {k: v for k, v in env.items() if k not in self._SENSITIVE_ENV_KEYS}
+            settings["env"] = env
+
+        # Remove baseUrl from modelProviders (qwen-code)
+        for provider_models in settings.get("modelProviders", {}).values():
+            if isinstance(provider_models, list):
+                for model in provider_models:
+                    if isinstance(model, dict):
+                        model.pop("baseUrl", None)
+
+        return settings
+
     def _apply_cli_settings(self, cli_settings: dict[str, Any]) -> None:
         """
         Write settings.json files for configured CLI tools.
+
+        Only non-sensitive configuration is written (model mappings, theme, etc.).
+        API keys and base URLs are NOT written — they are injected via
+        environment variables by terminal_server.py and executor.
 
         Args:
             cli_settings: Dict with tool_name -> settings mapping
@@ -941,6 +979,7 @@ class RemoteAgent:
 
         for tool_name, settings in cli_settings.items():
             try:
+                settings = self._strip_sensitive_fields(settings)
                 if tool_name == "claude-code":
                     self._write_claude_settings(settings)
                 elif tool_name == "qwen-code":

@@ -89,34 +89,20 @@ class ClaudeCodeAdapter(BaseCLIAdapter):
     def build_settings(
         self,
         base_settings: dict,
-        api_key: str,
-        base_url: str,
     ) -> dict:
         """
-        Build complete settings.json for Claude Code.
+        Build settings.json for Claude Code (non-sensitive config only).
 
-        Merges user-configured settings with system-injected credentials.
-        User settings should not contain sensitive fields like ANTHROPIC_API_KEY.
+        API credentials (ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL) are NOT
+        included — they are injected via environment variables by the agent.
 
         Args:
-            base_settings: User-configured settings (model mappings, etc.)
-            api_key: Real API key from api_key_store (or proxy token)
-            base_url: Base URL for API requests
+            base_settings: User-configured settings (model mappings, theme, etc.)
 
         Returns:
-            Complete settings dict ready to write to ~/.claude/settings.json
+            Settings dict ready to write to ~/.claude/settings.json
         """
-        settings = base_settings.copy()
-        settings.setdefault("env", {})
-
-        # Inject API credentials (from api_key_store, not user config)
-        settings["env"]["ANTHROPIC_API_KEY"] = api_key
-        settings["env"]["ANTHROPIC_BASE_URL"] = base_url.rstrip("/")
-
-        # Preserve user-configured model mappings if present:
-        # env.ANTHROPIC_MODEL, env.ANTHROPIC_DEFAULT_HAIKU_MODEL, etc.
-
-        return settings
+        return base_settings.copy()
 
     def get_settings_path(self) -> str:
         """Return the path to Claude Code settings.json."""

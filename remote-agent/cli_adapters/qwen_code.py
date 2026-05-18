@@ -113,52 +113,40 @@ class QwenCodeAdapter(BaseCLIAdapter):
     def build_settings(
         self,
         base_settings: dict,
-        api_key: str,
-        base_url: str,
-        provider_name: str = "openai",
     ) -> dict:
         """
-        Build complete settings.json for Qwen Code (bailian format).
+        Build settings.json for Qwen Code (non-sensitive config only).
 
-        Reference: ~/.qwen/settings.json.bailian format with:
-        - env: API key environment variables
-        - modelProviders: Provider-specific model configurations
-        - security: Auth type selection
-        - model: Default model selection
+        API credentials and baseUrl are NOT included — they are injected
+        via environment variables by the agent.
 
         Args:
             base_settings: User-configured settings (modelProviders, model, etc.)
-            api_key: Real API key from api_key_store (or proxy token)
-            base_url: Base URL for API requests
-            provider_name: Provider type (default: openai)
 
         Returns:
-            Complete settings dict ready to write to ~/.qwen/settings.json
+            Settings dict ready to write to ~/.qwen/settings.json
         """
         settings = base_settings.copy()
-        settings.setdefault("env", {})
-        settings.setdefault("modelProviders", {})
-        settings.setdefault("security", {"auth": {"selectedType": provider_name}})
-        settings["$version"] = 3
 
-        # Ensure target provider exists
-        settings["modelProviders"].setdefault(provider_name, [])
+        # Strip any API credential fields that the user may have
+        # accidentally included.
+        _sensitive_env_keys = {
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_BASE_URL",
+            "OPENAI_API_KEY",
+            "OPENAI_BASE_URL",
+        }
+        env = settings.get("env", {})
+        if env:
+            env = {k: v for k, v in env.items() if k not in _sensitive_env_keys}
+            settings["env"] = env
 
-        # Determine env key name (default based on provider)
-        env_key_name = f"{provider_name.upper()}_API_KEY"
-
-        # Process modelProviders - inject baseUrl where needed
-        for model_config in settings["modelProviders"][provider_name]:
-            # Use the model's envKey if specified
-            if "envKey" in model_config:
-                env_key_name = model_config["envKey"]
-
-            # If baseUrl not set in model config, use api_key_store's base_url
-            if "baseUrl" not in model_config:
-                model_config["baseUrl"] = base_url.rstrip("/")
-
-        # Inject the API key into env
-        settings["env"][env_key_name] = api_key
+        # Strip baseUrl from modelProviders entries
+        for provider_models in settings.get("modelProviders", {}).values():
+            if isinstance(provider_models, list):
+                for model in provider_models:
+                    if isinstance(model, dict):
+                        model.pop("baseUrl", None)
 
         return settings
 
