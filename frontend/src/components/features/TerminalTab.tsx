@@ -45,6 +45,8 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   const fitAddonRef = useRef<FitAddon | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectCountRef = useRef(0);
+  const isActiveRef = useRef(isActive);
+  isActiveRef.current = isActive;
 
   // Use refs for callbacks to avoid stale closures and unnecessary reconnects
   const onReattachNeededRef = useRef(onReattachNeeded);
@@ -111,6 +113,9 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
               })
             );
           }
+        }
+        if (isActiveRef.current) {
+          xtermRef.current?.focus();
         }
       };
 
@@ -258,11 +263,12 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
     }
   }, [connect, wsUrl, token]);
 
-  // Handle resize when tab becomes active
+  // Handle resize and focus when tab becomes active
   useEffect(() => {
     if (isActive && fitAddonRef.current && terminalRef.current) {
       const timer = setTimeout(() => {
         fitAddonRef.current?.fit();
+        xtermRef.current?.focus();
       }, 100);
       return () => clearTimeout(timer);
     }
