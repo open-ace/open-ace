@@ -142,7 +142,9 @@ export const workspaceApi = {
    */
   async getRemoteProjects(): Promise<RemoteProjectsResponse> {
     try {
-      const response = await apiClient.get<RemoteProjectsResponse>('/api/workspace/remote-projects');
+      const response = await apiClient.get<RemoteProjectsResponse>(
+        '/api/workspace/remote-projects'
+      );
       return response;
     } catch {
       return {

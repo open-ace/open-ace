@@ -215,11 +215,7 @@ export const SessionDetailContent: React.FC<SessionDetailContentProps> = ({
                   {msg.tokens_used > 0 && ` • ${formatTokens(msg.tokens_used)} tokens`}
                 </small>
               </div>
-              <MessageContent
-                msg={msg}
-                searchText={searchText}
-                highlightText={highlightText}
-              />
+              <MessageContent msg={msg} searchText={searchText} highlightText={highlightText} />
             </div>
           ))
         ) : (
@@ -419,7 +415,12 @@ const MessageContent: React.FC<{
   return (
     <div className="message-content">
       {blocks.map((block, idx) => (
-        <ContentBlockRenderer key={idx} block={block} searchText={searchText} highlightText={highlightText} />
+        <ContentBlockRenderer
+          key={idx}
+          block={block}
+          searchText={searchText}
+          highlightText={highlightText}
+        />
       ))}
     </div>
   );
@@ -467,7 +468,9 @@ const ContentBlockRenderer: React.FC<{
       return (
         <details className="border-start border-3 border-info ps-2 mb-1">
           <summary className="small" style={{ cursor: 'pointer' }}>
-            <Badge variant="info" className="me-1">Tool</Badge>
+            <Badge variant="info" className="me-1">
+              Tool
+            </Badge>
             <span className="fw-medium">{block.name}</span>
           </summary>
           <div
@@ -489,7 +492,9 @@ const ContentBlockRenderer: React.FC<{
       return (
         <details className="border-start border-3 border-success ps-2 mb-1">
           <summary className="small" style={{ cursor: 'pointer' }}>
-            <Badge variant="success" className="me-1">Result</Badge>
+            <Badge variant="success" className="me-1">
+              Result
+            </Badge>
           </summary>
           <div
             className="mt-1 bg-dark text-light rounded p-2 small"
@@ -503,10 +508,10 @@ const ContentBlockRenderer: React.FC<{
           >
             {typeof block.content === 'string'
               ? block.content
-              : block.content
+              : (block.content
                   ?.filter((b) => b.type === 'text')
                   .map((b) => b.text)
-                  .join('\n') ?? ''}
+                  .join('\n') ?? '')}
           </div>
         </details>
       );

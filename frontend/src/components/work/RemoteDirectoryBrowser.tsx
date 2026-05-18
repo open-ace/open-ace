@@ -36,12 +36,11 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
   onClose,
 }) => {
   const language = useLanguage();
-  const [currentPath, setCurrentPath] = useState(initialPath || '');
+  const [currentPath, setCurrentPath] = useState(initialPath ?? '');
   const [directories, setDirectories] = useState<DirectoryEntry[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [parentPath, setParentPath] = useState<string | null>(null);
-  const [canCreate, setCanCreate] = useState(false);
   const [isWritable, setIsWritable] = useState(false);
   const [showCreateInput, setShowCreateInput] = useState(false);
   const [newDirName, setNewDirName] = useState('');
@@ -77,27 +76,29 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
   );
 
   // Fetch directory listing
-  const fetchDirectories = useCallback(async (path: string) => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const result = await fsApi.browseRemoteDirectory(machineId, path);
-      if (result.success && result.result) {
-        const browseResult: BrowseResult = result.result;
-        setDirectories(browseResult.directories);
-        setCurrentPath(browseResult.path);
-        setParentPath(browseResult.parent);
-        setCanCreate(browseResult.canCreate);
-        setIsWritable(browseResult.is_writable);
-      } else {
-        setError(result.error || 'Failed to browse directory');
+  const fetchDirectories = useCallback(
+    async (path: string) => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const result = await fsApi.browseRemoteDirectory(machineId, path);
+        if (result.success && result.result) {
+          const browseResult: BrowseResult = result.result;
+          setDirectories(browseResult.directories);
+          setCurrentPath(browseResult.path);
+          setParentPath(browseResult.parent);
+          setIsWritable(browseResult.is_writable);
+        } else {
+          setError(result.error ?? 'Failed to browse directory');
+        }
+      } catch (err) {
+        setError((err as Error)?.message || 'Failed to browse directory');
+      } finally {
+        setIsLoading(false);
       }
-    } catch (err) {
-      setError((err as Error)?.message || 'Failed to browse directory');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [machineId]);
+    },
+    [machineId]
+  );
 
   // Initial load
   useEffect(() => {
@@ -134,9 +135,6 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
     setIsLoading(true);
     setError(null);
     try {
-      const newPath = currentPath.endsWith('/')
-        ? `${currentPath}${newDirName.trim()}`
-        : `${currentPath}/${newDirName.trim()}`;
       // For remote machines, we need to send create command via WebSocket
       // For now, we'll use a placeholder implementation
       // This will be enhanced when the remote create directory API is ready
@@ -209,10 +207,7 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
       {/* Breadcrumbs */}
       <div className="mb-2">
         <div className="d-flex align-items-center gap-1 small">
-          <button
-            className="btn btn-link btn-sm p-0"
-            onClick={() => fetchDirectories('/')}
-          >
+          <button className="btn btn-link btn-sm p-0" onClick={() => fetchDirectories('/')}>
             /
           </button>
           {breadcrumbs.map((crumb, index) => (

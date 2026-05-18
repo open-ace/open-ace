@@ -13,7 +13,12 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { workspaceApi, type WorkspaceConfig, type UserWebUIResponse, type RemoteProject } from '@/api';
+import {
+  workspaceApi,
+  type WorkspaceConfig,
+  type UserWebUIResponse,
+  type RemoteProject,
+} from '@/api';
 import { requestApi, type QuotaStatusResponse } from '@/api/request';
 import { sessionsApi } from '@/api/sessions';
 import {
@@ -443,7 +448,7 @@ export const Workspace: React.FC = () => {
         return result;
       };
 
-// Helper to append recent remote projects (Issue #417)
+      // Helper to append recent remote projects (Issue #417)
       const appendRecentProjects = (url: string) => {
         if (remoteProjects.length === 0) return url;
         // Use JSON format to avoid delimiter collision (paths may contain : or ,)

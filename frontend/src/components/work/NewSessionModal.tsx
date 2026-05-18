@@ -19,7 +19,6 @@ import { useAvailableMachines, useCreateRemoteSession } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import { Modal, Button, Badge, EmptyState, Loading } from '@/components/common';
-import { RemoteMachineSelector } from './RemoteMachineSelector';
 
 interface NewSessionModalProps {
   isOpen?: boolean;
