@@ -30,6 +30,36 @@ CLAUDE_PROJECTS_DIR = CLAUDE_DIR / "projects"
 SYNC_STATE_FILE = Path.home() / ".open-ace-agent" / "session_sync_state.json"
 
 
+def _extract_text_only(content: Any) -> str:
+    """Extract plain text from content for backward-compat display."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        texts = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                texts.append(block.get("text", ""))
+            elif isinstance(block, str):
+                texts.append(block)
+        return "\n".join(texts)
+    return str(content) if content else ""
+
+
+def _extract_content_blocks(content: Any) -> list[dict[str, Any]]:
+    """Extract full content blocks preserving structure (tool_use, thinking, tool_result)."""
+    if isinstance(content, list):
+        blocks: list[dict[str, Any]] = []
+        for block in content:
+            if isinstance(block, dict):
+                block_type = block.get("type")
+                if block_type in ("text", "tool_use", "thinking", "tool_result"):
+                    blocks.append(block)
+        return blocks
+    if isinstance(content, str) and content:
+        return [{"type": "text", "text": content}]
+    return []
+
+
 class ClaudeSession:
     """Parsed Claude Code session from a JSONL file."""
 
@@ -79,57 +109,59 @@ class ClaudeSession:
             return False
 
     def _process_entry(self, entry: dict[str, Any]) -> None:
-        """Process a single JSONL entry."""
+        """Process a single JSONL entry.
+
+        Claude Code JSONL uses type "user"/"assistant" (not "message")
+        with fields nested under entry.message:
+          entry.message.role, entry.message.content (list of blocks),
+          entry.message.model, entry.message.usage
+        """
         entry_type = entry.get("type")
 
-        if entry_type == "message":
-            role = entry.get("role", "")
-            if role in ("user", "assistant"):
-                self.message_count += 1
-                msg = {
-                    "role": role,
-                    "content": self._extract_content(entry),
-                    "timestamp": entry.get("timestamp"),
-                    "model": entry.get("model"),
-                }
-                self.messages.append(msg)
+        if entry_type in ("user", "assistant"):
+            message = entry.get("message", {})
+            if not isinstance(message, dict):
+                return
 
-                # Track timestamps
-                ts = entry.get("timestamp")
-                if ts:
-                    if not self.first_timestamp:
-                        self.first_timestamp = ts
-                    self.last_timestamp = ts
+            role = message.get("role", entry_type)
+            if role not in ("user", "assistant"):
+                return
 
-                # Track model
-                if not self.model and entry.get("model"):
-                    self.model = entry["model"]
+            content_raw = message.get("content", "")
+            content_blocks = _extract_content_blocks(content_raw)
+            text_content = _extract_text_only(content_raw)
 
-                # Track token usage from assistant messages
-                if role == "assistant" and "usage" in entry:
-                    usage = entry["usage"]
-                    self.total_input_tokens += usage.get("input_tokens", 0)
-                    self.total_output_tokens += usage.get("output_tokens", 0)
+            self.message_count += 1
+            msg: dict[str, Any] = {
+                "role": role,
+                "content": text_content,
+                "content_blocks": content_blocks or None,
+                "timestamp": entry.get("timestamp"),
+                "model": message.get("model"),
+                "uuid": entry.get("uuid"),
+            }
+
+            usage = message.get("usage")
+            if isinstance(usage, dict) and role == "assistant":
+                input_t = usage.get("input_tokens", 0)
+                output_t = usage.get("output_tokens", 0)
+                self.total_input_tokens += input_t
+                self.total_output_tokens += output_t
+                msg["usage"] = {"input_tokens": input_t, "output_tokens": output_t}
+
+            self.messages.append(msg)
+
+            ts = entry.get("timestamp")
+            if ts:
+                if not self.first_timestamp:
+                    self.first_timestamp = ts
+                self.last_timestamp = ts
+
+            if not self.model and message.get("model"):
+                self.model = message["model"]
 
         elif entry_type == "summary":
-            # Conversation summary/compression event
             pass
-
-    def _extract_content(self, entry: dict[str, Any]) -> str:
-        """Extract text content from a message entry."""
-        content = entry.get("content", "")
-        if isinstance(content, str):
-            return content
-        if isinstance(content, list):
-            # Content blocks: extract text from text blocks
-            texts = []
-            for block in content:
-                if isinstance(block, dict) and block.get("type") == "text":
-                    texts.append(block.get("text", ""))
-                elif isinstance(block, str):
-                    texts.append(block)
-            return "\n".join(texts)
-        return str(content)
 
     def to_sync_payload(self, machine_id: str, terminal_id: str) -> dict[str, Any]:
         """Convert to the payload expected by the Open-ACE session-sync endpoint."""
@@ -145,7 +177,7 @@ class ClaudeSession:
             "total_output_tokens": self.total_output_tokens,
             "first_timestamp": self.first_timestamp,
             "last_timestamp": self.last_timestamp,
-            "messages": self.messages[-50:],  # Last 50 messages only
+            "messages": self.messages,
         }
 
 

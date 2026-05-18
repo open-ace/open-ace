@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 # Entries older than this (seconds) are considered stale and removed.
 TTL_SECONDS = 24 * 3600  # 24 hours
 CLEANUP_INTERVAL = 10 * 60  # 10 minutes
+MAX_ENTRIES = 1000
 
 
 class TerminalInfoStore:
@@ -45,6 +46,11 @@ class TerminalInfoStore:
         with self._lock:
             info["_updated_at"] = time.time()
             self._store[(machine_id, terminal_id)] = info
+            # Evict oldest entries if over capacity
+            if len(self._store) > MAX_ENTRIES:
+                oldest = sorted(self._store.items(), key=lambda kv: kv[1].get("_updated_at", 0))
+                for k, _ in oldest[: len(self._store) - MAX_ENTRIES]:
+                    del self._store[k]
 
     def get(self, machine_id: str, terminal_id: str) -> dict | None:
         with self._lock:

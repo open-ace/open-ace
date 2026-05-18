@@ -26,6 +26,9 @@ from app.modules.workspace.terminal_store import terminal_info_store
 
 logger = logging.getLogger(__name__)
 
+MAX_RAW_CONTENT_LENGTH = 100000
+MAX_MESSAGE_LENGTH = 50000
+
 remote_bp = Blueprint("remote", __name__)
 
 
@@ -1066,12 +1069,51 @@ def agent_message():
                     content = msg.get("content", "")
                     timestamp = msg.get("timestamp")
                     msg_model = msg.get("model") or model
+                    msg_uuid = msg.get("uuid", "")
+                    content_blocks = msg.get("content_blocks")
+                    usage = msg.get("usage", {})
 
-                    if not content or len(content) > 100000:
+                    if not content or len(content) > MAX_RAW_CONTENT_LENGTH:
                         continue
 
+                    input_tokens = usage.get("input_tokens", 0) if isinstance(usage, dict) else 0
+                    output_tokens = usage.get("output_tokens", 0) if isinstance(usage, dict) else 0
+                    tokens_used = input_tokens + output_tokens
+
+                    # Use uuid for dedup if available, fallback to timestamp-based id
+                    message_id = msg_uuid or f"{session_id}-{timestamp}"
+
+                    # 1. Write to session_messages (dual-write with daily_messages)
+                    try:
+                        metadata = {"message_source": "web_terminal"}
+                        if content_blocks:
+                            metadata["content_blocks"] = content_blocks
+                        if input_tokens or output_tokens:
+                            metadata["input_tokens"] = input_tokens
+                            metadata["output_tokens"] = output_tokens
+
+                        sync_session_mgr.add_message(
+                            session_id=session_id,
+                            role=role,
+                            content=content[:MAX_MESSAGE_LENGTH],
+                            tokens_used=tokens_used,
+                            model=msg_model,
+                            metadata=metadata,
+                        )
+                    except Exception as e:
+                        logger.debug("Failed to add session_message: %s", e)
+
+                    # 2. Write to daily_messages with enriched fields
                     date_str = (timestamp or time.strftime("%Y-%m-%d"))[:10]
-                    message_id = f"{session_id}-{msg.get('timestamp', '')}"
+                    full_entry_json = json.dumps(
+                        {
+                            "session_id": session_id,
+                            "role": role,
+                            "content": content[:MAX_MESSAGE_LENGTH],
+                            "content_blocks": content_blocks,
+                        },
+                        ensure_ascii=False,
+                    )
 
                     try:
                         with get_db_connection() as conn:
@@ -1079,22 +1121,27 @@ def agent_message():
                             cursor.execute(
                                 adapt_sql("""INSERT OR IGNORE INTO daily_messages
                                     (date, tool_name, host_name, message_id, role, content,
-                                     tokens_used, model, timestamp, message_source,
-                                     conversation_id, agent_session_id)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""),
+                                     full_entry, tokens_used, input_tokens, output_tokens,
+                                     model, timestamp, message_source,
+                                     conversation_id, agent_session_id, project_path)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""),
                                 (
                                     date_str,
                                     tool_name,
                                     machine_id[:8],
                                     message_id,
                                     role,
-                                    content[:50000],
-                                    0,
+                                    content[:MAX_MESSAGE_LENGTH],
+                                    full_entry_json,
+                                    tokens_used,
+                                    input_tokens,
+                                    output_tokens,
                                     msg_model,
                                     timestamp,
                                     "web_terminal",
                                     session_id,
                                     session_id,
+                                    project_path or "",
                                 ),
                             )
                             conn.commit()

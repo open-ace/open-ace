@@ -32,6 +32,23 @@ TOKEN_QUOTA_MULTIPLIER = 1_000_000
 _SESSION_REFRESH_THRESHOLD_MINUTES = 10
 
 
+def _parse_daily_message_metadata(row: dict) -> dict:
+    """Extract content_blocks from daily_messages.full_entry if available."""
+    full_entry = row.get("full_entry")
+    if not full_entry:
+        return {}
+    try:
+        import json as _json
+
+        entry = _json.loads(full_entry) if isinstance(full_entry, str) else full_entry
+        content_blocks = entry.get("content_blocks")
+        if content_blocks:
+            return {"content_blocks": content_blocks}
+    except (ValueError, TypeError):
+        pass
+    return {}
+
+
 def format_datetime(dt):
     """Convert datetime to ISO 8601 string for proper timezone handling in frontend.
 
@@ -853,7 +870,7 @@ def get_session(session_id):
                 try:
                     msg_query = f"""
                         SELECT id, agent_session_id as session_id, role, content,
-                               tokens_used, model, timestamp
+                               tokens_used, model, timestamp, full_entry
                         FROM daily_messages
                         WHERE agent_session_id = {p}
                         ORDER BY timestamp ASC
@@ -877,7 +894,7 @@ def get_session(session_id):
                                         else None
                                     )
                                 ),
-                                metadata={},
+                                metadata=_parse_daily_message_metadata(m),
                             )
                             for m in msg_rows
                         ]
@@ -938,7 +955,8 @@ def get_session(session_id):
                         content,
                         tokens_used,
                         model,
-                        timestamp
+                        timestamp,
+                        full_entry
                     FROM daily_messages
                     WHERE agent_session_id = {p}
                     ORDER BY timestamp ASC
@@ -956,7 +974,11 @@ def get_session(session_id):
                         ),
                         "model": m["model"] if isinstance(m, dict) else m[5],
                         "timestamp": m["timestamp"] if isinstance(m, dict) else m[6],
-                        "metadata": {},
+                        "metadata": _parse_daily_message_metadata(
+                            m
+                            if isinstance(m, dict)
+                            else {"full_entry": m[7] if len(m) > 7 else None}
+                        ),
                     }
                     for m in messages_data
                 ]
