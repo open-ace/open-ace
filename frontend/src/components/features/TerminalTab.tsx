@@ -55,14 +55,22 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
 
   const connect = useCallback(() => {
-    console.log('[TerminalTab] connect called:', { wsUrl, hasToken: !!token, hasXterm: !!xtermRef.current });
+    console.log('[TerminalTab] connect called:', {
+      wsUrl,
+      hasToken: !!token,
+      hasXterm: !!xtermRef.current,
+    });
     if (!wsUrl || !token || !xtermRef.current) {
       console.log('[TerminalTab] Skipping connect - missing requirements');
       return;
     }
 
     // Skip if already connecting or connected
-    if (wsRef.current && (wsRef.current.readyState === WebSocket.CONNECTING || wsRef.current.readyState === WebSocket.OPEN)) {
+    if (
+      wsRef.current &&
+      (wsRef.current.readyState === WebSocket.CONNECTING ||
+        wsRef.current.readyState === WebSocket.OPEN)
+    ) {
       console.log('[TerminalTab] Skipping connect - already connected/connecting');
       return;
     }
@@ -119,7 +127,9 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
         setConnectionState('disconnected');
         if (event.code === 4001) {
           if (xtermRef.current) {
-            xtermRef.current.writeln('\r\n\x1b[33mAuthentication failed. Reconnecting...\x1b[0m\r\n');
+            xtermRef.current.writeln(
+              '\r\n\x1b[33mAuthentication failed. Reconnecting...\x1b[0m\r\n'
+            );
           }
           onAuthFailedRef.current?.();
           return;
@@ -132,7 +142,9 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
         if (reconnectCountRef.current >= 5 && onReattachNeededRef.current) {
           console.log('[TerminalTab] Too many reconnect failures, triggering reattach');
           if (xtermRef.current) {
-            xtermRef.current.writeln('\r\n\x1b[36mRequesting new terminal connection...\x1b[0m\r\n');
+            xtermRef.current.writeln(
+              '\r\n\x1b[36mRequesting new terminal connection...\x1b[0m\r\n'
+            );
           }
           onReattachNeededRef.current();
           return;
@@ -316,7 +328,8 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
             borderRadius: '50%',
             backgroundColor: statusColor[connectionState],
             marginRight: '6px',
-            animation: connectionState === 'connecting' ? 'pulse 1.5s ease-in-out infinite' : 'none',
+            animation:
+              connectionState === 'connecting' ? 'pulse 1.5s ease-in-out infinite' : 'none',
           }}
         />
         <span className="me-3">{statusText[connectionState]}</span>

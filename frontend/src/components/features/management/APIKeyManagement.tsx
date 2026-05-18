@@ -239,7 +239,10 @@ export const APIKeyManagement: React.FC = () => {
     }
 
     // Validate JSON settings
-    if (formData.cli_tools.includes('claude-code') && !validateJsonSettings(formData.claude_settings)) {
+    if (
+      formData.cli_tools.includes('claude-code') &&
+      !validateJsonSettings(formData.claude_settings)
+    ) {
       setFormError('Claude Code settings JSON is invalid');
       return;
     }
@@ -275,7 +278,10 @@ export const APIKeyManagement: React.FC = () => {
     }
 
     // Validate JSON settings
-    if (formData.cli_tools.includes('claude-code') && !validateJsonSettings(formData.claude_settings)) {
+    if (
+      formData.cli_tools.includes('claude-code') &&
+      !validateJsonSettings(formData.claude_settings)
+    ) {
       setFormError('Claude Code settings JSON is invalid');
       return;
     }
@@ -489,9 +495,7 @@ export const APIKeyManagement: React.FC = () => {
               </div>
             ))}
           </div>
-          <small className="text-muted">
-            {t('cliToolsDescription', language)}
-          </small>
+          <small className="text-muted">{t('cliToolsDescription', language)}</small>
         </div>
 
         {/* Claude Code Settings */}
@@ -505,9 +509,7 @@ export const APIKeyManagement: React.FC = () => {
               onChange={(e) => setFormData({ ...formData, claude_settings: e.target.value })}
               placeholder={defaultClaudeSettings}
             />
-            <small className="text-muted">
-              {t('claudeCodeSettingsHint', language)}
-            </small>
+            <small className="text-muted">{t('claudeCodeSettingsHint', language)}</small>
           </div>
         )}
       </Modal>
@@ -588,9 +590,7 @@ export const APIKeyManagement: React.FC = () => {
               value={formData.claude_settings}
               onChange={(e) => setFormData({ ...formData, claude_settings: e.target.value })}
             />
-            <small className="text-muted">
-              {t('claudeCodeSettingsHint', language)}
-            </small>
+            <small className="text-muted">{t('claudeCodeSettingsHint', language)}</small>
           </div>
         )}
 
@@ -604,9 +604,7 @@ export const APIKeyManagement: React.FC = () => {
               value={formData.qwen_settings}
               onChange={(e) => setFormData({ ...formData, qwen_settings: e.target.value })}
             />
-            <small className="text-muted">
-              {t('qwenCodeSettingsHint', language)}
-            </small>
+            <small className="text-muted">{t('qwenCodeSettingsHint', language)}</small>
           </div>
         )}
       </Modal>
