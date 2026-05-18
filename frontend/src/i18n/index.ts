@@ -777,6 +777,13 @@ const translations: Record<Language, Translations> = {
     noApiKeys: 'No API keys configured',
     noApiKeysDescription: 'Add API keys to enable LLM proxy for remote agents.',
     keyStatus: 'Status',
+    cliTools: 'CLI Tools',
+    cliToolsDescription: 'Select which CLI tools this API key should configure settings for.',
+    claudeCodeSettings: 'Claude Code Settings (JSON)',
+    claudeCodeSettingsHint: 'Paste ~/.claude/settings.json content (without sensitive AUTH_TOKEN). System will inject API key automatically.',
+    qwenCodeSettings: 'Qwen Code Settings (JSON)',
+    qwenCodeSettingsHint: 'Paste ~/.qwen/settings.json content (without env API keys). System will inject API key automatically.',
+    providerCannotChange: 'Provider cannot be changed',
 
     // Help Documents
     gettingStarted: 'Getting Started',
@@ -1570,6 +1577,13 @@ const translations: Record<Language, Translations> = {
     noApiKeys: '暂无已配置的 API 密钥',
     noApiKeysDescription: '添加 API 密钥以启用远程 Agent 的 LLM 代理功能。',
     keyStatus: '状态',
+    cliTools: 'CLI 工具',
+    cliToolsDescription: '选择此 API 密钥应为其配置设置的 CLI 工具。',
+    claudeCodeSettings: 'Claude Code 设置 (JSON)',
+    claudeCodeSettingsHint: '粘贴 ~/.claude/settings.json 内容（不含敏感 AUTH_TOKEN），系统将自动注入 API 密钥。',
+    qwenCodeSettings: 'Qwen Code 设置 (JSON)',
+    qwenCodeSettingsHint: '粘贴 ~/.qwen/settings.json 内容（不含环境变量 API 密钥），系统将自动注入 API 密钥。',
+    providerCannotChange: '提供商不可更改',
 
     // 帮助文档
     gettingStarted: '快速上手',

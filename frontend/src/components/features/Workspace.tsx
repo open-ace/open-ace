@@ -91,6 +91,50 @@ export const Workspace: React.FC = () => {
   // Refs for iframe elements (to send focus messages)
   const iframeRefs = useRef<Map<string, HTMLIFrameElement>>(new Map());
 
+  // Shared terminal proxy polling helper
+  const pollTerminalProxy = useCallback(async (
+    tabId: string,
+    terminalId: string,
+    machineId: string,
+    maxAttempts: number = 30,
+  ) => {
+    const poll = async (attempt: number) => {
+      if (terminalPollCancelRefs.current.get(tabId)) return;
+      if (attempt > maxAttempts) {
+        toast.error(t('terminalError', language) || 'Terminal Error', 'Timed out waiting for WebSocket proxy');
+        return;
+      }
+      if (attempt > 0) await new Promise((r) => setTimeout(r, 1000));
+      if (terminalPollCancelRefs.current.get(tabId)) return;
+      try {
+        const status = await remoteApi.getTerminalStatus(terminalId, machineId);
+        const wsUrl = status.terminal.ws_url || '';
+        const hasProxyUrl = wsUrl.includes('localhost') || wsUrl.includes('127.0.0.1');
+        if (status.terminal.status === 'running' && hasProxyUrl) {
+          setTabs((prev) =>
+            prev.map((t) =>
+              t.id === tabId
+                ? { ...t, terminalWsUrl: status.terminal.ws_url!, terminalToken: status.terminal.token! }
+                : t
+            )
+          );
+          updateStoredTab(tabId, {
+            terminalWsUrl: status.terminal.ws_url!,
+            terminalToken: status.terminal.token!,
+          });
+        } else if (status.terminal.status === 'error') {
+          toast.error(t('terminalError', language) || 'Terminal Error', status.terminal.error || 'Failed to start terminal');
+        } else {
+          poll(attempt + 1);
+        }
+      } catch {
+        poll(attempt + 1);
+      }
+    };
+    terminalPollCancelRefs.current.delete(tabId);
+    poll(0);
+  }, [language, t, toast]);
+
   // Track terminal polling that should be cancelled on tab close
   const terminalPollCancelRefs = useRef<Map<string, boolean>>(new Map());
 
@@ -779,65 +823,7 @@ export const Workspace: React.FC = () => {
             setStoredActiveTabId(tabId);
 
             // Poll for terminal status until WebSocket proxy is ready
-            const pollUntilProxyReady = async (attempt: number) => {
-              if (terminalPollCancelRefs.current.get(tabId)) return;
-              if (attempt > 30) { // 30 seconds max
-                toast.error(
-                  t('terminalError', language) || 'Terminal Error',
-                  'Timed out waiting for WebSocket proxy'
-                );
-                return;
-              }
-              // Only wait before subsequent attempts (not on first attempt)
-              if (attempt > 0) {
-                await new Promise((r) => setTimeout(r, 1000));
-              }
-              if (terminalPollCancelRefs.current.get(tabId)) return;
-              try {
-                const status = await remoteApi.getTerminalStatus(terminalId, machineId);
-                // Check if ws_url is proxy URL (contains 'localhost')
-                const wsUrl = status.terminal.ws_url || '';
-                const hasProxyUrl = wsUrl.includes('localhost') || wsUrl.includes('127.0.0.1');
-
-                console.log('[Terminal] Poll status:', {
-                  attempt,
-                  status: status.terminal.status,
-                  wsUrl,
-                  hasProxyUrl,
-                  hasToken: !!status.terminal.token,
-                });
-
-                if (status.terminal.status === 'running' && hasProxyUrl) {
-                  // Update tab with proxy URL and token, then stop polling
-                  setTabs((prev) =>
-                    prev.map((t) =>
-                      t.id === tabId
-                        ? { ...t, terminalWsUrl: status.terminal.ws_url!, terminalToken: status.terminal.token! }
-                        : t
-                    )
-                  );
-                  updateStoredTab(tabId, {
-                    terminalWsUrl: status.terminal.ws_url!,
-                    terminalToken: status.terminal.token!,
-                  });
-                  return; // Stop polling - proxy is ready
-                } else if (status.terminal.status === 'error') {
-                  toast.error(
-                    t('terminalError', language) || 'Terminal Error',
-                    status.terminal.error || 'Failed to start terminal'
-                  );
-                  return; // Stop polling - terminal error
-                } else {
-                  // Continue polling - waiting for proxy to start
-                  pollUntilProxyReady(attempt + 1);
-                }
-              } catch {
-                pollUntilProxyReady(attempt + 1);
-              }
-            };
-            // Always poll until proxy is ready
-            terminalPollCancelRefs.current.delete(tabId);
-            pollUntilProxyReady(0);
+            pollTerminalProxy(tabId, terminalId, machineId);
           } else {
             toast.error(t('terminalCreateFailed', language) || 'Failed to create terminal');
           }
@@ -963,7 +949,9 @@ export const Workspace: React.FC = () => {
                     // Poll for proxy URL
                     const pollNewTerminal = async (pollAttempt: number) => {
                       if (pollAttempt > 30) return;
+                      if (terminalPollCancelRefs.current.get(tabId)) return;
                       if (pollAttempt > 0) await new Promise((r) => setTimeout(r, 1000));
+                      if (terminalPollCancelRefs.current.get(tabId)) return;
                       try {
                         const newStatus = await remoteApi.getTerminalStatus(newTerminalId, machineId);
                         const newWs = newStatus.terminal.ws_url || '';
@@ -1804,9 +1792,11 @@ export const Workspace: React.FC = () => {
                             console.log('[Terminal] Reattach polling timed out');
                             return;
                           }
+                          if (terminalPollCancelRefs.current.get(tab.id)) return;
                           if (attempt > 0) {
                             await new Promise((r) => setTimeout(r, 1000));
                           }
+                          if (terminalPollCancelRefs.current.get(tab.id)) return;
                           try {
                             const status = await remoteApi.getTerminalStatus(tab.terminalId!, tab.machineId!);
                             const wsUrl = status.terminal.ws_url || '';
@@ -2160,67 +2150,7 @@ export const Workspace: React.FC = () => {
               setStoredActiveTabId(tabId);
 
               // Poll for terminal status until WebSocket proxy is ready
-              // The ws_url changes from remote IP (e.g., ws://192.168.64.3) to proxy URL (ws://localhost)
-              // after WebSocket proxy starts on the backend
-              const pollUntilProxyReady = async (attempt: number) => {
-                if (terminalPollCancelRefs.current.get(tabId)) return;
-                if (attempt > 30) { // 30 seconds max
-                  toast.error(
-                    t('terminalError', language) || 'Terminal Error',
-                    'Timed out waiting for WebSocket proxy'
-                  );
-                  return;
-                }
-                // Only wait before subsequent attempts (not on first attempt)
-                if (attempt > 0) {
-                  await new Promise((r) => setTimeout(r, 1000));
-                }
-                if (terminalPollCancelRefs.current.get(tabId)) return;
-                try {
-                  const status = await remoteApi.getTerminalStatus(terminalId, params.machineId);
-                  // Check if ws_url is proxy URL (contains 'localhost')
-                  const wsUrl = status.terminal.ws_url || '';
-                  const hasProxyUrl = wsUrl.includes('localhost') || wsUrl.includes('127.0.0.1');
-
-                  console.log('[Terminal] Poll status:', {
-                    attempt,
-                    status: status.terminal.status,
-                    wsUrl,
-                    hasProxyUrl,
-                    hasToken: !!status.terminal.token,
-                  });
-
-                  if (status.terminal.status === 'running' && hasProxyUrl) {
-                    // Update tab with proxy URL and token, then stop polling
-                    setTabs((prev) =>
-                      prev.map((t) =>
-                        t.id === tabId
-                          ? { ...t, terminalWsUrl: status.terminal.ws_url!, terminalToken: status.terminal.token! }
-                          : t
-                      )
-                    );
-                    updateStoredTab(tabId, {
-                      terminalWsUrl: status.terminal.ws_url!,
-                      terminalToken: status.terminal.token!,
-                    });
-                    return; // Stop polling - proxy is ready
-                  } else if (status.terminal.status === 'error') {
-                    toast.error(
-                      t('terminalError', language) || 'Terminal Error',
-                      status.terminal.error || 'Failed to start terminal'
-                    );
-                    return; // Stop polling - terminal error
-                  } else {
-                    // Continue polling - waiting for proxy to start
-                    pollUntilProxyReady(attempt + 1);
-                  }
-                } catch {
-                  pollUntilProxyReady(attempt + 1);
-                }
-              };
-              // Always poll until proxy is ready, regardless of initial status
-              terminalPollCancelRefs.current.delete(tabId);
-              pollUntilProxyReady(0);
+              pollTerminalProxy(tabId, terminalId, params.machineId);
             } else {
               toast.error(
                 t('terminalError', language) || 'Terminal Error',

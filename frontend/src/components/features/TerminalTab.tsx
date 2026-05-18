@@ -44,6 +44,14 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectCountRef = useRef(0);
 
+  // Use refs for callbacks to avoid stale closures and unnecessary reconnects
+  const onReattachNeededRef = useRef(onReattachNeeded);
+  onReattachNeededRef.current = onReattachNeeded;
+  const onAuthFailedRef = useRef(onAuthFailed);
+  onAuthFailedRef.current = onAuthFailed;
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
+
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
 
   const connect = useCallback(() => {
@@ -113,7 +121,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
           if (xtermRef.current) {
             xtermRef.current.writeln('\r\n\x1b[33mAuthentication failed. Reconnecting...\x1b[0m\r\n');
           }
-          onAuthFailed?.();
+          onAuthFailedRef.current?.();
           return;
         }
         if (xtermRef.current) {
@@ -121,12 +129,12 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
         }
         reconnectCountRef.current += 1;
         // After 5 failed reconnects, trigger reattach
-        if (reconnectCountRef.current >= 5 && onReattachNeeded) {
+        if (reconnectCountRef.current >= 5 && onReattachNeededRef.current) {
           console.log('[TerminalTab] Too many reconnect failures, triggering reattach');
           if (xtermRef.current) {
             xtermRef.current.writeln('\r\n\x1b[36mRequesting new terminal connection...\x1b[0m\r\n');
           }
-          onReattachNeeded();
+          onReattachNeededRef.current();
           return;
         }
         const delay = Math.min(3000 * Math.pow(1.5, reconnectCountRef.current - 1), 30000);
@@ -139,7 +147,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
         if (xtermRef.current) {
           xtermRef.current.writeln('\r\n\x1b[31mConnection error.\x1b[0m\r\n');
         }
-        onError?.('Failed to connect to terminal');
+        onErrorRef.current?.('Failed to connect to terminal');
       };
 
       wsRef.current = ws;
@@ -149,9 +157,9 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
       if (xtermRef.current) {
         xtermRef.current.writeln(`\r\n\x1b[31mConnection failed: ${errorMsg}\x1b[0m\r\n`);
       }
-      onError?.(errorMsg);
+      onErrorRef.current?.(errorMsg);
     }
-  }, [wsUrl, token, onError, onAuthFailed]);
+  }, [wsUrl, token]);
 
   // Initialize xterm.js
   useEffect(() => {

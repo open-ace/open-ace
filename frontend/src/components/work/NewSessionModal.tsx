@@ -157,18 +157,18 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
       const machineName = selectedMachine?.machine_name ?? selectedMachineId.slice(0, 8);
 
       if (onCreateTerminal) {
-        onCreateTerminal({
+        await onCreateTerminal({
           machineId: selectedMachineId,
           machineName,
           workDir: projectPath || getDefaultPath(selectedMachine?.os_type),
         });
       }
-    } finally {
-      setIsStartingTerminal(false);
       setSelectedMachineId('');
       setProjectPath('');
       setWorkspaceType('local');
       onClose();
+    } finally {
+      setIsStartingTerminal(false);
     }
   };
 

@@ -16,6 +16,7 @@ import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
@@ -114,6 +115,18 @@ class RemoteAgent:
         except Exception:
             return False
 
+    def _atomic_write_json(self, filepath: str, data: dict | list) -> None:
+        """Write JSON to file atomically using temp file + rename."""
+        dir_path = os.path.dirname(filepath)
+        fd, tmp_path = tempfile.mkstemp(dir=dir_path, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(data, f, indent=2)
+            os.rename(tmp_path, filepath)
+        except Exception:
+            os.unlink(tmp_path)
+            raise
+
     def _save_terminal_info(self, terminal_id: str, port: int, token: str, ws_url: str) -> None:
         """Save terminal session info to a file for persistence."""
         os.makedirs(self._terminal_info_dir, exist_ok=True)
@@ -126,8 +139,7 @@ class RemoteAgent:
                 "ws_url": ws_url,
                 "created_at": datetime.utcnow().isoformat(),
             }
-            with open(filepath, "w") as f:
-                json.dump(info, f)
+            self._atomic_write_json(filepath, info)
             logger.debug("Saved terminal info for %s to %s", terminal_id[:8], filepath)
         except Exception as e:
             logger.warning("Failed to save terminal info: %s", e)
@@ -886,11 +898,10 @@ class RemoteAgent:
         """Get a hostname/IP that the browser can use to reach this machine."""
         # Prefer IP address (hostname may not be resolvable from browser)
         try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            ip = s.getsockname()[0]
-            s.close()
-            return ip
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect(("8.8.8.8", 80))
+                ip = s.getsockname()[0]
+                return ip
         except Exception:
             pass
         # Fall back to configured hostname
@@ -945,13 +956,10 @@ class RemoteAgent:
             except (json.JSONDecodeError, OSError):
                 existing = {}
 
-        # Merge: new settings override existing, but keep non-conflicting existing
         merged = {**existing, **settings}
 
-        settings_path.write_text(
-            json.dumps(merged, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
+        # Atomic write via temp file + rename
+        self._atomic_write_json(str(settings_path), merged)
         logger.info("Wrote Claude Code settings to %s", settings_path)
 
     def _write_qwen_settings(self, settings: dict[str, Any]) -> None:
@@ -974,17 +982,14 @@ class RemoteAgent:
             except (json.JSONDecodeError, OSError):
                 existing = {}
 
-        # Merge: new settings override existing, but keep non-conflicting existing
         merged = {**existing, **settings}
 
         # Ensure $version is set for Qwen settings format
         if "$version" not in merged:
             merged["$version"] = 3
 
-        settings_path.write_text(
-            json.dumps(merged, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
+        # Atomic write via temp file + rename
+        self._atomic_write_json(str(settings_path), merged)
         logger.info("Wrote Qwen Code settings to %s", settings_path)
 
     # ----------------------------------------------------------------

@@ -259,23 +259,20 @@ class WebSocketProxyManager:
 
             # Check stdout for READY signal (non-blocking read)
             try:
-                # Try to read a line - use a timeout approach
-                # In gevent subprocess, readline may block, so we check poll first
                 if process.stdout:
-                    # Read available bytes without blocking
+                    # Use select to check if data is available (avoid blocking readline)
+                    import select as _select
 
-                    # Check if stdout has data available (non-blocking)
-                    # Note: select doesn't work well with pipes on all platforms
-                    # Use gevent-based approach instead
-                    line = process.stdout.readline()
-                    if line:
-                        line_str = line.decode().strip()
-                        logger.debug("Read from stdout: %s", line_str)
-                        if line_str.startswith("READY:"):
-                            logger.info("Proxy READY signal received: %s", line_str)
-                            return True
-                        # Accumulate output for debugging
-                        ready_line += line_str + "\n"
+                    readable, _, _ = _select.select([process.stdout], [], [], 0.5)
+                    if readable:
+                        line = process.stdout.readline()
+                        if line:
+                            line_str = line.decode().strip()
+                            logger.debug("Read from stdout: %s", line_str)
+                            if line_str.startswith("READY:"):
+                                logger.info("Proxy READY signal received: %s", line_str)
+                                return True
+                            ready_line += line_str + "\n"
             except Exception as e:
                 logger.debug("Read error: %s", e)
 

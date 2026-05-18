@@ -571,6 +571,28 @@ class SessionManager:
 
         return success
 
+    ALLOWED_UPDATE_FIELDS = {
+        "status",
+        "workspace_type",
+        "remote_machine_id",
+        "title",
+        "context",
+        "settings",
+        "tags",
+        "model",
+        "cli_tool",
+        "message_count",
+        "request_count",
+        "total_tokens",
+        "total_cost",
+        "duration_seconds",
+        "error_message",
+        "completed_at",
+        "paused_at",
+        "expires_at",
+        "terminal_id",
+    }
+
     def update_session_fields(self, session_id: str, fields: dict[str, Any]) -> bool:
         """
         Update specific fields of a session.
@@ -585,15 +607,20 @@ class SessionManager:
         if not session_id or not fields:
             return False
 
+        # Filter to allowed fields only (prevent column name injection)
+        safe_fields = {k: v for k, v in fields.items() if k in self.ALLOWED_UPDATE_FIELDS}
+        if not safe_fields:
+            return False
+
         p = _param()
         # Build SET clause
-        sets = ", ".join([f"{k} = {p}" for k in fields])
+        sets = ", ".join([f"{k} = {p}" for k in safe_fields])
         # Add updated_at
         sets += f", updated_at = {p}"
-        values = [fields[k] for k in fields]
+        values = [safe_fields[k] for k in safe_fields]
         # Handle JSON fields
         json_fields = ["context", "settings", "tags"]
-        for i, k in enumerate(fields.keys()):
+        for i, k in enumerate(safe_fields.keys()):
             if k in json_fields and isinstance(values[i], (dict, list)):
                 values[i] = json.dumps(values[i])
             elif k in ["updated_at", "completed_at", "paused_at", "expires_at"] and values[i]:

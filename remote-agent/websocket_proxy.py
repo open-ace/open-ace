@@ -53,14 +53,14 @@ async def get_remote_ws_info() -> tuple[str, str]:
     cookies = {"session_token": AUTH_TOKEN}
 
     try:
-        resp = requests.get(url, cookies=cookies, timeout=10)
+        loop = asyncio.get_event_loop()
+        resp = await loop.run_in_executor(
+            None, lambda: requests.get(url, cookies=cookies, timeout=10)
+        )
         if resp.status_code == 200:
             data = resp.json()
             if data.get("success") and data.get("terminal"):
                 term = data["terminal"]
-                # Get original ws_url and token (for connecting to remote terminal)
-                # The API returns ws_url as proxy URL and token as proxy token,
-                # but we need the original values to connect to the remote server
                 original_ws_url = term.get("original_ws_url", term.get("ws_url", ""))
                 original_token = term.get("original_token", term.get("token", ""))
                 return original_ws_url, original_token

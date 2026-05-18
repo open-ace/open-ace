@@ -94,7 +94,7 @@ class SinglePtyTerminalServer:
             return False
 
     def _update_bashrc(self) -> None:
-        """Update bashrc with AI CLI aliases."""
+        """Update bashrc with AI CLI aliases (creates backup first)."""
         bashrc_path = os.path.join(os.path.expanduser("~"), ".bashrc")
         try:
             aliases = []
@@ -109,6 +109,12 @@ class SinglePtyTerminalServer:
                 existing = ""
             new_aliases = [a for a in aliases if a not in existing]
             if new_aliases:
+                # Create backup before modifying
+                backup_path = bashrc_path + ".open-ace-backup"
+                if os.path.exists(bashrc_path) and not os.path.exists(backup_path):
+                    import shutil
+
+                    shutil.copy2(bashrc_path, backup_path)
                 with open(bashrc_path, "a") as f:
                     f.write("\n# Open ACE: AI assistant aliases for proxy\n")
                     for alias in new_aliases:
@@ -175,16 +181,18 @@ class SinglePtyTerminalServer:
 
     async def relay_output_loop(self) -> None:
         """Read PTY output continuously and broadcast to WebSockets."""
+        loop = asyncio.get_event_loop()
         while self._pty_alive and self.master_fd is not None:
             try:
-                ready, _, _ = select.select([self.master_fd], [], [], 0.1)
+                ready, _, _ = await loop.run_in_executor(
+                    None, lambda: select.select([self.master_fd], [], [], 0.05)
+                )
                 if ready:
                     try:
                         data = os.read(self.master_fd, 65536)
                         if data:
                             await self.broadcast_output(data)
                         else:
-                            # PTY closed (process exited)
                             logger.info("PTY output stream closed (process likely exited)")
                             self._pty_alive = False
                             break
@@ -311,6 +319,9 @@ def _build_env() -> dict[str, str]:
             env["OPENAI_API_KEY"] = OPENAI_TOKEN
             env["OPENAI_BASE_URL"] = PROXY_URL
     env["TERM"] = "xterm-256color"
+    # Pass terminal ID to child processes for accurate session-terminal association
+    if TERMINAL_ID:
+        env["OPEN_ACE_TERMINAL_ID"] = TERMINAL_ID
     return env
 
 
@@ -426,7 +437,23 @@ def main() -> None:
 
     port = args.port
 
-    asyncio.run(_run_server(port))
+    # Set up signal handlers for graceful shutdown
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    def _shutdown_handler():
+        logger.info("Received shutdown signal, cleaning up...")
+        if _terminal_server:
+            _terminal_server.kill_pty()
+        loop.stop()
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, _shutdown_handler)
+
+    try:
+        loop.run_until_complete(_run_server(port))
+    finally:
+        loop.close()
 
 
 if __name__ == "__main__":

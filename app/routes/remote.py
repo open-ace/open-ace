@@ -1163,32 +1163,33 @@ def start_terminal():
         f"Created terminal session {terminal_id} for user {g.user['id']} on machine {machine_id}"
     )
 
+    # Get machine's tenant_id for token generation
+    tenant_id = machine.get("tenant_id", 1) if machine else 1
+
     # Generate proxy tokens for LLM API auth through the terminal
     api_proxy = get_api_key_proxy_service()
     anthropic_token = api_proxy.generate_proxy_token(
         user_id=g.user["id"],
         session_id=terminal_id,
-        tenant_id=1,
+        tenant_id=tenant_id,
         provider="anthropic",
         session_type="terminal",
     )
     openai_token = api_proxy.generate_proxy_token(
         user_id=g.user["id"],
         session_id=terminal_id,
-        tenant_id=1,
+        tenant_id=tenant_id,
         provider="openai",
         session_type="terminal",
     )
 
     # Use external URL for LLM proxy (remote machine needs to access it)
-    # Fall back to request.host_url if external_url not configured
     backend_url = agent_mgr._get_backend_url()
     proxy_url = f"{backend_url}/api/remote/llm-proxy"
     logger.info("start_terminal: backend_url=%s, proxy_url=%s", backend_url, proxy_url)
 
     # Get CLI settings for both Claude Code and Qwen Code
     cli_settings = {}
-    tenant_id = machine.get("tenant_id", 1) if machine else 1
     for tool_name in ["claude-code", "qwen-code"]:
         tool_settings = api_proxy.get_cli_settings_for_tool(tenant_id, tool_name)
         if tool_settings:
@@ -1275,19 +1276,23 @@ def attach_terminal(terminal_id):
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
 
+    # Get machine's tenant_id for token generation
+    attach_machine = agent_mgr.get_machine(machine_id)
+    attach_tenant_id = attach_machine.get("tenant_id", 1) if attach_machine else 1
+
     # Generate fresh API tokens for LLM proxy auth
     api_proxy = get_api_key_proxy_service()
     anthropic_token = api_proxy.generate_proxy_token(
         user_id=g.user["id"],
         session_id=terminal_id,
-        tenant_id=1,
+        tenant_id=attach_tenant_id,
         provider="anthropic",
         session_type="terminal",
     )
     openai_token = api_proxy.generate_proxy_token(
         user_id=g.user["id"],
         session_id=terminal_id,
-        tenant_id=1,
+        tenant_id=attach_tenant_id,
         provider="openai",
         session_type="terminal",
     )

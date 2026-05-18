@@ -8,7 +8,7 @@
  * - Delete API key confirmation
  */
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useApiKeys, useStoreApiKey, useUpdateApiKey, useDeleteApiKey } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
@@ -75,6 +75,23 @@ export const APIKeyManagement: React.FC = () => {
   const deleteApiKey = useDeleteApiKey();
 
   const keys = keysData?.keys ?? [];
+
+  // Memoize parsed CLI tools to avoid repeated JSON.parse in render
+  const parsedCliTools = useMemo(() => {
+    const map = new Map<number, string[]>();
+    for (const key of keys) {
+      if (key.cli_tools) {
+        try {
+          map.set(key.id, JSON.parse(key.cli_tools));
+        } catch {
+          map.set(key.id, []);
+        }
+      } else {
+        map.set(key.id, []);
+      }
+    }
+    return map;
+  }, [keys]);
 
   // Dialog states
   const [showAddDialog, setShowAddDialog] = useState(false);
@@ -335,7 +352,7 @@ export const APIKeyManagement: React.FC = () => {
                 <th>{t('provider', language)}</th>
                 <th>{t('keyName', language)}</th>
                 <th>{t('baseUrl', language)}</th>
-                <th>CLI Tools</th>
+                <th>{t('cliTools', language)}</th>
                 <th>{t('keyStatus', language)}</th>
                 <th>{t('tableCreatedAt', language)}</th>
                 <th>{t('tableActions', language)}</th>
@@ -343,14 +360,7 @@ export const APIKeyManagement: React.FC = () => {
             </thead>
             <tbody>
               {keys.map((key) => {
-                let cliTools: string[] = [];
-                if (key.cli_tools) {
-                  try {
-                    cliTools = JSON.parse(key.cli_tools);
-                  } catch {
-                    cliTools = [];
-                  }
-                }
+                const cliTools = parsedCliTools.get(key.id) || [];
                 return (
                   <tr key={key.id}>
                     <td>
@@ -465,7 +475,7 @@ export const APIKeyManagement: React.FC = () => {
 
         {/* CLI Tools Section */}
         <div className="mb-3">
-          <label className="form-label">CLI Tools</label>
+          <label className="form-label">{t('cliTools', language)}</label>
           <div className="d-flex gap-3">
             {cliToolOptions.map((tool) => (
               <div key={tool.value} className="form-check">
@@ -480,14 +490,14 @@ export const APIKeyManagement: React.FC = () => {
             ))}
           </div>
           <small className="text-muted">
-            Select which CLI tools this API key should configure settings for.
+            {t('cliToolsDescription', language)}
           </small>
         </div>
 
         {/* Claude Code Settings */}
         {formData.cli_tools.includes('claude-code') && (
           <div className="mb-3">
-            <label className="form-label">Claude Code Settings (JSON)</label>
+            <label className="form-label">{t('claudeCodeSettings', language)}</label>
             <textarea
               className="form-control"
               rows={8}
@@ -496,26 +506,7 @@ export const APIKeyManagement: React.FC = () => {
               placeholder={defaultClaudeSettings}
             />
             <small className="text-muted">
-              Paste ~/.claude/settings.json content (without sensitive AUTH_TOKEN). System will inject
-              API key automatically.
-            </small>
-          </div>
-        )}
-
-        {/* Qwen Code Settings */}
-        {formData.cli_tools.includes('qwen-code') && (
-          <div className="mb-3">
-            <label className="form-label">Qwen Code Settings (JSON)</label>
-            <textarea
-              className="form-control"
-              rows={10}
-              value={formData.qwen_settings}
-              onChange={(e) => setFormData({ ...formData, qwen_settings: e.target.value })}
-              placeholder={defaultQwenSettings}
-            />
-            <small className="text-muted">
-              Paste ~/.qwen/settings.json content (without env API keys). System will inject API key
-              automatically.
+              {t('claudeCodeSettingsHint', language)}
             </small>
           </div>
         )}
@@ -550,7 +541,7 @@ export const APIKeyManagement: React.FC = () => {
           <Badge variant={providerBadgeVariant[formData.provider] || 'secondary'}>
             {formData.provider}
           </Badge>
-          <small className="text-muted d-block mt-1">Provider cannot be changed</small>
+          <small className="text-muted d-block mt-1">{t('providerCannotChange', language)}</small>
         </div>
         <div className="mb-3">
           <label className="form-label">{t('keyName', language)}</label>
@@ -571,7 +562,7 @@ export const APIKeyManagement: React.FC = () => {
 
         {/* CLI Tools Section */}
         <div className="mb-3">
-          <label className="form-label">CLI Tools</label>
+          <label className="form-label">{t('cliTools', language)}</label>
           <div className="d-flex gap-3">
             {cliToolOptions.map((tool) => (
               <div key={tool.value} className="form-check">
@@ -590,7 +581,7 @@ export const APIKeyManagement: React.FC = () => {
         {/* Claude Code Settings */}
         {formData.cli_tools.includes('claude-code') && (
           <div className="mb-3">
-            <label className="form-label">Claude Code Settings (JSON)</label>
+            <label className="form-label">{t('claudeCodeSettings', language)}</label>
             <textarea
               className="form-control"
               rows={8}
@@ -598,7 +589,7 @@ export const APIKeyManagement: React.FC = () => {
               onChange={(e) => setFormData({ ...formData, claude_settings: e.target.value })}
             />
             <small className="text-muted">
-              Paste ~/.claude/settings.json content (without sensitive AUTH_TOKEN).
+              {t('claudeCodeSettingsHint', language)}
             </small>
           </div>
         )}
@@ -606,7 +597,7 @@ export const APIKeyManagement: React.FC = () => {
         {/* Qwen Code Settings */}
         {formData.cli_tools.includes('qwen-code') && (
           <div className="mb-3">
-            <label className="form-label">Qwen Code Settings (JSON)</label>
+            <label className="form-label">{t('qwenCodeSettings', language)}</label>
             <textarea
               className="form-control"
               rows={10}
@@ -614,7 +605,7 @@ export const APIKeyManagement: React.FC = () => {
               onChange={(e) => setFormData({ ...formData, qwen_settings: e.target.value })}
             />
             <small className="text-muted">
-              Paste ~/.qwen/settings.json content (without env API keys).
+              {t('qwenCodeSettingsHint', language)}
             </small>
           </div>
         )}
