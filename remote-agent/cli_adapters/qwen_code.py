@@ -13,7 +13,7 @@ import logging
 import shutil
 from pathlib import Path
 
-from constants import SENSITIVE_ENV_KEYS
+from constants import SENSITIVE_ENV_KEYS, collect_dynamic_env_keys
 
 from .base import BaseCLIAdapter
 
@@ -140,17 +140,9 @@ class QwenCodeAdapter(BaseCLIAdapter):
         """
         settings = base_settings.copy()
 
-        # Collect dynamic env key names from modelProviders
-        dynamic_env_keys: set[str] = set()
-        for provider_models in settings.get("modelProviders", {}).values():
-            if isinstance(provider_models, list):
-                for model in provider_models:
-                    if isinstance(model, dict) and "envKey" in model:
-                        dynamic_env_keys.add(model["envKey"])
-
         # Strip any API credential fields that the user may have
         # accidentally included.
-        all_sensitive = SENSITIVE_ENV_KEYS | dynamic_env_keys
+        all_sensitive = SENSITIVE_ENV_KEYS | collect_dynamic_env_keys(settings)
         env = settings.get("env", {})
         if env:
             env = {k: v for k, v in env.items() if k not in all_sensitive}

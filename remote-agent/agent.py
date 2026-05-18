@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 import requests
-from constants import SENSITIVE_ENV_KEYS
+from constants import SENSITIVE_ENV_KEYS, collect_dynamic_env_keys
 from executor import ProcessExecutor
 from session_sync import SessionSyncService
 from system_info import get_capabilities
@@ -939,18 +939,9 @@ class RemoteAgent:
         (remote session), so they must not be written to settings.json.
         """
         settings = settings.copy()
-
-        # Collect dynamic env key names from modelProviders (qwen-code)
-        # e.g. envKey: "ZAI_API_KEY" or "BAILIAN_CODING_PLAN_API_KEY"
-        dynamic_env_keys: set[str] = set()
-        for provider_models in settings.get("modelProviders", {}).values():
-            if isinstance(provider_models, list):
-                for model in provider_models:
-                    if isinstance(model, dict) and "envKey" in model:
-                        dynamic_env_keys.add(model["envKey"])
+        all_sensitive = SENSITIVE_ENV_KEYS | collect_dynamic_env_keys(settings)
 
         # Remove sensitive keys from env block
-        all_sensitive = SENSITIVE_ENV_KEYS | dynamic_env_keys
         env = settings.get("env", {})
         if env:
             env = {k: v for k, v in env.items() if k not in all_sensitive}

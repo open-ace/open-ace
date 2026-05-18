@@ -34,6 +34,24 @@ _SENSITIVE_ENV_KEYS = frozenset(
 )
 
 
+def _collect_dynamic_env_keys(settings: dict[str, Any]) -> set[str]:
+    """Collect dynamic envKey names from modelProviders entries.
+
+    Qwen Code's modelProviders can specify custom envKey names like
+    "ZAI_API_KEY" or "BAILIAN_CODING_PLAN_API_KEY". These must also
+    be stripped from the env block to prevent API key leakage.
+
+    Keep in sync with remote-agent/constants.py:collect_dynamic_env_keys().
+    """
+    dynamic: set[str] = set()
+    for provider_models in settings.get("modelProviders", {}).values():
+        if isinstance(provider_models, list):
+            for model in provider_models:
+                if isinstance(model, dict) and isinstance(model.get("envKey"), str):
+                    dynamic.add(model["envKey"])
+    return dynamic
+
+
 def _param() -> str:
     """Get the correct parameter placeholder for the current database."""
     return "?" if not is_postgresql() else "%s"
@@ -473,19 +491,10 @@ class APIKeyProxyService:
             Settings dict with non-sensitive config only.
         """
         settings = base_settings.copy()
-
-        # Collect dynamic env key names from modelProviders (qwen-code)
-        # e.g. envKey: "ZAI_API_KEY" or "BAILIAN_CODING_PLAN_API_KEY"
-        dynamic_env_keys: set[str] = set()
-        for provider_models in settings.get("modelProviders", {}).values():
-            if isinstance(provider_models, list):
-                for model in provider_models:
-                    if isinstance(model, dict) and "envKey" in model:
-                        dynamic_env_keys.add(model["envKey"])
+        all_sensitive = _SENSITIVE_ENV_KEYS | _collect_dynamic_env_keys(settings)
 
         # Strip any API credential fields that the user may have
         # accidentally included in the UI.
-        all_sensitive = _SENSITIVE_ENV_KEYS | dynamic_env_keys
         env = settings.get("env", {})
         if env:
             env = {k: v for k, v in env.items() if k not in all_sensitive}

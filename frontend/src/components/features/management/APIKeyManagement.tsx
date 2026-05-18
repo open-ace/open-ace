@@ -218,16 +218,16 @@ export const APIKeyManagement: React.FC = () => {
 
   const stripSensitiveFields = (toolSettings: Record<string, unknown>): Record<string, unknown> => {
     const cleaned = { ...toolSettings };
+    const modelProviders = cleaned.modelProviders as Record<string, unknown[]> | undefined;
 
     // Collect dynamic env key names from modelProviders (qwen-code)
     // e.g. envKey: "ZAI_API_KEY" or "BAILIAN_CODING_PLAN_API_KEY"
     const dynamicEnvKeys = new Set<string>();
-    const modelProviders = cleaned.modelProviders as Record<string, unknown[]> | undefined;
     if (modelProviders && typeof modelProviders === 'object') {
       for (const models of Object.values(modelProviders)) {
         if (Array.isArray(models)) {
           for (const model of models) {
-            if (model && typeof model === 'object' && 'envKey' in model) {
+            if (model && typeof model === 'object' && typeof (model as Record<string, unknown>).envKey === 'string') {
               dynamicEnvKeys.add((model as Record<string, unknown>).envKey as string);
             }
           }
