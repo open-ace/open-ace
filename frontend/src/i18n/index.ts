@@ -830,6 +830,11 @@ const translations: Record<Language, Translations> = {
     confirmStopSession: 'Are you sure you want to stop this remote session?',
     restoreSession: 'Restore Session',
     noOutput: 'No output available',
+    // Issue #354: Verbose mode toggle
+    verboseMode: 'Verbose Mode',
+    compactMode: 'Compact Mode',
+    verbose: 'Verbose',
+    compact: 'Compact',
   },
   zh: {
     // Common
@@ -1635,6 +1640,11 @@ const translations: Record<Language, Translations> = {
     confirmStopSession: '确定要停止此远程会话吗？',
     restoreSession: '恢复会话',
     noOutput: '暂无输出',
+    // Issue #354: Verbose mode toggle
+    verboseMode: '详细模式',
+    compactMode: '简洁模式',
+    verbose: '详细',
+    compact: '简洁',
   },
   ja: {
     // Common
@@ -2145,6 +2155,11 @@ const translations: Record<Language, Translations> = {
     confirmStopSession: 'このリモートセッションを停止しますか？',
     restoreSession: 'セッションを復元',
     noOutput: '出力なし',
+    // Issue #354: Verbose mode toggle
+    verboseMode: '詳細モード',
+    compactMode: '簡潔モード',
+    verbose: '詳細',
+    compact: '簡潔',
   },
   ko: {
     // Common
@@ -2653,6 +2668,11 @@ const translations: Record<Language, Translations> = {
     confirmStopSession: '이 원격 세션을 중지하시겠습니까?',
     restoreSession: '세션 복원',
     noOutput: '출력 없음',
+    // Issue #354: Verbose mode toggle
+    verboseMode: '상세 모드',
+    compactMode: '간단 모드',
+    verbose: '상세',
+    compact: '간단',
   },
 };
 

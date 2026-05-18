@@ -10,7 +10,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { t, type Language } from '@/i18n';
 import { Badge } from './Badge';
 import type { BadgeVariant } from './Badge';
-import { formatDateTime, formatTokens } from '@/utils';
+import { formatDateTime, formatTimestampWithSeconds, formatTokens } from '@/utils';
 import { useRemoteSession } from '@/hooks';
 import type { AgentSession, SessionMessage, ContentBlock } from '@/api/sessions';
 
@@ -250,14 +250,81 @@ export const SessionDetailContent: React.FC<SessionDetailContentProps> = ({
 };
 
 /**
+ * Output segment type for remote session display (Issue #354)
+ */
+type OutputStatus = 'in_progress' | 'completed' | 'warning' | 'error';
+
+interface OutputSegment {
+  text: string;
+  type: 'text' | 'error';
+  status: OutputStatus;
+  toolName?: string;
+  timestamp: string;
+  /** Unique key for React rendering - combination of timestamp and index */
+  key: string;
+}
+
+/**
+ * Determine output status based on content (Issue #354)
+ * Note: Status is determined by content analysis only, not by message completion state.
+ * - tool_use blocks represent "actions being performed" → in_progress
+ * - text blocks are analyzed for keywords (warning/error)
+ * - result type determines final completion status (handled separately)
+ */
+function determineTextStatus(text: string): OutputStatus {
+  const lowerText = text.toLowerCase();
+  if (lowerText.includes('error') || lowerText.startsWith('error:')) return 'error';
+  if (lowerText.includes('warning') || lowerText.includes('warn')) return 'warning';
+  return 'in_progress';
+}
+
+/**
+ * Get status icon based on output status (Issue #354)
+ */
+function getStatusIcon(status: OutputStatus): string {
+  switch (status) {
+    case 'in_progress':
+      return '🔄';
+    case 'completed':
+      return '✅';
+    case 'warning':
+      return '⚠️';
+    case 'error':
+      return '❌';
+    default:
+      return '';
+  }
+}
+
+/**
+ * Generate unique key for output segment
+ * Uses timestamp + text hash to ensure stable keys across renders
+ */
+function generateSegmentKey(timestamp: string, text: string, index: number): string {
+  // Use first 8 chars of timestamp and first 8 chars of text for stable key
+  const tsPart = timestamp?.slice(0, 8) || 'no-ts';
+  const textPart = text?.slice(0, 8).replace(/\s/g, '_') || 'no-txt';
+  return `${tsPart}-${textPart}-${index}`;
+}
+
+/**
  * Parse qwen CLI stream-json output line into displayable segments.
+ * Enhanced with status detection for Issue #354.
  *
  * The stream-json format produces JSON lines with these types:
  * - system/init: session initialization metadata → skip
  * - assistant: LLM response with content blocks (text, thinking, tool_use) → extract text
- * - result: completion status → show errors only
+ * - result: completion status → only show errors (success results produce no output to avoid redundancy)
+ *
+ * Key insight: A message may contain multiple tool_use blocks. We display them as "in_progress"
+ * because they represent actions being performed. The final "completed" status is only shown
+ * when we see a successful "result" type (but we don't add extra "Completed" text to avoid redundancy).
  */
-function parseStreamJsonLine(data: string): { text: string; type: 'text' | 'error' | 'info' }[] {
+function parseStreamJsonLine(
+  data: string,
+  timestamp: string,
+  segmentIndex: number
+): OutputSegment[] {
   const trimmed = data.trim();
   if (!trimmed) return [];
 
@@ -266,8 +333,17 @@ function parseStreamJsonLine(data: string): { text: string; type: 'text' | 'erro
   try {
     parsed = JSON.parse(trimmed);
   } catch {
-    // Not JSON — display as-is
-    return [{ text: trimmed, type: 'text' }];
+    // Not JSON — display as-is with status detection
+    const status = determineTextStatus(trimmed);
+    return [
+      {
+        text: trimmed,
+        type: 'text',
+        status,
+        timestamp,
+        key: generateSegmentKey(timestamp, trimmed, segmentIndex),
+      },
+    ];
   }
 
   const msgType = parsed.type as string;
@@ -278,14 +354,40 @@ function parseStreamJsonLine(data: string): { text: string; type: 'text' | 'erro
     const content = message.content as Array<Record<string, unknown>> | undefined;
     if (!Array.isArray(content)) return [];
 
-    const segments: { text: string; type: 'text' | 'error' | 'info' }[] = [];
+    const segments: OutputSegment[] = [];
+    let blockIdx = 0;
     for (const block of content) {
       const blockType = block.type as string;
       if (blockType === 'text') {
         const text = (block.text as string) || '';
-        if (text) segments.push({ text, type: 'text' });
+        if (text) {
+          const status = determineTextStatus(text);
+          segments.push({
+            text,
+            type: 'text',
+            status,
+            timestamp,
+            key: generateSegmentKey(timestamp, text, segmentIndex + blockIdx),
+          });
+          blockIdx++;
+        }
       }
-      // Skip thinking, tool_use, tool_result blocks
+      // Extract tool_use name for display (Issue #354)
+      // Tool calls are always shown as in_progress since they represent actions
+      if (blockType === 'tool_use') {
+        const toolName = (block.name as string) || '';
+        if (toolName) {
+          segments.push({
+            text: `Tool: ${toolName}`,
+            type: 'text',
+            status: 'in_progress', // Tool calls are actions being performed
+            toolName,
+            timestamp,
+            key: generateSegmentKey(timestamp, `tool-${toolName}`, segmentIndex + blockIdx),
+          });
+          blockIdx++;
+        }
+      }
     }
     return segments;
   }
@@ -296,12 +398,31 @@ function parseStreamJsonLine(data: string): { text: string; type: 'text' | 'erro
     if (role === 'assistant') {
       const content = parsed.content as string | Array<Record<string, unknown>> | undefined;
       if (typeof content === 'string' && content) {
-        return [{ text: content, type: 'text' }];
+        const status = determineTextStatus(content);
+        return [
+          {
+            text: content,
+            type: 'text',
+            status,
+            timestamp,
+            key: generateSegmentKey(timestamp, content, segmentIndex),
+          },
+        ];
       }
       if (Array.isArray(content)) {
         return content
           .filter((b) => b.type === 'text' && b.text)
-          .map((b) => ({ text: b.text as string, type: 'text' as const }));
+          .map((b, idx) => {
+            const text = b.text as string;
+            const status = determineTextStatus(text);
+            return {
+              text,
+              type: 'text' as const,
+              status,
+              timestamp,
+              key: generateSegmentKey(timestamp, text, segmentIndex + idx),
+            };
+          });
       }
     }
     return [];
@@ -311,10 +432,27 @@ function parseStreamJsonLine(data: string): { text: string; type: 'text' | 'erro
     const subtype = parsed.subtype as string;
     if (subtype === 'error') {
       const error = (parsed.error as string) || (parsed.result as string) || 'Unknown error';
-      return [{ text: `Error: ${error}`, type: 'error' }];
+      return [
+        {
+          text: `Error: ${error}`,
+          type: 'error',
+          status: 'error',
+          timestamp,
+          key: generateSegmentKey(timestamp, `error-${error}`, segmentIndex),
+        },
+      ];
     }
-    // Success result — nothing to display
-    return [];
+    // Success result — show ✅ completed icon without text to avoid redundancy (Issue #354)
+    // Code review fix: The completed status should be visible via icon, but without "Completed" text
+    return [
+      {
+        text: '', // Empty text — only show ✅ icon, no redundant "Completed" text
+        type: 'text',
+        status: 'completed',
+        timestamp,
+        key: generateSegmentKey(timestamp, 'completed', segmentIndex),
+      },
+    ];
   }
 
   // system/init and other types — skip
@@ -322,7 +460,13 @@ function parseStreamJsonLine(data: string): { text: string; type: 'text' | 'erro
 }
 
 /**
- * Remote Output Section - Displays remote session output in terminal style
+ * Remote Output Section - Displays remote session output with timestamps and status icons
+ * Enhanced for Issue #354: Adds timestamps, status indicators, and verbose mode toggle
+ *
+ * Code review fixes:
+ * - verboseMode defaults to true (Issue expects timestamps on every output)
+ * - useMemo dependency fixed: output accessed inside useMemo to avoid new array per render
+ * - React keys use stable timestamp+text combination instead of idx
  */
 const RemoteOutputSection: React.FC<{ sessionId: string; language: Language }> = ({
   sessionId,
@@ -330,21 +474,28 @@ const RemoteOutputSection: React.FC<{ sessionId: string; language: Language }> =
 }) => {
   const outputRef = useRef<HTMLDivElement>(null);
   const { data: remoteData, isLoading } = useRemoteSession(sessionId);
-  const output = remoteData?.session?.output ?? [];
+  // Issue #354: Default to verbose mode since issue expects "timestamps on every output"
+  const [verboseMode, setVerboseMode] = useState(true);
 
-  // Parse all output entries into displayable segments
+  // Parse all output entries into displayable segments with timestamps and status
+  // Code review fix: access output inside useMemo to avoid creating new array per render
   const displaySegments = useMemo(() => {
-    const segments: { text: string; type: 'text' | 'error' | 'info'; stream: string }[] = [];
+    const output = remoteData?.session?.output;
+    if (!output) return [];
+
+    const segments: OutputSegment[] = [];
+    let globalIdx = 0;
     for (const entry of output) {
       // Only process stdout entries (skip stderr noise)
       if (entry.stream === 'stderr') continue;
-      const parsed = parseStreamJsonLine(entry.data);
+      const parsed = parseStreamJsonLine(entry.data, entry.timestamp, globalIdx);
       for (const seg of parsed) {
-        segments.push({ ...seg, stream: entry.stream });
+        segments.push(seg);
+        globalIdx++;
       }
     }
     return segments;
-  }, [output]);
+  }, [remoteData?.session?.output]);
 
   // Auto-scroll to bottom only when user is near the bottom
   useEffect(() => {
@@ -357,12 +508,50 @@ const RemoteOutputSection: React.FC<{ sessionId: string; language: Language }> =
     }
   }, [displaySegments]);
 
+  // Get status color class
+  const getStatusClass = (status: OutputStatus): string => {
+    switch (status) {
+      case 'error':
+        return 'text-danger';
+      case 'warning':
+        return 'text-warning';
+      case 'in_progress':
+        return 'text-info';
+      case 'completed':
+        return 'text-success';
+      default:
+        return '';
+    }
+  };
+
   return (
     <div className="mt-3">
-      <h6 className="mb-2">
-        <i className="bi bi-terminal me-1" />
-        {t('remoteOutput', language)}
-      </h6>
+      {/* Header with verbose mode toggle */}
+      <div className="d-flex justify-content-between align-items-center mb-2">
+        <h6 className="mb-0">
+          <i className="bi bi-terminal me-1" />
+          {t('remoteOutput', language)}
+        </h6>
+        <button
+          type="button"
+          className={`btn btn-sm ${verboseMode ? 'btn-outline-primary' : 'btn-outline-secondary'}`}
+          onClick={() => setVerboseMode(!verboseMode)}
+          title={verboseMode ? t('compactMode', language) : t('verboseMode', language)}
+        >
+          {verboseMode ? (
+            <>
+              <i className="bi bi-arrows-collapse me-1" />
+              {t('compact', language) ?? 'Compact'}
+            </>
+          ) : (
+            <>
+              <i className="bi bi-arrows-expand me-1" />
+              {t('verbose', language) ?? 'Verbose'}
+            </>
+          )}
+        </button>
+      </div>
+
       {isLoading ? (
         <div className="text-muted small p-2">{t('loading', language)}</div>
       ) : displaySegments.length === 0 ? (
@@ -380,9 +569,18 @@ const RemoteOutputSection: React.FC<{ sessionId: string; language: Language }> =
             wordBreak: 'break-word',
           }}
         >
-          {displaySegments.map((seg, idx) => (
-            <div key={idx} className={seg.type === 'error' ? 'text-danger' : undefined}>
-              {seg.text}
+          {displaySegments.map((seg) => (
+            <div key={seg.key} className={`mb-1 ${getStatusClass(seg.status)}`}>
+              {/* Timestamp (Issue #354) */}
+              {verboseMode && seg.timestamp && (
+                <span className="text-secondary me-2">
+                  {formatTimestampWithSeconds(seg.timestamp)}
+                </span>
+              )}
+              {/* Status icon (Issue #354) */}
+              <span className="me-1">{getStatusIcon(seg.status)}</span>
+              {/* Content */}
+              <span>{seg.text}</span>
             </div>
           ))}
         </div>

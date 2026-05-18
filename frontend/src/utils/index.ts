@@ -9,6 +9,7 @@ export {
   formatPercentage,
   formatDate,
   formatDateTime,
+  formatTimestampWithSeconds,
   formatRelativeTime,
   formatBytes,
   formatDuration,

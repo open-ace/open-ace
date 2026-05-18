@@ -289,6 +289,105 @@ def extract_content_from_entry(entry: dict) -> Optional[str]:
     return None
 
 
+def extract_content_blocks_from_entry(
+    entry: dict,
+    function_call_indices: Optional[dict[str, int]] = None
+) -> list[dict]:
+    """Extract structured content_blocks from a Qwen log entry.
+
+    Converts qwen JSONL parts format to frontend-expected content_blocks format:
+    - text parts → {type: 'text', text: '...'}
+    - thought parts → {type: 'thinking', thinking: '...'}
+    - functionCall → {type: 'tool_use', id: '...', name: '...', input: {...}}
+    - tool result → {type: 'tool_result', tool_use_id: '...', content: '...'}
+
+    This enables the Sessions page to display structured content (tool_use, thinking)
+    consistent with the Workspace iframe view.
+
+    Args:
+        entry: A single JSONL entry dict
+        function_call_indices: Optional mapping from tool result entry uuid to the
+            corresponding functionCall index in the parent assistant message.
+            Used to correctly link tool_result to tool_use.
+            Format: {tool_result_uuid: function_call_idx}
+
+    Returns:
+        List of content_block dicts, or empty list if no structured content
+    """
+    entry_type = entry.get("type")
+    if entry_type not in ["user", "assistant", "system", "tool_result"]:
+        return []
+
+    msg = entry.get("message", {})
+    if not isinstance(msg, dict):
+        return []
+
+    parts = msg.get("parts", [])
+    if not parts:
+        return []
+
+    content_blocks = []
+
+    for idx, part in enumerate(parts):
+        if not isinstance(part, dict):
+            continue
+
+        # 1. Thinking block (check first, as thought parts may also have 'text' key)
+        if part.get("thought") is True:
+            thinking_text = part.get("text", "")
+            if thinking_text:
+                content_blocks.append({"type": "thinking", "thinking": thinking_text})
+
+        # 2. Text block
+        elif "text" in part or part.get("type") == "text":
+            text = part.get("text", "")
+            if text:
+                content_blocks.append({"type": "text", "text": text})
+
+        # 3. Tool use (functionCall)
+        elif "functionCall" in part:
+            fc = part.get("functionCall", {})
+            # Generate a tool_use_id using entry uuid + idx
+            tool_id = f"{entry.get('uuid', 'unknown')}-{idx}"
+            content_blocks.append({
+                "type": "tool_use",
+                "id": tool_id,
+                "name": fc.get("name", "unknown"),
+                "input": fc.get("args", {})
+            })
+
+        # 4. Tool result
+        elif part.get("type") == "tool":
+            tool_name = part.get("name", "")
+            tool_content = part.get("content", "")
+            parent_uuid = entry.get("parentUuid", "unknown")
+            entry_uuid = entry.get("uuid", "")
+
+            # Use function_call_indices to get the correct idx of the functionCall
+            # in the parent assistant message. This ensures tool_result.tool_use_id
+            # matches the corresponding tool_use.id.
+            if function_call_indices and entry_uuid in function_call_indices:
+                func_idx = function_call_indices[entry_uuid]
+                tool_use_id = f"{parent_uuid}-{func_idx}"
+            else:
+                # Fallback: use idx from tool_result parts (may not match)
+                tool_use_id = f"{parent_uuid}-{idx}"
+            content_blocks.append({
+                "type": "tool_result",
+                "tool_use_id": tool_use_id,
+                "content": tool_content if isinstance(tool_content, str)
+                           else json.dumps(tool_content, ensure_ascii=False)
+            })
+
+        # 5. Image/Document (as text placeholder)
+        elif part.get("type") == "image":
+            content_blocks.append({"type": "text", "text": "[Image content]"})
+        elif part.get("type") == "document":
+            content_blocks.append({"type": "text", "text": "[Document content]"})
+
+    return content_blocks
+
+
 def process_jsonl_file(
     filepath: Path, hostname: str = "localhost", system_account: Optional[str] = None
 ) -> tuple:
@@ -379,6 +478,27 @@ def process_jsonl_file(
             current_uuid = parent_uuid
         return None
 
+    # Build function_call_indices: mapping from tool_result uuid to functionCall idx
+    # This enables correct linking of tool_result.tool_use_id to tool_use.id
+    # Format: {tool_result_uuid: functionCall_idx_in_parent_assistant_message}
+    function_call_indices: dict[str, int] = {}
+    for uuid, (entry, parent_uuid) in message_tree.items():
+        if entry.get("type") == "tool_result" and parent_uuid:
+            # Find the parent assistant message
+            if parent_uuid in message_tree:
+                parent_entry, _ = message_tree[parent_uuid]
+                if parent_entry.get("type") == "assistant":
+                    parent_msg = parent_entry.get("message", {})
+                    if isinstance(parent_msg, dict):
+                        parent_parts = parent_msg.get("parts", [])
+                        # Find functionCall index in parent parts
+                        for idx, part in enumerate(parent_parts):
+                            if isinstance(part, dict) and "functionCall" in part:
+                                # Assume each tool_result corresponds to one functionCall
+                                # Store the first functionCall idx found
+                                function_call_indices[uuid] = idx
+                                break
+
     # Second pass: process messages with conversation_id
     with open(filepath, encoding="utf-8") as f:
         for line in f:
@@ -463,6 +583,7 @@ def process_jsonl_file(
                                     "parent_id": entry.get("parent_id"),
                                     "role": role,
                                     "content": content or "",
+                                    "content_blocks": extract_content_blocks_from_entry(entry, function_call_indices),  # Issue #357: structured content
                                     "full_entry": full_entry_json,
                                     "tokens_used": total_tokens,
                                     "input_tokens": input_tokens,
@@ -857,6 +978,7 @@ def update_agent_sessions_stats(messages: list) -> int:
                             metadata = {
                                 "message_id": msg_id,
                                 "project_path": msg.get("project_path"),
+                                "content_blocks": msg.get("content_blocks"),  # Issue #357: structured content for session detail view
                             }
                             _execute(
                                 cursor,

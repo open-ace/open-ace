@@ -188,6 +188,100 @@ def extract_content_from_entry(entry: dict) -> Optional[str]:
     return None
 
 
+def extract_content_blocks_from_entry(entry: dict) -> list[dict]:
+    """Extract structured content_blocks from a Claude Code log entry.
+
+    Claude JSONL format is similar to frontend ContentBlock format:
+    - content[].type = 'text' → {type: 'text', text: '...'}
+    - content[].type = 'tool_use' → {type: 'tool_use', id, name, input}
+    - content[].type = 'tool_result' → {type: 'tool_result', tool_use_id, content}
+    - message.tool_uses[] → {type: 'tool_use', id, name, input}
+
+    This enables the Sessions page to display structured content (tool_use, thinking)
+    consistent with the Workspace iframe view.
+
+    Args:
+        entry: A single JSONL entry dict
+
+    Returns:
+        List of content_block dicts, or empty list if no structured content
+    """
+    entry_type = entry.get("type")
+    if entry_type not in ["user", "assistant", "system"]:
+        return []
+
+    content_blocks = []
+
+    if entry_type == "user":
+        msg = entry.get("message", {})
+        if isinstance(msg, dict):
+            content = msg.get("content", [])
+            if isinstance(content, list):
+                for part in content:
+                    if not isinstance(part, dict):
+                        continue
+
+                    part_type = part.get("type")
+
+                    if part_type == "text":
+                        text = part.get("text", "")
+                        if text:
+                            content_blocks.append({"type": "text", "text": text})
+                    elif part_type == "tool_result":
+                        # Claude tool_result already has correct format
+                        tool_use_id = part.get("tool_use_id", "")
+                        tool_content = part.get("content", "")
+                        if tool_use_id:
+                            content_blocks.append({
+                                "type": "tool_result",
+                                "tool_use_id": tool_use_id,
+                                "content": tool_content if isinstance(tool_content, str)
+                                           else json.dumps(tool_content, ensure_ascii=False)
+                            })
+
+    elif entry_type == "assistant":
+        msg = entry.get("message", {})
+        if isinstance(msg, dict):
+            content = msg.get("content", [])
+            if isinstance(content, list):
+                for part in content:
+                    if not isinstance(part, dict):
+                        continue
+
+                    part_type = part.get("type")
+
+                    if part_type == "text":
+                        text = part.get("text", "")
+                        if text:
+                            content_blocks.append({"type": "text", "text": text})
+                    elif part_type == "thinking":
+                        # Claude thinking block
+                        thinking = part.get("thinking", "")
+                        if thinking:
+                            content_blocks.append({"type": "thinking", "thinking": thinking})
+
+            # Also check tool_uses field (Claude specific)
+            tool_uses = msg.get("tool_uses", [])
+            if isinstance(tool_uses, list):
+                for tool_use in tool_uses:
+                    if not isinstance(tool_use, dict):
+                        continue
+                    # Claude tool_use already has correct format
+                    tool_id = tool_use.get("id", "")
+                    tool_name = tool_use.get("name", "unknown")
+                    tool_input = tool_use.get("input", {})
+                    if tool_id:
+                        content_blocks.append({
+                            "type": "tool_use",
+                            "id": tool_id,
+                            "name": tool_name,
+                            "input": tool_input
+                        })
+
+    return content_blocks
+
+
+
 def process_jsonl_file(
     filepath: Path, hostname: str = "localhost", system_account: Optional[str] = None
 ) -> tuple:
@@ -365,6 +459,7 @@ def process_jsonl_file(
                                     "parent_id": entry.get("parent_id") or entry.get("parentUuid"),
                                     "role": role,
                                     "content": content or "",
+                                    "content_blocks": extract_content_blocks_from_entry(entry),  # Issue #357: structured content
                                     "full_entry": full_entry_json,
                                     "tokens_used": total_tokens,
                                     "input_tokens": input_tokens,
@@ -760,6 +855,7 @@ def update_agent_sessions_stats(messages: list) -> int:
                             metadata = {
                                 "message_id": msg_id,
                                 "project_path": msg.get("project_path"),
+                                "content_blocks": msg.get("content_blocks"),  # Issue #357: structured content for session detail view
                             }
                             _execute(
                                 cursor,
