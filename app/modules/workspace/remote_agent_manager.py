@@ -730,16 +730,16 @@ class RemoteAgentManager:
                 self._connections[machine_id] = None
                 logger.info(f"Re-registered HTTP polling agent via heartbeat: {machine_id}")
 
-        # Update capabilities separately if provided
-        if capabilities:
-            self.update_capabilities(machine_id, capabilities)
-
         # Rate-limit DB writes: skip if last write was within HEARTBEAT_DB_WRITE_INTERVAL
         now_ts = time.time()
         last_write = self._last_heartbeat_db_write.get(machine_id, 0)
         if now_ts - last_write < self.HEARTBEAT_DB_WRITE_INTERVAL:
             return
         self._last_heartbeat_db_write[machine_id] = now_ts
+
+        # Update capabilities separately if provided (within rate limit)
+        if capabilities:
+            self.update_capabilities(machine_id, capabilities)
 
         with self.db.connection() as conn:
             cursor = conn.cursor()

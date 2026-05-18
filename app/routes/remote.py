@@ -1089,11 +1089,12 @@ def agent_message():
                 if updates:
                     sync_session_mgr.update_session_fields(session_id, updates)
 
-            # Fetch existing message uuids for dedup (lightweight query)
-            existing_uuids: set[str] = set()
+            # Fetch existing message uuids for dedup and mirror to daily_messages
             try:
                 from app.repositories.database import adapt_sql, get_db_connection
 
+                # Dedup: collect existing message uuids via lightweight query
+                existing_uuids: set[str] = set()
                 with get_db_connection() as conn:
                     cursor = conn.cursor()
                     cursor.execute(
@@ -1114,13 +1115,8 @@ def agent_message():
                         em_uuid = meta.get("uuid", "")
                         if em_uuid:
                             existing_uuids.add(em_uuid)
-            except Exception:
-                pass
 
-            # Mirror messages to daily_messages for ConversationHistory visibility
-            try:
-                from app.repositories.database import adapt_sql, get_db_connection
-
+                # Mirror messages to daily_messages for ConversationHistory visibility
                 for msg in messages:
                     role = msg.get("role", "")
                     content = msg.get("content", "")
