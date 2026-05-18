@@ -64,6 +64,10 @@ def make_manager():
     # Pre-populate scripts.shared.config to avoid module-level import chain issues
     import types
 
+    # Save original sys.modules state for cleanup
+    original_scripts_shared_config = sys.modules.get("scripts.shared.config")
+    original_scripts_shared = sys.modules.get("scripts.shared")
+
     if "scripts.shared.config" not in sys.modules:
         mod = types.ModuleType("scripts.shared.config")
         mod.get_database_url = lambda: f"sqlite:///{TMP_DB}"
@@ -143,6 +147,17 @@ def make_manager():
     db_mod.is_postgresql = original_is_pg
     db_mod.DB_PATH = original_db_path
     db_mod.get_database_url = original_get_url
+
+    # Restore sys.modules to prevent pollution of subsequent tests
+    if original_scripts_shared_config is not None:
+        sys.modules["scripts.shared.config"] = original_scripts_shared_config
+    elif "scripts.shared.config" in sys.modules:
+        del sys.modules["scripts.shared.config"]
+    if original_scripts_shared is not None:
+        sys.modules["scripts.shared"] = original_scripts_shared
+    elif "scripts.shared" in sys.modules:
+        del sys.modules["scripts.shared"]
+
     return mgr
 
 
