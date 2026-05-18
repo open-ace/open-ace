@@ -17,6 +17,27 @@ project_root = str(Path(__file__).resolve().parent.parent.parent)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
+# Save original module entries before mocking, so we can restore them
+# and avoid polluting other test files (e.g. test_auth_decorators.py)
+_mocked_module_names = [
+    "app.modules",
+    "app.modules.workspace",
+    "app.modules.workspace.collaboration",
+    "app.modules.workspace.prompt_library",
+    "app.modules.workspace.session_manager",
+    "app.modules.workspace.state_sync",
+    "app.modules.workspace.tool_connector",
+    "app.auth.decorators",
+    "app.repositories.database",
+    "app.repositories.schema_init",
+    "app.utils.tool_names",
+    "app.modules.analytics",
+    "app.modules.governance",
+    "app.utils.cache",
+    "gevent",
+]
+_original_modules = {name: sys.modules.get(name) for name in _mocked_module_names}
+
 mock_modules = {
     "app.modules": MagicMock(__path__=[]),
     "app.modules.workspace": MagicMock(__path__=[]),
@@ -248,3 +269,18 @@ class TestGetRemoteProjectsQueryStructure:
         get_remote_projects()
         query = mock_db.fetch_all.call_args[0][0]
         assert "GROUP BY project_path" in query
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _cleanup_mocked_modules():
+    """Restore original sys.modules entries after this module's tests run.
+
+    This prevents MagicMock objects from leaking into other test modules
+    (e.g. test_auth_decorators.py) that import the same modules.
+    """
+    yield
+    for name, original in _original_modules.items():
+        if original is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = original
