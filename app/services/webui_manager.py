@@ -555,7 +555,8 @@ class WebUIManager:
                 pwd.getpwnam(system_account)
             except KeyError:
                 logger.info(f"User '{system_account}' not found, creating...")
-                self._ensure_system_user(system_account)
+                if not self._ensure_system_user(system_account):
+                    raise ValueError(f"Failed to create system user: {system_account}")
 
         # Find webui executable or project path
         webui_cmd, webui_dir = self._find_webui_executable()
