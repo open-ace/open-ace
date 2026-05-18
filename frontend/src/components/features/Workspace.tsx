@@ -1202,14 +1202,18 @@ export const Workspace: React.FC = () => {
     try {
       if (tab?.sessionId) {
         await remoteApi.stopSession(tab.sessionId);
+        // Notify SessionList to refresh after session stopped successfully (Issue #358)
+        window.postMessage({ type: 'openace-session-stopped' }, '*');
+        toast.success(t('sessionStoppedSuccess', language));
       }
     } catch (err) {
       console.error('Failed to stop remote session:', err);
+      toast.error(t('sessionStoppedFailed', language));
     }
     setIsStoppingRemote(false);
     doCloseTab(remoteCloseTabId);
     setRemoteCloseTabId(null);
-  }, [remoteCloseTabId, tabs, doCloseTab]);
+  }, [remoteCloseTabId, tabs, doCloseTab, toast, language]);
 
   // Handle remote tab close without stopping session
   const handleRemoteCloseKeep = useCallback(() => {

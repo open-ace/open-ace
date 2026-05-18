@@ -103,6 +103,24 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
     return () => clearInterval(interval);
   }, [isLoading, showDetailModal, refetch]);
 
+  // Listen for session stopped event from Workspace (Issue #358)
+  useEffect(() => {
+    const handleSessionStopped = (event: MessageEvent) => {
+      // Validate message origin and type
+      if (
+        event.origin === window.location.origin &&
+        event.data?.type === 'openace-session-stopped'
+      ) {
+        // Refresh session list immediately when a remote session is stopped
+        // TanStack Query's refetch() handles concurrent requests automatically
+        refetch();
+      }
+    };
+
+    window.addEventListener('message', handleSessionStopped);
+    return () => window.removeEventListener('message', handleSessionStopped);
+  }, [refetch]);
+
   // Fetch selected session details with messages
   const { data: sessionDetail, isLoading: isLoadingDetail } = useSession(
     selectedSessionId ?? '',
