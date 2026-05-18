@@ -1838,7 +1838,14 @@ def usage_report():
 
 @remote_bp.route("/machines/<machine_id>/browse", methods=["GET"])
 def browse_remote_directory(machine_id):
-    """Browse the file system on a remote machine."""
+    """Browse the file system on a remote machine.
+
+    Returns directory information for the specified path.
+    If no path is specified, returns the machine's work_dir as the default.
+
+    Note: Full directory browsing requires sending commands to the remote agent.
+    This simplified implementation returns machine info with work_dir for basic usage.
+    """
 
     agent_mgr = get_remote_agent_manager()
 
@@ -1847,18 +1854,33 @@ def browse_remote_directory(machine_id):
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
 
-    request.args.get("path")
+    path = request.args.get("path")
 
-    # Send browse command to agent and wait for response
-    # For now, return machine info with work_dir
+    # Get machine info
     machine = agent_mgr.get_machine(machine_id)
     if not machine:
         return jsonify({"error": "Machine not found"}), 404
 
+    # Determine the path to browse
+    work_dir = machine.get("work_dir") or "/root/workspace"
+    browse_path = path or work_dir
+
+    # Return a simplified response compatible with frontend expectations
+    # The frontend can use the work_dir as the default project path
     return jsonify(
         {
             "success": True,
+            "result": {
+                "path": browse_path,
+                "name": browse_path.split("/")[-1] or "/",
+                "directories": [],  # Full browsing requires remote agent command
+                "parent": browse_path.rsplit("/", 1)[0] if "/" in browse_path else None,
+                "homePath": work_dir,
+                "canCreate": True,  # Assume user can create in work_dir
+                "is_writable": True,
+            },
             "machine": machine,
-            "message": "File browsing requires WebSocket connection for real-time response",
+            "message": "Full directory browsing requires remote agent support. "
+            "Use the machine's work_dir as the default project path.",
         }
     )

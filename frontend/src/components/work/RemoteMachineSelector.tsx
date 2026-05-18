@@ -10,7 +10,7 @@
  * Issue #317: Remote workspace lacks project creation functionality
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import { remoteApi, type RemoteMachine } from '@/api/remote';
@@ -39,13 +39,21 @@ export const RemoteMachineSelector: React.FC<RemoteMachineSelectorProps> = ({
   const [searchFilter, setSearchFilter] = useState('');
   const [sortBy, setSortBy] = useState<'name' | 'status' | 'lastHeartbeat'>('name');
 
-  // Load machines if not provided externally
+  // Use ref to avoid onSelectMachine dependency causing re-renders
+  const onSelectMachineRef = useRef(onSelectMachine);
+  onSelectMachineRef.current = onSelectMachine;
+
+  // Track if we've already auto-selected (to prevent re-selection on re-render)
+  const hasAutoSelectedRef = useRef(false);
+
+  // Update machines when external data changes
   useEffect(() => {
-    if (externalMachines) {
+    if (externalMachines !== undefined) {
       setMachines(externalMachines);
       return;
     }
 
+    // Only load internally if no external machines provided
     const loadMachines = async () => {
       setIsLoading(true);
       setError(null);
@@ -54,12 +62,15 @@ export const RemoteMachineSelector: React.FC<RemoteMachineSelectorProps> = ({
         if (result.success) {
           setMachines(result.machines);
 
-          // Auto-select last used machine if available
-          const lastMachineId = localStorage.getItem(LAST_MACHINE_KEY);
-          if (lastMachineId && !selectedMachineId) {
-            const lastMachine = result.machines.find((m) => m.machine_id === lastMachineId);
-            if (lastMachine) {
-              onSelectMachine(lastMachineId, lastMachine);
+          // Auto-select last used machine if available (only once)
+          if (!hasAutoSelectedRef.current && !selectedMachineId) {
+            const lastMachineId = localStorage.getItem(LAST_MACHINE_KEY);
+            if (lastMachineId) {
+              const lastMachine = result.machines.find((m) => m.machine_id === lastMachineId);
+              if (lastMachine) {
+                hasAutoSelectedRef.current = true;
+                onSelectMachineRef.current(lastMachineId, lastMachine);
+              }
             }
           }
         }
@@ -71,7 +82,7 @@ export const RemoteMachineSelector: React.FC<RemoteMachineSelectorProps> = ({
     };
 
     loadMachines();
-  }, [externalMachines, selectedMachineId, onSelectMachine]);
+  }, [externalMachines, selectedMachineId]); // Removed onSelectMachine from deps
 
   // Filter and sort machines
   const filteredMachines = useMemo(() => {

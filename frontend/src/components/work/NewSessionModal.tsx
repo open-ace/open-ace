@@ -18,7 +18,9 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAvailableMachines, useCreateRemoteSession } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
-import { Modal, Button, Badge, EmptyState, Loading } from '@/components/common';
+import { Modal, Button } from '@/components/common';
+import { RemoteMachineSelector } from './RemoteMachineSelector';
+import type { RemoteMachine } from '@/api/remote';
 
 interface NewSessionModalProps {
   isOpen?: boolean;
@@ -61,7 +63,8 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
   // Auto-select the only available machine
   useEffect(() => {
     if (machines.length === 1 && !selectedMachineId) {
-      handleMachineSelect(machines[0].machine_id);
+      const machine = machines[0];
+      handleMachineSelect(machine.machine_id, machine);
     }
   }, [machines.length]);
 
@@ -82,9 +85,9 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
     return '/root/workspace';
   };
 
-  const handleMachineSelect = (machineId: string) => {
+  // Handle machine selection from RemoteMachineSelector
+  const handleMachineSelect = (machineId: string, machine: RemoteMachine | undefined) => {
     setSelectedMachineId(machineId);
-    const machine = machines.find((m) => m.machine_id === machineId);
     if (machine) {
       setProjectPath(machine.work_dir ?? getDefaultPath(machine.os_type));
     }
@@ -239,39 +242,15 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
       {/* Remote / Terminal Options */}
       {(workspaceType === 'remote' || workspaceType === 'terminal') && (
         <>
-          {/* Machine List */}
+          {/* Machine Selector - using RemoteMachineSelector for enhanced functionality */}
           <div className="mb-3">
             <label className="form-label">{t('selectMachine', language)}</label>
-            {machinesLoading ? (
-              <Loading size="sm" text={t('loading', language)} />
-            ) : machines.length === 0 ? (
-              <EmptyState
-                icon="bi-pc-display"
-                title={t('noAvailableMachines', language)}
-                description={t('noAvailableMachinesDesc', language)}
-              />
-            ) : (
-              <div className="list-group" style={{ maxHeight: '240px', overflow: 'auto' }}>
-                {machines.map((machine) => (
-                  <button
-                    key={machine.machine_id}
-                    className={`list-group-item list-group-item-action d-flex justify-content-between align-items-center ${
-                      selectedMachineId === machine.machine_id ? 'active' : ''
-                    }`}
-                    onClick={() => handleMachineSelect(machine.machine_id)}
-                  >
-                    <div>
-                      <strong>{machine.machine_name}</strong>
-                      <div className="text-muted small">
-                        {machine.hostname ?? machine.machine_id.slice(0, 8)}
-                        {machine.os_type && ` | ${machine.os_type}`}
-                      </div>
-                    </div>
-                    <Badge variant="success">{t('online', language)}</Badge>
-                  </button>
-                ))}
-              </div>
-            )}
+            <RemoteMachineSelector
+              onSelectMachine={handleMachineSelect}
+              selectedMachineId={selectedMachineId}
+              machines={machines}
+              isLoading={machinesLoading}
+            />
           </div>
 
           {/* Project Path */}

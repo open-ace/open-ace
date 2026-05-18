@@ -130,22 +130,18 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
   };
 
   // Create new directory
+  // Note: This feature requires remote agent support which is not yet implemented
+  // Users can manually create directories on the remote machine
   const handleCreateDirectory = async () => {
     if (!newDirName.trim() || !isWritable) return;
-    setIsLoading(true);
-    setError(null);
-    try {
-      // For remote machines, we need to send create command via WebSocket
-      // For now, we'll use a placeholder implementation
-      // This will be enhanced when the remote create directory API is ready
-      setError('Create directory on remote machine requires WebSocket connection');
-      setShowCreateInput(false);
-      setNewDirName('');
-    } catch (err) {
-      setError((err as Error)?.message || 'Failed to create directory');
-    } finally {
-      setIsLoading(false);
-    }
+    setShowCreateInput(false);
+    setNewDirName('');
+    // Show info message instead of error - feature not yet available
+    setError(
+      (t('createDirNotAvailable', language) ||
+        'Create directory on remote machine is not yet available. ' +
+        'Please create the directory on the remote machine first, then enter the path here.')
+    );
   };
 
   // Select path from history
