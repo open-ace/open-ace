@@ -764,6 +764,18 @@ def get_remote_projects():
         """
         results = db.fetch_all(query, [user_id])
 
+        # Batch lookup machine names to avoid N+1 queries
+        machine_ids = [r.get("machine_id") for r in results if r.get("machine_id")]
+        machine_name_map = {}
+        if machine_ids:
+            try:
+                placeholders = ", ".join([p] * len(machine_ids))
+                machine_query = f"SELECT machine_id, machine_name FROM remote_machines WHERE machine_id IN ({placeholders})"
+                machine_rows = db.fetch_all(machine_query, machine_ids)
+                machine_name_map = {row["machine_id"]: row["machine_name"] for row in machine_rows}
+            except Exception as e:
+                logger.warning(f"Failed to batch lookup machine names: {e}")
+
         projects = []
         for r in results:
             project_path = r.get("project_path")
@@ -772,17 +784,8 @@ def get_remote_projects():
                 # /home/user/demo-project -> -home-user-demo-project
                 encoded_name = project_path.replace("/", "-") if project_path.startswith("/") else project_path
 
-                # Look up machine name if available
-                machine_name = None
                 machine_id = r.get("machine_id")
-                if machine_id:
-                    try:
-                        machine_query = f"SELECT machine_name FROM remote_machines WHERE machine_id = {p} LIMIT 1"
-                        machine_row = db.fetch_one(machine_query, [machine_id])
-                        if machine_row:
-                            machine_name = machine_row["machine_name"]
-                    except Exception:
-                        pass
+                machine_name = machine_name_map.get(machine_id) if machine_id else None
 
                 projects.append({
                     "project_path": project_path,

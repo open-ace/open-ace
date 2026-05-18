@@ -446,11 +446,18 @@ export const Workspace: React.FC = () => {
 // Helper to append recent remote projects (Issue #417)
       const appendRecentProjects = (url: string) => {
         if (remoteProjects.length === 0) return url;
-        // Format: project_path:encoded_name pairs, separated by comma
-        // Example: "/home/user/demo:-home-user-demo,/root/workspace:-root-workspace"
-        const projectsParam = remoteProjects
-          .map((p) => `${p.project_path}:${p.encoded_project_name}`)
-          .join(',');
+        // Use JSON format to avoid delimiter collision (paths may contain : or ,)
+        // Format: JSON array of {path, name, machineId, machineName}
+        const projectsParam = encodeURIComponent(
+          JSON.stringify(
+            remoteProjects.map((p) => ({
+              path: p.project_path,
+              name: p.encoded_project_name,
+              machineId: p.machine_id,
+              machineName: p.machine_name,
+            }))
+          )
+        );
         return appendParam(url, 'recentProjects', projectsParam);
       };
 
