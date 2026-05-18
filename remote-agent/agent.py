@@ -664,6 +664,9 @@ class RemoteAgent:
 
             # Wait for READY:port output (with timeout)
             port = self._read_terminal_port(proc, terminal_id)
+            # Redirect remaining output to DEVNULL to prevent pipe buffer deadlock
+            proc.stdout = open(os.devnull, "wb")
+            proc.stderr = open(os.devnull, "wb")
             if port:
                 self._terminal_ports[terminal_id] = port
                 hostname = self._get_reachable_hostname()
@@ -831,6 +834,9 @@ class RemoteAgent:
 
                 # Wait for READY:port output
                 port = self._read_terminal_port(proc, terminal_id)
+                # Redirect remaining output to DEVNULL to prevent pipe buffer deadlock
+                proc.stdout = open(os.devnull, "wb")
+                proc.stderr = open(os.devnull, "wb")
                 if port:
                     self._terminal_ports[terminal_id] = port
                     hostname = self._get_reachable_hostname()
@@ -887,7 +893,14 @@ class RemoteAgent:
 
     def _read_terminal_port(self, proc: subprocess.Popen, terminal_id: str) -> int | None:
         """Read the port number from terminal server's READY:port stdout."""
+        import select as _select
+
         try:
+            # Use select to avoid blocking indefinitely
+            ready, _, _ = _select.select([proc.stdout], [], [], 10.0)
+            if not ready:
+                logger.warning("Timeout waiting for terminal port from %s", terminal_id[:8])
+                return None
             line = proc.stdout.readline().decode().strip()
             if line.startswith("READY:"):
                 return int(line.split(":")[1])

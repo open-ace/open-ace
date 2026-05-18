@@ -118,7 +118,7 @@ def load_user():
                     g.user_role = user_data.get("role")
                     return None
         except Exception as e:
-            logger.warning(f"Failed to validate URL token: {e}")
+            logger.warning("Failed to validate URL token: %s", e)
 
     return jsonify({"error": "Authentication required"}), 401
 
@@ -1010,12 +1010,12 @@ def agent_message():
         if terminal_id and status:
             if status == "stopped":
                 sm.complete_session(terminal_id)
-                logger.info(f"Terminal session {terminal_id[:8]} marked as completed")
+                logger.info("Terminal session %s marked as completed", terminal_id[:8])
             elif status == "running":
                 sm.update_session_fields(terminal_id, {"status": "active"})
             elif status == "error":
                 sm.update_session_fields(terminal_id, {"status": "error"})
-                logger.warning(f"Terminal session {terminal_id[:8]} error: {error}")
+                logger.warning("Terminal session %s error: %s", terminal_id[:8], error)
 
         return jsonify({"success": True})
 
@@ -1252,7 +1252,7 @@ def stop_terminal():
 
     sm = get_session_manager()
     sm.complete_session(terminal_id)
-    logger.info(f"Completed terminal session {terminal_id}")
+    logger.info("Completed terminal session %s", terminal_id)
 
     return jsonify({"success": True})
 
@@ -1498,7 +1498,9 @@ def llm_proxy(path=""):
         _model = _body_json.get("model", "?")
     except Exception:
         _model = "?"
-    logger.info(f"LLM proxy: {request.method} -> {target_url} model={_model} provider={provider}")
+    logger.info(
+        "LLM proxy: %s -> %s model=%s provider=%s", request.method, target_url, _model, provider
+    )
 
     # Log response status for debugging
     _orig_target_url = target_url

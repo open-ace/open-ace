@@ -188,10 +188,11 @@ class WebSocketProxyManager:
             try:
                 # Redirect proxy output to log file for debugging
                 proxy_log_path = f"/tmp/ws_proxy_{terminal_id[:8]}.log"
+                log_file = open(proxy_log_path, "a")
                 process = stdlib_subprocess.Popen(
                     cmd,
-                    stdout=stdlib_subprocess.PIPE,
-                    stderr=stdlib_subprocess.PIPE,
+                    stdout=log_file,
+                    stderr=log_file,
                     env=env,
                 )
                 logger.info(
