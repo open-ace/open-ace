@@ -1802,16 +1802,9 @@ create_docker_compose() {
     local arch=$(detect_arch)
     print_info "检测到平台: $docker_platform (架构: $arch)"
 
-    # Build ports section - WEB_PORT and workspace port range for multi-user mode
+    # Build ports section - only WEB_PORT, workspace runs in separate container
     local ports_section="      - \"$WEB_PORT:$INTERNAL_WEB_PORT\""
 
-
-    # Add workspace port range for multi-user mode
-    if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
-        ports_section="$ports_section
-      - "$WORKSPACE_PORT_RANGE_START-$WORKSPACE_PORT_RANGE_END:$WORKSPACE_PORT_RANGE_START-$WORKSPACE_PORT_RANGE_END""
-        print_info "  - 多用户模式端口池: $WORKSPACE_PORT_RANGE_START-$WORKSPACE_PORT_RANGE_END"
-    fi
     # Build volumes section based on enabled tools
     local volumes_section="      - ./config:/root/.open-ace:ro"
     local user_home="/home/$RUN_USER"
