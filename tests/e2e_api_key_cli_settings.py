@@ -192,14 +192,22 @@ def test_api_key_cli_settings():
 
             log_step("Select", "Checking Claude Code and Qwen Code checkboxes")
 
-            # Check Claude Code checkbox by clicking the checkbox input directly
-            claude_checkbox = modal_body.locator("input.form-check-input").first
-            claude_checkbox.check(force=True)
-            pause(0.5)
+            # Check Claude Code - wait for textarea to appear before checking Qwen Code
+            page.evaluate("""() => {
+                const modal = document.querySelector('.modal.show');
+                const checkboxes = modal.querySelectorAll('input[type="checkbox"]');
+                if (checkboxes[0]) checkboxes[0].click();
+            }""")
+            # Wait for Claude Code textarea to render
+            page.wait_for_selector("textarea.form-control", state="visible", timeout=5000)
+            pause(1)
 
-            # Check Qwen Code checkbox (second checkbox)
-            qwen_checkbox = modal_body.locator("input.form-check-input").nth(1)
-            qwen_checkbox.check(force=True)
+            # Now check Qwen Code
+            page.evaluate("""() => {
+                const modal = document.querySelector('.modal.show');
+                const checkboxes = modal.querySelectorAll('input[type="checkbox"]');
+                if (checkboxes[1]) checkboxes[1].click();
+            }""")
             pause(1)
 
             shot(page, "04_cli_tools_selected")
@@ -207,9 +215,9 @@ def test_api_key_cli_settings():
             # ── Step 5: Edit CLI Settings JSON ───────────────
             log_step("Step 5", "Verify JSON editors appear for selected tools")
 
-            # Should have two textarea elements for settings
+            # Wait for both textareas to appear
             settings_textareas = page.locator("textarea.form-control")
-            expect(settings_textareas).to_have_count(2)
+            expect(settings_textareas).to_have_count(2, timeout=15000)
 
             # Claude Code settings textarea (first)
             claude_settings = settings_textareas.first

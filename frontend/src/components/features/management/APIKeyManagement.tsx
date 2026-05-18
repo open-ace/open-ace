@@ -512,6 +512,21 @@ export const APIKeyManagement: React.FC = () => {
             <small className="text-muted">{t('claudeCodeSettingsHint', language)}</small>
           </div>
         )}
+
+        {/* Qwen Code Settings */}
+        {formData.cli_tools.includes('qwen-code') && (
+          <div className="mb-3">
+            <label className="form-label">{t('qwenCodeSettings', language)}</label>
+            <textarea
+              className="form-control"
+              rows={10}
+              value={formData.qwen_settings}
+              onChange={(e) => setFormData({ ...formData, qwen_settings: e.target.value })}
+              placeholder={defaultQwenSettings}
+            />
+            <small className="text-muted">{t('qwenCodeSettingsHint', language)}</small>
+          </div>
+        )}
       </Modal>
 
       {/* Edit API Key Dialog */}
