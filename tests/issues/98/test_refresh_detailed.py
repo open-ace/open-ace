@@ -157,7 +157,8 @@ async def test_messages_refresh_detailed():
             print("\n[Step 7] Checking React Query state...")
 
             # Execute JavaScript to check React Query state
-            result = await page.evaluate("""() => {
+            result = await page.evaluate(
+                """() => {
                 // Try to find React Query devtools or state
                 const root = document.querySelector('#root');
                 if (!root) return { error: 'No root element' };
@@ -170,7 +171,8 @@ async def test_messages_refresh_detailed():
                     pendingQueries: pendingQueries.length,
                     fetchingQueries: fetchingQueries.length,
                 };
-            }""")
+            }"""
+            )
             print(f"  React Query state: {result}")
 
             # Take final screenshot

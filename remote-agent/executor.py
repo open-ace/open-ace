@@ -1500,9 +1500,7 @@ class ProcessExecutor:
         if restored:
             remaining_meta = {k: v for k, v in meta.items() if k not in restored}
             try:
-                self._META_FILE.write_text(
-                    json.dumps(remaining_meta, indent=2), encoding="utf-8"
-                )
+                self._META_FILE.write_text(json.dumps(remaining_meta, indent=2), encoding="utf-8")
                 logger.debug(
                     "Cleared %d restored session(s) from metadata, %d remaining",
                     len(restored),

@@ -29,7 +29,8 @@ SCREENSHOT_DIR = "screenshots/ui/tab_close_last"
 
 async def create_tab_via_store(page):
     """Create a new local workspace tab by dispatching store action."""
-    await page.evaluate("""
+    await page.evaluate(
+        """
         () => {
             const store = window.__ZUSTAND_STORE__ || window.store;
             if (store && store.getState) {
@@ -49,7 +50,8 @@ async def create_tab_via_store(page):
             }
             return false;
         }
-    """)
+    """
+    )
 
 
 async def run_tests():
