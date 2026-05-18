@@ -34,7 +34,7 @@ jobs:
 
       - name: Create review reminder issue
         if: steps.check-week.outputs.should_create == 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const weekInfo = process.env.WEEK_INFO;
