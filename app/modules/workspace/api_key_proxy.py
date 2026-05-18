@@ -20,6 +20,19 @@ from app.repositories.database import DB_PATH, get_database_url, is_postgresql
 
 logger = logging.getLogger(__name__)
 
+# Environment variable keys that contain API credentials.
+# These must NEVER be written to settings.json — they are injected
+# via environment variables by the remote agent at process launch time.
+# Keep in sync with remote-agent/constants.py.
+_SENSITIVE_ENV_KEYS = frozenset(
+    {
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_BASE_URL",
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
+    }
+)
+
 
 def _param() -> str:
     """Get the correct parameter placeholder for the current database."""
@@ -459,15 +472,9 @@ class APIKeyProxyService:
 
         # Strip any API credential fields that the user may have
         # accidentally included in the UI.
-        _sensitive_env_keys = {
-            "ANTHROPIC_API_KEY",
-            "ANTHROPIC_BASE_URL",
-            "OPENAI_API_KEY",
-            "OPENAI_BASE_URL",
-        }
         env = settings.get("env", {})
         if env:
-            env = {k: v for k, v in env.items() if k not in _sensitive_env_keys}
+            env = {k: v for k, v in env.items() if k not in _SENSITIVE_ENV_KEYS}
             settings["env"] = env
 
         # Strip baseUrl from modelProviders entries (qwen-code)

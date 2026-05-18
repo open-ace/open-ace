@@ -243,17 +243,22 @@ class WebSocketProxyManager:
         stdout_holder = [""]
 
         def _read_stdout():
-            """Read stdout in a thread to avoid gevent select issues with pipes."""
+            """Read stdout in a thread to avoid gevent select issues with pipes.
+
+            Keeps draining stdout even after READY to prevent the proxy process
+            from blocking on a full PIPE buffer (daemon thread exits with process).
+            """
             try:
                 if process.stdout:
                     for line in iter(process.stdout.readline, b""):
                         line_str = line.decode().strip()
                         logger.debug("Read from stdout: %s", line_str)
-                        if line_str.startswith("READY:"):
+                        if line_str.startswith("READY:") and not ready_event.is_set():
                             ready_line_holder[0] = line_str
                             ready_event.set()
-                            return
-                        stdout_holder[0] += line_str + "\n"
+                        # Cap accumulation to avoid unbounded memory growth
+                        if len(stdout_holder[0]) < 4096:
+                            stdout_holder[0] += line_str + "\n"
             except Exception as e:
                 logger.debug("Stdout read error: %s", e)
 

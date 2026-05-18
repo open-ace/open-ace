@@ -13,6 +13,8 @@ import logging
 import shutil
 from pathlib import Path
 
+from constants import SENSITIVE_ENV_KEYS
+
 from .base import BaseCLIAdapter
 
 logger = logging.getLogger(__name__)
@@ -130,15 +132,9 @@ class QwenCodeAdapter(BaseCLIAdapter):
 
         # Strip any API credential fields that the user may have
         # accidentally included.
-        _sensitive_env_keys = {
-            "ANTHROPIC_API_KEY",
-            "ANTHROPIC_BASE_URL",
-            "OPENAI_API_KEY",
-            "OPENAI_BASE_URL",
-        }
         env = settings.get("env", {})
         if env:
-            env = {k: v for k, v in env.items() if k not in _sensitive_env_keys}
+            env = {k: v for k, v in env.items() if k not in SENSITIVE_ENV_KEYS}
             settings["env"] = env
 
         # Strip baseUrl from modelProviders entries

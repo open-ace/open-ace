@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 import requests
+from constants import SENSITIVE_ENV_KEYS
 from executor import ProcessExecutor
 from session_sync import SessionSyncService
 from system_info import get_capabilities
@@ -929,15 +930,6 @@ class RemoteAgent:
     # CLI Settings Application
     # ----------------------------------------------------------------
 
-    # Fields that should never appear in settings.json — API credentials
-    # are injected via environment variables instead.
-    _SENSITIVE_ENV_KEYS = {
-        "ANTHROPIC_API_KEY",
-        "ANTHROPIC_BASE_URL",
-        "OPENAI_API_KEY",
-        "OPENAI_BASE_URL",
-    }
-
     def _strip_sensitive_fields(self, settings: dict[str, Any]) -> dict[str, Any]:
         """Remove API key and base URL fields from settings dict.
 
@@ -950,7 +942,7 @@ class RemoteAgent:
         # Remove sensitive keys from env block
         env = settings.get("env", {})
         if env:
-            env = {k: v for k, v in env.items() if k not in self._SENSITIVE_ENV_KEYS}
+            env = {k: v for k, v in env.items() if k not in SENSITIVE_ENV_KEYS}
             settings["env"] = env
 
         # Remove baseUrl from modelProviders (qwen-code)
