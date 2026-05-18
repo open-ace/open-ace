@@ -1510,6 +1510,12 @@ class ProcessExecutor:
                 )
             except OSError as e:
                 logger.warning("Failed to update metadata file: %s", e)
-
-        self._save_sessions_meta()
+            # Only update active sessions metadata after successful restores
+            self._save_sessions_meta()
+        else:
+            # All sessions failed to restore, keep original metadata for manual recovery
+            logger.warning(
+                "All %d session(s) failed to restore, keeping metadata for manual recovery",
+                len(meta),
+            )
         return restored
