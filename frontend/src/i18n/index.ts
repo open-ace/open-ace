@@ -781,10 +781,10 @@ const translations: Record<Language, Translations> = {
     cliToolsDescription: 'Select which CLI tools this API key should configure settings for.',
     claudeCodeSettings: 'Claude Code Settings (JSON)',
     claudeCodeSettingsHint:
-      'Paste ~/.claude/settings.json content (without sensitive AUTH_TOKEN). System will inject API key automatically.',
+      'Configure non-sensitive settings only (model mappings, theme, etc.). Do NOT include API keys or base URLs — they are injected via environment variables automatically.',
     qwenCodeSettings: 'Qwen Code Settings (JSON)',
     qwenCodeSettingsHint:
-      'Paste ~/.qwen/settings.json content (without env API keys). System will inject API key automatically.',
+      'Configure non-sensitive settings only (modelProviders, model, etc.). Do NOT include API keys or base URLs — they are injected via environment variables automatically.',
     claudeSettingsInvalid: 'Claude Code settings JSON is invalid',
     qwenSettingsInvalid: 'Qwen Code settings JSON is invalid',
     providerCannotChange: 'Provider cannot be changed',
@@ -1588,10 +1588,10 @@ const translations: Record<Language, Translations> = {
     cliToolsDescription: '选择此 API 密钥应为其配置设置的 CLI 工具。',
     claudeCodeSettings: 'Claude Code 设置 (JSON)',
     claudeCodeSettingsHint:
-      '粘贴 ~/.claude/settings.json 内容（不含敏感 AUTH_TOKEN），系统将自动注入 API 密钥。',
+      '仅配置非敏感设置（模型映射、主题等）。请勿填写 API Key 或 Base URL — 系统会通过环境变量自动注入。',
     qwenCodeSettings: 'Qwen Code 设置 (JSON)',
     qwenCodeSettingsHint:
-      '粘贴 ~/.qwen/settings.json 内容（不含环境变量 API 密钥），系统将自动注入 API 密钥。',
+      '仅配置非敏感设置（modelProviders、model 等）。请勿填写 API Key 或 Base URL — 系统会通过环境变量自动注入。',
     claudeSettingsInvalid: 'Claude Code 设置 JSON 无效',
     qwenSettingsInvalid: 'Qwen Code 设置 JSON 无效',
     providerCannotChange: '提供商不可更改',

@@ -207,18 +207,56 @@ export const APIKeyManagement: React.FC = () => {
     }
   };
 
+  // Fields that should never be stored in cli_settings —
+  // API credentials are injected via environment variables.
+  const SENSITIVE_ENV_KEYS = new Set([
+    'ANTHROPIC_API_KEY',
+    'ANTHROPIC_BASE_URL',
+    'OPENAI_API_KEY',
+    'OPENAI_BASE_URL',
+  ]);
+
+  const stripSensitiveFields = (toolSettings: Record<string, unknown>): Record<string, unknown> => {
+    const cleaned = { ...toolSettings };
+    // Strip sensitive env keys
+    const env = cleaned.env as Record<string, unknown> | undefined;
+    if (env && typeof env === 'object') {
+      const cleanEnv = { ...env };
+      for (const key of Object.keys(cleanEnv)) {
+        if (SENSITIVE_ENV_KEYS.has(key)) {
+          delete cleanEnv[key];
+        }
+      }
+      cleaned.env = cleanEnv;
+    }
+    // Strip baseUrl from modelProviders (qwen-code)
+    const modelProviders = cleaned.modelProviders as Record<string, unknown[]> | undefined;
+    if (modelProviders && typeof modelProviders === 'object') {
+      for (const models of Object.values(modelProviders)) {
+        if (Array.isArray(models)) {
+          for (const model of models) {
+            if (model && typeof model === 'object' && 'baseUrl' in model) {
+              delete (model as Record<string, unknown>).baseUrl;
+            }
+          }
+        }
+      }
+    }
+    return cleaned;
+  };
+
   const buildCliSettingsJson = (): string => {
     const settings: Record<string, unknown> = {};
     if (formData.cli_tools.includes('claude-code') && formData.claude_settings) {
       try {
-        settings['claude-code'] = JSON.parse(formData.claude_settings);
+        settings['claude-code'] = stripSensitiveFields(JSON.parse(formData.claude_settings));
       } catch {
         // Skip invalid JSON
       }
     }
     if (formData.cli_tools.includes('qwen-code') && formData.qwen_settings) {
       try {
-        settings['qwen-code'] = JSON.parse(formData.qwen_settings);
+        settings['qwen-code'] = stripSensitiveFields(JSON.parse(formData.qwen_settings));
       } catch {
         // Skip invalid JSON
       }

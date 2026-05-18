@@ -20,6 +20,19 @@ from app.repositories.database import DB_PATH, get_database_url, is_postgresql
 
 logger = logging.getLogger(__name__)
 
+# Environment variable keys that contain API credentials.
+# These must NEVER be written to settings.json — they are injected
+# via environment variables by the remote agent at process launch time.
+# Keep in sync with remote-agent/constants.py.
+_SENSITIVE_ENV_KEYS = frozenset(
+    {
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_BASE_URL",
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
+    }
+)
+
 
 def _param() -> str:
     """Get the correct parameter placeholder for the current database."""
@@ -431,15 +444,11 @@ class APIKeyProxyService:
             # Get tool-specific settings from cli_settings
             tool_settings = cli_settings.get(tool_name, {})
 
-            # Decrypt the API key
-            api_key = self._decrypt_key(row["encrypted_key"])
-            base_url = row["base_url"] or ""
-
-            # Build complete settings using CLI adapter logic
-            # Import adapters to build settings
-            return self._build_cli_settings_for_tool(
-                tool_name, tool_settings, api_key, base_url, row["provider"]
-            )
+            # Return non-sensitive settings only.
+            # API credentials (key + base_url) are NOT injected here —
+            # they are set via environment variables by the agent
+            # (terminal_server.py for web terminal, executor for sessions).
+            return self._build_cli_settings_for_tool(tool_name, tool_settings)
 
         return None
 
@@ -447,49 +456,35 @@ class APIKeyProxyService:
         self,
         tool_name: str,
         base_settings: dict,
-        api_key: str,
-        base_url: str,
-        provider: str,
     ) -> dict[str, Any]:
         """
-        Build complete CLI settings by merging user settings with API credentials.
+        Build CLI settings containing only non-sensitive configuration.
+
+        API keys and base URLs are intentionally NOT included — they are
+        injected via environment variables at process launch time.
 
         Args:
             tool_name: CLI tool name.
             base_settings: User-configured settings (from cli_settings column).
-            api_key: Decrypted API key.
-            base_url: Base URL for API requests.
-            provider: Provider name (anthropic, openai, etc.).
 
         Returns:
-            Complete settings dict ready for settings.json.
+            Settings dict with non-sensitive config only.
         """
         settings = base_settings.copy()
-        settings.setdefault("env", {})
 
-        if tool_name == "claude-code":
-            # Claude Code settings format
-            settings["env"]["ANTHROPIC_API_KEY"] = api_key
-            if base_url:
-                settings["env"]["ANTHROPIC_BASE_URL"] = base_url.rstrip("/")
-        elif tool_name == "qwen-code":
-            # Qwen Code settings (bailian format)
-            settings.setdefault("modelProviders", {})
-            settings.setdefault("security", {"auth": {"selectedType": "openai"}})
-            settings["$version"] = 3
+        # Strip any API credential fields that the user may have
+        # accidentally included in the UI.
+        env = settings.get("env", {})
+        if env:
+            env = {k: v for k, v in env.items() if k not in _SENSITIVE_ENV_KEYS}
+            settings["env"] = env
 
-            provider_name = "openai"
-            settings["modelProviders"].setdefault(provider_name, [])
-
-            # Determine env key name
-            env_key_name = f"{provider_name.upper()}_API_KEY"
-            for model_config in settings["modelProviders"].get(provider_name, []):
-                if "envKey" in model_config:
-                    env_key_name = model_config["envKey"]
-                if "baseUrl" not in model_config:
-                    model_config["baseUrl"] = base_url.rstrip("/") if base_url else ""
-
-            settings["env"][env_key_name] = api_key
+        # Strip baseUrl from modelProviders entries (qwen-code)
+        for provider_models in settings.get("modelProviders", {}).values():
+            if isinstance(provider_models, list):
+                for model in provider_models:
+                    if isinstance(model, dict):
+                        model.pop("baseUrl", None)
 
         return settings
 

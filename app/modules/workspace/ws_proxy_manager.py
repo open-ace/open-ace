@@ -18,12 +18,9 @@ import logging
 import os
 import subprocess as stdlib_subprocess
 import threading
-import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING
-
-import gevent
 
 if TYPE_CHECKING:
     import subprocess
@@ -186,12 +183,13 @@ class WebSocketProxyManager:
             env["OPEN_ACE_PROXY_TOKEN"] = auth_token
 
             try:
-                # Redirect proxy output to log file for debugging
+                # Use PIPE for stdout so _wait_for_ready can read the READY signal
+                # stderr goes to log file for debugging
                 proxy_log_path = f"/tmp/ws_proxy_{terminal_id[:8]}.log"
                 log_file = open(proxy_log_path, "a")
                 process = stdlib_subprocess.Popen(
                     cmd,
-                    stdout=log_file,
+                    stdout=stdlib_subprocess.PIPE,
                     stderr=log_file,
                     env=env,
                 )
@@ -237,52 +235,60 @@ class WebSocketProxyManager:
 
     def _wait_for_ready(self, process, terminal_id: str) -> bool:
         """Wait for proxy to signal it's ready (gevent-compatible)."""
+        import threading
+
         timeout = 10  # seconds
-        start = time.time()
-        ready_line = ""
+        ready_event = threading.Event()
+        ready_line_holder = [""]
+        stdout_holder = [""]
 
-        while time.time() - start < timeout:
-            poll_result = process.poll()
-            if poll_result is not None:
-                # Process exited
-                try:
-                    stderr = process.stderr.read().decode() if process.stderr else ""
-                    stdout = process.stdout.read().decode() if process.stdout else ""
-                    logger.error(
-                        "Proxy process exited early (code=%s): stderr=%s stdout=%s",
-                        poll_result,
-                        stderr[:500],
-                        stdout[:200],
-                    )
-                except Exception as read_err:
-                    logger.error("Proxy process exited, read error: %s", read_err)
-                return False
+        def _read_stdout():
+            """Read stdout in a thread to avoid gevent select issues with pipes.
 
-            # Check stdout for READY signal (non-blocking read)
+            Keeps draining stdout even after READY to prevent the proxy process
+            from blocking on a full PIPE buffer (daemon thread exits with process).
+            """
             try:
                 if process.stdout:
-                    # Use select to check if data is available (avoid blocking readline)
-                    import select as _select
-
-                    readable, _, _ = _select.select([process.stdout], [], [], 0.5)
-                    if readable:
-                        line = process.stdout.readline()
-                        if line:
-                            line_str = line.decode().strip()
-                            logger.debug("Read from stdout: %s", line_str)
-                            if line_str.startswith("READY:"):
-                                logger.info("Proxy READY signal received: %s", line_str)
-                                return True
-                            ready_line += line_str + "\n"
+                    for line in iter(process.stdout.readline, b""):
+                        line_str = line.decode().strip()
+                        logger.debug("Read from stdout: %s", line_str)
+                        if line_str.startswith("READY:") and not ready_event.is_set():
+                            ready_line_holder[0] = line_str
+                            ready_event.set()
+                        # Cap accumulation to avoid unbounded memory growth
+                        if len(stdout_holder[0]) < 4096:
+                            stdout_holder[0] += line_str + "\n"
             except Exception as e:
-                logger.debug("Read error: %s", e)
+                logger.debug("Stdout read error: %s", e)
 
-            gevent.sleep(0.1)  # Use gevent sleep instead of blocking time.sleep
+        reader_thread = threading.Thread(target=_read_stdout, daemon=True)
+        reader_thread.start()
+
+        # Wait for READY signal or timeout
+        if ready_event.wait(timeout):
+            logger.info("Proxy READY signal received: %s", ready_line_holder[0])
+            return True
+
+        # Check if process exited
+        poll_result = process.poll()
+        if poll_result is not None:
+            try:
+                stderr = process.stderr.read().decode() if process.stderr else ""
+                logger.error(
+                    "Proxy process exited early (code=%s): stderr=%s stdout=%s",
+                    poll_result,
+                    stderr[:500],
+                    stdout_holder[0][:200],
+                )
+            except Exception as read_err:
+                logger.error("Proxy process exited, read error: %s", read_err)
+            return False
 
         logger.warning(
             "Timeout waiting for proxy READY signal (terminal %s). Accumulated output: %s",
             terminal_id[:8],
-            ready_line[:200],
+            stdout_holder[0][:200],
         )
         return False
 
