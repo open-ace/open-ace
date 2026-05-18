@@ -573,9 +573,12 @@ class WebUIManager:
         os.makedirs(webui_log_dir, mode=0o755, exist_ok=True)
         child_env["OPENACE_LOG_DIR"] = webui_log_dir
 
-        # Set SESSION_TIMEOUT_MS for webui (Issue #351)
-        # Default: 24 hours = 86400000 ms
-        child_env["SESSION_TIMEOUT_MS"] = "86400000"
+        # Set timeout-related environment variables for webui (Issue #351)
+        # SESSION_TIMEOUT_MS: timeout for permission prompts (default: 24 hours)
+        # KEEPALIVE_INTERVAL_MS: heartbeat interval (default: 15 seconds)
+        # These prevent premature session termination during long-running tasks.
+        child_env["SESSION_TIMEOUT_MS"] = "86400000"  # 24 hours
+        child_env["KEEPALIVE_INTERVAL_MS"] = "10000"  # 10 seconds (more frequent)
 
         # Change log directory ownership to system_account (Linux/macOS only)
         # This allows webui to create additional log files if needed
@@ -619,6 +622,7 @@ class WebUIManager:
                 "env",
                 f"OPENACE_LOG_DIR={webui_log_dir}",
                 f"SESSION_TIMEOUT_MS={child_env['SESSION_TIMEOUT_MS']}",
+                f"KEEPALIVE_INTERVAL_MS={child_env['KEEPALIVE_INTERVAL_MS']}",
                 f"PATH={child_env['PATH']}",
                 webui_cmd,
                 "--port",
