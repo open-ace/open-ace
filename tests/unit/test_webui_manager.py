@@ -169,6 +169,7 @@ class TestLaunchWebuiProcessAuth:
 
         # Mock _find_webui_executable and _load_server_config
         with (
+            patch.object(manager, "_ensure_system_user", return_value=True),
             patch.object(
                 manager,
                 "_find_webui_executable",
@@ -206,6 +207,7 @@ class TestLaunchWebuiProcessAuth:
         manager._platform = "linux"
 
         with (
+            patch.object(manager, "_ensure_system_user", return_value=True),
             patch.object(
                 manager,
                 "_find_webui_executable",
@@ -241,6 +243,7 @@ class TestLaunchWebuiProcessAuth:
         manager._platform = "linux"
 
         with (
+            patch.object(manager, "_ensure_system_user", return_value=True),
             patch.object(
                 manager,
                 "_find_webui_executable",
@@ -275,6 +278,7 @@ class TestLaunchWebuiProcessAuth:
 
         try:
             with (
+                patch.object(manager, "_ensure_system_user", return_value=True),
                 patch.object(
                     manager,
                     "_find_webui_executable",
@@ -312,6 +316,7 @@ class TestLaunchWebuiProcessAuth:
 
         try:
             with (
+                patch.object(manager, "_ensure_system_user", return_value=True),
                 patch.object(
                     manager,
                     "_find_webui_executable",
