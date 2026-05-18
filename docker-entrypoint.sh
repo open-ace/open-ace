@@ -140,7 +140,7 @@ try:
     print('User sync completed.')
 except Exception as e:
     print(f'Error syncing users: {e}')
-" 2>&1 || echo "WARNING: User sync failed"
+" 2>&1 | tee /var/log/open-ace-user-sync.log || echo "WARNING: User sync failed - check /var/log/open-ace-user-sync.log for details"
     fi
 
     # Configure sudoers for qwen-code-webui

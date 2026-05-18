@@ -766,7 +766,7 @@ def get_remote_projects():
 
         # Batch lookup machine names to avoid N+1 queries
         # Use set to deduplicate machine_ids (multiple projects may share same machine)
-        machine_ids = list(set(r.get("machine_id") for r in results if r.get("machine_id")))
+        machine_ids = list({r.get("machine_id") for r in results if r.get("machine_id")})
         machine_name_map = {}
         if machine_ids:
             try:
