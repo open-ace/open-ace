@@ -68,6 +68,7 @@ def mock_user():
 @pytest.fixture
 def flask_context():
     from flask import Flask
+
     app = Flask(__name__)
     app.config["TESTING"] = True
     with app.app_context():
@@ -77,6 +78,7 @@ def flask_context():
 class TestGetRemoteProjectsAuthentication:
     def test_no_user_returns_401(self, flask_context):
         from flask import g
+
         mock_db_module = sys.modules["app.repositories.database"]
         mock_db_module.Database = MagicMock()
         mock_db_module.get_param_placeholder = MagicMock(return_value="%s")
@@ -89,6 +91,7 @@ class TestGetRemoteProjectsAuthentication:
 
     def test_user_without_id_returns_401(self, flask_context):
         from flask import g
+
         g.user = {"username": "testuser"}
         mock_db_module = sys.modules["app.repositories.database"]
         mock_db_module.Database = MagicMock()
@@ -101,10 +104,15 @@ class TestGetRemoteProjectsAuthentication:
 class TestGetRemoteProjectsNormalResponse:
     def test_returns_projects_list(self, flask_context, mock_db, mock_user):
         from flask import g
+
         g.user = mock_user
         mock_results = [
-            {"project_path": "/home/user/demo", "last_used": datetime(2026, 5, 18),
-             "machine_id": "machine-001", "session_count": 5},
+            {
+                "project_path": "/home/user/demo",
+                "last_used": datetime(2026, 5, 18),
+                "machine_id": "machine-001",
+                "session_count": 5,
+            },
         ]
         mock_machine_rows = [{"machine_id": "machine-001", "machine_name": "Server 1"}]
         mock_db.fetch_all.side_effect = [mock_results, mock_machine_rows]
@@ -120,6 +128,7 @@ class TestGetRemoteProjectsNormalResponse:
 
     def test_returns_empty_list(self, flask_context, mock_db, mock_user):
         from flask import g
+
         g.user = mock_user
         mock_db.fetch_all.return_value = []
         mock_db_module = sys.modules["app.repositories.database"]
@@ -134,14 +143,27 @@ class TestGetRemoteProjectsMachineLookup:
     def test_deduplicates_machine_ids(self, flask_context, mock_db, mock_user):
         """Verify machine_ids deduplication (Issue #417 optimization)."""
         from flask import g
+
         g.user = mock_user
         mock_results = [
-            {"project_path": "/p1", "last_used": datetime(2026, 5, 18),
-             "machine_id": "machine-A", "session_count": 2},
-            {"project_path": "/p2", "last_used": datetime(2026, 5, 17),
-             "machine_id": "machine-A", "session_count": 1},
-            {"project_path": "/p3", "last_used": datetime(2026, 5, 16),
-             "machine_id": "machine-B", "session_count": 3},
+            {
+                "project_path": "/p1",
+                "last_used": datetime(2026, 5, 18),
+                "machine_id": "machine-A",
+                "session_count": 2,
+            },
+            {
+                "project_path": "/p2",
+                "last_used": datetime(2026, 5, 17),
+                "machine_id": "machine-A",
+                "session_count": 1,
+            },
+            {
+                "project_path": "/p3",
+                "last_used": datetime(2026, 5, 16),
+                "machine_id": "machine-B",
+                "session_count": 3,
+            },
         ]
         mock_machine_rows = [
             {"machine_id": "machine-A", "machine_name": "Server A"},
@@ -158,9 +180,16 @@ class TestGetRemoteProjectsMachineLookup:
 
     def test_no_machine_ids_skips_lookup(self, flask_context, mock_db, mock_user):
         from flask import g
+
         g.user = mock_user
-        mock_results = [{"project_path": "/p", "last_used": datetime(2026, 5, 18),
-                         "machine_id": None, "session_count": 1}]
+        mock_results = [
+            {
+                "project_path": "/p",
+                "last_used": datetime(2026, 5, 18),
+                "machine_id": None,
+                "session_count": 1,
+            }
+        ]
         mock_db.fetch_all.return_value = mock_results
         mock_db_module = sys.modules["app.repositories.database"]
         mock_db_module.Database = MagicMock(return_value=mock_db)
@@ -172,6 +201,7 @@ class TestGetRemoteProjectsMachineLookup:
 class TestGetRemoteProjectsErrorHandling:
     def test_handles_database_exception(self, flask_context, mock_db, mock_user):
         from flask import g
+
         g.user = mock_user
         mock_db.fetch_all.side_effect = Exception("DB failed")
         mock_db_module = sys.modules["app.repositories.database"]
@@ -185,6 +215,7 @@ class TestGetRemoteProjectsErrorHandling:
 class TestGetRemoteProjectsQueryStructure:
     def test_query_filters_deleted(self, flask_context, mock_db, mock_user):
         from flask import g
+
         g.user = mock_user
         mock_db.fetch_all.return_value = []
         mock_db_module = sys.modules["app.repositories.database"]
@@ -196,6 +227,7 @@ class TestGetRemoteProjectsQueryStructure:
 
     def test_query_has_limit_50(self, flask_context, mock_db, mock_user):
         from flask import g
+
         g.user = mock_user
         mock_db.fetch_all.return_value = []
         mock_db_module = sys.modules["app.repositories.database"]
@@ -207,6 +239,7 @@ class TestGetRemoteProjectsQueryStructure:
 
     def test_query_groups_by_path(self, flask_context, mock_db, mock_user):
         from flask import g
+
         g.user = mock_user
         mock_db.fetch_all.return_value = []
         mock_db_module = sys.modules["app.repositories.database"]

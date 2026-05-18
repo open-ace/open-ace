@@ -193,21 +193,25 @@ def test_api_key_cli_settings():
             log_step("Select", "Checking Claude Code and Qwen Code checkboxes")
 
             # Check Claude Code - wait for textarea to appear before checking Qwen Code
-            page.evaluate("""() => {
+            page.evaluate(
+                """() => {
                 const modal = document.querySelector('.modal.show');
                 const checkboxes = modal.querySelectorAll('input[type="checkbox"]');
                 if (checkboxes[0]) checkboxes[0].click();
-            }""")
+            }"""
+            )
             # Wait for Claude Code textarea to render
             page.wait_for_selector("textarea.form-control", state="visible", timeout=5000)
             pause(1)
 
             # Now check Qwen Code
-            page.evaluate("""() => {
+            page.evaluate(
+                """() => {
                 const modal = document.querySelector('.modal.show');
                 const checkboxes = modal.querySelectorAll('input[type="checkbox"]');
                 if (checkboxes[1]) checkboxes[1].click();
-            }""")
+            }"""
+            )
             pause(1)
 
             shot(page, "04_cli_tools_selected")

@@ -129,7 +129,8 @@ def test_multi_tab_notification():
             # Since we can't easily do that, let's verify the CSS classes are correct
 
             # Inject test helper to modify React state
-            page.evaluate("""
+            page.evaluate(
+                """
                 () => {
                     // Find all workspace tabs
                     const tabs = document.querySelectorAll('.workspace-tab');
@@ -153,7 +154,8 @@ def test_multi_tab_notification():
                         }
                     }
                 }
-            """)
+            """
+            )
             time.sleep(0.5)
             screenshots.append(take_screenshot(page, "full_05_notification_simulated.png"))
 
@@ -215,7 +217,8 @@ def test_multi_tab_notification():
             # Let's also verify no bg-danger or bg-warning would be applied
             # by checking the actual CSS rules in the component
 
-            css_test = page.evaluate("""
+            css_test = page.evaluate(
+                """
                 () => {
                     // Check if the badge element has only bg-info class
                     const badge = document.querySelector('.waiting-badge');
@@ -228,7 +231,8 @@ def test_multi_tab_notification():
                     }
                     return null;
                 }
-            """)
+            """
+            )
 
             if css_test:
                 print(f"  CSS classes: {css_test['classes']}")

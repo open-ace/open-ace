@@ -164,7 +164,8 @@ async def test_click_debug():
         await page.wait_for_timeout(3000)
 
         # 检查当前显示的路径
-        current_path = await page.evaluate("""() => {
+        current_path = await page.evaluate(
+            """() => {
             // 找 breadcrumb 中的路径文本
             const breadcrumb = document.querySelector('.flex.items-center.gap-1.flex-1');
             if (breadcrumb) {
@@ -173,7 +174,8 @@ async def test_click_debug():
                 return path;
             }
             return null;
-        }""")
+        }"""
+        )
         print(f"当前路径: {current_path}")
 
         # 检查是否有 "no subdirectories" 消息（说明当前目录为空）
@@ -366,7 +368,8 @@ async def test_click_debug():
         # 方式5: 模拟鼠标事件
         print("方式5: 模拟鼠标事件...")
         try:
-            await create_button.evaluate("""el => {
+            await create_button.evaluate(
+                """el => {
                 const rect = el.getBoundingClientRect();
                 const x = rect.left + rect.width / 2;
                 const y = rect.top + rect.height / 2;
@@ -387,7 +390,8 @@ async def test_click_debug():
                 el.dispatchEvent(mousedown);
                 el.dispatchEvent(mouseup);
                 el.dispatchEvent(click);
-            }""")
+            }"""
+            )
             await page.wait_for_timeout(1000)
         except Exception as e:
             print(f"  点击失败: {e}")

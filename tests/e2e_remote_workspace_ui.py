@@ -529,7 +529,8 @@ def _run_all_steps(page):
 
     # ── B3. Create Remote Session ──
     print("\n══════ B3. Create Remote Session ══════")
-    create_result = page.evaluate(f"""
+    create_result = page.evaluate(
+        f"""
     async () => {{
         const resp = await fetch('/api/remote/sessions', {{
             method: 'POST',
@@ -546,7 +547,8 @@ def _run_all_steps(page):
         const data = await resp.json().catch(() => null);
         return {{ status: resp.status, ok: resp.ok, data }};
     }}
-    """)
+    """
+    )
     assert create_result["ok"], f"Create session failed: {create_result}"
     session_id = create_result["data"]["session"]["session_id"]
     log("Session", f"✓ Created: {session_id[:8]}...")

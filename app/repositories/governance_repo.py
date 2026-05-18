@@ -322,13 +322,15 @@ class GovernanceRepository:
                         str_value = str(value)
 
                     cursor.execute(
-                        adapt_sql("""
+                        adapt_sql(
+                            """
                         INSERT INTO security_settings (setting_key, setting_value, updated_at)
                         VALUES (?, ?, CURRENT_TIMESTAMP)
                         ON CONFLICT(setting_key) DO UPDATE SET
                             setting_value = excluded.setting_value,
                             updated_at = CURRENT_TIMESTAMP
-                    """),
+                    """
+                        ),
                         (key, str_value),
                     )
 

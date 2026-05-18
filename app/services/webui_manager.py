@@ -551,6 +551,15 @@ class WebUIManager:
         Returns:
             subprocess.Popen object or None if launch failed.
         """
+        # Ensure system user exists (for Docker multi-user mode)
+        if self._platform in ("linux", "darwin"):
+            try:
+                pwd.getpwnam(system_account)
+            except KeyError:
+                logger.info(f"User '{system_account}' not found, creating...")
+                if not self._ensure_system_user(system_account):
+                    raise ValueError(f"Failed to create system user: {system_account}")
+
         # Find webui executable or project path
         webui_cmd, webui_dir = self._find_webui_executable()
 
@@ -745,6 +754,57 @@ class WebUIManager:
             pass
 
         return None, None
+
+    def _ensure_system_user(self, system_account: str) -> bool:
+        """
+        Ensure a system user exists for workspace operations.
+        Creates the OS user if it doesn't exist.
+
+        Args:
+            system_account: Username for the system account.
+
+        Returns:
+            True if user exists or was created successfully.
+        """
+        # Validate username format (Linux useradd requirements)
+        # - Must start with a lowercase letter or underscore
+        # - Can contain lowercase letters, digits, underscores, and dashes
+        # - Maximum 32 characters
+        # - No spaces or special characters
+        import re
+
+        if not system_account:
+            logger.error("Empty username provided")
+            return False
+
+        if len(system_account) > 32:
+            logger.error(f"Username too long (max 32 chars): {system_account}")
+            return False
+
+        # Linux username pattern: [a-z_][a-z0-9_-]*
+        if not re.match(r"^[a-z_][a-z0-9_-]*$", system_account):
+            logger.error(f"Invalid username format: {system_account}")
+            return False
+
+        # Check if user already exists
+        result = subprocess.run(["id", system_account], capture_output=True, text=True)
+        if result.returncode == 0:
+            return True
+
+        # Create user with home directory
+        logger.info(f"Creating system user: {system_account}")
+        result = subprocess.run(
+            ["useradd", "-m", "-s", "/bin/bash", system_account],
+            capture_output=True,
+            text=True,
+        )
+
+        if result.returncode != 0:
+            logger.error(f"Failed to create system user {system_account}: {result.stderr}")
+            return False
+
+        logger.info(f"System user {system_account} created successfully")
+        return True
 
     def _stop_instance_internal(self, user_id: int):
         """

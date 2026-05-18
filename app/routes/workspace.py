@@ -766,7 +766,7 @@ def get_remote_projects():
 
         # Batch lookup machine names to avoid N+1 queries
         # Use set to deduplicate machine_ids (multiple projects may share same machine)
-        machine_ids = list(set(r.get("machine_id") for r in results if r.get("machine_id")))
+        machine_ids = list({r.get("machine_id") for r in results if r.get("machine_id")})
         machine_name_map = {}
         if machine_ids:
             try:
@@ -783,24 +783,30 @@ def get_remote_projects():
             if project_path:
                 # Convert path to encoded project name format
                 # /home/user/demo-project -> -home-user-demo-project
-                encoded_name = project_path.replace("/", "-") if project_path.startswith("/") else project_path
+                encoded_name = (
+                    project_path.replace("/", "-") if project_path.startswith("/") else project_path
+                )
 
                 machine_id = r.get("machine_id")
                 machine_name = machine_name_map.get(machine_id) if machine_id else None
 
-                projects.append({
-                    "project_path": project_path,
-                    "encoded_project_name": encoded_name,
-                    "last_used": format_datetime(r.get("last_used")),
-                    "session_count": r.get("session_count", 0),
-                    "machine_id": machine_id,
-                    "machine_name": machine_name,
-                })
+                projects.append(
+                    {
+                        "project_path": project_path,
+                        "encoded_project_name": encoded_name,
+                        "last_used": format_datetime(r.get("last_used")),
+                        "session_count": r.get("session_count", 0),
+                        "machine_id": machine_id,
+                        "machine_name": machine_name,
+                    }
+                )
 
-        return jsonify({
-            "success": True,
-            "projects": projects,
-        })
+        return jsonify(
+            {
+                "success": True,
+                "projects": projects,
+            }
+        )
     except Exception as e:
         logger.error(f"Error getting remote projects: {e}")
         return jsonify({"success": False, "error": "Internal server error"}), 500

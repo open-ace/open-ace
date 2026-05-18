@@ -80,6 +80,13 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # NOTE: Container runs as root to support multi-user workspace mode (sudo -u <user>)
 # The entrypoint script handles privilege management and user creation.
+#
+# SECURITY CONSIDERATIONS:
+# - Multi-user mode requires root to create system users (useradd) dynamically
+# - sudoers is configured to allow open-ace user to run specific commands only
+# - For single-user deployments, consider running as non-root (USER open-ace)
+# - In production, use network isolation and limit container privileges
+# - Refer to docker-entrypoint.sh for sudoers configuration details
 
 # Environment variables
 ENV PYTHONUNBUFFERED=1 \

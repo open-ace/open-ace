@@ -147,7 +147,8 @@ class AlertNotifier:
         bool_false = "BOOLEAN DEFAULT FALSE" if is_postgresql() else "INTEGER DEFAULT 0"
 
         # Create alerts table
-        cursor.execute(f"""
+        cursor.execute(
+            f"""
             CREATE TABLE IF NOT EXISTS alerts (
                 id {id_type},
                 alert_id TEXT UNIQUE NOT NULL,
@@ -164,10 +165,12 @@ class AlertNotifier:
                 action_url TEXT,
                 action_text TEXT
             )
-        """)
+        """
+        )
 
         # Create notification_preferences table
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS notification_preferences (
                 user_id INTEGER PRIMARY KEY,
                 email_enabled {bool_true},
@@ -176,21 +179,28 @@ class AlertNotifier:
                 alert_types TEXT,
                 min_severity TEXT DEFAULT 'warning'
             )
-        """)
+        """
+        )
 
         # Create indexes
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_alerts_user_id
             ON alerts(user_id)
-        """)
-        cursor.execute("""
+        """
+        )
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_alerts_created_at
             ON alerts(created_at)
-        """)
-        cursor.execute("""
+        """
+        )
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_alerts_read
             ON alerts(read)
-        """)
+        """
+        )
 
         conn.commit()
         conn.close()
@@ -314,12 +324,14 @@ class AlertNotifier:
         cursor = conn.cursor()
 
         cursor.execute(
-            adapt_sql("""
+            adapt_sql(
+                """
             INSERT INTO alerts
             (alert_id, alert_type, severity, title, message, user_id, username,
              tool_name, metadata, created_at, read, action_url, action_text)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """),
+        """
+            ),
             (
                 alert.alert_id,
                 alert.alert_type,
@@ -425,12 +437,14 @@ class AlertNotifier:
         where_clause = " AND ".join(conditions) if conditions else "1=1"
 
         cursor.execute(
-            adapt_sql(f"""
+            adapt_sql(
+                f"""
             SELECT * FROM alerts
             WHERE {where_clause}
             ORDER BY created_at DESC
             LIMIT ? OFFSET ?
-        """),
+        """
+            ),
             params + [limit, offset],
         )
 

@@ -48,10 +48,12 @@ def upgrade() -> None:
 
     if not _column_exists(conn, "users", "must_change_password"):
         if is_postgresql:
-            op.execute("""
+            op.execute(
+                """
                 ALTER TABLE users
                 ADD COLUMN must_change_password BOOLEAN DEFAULT FALSE
-            """)
+            """
+            )
         else:
             # SQLite uses BOOLEAN type (stored as INTEGER 0/1)
             op.add_column(
@@ -60,11 +62,13 @@ def upgrade() -> None:
 
         # Set must_change_password=TRUE for existing admin users with default password
         # This ensures existing admin accounts also require password change
-        op.execute("""
+        op.execute(
+            """
             UPDATE users
             SET must_change_password = TRUE
             WHERE role = 'admin' AND password_hash IS NOT NULL
-        """)
+        """
+        )
 
 
 def downgrade() -> None:
@@ -77,7 +81,8 @@ def downgrade() -> None:
             op.execute("ALTER TABLE users DROP COLUMN must_change_password")
         else:
             # SQLite requires recreating the table without the column
-            op.execute("""
+            op.execute(
+                """
                 CREATE TABLE users_new (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     username TEXT NOT NULL UNIQUE,
@@ -96,8 +101,10 @@ def downgrade() -> None:
                     tenant_id INTEGER,
                     linux_account TEXT
                 )
-            """)
-            op.execute("""
+            """
+            )
+            op.execute(
+                """
                 INSERT INTO users_new (
                     id, username, password_hash, email, role,
                     daily_token_quota, monthly_token_quota,
@@ -112,7 +119,8 @@ def downgrade() -> None:
                     is_active, created_at, updated_at, last_login,
                     deleted_at, tenant_id, linux_account
                 FROM users
-            """)
+            """
+            )
             op.execute("DROP TABLE users")
             op.execute("ALTER TABLE users_new RENAME TO users")
 
