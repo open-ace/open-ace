@@ -896,14 +896,17 @@ def agent_message():
     if msg_type == "register":
         # Agent re-registering on reconnect
         agent_mgr.register_connection(machine_id, None)
-        data.get("capabilities", {})
+        capabilities = data.get("capabilities", {})
+        if capabilities:
+            agent_mgr.update_capabilities(machine_id, capabilities)
         pending = agent_mgr.get_pending_commands(machine_id)
         return jsonify({"success": True, "type": "register_ack", "pending_commands": pending})
 
     elif msg_type == "heartbeat":
         status = data.get("status", "idle")
         active_sessions = data.get("active_sessions", 0)
-        agent_mgr.process_heartbeat(machine_id, status, active_sessions)
+        capabilities = data.get("capabilities", {})
+        agent_mgr.process_heartbeat(machine_id, status, active_sessions, capabilities=capabilities)
         pending = agent_mgr.get_pending_commands(machine_id)
         return jsonify({"success": True, "type": "heartbeat_ack", "pending_commands": pending})
 
@@ -1024,7 +1027,8 @@ def agent_message():
 
     elif msg_type == "session_sync":
         # Agent reports Claude Code session data from web terminal
-        session_id = data.get("session_id", "")
+        claude_session_id = data.get("session_id", "")
+        terminal_id = data.get("terminal_id", "")
         tool_name = data.get("tool_name", "claude-code")
         model = data.get("model")
         project_path = data.get("project_path")
@@ -1033,9 +1037,27 @@ def agent_message():
         total_output_tokens = data.get("total_output_tokens", 0)
         messages = data.get("messages", [])
 
+        # Resolve effective session_id: prefer terminal_id (shown in sidebar)
+        # over claude_session_id (internal Claude Code JSONL UUID).
+        sync_session_mgr = get_remote_session_manager()._session_manager
+        if terminal_id:
+            terminal_session = sync_session_mgr.get_session(terminal_id)
+            if terminal_session:
+                session_id = terminal_id
+            else:
+                session_id = claude_session_id
+                logger.warning(
+                    "session_sync: terminal_id=%s not found, " "fall back to claude_session_id=%s",
+                    terminal_id[:8],
+                    claude_session_id[:8],
+                )
+        else:
+            session_id = claude_session_id
+
         logger.info(
-            "Session sync [%s]: tool=%s msgs=%d tokens=%d/%d",
-            session_id[:8],
+            "Session sync [%s] terminal=[%s]: tool=%s msgs=%d tokens=%d/%d",
+            claude_session_id[:8],
+            terminal_id[:8] if terminal_id else "none",
             tool_name,
             message_count,
             total_input_tokens,
@@ -1043,8 +1065,6 @@ def agent_message():
         )
 
         try:
-            sync_session_mgr = get_remote_session_manager()._session_manager
-
             # Upsert the session record
             existing = sync_session_mgr.get_session(session_id)
             if not existing:
@@ -1055,15 +1075,48 @@ def agent_message():
                     model=model,
                     host_name=machine_id[:8],
                     context={
-                        "workspace_type": "remote",
+                        "workspace_type": "terminal",
                         "remote_machine_id": machine_id,
                     },
                 )
+            else:
+                # Update model/project_path if missing on existing session
+                updates = {}
+                if model and not existing.model:
+                    updates["model"] = model
+                if project_path and not existing.project_path:
+                    updates["project_path"] = project_path
+                if updates:
+                    sync_session_mgr.update_session_fields(session_id, updates)
 
-            # Mirror messages to daily_messages for ConversationHistory visibility
+            # Fetch existing message uuids for dedup and mirror to daily_messages
             try:
                 from app.repositories.database import adapt_sql, get_db_connection
 
+                # Dedup: collect existing message uuids via lightweight query
+                existing_uuids: set[str] = set()
+                with get_db_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        adapt_sql("SELECT metadata FROM session_messages WHERE session_id = ?"),
+                        (session_id,),
+                    )
+                    for row in cursor.fetchall():
+                        meta_raw = row["metadata"]
+                        if isinstance(meta_raw, str):
+                            try:
+                                meta = json.loads(meta_raw)
+                            except (json.JSONDecodeError, TypeError):
+                                continue
+                        elif isinstance(meta_raw, dict):
+                            meta = meta_raw
+                        else:
+                            continue
+                        em_uuid = meta.get("uuid", "")
+                        if em_uuid:
+                            existing_uuids.add(em_uuid)
+
+                # Mirror messages to daily_messages for ConversationHistory visibility
                 for msg in messages:
                     role = msg.get("role", "")
                     content = msg.get("content", "")
@@ -1083,9 +1136,15 @@ def agent_message():
                     # Use uuid for dedup if available, fallback to timestamp-based id
                     message_id = msg_uuid or f"{session_id}-{timestamp}"
 
+                    # Skip if message already synced (dedup by uuid)
+                    if msg_uuid and msg_uuid in existing_uuids:
+                        continue
+
                     # 1. Write to session_messages (dual-write with daily_messages)
                     try:
                         metadata = {"message_source": "web_terminal"}
+                        if msg_uuid:
+                            metadata["uuid"] = msg_uuid
                         if content_blocks:
                             metadata["content_blocks"] = content_blocks
                         if input_tokens or output_tokens:
@@ -1119,14 +1178,12 @@ def agent_message():
                         with get_db_connection() as conn:
                             cursor = conn.cursor()
                             cursor.execute(
-                                adapt_sql(
-                                    """INSERT OR IGNORE INTO daily_messages
+                                adapt_sql("""INSERT OR IGNORE INTO daily_messages
                                     (date, tool_name, host_name, message_id, role, content,
                                      full_entry, tokens_used, input_tokens, output_tokens,
                                      model, timestamp, message_source,
                                      conversation_id, agent_session_id, project_path)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
-                                ),
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""),
                                 (
                                     date_str,
                                     tool_name,

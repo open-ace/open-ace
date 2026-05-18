@@ -716,7 +716,11 @@ class RemoteAgentManager:
     # ==================== Heartbeat ====================
 
     def process_heartbeat(
-        self, machine_id: str, status: str = "idle", active_sessions: int = 0
+        self,
+        machine_id: str,
+        status: str = "idle",
+        active_sessions: int = 0,
+        capabilities: Optional[dict[str, Any]] = None,
     ) -> None:
         """Process a heartbeat from a remote agent."""
         # Ensure HTTP polling agents are tracked in _connections
@@ -733,6 +737,10 @@ class RemoteAgentManager:
             return
         self._last_heartbeat_db_write[machine_id] = now_ts
 
+        # Update capabilities separately if provided (within rate limit)
+        if capabilities:
+            self.update_capabilities(machine_id, capabilities)
+
         with self.db.connection() as conn:
             cursor = conn.cursor()
             now = datetime.utcnow().isoformat()
@@ -746,6 +754,22 @@ class RemoteAgentManager:
                 (now, status, now, machine_id),
             )
             conn.commit()
+
+    def update_capabilities(self, machine_id: str, capabilities: dict[str, Any]) -> None:
+        """Update capabilities for a remote machine."""
+        with self.db.connection() as conn:
+            cursor = conn.cursor()
+            now = datetime.utcnow().isoformat()
+            cursor.execute(
+                f"""
+                UPDATE remote_machines
+                SET capabilities = {_param()}, updated_at = {_param()}
+                WHERE machine_id = {_param()}
+            """,
+                (json.dumps(capabilities), now, machine_id),
+            )
+            conn.commit()
+            logger.info("Updated capabilities for machine %s", machine_id[:8])
 
     # ==================== Machine Queries ====================
 
