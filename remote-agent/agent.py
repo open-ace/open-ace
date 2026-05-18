@@ -123,6 +123,7 @@ class RemoteAgent:
             with os.fdopen(fd, "w") as f:
                 json.dump(data, f, indent=2)
             os.rename(tmp_path, filepath)
+            os.chmod(filepath, 0o600)
         except Exception:
             os.unlink(tmp_path)
             raise

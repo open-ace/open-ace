@@ -17,6 +17,7 @@ import asyncio
 import hmac
 import logging
 import os
+import signal
 import sys
 import urllib.parse
 
@@ -196,7 +197,24 @@ def main():
     # Print startup message to stderr (stdout reserved for READY signal)
     print("WebSocket proxy starting", file=sys.stderr, flush=True)
 
-    asyncio.run(run_server(args.port))
+    async def shutdown(sig, loop):
+        logging.info(f"Received signal {sig.name}, shutting down...")
+        tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        loop.stop()
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, lambda s=sig: asyncio.ensure_future(shutdown(s, loop)))
+
+    try:
+        loop.run_until_complete(run_server(args.port))
+    finally:
+        loop.close()
 
 
 if __name__ == "__main__":

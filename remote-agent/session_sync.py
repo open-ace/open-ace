@@ -195,9 +195,20 @@ class SessionSyncService:
 
     def _save_state(self) -> None:
         """Persist sync state to disk."""
+        import tempfile
+
         try:
             SYNC_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-            SYNC_STATE_FILE.write_text(json.dumps({"synced_files": list(self._synced_files)}))
+            data = {"synced_files": list(self._synced_files)}
+            dir_path = SYNC_STATE_FILE.parent
+            fd, tmp_path = tempfile.mkstemp(dir=dir_path, suffix=".json")
+            try:
+                with os.fdopen(fd, "w") as f:
+                    json.dump(data, f)
+                os.rename(tmp_path, SYNC_STATE_FILE)
+            except Exception:
+                os.unlink(tmp_path)
+                raise
         except OSError as e:
             logger.warning("Failed to save sync state: %s", e)
 
@@ -214,7 +225,7 @@ class SessionSyncService:
     def _cleanup_synced_files(self, max_entries: int = 500) -> None:
         """Trim _synced_files set to prevent unbounded growth."""
         if len(self._synced_files) > max_entries:
-            # Keep most recent entries by clearing stale ones
+            # Keep up to max_entries arbitrary entries (set is unordered)
             excess = len(self._synced_files) - max_entries
             to_remove = list(self._synced_files)[:excess]
             for f in to_remove:

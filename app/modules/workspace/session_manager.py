@@ -584,6 +584,8 @@ class SessionManager:
         "message_count",
         "request_count",
         "total_tokens",
+        "total_input_tokens",
+        "total_output_tokens",
         "total_cost",
         "duration_seconds",
         "error_message",

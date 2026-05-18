@@ -1405,12 +1405,6 @@ def llm_proxy(path=""):
             401,
         )
 
-    if not proxy_token:
-        return (
-            jsonify({"error": {"message": "Missing authorization token", "type": "auth_error"}}),
-            401,
-        )
-
     # Validate proxy token
     api_proxy = get_api_key_proxy_service()
     token_payload = api_proxy.validate_proxy_token(proxy_token)

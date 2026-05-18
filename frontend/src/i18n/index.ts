@@ -785,6 +785,8 @@ const translations: Record<Language, Translations> = {
     qwenCodeSettings: 'Qwen Code Settings (JSON)',
     qwenCodeSettingsHint:
       'Paste ~/.qwen/settings.json content (without env API keys). System will inject API key automatically.',
+    claudeSettingsInvalid: 'Claude Code settings JSON is invalid',
+    qwenSettingsInvalid: 'Qwen Code settings JSON is invalid',
     providerCannotChange: 'Provider cannot be changed',
 
     // Help Documents
@@ -1588,6 +1590,8 @@ const translations: Record<Language, Translations> = {
     qwenCodeSettings: 'Qwen Code 设置 (JSON)',
     qwenCodeSettingsHint:
       '粘贴 ~/.qwen/settings.json 内容（不含环境变量 API 密钥），系统将自动注入 API 密钥。',
+    claudeSettingsInvalid: 'Claude Code 设置 JSON 无效',
+    qwenSettingsInvalid: 'Qwen Code 设置 JSON 无效',
     providerCannotChange: '提供商不可更改',
 
     // 帮助文档

@@ -248,7 +248,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
     console.log('[TerminalTab] Connect effect triggered:', {
       hasXterm: !!xtermRef.current,
       wsUrl,
-      token: token?.substring(0, 20),
+      token: !!token,
     });
     if (xtermRef.current && wsUrl && token) {
       console.log('[TerminalTab] Calling connect() from effect');

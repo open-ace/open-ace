@@ -243,11 +243,11 @@ export const APIKeyManagement: React.FC = () => {
       formData.cli_tools.includes('claude-code') &&
       !validateJsonSettings(formData.claude_settings)
     ) {
-      setFormError('Claude Code settings JSON is invalid');
+      setFormError(t('claudeSettingsInvalid', language));
       return;
     }
     if (formData.cli_tools.includes('qwen-code') && !validateJsonSettings(formData.qwen_settings)) {
-      setFormError('Qwen Code settings JSON is invalid');
+      setFormError(t('qwenSettingsInvalid', language));
       return;
     }
 
@@ -282,11 +282,11 @@ export const APIKeyManagement: React.FC = () => {
       formData.cli_tools.includes('claude-code') &&
       !validateJsonSettings(formData.claude_settings)
     ) {
-      setFormError('Claude Code settings JSON is invalid');
+      setFormError(t('claudeSettingsInvalid', language));
       return;
     }
     if (formData.cli_tools.includes('qwen-code') && !validateJsonSettings(formData.qwen_settings)) {
-      setFormError('Qwen Code settings JSON is invalid');
+      setFormError(t('qwenSettingsInvalid', language));
       return;
     }
 
