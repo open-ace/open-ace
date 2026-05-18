@@ -193,10 +193,7 @@ export const remoteApi = {
   },
 
   // Terminal management
-  startTerminal(data: {
-    machine_id: string;
-    work_dir?: string;
-  }): Promise<{
+  startTerminal(data: { machine_id: string; work_dir?: string }): Promise<{
     success: boolean;
     terminal?: {
       terminal_id: string;
@@ -209,17 +206,11 @@ export const remoteApi = {
     return apiClient.post('/api/remote/terminal/start', data);
   },
 
-  stopTerminal(data: {
-    terminal_id: string;
-    machine_id: string;
-  }): Promise<{ success: boolean }> {
+  stopTerminal(data: { terminal_id: string; machine_id: string }): Promise<{ success: boolean }> {
     return apiClient.post('/api/remote/terminal/stop', data);
   },
 
-  attachTerminal(data: {
-    terminal_id: string;
-    machine_id: string;
-  }): Promise<{
+  attachTerminal(data: { terminal_id: string; machine_id: string }): Promise<{
     success: boolean;
     terminal?: {
       terminal_id: string;

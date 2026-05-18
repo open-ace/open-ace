@@ -66,6 +66,10 @@ def create_terminal_session(page, machine_id: str):
         time.sleep(2)
 
 
+import pytest
+
+
+@pytest.mark.skip(reason="Requires live machine_id fixture - run standalone via main()")
 def test_terminal(page, machine_id: str):
     """Test terminal WebSocket connection"""
     # Navigate to work page with terminal params

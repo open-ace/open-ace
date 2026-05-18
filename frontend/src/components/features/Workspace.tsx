@@ -107,7 +107,7 @@ export const Workspace: React.FC = () => {
         if (terminalPollCancelRefs.current.get(tabId)) return;
         try {
           const status = await remoteApi.getTerminalStatus(terminalId, machineId);
-          const wsUrl = status.terminal.ws_url || '';
+          const wsUrl = status.terminal.ws_url ?? '';
           const hasProxyUrl = wsUrl.includes('localhost') || wsUrl.includes('127.0.0.1');
           if (status.terminal.status === 'running' && hasProxyUrl) {
             setTabs((prev) =>
@@ -128,7 +128,7 @@ export const Workspace: React.FC = () => {
           } else if (status.terminal.status === 'error') {
             toast.error(
               t('terminalError', language) || 'Terminal Error',
-              status.terminal.error || 'Failed to start terminal'
+              status.terminal.error ?? 'Failed to start terminal'
             );
           } else {
             poll(attempt + 1);
@@ -788,7 +788,7 @@ export const Workspace: React.FC = () => {
     const terminalParam = searchParams.get('workspaceType');
     if (terminalParam === 'terminal' && tabsInitialized && config?.enabled) {
       const machineId = searchParams.get('machineId');
-      const machineName = searchParams.get('machineName') || 'Terminal';
+      const machineName = searchParams.get('machineName') ?? 'Terminal';
 
       if (machineId) {
         // Clear URL params
@@ -897,7 +897,7 @@ export const Workspace: React.FC = () => {
               if (terminalPollCancelRefs.current.get(tabId)) return;
               try {
                 const status = await remoteApi.getTerminalStatus(terminalId, machineId);
-                const wsUrl = status.terminal.ws_url || '';
+                const wsUrl = status.terminal.ws_url ?? '';
                 const hasProxyUrl = wsUrl.includes('localhost') || wsUrl.includes('127.0.0.1');
 
                 console.log('[Terminal] Attach poll:', {
@@ -973,7 +973,7 @@ export const Workspace: React.FC = () => {
                             newTerminalId,
                             machineId
                           );
-                          const newWs = newStatus.terminal.ws_url || '';
+                          const newWs = newStatus.terminal.ws_url ?? '';
                           const hasProxy =
                             newWs.includes('localhost') || newWs.includes('127.0.0.1');
                           if (newStatus.terminal.status === 'running' && hasProxy) {
@@ -1826,7 +1826,7 @@ export const Workspace: React.FC = () => {
                                 tab.terminalId!,
                                 tab.machineId!
                               );
-                              const wsUrl = status.terminal.ws_url || '';
+                              const wsUrl = status.terminal.ws_url ?? '';
                               const hasProxyUrl =
                                 wsUrl.includes('localhost') || wsUrl.includes('127.0.0.1');
                               if (status.terminal.status === 'running' && hasProxyUrl) {
@@ -1866,8 +1866,8 @@ export const Workspace: React.FC = () => {
                                             ? {
                                                 ...t,
                                                 terminalId: newTerminalId,
-                                                terminalWsUrl: newResult.terminal?.ws_url || '',
-                                                terminalToken: newResult.terminal?.token || '',
+                                                terminalWsUrl: newResult.terminal?.ws_url ?? '',
+                                                terminalToken: newResult.terminal?.token ?? '',
                                               }
                                             : t
                                         )
@@ -2201,7 +2201,7 @@ export const Workspace: React.FC = () => {
             } else {
               toast.error(
                 t('terminalError', language) || 'Terminal Error',
-                result.error || 'Failed to start terminal'
+                result.error ?? 'Failed to start terminal'
               );
             }
           } catch (err) {

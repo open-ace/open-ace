@@ -104,8 +104,8 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
             ws.send(
               JSON.stringify({
                 type: 'resize',
-                cols: dims.cols || 80,
-                rows: dims.rows || 24,
+                cols: dims.cols ?? 80,
+                rows: dims.rows ?? 24,
               })
             );
           }
@@ -207,14 +207,14 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
       fitAddon.fit();
 
       terminal.onData((data: string) => {
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
           const encoder = new TextEncoder();
           wsRef.current.send(encoder.encode(data));
         }
       });
 
       terminal.onResize(({ cols, rows }: { cols: number; rows: number }) => {
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
           wsRef.current.send(JSON.stringify({ type: 'resize', cols, rows }));
         }
       });
