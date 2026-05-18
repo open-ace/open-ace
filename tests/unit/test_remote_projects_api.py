@@ -9,7 +9,7 @@ import importlib.util
 import sys
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -17,9 +17,8 @@ project_root = str(Path(__file__).resolve().parent.parent.parent)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-# Save original module entries before mocking, so we can restore them
-# and avoid polluting other test files (e.g. test_auth_decorators.py)
-_mocked_module_names = [
+# Modules that need to be mocked for workspace.py to load
+_MOCK_MODULE_NAMES = [
     "app.modules",
     "app.modules.workspace",
     "app.modules.workspace.collaboration",
@@ -36,35 +35,41 @@ _mocked_module_names = [
     "app.utils.cache",
     "gevent",
 ]
-_original_modules = {name: sys.modules.get(name) for name in _mocked_module_names}
 
-mock_modules = {
-    "app.modules": MagicMock(__path__=[]),
-    "app.modules.workspace": MagicMock(__path__=[]),
-    "app.modules.workspace.collaboration": MagicMock(),
-    "app.modules.workspace.prompt_library": MagicMock(),
-    "app.modules.workspace.session_manager": MagicMock(),
-    "app.modules.workspace.state_sync": MagicMock(),
-    "app.modules.workspace.tool_connector": MagicMock(),
-    "app.auth.decorators": MagicMock(),
-    "app.repositories.database": MagicMock(),
-    "app.repositories.schema_init": MagicMock(),
-    "app.utils.tool_names": MagicMock(),
-    "app.modules.analytics": MagicMock(__path__=[]),
-    "app.modules.governance": MagicMock(__path__=[]),
-    "app.utils.cache": MagicMock(),
-    "gevent": MagicMock(),
-}
-for name, mock in mock_modules.items():
-    if name not in sys.modules:
-        sys.modules[name] = mock
 
-workspace_path = Path(project_root) / "app" / "routes" / "workspace.py"
-spec = importlib.util.spec_from_file_location("workspace_direct", workspace_path)
-workspace_module = importlib.util.module_from_spec(spec)
-sys.modules["workspace_direct"] = workspace_module
-spec.loader.exec_module(workspace_module)
-get_remote_projects = workspace_module.get_remote_projects
+@pytest.fixture(scope="module")
+def workspace_module():
+    """Load workspace.py with mocked dependencies.
+
+    Uses patch.dict to mock sys.modules entries only within this fixture's
+    scope, automatically restoring them when the fixture tears down.
+    This prevents MagicMock objects from leaking into other test modules.
+    """
+    mock_modules = {
+        "app.modules": MagicMock(__path__=[]),
+        "app.modules.workspace": MagicMock(__path__=[]),
+        "app.modules.workspace.collaboration": MagicMock(),
+        "app.modules.workspace.prompt_library": MagicMock(),
+        "app.modules.workspace.session_manager": MagicMock(),
+        "app.modules.workspace.state_sync": MagicMock(),
+        "app.modules.workspace.tool_connector": MagicMock(),
+        "app.auth.decorators": MagicMock(),
+        "app.repositories.database": MagicMock(),
+        "app.repositories.schema_init": MagicMock(),
+        "app.utils.tool_names": MagicMock(),
+        "app.modules.analytics": MagicMock(__path__=[]),
+        "app.modules.governance": MagicMock(__path__=[]),
+        "app.utils.cache": MagicMock(),
+        "gevent": MagicMock(),
+    }
+
+    with patch.dict(sys.modules, mock_modules):
+        workspace_path = Path(project_root) / "app" / "routes" / "workspace.py"
+        spec = importlib.util.spec_from_file_location("workspace_direct", workspace_path)
+        workspace_module = importlib.util.module_from_spec(spec)
+        sys.modules["workspace_direct"] = workspace_module
+        spec.loader.exec_module(workspace_module)
+        yield workspace_module
 
 
 def parse_response(result):
@@ -97,7 +102,7 @@ def flask_context():
 
 
 class TestGetRemoteProjectsAuthentication:
-    def test_no_user_returns_401(self, flask_context):
+    def test_no_user_returns_401(self, flask_context, workspace_module):
         from flask import g
 
         mock_db_module = sys.modules["app.repositories.database"]
@@ -105,25 +110,25 @@ class TestGetRemoteProjectsAuthentication:
         mock_db_module.get_param_placeholder = MagicMock(return_value="%s")
         if hasattr(g, "user"):
             delattr(g, "user")
-        result = get_remote_projects()
+        result = workspace_module.get_remote_projects()
         resp, status = parse_response(result)
         assert status == 401
         assert resp.get_json()["success"] is False
 
-    def test_user_without_id_returns_401(self, flask_context):
+    def test_user_without_id_returns_401(self, flask_context, workspace_module):
         from flask import g
 
         g.user = {"username": "testuser"}
         mock_db_module = sys.modules["app.repositories.database"]
         mock_db_module.Database = MagicMock()
         mock_db_module.get_param_placeholder = MagicMock(return_value="%s")
-        result = get_remote_projects()
+        result = workspace_module.get_remote_projects()
         resp, status = parse_response(result)
         assert status == 401
 
 
 class TestGetRemoteProjectsNormalResponse:
-    def test_returns_projects_list(self, flask_context, mock_db, mock_user):
+    def test_returns_projects_list(self, flask_context, mock_db, mock_user, workspace_module):
         from flask import g
 
         g.user = mock_user
@@ -140,14 +145,14 @@ class TestGetRemoteProjectsNormalResponse:
         mock_db_module = sys.modules["app.repositories.database"]
         mock_db_module.Database = MagicMock(return_value=mock_db)
         mock_db_module.get_param_placeholder = MagicMock(return_value="%s")
-        result = get_remote_projects()
+        result = workspace_module.get_remote_projects()
         resp, status = parse_response(result)
         data = resp.get_json()
         assert status == 200
         assert data["projects"][0]["project_path"] == "/home/user/demo"
         assert data["projects"][0]["machine_name"] == "Server 1"
 
-    def test_returns_empty_list(self, flask_context, mock_db, mock_user):
+    def test_returns_empty_list(self, flask_context, mock_db, mock_user, workspace_module):
         from flask import g
 
         g.user = mock_user
@@ -155,13 +160,13 @@ class TestGetRemoteProjectsNormalResponse:
         mock_db_module = sys.modules["app.repositories.database"]
         mock_db_module.Database = MagicMock(return_value=mock_db)
         mock_db_module.get_param_placeholder = MagicMock(return_value="%s")
-        result = get_remote_projects()
+        result = workspace_module.get_remote_projects()
         resp, status = parse_response(result)
         assert resp.get_json()["projects"] == []
 
 
 class TestGetRemoteProjectsMachineLookup:
-    def test_deduplicates_machine_ids(self, flask_context, mock_db, mock_user):
+    def test_deduplicates_machine_ids(self, flask_context, mock_db, mock_user, workspace_module):
         """Verify machine_ids deduplication (Issue #417 optimization)."""
         from flask import g
 
@@ -194,12 +199,12 @@ class TestGetRemoteProjectsMachineLookup:
         mock_db_module = sys.modules["app.repositories.database"]
         mock_db_module.Database = MagicMock(return_value=mock_db)
         mock_db_module.get_param_placeholder = MagicMock(return_value="%s")
-        get_remote_projects()
+        workspace_module.get_remote_projects()
         machine_params = mock_db.fetch_all.call_args_list[1][0][1]
         assert len(machine_params) == 2  # deduplicated
         assert set(machine_params) == {"machine-A", "machine-B"}
 
-    def test_no_machine_ids_skips_lookup(self, flask_context, mock_db, mock_user):
+    def test_no_machine_ids_skips_lookup(self, flask_context, mock_db, mock_user, workspace_module):
         from flask import g
 
         g.user = mock_user
@@ -215,12 +220,12 @@ class TestGetRemoteProjectsMachineLookup:
         mock_db_module = sys.modules["app.repositories.database"]
         mock_db_module.Database = MagicMock(return_value=mock_db)
         mock_db_module.get_param_placeholder = MagicMock(return_value="%s")
-        get_remote_projects()
+        workspace_module.get_remote_projects()
         assert mock_db.fetch_all.call_count == 1
 
 
 class TestGetRemoteProjectsErrorHandling:
-    def test_handles_database_exception(self, flask_context, mock_db, mock_user):
+    def test_handles_database_exception(self, flask_context, mock_db, mock_user, workspace_module):
         from flask import g
 
         g.user = mock_user
@@ -228,13 +233,13 @@ class TestGetRemoteProjectsErrorHandling:
         mock_db_module = sys.modules["app.repositories.database"]
         mock_db_module.Database = MagicMock(return_value=mock_db)
         mock_db_module.get_param_placeholder = MagicMock(return_value="%s")
-        result = get_remote_projects()
+        result = workspace_module.get_remote_projects()
         resp, status = parse_response(result)
         assert status == 500
 
 
 class TestGetRemoteProjectsQueryStructure:
-    def test_query_filters_deleted(self, flask_context, mock_db, mock_user):
+    def test_query_filters_deleted(self, flask_context, mock_db, mock_user, workspace_module):
         from flask import g
 
         g.user = mock_user
@@ -242,11 +247,11 @@ class TestGetRemoteProjectsQueryStructure:
         mock_db_module = sys.modules["app.repositories.database"]
         mock_db_module.Database = MagicMock(return_value=mock_db)
         mock_db_module.get_param_placeholder = MagicMock(return_value="%s")
-        get_remote_projects()
+        workspace_module.get_remote_projects()
         query = mock_db.fetch_all.call_args[0][0]
         assert "status != 'deleted'" in query
 
-    def test_query_has_limit_50(self, flask_context, mock_db, mock_user):
+    def test_query_has_limit_50(self, flask_context, mock_db, mock_user, workspace_module):
         from flask import g
 
         g.user = mock_user
@@ -254,11 +259,11 @@ class TestGetRemoteProjectsQueryStructure:
         mock_db_module = sys.modules["app.repositories.database"]
         mock_db_module.Database = MagicMock(return_value=mock_db)
         mock_db_module.get_param_placeholder = MagicMock(return_value="%s")
-        get_remote_projects()
+        workspace_module.get_remote_projects()
         query = mock_db.fetch_all.call_args[0][0]
         assert "LIMIT 50" in query
 
-    def test_query_groups_by_path(self, flask_context, mock_db, mock_user):
+    def test_query_groups_by_path(self, flask_context, mock_db, mock_user, workspace_module):
         from flask import g
 
         g.user = mock_user
@@ -266,21 +271,6 @@ class TestGetRemoteProjectsQueryStructure:
         mock_db_module = sys.modules["app.repositories.database"]
         mock_db_module.Database = MagicMock(return_value=mock_db)
         mock_db_module.get_param_placeholder = MagicMock(return_value="%s")
-        get_remote_projects()
+        workspace_module.get_remote_projects()
         query = mock_db.fetch_all.call_args[0][0]
         assert "GROUP BY project_path" in query
-
-
-@pytest.fixture(autouse=True, scope="module")
-def _cleanup_mocked_modules():
-    """Restore original sys.modules entries after this module's tests run.
-
-    This prevents MagicMock objects from leaking into other test modules
-    (e.g. test_auth_decorators.py) that import the same modules.
-    """
-    yield
-    for name, original in _original_modules.items():
-        if original is None:
-            sys.modules.pop(name, None)
-        else:
-            sys.modules[name] = original
