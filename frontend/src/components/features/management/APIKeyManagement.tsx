@@ -428,9 +428,26 @@ export const APIKeyManagement: React.FC = () => {
                       )}
                     </td>
                     <td>
-                      <Badge variant={key.is_active ? 'success' : 'secondary'}>
-                        {key.is_active ? t('active', language) : t('inactive', language)}
-                      </Badge>
+                      <div className="d-flex align-items-center gap-2">
+                        <div className="form-check form-switch mb-0">
+                          <input
+                            className="form-check-input"
+                            type="checkbox"
+                            role="switch"
+                            checked={key.is_active}
+                            onChange={() => {
+                              updateApiKey.mutateAsync({
+                                keyId: key.id,
+                                is_active: !key.is_active,
+                              });
+                            }}
+                            disabled={updateApiKey.isPending}
+                          />
+                        </div>
+                        <Badge variant={key.is_active ? 'success' : 'secondary'}>
+                          {key.is_active ? t('active', language) : t('inactive', language)}
+                        </Badge>
+                      </div>
                     </td>
                     <td>{new Date(key.created_at).toLocaleDateString()}</td>
                     <td>

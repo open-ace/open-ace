@@ -367,6 +367,7 @@ def update_api_key(key_id):
     base_url = data.get("base_url")
     cli_tools = data.get("cli_tools")
     cli_settings = data.get("cli_settings")
+    is_active = data.get("is_active")
     tenant_id = int(data.get("tenant_id", 1))
 
     api_proxy = get_api_key_proxy_service()
@@ -377,6 +378,7 @@ def update_api_key(key_id):
         base_url=base_url,
         cli_tools=cli_tools,
         cli_settings=cli_settings,
+        is_active=is_active,
     )
 
     if success:
@@ -1119,14 +1121,12 @@ def agent_message():
                         with get_db_connection() as conn:
                             cursor = conn.cursor()
                             cursor.execute(
-                                adapt_sql(
-                                    """INSERT OR IGNORE INTO daily_messages
+                                adapt_sql("""INSERT OR IGNORE INTO daily_messages
                                     (date, tool_name, host_name, message_id, role, content,
                                      full_entry, tokens_used, input_tokens, output_tokens,
                                      model, timestamp, message_source,
                                      conversation_id, agent_session_id, project_path)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
-                                ),
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""),
                                 (
                                     date_str,
                                     tool_name,
