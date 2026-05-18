@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -226,9 +227,20 @@ class SessionSyncService:
 
     def _save_state(self) -> None:
         """Persist sync state to disk."""
+        import tempfile
+
         try:
             SYNC_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-            SYNC_STATE_FILE.write_text(json.dumps({"synced_files": list(self._synced_files)}))
+            data = {"synced_files": list(self._synced_files)}
+            dir_path = SYNC_STATE_FILE.parent
+            fd, tmp_path = tempfile.mkstemp(dir=dir_path, suffix=".json")
+            try:
+                with os.fdopen(fd, "w") as f:
+                    json.dump(data, f)
+                os.rename(tmp_path, SYNC_STATE_FILE)
+            except Exception:
+                os.unlink(tmp_path)
+                raise
         except OSError as e:
             logger.warning("Failed to save sync state: %s", e)
 
@@ -237,9 +249,20 @@ class SessionSyncService:
         while self._running:
             try:
                 self._scan_and_sync()
+                self._cleanup_synced_files()
             except Exception as e:
                 logger.error("Session sync error: %s", e)
             time.sleep(SCAN_INTERVAL)
+
+    def _cleanup_synced_files(self, max_entries: int = 500) -> None:
+        """Trim _synced_files set to prevent unbounded growth."""
+        if len(self._synced_files) > max_entries:
+            # Keep up to max_entries arbitrary entries (set is unordered)
+            excess = len(self._synced_files) - max_entries
+            to_remove = list(self._synced_files)[:excess]
+            for f in to_remove:
+                self._synced_files.discard(f)
+            logger.info("Cleaned up %d stale synced file entries", excess)
 
     def _scan_and_sync(self) -> None:
         """Scan for session files and sync new/changed ones."""
@@ -263,7 +286,8 @@ class SessionSyncService:
             session = ClaudeSession(session_id, path_str)
             if session.parse() and session.message_count > 0:
                 # Find terminal_id for this sync
-                terminal_id = getattr(self, "_active_terminal_id", "")
+                # Use terminal_id from env var (set by terminal_server PTY) or fallback to active
+                terminal_id = os.environ.get("OPEN_ACE_TERMINAL_ID", "") or self._active_terminal_id
                 payload = session.to_sync_payload(self._config.machine_id, terminal_id)
 
                 result = self._http_send(

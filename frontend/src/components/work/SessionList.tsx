@@ -362,7 +362,9 @@ const SessionGroup: React.FC<SessionGroupProps> = ({
               onClick={() => onSessionClick(session.id)}
             >
               <span className="session-id text-truncate">
-                {session.workspace_type === 'remote' ? (
+                {session.workspace_type === 'terminal' ? (
+                  <i className="bi bi-terminal-fill text-info me-1" title="Web Terminal" />
+                ) : session.workspace_type === 'remote' ? (
                   <i
                     className="bi bi-cloud-fill text-primary me-1"
                     title={`Remote: ${session.machine_name ?? session.id.slice(0, 8)}`}

@@ -28,7 +28,7 @@ export interface AgentSession {
   completed_at: string | null;
   expires_at: string | null;
   project_path?: string;
-  workspace_type?: string;
+  workspace_type?: 'local' | 'remote' | 'terminal';
   remote_machine_id?: string;
   machine_name?: string;
   first_message?: string; // First user message preview (for tooltip)

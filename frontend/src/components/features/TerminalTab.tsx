@@ -20,7 +20,11 @@ interface TerminalTabProps {
   token: string;
   isActive: boolean;
   machineName?: string;
+  terminalId?: string;
+  machineId?: string;
   onError?: (error: string) => void;
+  onAuthFailed?: () => void;
+  onReattachNeeded?: () => void;
 }
 
 export const TerminalTab: React.FC<TerminalTabProps> = ({
@@ -28,7 +32,11 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   token,
   isActive,
   machineName,
+  terminalId: _terminalId, // eslint-disable-line @typescript-eslint/no-unused-vars
+  machineId: _machineId, // eslint-disable-line @typescript-eslint/no-unused-vars
   onError,
+  onAuthFailed,
+  onReattachNeeded,
 }) => {
   const language = useLanguage();
   const terminalRef = useRef<HTMLDivElement>(null);
@@ -38,10 +46,36 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectCountRef = useRef(0);
 
+  // Use refs for callbacks to avoid stale closures and unnecessary reconnects
+  const onReattachNeededRef = useRef(onReattachNeeded);
+  onReattachNeededRef.current = onReattachNeeded;
+  const onAuthFailedRef = useRef(onAuthFailed);
+  onAuthFailedRef.current = onAuthFailed;
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
+
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
 
   const connect = useCallback(() => {
-    if (!wsUrl || !token || !xtermRef.current) return;
+    console.log('[TerminalTab] connect called:', {
+      wsUrl,
+      hasToken: !!token,
+      hasXterm: !!xtermRef.current,
+    });
+    if (!wsUrl || !token || !xtermRef.current) {
+      console.log('[TerminalTab] Skipping connect - missing requirements');
+      return;
+    }
+
+    // Skip if already connecting or connected
+    if (
+      wsRef.current &&
+      (wsRef.current.readyState === WebSocket.CONNECTING ||
+        wsRef.current.readyState === WebSocket.OPEN)
+    ) {
+      console.log('[TerminalTab] Skipping connect - already connected/connecting');
+      return;
+    }
 
     if (wsRef.current) {
       wsRef.current.close();
@@ -56,9 +90,11 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
 
     try {
       const ws = new WebSocket(wsUrlWithToken, ['binary']);
+      console.log('[TerminalTab] WebSocket created, URL length:', wsUrlWithToken.length);
       ws.binaryType = 'arraybuffer';
 
       ws.onopen = () => {
+        console.log('[TerminalTab] WebSocket OPENED');
         setConnectionState('connected');
         reconnectCountRef.current = 0;
         if (xtermRef.current) {
@@ -70,8 +106,8 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
             ws.send(
               JSON.stringify({
                 type: 'resize',
-                cols: dims.cols || 80,
-                rows: dims.rows || 24,
+                cols: dims.cols ?? 80,
+                rows: dims.rows ?? 24,
               })
             );
           }
@@ -88,22 +124,44 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
         }
       };
 
-      ws.onclose = () => {
+      ws.onclose = (event) => {
+        console.log('[TerminalTab] WebSocket CLOSED:', event.code, event.reason);
         setConnectionState('disconnected');
+        if (event.code === 4001) {
+          if (xtermRef.current) {
+            xtermRef.current.writeln(
+              '\r\n\x1b[33mAuthentication failed. Reconnecting...\x1b[0m\r\n'
+            );
+          }
+          onAuthFailedRef.current?.();
+          return;
+        }
         if (xtermRef.current) {
           xtermRef.current.writeln('\r\n\x1b[33mConnection closed. Reconnecting...\x1b[0m\r\n');
         }
         reconnectCountRef.current += 1;
+        // After 5 failed reconnects, trigger reattach
+        if (reconnectCountRef.current >= 5 && onReattachNeededRef.current) {
+          console.log('[TerminalTab] Too many reconnect failures, triggering reattach');
+          if (xtermRef.current) {
+            xtermRef.current.writeln(
+              '\r\n\x1b[36mRequesting new terminal connection...\x1b[0m\r\n'
+            );
+          }
+          onReattachNeededRef.current();
+          return;
+        }
         const delay = Math.min(3000 * Math.pow(1.5, reconnectCountRef.current - 1), 30000);
         reconnectTimerRef.current = setTimeout(connect, delay);
       };
 
-      ws.onerror = () => {
+      ws.onerror = (error) => {
+        console.log('[TerminalTab] WebSocket ERROR:', error);
         setConnectionState('error');
         if (xtermRef.current) {
           xtermRef.current.writeln('\r\n\x1b[31mConnection error.\x1b[0m\r\n');
         }
-        onError?.('Failed to connect to terminal');
+        onErrorRef.current?.('Failed to connect to terminal');
       };
 
       wsRef.current = ws;
@@ -113,13 +171,15 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
       if (xtermRef.current) {
         xtermRef.current.writeln(`\r\n\x1b[31mConnection failed: ${errorMsg}\x1b[0m\r\n`);
       }
-      onError?.(errorMsg);
+      onErrorRef.current?.(errorMsg);
     }
-  }, [wsUrl, token, onError]);
+  }, [wsUrl, token]);
 
   // Initialize xterm.js
   useEffect(() => {
     if (!terminalRef.current) return;
+
+    console.log('[TerminalTab] Initializing xterm.js');
 
     let terminal: any;
 
@@ -149,14 +209,14 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
       fitAddon.fit();
 
       terminal.onData((data: string) => {
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
           const encoder = new TextEncoder();
           wsRef.current.send(encoder.encode(data));
         }
       });
 
       terminal.onResize(({ cols, rows }: { cols: number; rows: number }) => {
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
           wsRef.current.send(JSON.stringify({ type: 'resize', cols, rows }));
         }
       });
@@ -164,10 +224,9 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
       xtermRef.current = terminal;
       fitAddonRef.current = fitAddon;
 
-      // Auto-connect after terminal is ready
-      if (wsUrl && token) {
-        connect();
-      }
+      console.log('[TerminalTab] xterm.js initialized, ready to connect');
+
+      // Don't auto-connect here - let the connect effect handle it
     };
 
     initTerminal();
@@ -186,9 +245,15 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
     };
   }, []);
 
-  // Connect when xterm is ready
+  // Connect when xterm is ready or wsUrl/token change
   useEffect(() => {
+    console.log('[TerminalTab] Connect effect triggered:', {
+      hasXterm: !!xtermRef.current,
+      wsUrl,
+      token: !!token,
+    });
     if (xtermRef.current && wsUrl && token) {
+      console.log('[TerminalTab] Calling connect() from effect');
       connect();
     }
   }, [connect, wsUrl, token]);
@@ -229,16 +294,8 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
     error: t('terminalError', language) || 'Error',
   };
 
-  if (!wsUrl) {
-    return (
-      <div className="d-flex align-items-center justify-content-center h-100">
-        <div className="text-center text-muted">
-          <i className="bi bi-terminal fs-1" />
-          <p className="mt-2">{t('terminalWaitingForConnection', language)}</p>
-        </div>
-      </div>
-    );
-  }
+  // Always render terminal div to allow xterm.js initialization
+  // The terminal will show "waiting for connection" state if wsUrl is empty
 
   return (
     <div className="d-flex flex-column h-100">
@@ -273,7 +330,8 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
             borderRadius: '50%',
             backgroundColor: statusColor[connectionState],
             marginRight: '6px',
-            animation: connectionState === 'connecting' ? 'pulse 1.5s ease-in-out infinite' : 'none',
+            animation:
+              connectionState === 'connecting' ? 'pulse 1.5s ease-in-out infinite' : 'none',
           }}
         />
         <span className="me-3">{statusText[connectionState]}</span>

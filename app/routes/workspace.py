@@ -1130,6 +1130,47 @@ def restore_session(session_id):
         workspace_type = session_data.get("workspace_type") or "local"
         remote_machine_id = session_data.get("remote_machine_id")
 
+        # Terminal sessions don't need project_path - they use terminalId
+        if workspace_type == "terminal":
+            # Build workspace URL for terminal session
+            machine_name = None
+            if remote_machine_id:
+                try:
+                    from app.repositories.database import Database, get_param_placeholder
+
+                    db = Database()
+                    p2 = get_param_placeholder()
+                    machine_query = (
+                        f"SELECT machine_name FROM remote_machines WHERE machine_id = {p2} LIMIT 1"
+                    )
+                    machine_row = db.fetch_one(machine_query, [remote_machine_id])
+                    if machine_row:
+                        machine_name = machine_row["machine_name"]
+                except Exception as e:
+                    logger.warning(f"Failed to look up machine name for {remote_machine_id}: {e}")
+
+            workspace_url = f"/work?workspaceType=terminal&terminalId={session_id}&machineId={remote_machine_id}"
+            if machine_name:
+                workspace_url += f"&machineName={machine_name}"
+
+            logger.info(f"Restored terminal session {session_id} (machine={remote_machine_id})")
+
+            return jsonify(
+                {
+                    "success": True,
+                    "data": {
+                        "session_id": session_id,
+                        "encoded_project_name": "",
+                        "tool_name": tool_name,
+                        "url": workspace_url,
+                        "workspace_type": "terminal",
+                        "terminal_id": session_id,
+                        "remote_machine_id": remote_machine_id,
+                        "machine_name": machine_name,
+                    },
+                }
+            )
+
         # Generate encodedProjectName based on tool
         if normalize_tool_name(tool_name) in ["qwen", "claude"]:
             # project_path may be actual path or encoded name
@@ -1184,6 +1225,28 @@ def restore_session(session_id):
             if machine_name:
                 workspace_url += f"&machineName={machine_name}"
 
+        # Add terminal parameters for terminal sessions
+        elif workspace_type == "terminal":
+            # Terminal session - use terminalId as sessionId
+            workspace_url += f"&workspaceType=terminal&terminalId={session_id}"
+            if remote_machine_id:
+                workspace_url += f"&machineId={remote_machine_id}"
+                # Look up machine name for terminal session too
+                try:
+                    from app.repositories.database import Database, get_param_placeholder
+
+                    db = Database()
+                    p2 = get_param_placeholder()
+                    machine_query = (
+                        f"SELECT machine_name FROM remote_machines WHERE machine_id = {p2} LIMIT 1"
+                    )
+                    machine_row = db.fetch_one(machine_query, [remote_machine_id])
+                    if machine_row:
+                        machine_name = machine_row["machine_name"]
+                        workspace_url += f"&machineName={machine_name}"
+                except Exception as e:
+                    logger.warning(f"Failed to look up machine name for {remote_machine_id}: {e}")
+
         logger.info(
             f"Restored session {session_id} (tool={tool_name}, project={encoded_project_name}, type={workspace_type})"
         )
@@ -1196,6 +1259,11 @@ def restore_session(session_id):
         }
         if workspace_type == "remote":
             result["workspace_type"] = "remote"
+            result["remote_machine_id"] = remote_machine_id
+            result["machine_name"] = machine_name
+        elif workspace_type == "terminal":
+            result["workspace_type"] = "terminal"
+            result["terminal_id"] = session_id
             result["remote_machine_id"] = remote_machine_id
             result["machine_name"] = machine_name
 

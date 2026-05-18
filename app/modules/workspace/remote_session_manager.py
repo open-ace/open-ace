@@ -121,6 +121,15 @@ class RemoteSessionManager:
             provider=provider,
         )
 
+        # Get CLI settings for this tool
+        cli_settings = {}
+        tool_name = "claude-code" if cli_tool == "claude-code" else "qwen-code"
+        tool_settings = self._api_key_proxy.get_cli_settings_for_tool(
+            effective_tenant_id, tool_name
+        )
+        if tool_settings:
+            cli_settings[tool_name] = tool_settings
+
         # Bind session to machine in agent manager
         self._agent_manager.bind_session(session_id, machine_id)
 
@@ -133,6 +142,7 @@ class RemoteSessionManager:
             "model": model,
             "cli_tool": cli_tool,
             "proxy_token": proxy_token,
+            "cli_settings": cli_settings,
         }
         if permission_mode:
             command["permission_mode"] = permission_mode

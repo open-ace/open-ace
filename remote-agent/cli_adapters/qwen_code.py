@@ -110,6 +110,64 @@ class QwenCodeAdapter(BaseCLIAdapter):
         """Return the executable name."""
         return self.EXECUTABLE
 
+    def build_settings(
+        self,
+        base_settings: dict,
+        api_key: str,
+        base_url: str,
+        provider_name: str = "openai",
+    ) -> dict:
+        """
+        Build complete settings.json for Qwen Code (bailian format).
+
+        Reference: ~/.qwen/settings.json.bailian format with:
+        - env: API key environment variables
+        - modelProviders: Provider-specific model configurations
+        - security: Auth type selection
+        - model: Default model selection
+
+        Args:
+            base_settings: User-configured settings (modelProviders, model, etc.)
+            api_key: Real API key from api_key_store (or proxy token)
+            base_url: Base URL for API requests
+            provider_name: Provider type (default: openai)
+
+        Returns:
+            Complete settings dict ready to write to ~/.qwen/settings.json
+        """
+        settings = base_settings.copy()
+        settings.setdefault("env", {})
+        settings.setdefault("modelProviders", {})
+        settings.setdefault("security", {"auth": {"selectedType": provider_name}})
+        settings["$version"] = 3
+
+        # Ensure target provider exists
+        settings["modelProviders"].setdefault(provider_name, [])
+
+        # Determine env key name (default based on provider)
+        env_key_name = f"{provider_name.upper()}_API_KEY"
+
+        # Process modelProviders - inject baseUrl where needed
+        for model_config in settings["modelProviders"][provider_name]:
+            # Use the model's envKey if specified
+            if "envKey" in model_config:
+                env_key_name = model_config["envKey"]
+
+            # If baseUrl not set in model config, use api_key_store's base_url
+            if "baseUrl" not in model_config:
+                model_config["baseUrl"] = base_url.rstrip("/")
+
+        # Inject the API key into env
+        settings["env"][env_key_name] = api_key
+
+        return settings
+
+    def get_settings_path(self) -> str:
+        """Return the path to Qwen Code settings.json."""
+        import os
+
+        return os.path.expanduser("~/.qwen/settings.json")
+
     # ------------------------------------------------------------------
     # Optional helpers
     # ------------------------------------------------------------------

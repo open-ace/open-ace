@@ -421,8 +421,10 @@ class WebUIManager:
             Tuple of (url, token).
         """
         if not self.config.multi_user_mode:
-            # Single-user mode: return configured URL with empty token
-            return self.config.url, ""
+            # Single-user mode: return configured URL with a generated token
+            # The token is needed for iframe auth when making cross-origin API calls
+            token = self.generate_token(user_id, 0)
+            return self.config.url, token
 
         with self._lock:
             # Check if user already has an instance

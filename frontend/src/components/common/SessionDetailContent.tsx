@@ -120,6 +120,12 @@ export const SessionDetailContent: React.FC<SessionDetailContentProps> = ({
           <div className="col-md-4">
             <small className="text-muted d-block">{t('status', language) ?? 'Status'}</small>
             <Badge variant={getStatusVariant(session.status)}>{session.status}</Badge>
+            {session.workspace_type === 'terminal' && (
+              <Badge variant="info" className="ms-1">
+                <i className="bi bi-terminal-fill me-1" />
+                Terminal
+              </Badge>
+            )}
             {session.workspace_type === 'remote' && (
               <Badge variant="info" className="ms-1">
                 <i className="bi bi-cloud-fill me-1" />

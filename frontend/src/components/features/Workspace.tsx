@@ -91,8 +91,63 @@ export const Workspace: React.FC = () => {
   // Refs for iframe elements (to send focus messages)
   const iframeRefs = useRef<Map<string, HTMLIFrameElement>>(new Map());
 
+  // Shared terminal proxy polling helper
+  const pollTerminalProxy = useCallback(
+    async (tabId: string, terminalId: string, machineId: string, maxAttempts: number = 30) => {
+      const poll = async (attempt: number) => {
+        if (terminalPollCancelRefs.current.get(tabId)) return;
+        if (attempt > maxAttempts) {
+          toast.error(
+            t('terminalError', language) || 'Terminal Error',
+            'Timed out waiting for WebSocket proxy'
+          );
+          return;
+        }
+        if (attempt > 0) await new Promise((r) => setTimeout(r, 1000));
+        if (terminalPollCancelRefs.current.get(tabId)) return;
+        try {
+          const status = await remoteApi.getTerminalStatus(terminalId, machineId);
+          const wsUrl = status.terminal.ws_url ?? '';
+          const hasProxyUrl = wsUrl.includes('localhost') || wsUrl.includes('127.0.0.1');
+          if (status.terminal.status === 'running' && hasProxyUrl) {
+            setTabs((prev) =>
+              prev.map((t) =>
+                t.id === tabId
+                  ? {
+                      ...t,
+                      terminalWsUrl: status.terminal.ws_url!,
+                      terminalToken: status.terminal.token!,
+                    }
+                  : t
+              )
+            );
+            updateStoredTab(tabId, {
+              terminalWsUrl: status.terminal.ws_url!,
+              terminalToken: status.terminal.token!,
+            });
+          } else if (status.terminal.status === 'error') {
+            toast.error(
+              t('terminalError', language) || 'Terminal Error',
+              status.terminal.error ?? 'Failed to start terminal'
+            );
+          } else {
+            poll(attempt + 1);
+          }
+        } catch {
+          poll(attempt + 1);
+        }
+      };
+      terminalPollCancelRefs.current.delete(tabId);
+      poll(0);
+    },
+    [language, t, toast]
+  );
+
   // Track terminal polling that should be cancelled on tab close
   const terminalPollCancelRefs = useRef<Map<string, boolean>>(new Map());
+
+  // Track terminal attach attempts (to avoid duplicate attach calls)
+  const terminalAttachAttemptedRefs = useRef<Map<string, boolean>>(new Map());
 
   // Fullscreen state from global store
   const workspaceFullscreen = useWorkspaceFullscreen();
@@ -116,16 +171,18 @@ export const Workspace: React.FC = () => {
         const workspaceConfig = await workspaceApi.getConfig();
         setConfig(workspaceConfig);
 
-        // If multi-user mode is enabled, get user-specific URL
-        if (workspaceConfig.enabled && workspaceConfig.multi_user_mode) {
+        // Get user-specific URL (needed for token and openace_url in both modes)
+        if (workspaceConfig.enabled) {
           setLoadingStage('startingWorkspace');
-          const userWebUIResponse = await workspaceApi.getUserWebUIUrl();
-          if (userWebUIResponse.success) {
-            setUserWebUI(userWebUIResponse);
-            setLoadingStage('ready');
-          } else {
-            setError(userWebUIResponse.error ?? 'Failed to get user workspace URL');
+          try {
+            const userWebUIResponse = await workspaceApi.getUserWebUIUrl();
+            if (userWebUIResponse.success) {
+              setUserWebUI(userWebUIResponse);
+            }
+          } catch {
+            // In single-user mode, token may not be critical for local tabs
           }
+          setLoadingStage('ready');
         } else {
           setLoadingStage('ready');
         }
@@ -367,8 +424,8 @@ export const Workspace: React.FC = () => {
         return result;
       };
 
-      // Multi-user mode: use user-specific URL with token and openace_url
-      if (config.multi_user_mode && userWebUI?.success) {
+      // Use user-specific URL with token and openace_url when available
+      if (userWebUI?.success) {
         const baseUrl = userWebUI.url;
         const token = userWebUI.token;
         const openaceUrl = userWebUI.openace_url;
@@ -438,11 +495,11 @@ export const Workspace: React.FC = () => {
 
   // Initialize tabs when config is loaded (Issue #65: Restore from store if available)
   useEffect(() => {
-    // Wait for both config and userWebUI (in multi-user mode) to be loaded
+    // Wait for config and userWebUI to be loaded
     if (!config?.enabled) return;
 
-    // In multi-user mode, wait for userWebUI to be loaded
-    if (config.multi_user_mode && !userWebUI?.success) return;
+    // Wait for userWebUI to finish loading (it's loaded in both modes now)
+    if (isLoading) return;
 
     // Skip if tabs already initialized
     if (tabsInitialized) return;
@@ -459,9 +516,14 @@ export const Workspace: React.FC = () => {
     const urlUseWebUI = searchParams.get('useWebUI');
     const urlPermissionMode = searchParams.get('permissionMode');
     // Remote workspace params from URL
-    const urlWorkspaceType = searchParams.get('workspaceType') as 'local' | 'remote' | null;
+    const urlWorkspaceType = searchParams.get('workspaceType') as
+      | 'local'
+      | 'remote'
+      | 'terminal'
+      | null;
     const urlMachineId = searchParams.get('machineId');
     const urlMachineName = searchParams.get('machineName');
+    const urlTerminalId = searchParams.get('terminalId');
     const restoreSessionId = urlSessionId ?? restoreSession;
 
     // Determine if we should restore from store or create new
@@ -483,36 +545,30 @@ export const Workspace: React.FC = () => {
             }
           : undefined;
 
-      // Build remote params from URL
+      // Build remote params from URL (only for local/remote, not terminal)
       const remoteParams:
         | { workspaceType?: 'local' | 'remote'; machineId?: string; machineName?: string }
-        | undefined = urlWorkspaceType
-        ? {
-            workspaceType: urlWorkspaceType,
-            machineId: urlMachineId ?? undefined,
-            machineName: urlMachineName ?? undefined,
-          }
-        : undefined;
+        | undefined =
+        urlWorkspaceType && urlWorkspaceType !== 'terminal'
+          ? {
+              workspaceType: urlWorkspaceType,
+              machineId: urlMachineId ?? undefined,
+              machineName: urlMachineName ?? undefined,
+            }
+          : undefined;
 
-      const effectiveUrl = getEffectiveUrl(
-        restoreSessionId,
-        urlEncodedProjectName ?? undefined,
-        urlToolName ?? undefined,
-        urlSettings,
-        remoteParams
-      );
-      if (effectiveUrl) {
+      // Handle terminal session restoration separately
+      if (urlWorkspaceType === 'terminal' && urlTerminalId && urlMachineId) {
+        // Create terminal tab
         const tab: WorkspaceTab = {
           id: generateTabId(),
           title: t('restoredSession', language),
-          url: effectiveUrl,
-          token: userWebUI?.token ?? '',
+          url: '', // Terminal tabs don't use iframe URL
+          token: '',
           sessionId: restoreSessionId,
-          encodedProjectName: urlEncodedProjectName ?? undefined,
-          toolName: urlToolName ?? undefined,
-          settings: urlSettings,
-          workspaceType: urlWorkspaceType ?? undefined,
-          machineId: urlMachineId ?? undefined,
+          tabType: 'terminal',
+          terminalId: urlTerminalId,
+          machineId: urlMachineId,
           machineName: urlMachineName ?? undefined,
           createdAt: Date.now(),
           waitingForUser: false,
@@ -521,32 +577,76 @@ export const Workspace: React.FC = () => {
         initialTabs = [tab];
         initialActiveTabId = tab.id;
 
-        // Save to store (this replaces any previous stored tabs)
+        // Save to store
         addStoredTab({
           id: tab.id,
           title: tab.title,
-          sessionId: tab.sessionId,
-          encodedProjectName: tab.encodedProjectName,
-          toolName: tab.toolName,
-          settings: tab.settings,
-          workspaceType: tab.workspaceType,
-          machineId: tab.machineId,
-          machineName: tab.machineName,
+          tabType: 'terminal',
+          terminalId: urlTerminalId,
+          machineId: urlMachineId,
+          machineName: urlMachineName ?? undefined,
           createdAt: tab.createdAt,
-          waitingForUser: tab.waitingForUser,
-          waitingType: tab.waitingType,
+          waitingForUser: false,
+          waitingType: null,
         });
+      } else {
+        // Regular session (local or remote)
+        const effectiveUrl = getEffectiveUrl(
+          restoreSessionId,
+          urlEncodedProjectName ?? undefined,
+          urlToolName ?? undefined,
+          urlSettings,
+          remoteParams
+        );
+        if (effectiveUrl) {
+          const tab: WorkspaceTab = {
+            id: generateTabId(),
+            title: t('restoredSession', language),
+            url: effectiveUrl,
+            token: userWebUI?.token ?? '',
+            sessionId: restoreSessionId,
+            encodedProjectName: urlEncodedProjectName ?? undefined,
+            toolName: urlToolName ?? undefined,
+            settings: urlSettings,
+            workspaceType:
+              urlWorkspaceType && urlWorkspaceType !== 'terminal' ? urlWorkspaceType : undefined,
+            machineId: urlMachineId ?? undefined,
+            machineName: urlMachineName ?? undefined,
+            createdAt: Date.now(),
+            waitingForUser: false,
+            waitingType: null,
+          };
+          initialTabs = [tab];
+          initialActiveTabId = tab.id;
 
-        // Clear the restore parameters after using it
-        searchParams.delete('sessionId');
-        searchParams.delete('restoreSession');
-        searchParams.delete('encodedProjectName');
-        searchParams.delete('toolName');
-        searchParams.delete('workspaceType');
-        searchParams.delete('machineId');
-        searchParams.delete('machineName');
-        setSearchParams(searchParams, { replace: true });
+          // Save to store (this replaces any previous stored tabs)
+          addStoredTab({
+            id: tab.id,
+            title: tab.title,
+            sessionId: tab.sessionId,
+            encodedProjectName: tab.encodedProjectName,
+            toolName: tab.toolName,
+            settings: tab.settings,
+            workspaceType: tab.workspaceType,
+            machineId: tab.machineId,
+            machineName: tab.machineName,
+            createdAt: tab.createdAt,
+            waitingForUser: tab.waitingForUser,
+            waitingType: tab.waitingType,
+          });
+        }
       }
+
+      // Clear the restore parameters after using it
+      searchParams.delete('sessionId');
+      searchParams.delete('restoreSession');
+      searchParams.delete('encodedProjectName');
+      searchParams.delete('toolName');
+      searchParams.delete('workspaceType');
+      searchParams.delete('machineId');
+      searchParams.delete('machineName');
+      searchParams.delete('terminalId');
+      setSearchParams(searchParams, { replace: true });
     } else if (storedTabs.length > 0) {
       // Case 2: Restore from store - regenerate URLs for each tab
       initialTabs = storedTabs.map((storedTab) => {
@@ -556,8 +656,8 @@ export const Workspace: React.FC = () => {
             ...storedTab,
             url: '',
             token: '',
-            terminalWsUrl: storedTab.terminalWsUrl ?? '',
-            terminalToken: storedTab.terminalToken ?? '',
+            terminalWsUrl: '',
+            terminalToken: '',
           };
         }
 
@@ -683,6 +783,251 @@ export const Workspace: React.FC = () => {
     }
   }, [searchParams, config, getEffectiveUrl, tabsInitialized]);
 
+  // Handle URL params for creating terminal tab directly
+  useEffect(() => {
+    const terminalParam = searchParams.get('workspaceType');
+    if (terminalParam === 'terminal' && tabsInitialized && config?.enabled) {
+      const machineId = searchParams.get('machineId');
+      const machineName = searchParams.get('machineName') ?? 'Terminal';
+
+      if (machineId) {
+        // Clear URL params
+        searchParams.delete('workspaceType');
+        searchParams.delete('machineId');
+        searchParams.delete('machineName');
+        setSearchParams(searchParams, { replace: true });
+
+        // Create terminal
+        console.log('[Terminal] Creating terminal from URL params:', { machineId, machineName });
+        remoteApi
+          .startTerminal({
+            machine_id: machineId,
+            work_dir: '',
+          })
+          .then((result) => {
+            if (result.success && result.terminal) {
+              const tabId = generateTabId();
+              const terminalId = result.terminal.terminal_id;
+              const initialWsUrl = result.terminal.ws_url || '';
+              const initialToken = result.terminal.token || '';
+
+              console.log('[Terminal] Terminal created:', {
+                terminalId,
+                wsUrl: initialWsUrl,
+                hasProxyUrl: initialWsUrl.includes('localhost'),
+              });
+
+              const newTab: WorkspaceTab = {
+                id: tabId,
+                title: `Terminal - ${machineName}`,
+                tabType: 'terminal',
+                url: '',
+                token: '',
+                createdAt: Date.now(),
+                waitingForUser: false,
+                waitingType: null,
+                workspaceType: 'remote',
+                machineId,
+                machineName,
+                terminalId,
+                terminalWsUrl: initialWsUrl,
+                terminalToken: initialToken,
+              };
+              setTabs((prev) => [...prev, newTab]);
+              setActiveTabId(tabId);
+              setStoredActiveTabId(tabId);
+
+              // Poll for terminal status until WebSocket proxy is ready
+              pollTerminalProxy(tabId, terminalId, machineId);
+            } else {
+              toast.error(t('terminalCreateFailed', language) || 'Failed to create terminal');
+            }
+          })
+          .catch((err) => {
+            console.error('[Terminal] Failed to create terminal:', err);
+            toast.error(t('terminalCreateFailed', language) || 'Failed to create terminal');
+          });
+      }
+    }
+  }, [searchParams, tabsInitialized, config, toast, language, setSearchParams, updateStoredTab]);
+
+  // Attach to existing terminal tabs (restored from localStorage)
+  // This handles browser refresh: reconnect to the same terminal session
+  useEffect(() => {
+    if (!tabsInitialized || !config?.enabled) return;
+
+    // Find terminal tabs that need attach
+    const terminalTabs = tabs.filter(
+      (t) => t.tabType === 'terminal' && t.terminalId && t.machineId
+    );
+
+    for (const tab of terminalTabs) {
+      const tabId = tab.id;
+      const terminalId = tab.terminalId!;
+      const machineId = tab.machineId!;
+
+      // Skip if already attempted attach
+      if (terminalAttachAttemptedRefs.current.get(terminalId)) continue;
+      terminalAttachAttemptedRefs.current.set(terminalId, true);
+
+      console.log('[Terminal] Attaching to existing terminal:', {
+        tabId,
+        terminalId,
+        machineId,
+      });
+
+      // Call attach API to get current ws_url and token
+      remoteApi
+        .attachTerminal({
+          terminal_id: terminalId,
+          machine_id: machineId,
+        })
+        .then((result) => {
+          if (result.success && result.terminal?.status === 'pending') {
+            // Terminal exists, poll for status
+            const pollForAttach = async (attempt: number) => {
+              if (terminalPollCancelRefs.current.get(tabId)) return;
+              if (attempt > 30) {
+                console.log('[Terminal] Attach polling timed out');
+                return;
+              }
+              if (attempt > 0) {
+                await new Promise((r) => setTimeout(r, 1000));
+              }
+              if (terminalPollCancelRefs.current.get(tabId)) return;
+              try {
+                const status = await remoteApi.getTerminalStatus(terminalId, machineId);
+                const wsUrl = status.terminal.ws_url ?? '';
+                const hasProxyUrl = wsUrl.includes('localhost') || wsUrl.includes('127.0.0.1');
+
+                console.log('[Terminal] Attach poll:', {
+                  attempt,
+                  status: status.terminal.status,
+                  wsUrl,
+                });
+
+                if (status.terminal.status === 'running' && hasProxyUrl) {
+                  // Update tab with fresh ws_url and token
+                  setTabs((prev) =>
+                    prev.map((t) =>
+                      t.id === tabId
+                        ? {
+                            ...t,
+                            terminalWsUrl: status.terminal.ws_url!,
+                            terminalToken: status.terminal.token!,
+                          }
+                        : t
+                    )
+                  );
+                  updateStoredTab(tabId, {
+                    terminalWsUrl: status.terminal.ws_url!,
+                    terminalToken: status.terminal.token!,
+                  });
+                  console.log('[Terminal] Attached successfully:', wsUrl);
+                } else if (status.terminal.status === 'error') {
+                  // Terminal exited, need to show error
+                  setTabs((prev) =>
+                    prev.map((t) =>
+                      t.id === tabId ? { ...t, terminalWsUrl: '', terminalToken: '' } : t
+                    )
+                  );
+                } else if (status.terminal.status === 'not_found') {
+                  // Terminal no longer exists on agent - create a new one
+                  console.log('[Terminal] Terminal not found on agent, creating new');
+                  try {
+                    const startResult = await remoteApi.startTerminal({
+                      machine_id: machineId,
+                      work_dir: '',
+                    });
+                    if (startResult.success && startResult.terminal) {
+                      const newTerminalId = startResult.terminal.terminal_id;
+                      const newWsUrl = startResult.terminal.ws_url || '';
+                      const newToken = startResult.terminal.token || '';
+
+                      setTabs((prev) =>
+                        prev.map((t) =>
+                          t.id === tabId
+                            ? {
+                                ...t,
+                                terminalId: newTerminalId,
+                                terminalWsUrl: newWsUrl,
+                                terminalToken: newToken,
+                              }
+                            : t
+                        )
+                      );
+                      updateStoredTab(tabId, {
+                        terminalId: newTerminalId,
+                        terminalWsUrl: newWsUrl,
+                        terminalToken: newToken,
+                      } as any);
+
+                      // Poll for proxy URL
+                      const pollNewTerminal = async (pollAttempt: number) => {
+                        if (pollAttempt > 30) return;
+                        if (terminalPollCancelRefs.current.get(tabId)) return;
+                        if (pollAttempt > 0) await new Promise((r) => setTimeout(r, 1000));
+                        if (terminalPollCancelRefs.current.get(tabId)) return;
+                        try {
+                          const newStatus = await remoteApi.getTerminalStatus(
+                            newTerminalId,
+                            machineId
+                          );
+                          const newWs = newStatus.terminal.ws_url ?? '';
+                          const hasProxy =
+                            newWs.includes('localhost') || newWs.includes('127.0.0.1');
+                          if (newStatus.terminal.status === 'running' && hasProxy) {
+                            setTabs((prev) =>
+                              prev.map((t) =>
+                                t.id === tabId
+                                  ? {
+                                      ...t,
+                                      terminalWsUrl: newStatus.terminal.ws_url!,
+                                      terminalToken: newStatus.terminal.token!,
+                                    }
+                                  : t
+                              )
+                            );
+                            updateStoredTab(tabId, {
+                              terminalWsUrl: newStatus.terminal.ws_url!,
+                              terminalToken: newStatus.terminal.token!,
+                            });
+                          } else if (newStatus.terminal.status !== 'error') {
+                            pollNewTerminal(pollAttempt + 1);
+                          }
+                        } catch {
+                          pollNewTerminal(pollAttempt + 1);
+                        }
+                      };
+                      pollNewTerminal(0);
+                    }
+                  } catch (startErr) {
+                    console.error('[Terminal] Failed to create new terminal:', startErr);
+                  }
+                } else {
+                  pollForAttach(attempt + 1);
+                }
+              } catch {
+                pollForAttach(attempt + 1);
+              }
+            };
+            terminalPollCancelRefs.current.delete(tabId);
+            pollForAttach(0);
+          } else {
+            // Terminal not found, clear ws_url
+            console.log('[Terminal] Attach failed, terminal not found');
+            setTabs((prev) =>
+              prev.map((t) => (t.id === tabId ? { ...t, terminalWsUrl: '', terminalToken: '' } : t))
+            );
+          }
+        })
+        .catch((err) => {
+          console.error('[Terminal] Attach failed:', err);
+          // Keep stored values as fallback
+        });
+    }
+  }, [tabs, tabsInitialized, config, setTabs, updateStoredTab]);
+
   // Create a new tab
   const createNewTab = useCallback(
     (
@@ -786,10 +1131,12 @@ export const Workspace: React.FC = () => {
         // Cancel any pending terminal status polling
         terminalPollCancelRefs.current.set(tabId, true);
         if (tab.terminalId && tab.machineId) {
-          remoteApi.stopTerminal({
-            terminal_id: tab.terminalId,
-            machine_id: tab.machineId,
-          }).catch((err) => console.error('Failed to stop terminal:', err));
+          remoteApi
+            .stopTerminal({
+              terminal_id: tab.terminalId,
+              machine_id: tab.machineId,
+            })
+            .catch((err) => console.error('Failed to stop terminal:', err));
         }
         doCloseTab(tabId);
         return;
@@ -1307,10 +1654,7 @@ export const Workspace: React.FC = () => {
                     style={{ minWidth: 0 }}
                   >
                     {tab.tabType === 'terminal' ? (
-                      <i
-                        className="bi bi-terminal-fill text-warning me-1"
-                        title="Terminal"
-                      />
+                      <i className="bi bi-terminal-fill text-warning me-1" title="Terminal" />
                     ) : tab.workspaceType === 'remote' ? (
                       <i
                         className="bi bi-cloud-fill text-primary me-1"
@@ -1430,9 +1774,154 @@ export const Workspace: React.FC = () => {
                 token={tab.terminalToken ?? ''}
                 isActive={activeTabId === tab.id}
                 machineName={tab.machineName}
+                terminalId={tab.terminalId}
+                machineId={tab.machineId}
                 onError={(error) => {
                   console.error('Terminal error:', error);
                   toast.error(t('terminalError', language), error);
+                }}
+                onAuthFailed={() => {
+                  setTabs((prev) =>
+                    prev.map((t) =>
+                      t.id === tab.id ? { ...t, terminalWsUrl: '', terminalToken: '' } : t
+                    )
+                  );
+                  if (tab.terminalId) {
+                    terminalAttachAttemptedRefs.current.delete(tab.terminalId);
+                  }
+                }}
+                onReattachNeeded={() => {
+                  if (tab.terminalId && tab.machineId) {
+                    console.log('[Terminal] Reattach needed, calling attach_terminal API');
+                    // Reset reconnect counter
+                    terminalAttachAttemptedRefs.current.delete(tab.terminalId);
+                    // Clear current wsUrl/token
+                    setTabs((prev) =>
+                      prev.map((t) =>
+                        t.id === tab.id ? { ...t, terminalWsUrl: '', terminalToken: '' } : t
+                      )
+                    );
+                    // Call attach_terminal API to restart terminal_server if needed
+                    remoteApi
+                      .attachTerminal({
+                        terminal_id: tab.terminalId,
+                        machine_id: tab.machineId,
+                      })
+                      .then((result) => {
+                        console.log('[Terminal] Attach result:', result);
+                        if (result.success && result.terminal?.status === 'pending') {
+                          // Poll for new ws_url
+                          const pollForReattach = async (attempt: number) => {
+                            if (attempt > 30) {
+                              console.log('[Terminal] Reattach polling timed out');
+                              return;
+                            }
+                            if (terminalPollCancelRefs.current.get(tab.id)) return;
+                            if (attempt > 0) {
+                              await new Promise((r) => setTimeout(r, 1000));
+                            }
+                            if (terminalPollCancelRefs.current.get(tab.id)) return;
+                            try {
+                              const status = await remoteApi.getTerminalStatus(
+                                tab.terminalId!,
+                                tab.machineId!
+                              );
+                              const wsUrl = status.terminal.ws_url ?? '';
+                              const hasProxyUrl =
+                                wsUrl.includes('localhost') || wsUrl.includes('127.0.0.1');
+                              if (status.terminal.status === 'running' && hasProxyUrl) {
+                                setTabs((prev) =>
+                                  prev.map((t) =>
+                                    t.id === tab.id
+                                      ? {
+                                          ...t,
+                                          terminalWsUrl: status.terminal.ws_url!,
+                                          terminalToken: status.terminal.token!,
+                                        }
+                                      : t
+                                  )
+                                );
+                                updateStoredTab(tab.id, {
+                                  terminalWsUrl: status.terminal.ws_url!,
+                                  terminalToken: status.terminal.token!,
+                                });
+                                console.log('[Terminal] Reattached successfully:', wsUrl);
+                              } else if (
+                                status.terminal.status === 'not_found' ||
+                                status.terminal.status === 'error'
+                              ) {
+                                // Terminal gone, need to create new one
+                                console.log('[Terminal] Terminal not found, creating new');
+                                remoteApi
+                                  .startTerminal({
+                                    machine_id: tab.machineId!,
+                                    work_dir: '',
+                                  })
+                                  .then((newResult) => {
+                                    if (newResult.success && newResult.terminal) {
+                                      const newTerminalId = newResult.terminal.terminal_id;
+                                      setTabs((prev) =>
+                                        prev.map((t) =>
+                                          t.id === tab.id
+                                            ? {
+                                                ...t,
+                                                terminalId: newTerminalId,
+                                                terminalWsUrl: newResult.terminal?.ws_url ?? '',
+                                                terminalToken: newResult.terminal?.token ?? '',
+                                              }
+                                            : t
+                                        )
+                                      );
+                                      updateStoredTab(tab.id, {
+                                        terminalId: newTerminalId,
+                                        terminalWsUrl: newResult.terminal?.ws_url || '',
+                                        terminalToken: newResult.terminal?.token || '',
+                                      });
+                                    }
+                                  });
+                              } else {
+                                pollForReattach(attempt + 1);
+                              }
+                            } catch {
+                              pollForReattach(attempt + 1);
+                            }
+                          };
+                          pollForReattach(0);
+                        } else if (result.terminal?.status === 'not_found') {
+                          // Terminal gone, create new
+                          console.log('[Terminal] Terminal not found, creating new');
+                          remoteApi
+                            .startTerminal({
+                              machine_id: tab.machineId!,
+                              work_dir: '',
+                            })
+                            .then((newResult) => {
+                              if (newResult.success && newResult.terminal) {
+                                const newTerminalId = newResult.terminal.terminal_id;
+                                const newWsUrl = newResult.terminal.ws_url || '';
+                                const newToken = newResult.terminal.token || '';
+                                setTabs((prev) =>
+                                  prev.map((t) =>
+                                    t.id === tab.id
+                                      ? {
+                                          ...t,
+                                          terminalId: newTerminalId,
+                                          terminalWsUrl: newWsUrl,
+                                          terminalToken: newToken,
+                                        }
+                                      : t
+                                  )
+                                );
+                                updateStoredTab(tab.id, {
+                                  terminalId: newTerminalId,
+                                  terminalWsUrl: newWsUrl,
+                                  terminalToken: newToken,
+                                });
+                              }
+                            });
+                        }
+                      });
+                  }
                 }}
               />
             ) : (
@@ -1660,7 +2149,15 @@ export const Workspace: React.FC = () => {
             if (result.success && result.terminal) {
               const tabId = generateTabId();
               const terminalId = result.terminal.terminal_id;
-              const isPending = result.terminal.status === 'pending';
+              const initialWsUrl = result.terminal.ws_url || '';
+              const initialToken = result.terminal.token || '';
+
+              console.log('[Terminal] Created terminal:', {
+                terminalId,
+                initialWsUrl,
+                initialToken,
+                hasProxyUrl: initialWsUrl.includes('localhost'),
+              });
 
               const newTab: WorkspaceTab = {
                 id: tabId,
@@ -1699,59 +2196,16 @@ export const Workspace: React.FC = () => {
               addStoredTab(storeTab);
               setStoredActiveTabId(tabId);
 
-              // Poll for terminal status if pending
-              if (isPending) {
-                terminalPollCancelRefs.current.delete(tabId);
-                const pollStatus = async (attempt: number) => {
-                  if (terminalPollCancelRefs.current.get(tabId)) return;
-                  if (attempt > 20) {
-                    toast.error(
-                      t('terminalError', language) || 'Terminal Error',
-                      'Timed out waiting for terminal to start'
-                    );
-                    return;
-                  }
-                  await new Promise((r) => setTimeout(r, 1000));
-                  if (terminalPollCancelRefs.current.get(tabId)) return;
-                  try {
-                    const status = await remoteApi.getTerminalStatus(terminalId, params.machineId);
-                    if (status.terminal.status === 'running' && status.terminal.ws_url) {
-                      setTabs((prev) =>
-                        prev.map((t) =>
-                          t.id === tabId
-                            ? { ...t, terminalWsUrl: status.terminal.ws_url!, terminalToken: status.terminal.token! }
-                            : t
-                        )
-                      );
-                      updateStoredTab(tabId, {
-                        terminalWsUrl: status.terminal.ws_url!,
-                        terminalToken: status.terminal.token!,
-                      });
-                    } else if (status.terminal.status === 'error') {
-                      toast.error(
-                        t('terminalError', language) || 'Terminal Error',
-                        status.terminal.error || 'Failed to start terminal'
-                      );
-                    } else {
-                      pollStatus(attempt + 1);
-                    }
-                  } catch {
-                    pollStatus(attempt + 1);
-                  }
-                };
-                pollStatus(0);
-              }
+              // Poll for terminal status until WebSocket proxy is ready
+              pollTerminalProxy(tabId, terminalId, params.machineId);
             } else {
               toast.error(
                 t('terminalError', language) || 'Terminal Error',
-                result.error || 'Failed to start terminal'
+                result.error ?? 'Failed to start terminal'
               );
             }
           } catch (err) {
-            toast.error(
-              t('terminalError', language) || 'Terminal Error',
-              (err as Error).message
-            );
+            toast.error(t('terminalError', language) || 'Terminal Error', (err as Error).message);
           }
         }}
       />

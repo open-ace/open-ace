@@ -764,6 +764,7 @@ const translations: Record<Language, Translations> = {
 
     // API Key Management
     addApiKey: 'Add API Key',
+    editApiKey: 'Edit API Key',
     deleteApiKey: 'Delete API Key',
     deleteApiKeyConfirm: 'Are you sure you want to delete this API key?',
     provider: 'Provider',
@@ -776,6 +777,17 @@ const translations: Record<Language, Translations> = {
     noApiKeys: 'No API keys configured',
     noApiKeysDescription: 'Add API keys to enable LLM proxy for remote agents.',
     keyStatus: 'Status',
+    cliTools: 'CLI Tools',
+    cliToolsDescription: 'Select which CLI tools this API key should configure settings for.',
+    claudeCodeSettings: 'Claude Code Settings (JSON)',
+    claudeCodeSettingsHint:
+      'Paste ~/.claude/settings.json content (without sensitive AUTH_TOKEN). System will inject API key automatically.',
+    qwenCodeSettings: 'Qwen Code Settings (JSON)',
+    qwenCodeSettingsHint:
+      'Paste ~/.qwen/settings.json content (without env API keys). System will inject API key automatically.',
+    claudeSettingsInvalid: 'Claude Code settings JSON is invalid',
+    qwenSettingsInvalid: 'Qwen Code settings JSON is invalid',
+    providerCannotChange: 'Provider cannot be changed',
 
     // Help Documents
     gettingStarted: 'Getting Started',
@@ -791,7 +803,8 @@ const translations: Record<Language, Translations> = {
     terminalWorkspace: 'Terminal',
     terminalError: 'Terminal Error',
     terminalWaitingForConnection: 'Waiting for terminal connection...',
-    terminalInfoHint: 'Opens a web terminal on the remote machine. Claude Code is pre-configured with proxy authentication.',
+    terminalInfoHint:
+      'Opens a web terminal on the remote machine. Claude Code is pre-configured with proxy authentication.',
     terminalConnecting: 'Connecting...',
     terminalConnected: 'Connected',
     terminalDisconnected: 'Disconnected',
@@ -1556,6 +1569,7 @@ const translations: Record<Language, Translations> = {
 
     // API 密钥管理
     addApiKey: '添加 API 密钥',
+    editApiKey: '编辑 API 密钥',
     deleteApiKey: '删除 API 密钥',
     deleteApiKeyConfirm: '确定要删除此 API 密钥吗？',
     provider: '提供商',
@@ -1568,6 +1582,17 @@ const translations: Record<Language, Translations> = {
     noApiKeys: '暂无已配置的 API 密钥',
     noApiKeysDescription: '添加 API 密钥以启用远程 Agent 的 LLM 代理功能。',
     keyStatus: '状态',
+    cliTools: 'CLI 工具',
+    cliToolsDescription: '选择此 API 密钥应为其配置设置的 CLI 工具。',
+    claudeCodeSettings: 'Claude Code 设置 (JSON)',
+    claudeCodeSettingsHint:
+      '粘贴 ~/.claude/settings.json 内容（不含敏感 AUTH_TOKEN），系统将自动注入 API 密钥。',
+    qwenCodeSettings: 'Qwen Code 设置 (JSON)',
+    qwenCodeSettingsHint:
+      '粘贴 ~/.qwen/settings.json 内容（不含环境变量 API 密钥），系统将自动注入 API 密钥。',
+    claudeSettingsInvalid: 'Claude Code 设置 JSON 无效',
+    qwenSettingsInvalid: 'Qwen Code 设置 JSON 无效',
+    providerCannotChange: '提供商不可更改',
 
     // 帮助文档
     gettingStarted: '快速上手',
@@ -2089,7 +2114,8 @@ const translations: Record<Language, Translations> = {
     terminalWorkspace: 'ターミナル',
     terminalError: 'ターミナルエラー',
     terminalWaitingForConnection: 'ターミナル接続を待機中...',
-    terminalInfoHint: 'リモートマシンでWebターミナルを開きます。Claude Codeはプロキシ認証で事前設定されています。',
+    terminalInfoHint:
+      'リモートマシンでWebターミナルを開きます。Claude Codeはプロキシ認証で事前設定されています。',
     terminalConnecting: '接続中...',
     terminalConnected: '接続済み',
     terminalDisconnected: '切断',
@@ -2595,7 +2621,8 @@ const translations: Record<Language, Translations> = {
     terminalWorkspace: '터미널',
     terminalError: '터미널 오류',
     terminalWaitingForConnection: '터미널 연결 대기 중...',
-    terminalInfoHint: '원격 머신에서 웹 터미널을 엽니다. Claude Code는 프록시 인증으로 사전 구성되어 있습니다.',
+    terminalInfoHint:
+      '원격 머신에서 웹 터미널을 엽니다. Claude Code는 프록시 인증으로 사전 구성되어 있습니다.',
     terminalConnecting: '연결 중...',
     terminalConnected: '연결됨',
     terminalDisconnected: '연결 끊김',
