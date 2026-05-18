@@ -161,7 +161,7 @@ export const APIKeyManagement: React.FC = () => {
       provider: key.provider,
       key_name: key.key_name,
       api_key: '', // Don't show existing key
-      base_url: key.base_url || '',
+      base_url: key.base_url ?? '',
       cli_tools: cliTools,
       claude_settings: claudeSettings,
       qwen_settings: qwenSettings,
@@ -366,7 +366,7 @@ export const APIKeyManagement: React.FC = () => {
             </thead>
             <tbody>
               {keys.map((key) => {
-                const cliTools = parsedCliTools.get(key.id) || [];
+                const cliTools = parsedCliTools.get(key.id) ?? [];
                 return (
                   <tr key={key.id}>
                     <td>

@@ -29,11 +29,7 @@ interface NewSessionModalProps {
     sessionId: string;
     projectPath: string;
   }) => void;
-  onCreateTerminal?: (params: {
-    machineId: string;
-    machineName: string;
-    workDir: string;
-  }) => void;
+  onCreateTerminal?: (params: { machineId: string; machineName: string; workDir: string }) => void;
 }
 
 export const NewSessionModal: React.FC<NewSessionModalProps> = ({
@@ -298,7 +294,9 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
             <>
               {/* Working directory for terminal */}
               <div className="mb-3">
-                <label className="form-label">{t('terminalWorkDir', language) || 'Working Directory'}</label>
+                <label className="form-label">
+                  {t('terminalWorkDir', language) || 'Working Directory'}
+                </label>
                 <input
                   type="text"
                   className="form-control"
