@@ -13,6 +13,7 @@ import { t } from '@/i18n';
 import { usePrompts, usePromptCategories, useCopyPrompt } from '@/hooks';
 import type { PromptTemplate } from '@/api/prompts';
 import { Loading, EmptyState, SimpleTabs, useToast, Tooltip } from '@/components/common';
+import { copyToClipboard } from '@/utils';
 import { DocumentViewer } from './DocumentViewer';
 import { PromptDetailModal } from './PromptDetailModal';
 import './AssistPanel.css';
@@ -158,14 +159,13 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
     e.stopPropagation();
     if (hasRequiredVariables(prompt)) return;
 
-    try {
-      await navigator.clipboard.writeText(prompt.content);
+    const success = await copyToClipboard(prompt.content);
+    if (success) {
       await copyPromptMutation.mutateAsync(prompt.id);
       setCopiedPromptId(prompt.id);
       setTimeout(() => setCopiedPromptId(null), 1500);
       toast.success(t('copied', language), prompt.name);
-    } catch (err) {
-      console.error('Failed to copy:', err);
+    } else {
       toast.error(t('copyFailed', language) || 'Copy failed');
     }
   };

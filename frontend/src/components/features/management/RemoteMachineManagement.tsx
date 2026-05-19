@@ -22,11 +22,22 @@ import {
 import { useLanguage } from '@/store';
 import type { Language } from '@/i18n';
 import { t } from '@/i18n';
-import { Button, Modal, Select, Loading, Error, EmptyState, Badge } from '@/components/common';
+import {
+  Button,
+  Modal,
+  Select,
+  Loading,
+  Error,
+  EmptyState,
+  Badge,
+  useToast,
+} from '@/components/common';
 import type { RemoteMachine } from '@/api';
+import { copyToClipboard } from '@/utils';
 
 export const RemoteMachineManagement: React.FC = () => {
   const language = useLanguage();
+  const toast = useToast();
   const { data: machinesData, isLoading, isError, error, refetch } = useMachines();
   const generateToken = useGenerateToken();
   const deregisterMachine = useDeregisterMachine();
@@ -71,44 +82,13 @@ export const RemoteMachineManagement: React.FC = () => {
     }
   };
 
-  // Fallback copy function for HTTP environments where clipboard API is blocked
-  const copyToClipboard = async (text: string): Promise<boolean> => {
-    try {
-      // Try modern clipboard API first (requires HTTPS or localhost)
-      if (navigator.clipboard && window.isSecureContext) {
-        await navigator.clipboard.writeText(text);
-        return true;
-      }
-    } catch {
-      // Clipboard API failed, try fallback
-    }
-
-    // Fallback: use execCommand with a temporary textarea
-    const textarea = document.createElement('textarea');
-    textarea.value = text;
-    textarea.style.position = 'fixed';
-    textarea.style.left = '-9999px';
-    textarea.style.top = '0';
-    textarea.setAttribute('readonly', '');
-    document.body.appendChild(textarea);
-    textarea.focus();
-    textarea.select();
-
-    try {
-      const success = document.execCommand('copy');
-      document.body.removeChild(textarea);
-      return success;
-    } catch {
-      document.body.removeChild(textarea);
-      return false;
-    }
-  };
-
   const handleCopyToken = async () => {
     const success = await copyToClipboard(generatedToken);
     if (success) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    } else {
+      toast.error(t('copyFailed', language) || 'Copy failed');
     }
   };
 
@@ -130,6 +110,8 @@ export const RemoteMachineManagement: React.FC = () => {
     if (success) {
       setCopiedInstall(true);
       setTimeout(() => setCopiedInstall(false), 2000);
+    } else {
+      toast.error(t('copyFailed', language) || 'Copy failed');
     }
   };
 
@@ -216,6 +198,8 @@ export const RemoteMachineManagement: React.FC = () => {
     if (success) {
       setCopiedUninstall(true);
       setTimeout(() => setCopiedUninstall(false), 2000);
+    } else {
+      toast.error(t('copyFailed', language) || 'Copy failed');
     }
   };
 
