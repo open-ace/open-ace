@@ -65,15 +65,15 @@ def collect_custom_envkeys(
     return env_overrides
 
 
-def normalize_model_providers(settings: dict) -> None:
+def normalize_model_providers(settings: dict, proxy_base_url: str = "") -> None:
     """
     Normalize modelProviders in-place: unify all envKeys to
-    OPENAI_API_KEY and remove baseUrl entries.
+    OPENAI_API_KEY and set baseUrl to the LLM proxy endpoint.
 
-    This ensures the CLI reads credentials from the standard
-    OPENAI_API_KEY / OPENAI_BASE_URL env vars injected by the agent,
-    rather than user-configured custom keys or external baseUrls that
-    would bypass the LLM proxy.
+    When *proxy_base_url* is provided, every model entry's ``baseUrl``
+    is set to that value so the CLI connects through the proxy
+    regardless of any user-configured external URL.  When empty, any
+    existing ``baseUrl`` is removed as a fallback.
 
     Only ``envKey`` and ``baseUrl`` fields are touched; all other
     model configuration (id, name, generationConfig, etc.) and
@@ -92,7 +92,10 @@ def normalize_model_providers(settings: dict) -> None:
             if "envKey" in model:
                 model["envKey"] = "OPENAI_API_KEY"
             # Intentionally modify dict values (not keys) during iteration.
-            model.pop("baseUrl", None)
+            if proxy_base_url:
+                model["baseUrl"] = proxy_base_url
+            else:
+                model.pop("baseUrl", None)
 
 
 class BaseCLIAdapter(abc.ABC):

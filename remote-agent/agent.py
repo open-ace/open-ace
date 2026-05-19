@@ -1037,8 +1037,10 @@ class RemoteAgent:
             merged["$version"] = 3
 
         # Normalize modelProviders: unify all envKeys to OPENAI_API_KEY
-        # and remove baseUrl entries so the CLI uses the proxy via env vars.
-        normalize_model_providers(merged)
+        # and set baseUrl to the LLM proxy so the CLI routes all
+        # requests through the proxy.
+        proxy_base_url = f"{self.config.server_url.rstrip('/')}/api/remote/llm-proxy/v1"
+        normalize_model_providers(merged, proxy_base_url=proxy_base_url)
 
         # Atomic write via temp file + rename
         self._atomic_write_json(str(settings_path), merged)
