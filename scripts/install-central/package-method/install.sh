@@ -245,15 +245,15 @@ check_build_dependencies_remote() {
 # Check and install PostgreSQL client (psql) for schema execution
 check_psql_client() {
     print_info "Checking PostgreSQL client (psql)..."
-    
+
     # Check if psql is available
     if command -v psql >/dev/null 2>&1; then
         print_success "psql client already installed"
         return 0
     fi
-    
+
     print_info "psql client not found, installing..."
-    
+
     # Check if running as root
     if [ "$EUID" -ne 0 ]; then
         print_error "Root privileges required to install PostgreSQL client"
@@ -262,7 +262,7 @@ check_psql_client() {
         print_info "  Ubuntu/Debian: apt install postgresql-client"
         return 1
     fi
-    
+
     # Install PostgreSQL client based on OS
     if command -v apt-get >/dev/null 2>&1; then
         apt-get update -qq && apt-get install -y postgresql-client
@@ -274,7 +274,7 @@ check_psql_client() {
         print_error "Unsupported package manager"
         return 1
     fi
-    
+
     print_success "PostgreSQL client installed"
 }
 
@@ -282,20 +282,20 @@ check_psql_client() {
 check_psql_client_remote() {
     local remote="$1"
     print_info "Checking PostgreSQL client on $remote..."
-    
+
     # Check if psql is available on remote
     local has_psql=$(ssh "$remote" "command -v psql >/dev/null 2>&1 && echo yes || echo no")
-    
+
     if [ "$has_psql" = "yes" ]; then
         print_success "psql client already installed on $remote"
         return 0
     fi
-    
+
     print_info "psql client not found on $remote, installing..."
-    
+
     # Determine remote package manager
     local remote_pkg=$(ssh "$remote" "command -v apt-get >/dev/null 2>&1 && echo apt || (command -v dnf >/dev/null 2>&1 && echo dnf) || (command -v yum >/dev/null 2>&1 && echo yum) || echo unknown")
-    
+
     ssh "$remote" "
         if [ '$remote_pkg' = 'apt' ]; then
             sudo apt-get update -qq && sudo apt-get install -y postgresql-client
@@ -312,7 +312,7 @@ check_psql_client_remote() {
         print_info "Please ensure sudo is available on remote, or install manually"
         return 1
     }
-    
+
     print_success "PostgreSQL client installed on $remote"
 }
 # User Detection and Creation
@@ -1693,7 +1693,8 @@ $run_user ALL=(ALL) NOPASSWD: /usr/bin/test, /usr/bin/ls, /usr/bin/cat, /usr/bin
 $fetch_sudoers
 
 # Preserve auth environment variables for qwen CLI authentication
-Defaults env_keep += \"OPENAI_API_KEY OPENAI_BASE_URL BAILIAN_CODING_PLAN_API_KEY ANTHROPIC_API_KEY ANTHROPIC_BASE_URL GEMINI_API_KEY GEMINI_BASE_URL OPENCLAW_TOKEN OPENCLAW_GATEWAY_URL\"
+# and webui environment variables for sudo env_keep passing
+Defaults env_keep += \"OPENAI_API_KEY OPENAI_BASE_URL BAILIAN_CODING_PLAN_API_KEY ANTHROPIC_API_KEY ANTHROPIC_BASE_URL GEMINI_API_KEY GEMINI_BASE_URL OPENCLAW_TOKEN OPENCLAW_GATEWAY_URL OPENACE_LOG_DIR SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS PATH\"
 "
 
     # Check if sudoers file already exists
