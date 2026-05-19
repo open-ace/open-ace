@@ -242,7 +242,6 @@ class TestAssistantMessageAccumulation(unittest.TestCase):
         self.assertEqual(self.mock_agent_mgr.buffer_output.call_count, 2)
 
 
-
 class TestSystemMessageInStdout(unittest.TestCase):
     """Test system messages sent via stdout stream (JSON format).
 
@@ -399,7 +398,6 @@ class TestSystemMessageInStdout(unittest.TestCase):
         parsed = json.loads(stored_content)
         self.assertEqual(parsed["key"], "value")
 
-
     def test_init_message_preserves_content_field(self):
         """Init message with content field preserves it in stored content."""
         self._send_output(
@@ -534,5 +532,3 @@ class TestSystemMessageInStdout(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-

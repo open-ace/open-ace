@@ -17,7 +17,7 @@
  */
 export async function copyToClipboard(text: string): Promise<boolean> {
   // Early return for empty/invalid content
-  if (!text || typeof text !== "string") {
+  if (!text || typeof text !== 'string') {
     return false;
   }
 
@@ -33,21 +33,21 @@ export async function copyToClipboard(text: string): Promise<boolean> {
 
   // Fallback: use execCommand with a temporary textarea element
   // This works in HTTP environments where clipboard API is blocked
-  const textarea = document.createElement("textarea");
+  const textarea = document.createElement('textarea');
   textarea.value = text;
 
   // Make textarea invisible but still functional
-  textarea.style.position = "fixed";
-  textarea.style.left = "-9999px";
-  textarea.style.top = "0";
-  textarea.style.width = "2em";
-  textarea.style.height = "2em";
-  textarea.style.padding = "0";
-  textarea.style.border = "none";
-  textarea.style.outline = "none";
-  textarea.style.boxShadow = "none";
-  textarea.style.background = "transparent";
-  textarea.setAttribute("readonly", ""); // Prevent mobile keyboard popup
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  textarea.style.top = '0';
+  textarea.style.width = '2em';
+  textarea.style.height = '2em';
+  textarea.style.padding = '0';
+  textarea.style.border = 'none';
+  textarea.style.outline = 'none';
+  textarea.style.boxShadow = 'none';
+  textarea.style.background = 'transparent';
+  textarea.setAttribute('readonly', ''); // Prevent mobile keyboard popup
 
   document.body.appendChild(textarea);
 
@@ -70,7 +70,7 @@ export async function copyToClipboard(text: string): Promise<boolean> {
       textarea.select();
     }
 
-    success = document.execCommand("copy");
+    success = document.execCommand('copy');
   } catch {
     success = false;
   }
