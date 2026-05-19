@@ -290,8 +290,7 @@ def extract_content_from_entry(entry: dict) -> Optional[str]:
 
 
 def extract_content_blocks_from_entry(
-    entry: dict,
-    function_call_indices: Optional[dict[str, int]] = None
+    entry: dict, function_call_indices: Optional[dict[str, int]] = None
 ) -> list[dict]:
     """Extract structured content_blocks from a Qwen log entry.
 
@@ -349,16 +348,17 @@ def extract_content_blocks_from_entry(
             fc = part.get("functionCall", {})
             # Generate a tool_use_id using entry uuid + idx
             tool_id = f"{entry.get('uuid', 'unknown')}-{idx}"
-            content_blocks.append({
-                "type": "tool_use",
-                "id": tool_id,
-                "name": fc.get("name", "unknown"),
-                "input": fc.get("args", {})
-            })
+            content_blocks.append(
+                {
+                    "type": "tool_use",
+                    "id": tool_id,
+                    "name": fc.get("name", "unknown"),
+                    "input": fc.get("args", {}),
+                }
+            )
 
         # 4. Tool result
         elif part.get("type") == "tool":
-            tool_name = part.get("name", "")
             tool_content = part.get("content", "")
             parent_uuid = entry.get("parentUuid", "unknown")
             entry_uuid = entry.get("uuid", "")
@@ -372,12 +372,17 @@ def extract_content_blocks_from_entry(
             else:
                 # Fallback: use idx from tool_result parts (may not match)
                 tool_use_id = f"{parent_uuid}-{idx}"
-            content_blocks.append({
-                "type": "tool_result",
-                "tool_use_id": tool_use_id,
-                "content": tool_content if isinstance(tool_content, str)
-                           else json.dumps(tool_content, ensure_ascii=False)
-            })
+            content_blocks.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": tool_use_id,
+                    "content": (
+                        tool_content
+                        if isinstance(tool_content, str)
+                        else json.dumps(tool_content, ensure_ascii=False)
+                    ),
+                }
+            )
 
         # 5. Image/Document (as text placeholder)
         elif part.get("type") == "image":
@@ -583,7 +588,9 @@ def process_jsonl_file(
                                     "parent_id": entry.get("parent_id"),
                                     "role": role,
                                     "content": content or "",
-                                    "content_blocks": extract_content_blocks_from_entry(entry, function_call_indices),  # Issue #357: structured content
+                                    "content_blocks": extract_content_blocks_from_entry(
+                                        entry, function_call_indices
+                                    ),  # Issue #357: structured content
                                     "full_entry": full_entry_json,
                                     "tokens_used": total_tokens,
                                     "input_tokens": input_tokens,
@@ -978,7 +985,9 @@ def update_agent_sessions_stats(messages: list) -> int:
                             metadata = {
                                 "message_id": msg_id,
                                 "project_path": msg.get("project_path"),
-                                "content_blocks": msg.get("content_blocks"),  # Issue #357: structured content for session detail view
+                                "content_blocks": msg.get(
+                                    "content_blocks"
+                                ),  # Issue #357: structured content for session detail view
                             }
                             _execute(
                                 cursor,
