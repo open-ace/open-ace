@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 import requests
+from cli_adapters.base import normalize_model_providers
 from constants import SENSITIVE_ENV_KEYS, collect_dynamic_env_keys
 from executor import ProcessExecutor
 from session_sync import SessionSyncService
@@ -1034,6 +1035,10 @@ class RemoteAgent:
         # Ensure $version is set for Qwen settings format
         if "$version" not in merged:
             merged["$version"] = 3
+
+        # Normalize modelProviders: unify all envKeys to OPENAI_API_KEY
+        # and remove baseUrl entries so the CLI uses the proxy via env vars.
+        normalize_model_providers(merged)
 
         # Atomic write via temp file + rename
         self._atomic_write_json(str(settings_path), merged)

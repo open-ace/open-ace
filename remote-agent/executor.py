@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
 from cli_adapters import get_adapter
+from cli_adapters.base import collect_custom_envkeys
 
 if TYPE_CHECKING:
     from cli_adapters.base import BaseCLIAdapter
@@ -619,6 +620,17 @@ class ProcessExecutor:
 
         if model:
             env["OPENACE_MODEL"] = model
+
+        # Fallback: read settings to inject any custom envKeys that
+        # modelProviders may reference (e.g. BAILIAN_CODING_PLAN_API_KEY).
+        # Normally _write_qwen_settings normalizes envKey → OPENAI_API_KEY,
+        # but this catches cases where settings were edited after that step.
+        try:
+            settings_path = adapter.get_settings_path()
+            if settings_path:
+                env.update(collect_custom_envkeys(settings_path, proxy_token))
+        except Exception:
+            pass  # Non-critical fallback; proxy token is already set via adapter
 
         return env
 

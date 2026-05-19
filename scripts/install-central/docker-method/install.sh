@@ -241,7 +241,7 @@ install_qwen_code_webui() {
     # Install qwen-code-webui
     if npm install -g qwen-code-webui 2>&1; then
         print_success "qwen-code-webui 安装完成"
-        
+
         # Verify installation
         if command -v qwen-code-webui &>/dev/null; then
             local webui_path=$(which qwen-code-webui)
@@ -435,6 +435,9 @@ configure_sudoers() {
 
 $RUN_USER ALL=(ALL) NOPASSWD: $webui_path *
 $RUN_USER ALL=(ALL) NOPASSWD: /usr/bin/test, /usr/bin/ls, /usr/bin/cat, /usr/bin/stat, /usr/bin/mkdir
+
+# Preserve environment variables for sudo env_keep passing
+Defaults env_keep += \"OPENAI_API_KEY OPENAI_BASE_URL BAILIAN_CODING_PLAN_API_KEY ANTHROPIC_API_KEY ANTHROPIC_BASE_URL GEMINI_API_KEY GEMINI_BASE_URL OPENCLAW_TOKEN OPENCLAW_GATEWAY_URL OPENACE_LOG_DIR SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS PATH\"
 "
 
     # Check if sudoers file already exists
@@ -909,16 +912,16 @@ install_nodejs_redhat() {
         print_warning "官方源连接失败，尝试使用清华镜像..."
         if ! sudo curl -fsSL "$domestic_mirror_url" -o /etc/yum.repos.d/nodesource.repo 2>/dev/null; then
             print_warning "镜像源也失败，尝试使用系统模块化安装..."
-            
+
             # Try dnf module install for Rocky/RHEL 9+ (supports nodejs 18/20/22/24)
             if command -v dnf &>/dev/null; then
                 # Check available nodejs modules
                 print_info "检查可用的 Node.js 模块版本..."
                 local module_versions=$(dnf module list nodejs --quiet 2>/dev/null | grep -E "^\s*nodejs" | awk '{print $2}' | sort -V)
-                
+
                 if [ -n "$module_versions" ]; then
                     print_info "可用版本: $module_versions"
-                    
+
                     # Try to install the target version first
                     for target_version in "$NODEJS_VERSION" "20" "18"; do
                         if echo "$module_versions" | grep -q "^${target_version}"; then
@@ -941,7 +944,7 @@ install_nodejs_redhat() {
                     done
                 fi
             fi
-            
+
             # Fallback to yum install (may install older version)
             print_warning "模块安装失败，尝试系统自带版本..."
             sudo yum install -y nodejs npm
