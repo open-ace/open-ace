@@ -265,6 +265,106 @@ interface OutputSegment {
 }
 
 /**
+ * Error message friendly mapping (Issue #140)
+ * Converts technical CLI error messages to user-friendly descriptions.
+ * Each entry maps to friendly messages in all supported languages.
+ */
+const ERROR_FRIENDLY_MESSAGES: Record<string, { en: string; zh: string; ja: string; ko: string }> =
+  {
+    'Model stream ended with empty response text': {
+      en: 'API response interrupted. Please check your network connection and try again.',
+      zh: 'API 响应中断，请检查网络连接后重试。',
+      ja: 'API応答が中断されました。ネットワーク接続を確認して再試行してください。',
+      ko: 'API 응답이 중단되었습니다. 네트워크 연결을 확인하고 다시 시도하세요.',
+    },
+    'Model stream ended unexpectedly': {
+      en: 'Model stream response terminated unexpectedly. Please try again.',
+      zh: '模型流式响应异常终止，请重试。',
+      ja: 'モデルストリーム応答が予期せず終了しました。再試行してください。',
+      ko: '모델 스트림 응답이 예기치 않게 종료되었습니다. 다시 시도하세요.',
+    },
+    'Connection timeout': {
+      en: 'API connection timed out. Please check your network and try again.',
+      zh: 'API 连接超时，请检查网络后重试。',
+      ja: 'API接続がタイムアウトしました。ネットワークを確認して再試行してください。',
+      ko: 'API 연결 시간이 초과되었습니다. 네트워크를 확인하고 다시 시도하세요.',
+    },
+    'Rate limit exceeded': {
+      en: 'API rate limit reached. Please wait a moment and try again.',
+      zh: 'API 请求频率已达上限，请稍后重试。',
+      ja: 'APIレート制限に達しました。少し待ってから再試行してください。',
+      ko: 'API 요청 제한에 도달했습니다. 잠시 후 다시 시도하세요.',
+    },
+    'Network error': {
+      en: 'Network connection error. Please check your internet and try again.',
+      zh: '网络连接错误，请检查网络后重试。',
+      ja: 'ネットワーク接続エラー。インターネット接続を確認して再試行してください。',
+      ko: '네트워크 연결 오류. 인터넷 연결을 확인하고 다시 시도하세요.',
+    },
+    'Authentication failed': {
+      en: 'API authentication failed. Please check your API key settings.',
+      zh: 'API 认证失败，请检查 API 密钥设置。',
+      ja: 'API認証に失敗しました。APIキー設定を確認してください。',
+      ko: 'API 인증 실패. API 키 설정을 확인하세요.',
+    },
+    'Model not found': {
+      en: 'The specified model is not available. Please check your model settings.',
+      zh: '指定的模型不可用，请检查模型设置。',
+      ja: '指定されたモデルは利用できません。モデル設定を確認してください。',
+      ko: '지정된 모델을 사용할 수 없습니다. 모델 설정을 확인하세요.',
+    },
+  };
+
+/**
+ * Error keyword mapping for fuzzy matching (Issue #140)
+ * Maps keywords to the corresponding friendly message key.
+ * Used when exact match fails but error contains recognizable keywords.
+ */
+const ERROR_KEYWORDS: Record<string, string[]> = {
+  'Model stream ended with empty response text': ['empty response', 'stream ended', 'empty stream'],
+  'Model stream ended unexpectedly': ['stream ended', 'stream terminated', 'unexpectedly ended'],
+  'Connection timeout': ['timeout', 'timed out', 'connection timeout'],
+  'Rate limit exceeded': ['rate limit', 'limit exceeded', 'too many requests'],
+  'Network error': ['network error', 'connection refused', 'network failed'],
+  'Authentication failed': ['authentication', 'auth failed', 'invalid key', 'api key'],
+  'Model not found': ['model not found', 'unknown model', 'invalid model'],
+};
+
+/**
+ * Get user-friendly error message (Issue #140)
+ * Converts technical CLI error messages to user-friendly descriptions.
+ * Falls back to original message if no friendly version is available.
+ *
+ * @param originalError - The original error message from CLI
+ * @param language - Current language setting
+ * @returns User-friendly error message or original if no mapping exists
+ */
+function getFriendlyErrorMessage(originalError: string, language: Language): string {
+  // Try exact match first
+  const friendlyMessage = ERROR_FRIENDLY_MESSAGES[originalError];
+  if (friendlyMessage) {
+    return friendlyMessage[language] || friendlyMessage.en;
+  }
+
+  // Try keyword-based fuzzy match (more reliable than simple string containment)
+  const lowerError = originalError.toLowerCase();
+  for (const [targetKey, keywords] of Object.entries(ERROR_KEYWORDS)) {
+    for (const keyword of keywords) {
+      if (lowerError.includes(keyword.toLowerCase())) {
+        const targetMessage = ERROR_FRIENDLY_MESSAGES[targetKey];
+        if (targetMessage) {
+          return targetMessage[language] || targetMessage.en;
+        }
+      }
+    }
+  }
+
+  // No friendly version available, return original message
+  // The error will still be displayed with error styling and icon
+  return originalError;
+}
+
+/**
  * Determine output status based on content (Issue #354)
  * Note: Status is determined by content analysis only, not by message completion state.
  * - tool_use blocks represent "actions being performed" → in_progress
@@ -309,7 +409,7 @@ function generateSegmentKey(timestamp: string, text: string, index: number): str
 
 /**
  * Parse qwen CLI stream-json output line into displayable segments.
- * Enhanced with status detection for Issue #354.
+ * Enhanced with status detection for Issue #354 and error friendly messages for Issue #140.
  *
  * The stream-json format produces JSON lines with these types:
  * - system/init: session initialization metadata → skip
@@ -319,11 +419,14 @@ function generateSegmentKey(timestamp: string, text: string, index: number): str
  * Key insight: A message may contain multiple tool_use blocks. We display them as "in_progress"
  * because they represent actions being performed. The final "completed" status is only shown
  * when we see a successful "result" type (but we don't add extra "Completed" text to avoid redundancy).
+ *
+ * Issue #140: CLI error messages are converted to user-friendly descriptions.
  */
 function parseStreamJsonLine(
   data: string,
   timestamp: string,
-  segmentIndex: number
+  segmentIndex: number,
+  language: Language
 ): OutputSegment[] {
   const trimmed = data.trim();
   if (!trimmed) return [];
@@ -431,14 +534,16 @@ function parseStreamJsonLine(
   if (msgType === 'result') {
     const subtype = parsed.subtype as string;
     if (subtype === 'error') {
-      const error = (parsed.error as string) || (parsed.result as string) || 'Unknown error';
+      const rawError = (parsed.error as string) || (parsed.result as string) || 'Unknown error';
+      // Issue #140: Convert CLI error message to user-friendly description
+      const friendlyError = getFriendlyErrorMessage(rawError, language);
       return [
         {
-          text: `Error: ${error}`,
+          text: friendlyError,
           type: 'error',
           status: 'error',
           timestamp,
-          key: generateSegmentKey(timestamp, `error-${error}`, segmentIndex),
+          key: generateSegmentKey(timestamp, `error-${rawError}`, segmentIndex),
         },
       ];
     }
@@ -479,6 +584,7 @@ const RemoteOutputSection: React.FC<{ sessionId: string; language: Language }> =
 
   // Parse all output entries into displayable segments with timestamps and status
   // Code review fix: access output inside useMemo to avoid creating new array per render
+  // Issue #140: Pass language for error friendly messages
   const displaySegments = useMemo(() => {
     const output = remoteData?.session?.output;
     if (!output) return [];
@@ -488,14 +594,14 @@ const RemoteOutputSection: React.FC<{ sessionId: string; language: Language }> =
     for (const entry of output) {
       // Only process stdout entries (skip stderr noise)
       if (entry.stream === 'stderr') continue;
-      const parsed = parseStreamJsonLine(entry.data, entry.timestamp, globalIdx);
+      const parsed = parseStreamJsonLine(entry.data, entry.timestamp, globalIdx, language);
       for (const seg of parsed) {
         segments.push(seg);
         globalIdx++;
       }
     }
     return segments;
-  }, [remoteData?.session?.output]);
+  }, [remoteData?.session?.output, language]);
 
   // Auto-scroll to bottom only when user is near the bottom
   useEffect(() => {
