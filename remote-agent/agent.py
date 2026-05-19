@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 import requests
+from cli_adapters.base import normalize_model_providers
 from constants import SENSITIVE_ENV_KEYS, collect_dynamic_env_keys
 from executor import ProcessExecutor
 from session_sync import SessionSyncService
@@ -1037,19 +1038,7 @@ class RemoteAgent:
 
         # Normalize modelProviders: unify all envKeys to OPENAI_API_KEY
         # and remove baseUrl entries so the CLI uses the proxy via env vars.
-        # This prevents user-configured custom envKeys (e.g. BAILIAN_CODING_PLAN_API_KEY)
-        # or external baseUrls from bypassing the LLM proxy.
-        providers = merged.get("modelProviders", {})
-        if isinstance(providers, dict):
-            for _auth_type, models in providers.items():
-                if not isinstance(models, list):
-                    continue
-                for model in models:
-                    if not isinstance(model, dict):
-                        continue
-                    if "envKey" in model:
-                        model["envKey"] = "OPENAI_API_KEY"
-                    model.pop("baseUrl", None)
+        normalize_model_providers(merged)
 
         # Atomic write via temp file + rename
         self._atomic_write_json(str(settings_path), merged)

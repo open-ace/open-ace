@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
 from cli_adapters import get_adapter
+from cli_adapters.base import collect_custom_envkeys
 
 if TYPE_CHECKING:
     from cli_adapters.base import BaseCLIAdapter
@@ -626,19 +627,8 @@ class ProcessExecutor:
         # but this catches cases where settings were edited after that step.
         try:
             settings_path = adapter.get_settings_path()
-            if settings_path and os.path.isfile(settings_path):
-                with open(settings_path, encoding="utf-8") as f:
-                    settings_data = json.load(f)
-                providers = settings_data.get("modelProviders", {})
-                if isinstance(providers, dict):
-                    for _auth_type, models_list in providers.items():
-                        if not isinstance(models_list, list):
-                            continue
-                        for entry in models_list:
-                            if isinstance(entry, dict):
-                                custom_key = entry.get("envKey")
-                                if custom_key and custom_key != "OPENAI_API_KEY":
-                                    env[custom_key] = proxy_token
+            if settings_path:
+                env.update(collect_custom_envkeys(settings_path, proxy_token))
         except Exception:
             pass  # Non-critical fallback; proxy token is already set via adapter
 
