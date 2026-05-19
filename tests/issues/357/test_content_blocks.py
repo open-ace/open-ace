@@ -36,11 +36,7 @@ def test_user_message_text():
     entry = {
         "type": "user",
         "uuid": "user-uuid-001",
-        "message": {
-            "parts": [
-                {"text": "Hello, how are you?"}
-            ]
-        }
+        "message": {"parts": [{"text": "Hello, how are you?"}]},
     }
     result = extract_content_blocks_from_entry(entry)
     assert len(result) == 1, f"Expected 1 block, got {len(result)}"
@@ -58,9 +54,9 @@ def test_user_message_multiple_parts():
         "message": {
             "parts": [
                 {"text": "Check this image:"},
-                {"type": "image", "url": "http://example.com/img.png"}
+                {"type": "image", "url": "http://example.com/img.png"},
             ]
-        }
+        },
     }
     result = extract_content_blocks_from_entry(entry)
     assert len(result) == 2, f"Expected 2 blocks, got {len(result)}"
@@ -77,11 +73,7 @@ def test_assistant_message_text_only():
     entry = {
         "type": "assistant",
         "uuid": "assistant-uuid-001",
-        "message": {
-            "parts": [
-                {"text": "I can help you with that."}
-            ]
-        }
+        "message": {"parts": [{"text": "I can help you with that."}]},
     }
     result = extract_content_blocks_from_entry(entry)
     assert len(result) == 1
@@ -99,9 +91,9 @@ def test_assistant_message_with_thinking():
         "message": {
             "parts": [
                 {"thought": True, "text": "Let me think about this..."},
-                {"text": "Here's my answer."}
+                {"text": "Here's my answer."},
             ]
-        }
+        },
     }
     result = extract_content_blocks_from_entry(entry)
     assert len(result) == 2, f"Expected 2 blocks, got {len(result)}"
@@ -121,9 +113,9 @@ def test_assistant_message_with_function_call():
         "message": {
             "parts": [
                 {"text": "Let me check the file."},
-                {"functionCall": {"name": "read_file", "args": {"path": "/tmp/test.py"}}}
+                {"functionCall": {"name": "read_file", "args": {"path": "/tmp/test.py"}}},
             ]
-        }
+        },
     }
     result = extract_content_blocks_from_entry(entry)
     assert len(result) == 2, f"Expected 2 blocks, got {len(result)}"
@@ -144,9 +136,14 @@ def test_assistant_message_multiple_function_calls():
         "message": {
             "parts": [
                 {"functionCall": {"name": "read_file", "args": {"path": "a.py"}}},
-                {"functionCall": {"name": "write_file", "args": {"path": "b.py", "content": "test"}}}
+                {
+                    "functionCall": {
+                        "name": "write_file",
+                        "args": {"path": "b.py", "content": "test"},
+                    }
+                },
             ]
-        }
+        },
     }
     result = extract_content_blocks_from_entry(entry)
     assert len(result) == 2
@@ -169,10 +166,8 @@ def test_tool_result_message_with_correct_id_linking():
         "uuid": "tool-result-001",
         "parentUuid": "assistant-uuid-003",  # Links to the assistant message
         "message": {
-            "parts": [
-                {"type": "tool", "name": "read_file", "content": "File contents here..."}
-            ]
-        }
+            "parts": [{"type": "tool", "name": "read_file", "content": "File contents here..."}]
+        },
     }
     # function_call_indices tells us that functionCall is at idx=1 in parent assistant
     function_call_indices = {"tool-result-001": 1}
@@ -193,10 +188,8 @@ def test_tool_result_message_without_function_call_indices():
         "uuid": "tool-result-001",
         "parentUuid": "assistant-uuid-003",
         "message": {
-            "parts": [
-                {"type": "tool", "name": "read_file", "content": "File contents here..."}
-            ]
-        }
+            "parts": [{"type": "tool", "name": "read_file", "content": "File contents here..."}]
+        },
     }
     # Without function_call_indices, uses fallback (may not match exactly)
     result = extract_content_blocks_from_entry(entry)
@@ -217,7 +210,7 @@ def test_tool_result_with_dict_content():
             "parts": [
                 {"type": "tool", "name": "list_files", "content": {"files": ["a.py", "b.py"]}}
             ]
-        }
+        },
     }
     # functionCall is at idx=0 in parent (simplified scenario)
     function_call_indices = {"tool-result-002": 0}
@@ -236,11 +229,8 @@ def test_empty_text_skipped():
         "type": "assistant",
         "uuid": "assistant-uuid-006",
         "message": {
-            "parts": [
-                {"text": ""},  # Empty text - should be skipped
-                {"text": "Valid text"}
-            ]
-        }
+            "parts": [{"text": ""}, {"text": "Valid text"}]  # Empty text - should be skipped
+        },
     }
     result = extract_content_blocks_from_entry(entry)
     assert len(result) == 1, f"Expected 1 block (empty skipped), got {len(result)}"
@@ -257,9 +247,9 @@ def test_empty_thinking_skipped():
         "message": {
             "parts": [
                 {"thought": True, "text": ""},  # Empty thinking - should be skipped
-                {"text": "Result"}
+                {"text": "Result"},
             ]
-        }
+        },
     }
     result = extract_content_blocks_from_entry(entry)
     assert len(result) == 1
@@ -270,10 +260,7 @@ def test_empty_thinking_skipped():
 
 def test_no_message_field():
     """Test entry without message field."""
-    entry = {
-        "type": "assistant",
-        "uuid": "assistant-uuid-008"
-    }
+    entry = {"type": "assistant", "uuid": "assistant-uuid-008"}
     result = extract_content_blocks_from_entry(entry)
     assert result == []
 
@@ -282,11 +269,7 @@ def test_no_message_field():
 
 def test_no_parts_field():
     """Test message without parts field."""
-    entry = {
-        "type": "assistant",
-        "uuid": "assistant-uuid-009",
-        "message": {}
-    }
+    entry = {"type": "assistant", "uuid": "assistant-uuid-009", "message": {}}
     result = extract_content_blocks_from_entry(entry)
     assert result == []
 
@@ -298,9 +281,7 @@ def test_non_dict_parts():
     entry = {
         "type": "assistant",
         "uuid": "assistant-uuid-010",
-        "message": {
-            "parts": ["string part", 123, None]  # Non-dict elements
-        }
+        "message": {"parts": ["string part", 123, None]},  # Non-dict elements
     }
     result = extract_content_blocks_from_entry(entry)
     assert result == [], f"Expected empty list for non-dict parts, got {result}"
@@ -313,11 +294,7 @@ def test_document_placeholder():
     entry = {
         "type": "user",
         "uuid": "user-uuid-003",
-        "message": {
-            "parts": [
-                {"type": "document", "name": "report.pdf"}
-            ]
-        }
+        "message": {"parts": [{"type": "document", "name": "report.pdf"}]},
     }
     result = extract_content_blocks_from_entry(entry)
     assert len(result) == 1
@@ -331,11 +308,7 @@ def test_missing_uuid_fallback():
     """Test fallback when uuid is missing."""
     entry = {
         "type": "assistant",
-        "message": {
-            "parts": [
-                {"functionCall": {"name": "test_tool", "args": {}}}
-            ]
-        }
+        "message": {"parts": [{"functionCall": {"name": "test_tool", "args": {}}}]},
     }
     result = extract_content_blocks_from_entry(entry)
     assert len(result) == 1
@@ -350,11 +323,7 @@ def test_missing_parent_uuid_fallback():
     entry = {
         "type": "tool_result",
         "uuid": "tool-result-003",
-        "message": {
-            "parts": [
-                {"type": "tool", "name": "test", "content": "result"}
-            ]
-        }
+        "message": {"parts": [{"type": "tool", "name": "test", "content": "result"}]},
     }
     result = extract_content_blocks_from_entry(entry)
     assert len(result) == 1
