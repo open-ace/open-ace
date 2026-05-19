@@ -1695,7 +1695,11 @@ create_config() {
         local backup_file="${config_file}.bak.${backup_timestamp}"
         print_info "备份现有配置文件到: $backup_file"
         if cp "$config_file" "$backup_file"; then
+            # 设置备份文件权限为 600（仅 owner 可读写），保护敏感信息
+            chmod 600 "$backup_file"
             print_success "配置文件备份成功"
+            # 清理超过 7 天的旧备份文件
+            find "$DEPLOY_DIR/config" -name "config.json.bak.*" -mtime +7 -delete 2>/dev/null || true
         else
             print_error "配置文件备份失败，停止覆盖操作"
             return 1
