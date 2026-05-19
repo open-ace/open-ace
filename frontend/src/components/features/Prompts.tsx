@@ -3,7 +3,7 @@
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { cn } from '@/utils';
+import { cn, copyToClipboard } from '@/utils';
 import { promptsApi } from '@/api';
 import type { PromptTemplate, PromptVariable } from '@/api';
 import {
@@ -721,9 +721,13 @@ const RenderModal: React.FC<RenderModalProps> = ({
     }
   };
 
-  const handleCopy = () => {
+  const handleCopy = async () => {
     if (result) {
-      navigator.clipboard.writeText(result);
+      const success = await copyToClipboard(result);
+      if (!success) {
+        // Optionally show error toast if copy fails
+        console.error('Failed to copy to clipboard');
+      }
     }
   };
 

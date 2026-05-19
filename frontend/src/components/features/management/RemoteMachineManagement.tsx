@@ -24,6 +24,7 @@ import type { Language } from '@/i18n';
 import { t } from '@/i18n';
 import { Button, Modal, Select, Loading, Error, EmptyState, Badge } from '@/components/common';
 import type { RemoteMachine } from '@/api';
+import { copyToClipboard } from '@/utils';
 
 export const RemoteMachineManagement: React.FC = () => {
   const language = useLanguage();
@@ -68,39 +69,6 @@ export const RemoteMachineManagement: React.FC = () => {
       setShowTokenDialog(true);
     } catch (err) {
       console.error('Failed to generate token:', err);
-    }
-  };
-
-  // Fallback copy function for HTTP environments where clipboard API is blocked
-  const copyToClipboard = async (text: string): Promise<boolean> => {
-    try {
-      // Try modern clipboard API first (requires HTTPS or localhost)
-      if (navigator.clipboard && window.isSecureContext) {
-        await navigator.clipboard.writeText(text);
-        return true;
-      }
-    } catch {
-      // Clipboard API failed, try fallback
-    }
-
-    // Fallback: use execCommand with a temporary textarea
-    const textarea = document.createElement('textarea');
-    textarea.value = text;
-    textarea.style.position = 'fixed';
-    textarea.style.left = '-9999px';
-    textarea.style.top = '0';
-    textarea.setAttribute('readonly', '');
-    document.body.appendChild(textarea);
-    textarea.focus();
-    textarea.select();
-
-    try {
-      const success = document.execCommand('copy');
-      document.body.removeChild(textarea);
-      return success;
-    } catch {
-      document.body.removeChild(textarea);
-      return false;
     }
   };
 

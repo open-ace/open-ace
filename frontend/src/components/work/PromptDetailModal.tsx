@@ -9,6 +9,7 @@ import { promptsApi } from '@/api';
 import type { PromptTemplate, PromptVariable } from '@/api/prompts';
 import { useCopyPrompt } from '@/hooks';
 import { Modal, useToast } from '@/components/common';
+import { copyToClipboard } from '@/utils';
 
 interface PromptDetailModalProps {
   isOpen: boolean;
@@ -102,8 +103,8 @@ export const PromptDetailModal: React.FC<PromptDetailModalProps> = ({
     const contentToCopy = hasVariables && hasRendered ? renderedContent : (prompt?.content ?? '');
     if (!contentToCopy) return;
 
-    try {
-      await navigator.clipboard.writeText(contentToCopy);
+    const success = await copyToClipboard(contentToCopy);
+    if (success) {
       if (prompt) {
         await copyPromptMutation.mutateAsync(prompt.id);
       }
@@ -111,8 +112,7 @@ export const PromptDetailModal: React.FC<PromptDetailModalProps> = ({
       setTimeout(() => {
         onClose();
       }, 800);
-    } catch (err) {
-      console.error('Failed to copy:', err);
+    } else {
       toast.error(t('copyFailed', language) || 'Copy failed');
     }
   };
