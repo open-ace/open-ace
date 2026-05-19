@@ -39,7 +39,8 @@ class TestNormalizeModelProviders:
         normalize_model_providers(settings)
         assert settings["modelProviders"]["openai"][0]["envKey"] == "OPENAI_API_KEY"
 
-    def test_removes_base_url(self):
+    def test_removes_base_url_when_no_proxy(self):
+        """Without proxy_base_url, baseUrl is removed."""
         settings = {
             "modelProviders": {
                 "openai": [
@@ -53,6 +54,32 @@ class TestNormalizeModelProviders:
         }
         normalize_model_providers(settings)
         assert "baseUrl" not in settings["modelProviders"]["openai"][0]
+
+    def test_sets_base_url_to_proxy(self):
+        """With proxy_base_url, baseUrl is set to the proxy URL."""
+        settings = {
+            "modelProviders": {
+                "openai": [
+                    {
+                        "envKey": "OPENAI_API_KEY",
+                        "id": "gpt-4o",
+                        "baseUrl": "https://api.openai.com/v1",
+                    }
+                ]
+            }
+        }
+        proxy_url = "http://192.168.64.1:5001/api/remote/llm-proxy/v1"
+        normalize_model_providers(settings, proxy_base_url=proxy_url)
+        assert settings["modelProviders"]["openai"][0]["baseUrl"] == proxy_url
+
+    def test_adds_base_url_when_missing_with_proxy(self):
+        """Model entries without baseUrl get it added when proxy_base_url is set."""
+        settings = {
+            "modelProviders": {"openai": [{"envKey": "CUSTOM_KEY", "id": "glm-5", "name": "glm-5"}]}
+        }
+        proxy_url = "http://192.168.64.1:5001/api/remote/llm-proxy/v1"
+        normalize_model_providers(settings, proxy_base_url=proxy_url)
+        assert settings["modelProviders"]["openai"][0]["baseUrl"] == proxy_url
 
     def test_preserves_other_fields(self):
         settings = {
@@ -99,6 +126,20 @@ class TestNormalizeModelProviders:
         assert settings["modelProviders"]["openai"][0]["envKey"] == "OPENAI_API_KEY"
         assert settings["modelProviders"]["anthropic"][0]["envKey"] == "OPENAI_API_KEY"
         assert "baseUrl" not in settings["modelProviders"]["anthropic"][0]
+
+    def test_multiple_providers_with_proxy(self):
+        settings = {
+            "modelProviders": {
+                "openai": [{"envKey": "KEY_A", "id": "model-a"}],
+                "anthropic": [
+                    {"envKey": "KEY_B", "id": "model-b", "baseUrl": "https://api.anthropic.com"}
+                ],
+            }
+        }
+        proxy_url = "http://proxy/v1"
+        normalize_model_providers(settings, proxy_base_url=proxy_url)
+        assert settings["modelProviders"]["openai"][0]["baseUrl"] == proxy_url
+        assert settings["modelProviders"]["anthropic"][0]["baseUrl"] == proxy_url
 
     def test_multiple_models_per_provider(self):
         settings = {
