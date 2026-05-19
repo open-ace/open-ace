@@ -138,9 +138,9 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
     setNewDirName('');
     // Show info message instead of error - feature not yet available
     setError(
-      (t('createDirNotAvailable', language) ||
+      t('createDirNotAvailable', language) ||
         'Create directory on remote machine is not yet available. ' +
-        'Please create the directory on the remote machine first, then enter the path here.')
+          'Please create the directory on the remote machine first, then enter the path here.'
     );
   };
 
