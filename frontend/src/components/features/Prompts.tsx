@@ -26,6 +26,7 @@ import {
   Modal,
   TextInput,
   Textarea,
+  useToast,
 } from '@/components/common';
 import type { BadgeVariant } from '@/components/common';
 
@@ -700,6 +701,7 @@ const RenderModal: React.FC<RenderModalProps> = ({
 }) => {
   const [variables, setVariables] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(false);
+  const toast = useToast();
 
   // Reset variables when modal opens
   useEffect(() => {
@@ -724,9 +726,10 @@ const RenderModal: React.FC<RenderModalProps> = ({
   const handleCopy = async () => {
     if (result) {
       const success = await copyToClipboard(result);
-      if (!success) {
-        // Optionally show error toast if copy fails
-        console.error('Failed to copy to clipboard');
+      if (success) {
+        toast.success(t('copied', language));
+      } else {
+        toast.error(t('copyFailed', language) || 'Copy failed');
       }
     }
   };

@@ -241,7 +241,7 @@ install_qwen_code_webui() {
     # Install qwen-code-webui
     if npm install -g qwen-code-webui 2>&1; then
         print_success "qwen-code-webui 安装完成"
-        
+
         # Verify installation
         if command -v qwen-code-webui &>/dev/null; then
             local webui_path=$(which qwen-code-webui)
@@ -435,6 +435,9 @@ configure_sudoers() {
 
 $RUN_USER ALL=(ALL) NOPASSWD: $webui_path *
 $RUN_USER ALL=(ALL) NOPASSWD: /usr/bin/test, /usr/bin/ls, /usr/bin/cat, /usr/bin/stat, /usr/bin/mkdir
+
+# Preserve environment variables for sudo env_keep passing
+Defaults env_keep += \"OPENAI_API_KEY OPENAI_BASE_URL BAILIAN_CODING_PLAN_API_KEY ANTHROPIC_API_KEY ANTHROPIC_BASE_URL GEMINI_API_KEY GEMINI_BASE_URL OPENCLAW_TOKEN OPENCLAW_GATEWAY_URL OPENACE_LOG_DIR SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS PATH\"
 "
 
     # Check if sudoers file already exists
@@ -909,16 +912,16 @@ install_nodejs_redhat() {
         print_warning "官方源连接失败，尝试使用清华镜像..."
         if ! sudo curl -fsSL "$domestic_mirror_url" -o /etc/yum.repos.d/nodesource.repo 2>/dev/null; then
             print_warning "镜像源也失败，尝试使用系统模块化安装..."
-            
+
             # Try dnf module install for Rocky/RHEL 9+ (supports nodejs 18/20/22/24)
             if command -v dnf &>/dev/null; then
                 # Check available nodejs modules
                 print_info "检查可用的 Node.js 模块版本..."
                 local module_versions=$(dnf module list nodejs --quiet 2>/dev/null | grep -E "^\s*nodejs" | awk '{print $2}' | sort -V)
-                
+
                 if [ -n "$module_versions" ]; then
                     print_info "可用版本: $module_versions"
-                    
+
                     # Try to install the target version first
                     for target_version in "$NODEJS_VERSION" "20" "18"; do
                         if echo "$module_versions" | grep -q "^${target_version}"; then
@@ -941,7 +944,7 @@ install_nodejs_redhat() {
                     done
                 fi
             fi
-            
+
             # Fallback to yum install (may install older version)
             print_warning "模块安装失败，尝试系统自带版本..."
             sudo yum install -y nodejs npm
@@ -1628,18 +1631,34 @@ create_directories() {
     print_info "  - $user_home/workspace"
 
     # Create tool directories based on configuration
+    # Warn if directories already exist (may contain user settings)
     if [ "$QWEN_ENABLED" = "true" ]; then
-        mkdir -p "$user_home/.qwen"
+        if [ -d "$user_home/.qwen" ]; then
+            print_warning ".qwen 目录已存在: $user_home/.qwen"
+            print_info "  该目录可能包含 settings.json 等用户配置，请注意保护"
+        else
+            mkdir -p "$user_home/.qwen"
+        fi
         print_info "  - $user_home/.qwen"
     fi
 
     if [ "$CLAUDE_ENABLED" = "true" ]; then
-        mkdir -p "$user_home/.claude"
+        if [ -d "$user_home/.claude" ]; then
+            print_warning ".claude 目录已存在: $user_home/.claude"
+            print_info "  该目录可能包含 settings.json 等用户配置，请注意保护"
+        else
+            mkdir -p "$user_home/.claude"
+        fi
         print_info "  - $user_home/.claude"
     fi
 
     if [ "$OPENCLAW_ENABLED" = "true" ]; then
-        mkdir -p "$user_home/.openclaw"
+        if [ -d "$user_home/.openclaw" ]; then
+            print_warning ".openclaw 目录已存在: $user_home/.openclaw"
+            print_info "  该目录可能包含 openclaw.json 等用户配置，请注意保护"
+        else
+            mkdir -p "$user_home/.openclaw"
+        fi
         print_info "  - $user_home/.openclaw"
     fi
 
@@ -1664,10 +1683,26 @@ create_config() {
 
     if [ -f "$config_file" ]; then
         print_warning "配置文件已存在: $config_file"
-        prompt_yesno "是否覆盖?" "y" overwrite_config
+        # 默认不覆盖，保护已有配置（非交互模式下也会保留）
+        prompt_yesno "是否覆盖?" "n" overwrite_config
         if [ "$overwrite_config" = "no" ]; then
             print_info "保留现有配置文件"
             return
+        fi
+
+        # 备份现有配置文件
+        local backup_timestamp=$(date +"%Y%m%d_%H%M%S")
+        local backup_file="${config_file}.bak.${backup_timestamp}"
+        print_info "备份现有配置文件到: $backup_file"
+        if cp "$config_file" "$backup_file"; then
+            # 设置备份文件权限为 600（仅 owner 可读写），保护敏感信息
+            chmod 600 "$backup_file"
+            print_success "配置文件备份成功"
+            # 清理超过 7 天的旧备份文件
+            find "$DEPLOY_DIR/config" -name "config.json.bak.*" -mtime +7 -delete 2>/dev/null || true
+        else
+            print_error "配置文件备份失败，停止覆盖操作"
+            return 1
         fi
     fi
 
@@ -2226,6 +2261,44 @@ show_deployment_info() {
     print_warning "请妥善保管 $DEPLOY_DIR/.env 文件中的敏感信息！"
 }
 
+# Check for existing config files and warn user before deployment
+check_existing_config() {
+    local config_file="$DEPLOY_DIR/config/config.json"
+    local user_home="/home/$RUN_USER"
+    local qwen_settings="$user_home/.qwen/settings.json"
+    local claude_settings="$user_home/.claude/settings.json"
+    local openclaw_settings="$user_home/.openclaw/openclaw.json"
+    local has_existing_config=false
+
+    if [ -f "$config_file" ]; then
+        print_warning "检测到已存在的配置文件: $config_file"
+        print_info "  重新运行安装脚本时，默认不会覆盖已有配置"
+        has_existing_config=true
+    fi
+
+    if [ "$QWEN_ENABLED" = "true" ] && [ -f "$qwen_settings" ]; then
+        print_warning "检测到已存在的 Qwen 配置: $qwen_settings"
+        print_info "  该文件包含 API key 等敏感信息，请注意保护"
+        has_existing_config=true
+    fi
+
+    if [ "$CLAUDE_ENABLED" = "true" ] && [ -f "$claude_settings" ]; then
+        print_warning "检测到已存在的 Claude 配置: $claude_settings"
+        has_existing_config=true
+    fi
+
+    if [ "$OPENCLAW_ENABLED" = "true" ] && [ -f "$openclaw_settings" ]; then
+        print_warning "检测到已存在的 OpenClaw 配置: $openclaw_settings"
+        has_existing_config=true
+    fi
+
+    if [ "$has_existing_config" = true ]; then
+        echo ""
+        print_info "提示: 如需覆盖配置，请在后续步骤中明确选择覆盖选项"
+        echo ""
+    fi
+}
+
 # ============================================================================
 # Main
 # ============================================================================
@@ -2424,6 +2497,8 @@ if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
 fi
 
 # Execute deployment
+# Check for existing config files and warn user before deployment
+check_existing_config
 create_directories
 
 # Check for existing PostgreSQL data volume BEFORE creating config files

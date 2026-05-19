@@ -359,7 +359,7 @@ def extract_content_blocks_from_entry(
 
         # 4. Tool result
         elif part.get("type") == "tool":
-            tool_name = part.get("name", "")
+            _tool_name = part.get("name", "")  # noqa: F841
             tool_content = part.get("content", "")
             parent_uuid = entry.get("parentUuid", "unknown")
             entry_uuid = entry.get("uuid", "")

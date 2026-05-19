@@ -24,6 +24,9 @@ import struct
 import sys
 import termios
 import urllib.parse
+from pathlib import Path
+
+from cli_adapters.base import collect_custom_envkeys
 
 try:
     import websockets
@@ -318,6 +321,15 @@ def _build_env() -> dict[str, str]:
         if OPENAI_TOKEN:
             env["OPENAI_API_KEY"] = OPENAI_TOKEN
             env["OPENAI_BASE_URL"] = PROXY_URL
+
+            # Fallback: inject custom envKeys from qwen settings
+            # (e.g. BAILIAN_CODING_PLAN_API_KEY) so the proxy token
+            # is available regardless of which envKey the CLI reads.
+            try:
+                settings_path = Path.home() / ".qwen" / "settings.json"
+                env.update(collect_custom_envkeys(settings_path, OPENAI_TOKEN))
+            except Exception:
+                pass  # Non-critical fallback
     env["TERM"] = "xterm-256color"
     # Pass terminal ID to child processes for accurate session-terminal association
     if TERMINAL_ID:

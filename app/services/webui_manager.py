@@ -622,17 +622,12 @@ class WebUIManager:
             ]
             cwd = webui_dir
         elif self._platform in ("linux", "darwin"):
-            # Linux/macOS: use sudo -u with env to pass environment variables
-            # Note: Must set child_env and webui_log_dir BEFORE this point
+            # Linux/macOS: use sudo -u for global executable
+            # Environment variables are passed via sudoers env_keep configuration
             cmd = [
                 "sudo",
                 "-u",
                 system_account,
-                "env",
-                f"OPENACE_LOG_DIR={webui_log_dir}",
-                f"SESSION_TIMEOUT_MS={child_env['SESSION_TIMEOUT_MS']}",
-                f"KEEPALIVE_INTERVAL_MS={child_env['KEEPALIVE_INTERVAL_MS']}",
-                f"PATH={child_env['PATH']}",
                 webui_cmd,
                 "--port",
                 str(port),
@@ -676,7 +671,7 @@ class WebUIManager:
                 cmd,
                 start_new_session=True,  # Detach from parent process group
                 cwd=cwd,
-                env=child_env,  # Note: ignored for sudo; vars passed via 'env' cmd above
+                env=child_env,  # Passed to sudo; preserved via sudoers env_keep
                 stdout=log_fd,
                 stderr=subprocess.STDOUT,
             )
