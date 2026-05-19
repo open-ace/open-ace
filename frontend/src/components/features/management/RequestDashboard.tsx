@@ -141,10 +141,13 @@ export const RequestDashboard: React.FC = () => {
   }, [trendData]);
 
   // Prepare user bar chart data
+  // Y-axis shows ranking (1, 2, 3...), X-axis shows request count
+  // Tooltip shows username + request count
   const userChartData = useMemo(() => {
     const topUsers = aggregatedUserStats.slice(0, 10);
     return {
-      labels: topUsers.map((u) => u.user),
+      labels: topUsers.map((_, index) => String(index + 1)), // 排序号从1开始
+      usernames: topUsers.map((u) => u.user), // 保存用户名用于 tooltip
       datasets: [
         {
           label: t('requests', language),
@@ -340,6 +343,7 @@ export const RequestDashboard: React.FC = () => {
                 datasets={userChartData.datasets}
                 height={300}
                 horizontal
+                usernames={userChartData.usernames}
               />
             ) : (
               <EmptyState icon="bi-people" title={t('noData', language)} />
