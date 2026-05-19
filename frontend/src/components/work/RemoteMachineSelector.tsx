@@ -10,7 +10,7 @@
  * Issue #317: Remote workspace lacks project creation functionality
  */
 
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import { remoteApi, type RemoteMachine } from '@/api/remote';
