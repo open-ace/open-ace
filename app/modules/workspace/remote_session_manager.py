@@ -570,14 +570,14 @@ class RemoteSessionManager:
             # System messages (e.g., init) are stored directly, not accumulated
             # Extract meaningful content for storage
             subtype = parsed.get("subtype", "")
-            
+
             # Get content/message fields with clear priority:
             # - Prefer 'content' if it exists and is non-empty
             # - Fall back to 'message' if content is empty/missing
             # - Both can be str or dict
             raw_content = parsed.get("content")
             raw_message = parsed.get("message")
-            
+
             # Determine the effective content value
             if raw_content is not None and raw_content != "":
                 effective_content = raw_content
@@ -595,11 +595,11 @@ class RemoteSessionManager:
                 }
                 # Remove empty fields
                 init_info = {k: v for k, v in init_info.items() if v}
-                
+
                 # Preserve original content/message if present
                 if effective_content is not None:
                     init_info["content"] = effective_content
-                
+
                 # Only store if there's meaningful info beyond subtype
                 if init_info:
                     init_info["subtype"] = subtype
@@ -620,7 +620,7 @@ class RemoteSessionManager:
                 content = effective_content
                 if content is None:
                     return
-            
+
             # Serialize content to string if needed
             if isinstance(content, dict):
                 try:
