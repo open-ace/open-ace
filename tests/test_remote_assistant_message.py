@@ -399,14 +399,17 @@ class TestSystemMessageInStdout(unittest.TestCase):
         parsed = json.loads(stored_content)
         self.assertEqual(parsed["key"], "value")
 
-    def test_system_message_preserves_session_id(self):
-        """System init message includes session_id in stored content."""
+
+    def test_init_message_preserves_content_field(self):
+        """Init message with content field preserves it in stored content."""
         self._send_output(
             json.dumps(
                 {
                     "type": "system",
                     "subtype": "init",
-                    "session_id": "my-custom-session-id",
+                    "session_id": "test-123",
+                    "model": "qwen3-coder",
+                    "content": "Initializing session for project",
                 }
             )
         )
@@ -414,9 +417,122 @@ class TestSystemMessageInStdout(unittest.TestCase):
         msgs = self._get_stored_system_messages()
         self.assertEqual(len(msgs), 1)
         stored_content = msgs[0].kwargs.get("content") or msgs[0].args[2]
-        self.assertIn("my-custom-session-id", stored_content)
+        # Should contain both key info and original content
+        self.assertIn("test-123", stored_content)
+        self.assertIn("Initializing session for project", stored_content)
+        parsed = json.loads(stored_content)
+        self.assertEqual(parsed["content"], "Initializing session for project")
+
+    def test_init_message_preserves_message_field(self):
+        """Init message with message field preserves it in stored content."""
+        self._send_output(
+            json.dumps(
+                {
+                    "type": "system",
+                    "subtype": "init",
+                    "session_id": "test-456",
+                    "message": {"status": "ready", "info": "test"},
+                }
+            )
+        )
+
+        msgs = self._get_stored_system_messages()
+        self.assertEqual(len(msgs), 1)
+        stored_content = msgs[0].kwargs.get("content") or msgs[0].args[2]
+        parsed = json.loads(stored_content)
+        # message field should be preserved as content
+        self.assertIn("content", parsed)
+        self.assertEqual(parsed["content"]["status"], "ready")
+
+    def test_content_vs_message_priority(self):
+        """Content field takes priority over message field."""
+        self._send_output(
+            json.dumps(
+                {
+                    "type": "system",
+                    "content": "Primary content",
+                    "message": "Secondary message",
+                }
+            )
+        )
+
+        msgs = self._get_stored_system_messages()
+        self.assertEqual(len(msgs), 1)
+        stored_content = msgs[0].kwargs.get("content") or msgs[0].args[2]
+        self.assertEqual(stored_content, "Primary content")
+
+    def test_message_fallback_when_content_empty(self):
+        """Message field is used when content is empty."""
+        self._send_output(
+            json.dumps(
+                {
+                    "type": "system",
+                    "content": "",
+                    "message": "Fallback message",
+                }
+            )
+        )
+
+        msgs = self._get_stored_system_messages()
+        self.assertEqual(len(msgs), 1)
+        stored_content = msgs[0].kwargs.get("content") or msgs[0].args[2]
+        self.assertEqual(stored_content, "Fallback message")
+
+    def test_content_message_both_empty_not_stored(self):
+        """System message with both content and message empty is not stored."""
+        self._send_output(
+            json.dumps(
+                {
+                    "type": "system",
+                    "content": "",
+                    "message": "",
+                }
+            )
+        )
+
+        msgs = self._get_stored_system_messages()
+        self.assertEqual(len(msgs), 0)
+
+    def test_system_message_list_content(self):
+        """System message with list content is stored."""
+        self._send_output(
+            json.dumps(
+                {
+                    "type": "system",
+                    "content": ["item1", "item2", "item3"],
+                }
+            )
+        )
+
+        msgs = self._get_stored_system_messages()
+        self.assertEqual(len(msgs), 1)
+        stored_content = msgs[0].kwargs.get("content") or msgs[0].args[2]
+        # List should be serialized as JSON string
+        parsed = json.loads(stored_content)
+        self.assertEqual(parsed, ["item1", "item2", "item3"])
+
+    def test_system_message_numeric_content(self):
+        """System message with numeric content is stored."""
+        self._send_output(
+            json.dumps(
+                {
+                    "type": "system",
+                    "content": 42,
+                }
+            )
+        )
+
+        msgs = self._get_stored_system_messages()
+        # Numeric content should not be stored (not string or dict)
+        # but it will be stored as the value 42 (which is truthy but not str)
+        # Actually it will pass because we serialize to str after
+        self.assertEqual(len(msgs), 1)
+        stored_content = msgs[0].kwargs.get("content") or msgs[0].args[2]
+        # Should be string "42"
+        self.assertEqual(stored_content, "42")
 
 
 if __name__ == "__main__":
     unittest.main()
+
 
