@@ -22,11 +22,12 @@ import {
 import { useLanguage } from '@/store';
 import type { Language } from '@/i18n';
 import { t } from '@/i18n';
-import { Button, Modal, Select, Loading, Error, EmptyState, Badge } from '@/components/common';
+import { Button, Modal, Select, Loading, Error, EmptyState, Badge, useToast } from '@/components/common';
 import type { RemoteMachine } from '@/api';
 
 export const RemoteMachineManagement: React.FC = () => {
   const language = useLanguage();
+  const toast = useToast();
   const { data: machinesData, isLoading, isError, error, refetch } = useMachines();
   const generateToken = useGenerateToken();
   const deregisterMachine = useDeregisterMachine();
@@ -109,6 +110,8 @@ export const RemoteMachineManagement: React.FC = () => {
     if (success) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    } else {
+      toast.error(t('copyFailed', language) || 'Copy failed');
     }
   };
 
@@ -130,6 +133,8 @@ export const RemoteMachineManagement: React.FC = () => {
     if (success) {
       setCopiedInstall(true);
       setTimeout(() => setCopiedInstall(false), 2000);
+    } else {
+      toast.error(t('copyFailed', language) || 'Copy failed');
     }
   };
 
@@ -216,6 +221,8 @@ export const RemoteMachineManagement: React.FC = () => {
     if (success) {
       setCopiedUninstall(true);
       setTimeout(() => setCopiedUninstall(false), 2000);
+    } else {
+      toast.error(t('copyFailed', language) || 'Copy failed');
     }
   };
 
