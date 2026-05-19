@@ -311,6 +311,8 @@ class QwenSession:
             if entry_type == "assistant":
                 usage_meta = entry.get("usageMetadata")
                 if isinstance(usage_meta, dict):
+                    # Deduct cached tokens to avoid inflating input count
+                    # (matches fetch_qwen.py actual_input_tokens logic)
                     prompt_tokens = usage_meta.get("promptTokenCount", 0)
                     cached_tokens = usage_meta.get("cachedContentTokenCount", 0)
                     input_t = max(0, prompt_tokens - cached_tokens)
@@ -343,7 +345,7 @@ class QwenSession:
 
             self.message_count += 1
             msg = {
-                "role": "tool_result",
+                "role": "system",  # map to system for frontend compatibility
                 "content": text_content,
                 "content_blocks": content_blocks or None,
                 "timestamp": entry.get("timestamp"),
