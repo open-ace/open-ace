@@ -566,6 +566,41 @@ class RemoteSessionManager:
                             blocks_buf.extend(structured_blocks)
                             self._content_blocks_buffer[session_id] = blocks_buf
 
+        elif msg_type == "system":
+            # System messages (e.g., init) are stored directly, not accumulated
+            # Extract meaningful content for storage
+            subtype = parsed.get("subtype", "")
+            content = parsed.get("content", "") or parsed.get("message", "")
+
+            # For init messages, create a summary with key info
+            if subtype in ("init", "initialized"):
+                init_info = {
+                    "session_id": parsed.get("session_id", ""),
+                    "model": parsed.get("model", ""),
+                    "permission_mode": parsed.get("permission_mode", ""),
+                }
+                # Remove empty fields - only store if there's meaningful info beyond subtype
+                init_info = {k: v for k, v in init_info.items() if v}
+                if init_info:
+                    init_info["subtype"] = subtype
+                    content = json.dumps(init_info, ensure_ascii=False)
+                else:
+                    # No meaningful info beyond subtype - skip storage
+                    content = ""
+
+            # If content is a dict, serialize it
+            if isinstance(content, dict):
+                content = json.dumps(content, ensure_ascii=False)
+
+            # Store if we have meaningful content
+            if content and isinstance(content, str) and content.strip():
+                self._session_manager.add_message(
+                    session_id=session_id,
+                    role="system",
+                    content=content,
+                )
+                self._save_to_daily_messages(session_id, "system", content)
+
         elif msg_type == "result":
             # End of turn — flush accumulated assistant text
             self._flush_assistant_buffer(session_id)
