@@ -3,7 +3,7 @@
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { cn } from '@/utils';
+import { cn, copyToClipboard } from '@/utils';
 import { promptsApi } from '@/api';
 import type { PromptTemplate, PromptVariable } from '@/api';
 import {
@@ -26,6 +26,7 @@ import {
   Modal,
   TextInput,
   Textarea,
+  useToast,
 } from '@/components/common';
 import type { BadgeVariant } from '@/components/common';
 
@@ -700,6 +701,7 @@ const RenderModal: React.FC<RenderModalProps> = ({
 }) => {
   const [variables, setVariables] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(false);
+  const toast = useToast();
 
   // Reset variables when modal opens
   useEffect(() => {
@@ -721,9 +723,14 @@ const RenderModal: React.FC<RenderModalProps> = ({
     }
   };
 
-  const handleCopy = () => {
+  const handleCopy = async () => {
     if (result) {
-      navigator.clipboard.writeText(result);
+      const success = await copyToClipboard(result);
+      if (success) {
+        toast.success(t('copied', language));
+      } else {
+        toast.error(t('copyFailed', language) || 'Copy failed');
+      }
     }
   };
 
