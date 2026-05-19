@@ -136,6 +136,10 @@ class BaseCLIAdapter(abc.ABC):
         """Return the executable name (e.g., 'qwen', 'claude')."""
         pass
 
+    def get_settings_path(self) -> str | None:
+        """Return the path to the CLI tool's settings.json, or None if not applicable."""
+        return None
+
     def supports_stdin_input(self) -> bool:
         """Whether this CLI tool supports sending messages via stdin pipe."""
         return True

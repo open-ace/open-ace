@@ -148,12 +148,9 @@ class QwenCodeAdapter(BaseCLIAdapter):
             env = {k: v for k, v in env.items() if k not in all_sensitive}
             settings["env"] = env
 
-        # Strip baseUrl from modelProviders entries
-        for provider_models in settings.get("modelProviders", {}).values():
-            if isinstance(provider_models, list):
-                for model in provider_models:
-                    if isinstance(model, dict):
-                        model.pop("baseUrl", None)
+        # Note: baseUrl stripping from modelProviders is handled by
+        # normalize_model_providers() in cli_adapters/base.py, called
+        # by the agent after merging settings.
 
         return settings
 
