@@ -227,7 +227,11 @@ export const APIKeyManagement: React.FC = () => {
       for (const models of Object.values(modelProviders)) {
         if (Array.isArray(models)) {
           for (const model of models) {
-            if (model && typeof model === 'object' && typeof (model as Record<string, unknown>).envKey === 'string') {
+            if (
+              model &&
+              typeof model === 'object' &&
+              typeof (model as Record<string, unknown>).envKey === 'string'
+            ) {
               dynamicEnvKeys.add((model as Record<string, unknown>).envKey as string);
             }
           }

@@ -32,8 +32,8 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   token,
   isActive,
   machineName,
-  terminalId: _terminalId, // eslint-disable-line @typescript-eslint/no-unused-vars
-  machineId: _machineId, // eslint-disable-line @typescript-eslint/no-unused-vars
+  terminalId: _terminalId,
+  machineId: _machineId,
   onError,
   onAuthFailed,
   onReattachNeeded,
@@ -115,7 +115,11 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
           }
         }
         if (isActiveRef.current) {
-          try { xtermRef.current?.focus(); } catch {}
+          try {
+            xtermRef.current?.focus();
+          } catch {
+            // Ignore focus errors
+          }
         }
       };
 
@@ -268,7 +272,11 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
     if (isActive && fitAddonRef.current && terminalRef.current) {
       const timer = setTimeout(() => {
         fitAddonRef.current?.fit();
-        try { xtermRef.current?.focus(); } catch {}
+        try {
+          xtermRef.current?.focus();
+        } catch {
+          // Ignore focus errors
+        }
       }, 100);
       return () => clearTimeout(timer);
     }
