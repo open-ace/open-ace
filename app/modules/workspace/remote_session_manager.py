@@ -566,6 +566,19 @@ class RemoteSessionManager:
                             blocks_buf.extend(structured_blocks)
                             self._content_blocks_buffer[session_id] = blocks_buf
 
+        elif msg_type == "system":
+            # System messages (e.g., init) are stored directly without accumulation
+            content = parsed.get("content") or parsed.get("message", "")
+            if isinstance(content, dict):
+                content = json.dumps(content, ensure_ascii=False)
+            if content:
+                self._session_manager.add_message(
+                    session_id=session_id,
+                    role="system",
+                    content=content,
+                )
+                self._save_to_daily_messages(session_id, "system", content)
+
         elif msg_type == "result":
             # End of turn — flush accumulated assistant text
             self._flush_assistant_buffer(session_id)
