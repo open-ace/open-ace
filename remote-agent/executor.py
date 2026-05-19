@@ -620,6 +620,28 @@ class ProcessExecutor:
         if model:
             env["OPENACE_MODEL"] = model
 
+        # Fallback: read settings to inject any custom envKeys that
+        # modelProviders may reference (e.g. BAILIAN_CODING_PLAN_API_KEY).
+        # Normally _write_qwen_settings normalizes envKey → OPENAI_API_KEY,
+        # but this catches cases where settings were edited after that step.
+        try:
+            settings_path = adapter.get_settings_path()
+            if settings_path and os.path.isfile(settings_path):
+                with open(settings_path, encoding="utf-8") as f:
+                    settings_data = json.load(f)
+                providers = settings_data.get("modelProviders", {})
+                if isinstance(providers, dict):
+                    for _auth_type, models_list in providers.items():
+                        if not isinstance(models_list, list):
+                            continue
+                        for entry in models_list:
+                            if isinstance(entry, dict):
+                                custom_key = entry.get("envKey")
+                                if custom_key and custom_key != "OPENAI_API_KEY":
+                                    env[custom_key] = proxy_token
+        except Exception:
+            pass  # Non-critical fallback; proxy token is already set via adapter
+
         return env
 
     def _find_executable(self, cli_tool: str) -> str | None:

@@ -1035,6 +1035,22 @@ class RemoteAgent:
         if "$version" not in merged:
             merged["$version"] = 3
 
+        # Normalize modelProviders: unify all envKeys to OPENAI_API_KEY
+        # and remove baseUrl entries so the CLI uses the proxy via env vars.
+        # This prevents user-configured custom envKeys (e.g. BAILIAN_CODING_PLAN_API_KEY)
+        # or external baseUrls from bypassing the LLM proxy.
+        providers = merged.get("modelProviders", {})
+        if isinstance(providers, dict):
+            for _auth_type, models in providers.items():
+                if not isinstance(models, list):
+                    continue
+                for model in models:
+                    if not isinstance(model, dict):
+                        continue
+                    if "envKey" in model:
+                        model["envKey"] = "OPENAI_API_KEY"
+                    model.pop("baseUrl", None)
+
         # Atomic write via temp file + rename
         self._atomic_write_json(str(settings_path), merged)
         logger.info("Wrote Qwen Code settings to %s", settings_path)
