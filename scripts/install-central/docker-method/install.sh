@@ -2336,8 +2336,35 @@ done
 # Main execution
 print_header "Open ACE - 快速部署"
 
+# Check for existing config files and warn user
+check_existing_config() {
+    local config_file="$DEPLOY_DIR/config/config.json"
+    local qwen_settings="/home/$RUN_USER/.qwen/settings.json"
+    local has_existing_config=false
+
+    if [ -f "$config_file" ]; then
+        print_warning "检测到已存在的配置文件: $config_file"
+        print_info "  重新运行安装脚本时，默认不会覆盖已有配置"
+        has_existing_config=true
+    fi
+
+    if [ -f "$qwen_settings" ]; then
+        print_warning "检测到已存在的 Qwen 配置: $qwen_settings"
+        has_existing_config=true
+    fi
+
+    if [ "$has_existing_config" = true ]; then
+        echo ""
+        print_info "提示: 如需覆盖配置，请在后续步骤中明确选择覆盖选项"
+        echo ""
+    fi
+}
+
 # Check prerequisites
 check_prerequisites
+
+# Check for existing configs after RUN_USER and DEPLOY_DIR are set
+check_existing_config
 
 # Interactive configuration
 if [ "$NON_INTERACTIVE" = false ]; then
