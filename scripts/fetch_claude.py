@@ -828,8 +828,10 @@ def update_agent_sessions_stats(messages: list) -> int:
                                 WHERE session_id = {placeholder}
                                 AND role = {placeholder}
                                 AND timestamp = {placeholder}
-                                AND metadata LIKE {placeholder}
+                                AND metadata LIKE {placeholder} ESCAPE '\'
                             """
+                            # Escape special characters in msg_id for LIKE query
+                            escaped_msg_id = db.escape_like(msg_id)
                             _execute(
                                 cursor,
                                 check_sql,
@@ -837,7 +839,7 @@ def update_agent_sessions_stats(messages: list) -> int:
                                     session_id,
                                     msg.get("role"),
                                     timestamp,
-                                    f'%"message_id": "{msg_id}"%',
+                                    f'%"message_id": "{escaped_msg_id}"%',
                                 ),
                             )
                         else:
