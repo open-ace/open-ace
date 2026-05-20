@@ -82,6 +82,42 @@ def test_login_writes_session_token(monkeypatch, tmp_path):
     assert '"session_token": "session-token"' in config_path.read_text(encoding="utf-8")
 
 
+def test_login_with_password_extracts_session_token(monkeypatch, tmp_path):
+    import builtins
+
+    openace_cli = load_openace_cli()
+    config_path = tmp_path / "config.json"
+
+    monkeypatch.setattr(openace_cli, "CLI_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(openace_cli, "CLI_CONFIG_PATH", config_path)
+    monkeypatch.setattr(openace_cli, "_server_url", lambda: "https://openace.example")
+    monkeypatch.setattr(openace_cli, "_machine_id", lambda: "machine-123")
+
+    monkeypatch.setattr(builtins, "input", lambda _: "testuser")
+    monkeypatch.setattr(openace_cli.getpass, "getpass", lambda _: "testpass")
+
+    class FakeResp:
+        headers = type("H", (), {"get_all": lambda s, k=None: ["session_token=abc123; Path=/"]})()
+
+        def read(self):
+            return b'{"success": true, "user": {"username": "testuser"}}'
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    def fake_urlopen(req, timeout=30):
+        return FakeResp()
+
+    monkeypatch.setattr(openace_cli.urllib.request, "urlopen", fake_urlopen)
+
+    args = type("Args", (), {"token": None})()
+    assert openace_cli.cmd_login(args) == 0
+    assert '"session_token": "abc123"' in config_path.read_text(encoding="utf-8")
+
+
 def test_write_active_terminal_metadata(monkeypatch, tmp_path):
     openace_cli = load_openace_cli()
     active_path = tmp_path / "active_terminal.json"
