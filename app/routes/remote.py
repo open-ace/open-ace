@@ -1040,6 +1040,7 @@ def agent_message():
         total_input_tokens = data.get("total_input_tokens", 0)
         total_output_tokens = data.get("total_output_tokens", 0)
         messages = data.get("messages", [])
+        message_source = data.get("source") or "web_terminal"
 
         # Resolve effective session_id: prefer terminal_id (shown in sidebar)
         # over claude_session_id (internal Claude Code JSONL UUID).
@@ -1146,7 +1147,7 @@ def agent_message():
 
                     # 1. Write to session_messages (dual-write with daily_messages)
                     try:
-                        metadata = {"message_source": "web_terminal"}
+                        metadata = {"message_source": message_source}
                         if msg_uuid:
                             metadata["uuid"] = msg_uuid
                         if content_blocks:
@@ -1182,14 +1183,12 @@ def agent_message():
                         with get_db_connection() as conn:
                             cursor = conn.cursor()
                             cursor.execute(
-                                adapt_sql(
-                                    """INSERT OR IGNORE INTO daily_messages
+                                adapt_sql("""INSERT OR IGNORE INTO daily_messages
                                     (date, tool_name, host_name, message_id, role, content,
                                      full_entry, tokens_used, input_tokens, output_tokens,
                                      model, timestamp, message_source,
                                      conversation_id, agent_session_id, project_path)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
-                                ),
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""),
                                 (
                                     date_str,
                                     tool_name,
@@ -1203,7 +1202,7 @@ def agent_message():
                                     output_tokens,
                                     msg_model,
                                     timestamp,
-                                    "web_terminal",
+                                    message_source,
                                     session_id,
                                     session_id,
                                     project_path or "",
@@ -1328,6 +1327,103 @@ def start_terminal():
                 "terminal_id": terminal_id,
                 "machine_id": machine_id,
                 "status": "pending",
+            },
+        }
+    )
+
+
+@remote_bp.route("/terminal/cli/start", methods=["POST"])
+def start_cli_terminal():
+    """Start an SSH/local CLI-backed terminal session.
+
+    Unlike the web terminal flow, this endpoint does not ask the remote agent to
+    spawn a PTY. The caller is already inside an SSH/local shell on the remote
+    machine, so the server only creates the Open ACE session and returns short
+    lived proxy tokens for local CLI processes.
+    """
+    data = request.get_json() or {}
+    machine_id = data.get("machine_id")
+    work_dir = data.get("work_dir") or ""
+    source = data.get("source") or "ssh_cli"
+
+    if not machine_id:
+        return jsonify({"error": "machine_id is required"}), 400
+
+    agent_mgr = get_remote_agent_manager()
+    if g.user.get("role") != "admin":
+        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
+            return jsonify({"error": "Access denied"}), 403
+
+    machine = agent_mgr.get_machine(machine_id)
+    machine_name = machine.get("machine_name", machine_id[:8]) if machine else machine_id[:8]
+    hostname = machine.get("hostname", machine_id[:8]) if machine else machine_id[:8]
+    tenant_id = machine.get("tenant_id", 1) if machine else 1
+    terminal_id = str(uuid.uuid4())
+
+    from app.modules.workspace.session_manager import get_session_manager
+
+    sm = get_session_manager()
+    sm.create_session(
+        session_id=terminal_id,
+        tool_name="claude-code",
+        user_id=g.user["id"],
+        title=f"Terminal: {machine_name}",
+        host_name=hostname,
+        project_path=work_dir,
+        context={
+            "workspace_type": "terminal",
+            "remote_machine_id": machine_id,
+            "terminal_source": source,
+        },
+    )
+    sm.update_session_fields(
+        terminal_id,
+        {
+            "workspace_type": "terminal",
+            "remote_machine_id": machine_id,
+        },
+    )
+
+    api_proxy = get_api_key_proxy_service()
+    anthropic_token = api_proxy.generate_proxy_token(
+        user_id=g.user["id"],
+        session_id=terminal_id,
+        tenant_id=tenant_id,
+        provider="anthropic",
+        session_type="terminal",
+    )
+    openai_token = api_proxy.generate_proxy_token(
+        user_id=g.user["id"],
+        session_id=terminal_id,
+        tenant_id=tenant_id,
+        provider="openai",
+        session_type="terminal",
+    )
+
+    backend_url = agent_mgr._get_backend_url()
+    proxy_url = f"{backend_url}/api/remote/llm-proxy"
+
+    logger.info(
+        "Created CLI terminal session %s for user %s on machine %s",
+        terminal_id[:8],
+        g.user["id"],
+        machine_id,
+    )
+
+    return jsonify(
+        {
+            "success": True,
+            "terminal": {
+                "session_id": terminal_id,
+                "terminal_id": terminal_id,
+                "machine_id": machine_id,
+                "status": "running",
+                "source": source,
+                "proxy_url": proxy_url,
+                "tokens": {
+                    "anthropic": anthropic_token,
+                    "openai": openai_token,
+                },
             },
         }
     )

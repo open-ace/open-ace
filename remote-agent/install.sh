@@ -140,12 +140,24 @@ log_info "Downloading agent files..."
 
 AGENT_URL="${SERVER_URL}/api/remote/agent/files"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+AGENT_FILES=(
+    agent.py
+    config.py
+    executor.py
+    system_info.py
+    requirements.txt
+    terminal_menu.py
+    terminal_server.py
+    websocket_proxy.py
+    session_sync.py
+    openace_cli.py
+)
 
 # If running from curl, download files; if running from source, copy
 if [[ -f "${SCRIPT_DIR}/agent.py" ]]; then
     # Running from source directory
     log_info "Installing from source directory..."
-    for file in agent.py config.py executor.py system_info.py requirements.txt; do
+    for file in "${AGENT_FILES[@]}"; do
         if [[ -f "${SCRIPT_DIR}/$file" ]]; then
             cp "${SCRIPT_DIR}/$file" "$INSTALL_DIR/"
         fi
@@ -160,7 +172,7 @@ else
     HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${AGENT_URL}/agent.py" 2>/dev/null || echo "000")
 
     if [[ "$HTTP_CODE" == "200" ]]; then
-        for file in agent.py config.py executor.py system_info.py requirements.txt; do
+        for file in "${AGENT_FILES[@]}"; do
             curl -fsSL "${AGENT_URL}/${file}" -o "${INSTALL_DIR}/${file}" 2>/dev/null || {
                 log_warn "Could not download ${file}"
             }
@@ -182,6 +194,31 @@ fi
 touch "${INSTALL_DIR}/__init__.py"
 
 log_success "Agent files installed"
+
+# Install the user-facing Open ACE CLI wrapper for SSH shells.
+log_info "Installing openace command..."
+BIN_DIR="${OPENACE_BIN_DIR:-$HOME/.local/bin}"
+mkdir -p "$BIN_DIR"
+OPENACE_BIN="$BIN_DIR/openace"
+cat > "$OPENACE_BIN" <<EOF
+#!/usr/bin/env bash
+exec "$PYTHON_PATH" "$INSTALL_DIR/openace_cli.py" "\$@"
+EOF
+chmod +x "$OPENACE_BIN"
+
+if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
+    BASHRC="$HOME/.bashrc"
+    MARKER="# Open ACE CLI path"
+    if [[ ! -f "$BASHRC" ]] || ! grep -qF "$MARKER" "$BASHRC"; then
+        {
+            echo ""
+            echo "$MARKER"
+            echo "export PATH=\"$BIN_DIR:\$PATH\""
+        } >> "$BASHRC"
+    fi
+    log_warn "$BIN_DIR is not in the current PATH. Restart your shell or run: export PATH=\"$BIN_DIR:\$PATH\""
+fi
+log_success "openace command installed: $OPENACE_BIN"
 
 # Step 4: Install Python dependencies
 log_info "Installing Python dependencies..."

@@ -31,6 +31,8 @@ QWEN_PROJECTS_DIR = QWEN_DIR / "projects"
 
 # File to track which sessions have already been synced
 SYNC_STATE_FILE = Path.home() / ".open-ace-agent" / "session_sync_state.json"
+ACTIVE_TERMINAL_FILE = Path.home() / ".open-ace-agent" / "active_terminal.json"
+ACTIVE_TERMINAL_TTL_SECONDS = 12 * 3600
 
 
 def _extract_text_only(content: Any) -> str:
@@ -180,6 +182,7 @@ class ClaudeSession:
             "total_output_tokens": self.total_output_tokens,
             "first_timestamp": self.first_timestamp,
             "last_timestamp": self.last_timestamp,
+            "source": os.environ.get("OPEN_ACE_TERMINAL_SOURCE", "web_terminal"),
             "messages": self.messages,
         }
 
@@ -374,6 +377,7 @@ class QwenSession:
             "total_output_tokens": self.total_output_tokens,
             "first_timestamp": self.first_timestamp,
             "last_timestamp": self.last_timestamp,
+            "source": os.environ.get("OPEN_ACE_TERMINAL_SOURCE", "web_terminal"),
             "messages": self.messages,
         }
 
@@ -411,6 +415,28 @@ class SessionSyncService:
     def notify_terminal_active(self, terminal_id: str) -> None:
         """Called when a terminal is active — triggers immediate scan."""
         self._active_terminal_id = terminal_id
+
+    def _get_active_terminal_context(self) -> tuple[str, str]:
+        """Return the active terminal id and source for session attribution."""
+        env_terminal_id = os.environ.get("OPEN_ACE_TERMINAL_ID", "")
+        env_source = os.environ.get("OPEN_ACE_TERMINAL_SOURCE", "")
+        if env_terminal_id:
+            return env_terminal_id, env_source or "web_terminal"
+
+        try:
+            data = json.loads(ACTIVE_TERMINAL_FILE.read_text(encoding="utf-8"))
+            updated_at = float(data.get("updated_at") or 0)
+            if time.time() - updated_at <= ACTIVE_TERMINAL_TTL_SECONDS:
+                terminal_id = str(data.get("terminal_id") or "")
+                source = str(data.get("source") or "ssh_cli")
+                if terminal_id:
+                    return terminal_id, source
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            logger.debug("Failed to read active terminal metadata: %s", e)
+
+        return self._active_terminal_id, "web_terminal"
 
     def _load_state(self) -> None:
         """Load previously synced file state from disk."""
@@ -487,10 +513,9 @@ class SessionSyncService:
 
                 session = session_cls(session_id, path_str)
                 if session.parse() and session.message_count > 0:
-                    terminal_id = (
-                        os.environ.get("OPEN_ACE_TERMINAL_ID", "") or self._active_terminal_id
-                    )
+                    terminal_id, source = self._get_active_terminal_context()
                     payload = session.to_sync_payload(self._config.machine_id, terminal_id)
+                    payload["source"] = source
 
                     result = self._http_send(
                         {

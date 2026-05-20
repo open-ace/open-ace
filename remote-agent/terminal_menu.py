@@ -67,12 +67,13 @@ def get_menu_items() -> list[dict]:
         installed = check_installed(tool["cli"])
         configured = bool(os.environ.get(tool["env_key"]))
         items.append({**tool, "installed": installed, "configured": configured})
-    items.append({"name": "Exit to shell", "is_shell": True})
+    items.append({"name": "Shell (return to menu on exit)", "is_shell_return": True})
+    items.append({"name": "Exit to shell", "is_shell_exit": True})
     return items
 
 
 def get_label(item: dict) -> str:
-    if item.get("is_shell"):
+    if item.get("is_shell_return") or item.get("is_shell_exit"):
         return item["name"]
     if item["installed"]:
         if item["configured"]:
@@ -161,7 +162,18 @@ def exec_command(command: str) -> None:
 
 
 def handle_select(item: dict) -> None:
-    if item.get("is_shell"):
+    if item.get("is_shell_return"):
+        cmd = (
+            'echo "Type \\"exit\\" to return to the Open ACE menu. '
+            'Type \\"openace menu\\" to restart it anytime."; '
+            f"/bin/bash -l; exec {sys.executable} {MENU_PATH}"
+        )
+        exec_command(cmd)
+        return
+
+    if item.get("is_shell_exit"):
+        sys.stdout.write("\r\n  Type 'openace menu' to return to the Open ACE menu.\r\n\r\n")
+        sys.stdout.flush()
         os.execvp("/bin/bash", ["/bin/bash", "-l"])
         return
 
@@ -183,13 +195,6 @@ def handle_select(item: dict) -> None:
 
 def main() -> None:
     items = get_menu_items()
-
-    # Only "Exit to shell" and no installed tools -> skip menu
-    tool_items = [i for i in items if not i.get("is_shell")]
-    installed_tools = [i for i in tool_items if i["installed"]]
-    if not installed_tools:
-        os.execvp("/bin/bash", ["/bin/bash", "-l"])
-        return
 
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)

@@ -105,6 +105,12 @@ class SinglePtyTerminalServer:
                 aliases.append("alias claude='claude --bare'")
             if OPENAI_TOKEN:
                 aliases.append("alias qwen='qwen --auth-type openai'")
+            openace_cli = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "openace_cli.py",
+            )
+            if os.path.exists(openace_cli):
+                aliases.append(f"alias openace='{sys.executable} {openace_cli}'")
             try:
                 with open(bashrc_path) as f:
                     existing = f.read()
