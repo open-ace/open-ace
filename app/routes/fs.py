@@ -16,7 +16,6 @@ from typing import Any
 
 from flask import Blueprint, g, jsonify, request
 
-from app.auth.decorators import auth_required
 from app.repositories.user_repo import UserRepository
 
 logger = logging.getLogger(__name__)
@@ -43,6 +42,7 @@ def _authenticate_user():
             if user:
                 g.user = user
                 g.user_id = user.get("id")
+                g.user_role = user.get("role")
                 return None
 
     # Fallback: try WebUI token from query param (for iframe integration)
