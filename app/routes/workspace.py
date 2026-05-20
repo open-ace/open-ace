@@ -371,7 +371,9 @@ def get_prompt_categories():
     """Get prompt categories with counts."""
     try:
         library = get_prompt_library()
-        categories = library.get_categories()
+        # Get current user ID to include their private templates in counts
+        current_user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
+        categories = library.get_categories(user_id=current_user_id)
 
         return jsonify({"success": True, "data": categories})
     except Exception as e:
