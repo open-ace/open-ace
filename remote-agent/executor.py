@@ -521,6 +521,7 @@ class ProcessExecutor:
         output_callback: Callable | None = None,
         permission_callback: Callable | None = None,
         usage_callback: Callable | None = None,
+        tool_timeout: int = 600,
     ):
         """
         Args:
@@ -533,8 +534,11 @@ class ProcessExecutor:
                 prompt).  If None, control_requests are forwarded as regular output.
             usage_callback: Called with (session_id, tokens_dict) when a result
                 message contains token usage data.
+            tool_timeout: Maximum timeout for run_shell_command in seconds.
+                Defaults to 600 (10 minutes). Used in tool limit hints message.
         """
         self.server_url = server_url
+        self._tool_timeout = tool_timeout
         self._output_callback = output_callback or self._default_output_callback
         self._permission_callback = permission_callback
         self._usage_callback = usage_callback
@@ -592,6 +596,7 @@ class ProcessExecutor:
 
         # Tool limit hints message
         # These limits are platform-specific and should be communicated clearly
+        timeout_minutes = self._tool_timeout // 60
         hints_msg = {
             "type": "user",
             "message": {
@@ -602,7 +607,7 @@ class ProcessExecutor:
                         "text": (
                             "[Platform Tool Limits]\n"
                             "The following tool limitations apply on this platform:\n"
-                            "- run_shell_command: Maximum timeout is 600 seconds (10 minutes)\n"
+                            f"- run_shell_command: Maximum timeout is {self._tool_timeout} seconds ({timeout_minutes} minutes)\n"
                             "- For tasks that may exceed this limit, consider:\n"
                             "  1. Using is_background=true for long-running processes\n"
                             "  2. Breaking down into smaller steps\n"

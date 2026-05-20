@@ -208,5 +208,143 @@ class TestToolLimitHintsIntegration(unittest.TestCase):
         )
 
 
+class TestToolLimitHintsExceptionHandling(unittest.TestCase):
+    """Test exception handling in _send_tool_limit_hints method."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        from executor import ProcessExecutor
+
+        self.executor = ProcessExecutor(
+            server_url="http://localhost:5000",
+        )
+
+    def test_os_error_handling(self):
+        """Test handling of OSError when writing to stdin."""
+        session_id = "test-session-os-error"
+        mock_session = MockSessionProcess(session_id, is_running=True)
+
+        # Mock stdin.write to raise OSError
+        def raise_os_error(data):
+            raise OSError("Mock OS error")
+
+        mock_session.process.stdin.write = raise_os_error
+        mock_session.process.stdin.flush = Mock()
+
+        # Add mock session to executor's sessions dict
+        with self.executor._lock:
+            self.executor._sessions[session_id] = mock_session
+
+        # Send tool limit hints - should handle exception gracefully
+        result = self.executor._send_tool_limit_hints(session_id)
+
+        # Verify result - should return False on error
+        self.assertFalse(result, "Should return False on OSError")
+
+    def test_broken_pipe_error_handling(self):
+        """Test handling of BrokenPipeError when writing to stdin."""
+        session_id = "test-session-broken-pipe"
+        mock_session = MockSessionProcess(session_id, is_running=True)
+
+        # Mock stdin.write to raise BrokenPipeError
+        def raise_broken_pipe(data):
+            raise BrokenPipeError("Mock broken pipe")
+
+        mock_session.process.stdin.write = raise_broken_pipe
+        mock_session.process.stdin.flush = Mock()
+
+        # Add mock session to executor's sessions dict
+        with self.executor._lock:
+            self.executor._sessions[session_id] = mock_session
+
+        # Send tool limit hints - should handle exception gracefully
+        result = self.executor._send_tool_limit_hints(session_id)
+
+        # Verify result - should return False on error
+        self.assertFalse(result, "Should return False on BrokenPipeError")
+
+    def test_attribute_error_handling(self):
+        """Test handling of AttributeError when stdin is None."""
+        session_id = "test-session-attr-error"
+        mock_session = MockSessionProcess(session_id, is_running=True)
+
+        # Set stdin to None to trigger AttributeError
+        mock_session.process.stdin = None
+
+        # Add mock session to executor's sessions dict
+        with self.executor._lock:
+            self.executor._sessions[session_id] = mock_session
+
+        # Send tool limit hints - should handle exception gracefully
+        result = self.executor._send_tool_limit_hints(session_id)
+
+        # Verify result - should return False on error
+        self.assertFalse(result, "Should return False on AttributeError")
+
+
+class TestToolTimeoutConfiguration(unittest.TestCase):
+    """Test configurable tool timeout feature."""
+
+    def test_default_timeout_value(self):
+        """Test that default timeout is 600 seconds."""
+        from executor import ProcessExecutor
+
+        executor = ProcessExecutor(
+            server_url="http://localhost:5000",
+        )
+
+        # Verify default timeout
+        self.assertEqual(executor._tool_timeout, 600, "Default timeout should be 600 seconds")
+
+    def test_custom_timeout_value(self):
+        """Test that custom timeout value is properly set."""
+        from executor import ProcessExecutor
+
+        executor = ProcessExecutor(
+            server_url="http://localhost:5000",
+            tool_timeout=300,
+        )
+
+        # Verify custom timeout
+        self.assertEqual(executor._tool_timeout, 300, "Custom timeout should be 300 seconds")
+
+    def test_timeout_in_hints_message(self):
+        """Test that custom timeout appears in hints message."""
+        from executor import ProcessExecutor
+
+        executor = ProcessExecutor(
+            server_url="http://localhost:5000",
+            tool_timeout=300,  # 5 minutes
+        )
+
+        session_id = "test-session-custom-timeout"
+        mock_session = MockSessionProcess(session_id, is_running=True)
+
+        # Create a mock stdin that captures writes
+        written_content = []
+
+        def capture_write(data):
+            written_content.append(data)
+
+        mock_session.process.stdin.write = capture_write
+        mock_session.process.stdin.flush = Mock()
+
+        # Add mock session to executor's sessions dict
+        with executor._lock:
+            executor._sessions[session_id] = mock_session
+
+        # Send tool limit hints
+        executor._send_tool_limit_hints(session_id)
+
+        # Parse the written content
+        written_data = written_content[0].decode("utf-8").strip()
+        parsed_msg = json.loads(written_data)
+        text_content = parsed_msg["message"]["content"][0]["text"]
+
+        # Verify custom timeout appears in message
+        self.assertIn("300 seconds", text_content, "Custom timeout should appear in message")
+        self.assertIn("5 minutes", text_content, "Timeout in minutes should appear in message")
+
+
 if __name__ == "__main__":
     unittest.main()
