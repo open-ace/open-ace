@@ -92,3 +92,14 @@ def test_write_active_terminal_metadata(monkeypatch, tmp_path):
     raw = active_path.read_text(encoding="utf-8")
     assert '"terminal_id": "term-123"' in raw
     assert '"source": "ssh_cli"' in raw
+
+
+def test_clear_active_terminal_metadata(monkeypatch, tmp_path):
+    openace_cli = load_openace_cli()
+    active_path = tmp_path / "active_terminal.json"
+    active_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(openace_cli, "ACTIVE_TERMINAL_PATH", active_path)
+
+    openace_cli._clear_active_terminal()
+
+    assert not active_path.exists()

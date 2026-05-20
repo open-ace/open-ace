@@ -1295,7 +1295,7 @@ def start_terminal():
     )
 
     # Use external URL for LLM proxy (remote machine needs to access it)
-    backend_url = agent_mgr._get_backend_url()
+    backend_url = agent_mgr.get_backend_url()
     proxy_url = f"{backend_url}/api/remote/llm-proxy"
     logger.info("start_terminal: backend_url=%s, proxy_url=%s", backend_url, proxy_url)
 
@@ -1376,6 +1376,8 @@ def start_cli_terminal():
             "terminal_source": source,
         },
     )
+    # create_session context is JSON metadata; these fields also need the
+    # dedicated DB columns used by session listing and access checks.
     sm.update_session_fields(
         terminal_id,
         {
@@ -1400,7 +1402,7 @@ def start_cli_terminal():
         session_type="terminal",
     )
 
-    backend_url = agent_mgr._get_backend_url()
+    backend_url = agent_mgr.get_backend_url()
     proxy_url = f"{backend_url}/api/remote/llm-proxy"
 
     logger.info(
@@ -1506,7 +1508,7 @@ def attach_terminal(terminal_id):
     )
 
     # Get proxy URL for LLM API
-    backend_url = agent_mgr._get_backend_url()
+    backend_url = agent_mgr.get_backend_url()
     proxy_url = f"{backend_url}/api/remote/llm-proxy"
 
     # Send attach_terminal command to agent with fresh tokens

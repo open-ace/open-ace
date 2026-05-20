@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import getpass
 import json
+import logging
 import os
 import stat
 import subprocess
@@ -27,6 +28,7 @@ CLI_CONFIG_DIR = Path.home() / ".open-ace-cli"
 CLI_CONFIG_PATH = CLI_CONFIG_DIR / "config.json"
 MENU_PATH = AGENT_DIR / "terminal_menu.py"
 ACTIVE_TERMINAL_PATH = AGENT_DIR / "active_terminal.json"
+logger = logging.getLogger("openace-cli")
 
 
 class CliError(Exception):
@@ -156,8 +158,8 @@ def _session_env(terminal: dict[str, Any]) -> dict[str, str]:
                     str(tokens["openai"]),
                 )
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to collect qwen custom env keys: %s", exc)
     env["OPEN_ACE_TERMINAL_ID"] = str(terminal["session_id"])
     env["OPEN_ACE_TERMINAL_SOURCE"] = str(terminal.get("source") or "ssh_cli")
     return env
@@ -171,6 +173,13 @@ def _write_active_terminal(terminal: dict[str, Any]) -> None:
     }
     ACTIVE_TERMINAL_PATH.write_text(json.dumps(payload), encoding="utf-8")
     os.chmod(ACTIVE_TERMINAL_PATH, stat.S_IRUSR | stat.S_IWUSR)
+
+
+def _clear_active_terminal() -> None:
+    try:
+        ACTIVE_TERMINAL_PATH.unlink()
+    except FileNotFoundError:
+        pass
 
 
 def cmd_login(args: argparse.Namespace) -> int:
@@ -209,7 +218,6 @@ def cmd_menu(args: argparse.Namespace) -> int:
     _write_active_terminal(terminal)
     env = _session_env(terminal)
     os.execvpe(sys.executable, [sys.executable, str(MENU_PATH)], env)
-    return 0
 
 
 def cmd_shell(args: argparse.Namespace) -> int:
@@ -217,8 +225,11 @@ def cmd_shell(args: argparse.Namespace) -> int:
     terminal = _start_cli_terminal(work_dir)
     _write_active_terminal(terminal)
     env = _session_env(terminal)
-    shell = os.environ.get("SHELL") or "/bin/bash"
-    subprocess.run([shell, "-l"], env=env, cwd=work_dir, check=False)
+    shell = os.environ.get("SHELL") or "/bin/sh"
+    try:
+        subprocess.run([shell, "-l"], env=env, cwd=work_dir, check=False)
+    finally:
+        _clear_active_terminal()
     return 0
 
 

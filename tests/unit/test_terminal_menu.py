@@ -77,11 +77,12 @@ def test_handle_shell_return_executes_shell_then_menu(monkeypatch):
         executed_commands.append(command)
 
     monkeypatch.setattr(terminal_menu, "exec_command", fake_exec_command)
+    monkeypatch.setenv("SHELL", "/bin/zsh")
 
     terminal_menu.handle_select({"name": "Shell", "is_shell_return": True})
 
     assert len(executed_commands) == 1
-    assert "/bin/bash -l" in executed_commands[0]
+    assert "/bin/zsh -l" in executed_commands[0]
     assert f"exec {terminal_menu.sys.executable} {terminal_menu.MENU_PATH}" in executed_commands[0]
 
 

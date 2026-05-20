@@ -646,8 +646,8 @@ class RemoteAgentManager:
 
         terminal_info_store.put(machine_id, terminal_id, info)
 
-    def _get_backend_url(self) -> str:
-        """Get the backend URL for WebSocket proxy to fetch remote terminal info."""
+    def get_backend_url(self) -> str:
+        """Get the externally reachable backend URL for agents and CLI tools."""
         # Try to get from config first
         try:
             import json
@@ -669,6 +669,10 @@ class RemoteAgentManager:
 
         # Default to localhost
         return "http://localhost:5001"
+
+    def _get_backend_url(self) -> str:
+        """Backward-compatible alias for existing internal callers."""
+        return self.get_backend_url()
 
     # ==================== Session Tracking ====================
 

@@ -12,10 +12,12 @@ Runs as the initial PTY process via terminal_server.py.
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 import sys
 import termios
 import tty
+from pathlib import Path
 
 TOOLS = [
     {
@@ -35,6 +37,7 @@ TOOLS = [
 ]
 
 MENU_PATH = os.path.abspath(__file__)
+ACTIVE_TERMINAL_PATH = Path.home() / ".open-ace-agent" / "active_terminal.json"
 
 # ANSI codes
 CLEAR = "\x1b[2J\x1b[H"
@@ -157,8 +160,33 @@ def read_key(fd: int) -> str:
     return "other"
 
 
+def get_shell_path() -> str:
+    return os.environ.get("SHELL") or "/bin/sh"
+
+
+def get_login_shell_args() -> list[str]:
+    shell = get_shell_path()
+    return [shell, "-l"]
+
+
+def get_login_shell_command() -> str:
+    shell = get_shell_path()
+    return f"{shlex.quote(shell)} -l"
+
+
+def clear_active_terminal() -> None:
+    if os.environ.get("OPEN_ACE_TERMINAL_SOURCE") != "ssh_cli":
+        return
+    try:
+        ACTIVE_TERMINAL_PATH.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        pass
+
+
 def exec_command(command: str) -> None:
-    os.execvp("/bin/bash", ["/bin/bash", "-l", "-c", command])
+    os.execvp("/bin/sh", ["/bin/sh", "-c", command])
 
 
 def handle_select(item: dict) -> None:
@@ -166,7 +194,7 @@ def handle_select(item: dict) -> None:
         cmd = (
             'echo "Type \\"exit\\" to return to the Open ACE menu. '
             'Type \\"openace menu\\" to restart it anytime."; '
-            f"/bin/bash -l; exec {sys.executable} {MENU_PATH}"
+            f"{get_login_shell_command()}; exec {sys.executable} {MENU_PATH}"
         )
         exec_command(cmd)
         return
@@ -174,7 +202,8 @@ def handle_select(item: dict) -> None:
     if item.get("is_shell_exit"):
         sys.stdout.write("\r\n  Type 'openace menu' to return to the Open ACE menu.\r\n\r\n")
         sys.stdout.flush()
-        os.execvp("/bin/bash", ["/bin/bash", "-l"])
+        clear_active_terminal()
+        os.execvp(get_shell_path(), get_login_shell_args())
         return
 
     if item["installed"] and not item["configured"]:
