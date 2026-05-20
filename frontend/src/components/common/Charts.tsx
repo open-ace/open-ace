@@ -287,6 +287,8 @@ interface BarChartProps {
   className?: string;
   /** Format large numbers (e.g., 'M' for millions) */
   unit?: 'none' | 'K' | 'M' | 'B';
+  /** User names for tooltip display (used when labels are ranking numbers) */
+  usernames?: string[];
 }
 
 export const BarChart: React.FC<BarChartProps> = ({
@@ -299,6 +301,7 @@ export const BarChart: React.FC<BarChartProps> = ({
   stacked = false,
   className,
   unit = 'none',
+  usernames,
 }) => {
   // Helper function to format values based on unit
   const formatValue = (value: number): number => {
@@ -347,7 +350,23 @@ export const BarChart: React.FC<BarChartProps> = ({
       tooltip: {
         callbacks: {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          title: (context: any[]) => {
+            // For horizontal bar charts with usernames, show username as title
+            if (horizontal && usernames && context[0]) {
+              const dataIndex = context[0].dataIndex ?? 0;
+              return usernames[dataIndex] ?? '';
+            }
+            // Default: use label (ranking number or category)
+            return context[0]?.label ?? '';
+          },
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           label: (context: any) => {
+            // For horizontal bar charts with usernames, show "请求数: value"
+            if (horizontal && usernames) {
+              const value = context.parsed?.x;
+              return `请求数: ${value?.toLocaleString() ?? 0}`;
+            }
+            // Default format
             const label = context.dataset?.label ?? '';
             const value = context.parsed?.y;
             if (unit !== 'none') {
@@ -359,28 +378,36 @@ export const BarChart: React.FC<BarChartProps> = ({
       },
     },
     scales: {
-      x: {
-        stacked,
-      },
-      y: {
-        stacked,
-        beginAtZero: true,
-        max: yMax,
-        ticks:
-          unit !== 'none'
-            ? {
-                stepSize: 1,
-                callback: (value: string | number) => `${value}${unit}`,
-              }
-            : undefined,
-        title:
-          unit !== 'none'
-            ? {
-                display: true,
-                text: `Tokens (${unit})`,
-              }
-            : undefined,
-      },
+      // For horizontal bar charts: X is value axis, Y is category axis
+      // For vertical bar charts: X is category axis, Y is value axis
+      x: horizontal
+        ? {
+            stacked,
+            beginAtZero: true,
+            max: yMax,
+          }
+        : { stacked },
+      y: horizontal
+        ? { stacked }
+        : {
+            stacked,
+            beginAtZero: true,
+            max: yMax,
+            ticks:
+              unit !== 'none'
+                ? {
+                    stepSize: 1,
+                    callback: (value: string | number) => `${value}${unit}`,
+                  }
+                : undefined,
+            title:
+              unit !== 'none'
+                ? {
+                    display: true,
+                    text: `Tokens (${unit})`,
+                  }
+                : undefined,
+          },
     },
   };
 
