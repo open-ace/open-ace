@@ -1849,6 +1849,11 @@ def browse_remote_directory(machine_id):
     This simplified implementation returns machine info with work_dir for basic usage.
     """
 
+    # Check authentication - g.user may not be set if before_request auth failed
+    # (e.g., invalid/expired token, missing session) - Issue #477
+    if not hasattr(g, "user") or g.user is None:
+        return jsonify({"error": "Unauthorized"}), 401
+
     agent_mgr = get_remote_agent_manager()
 
     # Check access
