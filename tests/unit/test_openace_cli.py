@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 
@@ -109,6 +110,10 @@ def test_login_with_password_extracts_session_token(monkeypatch, tmp_path):
             pass
 
     def fake_urlopen(req, timeout=30):
+        assert "/api/auth/login" in req.full_url, f"Unexpected URL: {req.full_url}"
+        body = json.loads(req.data)
+        assert body["username"] == "testuser"
+        assert body["password"] == "testpass"
         return FakeResp()
 
     monkeypatch.setattr(openace_cli.urllib.request, "urlopen", fake_urlopen)

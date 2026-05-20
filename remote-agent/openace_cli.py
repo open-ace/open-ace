@@ -90,9 +90,11 @@ def _session_token() -> str:
 
 
 def _login_with_password(server_url: str, username: str, password: str) -> str:
+    if not server_url.startswith("https://"):
+        print("Warning: Sending credentials over insecure connection.", file=sys.stderr)
     body = json.dumps({"username": username, "password": password}).encode("utf-8")
     req = urllib.request.Request(
-        f"{server_url}/auth/login",
+        f"{server_url}/api/auth/login",
         data=body,
         method="POST",
         headers={
