@@ -85,8 +85,45 @@ def _machine_id() -> str:
 def _session_token() -> str:
     token = str(_load_cli_config().get("session_token") or "")
     if not token:
-        raise CliError("Not logged in. Run: openace login --token <session-token>")
+        raise CliError("Not logged in. Run: openace login")
     return token
+
+
+def _login_with_password(server_url: str, username: str, password: str) -> str:
+    if not server_url.startswith("https://"):
+        print("Warning: Sending credentials over insecure connection.", file=sys.stderr)
+    body = json.dumps({"username": username, "password": password}).encode("utf-8")
+    req = urllib.request.Request(
+        f"{server_url}/api/auth/login",
+        data=body,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if not data.get("success"):
+                raise CliError(str(data.get("error") or "Login failed"))
+            cookies = resp.headers.get_all("Set-Cookie") or []
+            for cookie in cookies:
+                for part in cookie.split(";"):
+                    part = part.strip()
+                    if part.startswith("session_token="):
+                        return part.split("=", 1)[1]
+            raise CliError("Login succeeded but no session token received")
+    except urllib.error.HTTPError as exc:
+        raw = exc.read().decode("utf-8", errors="replace")
+        try:
+            err_data = json.loads(raw)
+            message = err_data.get("error") or err_data.get("message") or raw
+        except json.JSONDecodeError:
+            message = raw or exc.reason
+        raise CliError(f"Login failed ({exc.code}): {message}") from exc
+    except urllib.error.URLError as exc:
+        raise CliError(f"Cannot reach Open ACE server: {exc.reason}") from exc
 
 
 def _request_json(method: str, url: str, token: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -183,15 +220,24 @@ def _clear_active_terminal() -> None:
 
 
 def cmd_login(args: argparse.Namespace) -> int:
-    token = args.token or getpass.getpass("Open ACE session token: ").strip()
-    if not token:
-        raise CliError("Token is required")
+    server_url = _server_url()
+    machine_id = _machine_id()
+
+    if args.token:
+        token = args.token
+    else:
+        username = input("Username: ").strip()
+        password = getpass.getpass("Password: ")
+        if not username or not password:
+            raise CliError("Username and password are required")
+        token = _login_with_password(server_url, username, password)
+
     config = _load_cli_config()
     config["session_token"] = token
-    config["server_url"] = _server_url()
-    config["machine_id"] = _machine_id()
+    config["server_url"] = server_url
+    config["machine_id"] = machine_id
     _write_cli_config(config)
-    print(f"Logged in for server {_server_url()} on machine {_machine_id()}.")
+    print(f"Logged in for server {server_url} on machine {machine_id}.")
     return 0
 
 
@@ -237,8 +283,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="openace", description="Open ACE remote CLI")
     sub = parser.add_subparsers(dest="command")
 
-    login = sub.add_parser("login", help="Store an Open ACE session token")
-    login.add_argument("--token", help="Open ACE session token")
+    login = sub.add_parser("login", help="Log in with username/password or a session token")
+    login.add_argument("--token", help="Open ACE session token (skip username/password prompt)")
     login.set_defaults(func=cmd_login)
 
     logout = sub.add_parser("logout", help="Remove stored Open ACE credentials")
