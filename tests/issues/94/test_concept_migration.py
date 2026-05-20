@@ -193,16 +193,14 @@ def test_concept_definitions():
     try:
         # Test Agent Session concept
         print("\n[Agent Session Concept]")
-        cursor.execute(
-            """
+        cursor.execute("""
             SELECT agent_session_id, COUNT(*) as msg_count
             FROM daily_messages
             WHERE agent_session_id IS NOT NULL
             GROUP BY agent_session_id
             ORDER BY msg_count DESC
             LIMIT 5
-        """
-        )
+        """)
         sessions = cursor.fetchall()
 
         if sessions:
@@ -225,16 +223,14 @@ def test_concept_definitions():
 
         # Test Conversation concept
         print("\n[Conversation Concept]")
-        cursor.execute(
-            """
+        cursor.execute("""
             SELECT conversation_id, COUNT(*) as msg_count
             FROM daily_messages
             WHERE conversation_id IS NOT NULL
             GROUP BY conversation_id
             ORDER BY msg_count DESC
             LIMIT 5
-        """
-        )
+        """)
         conversations = cursor.fetchall()
 
         if conversations:
@@ -261,15 +257,13 @@ def test_concept_definitions():
 
         # Test Message role breakdown
         print("\n[Message Role Breakdown]")
-        cursor.execute(
-            """
+        cursor.execute("""
             SELECT role, COUNT(*) as count
             FROM daily_messages
             WHERE role IS NOT NULL
             GROUP BY role
             ORDER BY count DESC
-        """
-        )
+        """)
         roles = cursor.fetchall()
 
         if roles:
@@ -311,8 +305,7 @@ def test_conversation_structure():
 
     try:
         # Find a conversation with multiple messages
-        cursor.execute(
-            """
+        cursor.execute("""
             SELECT conversation_id, COUNT(*) as msg_count
             FROM daily_messages
             WHERE conversation_id IS NOT NULL
@@ -320,8 +313,7 @@ def test_conversation_structure():
             HAVING msg_count >= 2
             ORDER BY msg_count DESC
             LIMIT 1
-        """
-        )
+        """)
         result = cursor.fetchone()
 
         if result:
@@ -393,14 +385,12 @@ def test_session_agent_mapping():
 
     try:
         # Check if agent_session_id follows the expected pattern (tool_sessionid)
-        cursor.execute(
-            """
+        cursor.execute("""
             SELECT DISTINCT agent_session_id, tool_name
             FROM daily_messages
             WHERE agent_session_id IS NOT NULL
             LIMIT 10
-        """
-        )
+        """)
         mappings = cursor.fetchall()
 
         if mappings:

@@ -37,15 +37,13 @@ def upgrade() -> None:
 
     # For PostgreSQL, add foreign key constraint
     if is_postgresql:
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE users
             ADD CONSTRAINT fk_users_tenant
             FOREIGN KEY (tenant_id)
             REFERENCES tenants(id)
             ON DELETE SET NULL
-        """
-        )
+        """)
 
     # For SQLite, we need to recreate the table to add foreign key
     # SQLite doesn't support ALTER TABLE ADD CONSTRAINT

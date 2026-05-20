@@ -109,11 +109,9 @@ def run_all_tests():
             screenshot(page, "01_dashboard")
 
             # Check summary data
-            api_data = page.evaluate(
-                """async () => {
+            api_data = page.evaluate("""async () => {
                 try { const resp = await fetch('/api/summary'); return resp.json(); } catch(e) { return null; }
-            }"""
-            )
+            }""")
             if api_data:
                 for tool, data in api_data.items():
                     first = data.get("first_date", "")
@@ -125,11 +123,9 @@ def run_all_tests():
                         add_issue(f"Dashboard-汇总数据-{tool}", f"数据过期: 最后日期是 {last}")
 
             # Check today data
-            today_data = page.evaluate(
-                """async () => {
+            today_data = page.evaluate("""async () => {
                 try { const resp = await fetch('/api/today'); return resp.json(); } catch(e) { return null; }
-            }"""
-            )
+            }""")
             if today_data and isinstance(today_data, list):
                 for item in today_data:
                     tool = item.get("tool_name", "?")

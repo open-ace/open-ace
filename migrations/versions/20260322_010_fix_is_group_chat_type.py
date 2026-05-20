@@ -30,13 +30,11 @@ def upgrade() -> None:
     # Check if we're using PostgreSQL
     if conn.dialect.name == "postgresql":
         # Alter column type from INTEGER to BOOLEAN
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE daily_messages
             ALTER COLUMN is_group_chat TYPE BOOLEAN
             USING (CASE WHEN is_group_chat = 1 THEN TRUE ELSE FALSE END)
-        """
-        )
+        """)
 
 
 def downgrade() -> None:
@@ -47,10 +45,8 @@ def downgrade() -> None:
     # Check if we're using PostgreSQL
     if conn.dialect.name == "postgresql":
         # Revert column type from BOOLEAN to INTEGER
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE daily_messages
             ALTER COLUMN is_group_chat TYPE INTEGER
             USING (CASE WHEN is_group_chat THEN 1 ELSE 0 END)
-        """
-        )
+        """)

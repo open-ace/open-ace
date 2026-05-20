@@ -207,8 +207,7 @@ class DataFetchScheduler:
         try:
             # Find users who exceeded their daily quota
             daily_rows = db.fetch_all(
-                adapt_sql(
-                    f"""
+                adapt_sql(f"""
                     SELECT uds.user_id, uds.requests AS today_requests,
                            uds.tokens AS today_tokens, u.username,
                            u.daily_request_quota, u.daily_token_quota
@@ -220,8 +219,7 @@ class DataFetchScheduler:
                         uds.requests >= COALESCE(u.daily_request_quota, 999999)
                         OR uds.tokens >= COALESCE(u.daily_token_quota, 999999) * 1000000
                       )
-                """
-                ),
+                """),
                 (today,),
             )
 
@@ -231,8 +229,7 @@ class DataFetchScheduler:
 
             # Find users who exceeded their monthly quota
             monthly_rows = db.fetch_all(
-                adapt_sql(
-                    f"""
+                adapt_sql(f"""
                     SELECT u.id AS user_id, SUM(uds.requests) AS month_requests,
                            SUM(uds.tokens) AS month_tokens, u.username,
                            u.monthly_request_quota, u.monthly_token_quota
@@ -244,8 +241,7 @@ class DataFetchScheduler:
                     GROUP BY u.id, u.username, u.monthly_request_quota, u.monthly_token_quota
                     HAVING SUM(uds.requests) >= COALESCE(u.monthly_request_quota, 999999)
                         OR SUM(uds.tokens) >= COALESCE(u.monthly_token_quota, 999999) * 1000000
-                """
-                ),
+                """),
                 (month_start, today),
             )
 

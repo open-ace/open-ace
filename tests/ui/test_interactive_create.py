@@ -158,8 +158,7 @@ async def test_interactive():
 
         # 注入事件监听脚本
         log_message("注入按钮点击事件监听...")
-        await iframe.locator("body").evaluate(
-            """() => {
+        await iframe.locator("body").evaluate("""() => {
             // 监听所有按钮的点击事件
             document.addEventListener('click', (e) => {
                 if (e.target.tagName === 'BUTTON' || e.target.closest('button')) {
@@ -185,8 +184,7 @@ async def test_interactive():
             }, true);
 
             console.log('[EVENT LISTENERS] 已注入点击事件监听');
-        }"""
-        )
+        }""")
 
         # 保存截图让用户看到当前状态
         await page.screenshot(

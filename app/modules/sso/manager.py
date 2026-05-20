@@ -63,8 +63,7 @@ class SSOManager:
             bool_true = "BOOLEAN DEFAULT TRUE" if self.db.is_postgresql else "INTEGER DEFAULT 1"
 
             # SSO providers table
-            cursor.execute(
-                f"""
+            cursor.execute(f"""
                 CREATE TABLE IF NOT EXISTS sso_providers (
                     id {id_type},
                     name TEXT UNIQUE NOT NULL,
@@ -76,12 +75,10 @@ class SSOManager:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (tenant_id) REFERENCES tenants(id)
                 )
-            """
-            )
+            """)
 
             # SSO identities table (links SSO users to local users)
-            cursor.execute(
-                f"""
+            cursor.execute(f"""
                 CREATE TABLE IF NOT EXISTS sso_identities (
                     id {id_type},
                     user_id INTEGER NOT NULL,
@@ -93,12 +90,10 @@ class SSOManager:
                     UNIQUE(provider_name, provider_user_id),
                     FOREIGN KEY (user_id) REFERENCES users(id)
                 )
-            """
-            )
+            """)
 
             # SSO sessions table
-            cursor.execute(
-                f"""
+            cursor.execute(f"""
                 CREATE TABLE IF NOT EXISTS sso_sessions (
                     id {id_type},
                     session_token TEXT UNIQUE NOT NULL,
@@ -110,8 +105,7 @@ class SSOManager:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (user_id) REFERENCES users(id)
                 )
-            """
-            )
+            """)
 
             # Create indexes
             indexes = [
@@ -638,8 +632,7 @@ class SSOManager:
         try:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute(
-                    """
+                cursor.execute("""
                     CREATE TABLE IF NOT EXISTS sso_auth_states (
                         state TEXT PRIMARY KEY,
                         code_verifier TEXT NOT NULL,
@@ -647,8 +640,7 @@ class SSOManager:
                         nonce TEXT,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
-                """
-                )
+                """)
                 cursor.execute(
                     """
                     INSERT INTO sso_auth_states (state, code_verifier, provider_name, nonce)

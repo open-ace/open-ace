@@ -78,8 +78,7 @@ async def test_manual_create():
         log("截图: manual_01_ready.png - 请现在手工点击 Create 按钮")
 
         # 注入详细的事件监听
-        await iframe.locator("body").evaluate(
-            """() => {
+        await iframe.locator("body").evaluate("""() => {
             document.addEventListener('click', (e) => {
                 const btn = e.target.closest('button');
                 if (btn) {
@@ -87,8 +86,7 @@ async def test_manual_create():
                 }
             }, true);
             console.log('[EVENT MONITOR] Active');
-        }"""
-        )
+        }""")
 
         log("\n=== 等待用户手工点击 Create 按钮 (60秒) ===")
         log("请在浏览器中手工点击蓝色的 Create 按钮")

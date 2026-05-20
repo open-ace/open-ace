@@ -163,13 +163,11 @@ async def test_data_update():
 
                 # Check API directly
                 print("\n  Checking API directly...")
-                api_response = await page.evaluate(
-                    """async () => {
+                api_response = await page.evaluate("""async () => {
                     const response = await fetch('/api/messages?limit=100&role=user,assistant,system');
                     const data = await response.json();
                     return data;
-                }"""
-                )
+                }""")
 
                 if api_response and "messages" in api_response:
                     print(f"  API returned {len(api_response['messages'])} messages")

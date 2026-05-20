@@ -102,9 +102,7 @@ def upgrade() -> None:
 
         # Populate initial data from daily_messages
         if conn.dialect.name == "postgresql":
-            conn.execute(
-                sa.text(
-                    """
+            conn.execute(sa.text("""
                     INSERT INTO daily_stats
                     (date, tool_name, host_name, sender_name, total_tokens, total_input_tokens,
                      total_output_tokens, message_count, updated_at)
@@ -121,13 +119,9 @@ def upgrade() -> None:
                     FROM daily_messages
                     GROUP BY date, tool_name, host_name, sender_name
                     ON CONFLICT (date, tool_name, host_name, sender_name) DO NOTHING
-                """
-                )
-            )
+                """))
         else:
-            conn.execute(
-                sa.text(
-                    """
+            conn.execute(sa.text("""
                     INSERT OR IGNORE INTO daily_stats
                     (date, tool_name, host_name, sender_name, total_tokens, total_input_tokens,
                      total_output_tokens, message_count, updated_at)
@@ -143,9 +137,7 @@ def upgrade() -> None:
                         CURRENT_TIMESTAMP
                     FROM daily_messages
                     GROUP BY date, tool_name, host_name, sender_name
-                """
-                )
-            )
+                """))
         conn.commit()
 
 
