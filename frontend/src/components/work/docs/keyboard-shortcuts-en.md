@@ -52,4 +52,3 @@ Open ACE supports the following keyboard shortcuts to help users use the system 
 ---
 
 All shortcuts above are implemented in the current version.
-
