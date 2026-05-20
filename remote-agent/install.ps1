@@ -73,7 +73,18 @@ Write-Host "[OK] Directory created: $InstallDir" -ForegroundColor Green
 Write-Host "[INFO] Downloading agent files..." -ForegroundColor Cyan
 
 $agentUrl = "$ServerUrl/api/remote/agent/files"
-$files = @("agent.py", "config.py", "executor.py", "system_info.py", "requirements.txt")
+$files = @(
+    "agent.py",
+    "config.py",
+    "executor.py",
+    "system_info.py",
+    "requirements.txt",
+    "terminal_menu.py",
+    "terminal_server.py",
+    "websocket_proxy.py",
+    "session_sync.py",
+    "openace_cli.py"
+)
 $adapterFiles = @("__init__.py", "base.py", "qwen_code.py", "claude_code.py", "openclaw.py")
 
 foreach ($file in $files) {
@@ -114,6 +125,21 @@ foreach ($file in $adapterFiles) {
 
 New-Item -ItemType File -Force -Path "$InstallDir\__init__.py" | Out-Null
 Write-Host "[OK] Agent files installed" -ForegroundColor Green
+
+# Install the user-facing Open ACE CLI wrapper.
+Write-Host "[INFO] Installing openace command..." -ForegroundColor Cyan
+$openaceCmd = "$InstallDir\openace.cmd"
+@"
+@echo off
+python "$InstallDir\openace_cli.py" %*
+"@ | Set-Content -Path $openaceCmd -Encoding ASCII
+
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if (-not ($userPath.Split(';') -contains $InstallDir)) {
+    [Environment]::SetEnvironmentVariable("Path", "$userPath;$InstallDir", "User")
+    Write-Host "[WARN] $InstallDir was added to your user PATH. Restart the shell before using openace globally." -ForegroundColor Yellow
+}
+Write-Host "[OK] openace command installed: $openaceCmd" -ForegroundColor Green
 
 # Step 4: Install Python dependencies
 Write-Host "[INFO] Installing Python dependencies..." -ForegroundColor Cyan

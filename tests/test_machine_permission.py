@@ -141,14 +141,12 @@ def setup_test_data(mgr):
             )
 
         # Create a users table for the LEFT JOIN in get_machine_assignments
-        cursor.execute(
-            """
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY,
                 username TEXT NOT NULL
             )
-        """
-        )
+        """)
         for uid in [1, 2, 3, 4, 5, 99]:
             cursor.execute(
                 "INSERT OR IGNORE INTO users (id, username) VALUES (?, ?)",

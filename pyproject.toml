@@ -194,5 +194,5 @@ skip_covered = true
 # Bandit Configuration (Security Linter)
 # =============================================================================
 [tool.bandit]
-exclude_dirs = ["tests", ".venv", "venv"]
+exclude_dirs = ["tests", ".venv", "venv", ".qwen"]
 skips = ["B101", "B601"]

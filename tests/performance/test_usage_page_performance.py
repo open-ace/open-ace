@@ -31,14 +31,12 @@ def get_existing_user(db: Database):
         cursor = conn.cursor()
 
         # Get a user that has usage data
-        cursor.execute(
-            """
+        cursor.execute("""
             SELECT DISTINCT u.id, u.username
             FROM daily_messages dm
             JOIN users u ON dm.sender_name LIKE (u.username || '%%')
             LIMIT 1
-        """
-        )
+        """)
 
         user = cursor.fetchone()
         if user:
@@ -189,8 +187,7 @@ def run_performance_test():
         ) * 100
         speedup = original_stats["avg_ms"] / optimized_stats["avg_ms"]
 
-        print(
-            f"""
+        print(f"""
 Query Performance (30-day trend):
   ┌────────────────────────────────────────────────────────┐
   │ Before: {original_stats['avg_ms']:>8.2f}ms  (daily_messages scan)        │
@@ -206,17 +203,14 @@ Aggregation:
 
 Note: First query may be slower due to cold cache.
       Subsequent queries benefit from 10-minute caching.
-"""
-        )
+""")
     else:
-        print(
-            f"""
+        print(f"""
 Query Performance:
   Optimized: {optimized_stats['avg_ms']:.2f}ms average (user_daily_stats)
 
 Note: Original query may have been served from cache.
-"""
-        )
+""")
 
     print("=" * 70)
 

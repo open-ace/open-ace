@@ -178,8 +178,7 @@ class StateSyncManager:
         id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
 
         # Create sync_events table for event persistence
-        cursor.execute(
-            f"""
+        cursor.execute(f"""
             CREATE TABLE IF NOT EXISTS sync_events (
                 id {id_type},
                 event_id TEXT NOT NULL UNIQUE,
@@ -192,28 +191,21 @@ class StateSyncManager:
                 data TEXT,
                 metadata TEXT
             )
-        """
-        )
+        """)
 
         # Create indexes
-        cursor.execute(
-            """
+        cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_sync_events_timestamp
             ON sync_events(timestamp)
-        """
-        )
-        cursor.execute(
-            """
+        """)
+        cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_sync_events_session_id
             ON sync_events(session_id)
-        """
-        )
-        cursor.execute(
-            """
+        """)
+        cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_sync_events_user_id
             ON sync_events(user_id)
-        """
-        )
+        """)
 
         conn.commit()
         conn.close()

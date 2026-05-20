@@ -39,14 +39,12 @@ def _column_exists(conn, table_name: str, column_name: str) -> bool:
     """Check if a column exists in a table."""
     if conn.dialect.name == "postgresql":
         result = conn.execute(
-            sa.text(
-                """
+            sa.text("""
                 SELECT EXISTS (
                     SELECT FROM information_schema.columns
                     WHERE table_name = :table_name AND column_name = :column_name
                 )
-                """
-            ),
+                """),
             {"table_name": table_name, "column_name": column_name},
         )
         return result.fetchone()[0]
@@ -78,15 +76,13 @@ def _constraint_exists(conn, table_name: str, constraint_name: str) -> bool:
     if conn.dialect.name == "postgresql":
         # Use string formatting for regclass cast, as parameter binding doesn't work with type casts
         result = conn.execute(
-            sa.text(
-                f"""
+            sa.text(f"""
                 SELECT EXISTS (
                     SELECT FROM pg_constraint
                     WHERE conname = :constraint_name
                     AND conrelid = '{table_name}'::regclass
                 )
-                """
-            ),
+                """),
             {"constraint_name": constraint_name},
         )
         return result.fetchone()[0]
@@ -129,142 +125,118 @@ def upgrade() -> None:
             op.execute(f"DROP INDEX {idx_name}")
 
     # Create ENUM types
-    op.execute(
-        """
+    op.execute("""
         DO $$ BEGIN
             CREATE TYPE user_role AS ENUM ('admin', 'manager', 'user');
         EXCEPTION
             WHEN duplicate_object THEN NULL;
         END $$;
-    """
-    )
+    """)
 
-    op.execute(
-        """
+    op.execute("""
         DO $$ BEGIN
             CREATE TYPE tenant_status AS ENUM ('active', 'suspended', 'trial', 'inactive');
         EXCEPTION
             WHEN duplicate_object THEN NULL;
         END $$;
-    """
-    )
+    """)
 
-    op.execute(
-        """
+    op.execute("""
         DO $$ BEGIN
             CREATE TYPE tenant_plan AS ENUM ('free', 'standard', 'premium', 'enterprise');
         EXCEPTION
             WHEN duplicate_object THEN NULL;
         END $$;
-    """
-    )
+    """)
 
-    op.execute(
-        """
+    op.execute("""
         DO $$ BEGIN
             CREATE TYPE message_role AS ENUM ('user', 'assistant', 'system');
         EXCEPTION
             WHEN duplicate_object THEN NULL;
         END $$;
-    """
-    )
+    """)
 
-    op.execute(
-        """
+    op.execute("""
         DO $$ BEGIN
             CREATE TYPE audit_severity AS ENUM ('info', 'warning', 'error', 'critical');
         EXCEPTION
             WHEN duplicate_object THEN NULL;
         END $$;
-    """
-    )
+    """)
 
     # Convert columns to ENUM types
     # Note: Must drop default before changing type, then set new default
     if _column_exists(conn, "users", "role"):
         # Drop default first
         op.execute("ALTER TABLE users ALTER COLUMN role DROP DEFAULT")
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE users
             ALTER COLUMN role TYPE user_role
             USING CASE
                 WHEN role IN ('admin', 'manager', 'user') THEN role::user_role
                 ELSE 'user'::user_role
             END
-        """
-        )
+        """)
         # Set new default
         op.execute("ALTER TABLE users ALTER COLUMN role SET DEFAULT 'user'::user_role")
 
     if _column_exists(conn, "tenants", "status"):
         # Drop default first
         op.execute("ALTER TABLE tenants ALTER COLUMN status DROP DEFAULT")
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE tenants
             ALTER COLUMN status TYPE tenant_status
             USING CASE
                 WHEN status IN ('active', 'suspended', 'trial', 'inactive') THEN status::tenant_status
                 ELSE 'active'::tenant_status
             END
-        """
-        )
+        """)
         # Set new default
         op.execute("ALTER TABLE tenants ALTER COLUMN status SET DEFAULT 'active'::tenant_status")
 
     if _column_exists(conn, "tenants", "plan"):
         # Drop default first
         op.execute("ALTER TABLE tenants ALTER COLUMN plan DROP DEFAULT")
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE tenants
             ALTER COLUMN plan TYPE tenant_plan
             USING CASE
                 WHEN plan IN ('free', 'standard', 'premium', 'enterprise') THEN plan::tenant_plan
                 ELSE 'standard'::tenant_plan
             END
-        """
-        )
+        """)
         # Set new default
         op.execute("ALTER TABLE tenants ALTER COLUMN plan SET DEFAULT 'standard'::tenant_plan")
 
     if _column_exists(conn, "daily_messages", "role"):
         # Skip if role is already message_role
-        result = conn.execute(
-            sa.text(
-                """
+        result = conn.execute(sa.text("""
                 SELECT data_type FROM information_schema.columns
                 WHERE table_name = 'daily_messages' AND column_name = 'role'
-                """
-            )
-        )
+                """))
         data_type = result.fetchone()
         if not data_type or data_type[0] != "message_role":
-            op.execute(
-                """
+            op.execute("""
                 ALTER TABLE daily_messages
                 ALTER COLUMN role TYPE message_role
                 USING CASE
                     WHEN role IN ('user', 'assistant', 'system') THEN role::message_role
                     ELSE 'user'::message_role
                 END
-            """
-            )
+            """)
 
     if _column_exists(conn, "audit_logs", "severity"):
         # Drop default first
         op.execute("ALTER TABLE audit_logs ALTER COLUMN severity DROP DEFAULT")
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE audit_logs
             ALTER COLUMN severity TYPE audit_severity
             USING CASE
                 WHEN severity IN ('info', 'warning', 'error', 'critical') THEN severity::audit_severity
                 ELSE 'info'::audit_severity
             END
-        """
-        )
+        """)
         # Set new default
         op.execute(
             "ALTER TABLE audit_logs ALTER COLUMN severity SET DEFAULT 'info'::audit_severity"
@@ -275,18 +247,13 @@ def upgrade() -> None:
     # ============================================
     if _column_exists(conn, "tenants", "quota"):
         # Check if already JSONB
-        result = conn.execute(
-            sa.text(
-                """
+        result = conn.execute(sa.text("""
                 SELECT data_type FROM information_schema.columns
                 WHERE table_name = 'tenants' AND column_name = 'quota'
-                """
-            )
-        )
+                """))
         data_type = result.fetchone()
         if data_type and data_type[0] not in ("jsonb", "JSONB"):
-            op.execute(
-                r"""
+            op.execute(r"""
                 ALTER TABLE tenants
                 ALTER COLUMN quota TYPE JSONB
                 USING CASE
@@ -294,22 +261,16 @@ def upgrade() -> None:
                     WHEN quota::text ~ '^\s*\{' THEN quota::JSONB
                     ELSE NULL
                 END
-            """
-            )
+            """)
 
     if _column_exists(conn, "tenants", "settings"):
-        result = conn.execute(
-            sa.text(
-                """
+        result = conn.execute(sa.text("""
                 SELECT data_type FROM information_schema.columns
                 WHERE table_name = 'tenants' AND column_name = 'settings'
-                """
-            )
-        )
+                """))
         data_type = result.fetchone()
         if data_type and data_type[0] not in ("jsonb", "JSONB"):
-            op.execute(
-                r"""
+            op.execute(r"""
                 ALTER TABLE tenants
                 ALTER COLUMN settings TYPE JSONB
                 USING CASE
@@ -317,8 +278,7 @@ def upgrade() -> None:
                     WHEN settings::text ~ '^\s*\{' THEN settings::JSONB
                     ELSE NULL
                 END
-            """
-            )
+            """)
 
     # Add GIN indexes for JSONB fields
     if not _index_exists(conn, "tenants", "idx_tenants_quota_gin"):
@@ -333,67 +293,54 @@ def upgrade() -> None:
     # Recreate indexes on daily_messages.role that were dropped earlier
     # Now that role is converted to message_role ENUM
     if not _index_exists(conn, "daily_messages", "idx_messages_sender_date_role_covering"):
-        op.execute(
-            """
+        op.execute("""
             CREATE INDEX idx_messages_sender_date_role_covering ON daily_messages
             USING btree (sender_id, date, role)
             INCLUDE (tokens_used)
             WHERE ((sender_id IS NOT NULL) AND (role = 'assistant'::message_role))
-        """
-        )
+        """)
 
     if not _index_exists(conn, "daily_messages", "idx_messages_session_list_covering"):
-        op.execute(
-            """
+        op.execute("""
             CREATE INDEX idx_messages_session_list_covering ON daily_messages
             USING btree (agent_session_id, tool_name, host_name, sender_name)
             INCLUDE (timestamp, tokens_used, input_tokens, output_tokens, sender_id, date)
             WHERE (agent_session_id IS NOT NULL)
-        """
-        )
+        """)
 
     if not _index_exists(conn, "daily_messages", "idx_messages_usage_trend_covering"):
-        op.execute(
-            """
+        op.execute("""
             CREATE INDEX idx_messages_usage_trend_covering ON daily_messages
             USING btree (date, role, sender_name)
             INCLUDE (tokens_used)
             WHERE (role = 'assistant'::message_role)
-        """
-        )
+        """)
 
     # Active users only (is_active is BOOLEAN in PostgreSQL)
     if not _index_exists(conn, "users", "idx_users_active_partial"):
-        op.execute(
-            """
+        op.execute("""
             CREATE INDEX idx_users_active_partial ON users (username, email, role)
             WHERE is_active IS TRUE AND deleted_at IS NULL
-        """
-        )
+        """)
 
     # Unacknowledged alerts (acknowledged is INTEGER: 0=unacknowledged, 1=acknowledged)
     if not _index_exists(conn, "quota_alerts", "idx_alerts_unacked_partial"):
-        op.execute(
-            """
+        op.execute("""
             CREATE INDEX idx_alerts_unacked_partial ON quota_alerts (created_at, user_id)
             WHERE acknowledged = 0
-        """
-        )
+        """)
 
     # Recent audit logs - skip partial index with CURRENT_TIMESTAMP (not IMMUTABLE)
     # Use regular index instead
     if not _index_exists(conn, "audit_logs", "idx_audit_recent"):
-        op.execute(
-            """
+        op.execute("""
             CREATE INDEX idx_audit_recent ON audit_logs (timestamp, user_id, action)
-        """
-        )
+        """)
 
     # ============================================
     # 4. Create updated_at trigger function
     # ============================================
-    op.execute(
-        """
+    op.execute("""
         CREATE OR REPLACE FUNCTION update_timestamp()
         RETURNS TRIGGER AS $$
         BEGIN
@@ -401,29 +348,24 @@ def upgrade() -> None:
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql;
-    """
-    )
+    """)
 
     # Apply trigger to tables with updated_at column
     for table in ["tenants", "tenant_usage", "quota_usage", "tenant_quotas", "tenant_settings"]:
         if _column_exists(conn, table, "updated_at"):
             trigger_name = f"{table}_updated_at_trigger"
             # Drop existing trigger if exists
-            op.execute(
-                f"""
+            op.execute(f"""
                 DROP TRIGGER IF EXISTS {trigger_name} ON {table}
-            """
-            )
+            """)
             # Create new trigger with condition
-            op.execute(
-                f"""
+            op.execute(f"""
                 CREATE TRIGGER {trigger_name}
                     BEFORE UPDATE ON {table}
                     FOR EACH ROW
                     WHEN (OLD.* IS DISTINCT FROM NEW.*)
                     EXECUTE FUNCTION update_timestamp()
-            """
-            )
+            """)
 
     # ============================================
     # 5. Add foreign key indexes
@@ -595,42 +537,30 @@ def downgrade() -> None:
     # 2. Convert JSONB back to TEXT
     # ============================================
     if _column_exists(conn, "tenants", "quota"):
-        result = conn.execute(
-            sa.text(
-                """
+        result = conn.execute(sa.text("""
                 SELECT data_type FROM information_schema.columns
                 WHERE table_name = 'tenants' AND column_name = 'quota'
-                """
-            )
-        )
+                """))
         data_type = result.fetchone()
         if data_type and data_type[0] in ("jsonb", "JSONB"):
-            op.execute(
-                """
+            op.execute("""
                 ALTER TABLE tenants
                 ALTER COLUMN quota TYPE TEXT
                 USING quota::TEXT
-            """
-            )
+            """)
 
     if _column_exists(conn, "tenants", "settings"):
-        result = conn.execute(
-            sa.text(
-                """
+        result = conn.execute(sa.text("""
                 SELECT data_type FROM information_schema.columns
                 WHERE table_name = 'tenants' AND column_name = 'settings'
-                """
-            )
-        )
+                """))
         data_type = result.fetchone()
         if data_type and data_type[0] in ("jsonb", "JSONB"):
-            op.execute(
-                """
+            op.execute("""
                 ALTER TABLE tenants
                 ALTER COLUMN settings TYPE TEXT
                 USING settings::TEXT
-            """
-            )
+            """)
 
     # Drop GIN indexes
     if _index_exists(conn, "tenants", "idx_tenants_quota_gin"):
@@ -643,70 +573,54 @@ def downgrade() -> None:
     # 1. Convert ENUM back to TEXT with CHECK constraints
     # ============================================
     if _column_exists(conn, "users", "role"):
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE users
             ALTER COLUMN role TYPE TEXT
             USING role::TEXT
-        """
-        )
-        op.execute(
-            """
+        """)
+        op.execute("""
             ALTER TABLE users
             ADD CONSTRAINT chk_users_role
             CHECK (role IN ('admin', 'manager', 'user'))
-        """
-        )
+        """)
 
     if _column_exists(conn, "tenants", "status"):
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE tenants
             ALTER COLUMN status TYPE TEXT
             USING status::TEXT
-        """
-        )
-        op.execute(
-            """
+        """)
+        op.execute("""
             ALTER TABLE tenants
             ADD CONSTRAINT chk_tenants_status
             CHECK (status IN ('active', 'suspended', 'trial', 'inactive'))
-        """
-        )
+        """)
 
     if _column_exists(conn, "tenants", "plan"):
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE tenants
             ALTER COLUMN plan TYPE TEXT
             USING plan::TEXT
-        """
-        )
-        op.execute(
-            """
+        """)
+        op.execute("""
             ALTER TABLE tenants
             ADD CONSTRAINT chk_tenants_plan
             CHECK (plan IN ('free', 'standard', 'premium', 'enterprise'))
-        """
-        )
+        """)
 
     if _column_exists(conn, "daily_messages", "role"):
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE daily_messages
             ALTER COLUMN role TYPE TEXT
             USING role::TEXT
-        """
-        )
+        """)
 
     if _column_exists(conn, "audit_logs", "severity"):
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE audit_logs
             ALTER COLUMN severity TYPE TEXT
             USING severity::TEXT
-        """
-        )
+        """)
 
     # Drop ENUM types
     op.execute("DROP TYPE IF EXISTS audit_severity")
@@ -720,34 +634,28 @@ def downgrade() -> None:
     # ============================================
     # Recreate indexes that were dropped at the beginning
     if not _index_exists(conn, "daily_messages", "idx_messages_sender_date_role_covering"):
-        op.execute(
-            """
+        op.execute("""
             CREATE INDEX idx_messages_sender_date_role_covering ON daily_messages
             USING btree (sender_id, date, role)
             INCLUDE (tokens_used)
             WHERE ((sender_id IS NOT NULL) AND (role = 'assistant'))
-        """
-        )
+        """)
 
     if not _index_exists(conn, "daily_messages", "idx_messages_session_list_covering"):
-        op.execute(
-            """
+        op.execute("""
             CREATE INDEX idx_messages_session_list_covering ON daily_messages
             USING btree (agent_session_id, tool_name, host_name, sender_name)
             INCLUDE (timestamp, tokens_used, input_tokens, output_tokens, sender_id, date)
             WHERE (agent_session_id IS NOT NULL)
-        """
-        )
+        """)
 
     if not _index_exists(conn, "daily_messages", "idx_messages_usage_trend_covering"):
-        op.execute(
-            """
+        op.execute("""
             CREATE INDEX idx_messages_usage_trend_covering ON daily_messages
             USING btree (date, role, sender_name)
             INCLUDE (tokens_used)
             WHERE (role = 'assistant')
-        """
-        )
+        """)
 
 
 def _downgrade_sqlite_indexes(conn) -> None:

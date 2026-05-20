@@ -35,8 +35,7 @@ def db_connection(temp_db_path):
     conn.execute("PRAGMA foreign_keys = ON")
 
     # Create agent_sessions table
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS agent_sessions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             session_id TEXT NOT NULL UNIQUE,
@@ -65,12 +64,10 @@ def db_connection(temp_db_path):
             remote_machine_id TEXT,
             paused_at TEXT
         )
-    """
-    )
+    """)
 
     # Create session_messages table
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS session_messages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             session_id TEXT NOT NULL,
@@ -81,12 +78,10 @@ def db_connection(temp_db_path):
             timestamp TEXT NOT NULL,
             metadata TEXT DEFAULT '{}'
         )
-    """
-    )
+    """)
 
     # Create daily_messages table
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS daily_messages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             date TEXT NOT NULL,
@@ -107,8 +102,7 @@ def db_connection(temp_db_path):
             agent_session_id TEXT,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
-    """
-    )
+    """)
 
     conn.commit()
     yield conn

@@ -101,27 +101,23 @@ def seed_audit_logs(conn):
         )
 
     cur.execute(
-        adapt_sql(
-            f"""
+        adapt_sql(f"""
         INSERT INTO audit_logs
         (timestamp, user_id, username, action, severity, resource_type,
          resource_id, details, ip_address, user_agent, session_id, success, error_message)
         VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph})
-    """
-        ),
+    """),
         logs[0],
     )
 
     for log in logs[1:]:
         cur.execute(
-            adapt_sql(
-                f"""
+            adapt_sql(f"""
             INSERT INTO audit_logs
             (timestamp, user_id, username, action, severity, resource_type,
              resource_id, details, ip_address, user_agent, session_id, success, error_message)
             VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph})
-        """
-            ),
+        """),
             log,
         )
 
@@ -173,13 +169,11 @@ def seed_filter_rules(conn):
 
     for desc, rule_type, pattern, severity, action, enabled in rules:
         cur.execute(
-            adapt_sql(
-                f"""
+            adapt_sql(f"""
             INSERT INTO content_filter_rules
             (pattern, type, severity, action, is_enabled, description, created_at, updated_at)
             VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph})
-        """
-            ),
+        """),
             (
                 pattern,
                 rule_type,
@@ -262,14 +256,12 @@ def seed_alerts(conn):
         alert_id = f"alert_{random.randint(10000, 99999)}"
         read_flag = 1 if hours_ago > 24 else 0
         cur.execute(
-            adapt_sql(
-                f"""
+            adapt_sql(f"""
             INSERT INTO alerts
             (alert_id, alert_type, severity, title, message, user_id, username,
              tool_name, metadata, created_at, read, action_url, action_text)
             VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph})
-        """
-            ),
+        """),
             (
                 alert_id,
                 alert_type,
@@ -306,9 +298,7 @@ def seed_hourly_stats(conn):
     ph = get_param_placeholder()
 
     # Get recent daily_usage data to know which dates/tools/hosts have data
-    cur.execute(
-        adapt_sql(
-            """
+    cur.execute(adapt_sql("""
         SELECT date, tool_name, host_name,
                SUM(input_tokens) as input_tokens,
                SUM(output_tokens) as output_tokens,
@@ -319,15 +309,11 @@ def seed_hourly_stats(conn):
         GROUP BY date, tool_name, host_name
         ORDER BY date DESC
         LIMIT 50
-    """
-        )
-    )
+    """))
 
     if not is_postgresql():
         # SQLite fallback
-        cur.execute(
-            adapt_sql(
-                """
+        cur.execute(adapt_sql("""
             SELECT date, tool_name, host_name,
                    SUM(input_tokens) as input_tokens,
                    SUM(output_tokens) as output_tokens,
@@ -338,9 +324,7 @@ def seed_hourly_stats(conn):
             GROUP BY date, tool_name, host_name
             ORDER BY date DESC
             LIMIT 50
-        """
-            )
-        )
+        """))
 
     rows = cur.fetchall()
     if not rows:
@@ -361,13 +345,11 @@ def seed_hourly_stats(conn):
                     in_tokens = base_tokens - out_tokens
                     reqs = random.randint(5, 100)
                     cur.execute(
-                        adapt_sql(
-                            f"""
+                        adapt_sql(f"""
                         INSERT INTO hourly_stats
                         (date, hour, tool_name, host_name, total_tokens, input_tokens, output_tokens, request_count)
                         VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph})
-                    """
-                        ),
+                    """),
                         (today, hour, tool, host, base_tokens, in_tokens, out_tokens, reqs),
                     )
         conn.commit()
@@ -424,13 +406,11 @@ def seed_hourly_stats(conn):
             h_reqs = max(1, int(request_count * w / total_weight))
 
             cur.execute(
-                adapt_sql(
-                    f"""
+                adapt_sql(f"""
                 INSERT INTO hourly_stats
                 (date, hour, tool_name, host_name, total_tokens, input_tokens, output_tokens, request_count)
                 VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph})
-            """
-                ),
+            """),
                 (date, hour, tool, host, h_tokens, h_input, h_output, h_reqs),
             )
             inserted += 1
@@ -477,12 +457,10 @@ def seed_retention_history(conn):
             }
         )
         cur.execute(
-            adapt_sql(
-                f"""
+            adapt_sql(f"""
             INSERT INTO retention_history (timestamp, report_data)
             VALUES ({ph}, {ph})
-        """
-            ),
+        """),
             (ts, report),
         )
 

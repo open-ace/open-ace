@@ -73,16 +73,14 @@ async def test_new_folder_create():
         await new_folder_btn.wait_for(timeout=5000)
 
         # 注入点击监听脚本
-        await iframe.locator("body").evaluate(
-            """() => {
+        await iframe.locator("body").evaluate("""() => {
             document.addEventListener('click', (e) => {
                 const btn = e.target.closest('button');
                 if (btn) {
                     console.log('[CLICK]', btn.textContent?.trim().substring(0, 50), btn.className?.substring(0, 50));
                 }
             }, true);
-        }"""
-        )
+        }""")
 
         await new_folder_btn.click()
         await page.wait_for_timeout(1000)

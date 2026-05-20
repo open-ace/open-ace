@@ -108,8 +108,7 @@ async def test_workspace_state_restore():
 
             # Step 8: Verify localStorage has stored tabs
             print("\nStep 8: Verify localStorage contains workspace tabs")
-            stored_data = await page.evaluate(
-                """() => {
+            stored_data = await page.evaluate("""() => {
                 const store = localStorage.getItem('open-ace-store');
                 if (store) {
                     const parsed = JSON.parse(store);
@@ -120,8 +119,7 @@ async def test_workspace_state_restore():
                     };
                 }
                 return null;
-            }"""
-            )
+            }""")
             print(f"  Stored data: {stored_data}")
             if stored_data and stored_data.get("hasWorkspaceTabs"):
                 print(
