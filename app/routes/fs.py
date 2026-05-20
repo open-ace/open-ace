@@ -16,13 +16,52 @@ from typing import Any
 
 from flask import Blueprint, g, jsonify, request
 
-from app.auth.decorators import auth_required
 from app.repositories.user_repo import UserRepository
 
 logger = logging.getLogger(__name__)
 
 fs_bp = Blueprint("fs", __name__)
 user_repo = UserRepository()
+
+
+@fs_bp.before_request
+def _authenticate_user():
+    """Authenticate via session token or WebUI token (for iframe integration)."""
+    # Skip auth for OPTIONS preflight requests
+    if request.method == "OPTIONS":
+        return None
+
+    # Try session token first
+    from app.auth.decorators import _extract_token, _load_user_from_token
+
+    token = _extract_token()
+    if token:
+        user_data = _load_user_from_token(token)
+        if user_data:
+            user = user_repo.get_user_by_id(int(user_data.get("id", 0)))
+            if user:
+                g.user = user
+                g.user_id = user.get("id")
+                g.user_role = user.get("role")
+                return None
+
+    # Fallback: try WebUI token from query param (for iframe integration)
+    url_token = request.args.get("token")
+    if url_token:
+        from app.services.webui_manager import get_webui_manager
+
+        manager = get_webui_manager()
+        if manager:
+            valid, user_id, error = manager.validate_token(url_token)
+            if valid and user_id:
+                user = user_repo.get_user_by_id(user_id)
+                if user:
+                    g.user = user
+                    g.user_id = user_id
+                    g.user_role = user.get("role")
+                    return None
+
+    return jsonify({"error": "Authentication required"}), 401
 
 
 def run_as_user(system_account: str, command: list) -> subprocess.CompletedProcess:
@@ -201,7 +240,6 @@ def get_directory_info(path: str, system_account: str | None = None):
 
 
 @fs_bp.route("/fs/browse", methods=["GET"])
-@auth_required
 def api_browse_directory():
     """Browse a directory and list subdirectories."""
     user = g.user
@@ -344,7 +382,6 @@ def list_subdirectories(path: str, system_account: str | None = None) -> list:
 
 
 @fs_bp.route("/fs/check-path", methods=["POST"])
-@auth_required
 def api_check_path():
     """Check if a path is valid and can be used for a project."""
     user = g.user
@@ -425,7 +462,6 @@ def api_check_path():
 
 
 @fs_bp.route("/fs/home", methods=["GET"])
-@auth_required
 def api_get_home():
     """Get user's home directory."""
     user = g.user

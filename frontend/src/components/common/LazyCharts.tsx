@@ -56,6 +56,7 @@ export interface BarChartProps {
   stacked?: boolean;
   className?: string;
   unit?: 'none' | 'K' | 'M' | 'B';
+  usernames?: string[];
 }
 
 export interface PieChartProps {

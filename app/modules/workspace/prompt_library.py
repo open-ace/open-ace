@@ -518,9 +518,12 @@ class PromptLibrary:
 
         return [self._row_to_template(row) for row in rows]
 
-    def get_categories(self) -> list[dict[str, Any]]:
+    def get_categories(self, user_id: Optional[int] = None) -> list[dict[str, Any]]:
         """
         Get all categories with template counts.
+
+        Args:
+            user_id: Optional user ID to include their private templates in counts.
 
         Returns:
             List of category info dictionaries.
@@ -528,13 +531,27 @@ class PromptLibrary:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        cursor.execute(f"""
-            SELECT category, COUNT(*) as count
-            FROM prompt_templates
-            WHERE {adapt_boolean_condition('is_public', True)}
-            GROUP BY category
-            ORDER BY count DESC
-        """)
+        if user_id is not None:
+            # Include user's private templates + all public templates
+            cursor.execute(
+                f"""
+                SELECT category, COUNT(*) as count
+                FROM prompt_templates
+                WHERE (author_id = ? OR {adapt_boolean_condition('is_public', True)})
+                GROUP BY category
+                ORDER BY count DESC
+            """,
+                (user_id,),
+            )
+        else:
+            # Only count public templates
+            cursor.execute(f"""
+                SELECT category, COUNT(*) as count
+                FROM prompt_templates
+                WHERE {adapt_boolean_condition('is_public', True)}
+                GROUP BY category
+                ORDER BY count DESC
+            """)
 
         rows = cursor.fetchall()
         conn.close()
