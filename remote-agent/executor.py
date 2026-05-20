@@ -570,6 +570,71 @@ class ProcessExecutor:
         if is_complete:
             logger.info("Session %s output stream complete", session_id[:8])
 
+    def _send_tool_limit_hints(self, session_id: str) -> bool:
+        """
+        Send tool limit hints to the CLI after SDK initialization (Issue #352).
+
+        This informs the assistant about platform tool limitations so it can
+        proactively handle long-running tasks instead of silently switching
+        strategies when limits are hit.
+
+        Args:
+            session_id: Session identifier.
+
+        Returns:
+            True if hints were sent successfully.
+        """
+        with self._lock:
+            session = self._sessions.get(session_id)
+        if not session or not session.is_running:
+            logger.warning("Cannot send tool limit hints to stopped session %s", session_id[:8])
+            return False
+
+        # Tool limit hints message
+        # These limits are platform-specific and should be communicated clearly
+        hints_msg = {
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            "[Platform Tool Limits]\n"
+                            "The following tool limitations apply on this platform:\n"
+                            "- run_shell_command: Maximum timeout is 600 seconds (10 minutes)\n"
+                            "- For tasks that may exceed this limit, consider:\n"
+                            "  1. Using is_background=true for long-running processes\n"
+                            "  2. Breaking down into smaller steps\n"
+                            "  3. Using polling/checkpointing for progress tracking\n"
+                            "- When a tool call approaches or exceeds limits, the system will\n"
+                            "  provide explicit error messages - please handle accordingly\n"
+                            "- Do not silently switch execution strategies without user confirmation\n"
+                            "\n"
+                            "Please plan your approach accordingly when executing long-running commands."
+                        ),
+                    }
+                ],
+            },
+        }
+
+        try:
+            payload = json.dumps(hints_msg) + "\n"
+            session.process.stdin.write(payload.encode("utf-8"))
+            session.process.stdin.flush()
+            logger.info(
+                "Sent tool limit hints for session %s",
+                session_id[:8],
+            )
+            return True
+        except (OSError, BrokenPipeError, AttributeError) as e:
+            logger.error(
+                "Failed to send tool limit hints for session %s: %s",
+                session_id[:8],
+                e,
+            )
+            return False
+
     def _build_env(
         self,
         cli_tool: str,
@@ -893,6 +958,9 @@ class ProcessExecutor:
                     session_id[:8],
                 )
 
+            else:
+                # SDK init successful - send tool limit hints (Issue #352)
+                self._send_tool_limit_hints(session_id)
         logger.info(
             "Session %s started (pid %d): %s",
             session_id[:8],
