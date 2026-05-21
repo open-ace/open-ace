@@ -51,11 +51,6 @@ GREEN = "\x1b[32m"
 YELLOW = "\x1b[33m"
 
 
-def get_progress_bar(percent: int) -> str:
-    filled = max(0, min(20, round(percent / 5)))
-    return f"[{'=' * filled}{' ' * (20 - filled)}]"
-
-
 def check_installed(cli_name: str) -> bool:
     try:
         result = subprocess.run(["which", cli_name], capture_output=True, timeout=5)
@@ -112,35 +107,6 @@ def render_menu(items: list[dict], selected: int) -> None:
 
 def show_message(message: str) -> None:
     sys.stdout.write(f"\r\n  {message}\r\n\r\n  {DIM}Press any key to continue...{RESET}")
-    sys.stdout.flush()
-
-
-def render_launch_progress(item: dict) -> None:
-    installing = not item.get("installed")
-    action = "Installing" if installing else "Starting"
-    detail = (
-        "Installer output will appear below when it starts."
-        if installing
-        else "Waiting for the CLI interface to take over the terminal."
-    )
-    progress = 35 if installing else 55
-    lines = [
-        "",
-        f"  {BOLD_CYAN}========================================{RESET}",
-        f"  {BOLD_CYAN}  Open ACE Remote Terminal{RESET}",
-        f"  {BOLD_CYAN}========================================{RESET}",
-        "",
-        f"  {action} {BOLD_YELLOW}{item['name']}{RESET}",
-        "",
-        f"  {GREEN}{get_progress_bar(progress)}{RESET}  {progress}%",
-        "",
-        f"  {detail}",
-        "  First launch can take 5-15 seconds while the remote CLI initializes.",
-        "",
-        f"  {DIM}If this takes longer than 30 seconds, press Ctrl+C to interrupt.{RESET}",
-        "",
-    ]
-    sys.stdout.write(CLEAR + "\r\n".join(lines))
     sys.stdout.flush()
 
 
@@ -218,7 +184,6 @@ def handle_select(item: dict) -> None:
         cmd = f'{item["install_cmd"]} && {item["cmd"]}; exec {sys.executable} {MENU_PATH}'
     else:
         cmd = f'{item["cmd"]}; exec {sys.executable} {MENU_PATH}'
-    render_launch_progress(item)
     exec_command(cmd)
 
 

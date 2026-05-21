@@ -16,34 +16,7 @@ def load_terminal_menu():
     return module
 
 
-def test_render_launch_progress_for_installed_tool(capsys):
-    terminal_menu = load_terminal_menu()
-
-    terminal_menu.render_launch_progress({"name": "Claude Code", "installed": True})
-
-    output = capsys.readouterr().out
-    assert "Starting" in output
-    assert "Claude Code" in output
-    assert "[===========         ]" in output
-    assert "55%" in output
-    assert "Waiting for the CLI interface" in output
-    assert "Ctrl+C" in output
-
-
-def test_render_launch_progress_for_installing_tool(capsys):
-    terminal_menu = load_terminal_menu()
-
-    terminal_menu.render_launch_progress({"name": "Qwen Code", "installed": False})
-
-    output = capsys.readouterr().out
-    assert "Installing" in output
-    assert "Qwen Code" in output
-    assert "[=======             ]" in output
-    assert "35%" in output
-    assert "Installer output will appear below" in output
-
-
-def test_handle_select_renders_progress_before_exec(monkeypatch, capsys):
+def test_handle_select_execs_command(monkeypatch):
     terminal_menu = load_terminal_menu()
     executed_commands = []
 
@@ -61,9 +34,6 @@ def test_handle_select_renders_progress_before_exec(monkeypatch, capsys):
         }
     )
 
-    output = capsys.readouterr().out
-    assert "Starting" in output
-    assert "Claude Code" in output
     assert executed_commands == [
         f"claude --bare; exec {terminal_menu.sys.executable} {terminal_menu.MENU_PATH}"
     ]
