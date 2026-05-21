@@ -29,7 +29,7 @@ try:
     import websockets
 except ImportError:
     print("Error: 'websockets' package is required.", file=sys.stderr)
-    print("Install with: pip install websockets>=15.0", file=sys.stderr)
+    print("Install with: pip install 'websockets>=13.0,<17.0'", file=sys.stderr)
     sys.exit(1)
 
 logger = logging.getLogger("openace-ws-proxy")

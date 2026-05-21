@@ -33,7 +33,7 @@ try:
     from websockets.server import serve
 except ImportError:
     print("Error: 'websockets' package is required.", file=sys.stderr)
-    print("Install with: pip install websockets>=12.0", file=sys.stderr)
+    print("Install with: pip install 'websockets>=13.0,<17.0'", file=sys.stderr)
     sys.exit(1)
 
 logger = logging.getLogger("openace-terminal-server")
