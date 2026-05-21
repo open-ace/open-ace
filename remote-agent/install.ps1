@@ -76,6 +76,7 @@ $agentUrl = "$ServerUrl/api/remote/agent/files"
 $files = @(
     "agent.py",
     "config.py",
+    "constants.py",
     "executor.py",
     "system_info.py",
     "requirements.txt",
