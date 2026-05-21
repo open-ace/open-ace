@@ -23,7 +23,9 @@ jobs:
           # The repository has existing Bandit findings; keep Bandit available
           # for local/incremental checks, but do not fail full-repo CI on legacy
           # issues unrelated to the current PR.
-          SKIP: bandit
+          # Skip no-commit-to-branch in CI: GitHub branch protection already
+          # prevents direct pushes; this hook is for local development only.
+          SKIP: bandit,no-commit-to-branch
 
   test:
     runs-on: ubuntu-latest
