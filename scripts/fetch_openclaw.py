@@ -1465,9 +1465,6 @@ def update_agent_sessions_stats(messages: list, tool_name: str = "openclaw") -> 
                         # Deduplicate by (session_id, role, timestamp) + message_id if available
                         # Note: metadata is TEXT type, use LIKE pattern matching instead of JSONB ->>
                         if msg_id:
-                            # Pattern match for message_id in JSON-like metadata string
-                            # Use escape_like to prevent wildcard injection
-                            escaped_msg_id = escape_like(msg_id)
                             check_sql = f"""
                                 SELECT id FROM session_messages
                                 WHERE session_id = {placeholder}
@@ -1475,6 +1472,8 @@ def update_agent_sessions_stats(messages: list, tool_name: str = "openclaw") -> 
                                 AND timestamp = {placeholder}
                                 AND metadata LIKE {placeholder}
                             """
+                            # Use escape_like to prevent wildcard injection
+                            escaped_msg_id = escape_like(msg_id)
                             _execute(
                                 cursor,
                                 check_sql,
@@ -1508,7 +1507,9 @@ def update_agent_sessions_stats(messages: list, tool_name: str = "openclaw") -> 
                             metadata = {
                                 "message_id": msg_id,
                                 "project_path": msg.get("project_path"),
-                                "content_blocks": msg.get("content_blocks"),  # Issue #357: structured content
+                                "content_blocks": msg.get(
+                                    "content_blocks"
+                                ),  # Issue #357: structured content
                             }
                             _execute(
                                 cursor,
