@@ -65,7 +65,9 @@ class SessionProcess:
         self.env = env
         self.model = model
         self.permission_mode = permission_mode
-        self.original_project_path = original_project_path or project_path  # For cleanup (Issue #491)
+        self.original_project_path = (
+            original_project_path or project_path
+        )  # For cleanup (Issue #491)
         self.allowed_tools: list[str] = list(allowed_tools) if allowed_tools else []
 
         self._stdout_thread: threading.Thread | None = None
