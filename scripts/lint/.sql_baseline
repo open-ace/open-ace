@@ -1,3 +1,3 @@
-{"rule": "SQL003", "file": "scripts/fetch_claude.py", "line": 728, "message": "LIKE query without escape_like() — special characters in user input will be treated as wildcards"}
-{"rule": "SQL001", "file": "scripts/shared/db.py", "line": 1487, "message": "Boolean value converted to int variable 'is_active_val' — use adapt_boolean_value() or adapt_boolean_condition()"}
-{"rule": "SQL001", "file": "scripts/shared/db.py", "line": 1488, "message": "Boolean value converted to int variable 'must_change_val' — use adapt_boolean_value() or adapt_boolean_condition()"}
+{"rule": "SQL003", "file": "scripts/fetch_claude.py", "line": 831, "message": "LIKE query without escape_like() — special characters in user input will be treated as wildcards"}
+{"rule": "SQL001", "file": "scripts/shared/db.py", "line": 1485, "message": "Boolean value converted to int variable 'is_active_val' — use adapt_boolean_value() or adapt_boolean_condition()"}
+{"rule": "SQL001", "file": "scripts/shared/db.py", "line": 1486, "message": "Boolean value converted to int variable 'must_change_val' — use adapt_boolean_value() or adapt_boolean_condition()"}

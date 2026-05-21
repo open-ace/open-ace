@@ -567,11 +567,88 @@ class RemoteSessionManager:
                             self._content_blocks_buffer[session_id] = blocks_buf
 
         elif msg_type == "system":
-            # System messages (e.g., init) are stored directly without accumulation
-            content = parsed.get("content") or parsed.get("message", "")
+            # System messages (e.g., init) are stored directly, not accumulated
+            # Extract meaningful content for storage
+            subtype = parsed.get("subtype", "")
+
+            # Get content/message fields with clear priority:
+            # - Prefer 'content' if it exists and is non-empty
+            # - Fall back to 'message' if content is empty/missing
+            # - Both can be str or dict
+            raw_content = parsed.get("content")
+            raw_message = parsed.get("message")
+
+            # Determine the effective content value
+            if raw_content is not None and raw_content != "":
+                effective_content = raw_content
+            elif raw_message is not None and raw_message != "":
+                effective_content = raw_message
+            else:
+                effective_content = None
+
+            # For init messages, create a summary with key info
+            if subtype in ("init", "initialized"):
+                init_info = {
+                    "session_id": parsed.get("session_id", ""),
+                    "model": parsed.get("model", ""),
+                    "permission_mode": parsed.get("permission_mode", ""),
+                }
+                # Remove empty fields
+                init_info = {k: v for k, v in init_info.items() if v}
+
+                # Preserve original content/message if present
+                if effective_content is not None:
+                    init_info["content"] = effective_content
+
+                # Only store if there's meaningful info beyond subtype
+                if init_info:
+                    init_info["subtype"] = subtype
+                    try:
+                        content = json.dumps(init_info, ensure_ascii=False)
+                    except (TypeError, ValueError) as e:
+                        logger.warning(
+                            "Failed to serialize system init message for %s: %s",
+                            session_id[:8],
+                            e,
+                        )
+                        return
+                else:
+                    # No meaningful info beyond subtype - skip storage
+                    return
+            else:
+                # Non-init system messages: use effective_content directly
+                content = effective_content
+                if content is None:
+                    return
+
+            # Serialize content to string if needed
             if isinstance(content, dict):
-                content = json.dumps(content, ensure_ascii=False)
-            if content:
+                try:
+                    content = json.dumps(content, ensure_ascii=False)
+                except (TypeError, ValueError) as e:
+                    logger.warning(
+                        "Failed to serialize system message content for %s: %s",
+                        session_id[:8],
+                        e,
+                    )
+                    return
+            elif isinstance(content, (list, int, float, bool)):
+                # Convert other JSON-serializable types to string
+                try:
+                    content = json.dumps(content, ensure_ascii=False)
+                except (TypeError, ValueError) as e:
+                    logger.warning(
+                        "Failed to serialize system message content for %s: %s",
+                        session_id[:8],
+                        e,
+                    )
+                    return
+            elif not isinstance(content, str):
+                # Non-serializable type - convert to string representation
+                content = str(content)
+
+            # Store if we have meaningful content
+            if content and isinstance(content, str) and content.strip():
                 self._session_manager.add_message(
                     session_id=session_id,
                     role="system",

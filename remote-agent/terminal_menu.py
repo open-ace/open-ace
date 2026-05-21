@@ -12,10 +12,12 @@ Runs as the initial PTY process via terminal_server.py.
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 import sys
 import termios
 import tty
+from pathlib import Path
 
 TOOLS = [
     {
@@ -35,6 +37,7 @@ TOOLS = [
 ]
 
 MENU_PATH = os.path.abspath(__file__)
+ACTIVE_TERMINAL_PATH = Path.home() / ".open-ace-agent" / "active_terminal.json"
 
 # ANSI codes
 CLEAR = "\x1b[2J\x1b[H"
@@ -46,6 +49,11 @@ RESET = "\x1b[0m"
 REVERSE = "\x1b[7m"
 GREEN = "\x1b[32m"
 YELLOW = "\x1b[33m"
+
+
+def get_progress_bar(percent: int) -> str:
+    filled = max(0, min(20, round(percent / 5)))
+    return f"[{'=' * filled}{' ' * (20 - filled)}]"
 
 
 def check_installed(cli_name: str) -> bool:
@@ -62,12 +70,13 @@ def get_menu_items() -> list[dict]:
         installed = check_installed(tool["cli"])
         configured = bool(os.environ.get(tool["env_key"]))
         items.append({**tool, "installed": installed, "configured": configured})
-    items.append({"name": "Exit to shell", "is_shell": True})
+    items.append({"name": "Shell (return to menu on exit)", "is_shell_return": True})
+    items.append({"name": "Exit to shell", "is_shell_exit": True})
     return items
 
 
 def get_label(item: dict) -> str:
-    if item.get("is_shell"):
+    if item.get("is_shell_return") or item.get("is_shell_exit"):
         return item["name"]
     if item["installed"]:
         if item["configured"]:
@@ -106,6 +115,35 @@ def show_message(message: str) -> None:
     sys.stdout.flush()
 
 
+def render_launch_progress(item: dict) -> None:
+    installing = not item.get("installed")
+    action = "Installing" if installing else "Starting"
+    detail = (
+        "Installer output will appear below when it starts."
+        if installing
+        else "Waiting for the CLI interface to take over the terminal."
+    )
+    progress = 35 if installing else 55
+    lines = [
+        "",
+        f"  {BOLD_CYAN}========================================{RESET}",
+        f"  {BOLD_CYAN}  Open ACE Remote Terminal{RESET}",
+        f"  {BOLD_CYAN}========================================{RESET}",
+        "",
+        f"  {action} {BOLD_YELLOW}{item['name']}{RESET}",
+        "",
+        f"  {GREEN}{get_progress_bar(progress)}{RESET}  {progress}%",
+        "",
+        f"  {detail}",
+        "  First launch can take 5-15 seconds while the remote CLI initializes.",
+        "",
+        f"  {DIM}If this takes longer than 30 seconds, press Ctrl+C to interrupt.{RESET}",
+        "",
+    ]
+    sys.stdout.write(CLEAR + "\r\n".join(lines))
+    sys.stdout.flush()
+
+
 def read_key(fd: int) -> str:
     key = os.read(fd, 1).decode("utf-8", errors="replace")
     if key == "\x1b":
@@ -122,13 +160,50 @@ def read_key(fd: int) -> str:
     return "other"
 
 
+def get_shell_path() -> str:
+    return os.environ.get("SHELL") or "/bin/sh"
+
+
+def get_login_shell_args() -> list[str]:
+    shell = get_shell_path()
+    return [shell, "-l"]
+
+
+def get_login_shell_command() -> str:
+    shell = get_shell_path()
+    return f"{shlex.quote(shell)} -l"
+
+
+def clear_active_terminal() -> None:
+    if os.environ.get("OPEN_ACE_TERMINAL_SOURCE") != "ssh_cli":
+        return
+    try:
+        ACTIVE_TERMINAL_PATH.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        pass
+
+
 def exec_command(command: str) -> None:
-    os.execvp("/bin/bash", ["/bin/bash", "-l", "-c", command])
+    os.execvp("/bin/sh", ["/bin/sh", "-c", command])
 
 
 def handle_select(item: dict) -> None:
-    if item.get("is_shell"):
-        os.execvp("/bin/bash", ["/bin/bash", "-l"])
+    if item.get("is_shell_return"):
+        cmd = (
+            'echo "Type \\"exit\\" to return to the Open ACE menu. '
+            'Type \\"openace menu\\" to restart it anytime."; '
+            f"{get_login_shell_command()}; exec {sys.executable} {MENU_PATH}"
+        )
+        exec_command(cmd)
+        return
+
+    if item.get("is_shell_exit"):
+        sys.stdout.write("\r\n  Type 'openace menu' to return to the Open ACE menu.\r\n\r\n")
+        sys.stdout.flush()
+        clear_active_terminal()
+        os.execvp(get_shell_path(), get_login_shell_args())
         return
 
     if item["installed"] and not item["configured"]:
@@ -143,18 +218,12 @@ def handle_select(item: dict) -> None:
         cmd = f'{item["install_cmd"]} && {item["cmd"]}; exec {sys.executable} {MENU_PATH}'
     else:
         cmd = f'{item["cmd"]}; exec {sys.executable} {MENU_PATH}'
+    render_launch_progress(item)
     exec_command(cmd)
 
 
 def main() -> None:
     items = get_menu_items()
-
-    # Only "Exit to shell" and no installed tools -> skip menu
-    tool_items = [i for i in items if not i.get("is_shell")]
-    installed_tools = [i for i in tool_items if i["installed"]]
-    if not installed_tools:
-        os.execvp("/bin/bash", ["/bin/bash", "-l"])
-        return
 
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)

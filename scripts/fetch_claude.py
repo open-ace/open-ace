@@ -232,12 +232,17 @@ def extract_content_blocks_from_entry(entry: dict) -> list[dict]:
                         tool_use_id = part.get("tool_use_id", "")
                         tool_content = part.get("content", "")
                         if tool_use_id:
-                            content_blocks.append({
-                                "type": "tool_result",
-                                "tool_use_id": tool_use_id,
-                                "content": tool_content if isinstance(tool_content, str)
-                                           else json.dumps(tool_content, ensure_ascii=False)
-                            })
+                            content_blocks.append(
+                                {
+                                    "type": "tool_result",
+                                    "tool_use_id": tool_use_id,
+                                    "content": (
+                                        tool_content
+                                        if isinstance(tool_content, str)
+                                        else json.dumps(tool_content, ensure_ascii=False)
+                                    ),
+                                }
+                            )
 
     elif entry_type == "assistant":
         msg = entry.get("message", {})
@@ -271,15 +276,16 @@ def extract_content_blocks_from_entry(entry: dict) -> list[dict]:
                     tool_name = tool_use.get("name", "unknown")
                     tool_input = tool_use.get("input", {})
                     if tool_id:
-                        content_blocks.append({
-                            "type": "tool_use",
-                            "id": tool_id,
-                            "name": tool_name,
-                            "input": tool_input
-                        })
+                        content_blocks.append(
+                            {
+                                "type": "tool_use",
+                                "id": tool_id,
+                                "name": tool_name,
+                                "input": tool_input,
+                            }
+                        )
 
     return content_blocks
-
 
 
 def process_jsonl_file(
@@ -459,7 +465,9 @@ def process_jsonl_file(
                                     "parent_id": entry.get("parent_id") or entry.get("parentUuid"),
                                     "role": role,
                                     "content": content or "",
-                                    "content_blocks": extract_content_blocks_from_entry(entry),  # Issue #357: structured content
+                                    "content_blocks": extract_content_blocks_from_entry(
+                                        entry
+                                    ),  # Issue #357: structured content
                                     "full_entry": full_entry_json,
                                     "tokens_used": total_tokens,
                                     "input_tokens": input_tokens,
@@ -855,7 +863,9 @@ def update_agent_sessions_stats(messages: list) -> int:
                             metadata = {
                                 "message_id": msg_id,
                                 "project_path": msg.get("project_path"),
-                                "content_blocks": msg.get("content_blocks"),  # Issue #357: structured content for session detail view
+                                "content_blocks": msg.get(
+                                    "content_blocks"
+                                ),  # Issue #357: structured content for session detail view
                             }
                             _execute(
                                 cursor,

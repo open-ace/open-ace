@@ -1484,8 +1484,8 @@ def create_user_with_is_active(
         must_change_val = must_change_password
     else:
         # SQLite: use integer values
-        is_active_val = 1 if is_active else 0  # type: ignore[assignment]
-        must_change_val = 1 if must_change_password else 0  # type: ignore[assignment]
+        is_active_val = 1 if is_active else 0  # type: ignore[assignment]  # noqa: SQL001
+        must_change_val = 1 if must_change_password else 0  # type: ignore[assignment]  # noqa: SQL001
 
     try:
         _execute(

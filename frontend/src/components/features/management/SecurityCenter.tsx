@@ -70,6 +70,10 @@ const AUDIT_THRESHOLD_DEFAULTS: AuditThresholdsType = {
   audit_permission_change_threshold: 10,
 };
 
+// Threshold validation constants
+const MIN_THRESHOLD_VALUE = 1;
+const MAX_THRESHOLD_VALUE = 10000;
+
 export const SecurityCenter: React.FC = () => {
   const language = useLanguage();
   const toast = useToast();
@@ -121,6 +125,9 @@ export const SecurityCenter: React.FC = () => {
   const updateThresholds = useUpdateAuditThresholds();
 
   const [thresholdsFormData, setThresholdsFormData] = useState<Partial<AuditThresholdsType>>({});
+  const [thresholdsErrors, setThresholdsErrors] = useState<
+    Partial<Record<keyof AuditThresholdsType, string>>
+  >({});
 
   // --- Filter Rules Handlers ---
   const handleOpenCreateRule = () => {
@@ -232,17 +239,75 @@ export const SecurityCenter: React.FC = () => {
 
   // --- Audit Thresholds Handlers ---
   const handleThresholdsInputChange = (key: keyof AuditThresholdsType, value: string) => {
+    // Handle empty input
+    if (value.trim() === '') {
+      setThresholdsErrors((prev) => ({
+        ...prev,
+        [key]: language === 'zh' ? '请输入有效值' : 'Please enter a valid value',
+      }));
+      return;
+    }
+
+    // parseInt extracts integer part from floats (e.g., '3.5' => 3)
     const numVal = parseInt(value);
-    if (isNaN(numVal) || numVal < 1) return; // Reject invalid input
-    const clamped = Math.min(numVal, 10000); // Upper bound
+
+    // Handle non-numeric input
+    if (isNaN(numVal)) {
+      setThresholdsErrors((prev) => ({
+        ...prev,
+        [key]: language === 'zh' ? '必须为数字' : 'Must be a number',
+      }));
+      return;
+    }
+
+    // Handle negative or zero values
+    if (numVal < MIN_THRESHOLD_VALUE) {
+      setThresholdsErrors((prev) => ({
+        ...prev,
+        [key]:
+          language === 'zh'
+            ? `值必须大于等于 ${MIN_THRESHOLD_VALUE}`
+            : `Value must be at least ${MIN_THRESHOLD_VALUE}`,
+      }));
+      return;
+    }
+
+    // Clear any previous error for this field
+    setThresholdsErrors((prev) => {
+      const newErrors = { ...prev };
+      delete newErrors[key];
+      return newErrors;
+    });
+
+    // Clamp to upper bound and show warning if clamped
+    const clamped = Math.min(numVal, MAX_THRESHOLD_VALUE);
+    if (numVal > MAX_THRESHOLD_VALUE) {
+      toast.warning(
+        language === 'zh'
+          ? `值已自动调整为最大值 ${MAX_THRESHOLD_VALUE}`
+          : `Value automatically adjusted to maximum of ${MAX_THRESHOLD_VALUE}`
+      );
+    }
+
     setThresholdsFormData((prev) => ({ ...prev, [key]: clamped }));
   };
 
   const handleSaveThresholds = async () => {
+    // Prevent saving if there are validation errors
+    if (Object.keys(thresholdsErrors).length > 0) {
+      toast.error(
+        language === 'zh'
+          ? '存在验证错误，请修正后再保存'
+          : 'Please fix validation errors before saving'
+      );
+      return;
+    }
+
     try {
       await updateThresholds.mutateAsync(thresholdsFormData);
       toast.success(t('auditThresholdsSaved', language));
       setThresholdsFormData({});
+      setThresholdsErrors({});
     } catch (err) {
       console.error('Failed to save thresholds:', err);
       toast.error(t('error', language));
@@ -251,6 +316,7 @@ export const SecurityCenter: React.FC = () => {
 
   const handleResetThresholds = () => {
     setThresholdsFormData({});
+    setThresholdsErrors({});
   };
 
   const currentThresholds: AuditThresholdsType = {
@@ -673,7 +739,14 @@ export const SecurityCenter: React.FC = () => {
                   handleThresholdsInputChange('audit_failed_login_threshold', value)
                 }
               />
-              <small className="text-muted">{t('failedLoginThresholdHelp', language)}</small>
+              {thresholdsErrors['audit_failed_login_threshold'] && (
+                <small className="text-danger">
+                  {thresholdsErrors['audit_failed_login_threshold']}
+                </small>
+              )}
+              {!thresholdsErrors['audit_failed_login_threshold'] && (
+                <small className="text-muted">{t('failedLoginThresholdHelp', language)}</small>
+              )}
             </div>
             <div className="col-md-6">
               <label className="form-label">{t('rapidActionThreshold', language)}</label>
@@ -684,7 +757,14 @@ export const SecurityCenter: React.FC = () => {
                   handleThresholdsInputChange('audit_rapid_action_threshold', value)
                 }
               />
-              <small className="text-muted">{t('rapidActionThresholdHelp', language)}</small>
+              {thresholdsErrors['audit_rapid_action_threshold'] && (
+                <small className="text-danger">
+                  {thresholdsErrors['audit_rapid_action_threshold']}
+                </small>
+              )}
+              {!thresholdsErrors['audit_rapid_action_threshold'] && (
+                <small className="text-muted">{t('rapidActionThresholdHelp', language)}</small>
+              )}
             </div>
             <div className="col-md-6">
               <label className="form-label">{t('offHoursThreshold', language)}</label>
@@ -695,7 +775,14 @@ export const SecurityCenter: React.FC = () => {
                   handleThresholdsInputChange('audit_off_hours_threshold', value)
                 }
               />
-              <small className="text-muted">{t('offHoursThresholdHelp', language)}</small>
+              {thresholdsErrors['audit_off_hours_threshold'] && (
+                <small className="text-danger">
+                  {thresholdsErrors['audit_off_hours_threshold']}
+                </small>
+              )}
+              {!thresholdsErrors['audit_off_hours_threshold'] && (
+                <small className="text-muted">{t('offHoursThresholdHelp', language)}</small>
+              )}
             </div>
             <div className="col-md-6">
               <label className="form-label">{t('roleChangeThreshold', language)}</label>
@@ -706,7 +793,14 @@ export const SecurityCenter: React.FC = () => {
                   handleThresholdsInputChange('audit_role_change_threshold', value)
                 }
               />
-              <small className="text-muted">{t('roleChangeThresholdHelp', language)}</small>
+              {thresholdsErrors['audit_role_change_threshold'] && (
+                <small className="text-danger">
+                  {thresholdsErrors['audit_role_change_threshold']}
+                </small>
+              )}
+              {!thresholdsErrors['audit_role_change_threshold'] && (
+                <small className="text-muted">{t('roleChangeThresholdHelp', language)}</small>
+              )}
             </div>
             <div className="col-md-6">
               <label className="form-label">{t('permissionChangeThreshold', language)}</label>
@@ -717,7 +811,14 @@ export const SecurityCenter: React.FC = () => {
                   handleThresholdsInputChange('audit_permission_change_threshold', value)
                 }
               />
-              <small className="text-muted">{t('permissionChangeThresholdHelp', language)}</small>
+              {thresholdsErrors['audit_permission_change_threshold'] && (
+                <small className="text-danger">
+                  {thresholdsErrors['audit_permission_change_threshold']}
+                </small>
+              )}
+              {!thresholdsErrors['audit_permission_change_threshold'] && (
+                <small className="text-muted">{t('permissionChangeThresholdHelp', language)}</small>
+              )}
             </div>
           </div>
         </Card>
@@ -731,9 +832,15 @@ export const SecurityCenter: React.FC = () => {
             variant="primary"
             onClick={handleSaveThresholds}
             loading={updateThresholds.isPending}
+            disabled={Object.keys(thresholdsErrors).length > 0}
           >
             {t('save', language)}
           </Button>
+          {Object.keys(thresholdsErrors).length > 0 && (
+            <small className="text-danger align-self-center">
+              {language === 'zh' ? '请修正红色标记的错误字段' : 'Fix red error fields first'}
+            </small>
+          )}
         </div>
       </>
     );
