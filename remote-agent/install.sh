@@ -143,6 +143,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 AGENT_FILES=(
     agent.py
     config.py
+    constants.py
     executor.py
     system_info.py
     requirements.txt
@@ -151,6 +152,7 @@ AGENT_FILES=(
     websocket_proxy.py
     session_sync.py
     openace_cli.py
+    __init__.py
 )
 
 # If running from curl, download files; if running from source, copy
