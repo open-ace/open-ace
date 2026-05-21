@@ -27,12 +27,14 @@ def _table_exists(conn, table_name: str) -> bool:
     """Check if a table exists."""
     if conn.dialect.name == "postgresql":
         result = conn.execute(
-            sa.text("""
+            sa.text(
+                """
                 SELECT EXISTS (
                     SELECT FROM information_schema.tables
                     WHERE table_schema = 'public' AND table_name = :table_name
                 )
-                """),
+                """
+            ),
             {"table_name": table_name},
         )
         return result.fetchone()[0]
@@ -48,14 +50,16 @@ def _column_exists(conn, table_name: str, column_name: str) -> bool:
     """Check if a column exists in a table."""
     if conn.dialect.name == "postgresql":
         result = conn.execute(
-            sa.text("""
+            sa.text(
+                """
                 SELECT EXISTS (
                     SELECT FROM information_schema.columns
                     WHERE table_schema = 'public'
                     AND table_name = :table_name
                     AND column_name = :column_name
                 )
-                """),
+                """
+            ),
             {"table_name": table_name, "column_name": column_name},
         )
         return result.fetchone()[0]
@@ -90,7 +94,9 @@ def upgrade() -> None:
     # Create remote_machines table
     if not _table_exists(conn, "remote_machines"):
         if is_postgresql:
-            op.execute(sa.text(f"""
+            op.execute(
+                sa.text(
+                    f"""
                     CREATE TABLE remote_machines (
                         id {id_type},
                         machine_id TEXT NOT NULL UNIQUE,
@@ -110,9 +116,13 @@ def upgrade() -> None:
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         last_heartbeat TIMESTAMP
                     )
-                    """))
+                    """
+                )
+            )
         else:
-            op.execute(sa.text(f"""
+            op.execute(
+                sa.text(
+                    f"""
                     CREATE TABLE remote_machines (
                         id {id_type},
                         machine_id TEXT NOT NULL UNIQUE,
@@ -132,7 +142,9 @@ def upgrade() -> None:
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         last_heartbeat TIMESTAMP
                     )
-                    """))
+                    """
+                )
+            )
 
     if not _index_exists(conn, "remote_machines", "idx_remote_machines_machine_id"):
         op.execute(
@@ -144,7 +156,9 @@ def upgrade() -> None:
     # Create machine_assignments table
     if not _table_exists(conn, "machine_assignments"):
         if is_postgresql:
-            op.execute(sa.text(f"""
+            op.execute(
+                sa.text(
+                    f"""
                     CREATE TABLE machine_assignments (
                         id {id_type},
                         machine_id TEXT NOT NULL REFERENCES remote_machines(machine_id),
@@ -154,9 +168,13 @@ def upgrade() -> None:
                         granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         UNIQUE(machine_id, user_id)
                     )
-                    """))
+                    """
+                )
+            )
         else:
-            op.execute(sa.text(f"""
+            op.execute(
+                sa.text(
+                    f"""
                     CREATE TABLE machine_assignments (
                         id {id_type},
                         machine_id TEXT NOT NULL,
@@ -166,7 +184,9 @@ def upgrade() -> None:
                         granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         UNIQUE(machine_id, user_id)
                     )
-                    """))
+                    """
+                )
+            )
 
     if not _index_exists(conn, "machine_assignments", "idx_machine_assignments_user_id"):
         op.execute(
@@ -176,7 +196,9 @@ def upgrade() -> None:
     # Create api_key_store table
     if not _table_exists(conn, "api_key_store"):
         if is_postgresql:
-            op.execute(sa.text(f"""
+            op.execute(
+                sa.text(
+                    f"""
                     CREATE TABLE api_key_store (
                         id {id_type},
                         tenant_id INTEGER REFERENCES tenants(id),
@@ -191,9 +213,13 @@ def upgrade() -> None:
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         UNIQUE(tenant_id, provider, key_name)
                     )
-                    """))
+                    """
+                )
+            )
         else:
-            op.execute(sa.text(f"""
+            op.execute(
+                sa.text(
+                    f"""
                     CREATE TABLE api_key_store (
                         id {id_type},
                         tenant_id INTEGER,
@@ -208,7 +234,9 @@ def upgrade() -> None:
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         UNIQUE(tenant_id, provider, key_name)
                     )
-                    """))
+                    """
+                )
+            )
 
     if not _index_exists(conn, "api_key_store", "idx_api_key_store_tenant_provider"):
         op.execute(

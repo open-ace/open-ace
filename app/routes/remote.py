@@ -1183,12 +1183,14 @@ def agent_message():
                         with get_db_connection() as conn:
                             cursor = conn.cursor()
                             cursor.execute(
-                                adapt_sql("""INSERT OR IGNORE INTO daily_messages
+                                adapt_sql(
+                                    """INSERT OR IGNORE INTO daily_messages
                                     (date, tool_name, host_name, message_id, role, content,
                                      full_entry, tokens_used, input_tokens, output_tokens,
                                      model, timestamp, message_source,
                                      conversation_id, agent_session_id, project_path)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""),
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+                                ),
                                 (
                                     date_str,
                                     tool_name,

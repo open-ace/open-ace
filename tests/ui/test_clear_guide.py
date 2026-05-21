@@ -90,7 +90,8 @@ async def test_clear_guide():
         log_message("按钮文本是 'Add Project' 或 '添加项目'，不是 'Create'")
 
         # 注入脚本高亮正确的按钮
-        await iframe.locator("body").evaluate("""() => {
+        await iframe.locator("body").evaluate(
+            """() => {
             // 找到 details 步骤中的 Add Project 按钮
             const buttons = document.querySelectorAll('button');
             for (const btn of buttons) {
@@ -117,21 +118,24 @@ async def test_clear_guide():
                 }
             }
             console.log('[WARNING] Could not find the Add Project button in details step');
-        }""")
+        }"""
+        )
 
         await page.screenshot(path=os.path.join(SCREENSHOT_DIR, "guide_correct_button.png"))
         log_message("截图已保存: guide_correct_button.png")
         log_message("请点击红色高亮的 'Add Project' 按钮")
 
         # 注入点击监听
-        await iframe.locator("body").evaluate("""() => {
+        await iframe.locator("body").evaluate(
+            """() => {
             document.addEventListener('click', (e) => {
                 const btn = e.target.closest('button');
                 if (btn) {
                     console.log('[CLICK]', btn.textContent?.trim().substring(0, 50));
                 }
             }, true);
-        }""")
+        }"""
+        )
 
         # 等待用户点击
         log_message("\n等待 60 秒让你点击红色高亮的按钮...")

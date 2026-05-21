@@ -149,7 +149,8 @@ class PermissionService:
             )
 
             # User permissions table (for custom permissions)
-            cursor.execute(f"""
+            cursor.execute(
+                f"""
                 CREATE TABLE IF NOT EXISTS user_permissions (
                     id {id_type},
                     user_id INTEGER NOT NULL,
@@ -159,10 +160,12 @@ class PermissionService:
                     UNIQUE(user_id, permission),
                     FOREIGN KEY (user_id) REFERENCES users(id)
                 )
-            """)
+            """
+            )
 
             # Role permissions override table
-            cursor.execute(f"""
+            cursor.execute(
+                f"""
                 CREATE TABLE IF NOT EXISTS role_permissions (
                     id {id_type},
                     role_name TEXT NOT NULL,
@@ -170,7 +173,8 @@ class PermissionService:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(role_name, permission)
                 )
-            """)
+            """
+            )
 
             # Create indexes
             cursor.execute(
@@ -507,14 +511,16 @@ class PermissionService:
                 (user_id,),
             )
         else:
-            return self.db.fetch_all("""
+            return self.db.fetch_all(
+                """
                 SELECT up.*, u.username, grantor.username as granted_by_username
                 FROM user_permissions up
                 JOIN users u ON up.user_id = u.id
                 LEFT JOIN users grantor ON up.granted_by = grantor.id
                 ORDER BY up.granted_at DESC
                 LIMIT 100
-            """)
+            """
+            )
 
 
 def get_ddl_statements() -> list[str]:

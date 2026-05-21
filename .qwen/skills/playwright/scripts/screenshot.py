@@ -268,11 +268,13 @@ def generate_html_report(screenshots: list, output_dir: str, title: str = None) 
     # Generate screenshot items HTML
     screenshot_items = []
     for i, shot in enumerate(screenshots, 1):
-        screenshot_items.append(f"""
+        screenshot_items.append(
+            f"""
     <div class="screenshot">
         <h3>{i}. {shot['description']}</h3>
         <img src="{shot['filename']}" alt="{shot['description']}">
-    </div>""")
+    </div>"""
+        )
 
     html_content = f"""<!DOCTYPE html>
 <html lang="zh-CN">

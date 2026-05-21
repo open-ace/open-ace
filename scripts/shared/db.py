@@ -214,12 +214,14 @@ def init_database() -> None:
         missing_tables = []
 
         for table in core_tables:
-            cursor.execute(f"""
+            cursor.execute(
+                f"""
                 SELECT EXISTS (
                     SELECT FROM information_schema.tables
                     WHERE table_schema = 'public' AND table_name = '{table}'
                 ) as exists
-            """)
+            """
+            )
             if not cursor.fetchone()["exists"]:
                 missing_tables.append(table)
 

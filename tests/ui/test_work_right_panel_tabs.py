@@ -268,7 +268,8 @@ async def test_work_right_panel_tabs_layout():
             print("Step 10: 保存最终状态截图...")
 
             # Highlight tabs with bounding boxes
-            await page.evaluate("""
+            await page.evaluate(
+                """
                 () => {
                     const tabs = document.querySelectorAll('.assist-panel .nav-tabs .nav-link');
                     tabs.forEach((tab, index) => {
@@ -286,7 +287,8 @@ async def test_work_right_panel_tabs_layout():
                         document.body.appendChild(highlight);
                     });
                 }
-            """)
+            """
+            )
 
             time.sleep(0.5)
             screenshot_path = os.path.join(SCREENSHOT_DIR, "work_tabs", "work_tabs_layout.png")

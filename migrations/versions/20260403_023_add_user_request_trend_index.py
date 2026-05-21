@@ -55,10 +55,12 @@ def upgrade() -> None:
     # Note: CONCURRENTLY is not used because alembic runs in transaction block
     # For fresh installation, locking is not a concern
     if not _index_exists(conn, "daily_messages", "idx_messages_sender_date_role"):
-        op.execute("""
+        op.execute(
+            """
             CREATE INDEX idx_messages_sender_date_role
             ON daily_messages (sender_name, date, role)
-            """)
+            """
+        )
 
 
 def downgrade() -> None:

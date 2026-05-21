@@ -30,12 +30,14 @@ def _table_exists(conn, table_name: str) -> bool:
     """Check if a table exists."""
     if conn.dialect.name == "postgresql":
         result = conn.execute(
-            sa.text("""
+            sa.text(
+                """
                 SELECT EXISTS (
                     SELECT FROM information_schema.tables
                     WHERE table_schema = 'public' AND table_name = :table_name
                 )
-                """),
+                """
+            ),
             {"table_name": table_name},
         )
         return result.fetchone()[0]
@@ -91,21 +93,27 @@ def upgrade() -> None:
             )
 
             # Create indexes for fast lookups
-            op.execute("""
+            op.execute(
+                """
                 CREATE INDEX idx_user_daily_stats_user_date
                 ON user_daily_stats (user_id, date DESC)
-                """)
-            op.execute("""
+                """
+            )
+            op.execute(
+                """
                 CREATE INDEX idx_user_daily_stats_date
                 ON user_daily_stats (date DESC)
-                """)
+                """
+            )
 
             # Add foreign key constraint
-            op.execute("""
+            op.execute(
+                """
                 ALTER TABLE user_daily_stats
                 ADD CONSTRAINT fk_user_daily_stats_user
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-                """)
+                """
+            )
 
         else:
             # SQLite version
@@ -136,14 +144,18 @@ def upgrade() -> None:
             )
 
             # Create indexes for fast lookups
-            op.execute("""
+            op.execute(
+                """
                 CREATE INDEX idx_user_daily_stats_user_date
                 ON user_daily_stats (user_id, date DESC)
-                """)
-            op.execute("""
+                """
+            )
+            op.execute(
+                """
                 CREATE INDEX idx_user_daily_stats_date
                 ON user_daily_stats (date DESC)
-                """)
+                """
+            )
 
     # Migrate existing data from daily_messages to user_daily_stats
     # This aggregates historical data for all users
@@ -162,7 +174,8 @@ def upgrade() -> None:
                 pass
             else:
                 # SQLite: simpler aggregation
-                op.execute("""
+                op.execute(
+                    """
                     INSERT INTO user_daily_stats (user_id, date, requests, tokens, created_at, updated_at)
                     SELECT
                         u.id as user_id,
@@ -175,7 +188,8 @@ def upgrade() -> None:
                     JOIN users u ON dm.sender_name LIKE (u.username || '%')
                     WHERE dm.role = 'assistant'
                     GROUP BY u.id, dm.date
-                    """)
+                    """
+                )
 
             print("Data migration completed.")
 
