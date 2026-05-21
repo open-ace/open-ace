@@ -403,7 +403,13 @@ export const Workspace: React.FC = () => {
 
     window.addEventListener('message', handleIframeMessage);
     return () => window.removeEventListener('message', handleIframeMessage);
-  }, [enableTabNotifications, language, workspaceFullscreen, exitWorkspaceFullscreen, clearTabNotification]);
+  }, [
+    enableTabNotifications,
+    language,
+    workspaceFullscreen,
+    exitWorkspaceFullscreen,
+    clearTabNotification,
+  ]);
 
   // Check quota
   const checkQuota = useCallback(async () => {
@@ -921,7 +927,18 @@ export const Workspace: React.FC = () => {
           });
       }
     }
-  }, [searchParams, tabsInitialized, config, toast, language, setSearchParams, updateStoredTab, clearTabNotification]);
+  }, [
+    searchParams,
+    tabsInitialized,
+    config,
+    toast,
+    language,
+    setSearchParams,
+    updateStoredTab,
+    clearTabNotification,
+    pollTerminalProxy,
+    setStoredActiveTabId,
+  ]);
 
   // Attach to existing terminal tabs (restored from localStorage)
   // This handles browser refresh: reconnect to the same terminal session
