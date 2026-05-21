@@ -129,7 +129,7 @@ async def handle_browser_connection(browser_ws):
     """Handle a browser WebSocket connection."""
     # Validate auth token from query params
     # websockets >= 13 stores path in request.path; older versions used websocket.path
-    raw_path = "/"
+    raw_path = ""
     if hasattr(browser_ws, "request") and browser_ws.request is not None:
         raw_path = browser_ws.request.path
     elif hasattr(browser_ws, "path"):
