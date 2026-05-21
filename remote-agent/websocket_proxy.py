@@ -128,8 +128,12 @@ async def proxy_connection(browser_ws, remote_ws_url: str, remote_token: str):
 async def handle_browser_connection(browser_ws):
     """Handle a browser WebSocket connection."""
     # Validate auth token from query params
-    # websockets provides the request path via websocket.path
-    raw_path = getattr(browser_ws, "path", "/")
+    # websockets >= 13 stores path in request.path; older versions used websocket.path
+    raw_path = "/"
+    if hasattr(browser_ws, "request") and browser_ws.request is not None:
+        raw_path = browser_ws.request.path
+    elif hasattr(browser_ws, "path"):
+        raw_path = browser_ws.path
     logger.info("Browser connection received, path: %s", raw_path)
     params = urllib.parse.parse_qs(urllib.parse.urlparse(raw_path).query)
     token = params.get("token", [None])[0]

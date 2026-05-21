@@ -357,7 +357,12 @@ async def _handle_connection(websocket) -> None:
         return
 
     # Authenticate
-    raw_path = getattr(websocket, "path", "")
+    # websockets >= 13 stores path in request.path; older versions used websocket.path
+    raw_path = ""
+    if hasattr(websocket, "request") and websocket.request is not None:
+        raw_path = websocket.request.path
+    elif hasattr(websocket, "path"):
+        raw_path = websocket.path
     params = urllib.parse.parse_qs(urllib.parse.urlparse(raw_path).query)
     token = params.get("token", [None])[0]
     if not token or not hmac.compare_digest(token, AUTH_TOKEN):

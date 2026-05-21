@@ -143,6 +143,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 AGENT_FILES=(
     agent.py
     config.py
+    constants.py
     executor.py
     system_info.py
     requirements.txt
