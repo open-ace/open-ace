@@ -357,6 +357,9 @@ export const Workspace: React.FC = () => {
 
           const targetTab = currentTabs[newIndex];
           if (targetTab && targetTab.id !== currentActiveTabId) {
+            // Clear notification state for the tab we're leaving
+            clearTabNotification(currentActiveTabId);
+
             // Switch to the target tab
             setActiveTabId(targetTab.id);
             useAppStore.getState().setWorkspaceActiveTabId(targetTab.id);
