@@ -1118,6 +1118,24 @@ export const Workspace: React.FC = () => {
         machineName: remoteParams?.machineName,
       };
 
+      // Clear notification state for the previously active tab before switching
+      const previousTabId = useAppStore.getState().workspaceActiveTabId;
+      if (previousTabId) {
+        const prevIframe = iframeRefs.current.get(previousTabId);
+        if (prevIframe?.contentWindow) {
+          prevIframe.contentWindow.postMessage({ type: 'openace-clear-notification-state' }, '*');
+        }
+        setTabs((prev) =>
+          prev.map((tab) =>
+            tab.id === previousTabId ? { ...tab, waitingForUser: false, waitingType: null } : tab
+          )
+        );
+        useAppStore.getState().updateWorkspaceTab(previousTabId, {
+          waitingForUser: false,
+          waitingType: null,
+        });
+      }
+
       // Update local state
       setTabs((prev) => [...prev, newTab]);
       setActiveTabId(newTab.id);
