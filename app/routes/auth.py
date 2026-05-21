@@ -29,7 +29,14 @@ user_repo = UserRepository()
 
 
 def _validate_avatar_url(user_id: int, avatar_url: Optional[str]) -> Optional[str]:
-    """Validate avatar file exists on disk. Clean up DB if file is missing."""
+    """Return the avatar URL only if the file exists on disk.
+
+    This is a read-only check — it does NOT mutate the database.
+    DB cleanup only happens in explicit write paths
+    (upload/delete avatar endpoints) so that multi-instance or
+    rolling-deploy scenarios are not affected by transient file
+    unavailability on a single node.
+    """
     if not avatar_url:
         return None
 
@@ -39,13 +46,7 @@ def _validate_avatar_url(user_id: int, avatar_url: Optional[str]) -> Optional[st
     if os.path.exists(filepath):
         return avatar_url
 
-    # File missing — clear stale DB entry so the UI stops showing a broken avatar
-    logger.warning(f"Avatar file missing for user {user_id}: {filepath}, clearing avatar_url")
-    try:
-        user_repo.update_avatar(user_id, None)
-    except Exception:
-        pass
-
+    logger.warning(f"Avatar file missing for user {user_id}: {filepath}")
     return None
 
 
