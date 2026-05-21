@@ -152,6 +152,7 @@ AGENT_FILES=(
     websocket_proxy.py
     session_sync.py
     openace_cli.py
+    __init__.py
 )
 
 # If running from curl, download files; if running from source, copy

@@ -3418,6 +3418,14 @@ do_upgrade_remote() {
     # Set permissions
     ssh "$remote" "chmod +x '$target_path/scripts/'*.py '$target_path/scripts/'*.sh 2>/dev/null || true"
 
+    # Sync remote-agent directory to ~/.open-ace-agent (for agent service)
+    print_info "Syncing remote-agent files to ~/.open-ace-agent..."
+    ssh "$remote" "mkdir -p ~/.open-ace-agent ~/.open-ace-agent/cli_adapters"
+    scp -r "$SOURCE_DIR/remote-agent/*.py" "$remote:~/.open-ace-agent/"
+    scp -r "$SOURCE_DIR/remote-agent/cli_adapters/*.py" "$remote:~/.open-ace-agent/cli_adapters/"
+    ssh "$remote" "chmod +x ~/.open-ace-agent/*.py ~/.open-ace-agent/cli_adapters/*.py 2>/dev/null || true"
+    ssh "$remote" "systemctl restart open-ace-agent 2>/dev/null || echo 'Note: open-ace-agent service not found or not installed'"
+
     # Install Python dependencies
     print_info "Installing Python dependencies on remote..."
     ssh "$remote" "
