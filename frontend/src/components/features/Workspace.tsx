@@ -237,6 +237,24 @@ export const Workspace: React.FC = () => {
     return () => clearInterval(interval);
   }, [config?.multi_user_mode, userWebUI?.success]);
 
+  // Clear notification state for a tab (used when leaving/switching away from a tab)
+  // Declared early so effects below can reference it
+  const clearTabNotification = useCallback((tabId: string) => {
+    const prevIframe = iframeRefs.current.get(tabId);
+    if (prevIframe?.contentWindow) {
+      prevIframe.contentWindow.postMessage({ type: 'openace-clear-notification-state' }, '*');
+    }
+    setTabs((prev) =>
+      prev.map((tab) =>
+        tab.id === tabId ? { ...tab, waitingForUser: false, waitingType: null } : tab
+      )
+    );
+    useAppStore.getState().updateWorkspaceTab(tabId, {
+      waitingForUser: false,
+      waitingType: null,
+    });
+  }, []);
+
   // Listen for fullscreen request from iframe (when user selects project and enters chat)
   // Also listen for session ID update from iframe (Issue #65)
   // Also listen for tab switch request from iframe (Issue #68)
@@ -357,6 +375,9 @@ export const Workspace: React.FC = () => {
 
           const targetTab = currentTabs[newIndex];
           if (targetTab && targetTab.id !== currentActiveTabId) {
+            // Clear notification state for the tab we're leaving
+            clearTabNotification(currentActiveTabId);
+
             // Switch to the target tab
             setActiveTabId(targetTab.id);
             useAppStore.getState().setWorkspaceActiveTabId(targetTab.id);
@@ -382,7 +403,13 @@ export const Workspace: React.FC = () => {
 
     window.addEventListener('message', handleIframeMessage);
     return () => window.removeEventListener('message', handleIframeMessage);
-  }, [enableTabNotifications, language, workspaceFullscreen, exitWorkspaceFullscreen]);
+  }, [
+    enableTabNotifications,
+    language,
+    workspaceFullscreen,
+    exitWorkspaceFullscreen,
+    clearTabNotification,
+  ]);
 
   // Check quota
   const checkQuota = useCallback(async () => {
@@ -880,6 +907,11 @@ export const Workspace: React.FC = () => {
                 terminalToken: initialToken,
               };
               setTabs((prev) => [...prev, newTab]);
+              // Clear notification state for the previously active tab
+              const prevActiveTabId = useAppStore.getState().workspaceActiveTabId;
+              if (prevActiveTabId) {
+                clearTabNotification(prevActiveTabId);
+              }
               setActiveTabId(tabId);
               setStoredActiveTabId(tabId);
 
@@ -895,7 +927,18 @@ export const Workspace: React.FC = () => {
           });
       }
     }
-  }, [searchParams, tabsInitialized, config, toast, language, setSearchParams, updateStoredTab]);
+  }, [
+    searchParams,
+    tabsInitialized,
+    config,
+    toast,
+    language,
+    setSearchParams,
+    updateStoredTab,
+    clearTabNotification,
+    pollTerminalProxy,
+    setStoredActiveTabId,
+  ]);
 
   // Attach to existing terminal tabs (restored from localStorage)
   // This handles browser refresh: reconnect to the same terminal session
@@ -1118,6 +1161,12 @@ export const Workspace: React.FC = () => {
         machineName: remoteParams?.machineName,
       };
 
+      // Clear notification state for the previously active tab before switching
+      const previousTabId = useAppStore.getState().workspaceActiveTabId;
+      if (previousTabId) {
+        clearTabNotification(previousTabId);
+      }
+
       // Update local state
       setTabs((prev) => [...prev, newTab]);
       setActiveTabId(newTab.id);
@@ -1141,7 +1190,7 @@ export const Workspace: React.FC = () => {
       // Mark as loading
       setLoadingTabs((prev) => new Set(prev).add(newTab.id));
     },
-    [getEffectiveUrl, userWebUI, language, addStoredTab, setStoredActiveTabId]
+    [getEffectiveUrl, userWebUI, language, addStoredTab, setStoredActiveTabId, clearTabNotification]
   );
 
   // Actually remove a tab (shared by closeTab and remote close confirmation)
@@ -1241,23 +1290,8 @@ export const Workspace: React.FC = () => {
       setStoredActiveTabId(tabId);
 
       // Clear notification state for the tab we're leaving
-      // This prevents stale notifications when AI response completes after user switched away
       if (previousTabId && previousTabId !== tabId) {
-        // Send tab-activated message to the previous tab's iframe to clear its internal state
-        const prevIframe = iframeRefs.current.get(previousTabId);
-        if (prevIframe?.contentWindow) {
-          prevIframe.contentWindow.postMessage({ type: 'openace-clear-notification-state' }, '*');
-        }
-        // Clear local notification state
-        setTabs((prev) =>
-          prev.map((tab) =>
-            tab.id === previousTabId ? { ...tab, waitingForUser: false, waitingType: null } : tab
-          )
-        );
-        useAppStore.getState().updateWorkspaceTab(previousTabId, {
-          waitingForUser: false,
-          waitingType: null,
-        });
+        clearTabNotification(previousTabId);
       }
 
       // Send focus message to the new active iframe
@@ -1269,7 +1303,7 @@ export const Workspace: React.FC = () => {
         }
       }, 100);
     },
-    [activeTabId, setStoredActiveTabId]
+    [activeTabId, setStoredActiveTabId, clearTabNotification]
   );
 
   // Rename a tab
@@ -2226,6 +2260,11 @@ export const Workspace: React.FC = () => {
                 terminalToken: result.terminal.token || '',
               };
               setTabs((prev) => [...prev, newTab]);
+              // Clear notification state for the previously active tab
+              const prevActiveTabId = useAppStore.getState().workspaceActiveTabId;
+              if (prevActiveTabId) {
+                clearTabNotification(prevActiveTabId);
+              }
               setActiveTabId(tabId);
               setStoredActiveTabId(tabId);
 
