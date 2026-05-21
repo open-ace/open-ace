@@ -7,7 +7,7 @@ API routes for authentication operations.
 import logging
 import os
 import uuid
-from typing import cast
+from typing import Optional, cast
 
 import bcrypt
 import filetype
@@ -26,6 +26,28 @@ logger = logging.getLogger(__name__)
 auth_bp = Blueprint("auth", __name__)
 auth_service = AuthService()
 user_repo = UserRepository()
+
+
+def _validate_avatar_url(user_id: int, avatar_url: Optional[str]) -> Optional[str]:
+    """Return the avatar URL only if the file exists on disk.
+
+    This is a read-only check — it does NOT mutate the database.
+    DB cleanup only happens in explicit write paths
+    (upload/delete avatar endpoints) so that multi-instance or
+    rolling-deploy scenarios are not affected by transient file
+    unavailability on a single node.
+    """
+    if not avatar_url:
+        return None
+
+    static_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "static")
+    filepath = os.path.join(static_dir, avatar_url.removeprefix("/static/"))
+
+    if os.path.exists(filepath):
+        return avatar_url
+
+    logger.warning(f"Avatar file missing for user {user_id}: {filepath}")
+    return None
 
 
 def verify_password(password: str, password_hash: str) -> bool:
@@ -55,6 +77,9 @@ def api_login():
 
     if user:
         from app.services.auth_service import _get_session_timeout_hours
+
+        # Validate avatar file exists
+        user["avatar_url"] = _validate_avatar_url(user["id"], user.get("avatar_url"))
 
         timeout_seconds = int(_get_session_timeout_hours() * 3600)
         response = make_response(jsonify({"success": True, "user": user}))
@@ -128,6 +153,7 @@ def api_profile():
     profile = auth_service.get_user_profile(user_id)
 
     if profile:
+        profile["avatar_url"] = _validate_avatar_url(user_id, profile.get("avatar_url"))
         return jsonify(profile)
 
     return jsonify({"error": "User not found"}), 404
@@ -150,6 +176,9 @@ def api_auth_check():
     user_id = int(session.get("user_id", 0))
     user_data = user_repo.get_user_by_id(user_id)
 
+    avatar_url = user_data.get("avatar_url") if user_data else None
+    avatar_url = _validate_avatar_url(user_id, avatar_url)
+
     return jsonify(
         {
             "authenticated": True,
@@ -158,7 +187,7 @@ def api_auth_check():
                 "username": session.get("username"),
                 "email": session.get("email"),
                 "role": session.get("role"),
-                "avatar_url": user_data.get("avatar_url") if user_data else None,
+                "avatar_url": avatar_url,
             },
         }
     )
@@ -182,6 +211,7 @@ def api_current_user():
     profile = auth_service.get_user_profile(user_id)
 
     if profile:
+        profile["avatar_url"] = _validate_avatar_url(user_id, profile.get("avatar_url"))
         return jsonify({"user": profile})
 
     return jsonify({"error": "User not found"}), 404
