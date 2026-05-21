@@ -64,6 +64,3 @@ VERSION
 
 # Qwen project memory (local only)
 QWEN.md
-
-# Claude local settings
-.claude/
