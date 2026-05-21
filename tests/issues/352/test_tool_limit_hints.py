@@ -128,20 +128,36 @@ class TestSendToolLimitHints(unittest.TestCase):
         # Verify message structure
         self.assertEqual(parsed_msg["type"], "user", "Message type should be 'user'")
         self.assertEqual(parsed_msg["message"]["role"], "user", "Role should be 'user'")
-        self.assertIsInstance(parsed_msg["message"]["content"], list, "Content should be a list")
-        self.assertEqual(len(parsed_msg["message"]["content"]), 1, "Should have one content block")
+        self.assertIsInstance(
+            parsed_msg["message"]["content"], list, "Content should be a list"
+        )
+        self.assertEqual(
+            len(parsed_msg["message"]["content"]), 1, "Should have one content block"
+        )
 
         # Verify content block
         content_block = parsed_msg["message"]["content"][0]
-        self.assertEqual(content_block["type"], "text", "Content block type should be 'text'")
+        self.assertEqual(
+            content_block["type"], "text", "Content block type should be 'text'"
+        )
 
         # Verify key information is present in the text
         text_content = content_block["text"]
-        self.assertIn("Platform Tool Limits", text_content, "Should mention Platform Tool Limits")
-        self.assertIn("run_shell_command", text_content, "Should mention run_shell_command")
+        self.assertIn(
+            "Platform Tool Limits", text_content, "Should mention Platform Tool Limits"
+        )
+        self.assertIn(
+            "run_shell_command", text_content, "Should mention run_shell_command"
+        )
         self.assertIn("600 seconds", text_content, "Should mention 600 seconds timeout")
-        self.assertIn("is_background=true", text_content, "Should mention background mode")
-        self.assertIn("Breaking down into smaller steps", text_content, "Should suggest task breakdown")
+        self.assertIn(
+            "is_background=true", text_content, "Should mention background mode"
+        )
+        self.assertIn(
+            "Breaking down into smaller steps",
+            text_content,
+            "Should suggest task breakdown",
+        )
 
     def test_hints_content_comprehensive(self):
         """Test that hints content covers all required aspects."""
@@ -198,13 +214,13 @@ class TestToolLimitHintsIntegration(unittest.TestCase):
         # Verify method exists
         self.assertTrue(
             hasattr(executor, "_send_tool_limit_hints"),
-            "ProcessExecutor should have _send_tool_limit_hints method"
+            "ProcessExecutor should have _send_tool_limit_hints method",
         )
 
         # Verify method is callable
         self.assertTrue(
             callable(executor._send_tool_limit_hints),
-            "_send_tool_limit_hints should be callable"
+            "_send_tool_limit_hints should be callable",
         )
 
 
@@ -294,7 +310,9 @@ class TestToolTimeoutConfiguration(unittest.TestCase):
         )
 
         # Verify default timeout
-        self.assertEqual(executor._tool_timeout, 600, "Default timeout should be 600 seconds")
+        self.assertEqual(
+            executor._tool_timeout, 600, "Default timeout should be 600 seconds"
+        )
 
     def test_custom_timeout_value(self):
         """Test that custom timeout value is properly set."""
@@ -306,7 +324,9 @@ class TestToolTimeoutConfiguration(unittest.TestCase):
         )
 
         # Verify custom timeout
-        self.assertEqual(executor._tool_timeout, 300, "Custom timeout should be 300 seconds")
+        self.assertEqual(
+            executor._tool_timeout, 300, "Custom timeout should be 300 seconds"
+        )
 
     def test_timeout_in_hints_message(self):
         """Test that custom timeout appears in hints message."""
@@ -342,8 +362,12 @@ class TestToolTimeoutConfiguration(unittest.TestCase):
         text_content = parsed_msg["message"]["content"][0]["text"]
 
         # Verify custom timeout appears in message
-        self.assertIn("300 seconds", text_content, "Custom timeout should appear in message")
-        self.assertIn("5 minutes", text_content, "Timeout in minutes should appear in message")
+        self.assertIn(
+            "300 seconds", text_content, "Custom timeout should appear in message"
+        )
+        self.assertIn(
+            "5 minutes", text_content, "Timeout in minutes should appear in message"
+        )
 
 
 if __name__ == "__main__":
