@@ -1314,7 +1314,7 @@ def update_agent_sessions_stats(messages: list, tool_name: str = "openclaw") -> 
     Returns:
         Number of sessions updated
     """
-    from shared.db import _execute, _placeholder, get_connection
+    from shared.db import _execute, _placeholder, escape_like, get_connection
 
     # Group messages by agent_session_id
     session_stats: dict[str, dict[str, Any]] = defaultdict(
@@ -1466,6 +1466,8 @@ def update_agent_sessions_stats(messages: list, tool_name: str = "openclaw") -> 
                         # Note: metadata is TEXT type, use LIKE pattern matching instead of JSONB ->>
                         if msg_id:
                             # Pattern match for message_id in JSON-like metadata string
+                            # Use escape_like to prevent wildcard injection
+                            escaped_msg_id = escape_like(msg_id)
                             check_sql = f"""
                                 SELECT id FROM session_messages
                                 WHERE session_id = {placeholder}
@@ -1480,7 +1482,7 @@ def update_agent_sessions_stats(messages: list, tool_name: str = "openclaw") -> 
                                     session_id,
                                     msg.get("role"),
                                     timestamp,
-                                    f'%"message_id": "{msg_id}"%',
+                                    f'%"message_id": "{escaped_msg_id}"%',
                                 ),
                             )
                         else:
@@ -1506,6 +1508,7 @@ def update_agent_sessions_stats(messages: list, tool_name: str = "openclaw") -> 
                             metadata = {
                                 "message_id": msg_id,
                                 "project_path": msg.get("project_path"),
+                                "content_blocks": msg.get("content_blocks"),  # Issue #357: structured content
                             }
                             _execute(
                                 cursor,
@@ -1528,10 +1531,10 @@ def update_agent_sessions_stats(messages: list, tool_name: str = "openclaw") -> 
                             and "foreign key" not in str(e).lower()
                             and "not present" not in str(e).lower()
                         ):
-                            logger.warning("Failed to insert message: %s", e)
+                            print(f"Warning: Failed to insert message: {e}")
 
             except Exception as e:
-                logger.warning("Failed to update session %s: %s", session_id, e)
+                print(f"Warning: Failed to update session {session_id}: {e}")
 
         conn.commit()
 
