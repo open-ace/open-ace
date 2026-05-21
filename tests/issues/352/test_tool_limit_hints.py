@@ -12,7 +12,7 @@ import threading
 import unittest
 from io import BytesIO
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch, PropertyMock
+from unittest.mock import MagicMock, Mock, PropertyMock, patch
 
 # Add remote-agent directory to path
 remote_agent_dir = Path(__file__).parent.parent.parent.parent / "remote-agent"
