@@ -65,6 +65,9 @@ interface AppState {
   // Auto fullscreen on enter chat setting (Issue #121)
   autoFullscreenOnEnterChat: boolean;
 
+  // File changes panel visibility setting (Issue #144)
+  showFileChangesPanel: boolean;
+
   // Actions
   setUser: (user: User | null) => void;
   setAuthenticated: (isAuthenticated: boolean) => void;
@@ -98,6 +101,10 @@ interface AppState {
   // Auto fullscreen actions (Issue #121)
   setAutoFullscreenOnEnterChat: (enabled: boolean) => void;
   toggleAutoFullscreenOnEnterChat: () => void;
+
+  // File changes panel actions (Issue #144)
+  setShowFileChangesPanel: (enabled: boolean) => void;
+  toggleFileChangesPanel: () => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -127,6 +134,9 @@ export const useAppStore = create<AppState>()(
 
       // Auto fullscreen on enter chat setting (Issue #121)
       autoFullscreenOnEnterChat: false,
+
+      // File changes panel visibility (Issue #144)
+      showFileChangesPanel: true,
 
       // Actions
       setUser: (user) => set({ user }),
@@ -221,6 +231,11 @@ export const useAppStore = create<AppState>()(
       setAutoFullscreenOnEnterChat: (enabled) => set({ autoFullscreenOnEnterChat: enabled }),
       toggleAutoFullscreenOnEnterChat: () =>
         set((state) => ({ autoFullscreenOnEnterChat: !state.autoFullscreenOnEnterChat })),
+
+      // File changes panel actions (Issue #144)
+      setShowFileChangesPanel: (enabled) => set({ showFileChangesPanel: enabled }),
+      toggleFileChangesPanel: () =>
+        set((state) => ({ showFileChangesPanel: !state.showFileChangesPanel })),
     }),
     {
       name: 'open-ace-store',
@@ -231,6 +246,7 @@ export const useAppStore = create<AppState>()(
         appMode: state.appMode,
         enableTabNotifications: state.enableTabNotifications,
         autoFullscreenOnEnterChat: state.autoFullscreenOnEnterChat,
+        showFileChangesPanel: state.showFileChangesPanel,
         // Issue #65: Persist workspace tabs state (exclude sensitive fields)
         workspaceTabs: state.workspaceTabs.map(
           // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -255,6 +271,8 @@ export const useWorkspaceFullscreen = () => useAppStore((state) => state.workspa
 export const useEnableTabNotifications = () => useAppStore((state) => state.enableTabNotifications);
 export const useAutoFullscreenOnEnterChat = () =>
   useAppStore((state) => state.autoFullscreenOnEnterChat);
+export const useShowFileChangesPanel = () =>
+  useAppStore((state) => state.showFileChangesPanel);
 export const usePreviousPanelState = () =>
   useAppStore((state) => ({
     left: state.previousLeftPanelCollapsed,
