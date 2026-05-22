@@ -562,7 +562,7 @@ export const Workspace: React.FC = () => {
       }
       // File changes panel visibility (Issue #144)
       const showPanel = useAppStore.getState().showFileChangesPanel;
-      url = `${url}&showFileChangesPanel=${showPanel}`;
+      url = appendParam(url, 'showFileChangesPanel', String(showPanel));
       // Remote workspace parameters
       url = appendRemoteParams(url);
       // Recent remote projects (Issue #417)

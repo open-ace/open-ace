@@ -15,7 +15,6 @@ Run:
 """
 
 import os
-import subprocess
 import sys
 import time
 
@@ -95,7 +94,9 @@ def navigate_to_chat(page, webui_info, show_panel=True):
 
     # 使用 encodedProjectName 查询参数（而非 URL 路径），
     # 确保在 projects 加载后通过 Strategy 1 正确解码 workingDirectory
-    encoded_project = "-Users-rhuang-workspace-qwen-code-webui"
+    encoded_project = os.environ.get(
+        "TEST_ENCODED_PROJECT", "-Users-rhuang-workspace-qwen-code-webui"
+    )
     panel_param = "true" if show_panel else "false"
 
     url = (
@@ -276,7 +277,8 @@ def run_tests():
                 try {
                     const url = new URL(window.location.href);
                     const token = url.searchParams.get('token');
-                    const resp = await fetch('/api/git/status?workingDirectory=/Users/rhuang/workspace/qwen-code-webui&token=' + encodeURIComponent(token));
+                    const workingDir = new URL(window.location.href).searchParams.get('encodedProjectName')?.replace(/^-/, '/').replace(/-/g, '/') || '/Users/rhuang/workspace/qwen-code-webui';
+                    const resp = await fetch('/api/git/status?workingDirectory=' + workingDir + '&token=' + encodeURIComponent(token));
                     return await resp.json();
                 } catch (e) {
                     return { error: e.message };
@@ -553,7 +555,9 @@ def run_tests():
         openace_url = webui_info.get("openace_url", BASE_URL)
 
         # 使用不带 showFileChangesPanel 的 URL（模拟从 open-ace iframe 导航）
-        encoded_project = "-Users-rhuang-workspace-qwen-code-webui"
+        encoded_project = os.environ.get(
+            "TEST_ENCODED_PROJECT", "-Users-rhuang-workspace-qwen-code-webui"
+        )
         url_no_panel = (
             f"{webui_url}/projects"
             f"?token={token}"

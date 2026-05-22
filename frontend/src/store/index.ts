@@ -271,8 +271,7 @@ export const useWorkspaceFullscreen = () => useAppStore((state) => state.workspa
 export const useEnableTabNotifications = () => useAppStore((state) => state.enableTabNotifications);
 export const useAutoFullscreenOnEnterChat = () =>
   useAppStore((state) => state.autoFullscreenOnEnterChat);
-export const useShowFileChangesPanel = () =>
-  useAppStore((state) => state.showFileChangesPanel);
+export const useShowFileChangesPanel = () => useAppStore((state) => state.showFileChangesPanel);
 export const usePreviousPanelState = () =>
   useAppStore((state) => ({
     left: state.previousLeftPanelCollapsed,

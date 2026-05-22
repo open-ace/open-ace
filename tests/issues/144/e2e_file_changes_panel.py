@@ -331,9 +331,15 @@ def run_tests():
         print("\n══════ 3. 导航到 qwen-code-webui")
 
         # 获取 webui 访问信息
+        cookies = context.cookies()
+        session_token = ""
+        for c in cookies:
+            if c["name"] == "session_token":
+                session_token = c["value"]
+                break
         webui_info = requests.get(
             f"{BASE_URL}/api/workspace/user-url",
-            cookies={"session_token": context.cookies()[0]["value"] if context.cookies() else ""},
+            cookies={"session_token": session_token},
         ).json()
         log("webui config", str(webui_info)[:200])
 
