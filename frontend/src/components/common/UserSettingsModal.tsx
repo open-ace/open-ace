@@ -6,7 +6,11 @@ import React, { useState, useCallback } from 'react';
 import { Modal } from './Modal';
 import { AvatarUploader } from './AvatarUploader';
 import { useLanguage, useAppStore, useUser } from '@/store';
-import { useAutoFullscreenOnEnterChat, useEnableTabNotifications, useShowFileChangesPanel } from '@/store';
+import {
+  useAutoFullscreenOnEnterChat,
+  useEnableTabNotifications,
+  useShowFileChangesPanel,
+} from '@/store';
 import { authApi } from '@/api/auth';
 import { t } from '@/i18n';
 import { useToast } from './Toast';
@@ -23,7 +27,12 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({ isOpen, on
   const autoFullscreenOnEnterChat = useAutoFullscreenOnEnterChat();
   const enableTabNotifications = useEnableTabNotifications();
   const showFileChangesPanel = useShowFileChangesPanel();
-  const { toggleAutoFullscreenOnEnterChat, toggleTabNotifications, toggleFileChangesPanel, setUser } = useAppStore();
+  const {
+    toggleAutoFullscreenOnEnterChat,
+    toggleTabNotifications,
+    toggleFileChangesPanel,
+    setUser,
+  } = useAppStore();
   const [uploading, setUploading] = useState(false);
 
   const handleUpload = useCallback(
@@ -147,7 +156,9 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({ isOpen, on
               <label className="form-check-label fw-medium" htmlFor="showFileChangesPanel">
                 {t('showFileChangesPanel', language)}
               </label>
-              <p className="text-muted small mb-0 mt-1">{t('showFileChangesPanelDesc', language)}</p>
+              <p className="text-muted small mb-0 mt-1">
+                {t('showFileChangesPanelDesc', language)}
+              </p>
             </div>
           </div>
         </div>
