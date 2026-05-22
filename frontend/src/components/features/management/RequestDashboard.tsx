@@ -22,7 +22,7 @@ import {
   TextInput,
 } from '@/components/common';
 import { LazyLineChart, LazyBarChart } from '@/components/common/LazyCharts';
-import { getToolColor } from '@/components/common/Charts';
+import { getToolColor } from '@/components/common/chartColors';
 import {
   requestApi,
   type RequestTodayStats,
