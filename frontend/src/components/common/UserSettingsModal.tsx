@@ -6,7 +6,11 @@ import React, { useState, useCallback } from 'react';
 import { Modal } from './Modal';
 import { AvatarUploader } from './AvatarUploader';
 import { useLanguage, useAppStore, useUser } from '@/store';
-import { useAutoFullscreenOnEnterChat, useEnableTabNotifications } from '@/store';
+import {
+  useAutoFullscreenOnEnterChat,
+  useEnableTabNotifications,
+  useShowFileChangesPanel,
+} from '@/store';
 import { authApi } from '@/api/auth';
 import { t } from '@/i18n';
 import { useToast } from './Toast';
@@ -22,7 +26,13 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({ isOpen, on
   const toast = useToast();
   const autoFullscreenOnEnterChat = useAutoFullscreenOnEnterChat();
   const enableTabNotifications = useEnableTabNotifications();
-  const { toggleAutoFullscreenOnEnterChat, toggleTabNotifications, setUser } = useAppStore();
+  const showFileChangesPanel = useShowFileChangesPanel();
+  const {
+    toggleAutoFullscreenOnEnterChat,
+    toggleTabNotifications,
+    toggleFileChangesPanel,
+    setUser,
+  } = useAppStore();
   const [uploading, setUploading] = useState(false);
 
   const handleUpload = useCallback(
@@ -130,6 +140,25 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({ isOpen, on
                 {t('tabNotifications', language)}
               </label>
               <p className="text-muted small mb-0 mt-1">{t('tabNotificationsDesc', language)}</p>
+            </div>
+          </div>
+
+          {/* File changes panel (Issue #144) */}
+          <div className="form-check form-switch mb-3 d-flex align-items-start">
+            <input
+              className="form-check-input mt-1"
+              type="checkbox"
+              id="showFileChangesPanel"
+              checked={showFileChangesPanel}
+              onChange={toggleFileChangesPanel}
+            />
+            <div className="ms-2">
+              <label className="form-check-label fw-medium" htmlFor="showFileChangesPanel">
+                {t('showFileChangesPanel', language)}
+              </label>
+              <p className="text-muted small mb-0 mt-1">
+                {t('showFileChangesPanelDesc', language)}
+              </p>
             </div>
           </div>
         </div>
