@@ -820,6 +820,70 @@ const ContentBlockRenderer: React.FC<{
         </details>
       );
 
+    case 'reasoning':
+      return (
+        <details className="border-start border-3 border-secondary ps-2 mb-1">
+          <summary className="small text-muted" style={{ cursor: 'pointer' }}>
+            <i className="bi bi-lightbulb me-1" />
+            Reasoning
+          </summary>
+          <div
+            className="mt-1 small text-muted"
+            style={{
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              maxHeight: '200px',
+              overflowY: 'auto',
+            }}
+          >
+            {block.summary}
+          </div>
+        </details>
+      );
+
+    case 'file_change':
+      return (
+        <details className={`border-start border-3 ps-2 mb-1 ${block.status === 'accepted' ? 'border-success' : 'border-danger'}`}>
+          <summary className="small" style={{ cursor: 'pointer' }}>
+            <Badge variant={block.status === 'accepted' ? 'success' : 'danger'} className="me-1">
+              {block.status === 'accepted' ? 'Accepted' : 'Declined'}
+            </Badge>
+            <span className="fw-medium">{block.changes.length} file change{block.changes.length !== 1 ? 's' : ''}</span>
+          </summary>
+          <div className="mt-1 small">
+            {block.changes.map((change, i) => (
+              <div key={i} className="d-flex align-items-center mb-1">
+                <Badge variant={change.change_type === 'add' ? 'success' : change.change_type === 'delete' ? 'danger' : 'warning'} className="me-1" style={{ fontSize: '0.65rem' }}>
+                  {change.change_type.toUpperCase()}
+                </Badge>
+                <code className="small">{change.path}</code>
+              </div>
+            ))}
+          </div>
+        </details>
+      );
+
+    case 'task_summary':
+      return (
+        <div className="border-top pt-2 mt-2 mb-2">
+          <div className="d-flex align-items-center mb-1">
+            <i className="bi bi-check-circle me-1 text-success" />
+            <span className="small fw-medium">Task Complete</span>
+            {block.duration_ms > 0 && (
+              <span className="ms-2 small text-muted">
+                ({(block.duration_ms / 1000).toFixed(1)}s)
+              </span>
+            )}
+          </div>
+          <div
+            className="small"
+            style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
+          >
+            {block.text}
+          </div>
+        </div>
+      );
+
     default:
       return null;
   }

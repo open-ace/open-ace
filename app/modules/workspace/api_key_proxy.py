@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 from typing import Any, Optional, Union, cast
 
 from app.repositories.database import DB_PATH, get_database_url, is_postgresql
+from app.utils.tool_names import normalize_tool_name
 
 logger = logging.getLogger(__name__)
 
@@ -417,14 +418,19 @@ class APIKeyProxyService:
         Returns the tool-specific settings from cli_settings, merged with
         the actual API key and base_url.
 
+        Tool name normalization is applied so that aliases like "codex-cli"
+        and "codex" match each other, and "claude-code" matches "claude".
+
         Args:
             tenant_id: Tenant ID.
-            tool_name: CLI tool name (e.g., "claude-code", "qwen-code").
+            tool_name: CLI tool name (e.g., "claude-code", "qwen-code", "codex", "codex-cli").
 
         Returns:
             Dict with complete settings ready for agent to write to settings.json,
             or None if no matching API key found.
         """
+        canonical_tool = normalize_tool_name(tool_name)
+
         conn = self._get_connection()
         cursor = conn.cursor()
 
@@ -454,7 +460,8 @@ class APIKeyProxyService:
             except json.JSONDecodeError:
                 cli_tools = []
 
-            if tool_name not in cli_tools:
+            # Normalize both sides so "codex" matches "codex-cli", etc.
+            if canonical_tool not in {normalize_tool_name(t) for t in cli_tools}:
                 continue
 
             # Found matching key - build settings
@@ -463,8 +470,10 @@ class APIKeyProxyService:
             except json.JSONDecodeError:
                 cli_settings = {}
 
-            # Get tool-specific settings from cli_settings
-            tool_settings = cli_settings.get(tool_name, {})
+            # Get tool-specific settings from cli_settings.
+            # Try the original tool_name key first, then the canonical form,
+            # so that cli_settings keyed by either "codex" or "codex-cli" are found.
+            tool_settings = cli_settings.get(tool_name, cli_settings.get(canonical_tool, {}))
 
             # Return non-sensitive settings only.
             # API credentials (key + base_url) are NOT injected here —

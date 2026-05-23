@@ -1717,6 +1717,74 @@ def llm_proxy(path=""):
     # Log response status for debugging
     _orig_target_url = target_url
 
+    # ------------------------------------------------------------------
+    # Responses API → Chat Completions conversion for non-OpenAI providers
+    # ------------------------------------------------------------------
+    # Codex CLI uses the OpenAI Responses API (POST /v1/responses) which
+    # many third-party providers (dashscope, etc.) do not support. When
+    # the target provider is not the real OpenAI and the request targets
+    # /v1/responses, we convert the request body to Chat Completions
+    # format and forward to /v1/chat/completions instead.
+    _converted_from_responses = False
+    # Check if the target provider actually supports the Responses API.
+    # Only the real OpenAI API (api.openai.com) supports /v1/responses.
+    # Third-party OpenAI-compatible providers (dashscope, etc.) typically
+    # only support /v1/chat/completions, so we convert the request.
+    _is_real_openai = "api.openai.com" in target_url
+    if path and path.endswith("/responses") and not _is_real_openai:
+        try:
+            resp_body = json.loads(request.get_data())
+            messages = []
+            # Extract input: can be a string or array of content items
+            input_data = resp_body.get("input", "")
+            if isinstance(input_data, str):
+                messages.append({"role": "user", "content": input_data})
+            elif isinstance(input_data, list):
+                # Build message list from input array
+                for item in input_data:
+                    if isinstance(item, dict):
+                        role = item.get("role", "user")
+                        content = item.get("content", "")
+                        if isinstance(content, list):
+                            # Multi-part content
+                            content = " ".join(
+                                p.get("text", "") for p in content if isinstance(p, dict)
+                            )
+                        # Map unsupported roles for non-OpenAI providers
+                        if role == "developer":
+                            role = "system"
+                        messages.append({"role": role, "content": content or ""})
+
+            # Add instructions as system message if present
+            instructions = resp_body.get("instructions")
+            if instructions:
+                messages.insert(0, {"role": "system", "content": instructions})
+
+            if not messages:
+                messages.append({"role": "user", "content": ""})
+
+            cc_body = {
+                "model": resp_body.get("model", ""),
+                "messages": messages,
+                "stream": False,  # Non-streaming: we'll convert the response
+            }
+            if resp_body.get("max_output_tokens"):
+                cc_body["max_tokens"] = resp_body["max_output_tokens"]
+            if resp_body.get("temperature") is not None:
+                cc_body["temperature"] = resp_body["temperature"]
+
+            # Rewrite target URL to /v1/chat/completions
+            target_url = target_url.replace("/responses", "/chat/completions")
+            body = json.dumps(cc_body).encode("utf-8")
+            _converted_from_responses = True
+            logger.info(
+                "LLM proxy: converted Responses API -> Chat Completions for %s "
+                "(non-streaming; streaming conversion not yet implemented)",
+                target_url,
+            )
+        except Exception as e:
+            logger.warning("Failed to convert Responses API request: %s", e)
+
     # Forward the request
     try:
         import requests as http_requests
@@ -1735,7 +1803,8 @@ def llm_proxy(path=""):
             fwd_headers["Authorization"] = f"Bearer {api_key}"
 
         # Check if this is a streaming request
-        body = request.get_data()
+        if not _converted_from_responses:
+            body = request.get_data()
 
         # Forward the request (bypass system proxy to avoid interference)
         resp = http_requests.request(
@@ -1757,6 +1826,123 @@ def llm_proxy(path=""):
             logger.error(
                 f"LLM proxy error {resp.status_code} from {_orig_target_url}: {peek.decode('utf-8', errors='replace')}"
             )
+
+        # If we converted from Responses API, convert the Chat Completions
+        # response back to Responses API format
+        if _converted_from_responses and resp.status_code == 200:
+            try:
+                cc_resp = resp.json()
+                # Build a minimal Responses API compatible response
+                response_id = f"resp_{cc_resp.get('id', 'default')}"
+                model = cc_resp.get("model", "")
+                output_text = ""
+                if cc_resp.get("choices"):
+                    output_text = cc_resp["choices"][0].get("message", {}).get("content", "")
+                usage = cc_resp.get("usage", {})
+
+                # Return SSE stream in Responses API format
+                import uuid as _uuid
+
+                item_id = f"msg_{_uuid.uuid4().hex[:24]}"
+                events: list[dict] = [
+                    {
+                        "type": "response.created",
+                        "response": {
+                            "id": response_id,
+                            "object": "response",
+                            "status": "in_progress",
+                            "model": model,
+                            "output": [],
+                            "usage": None,
+                        },
+                    },
+                    {
+                        "type": "response.output_item.added",
+                        "output_index": 0,
+                        "item": {
+                            "type": "message",
+                            "id": item_id,
+                            "status": "in_progress",
+                            "role": "assistant",
+                            "content": [],
+                        },
+                    },
+                    {
+                        "type": "response.content_part.added",
+                        "output_index": 0,
+                        "content_index": 0,
+                        "part": {"type": "output_text", "text": ""},
+                    },
+                    {
+                        "type": "response.output_text.delta",
+                        "output_index": 0,
+                        "content_index": 0,
+                        "delta": output_text,
+                    },
+                    {
+                        "type": "response.output_text.done",
+                        "output_index": 0,
+                        "content_index": 0,
+                        "text": output_text,
+                    },
+                    {
+                        "type": "response.content_part.done",
+                        "output_index": 0,
+                        "content_index": 0,
+                        "part": {"type": "output_text", "text": output_text},
+                    },
+                    {
+                        "type": "response.output_item.done",
+                        "output_index": 0,
+                        "item": {
+                            "type": "message",
+                            "id": item_id,
+                            "status": "completed",
+                            "role": "assistant",
+                            "content": [{"type": "output_text", "text": output_text}],
+                        },
+                    },
+                    {
+                        "type": "response.completed",
+                        "response": {
+                            "id": response_id,
+                            "object": "response",
+                            "status": "completed",
+                            "model": model,
+                            "output": [
+                                {
+                                    "type": "message",
+                                    "id": item_id,
+                                    "status": "completed",
+                                    "role": "assistant",
+                                    "content": [{"type": "output_text", "text": output_text}],
+                                }
+                            ],
+                            "usage": (
+                                {
+                                    "input_tokens": usage.get("prompt_tokens", 0),
+                                    "output_tokens": usage.get("completion_tokens", 0),
+                                    "total_tokens": usage.get("total_tokens", 0),
+                                }
+                                if usage
+                                else None
+                            ),
+                        },
+                    },
+                ]
+
+                def sse_stream():
+                    for event in events:
+                        yield f"event: {event['type']}\ndata: {json.dumps(event)}\n\n"
+
+                return Response(
+                    sse_stream(),
+                    status=200,
+                    content_type="text/event-stream",
+                )
+            except Exception as e:
+                logger.error("Failed to convert CC response to Responses format: %s", e)
+                # Fall through to normal response handling
 
         # Handle streaming response
         content_type = resp.headers.get("Content-Type", "")

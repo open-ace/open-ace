@@ -53,11 +53,20 @@ export interface SessionMessageMetadata {
   [key: string]: unknown;
 }
 
+export interface FileChangeDetail {
+  path: string;
+  change_type: 'add' | 'modify' | 'delete';
+  content?: string;
+}
+
 export type ContentBlock =
   | { type: 'text'; text: string }
   | { type: 'thinking'; thinking: string }
   | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
-  | { type: 'tool_result'; tool_use_id: string; content: string | ContentBlock[] };
+  | { type: 'tool_result'; tool_use_id: string; content: string | ContentBlock[] }
+  | { type: 'reasoning'; summary: string }
+  | { type: 'file_change'; changes: FileChangeDetail[]; status: 'accepted' | 'declined' | 'modified' }
+  | { type: 'task_summary'; text: string; duration_ms: number; time_to_first_token_ms?: number };
 
 export interface SessionFilters {
   tool_name?: string;

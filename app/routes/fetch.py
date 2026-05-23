@@ -7,6 +7,7 @@ API routes for data fetching operations.
 import logging
 import os
 import subprocess
+import sys
 import threading
 from datetime import datetime
 from typing import Any
@@ -50,28 +51,33 @@ def run_fetch_scripts():
 
         results = {}
 
-        # Run fetch_qwen.py with sudo and --multi-user to scan all users' qwen directories
-        # sudo is needed to read other users' .qwen directories
-        # Pass --config with current user's config path so root uses correct database
+        # NOTE: fetch scripts use sudo -n to read other users' home directories.
+        # For production, configure a dedicated service account with read-only
+        # access to user home dirs and set FETCH_USE_SUDO=false in config.
+        use_sudo = os.environ.get("FETCH_USE_SUDO", "true").lower() == "true"
+        python_path = "/usr/bin/python3" if use_sudo else sys.executable
+
+        def _build_cmd(script_path, args):
+            cmd = []
+            if use_sudo:
+                cmd.extend(["sudo", "-n", python_path])
+            else:
+                cmd.append(python_path)
+            cmd.append(script_path)
+            cmd.extend(args)
+            return cmd
+
+        # Run fetch_qwen.py to scan all users' qwen directories
         qwen_script = os.path.join(project_root, "scripts", "fetch_qwen.py")
         if os.path.exists(qwen_script):
             try:
-                # Get config file path from current user's home directory
                 config_path = os.path.expanduser("~/.open-ace/config.json")
 
                 result = subprocess.run(
-                    [
-                        "sudo",
-                        "-n",
-                        "/usr/bin/python3",
+                    _build_cmd(
                         qwen_script,
-                        "--days",
-                        "1",
-                        "--multi-user",
-                        "--recent",
-                        "--config",
-                        config_path,
-                    ],
+                        ["--days", "1", "--multi-user", "--recent", "--config", config_path],
+                    ),
                     capture_output=True,
                     text=True,
                     timeout=600,
@@ -88,25 +94,15 @@ def run_fetch_scripts():
                 logger.error(f"Error running qwen fetch script: {e}")
                 results["qwen"] = {"success": False, "error": "Internal server error"}
 
-        # Run fetch_claude.py with sudo and --multi-user to scan all users' Claude directories
-        # sudo is needed to read other users' .claude directories
-        # Pass --config with current user's config path so root uses correct database
+        # Run fetch_claude.py to scan all users' Claude directories
         claude_script = os.path.join(project_root, "scripts", "fetch_claude.py")
         if os.path.exists(claude_script):
             try:
                 result = subprocess.run(
-                    [
-                        "sudo",
-                        "-n",
-                        "/usr/bin/python3",
+                    _build_cmd(
                         claude_script,
-                        "--days",
-                        "1",
-                        "--multi-user",
-                        "--recent",
-                        "--config",
-                        config_path,
-                    ],
+                        ["--days", "1", "--multi-user", "--recent", "--config", config_path],
+                    ),
                     capture_output=True,
                     text=True,
                     timeout=600,
@@ -123,27 +119,24 @@ def run_fetch_scripts():
                 logger.error(f"Error running claude fetch script: {e}")
                 results["claude"] = {"success": False, "error": "Internal server error"}
 
-        # Run fetch_openclaw.py with sudo and --multi-user to scan all users' OpenClaw directories
-        # sudo is needed to read other users' .openclaw directories
-        # Pass --config with current user's config path so root uses correct database
+        # Run fetch_openclaw.py to scan all users' OpenClaw directories
         openclaw_script = os.path.join(project_root, "scripts", "fetch_openclaw.py")
         if os.path.exists(openclaw_script):
             try:
                 result = subprocess.run(
-                    [
-                        "sudo",
-                        "-n",
-                        "/usr/bin/python3",
+                    _build_cmd(
                         openclaw_script,
-                        "--days",
-                        "1",
-                        "--mode",
-                        "both",
-                        "--multi-user",
-                        "--recent",
-                        "--config",
-                        config_path,
-                    ],
+                        [
+                            "--days",
+                            "1",
+                            "--mode",
+                            "both",
+                            "--multi-user",
+                            "--recent",
+                            "--config",
+                            config_path,
+                        ],
+                    ),
                     capture_output=True,
                     text=True,
                     timeout=600,
@@ -159,6 +152,31 @@ def run_fetch_scripts():
             except Exception as e:
                 logger.error(f"Error running openclaw fetch script: {e}")
                 results["openclaw"] = {"success": False, "error": "Internal server error"}
+
+        # Run fetch_codex.py to scan all users' Codex directories
+        codex_script = os.path.join(project_root, "scripts", "fetch_codex.py")
+        if os.path.exists(codex_script):
+            try:
+                result = subprocess.run(
+                    _build_cmd(
+                        codex_script,
+                        ["--days", "1", "--multi-user", "--recent", "--config", config_path],
+                    ),
+                    capture_output=True,
+                    text=True,
+                    timeout=600,
+                    cwd=project_root,
+                )
+                results["codex"] = {
+                    "success": result.returncode == 0,
+                    "output": result.stdout[-1000:] if result.stdout else "",
+                    "error": result.stderr[-500:] if result.stderr else None,
+                }
+            except subprocess.TimeoutExpired:
+                results["codex"] = {"success": False, "error": "Timeout after 10 minutes"}
+            except Exception as e:
+                logger.error(f"Error running codex fetch script: {e}")
+                results["codex"] = {"success": False, "error": "Internal server error"}
 
         with _fetch_lock:
             _fetch_status["last_run"] = datetime.now().isoformat()
