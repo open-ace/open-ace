@@ -284,7 +284,7 @@ def run_tests():
             from executor import ProcessExecutor
 
             # Create a test executor to verify save/load works
-            pe = ProcessExecutor("http://localhost:5001")
+            pe = ProcessExecutor(BASE_URL)
 
             # Manually write a sessions.json to simulate agent having saved state
             meta_dir = os.path.expanduser("~/.open-ace-agent")
@@ -354,7 +354,7 @@ def run_tests():
             log_step("Post-crash", "Metadata file still exists with session data")
 
             # New ProcessExecutor instance simulates agent restart
-            ProcessExecutor("http://localhost:5001")
+            ProcessExecutor(BASE_URL)
             log_step("New executor", "Created to simulate agent restart")
             shot(page, "06_crash_simulation")
             print("  Crash simulation: metadata persists on disk")

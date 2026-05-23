@@ -17,6 +17,8 @@ import time
 from playwright.async_api import async_playwright
 
 BASE_URL = os.environ.get("OPENACE_URL", "http://127.0.0.1:5001")
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 SCREENSHOT_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "screenshots", "issues", "341")
 os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
@@ -50,8 +52,8 @@ async def main():
         password_input = page.locator('input[type="password"], input[name="password"]')
 
         if await username_input.count() > 0:
-            await username_input.fill("rhuang")
-            await password_input.fill("rhuang")
+            await username_input.fill(USERNAME)
+            await password_input.fill(PASSWORD)
 
             # Click login button
             login_btn = page.locator(

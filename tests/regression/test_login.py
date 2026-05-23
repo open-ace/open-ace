@@ -27,6 +27,9 @@ from tests.regression.test_helpers import (
 MODULE_NAME = "login"
 
 
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+
+
 def test_login_page_loads():
     """测试登录页面加载"""
     with sync_playwright() as p:

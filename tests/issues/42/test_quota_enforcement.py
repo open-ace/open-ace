@@ -21,7 +21,7 @@ import time
 import requests
 
 # Configuration
-OPENACE_URL = "http://localhost:5001"
+OPENACE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 USERNAME = "黄迎春"
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 

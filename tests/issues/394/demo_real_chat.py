@@ -143,11 +143,7 @@ def main():
             if not webui_frame:
                 # Try any non-main frame
                 for frame in frames:
-                    if (
-                        frame.url
-                        and "localhost:5001" not in frame.url
-                        and "about:blank" not in frame.url
-                    ):
+                    if frame.url and BASE_URL not in frame.url and "about:blank" not in frame.url:
                         webui_frame = frame
                         break
 
