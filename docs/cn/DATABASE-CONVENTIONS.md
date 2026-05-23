@@ -88,7 +88,7 @@ from app.repositories.database import adapt_boolean_value, adapt_boolean_conditi
 is_active_val = adapt_boolean_value(True)  # PostgreSQL: True, SQLite: 1
 
 # 用于 WHERE 条件
-condition = adapt_boolean_condition("is_active", True)  # PostgreSQL: "is_active IS TRUE", SQLite: "is_active = 1"
+condition = adapt_boolean_condition("is_active", True)  # PostgreSQL: "(is_active)::int != 0", SQLite: "is_active = 1"
 ```
 
 ### 避免直接使用整数比较

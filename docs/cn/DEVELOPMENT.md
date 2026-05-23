@@ -42,8 +42,8 @@ open-ace/
 │
 ├── app/                # Flask 应用
 │   ├── __init__.py     # create_app() 工厂函数
-│   ├── routes/         # 23 个 Blueprint 路由模块
-│   ├── services/       # 14 个业务逻辑服务
+│   ├── routes/         # 24 个 Blueprint 路由模块
+│   ├── services/       # 13 个业务逻辑服务
 │   ├── repositories/   # 11 个数据访问仓储
 │   ├── modules/        # 领域逻辑包
 │   │   ├── analytics/  # 使用分析、ROI、成本优化
@@ -148,17 +148,19 @@ def get_daily_usage(date: str, tool_name: str = None) -> dict:
     Returns:
         包含使用统计的字典
     """
+    from app.repositories.database import get_connection, adapt_sql
+
     conn = get_connection()
     cursor = conn.cursor()
 
     if tool_name:
         cursor.execute(
-            "SELECT * FROM daily_usage WHERE date = ? AND tool_name = ?",
+            adapt_sql("SELECT * FROM daily_usage WHERE date = ? AND tool_name = ?"),
             (date, tool_name)
         )
     else:
         cursor.execute(
-            "SELECT * FROM daily_usage WHERE date = ?",
+            adapt_sql("SELECT * FROM daily_usage WHERE date = ?"),
             (date,)
         )
 
@@ -176,11 +178,20 @@ pytest
 # 详细输出
 pytest -v
 
+# 仅运行单元测试
+pytest tests/unit/
+
+# 运行集成测试（SQLite + PostgreSQL）
+pytest tests/integration/
+
+# 仅运行 PostgreSQL 集成测试
+pytest tests/integration/ -k "_pg"
+
 # 运行指定测试文件
-pytest tests/test_db.py
+pytest tests/unit/test_db.py
 
 # 带覆盖率
-pytest --cov=scripts/shared tests/
+pytest --cov=app tests/
 ```
 
 ### 测试组织
@@ -191,10 +202,19 @@ tests/
 │   ├── test_message_service.py
 │   ├── test_usage_service.py
 │   └── ...
+├── integration/        # 集成测试（SQLite + PostgreSQL）
+│   ├── test_auth_service_pg.py
+│   ├── test_auth_service_sqlite.py
+│   ├── test_governance_repo_pg.py
+│   ├── test_governance_repo_sqlite.py
+│   └── ...
 ├── e2e/                # 端到端测试
 │   ├── manage/         # 管理 UI 测试
 │   ├── remote/         # 远程工作区测试
 │   └── terminal/       # 终端测试
+├── regression/         # 完整回归测试套件
+├── performance/        # 性能测试
+├── ui/                 # UI 截图/交互测试
 ├── issues/             # Issue 相关测试
 │   ├── 164/
 │   ├── 517/
@@ -340,12 +360,18 @@ logging.basicConfig(level=logging.DEBUG)
 ### 数据库检查
 
 ```bash
-# 打开数据库
-sqlite3 ~/.open-ace/usage.db
+# 打开 SQLite 数据库
+sqlite3 ~/.open-ace/ace.db
 
 # 查询表
 .tables
 .schema daily_usage
+SELECT * FROM daily_usage LIMIT 10;
+
+# PostgreSQL（如果已配置）
+psql $DATABASE_URL
+\dt
+\d daily_usage
 SELECT * FROM daily_usage LIMIT 10;
 ```
 
