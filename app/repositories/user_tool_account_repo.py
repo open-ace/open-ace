@@ -93,7 +93,7 @@ class UserToolAccountRepository:
 
         try:
             if is_postgresql():
-                row = self.db.fetch_one(query, params)
+                row = self.db.fetch_one(query, params, commit=True)
             else:
                 self.db.execute(query, params)
                 row = self.db.fetch_one(
@@ -144,7 +144,7 @@ class UserToolAccountRepository:
                 WHERE id = %s
                 RETURNING *
             """
-            row = self.db.fetch_one(query, tuple(params))
+            row = self.db.fetch_one(query, tuple(params), commit=True)
         else:
             query = f"""
                 UPDATE user_tool_accounts

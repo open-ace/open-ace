@@ -1182,34 +1182,63 @@ def agent_message():
                     try:
                         with get_db_connection() as conn:
                             cursor = conn.cursor()
-                            cursor.execute(
-                                adapt_sql(
+                            from app.repositories.database import is_postgresql
+
+                            if is_postgresql():
+                                cursor.execute(
+                                    """INSERT INTO daily_messages
+                                    (date, tool_name, host_name, message_id, role, content,
+                                     full_entry, tokens_used, input_tokens, output_tokens,
+                                     model, timestamp, message_source,
+                                     conversation_id, agent_session_id, project_path)
+                                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                    ON CONFLICT (date, tool_name, message_id, host_name) DO NOTHING""",
+                                    (
+                                        date_str,
+                                        tool_name,
+                                        machine_id[:8],
+                                        message_id,
+                                        role,
+                                        content[:MAX_MESSAGE_LENGTH],
+                                        full_entry_json,
+                                        tokens_used,
+                                        input_tokens,
+                                        output_tokens,
+                                        msg_model,
+                                        timestamp,
+                                        message_source,
+                                        session_id,
+                                        session_id,
+                                        project_path or "",
+                                    ),
+                                )
+                            else:
+                                cursor.execute(
                                     """INSERT OR IGNORE INTO daily_messages
                                     (date, tool_name, host_name, message_id, role, content,
                                      full_entry, tokens_used, input_tokens, output_tokens,
                                      model, timestamp, message_source,
                                      conversation_id, agent_session_id, project_path)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
-                                ),
-                                (
-                                    date_str,
-                                    tool_name,
-                                    machine_id[:8],
-                                    message_id,
-                                    role,
-                                    content[:MAX_MESSAGE_LENGTH],
-                                    full_entry_json,
-                                    tokens_used,
-                                    input_tokens,
-                                    output_tokens,
-                                    msg_model,
-                                    timestamp,
-                                    message_source,
-                                    session_id,
-                                    session_id,
-                                    project_path or "",
-                                ),
-                            )
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                    (
+                                        date_str,
+                                        tool_name,
+                                        machine_id[:8],
+                                        message_id,
+                                        role,
+                                        content[:MAX_MESSAGE_LENGTH],
+                                        full_entry_json,
+                                        tokens_used,
+                                        input_tokens,
+                                        output_tokens,
+                                        msg_model,
+                                        timestamp,
+                                        message_source,
+                                        session_id,
+                                        session_id,
+                                        project_path or "",
+                                    ),
+                                )
                             conn.commit()
                     except Exception as e:
                         logger.debug("Failed to insert daily_message: %s", e)

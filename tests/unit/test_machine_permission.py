@@ -13,8 +13,13 @@ import os
 import sys
 import tempfile
 
+import pytest
+
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
+
+# Ensure encryption key is available for session tests
+os.environ.setdefault("SECRET_KEY", "test-secret-key-for-machine-permission-tests")
 
 # Use a temp DB for isolation
 TMP_DB = tempfile.mktemp(suffix=".db")
@@ -73,6 +78,16 @@ def make_manager():
     db_mod.is_postgresql = lambda: False
     db_mod.DB_PATH = TMP_DB
 
+    # Also patch the imported reference in remote_agent_manager
+    import app.modules.workspace.remote_agent_manager as ram_compat
+
+    ram_compat.is_postgresql = lambda: False
+
+    # Patch session_manager's DB_PATH to use the test database
+    import app.modules.workspace.session_manager as sm_compat
+
+    sm_compat.DB_PATH = TMP_DB
+
     # Reset singleton so each test gets a fresh manager
     import app.modules.workspace.remote_agent_manager as ram_mod
 
@@ -110,11 +125,30 @@ def make_manager():
         "CREATE TABLE IF NOT EXISTS agent_sessions ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT, "
         "session_id TEXT NOT NULL UNIQUE, "
+        "session_type TEXT DEFAULT 'chat', "
+        "title TEXT, "
+        "tool_name TEXT, "
+        "host_name TEXT, "
         "user_id INTEGER, "
         "status TEXT DEFAULT 'active', "
+        "context TEXT, "
+        "settings TEXT, "
+        "project_id TEXT, "
+        "project_path TEXT, "
+        "total_tokens INTEGER DEFAULT 0, "
+        "total_input_tokens INTEGER DEFAULT 0, "
+        "total_output_tokens INTEGER DEFAULT 0, "
+        "message_count INTEGER DEFAULT 0, "
+        "request_count INTEGER DEFAULT 0, "
+        "model TEXT, "
+        "tags TEXT, "
+        "workspace_type TEXT DEFAULT 'local', "
         "remote_machine_id TEXT, "
+        "paused_at TIMESTAMP, "
         "created_at TIMESTAMP, "
-        "updated_at TIMESTAMP)"
+        "updated_at TIMESTAMP, "
+        "completed_at TIMESTAMP, "
+        "expires_at TIMESTAMP)"
     )
     conn.commit()
     conn.close()
@@ -386,26 +420,31 @@ def _make_app(mgr):
     app.config["SECRET_KEY"] = "test-secret"
     app.register_blueprint(remote_mod.remote_bp, url_prefix="/api/remote")
 
-    # Mock auth_service.get_session to return user based on token prefix
-    _original_get_session = remote_mod.auth_service.get_session
+    # Mock _load_user_from_token to return user based on token prefix
+    from app.auth import decorators as auth_dec
 
-    def _mock_get_session(token):
+    _original_load_user = auth_dec._load_user_from_token
+
+    def _mock_load_user(token):
         if not token:
             return None
         if token.startswith("test-token-"):
             parts = token.split("-")
             if len(parts) >= 4:
                 return {
-                    "user_id": int(parts[2]),
+                    "id": int(parts[2]),
                     "username": f"user{parts[2]}",
                     "email": f"user{parts[2]}@test.com",
                     "role": parts[3],
                 }
         return None
 
-    remote_mod.auth_service.get_session = _mock_get_session
+    auth_dec._load_user_from_token = _mock_load_user
+    # Also patch the imported reference in remote module
+    remote_mod._load_user_from_token = _mock_load_user
+    app._auth_dec = auth_dec
     app._remote_mod = remote_mod
-    app._original_get_session = _original_get_session
+    app._original_load_user = _original_load_user
 
     return app
 
@@ -661,11 +700,28 @@ def _create_session_for_test(mgr, user_id, machine_id):
     mgr._connections[machine_id] = True
 
     original_get = rsm_mod.get_remote_agent_manager
+    original_rsm_get = rsm_mod.get_remote_session_manager
     rsm_mod.get_remote_agent_manager = lambda: mgr
+
+    from unittest.mock import MagicMock
 
     from app.modules.workspace.remote_session_manager import RemoteSessionManager
 
     session_mgr = RemoteSessionManager()
+
+    # Mock APIKeyProxyService to avoid needing api_key_store table
+    mock_proxy = MagicMock()
+    mock_proxy.generate_proxy_token.return_value = "test-proxy-token"
+    mock_proxy.get_cli_settings_for_tool.return_value = None
+    session_mgr._api_key_proxy = mock_proxy
+    # Mock send_command to avoid needing actual remote connection
+    mgr.send_command = MagicMock(return_value=True)
+
+    # Patch route module to use our session manager
+    import app.routes.remote as remote_mod
+
+    original_remote_rsm = remote_mod.get_remote_session_manager
+    remote_mod.get_remote_session_manager = lambda: session_mgr
 
     result = session_mgr.create_remote_session(
         user_id=user_id,
@@ -675,6 +731,8 @@ def _create_session_for_test(mgr, user_id, machine_id):
     )
 
     rsm_mod.get_remote_agent_manager = original_get
+    rsm_mod.get_remote_session_manager = original_rsm_get
+    remote_mod.get_remote_session_manager = original_remote_rsm
     return result
 
 
@@ -793,12 +851,10 @@ def main():
     test_route_list_machines_includes_permission()
     test_route_deregister_system_admin_only()
     test_route_generate_token_system_admin_only()
-    # Session tests require full app DB schema (agent_sessions table) — skipped
-    # The _check_session_access logic uses the same get_user_permission() verified above
-    # test_route_session_access_owner()
-    # test_route_session_access_machine_admin()
-    # test_route_session_access_denied_other_user()
-    # test_route_session_access_unassigned_user()
+    test_route_session_access_owner()
+    test_route_session_access_machine_admin()
+    test_route_session_access_denied_other_user()
+    test_route_session_access_unassigned_user()
 
     all_passed = print_summary()
 

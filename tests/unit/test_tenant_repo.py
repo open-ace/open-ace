@@ -90,7 +90,7 @@ class TestTenantRepository:
     def test_create_postgresql(self):
         tenant = self._make_tenant()
         mock_cursor = MagicMock()
-        mock_cursor.fetchone.return_value = [42]
+        mock_cursor.fetchone.return_value = {"id": 42}
         self.db.is_postgresql = True
 
         mock_conn = MagicMock()
@@ -578,7 +578,8 @@ class TestTenantRepository:
         self.db.connection.return_value.__exit__ = MagicMock(return_value=False)
 
         with patch("app.repositories.database.adapt_sql", lambda q: q):
-            result = self.repo.update_user_count(tenant_id=1, delta=-1)
+            with patch("app.repositories.database.is_postgresql", return_value=False):
+                result = self.repo.update_user_count(tenant_id=1, delta=-1)
         assert result is True
         query = mock_cursor.execute.call_args[0][0]
         assert "MAX(0, user_count + ?)" in query
