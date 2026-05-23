@@ -133,7 +133,7 @@ class TestToolTypes:
         assert "other" in TOOL_TYPES
 
     def test_total_count(self):
-        assert len(TOOL_TYPES) == 6
+        assert len(TOOL_TYPES) == 7
 
     def test_all_values_are_strings(self):
         for key, value in TOOL_TYPES.items():

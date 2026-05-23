@@ -286,7 +286,9 @@ class TestSecuritySettings:
     def test_get_security_settings_defaults(self):
         """When DB fails, should return defaults."""
         self.db.fetch_all.side_effect = Exception("Table not found")
-        result = self.repo.get_security_settings()
+        with patch("app.repositories.governance_repo.SETTINGS_FILE", "/nonexistent/file.json"):
+            with patch("app.repositories.governance_repo.CONFIG_DIR", "/nonexistent"):
+                result = self.repo.get_security_settings()
         assert result["session_timeout"] == 30
         assert result["max_login_attempts"] == 5
         assert result["password_min_length"] == 8

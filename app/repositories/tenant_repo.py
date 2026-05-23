@@ -369,9 +369,16 @@ class TenantRepository:
 
             with self.db.connection() as conn:
                 cursor = conn.cursor()
-                # Delete related records first
+                # Delete related records first (order matters for FK constraints)
                 cursor.execute(
                     adapt_sql("DELETE FROM tenant_usage WHERE tenant_id = ?"), (tenant_id,)
+                )
+                cursor.execute(
+                    adapt_sql("DELETE FROM tenant_settings WHERE tenant_id = ?"),
+                    (tenant_id,),
+                )
+                cursor.execute(
+                    adapt_sql("DELETE FROM tenant_quotas WHERE tenant_id = ?"), (tenant_id,)
                 )
                 cursor.execute(adapt_sql("DELETE FROM tenants WHERE id = ?"), (tenant_id,))
                 conn.commit()
