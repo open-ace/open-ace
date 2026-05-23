@@ -664,7 +664,7 @@ API 密钥加密存储。
 | user_id | integer | NOT NULL |
 | permission | text | NOT NULL |
 | granted_by | integer | 授权者 |
-| granted_at | text | 授权时间 |
+| granted_at | timestamp | DEFAULT CURRENT_TIMESTAMP |
 
 索引：`idx_user_permissions_user`, `idx_user_permissions_permission`
 
@@ -698,9 +698,8 @@ API 密钥加密存储。
 | tenant_quotas | tenant_id | tenants | CASCADE |
 | tenant_settings | tenant_id | tenants | CASCADE |
 | tenant_usage | tenant_id | tenants | CASCADE |
-| machine_assignments | machine_id | remote_machines | — |
-| api_key_store | tenant_id | tenants | CASCADE |
-| user_permissions | user_id | users | — |
+| anomaly_status | processed_by | users | — |
+| insights_reports | user_id | users | — |
 
 ## 跨数据库兼容性
 

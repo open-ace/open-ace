@@ -431,7 +431,7 @@ User-level permission overrides.
 | user_id | integer | NOT NULL |
 | permission | text | NOT NULL |
 | granted_by | integer | Grantor |
-| granted_at | text | Grant time |
+| granted_at | timestamp | DEFAULT CURRENT_TIMESTAMP |
 
 Indexes: `idx_user_permissions_user`, `idx_user_permissions_permission`
 
@@ -698,9 +698,8 @@ Unique: `(team_id, user_id)`
 | tenant_quotas | tenant_id | tenants | CASCADE |
 | tenant_settings | tenant_id | tenants | CASCADE |
 | tenant_usage | tenant_id | tenants | CASCADE |
-| api_key_store | tenant_id | tenants | CASCADE |
-| machine_assignments | machine_id | remote_machines | — |
-| user_permissions | user_id | users | — |
+| anomaly_status | processed_by | users | — |
+| insights_reports | user_id | users | — |
 
 ## Cross-Database Compatibility
 

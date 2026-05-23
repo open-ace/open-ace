@@ -552,7 +552,7 @@ CREATE TABLE user_permissions (
  user_id integer NOT NULL,
  permission text NOT NULL,
  granted_by integer,
- granted_at text
+ granted_at TIMESTAMP
 );
 
 CREATE TABLE user_projects (
