@@ -1,6 +1,6 @@
 # Database Schema
 
-Open ACE supports both SQLite (single-machine) and PostgreSQL (production). The schema contains 34 tables + 1 materialized view, organized by domain.
+Open ACE supports both SQLite (single-machine) and PostgreSQL (production). The schema contains 36 tables + 1 materialized view, organized by domain.
 
 Reference: `schema/schema-postgres.sql`
 

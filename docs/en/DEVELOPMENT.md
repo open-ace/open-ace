@@ -42,8 +42,8 @@ open-ace/
 │
 ├── app/                # Flask application
 │   ├── __init__.py     # create_app() factory
-│   ├── routes/         # 23 Blueprint route modules
-│   ├── services/       # 14 business logic services
+│   ├── routes/         # 24 Blueprint route modules
+│   ├── services/       # 13 business logic services
 │   ├── repositories/   # 11 data access repositories
 │   ├── modules/        # Domain logic packages
 │   │   ├── analytics/  # Usage analytics, ROI, cost optimization
@@ -148,17 +148,19 @@ def get_daily_usage(date: str, tool_name: str = None) -> dict:
     Returns:
         Dictionary with usage statistics
     """
+    from app.repositories.database import get_connection, adapt_sql
+
     conn = get_connection()
     cursor = conn.cursor()
 
     if tool_name:
         cursor.execute(
-            "SELECT * FROM daily_usage WHERE date = ? AND tool_name = ?",
+            adapt_sql("SELECT * FROM daily_usage WHERE date = ? AND tool_name = ?"),
             (date, tool_name)
         )
     else:
         cursor.execute(
-            "SELECT * FROM daily_usage WHERE date = ?",
+            adapt_sql("SELECT * FROM daily_usage WHERE date = ?"),
             (date,)
         )
 
@@ -176,11 +178,20 @@ pytest
 # Run with verbose output
 pytest -v
 
+# Run unit tests only
+pytest tests/unit/
+
+# Run integration tests (SQLite + PostgreSQL)
+pytest tests/integration/
+
+# Run integration tests with PostgreSQL only
+pytest tests/integration/ -k "_pg"
+
 # Run specific test file
-pytest tests/test_db.py
+pytest tests/unit/test_db.py
 
 # Run with coverage
-pytest --cov=scripts/shared tests/
+pytest --cov=app tests/
 ```
 
 ### Test Organization
@@ -191,10 +202,19 @@ tests/
 │   ├── test_message_service.py
 │   ├── test_usage_service.py
 │   └── ...
+├── integration/        # Integration tests (SQLite + PostgreSQL)
+│   ├── test_auth_service_pg.py
+│   ├── test_auth_service_sqlite.py
+│   ├── test_governance_repo_pg.py
+│   ├── test_governance_repo_sqlite.py
+│   └── ...
 ├── e2e/                # End-to-end tests
 │   ├── manage/         # Admin UI tests
 │   ├── remote/         # Remote workspace tests
 │   └── terminal/       # Terminal tests
+├── regression/         # Full regression test suite
+├── performance/        # Performance tests
+├── ui/                 # UI screenshot/interaction tests
 ├── issues/             # Issue-specific tests
 │   ├── 164/
 │   ├── 517/
@@ -340,12 +360,18 @@ logging.basicConfig(level=logging.DEBUG)
 ### Database Inspection
 
 ```bash
-# Open database
-sqlite3 ~/.open-ace/usage.db
+# Open SQLite database
+sqlite3 ~/.open-ace/ace.db
 
 # Query tables
 .tables
 .schema daily_usage
+SELECT * FROM daily_usage LIMIT 10;
+
+# PostgreSQL (if configured)
+psql $DATABASE_URL
+\dt
+\d daily_usage
 SELECT * FROM daily_usage LIMIT 10;
 ```
 

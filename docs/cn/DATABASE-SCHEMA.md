@@ -1,6 +1,6 @@
 # 数据库模式
 
-Open ACE 同时支持 SQLite（单机）和 PostgreSQL（生产环境）。模式包含 34 张表 + 1 个物化视图，按领域组织。
+Open ACE 同时支持 SQLite（单机）和 PostgreSQL（生产环境）。模式包含 36 张表 + 1 个物化视图，按领域组织。
 
 参考文件：`schema/schema-postgres.sql`
 
