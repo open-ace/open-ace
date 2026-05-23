@@ -470,12 +470,13 @@ class TestTenantRepository:
         with patch("app.repositories.database.adapt_sql", lambda q: q):
             result = self.repo.hard_delete(1)
         assert result is True
-        # Should delete tenant_usage first, then tenant
-        assert mock_cursor.execute.call_count == 2
-        first_query = mock_cursor.execute.call_args_list[0][0][0]
-        assert "DELETE FROM tenant_usage" in first_query
-        second_query = mock_cursor.execute.call_args_list[1][0][0]
-        assert "DELETE FROM tenants" in second_query
+        # Should delete tenant_usage, tenant_settings, tenant_quotas, then tenant
+        assert mock_cursor.execute.call_count == 4
+        queries = [c[0][0] for c in mock_cursor.execute.call_args_list]
+        assert "DELETE FROM tenant_usage" in queries[0]
+        assert "DELETE FROM tenant_settings" in queries[1]
+        assert "DELETE FROM tenant_quotas" in queries[2]
+        assert "DELETE FROM tenants" in queries[3]
 
     def test_hard_delete_exception(self):
         self.db.connection.side_effect = Exception("DB error")
