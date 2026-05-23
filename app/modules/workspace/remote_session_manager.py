@@ -12,7 +12,7 @@ import logging
 import threading
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from app.modules.workspace.api_key_proxy import APIKeyProxyService
@@ -402,7 +402,7 @@ class RemoteSessionManager:
             session = self._session_manager.get_session(session_id)
             if session:
                 session.status = "paused"
-                session.paused_at = datetime.utcnow()
+                session.paused_at = datetime.now(timezone.utc).replace(tzinfo=None)
                 self._session_manager.update_session(session)
 
         return success
@@ -469,7 +469,7 @@ class RemoteSessionManager:
             "data": data,
             "stream": stream,
             "is_complete": is_complete,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
         }
 
         self._agent_manager.buffer_output(session_id, output_entry)
@@ -733,7 +733,7 @@ class RemoteSessionManager:
             "data": json.dumps(control_request),
             "stream": "permission",
             "is_complete": False,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
         }
 
         self._agent_manager.buffer_output(session_id, output_entry)
@@ -757,7 +757,7 @@ class RemoteSessionManager:
         elif status == "paused":
             session.status = "paused"
             if not session.paused_at:
-                session.paused_at = datetime.utcnow()
+                session.paused_at = datetime.now(timezone.utc).replace(tzinfo=None)
         elif status == "stopped":
             # User-initiated stop — finalize the session
             session.status = "completed"
@@ -810,7 +810,7 @@ class RemoteSessionManager:
         if not session:
             return
         try:
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
             self._message_repo.save_message(
                 date=now.strftime("%Y-%m-%d"),
                 tool_name=normalize_tool_name(session.tool_name or "unknown"),

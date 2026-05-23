@@ -294,6 +294,35 @@ class TestSecuritySettings:
         assert result["two_factor_enabled"] is False
         assert result["ip_whitelist"] == []
 
+    def test_get_security_settings_all_default_values(self):
+        """Verify ALL 14 default values when no DB or JSON config exists."""
+        self.db.fetch_all.side_effect = Exception("Table not found")
+
+        with patch("app.repositories.governance_repo.SETTINGS_FILE", "/nonexistent/file.json"):
+            with patch("app.repositories.governance_repo.CONFIG_DIR", "/nonexistent"):
+                result = self.repo.get_security_settings()
+
+        # Password policy defaults
+        assert result["password_require_lowercase"] is True
+        assert result["password_require_number"] is True
+        assert result["password_require_special"] is False
+        # Audit anomaly threshold defaults
+        assert result["audit_failed_login_threshold"] == 5
+        assert result["audit_rapid_action_threshold"] == 50
+        assert result["audit_off_hours_threshold"] == 10
+        assert result["audit_role_change_threshold"] == 5
+        assert result["audit_permission_change_threshold"] == 10
+        # Also verify the previously checked defaults are present
+        assert result["session_timeout"] == 30
+        assert result["max_login_attempts"] == 5
+        assert result["password_min_length"] == 8
+        assert result["password_require_uppercase"] is True
+        assert result["two_factor_enabled"] is False
+        assert result["ip_whitelist"] == []
+        # Total count of default keys
+        assert len(self._default_keys()) == 14
+        assert self._default_keys() == set(result.keys())
+
     def test_get_security_settings_fallback_to_file(self):
         """Second tier: when DB fails, load from JSON file."""
         self.db.fetch_all.side_effect = Exception("Table not found")

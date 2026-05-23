@@ -8,7 +8,7 @@ Identifies opportunities for cost savings and efficiency improvements.
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Optional
 
@@ -57,7 +57,9 @@ class OptimizationSuggestion:
     current_cost: float = 0.0
     optimized_cost: float = 0.0
     savings_percentage: float = 0.0
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(
+        default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
+    )
 
     def to_dict(self) -> dict:
         return {
@@ -158,8 +160,10 @@ class CostOptimizer:
         """
         suggestions = []
 
-        end_date = datetime.utcnow().strftime("%Y-%m-%d")
-        start_date = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
+        end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
+        start_date = (
+            datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+        ).strftime("%Y-%m-%d")
 
         # Get usage data
         usage_data = self._get_usage_data(start_date, end_date)
@@ -476,8 +480,10 @@ class CostOptimizer:
         Returns:
             List of daily cost data.
         """
-        end_date = datetime.utcnow().strftime("%Y-%m-%d")
-        start_date = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
+        end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
+        start_date = (
+            datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+        ).strftime("%Y-%m-%d")
 
         rows = self.db.fetch_all(
             """
@@ -522,8 +528,10 @@ class CostOptimizer:
         Returns:
             Dict with efficiency metrics.
         """
-        end_date = datetime.utcnow().strftime("%Y-%m-%d")
-        start_date = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
+        end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
+        start_date = (
+            datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+        ).strftime("%Y-%m-%d")
 
         data = self._get_usage_data(start_date, end_date)
 

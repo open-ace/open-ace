@@ -99,8 +99,8 @@ class TestUserDailyStatsAggregator:
             )
             assert result == 3
             # Verify LIKE pattern uses system_account (with escaped underscore)
-            call_args = mock_cursor.execute.call_args
-            assert "sys\\\\_account%" in str(call_args)
+            params = mock_cursor.execute.call_args[0][1]
+            assert params[-1] == "sys\\_account%"
 
     def test_aggregate_user_db_error(self):
         agg, mock_db, mock_cursor, _, _ = self._make_aggregator()

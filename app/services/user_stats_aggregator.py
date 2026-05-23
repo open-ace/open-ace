@@ -11,7 +11,7 @@ This service should be called:
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, cast
 
 from app.repositories.database import Database, escape_like, is_postgresql
@@ -106,7 +106,7 @@ class UserDailyStatsAggregator:
                         (user_id, start_str, end_str, f"{escape_like(sender_prefix)}%"),
                     )
                 else:
-                    now = datetime.utcnow().isoformat()
+                    now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
                     cursor.execute(
                         """
                         INSERT OR REPLACE INTO user_daily_stats

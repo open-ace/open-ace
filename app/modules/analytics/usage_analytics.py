@@ -8,7 +8,7 @@ Analyzes trends, detects anomalies, and generates reports.
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Optional
 
@@ -494,8 +494,10 @@ class UsageAnalytics:
             Dict with forecast data.
         """
         # Get last 30 days of data
-        end_date = datetime.utcnow().strftime("%Y-%m-%d")
-        start_date = (datetime.utcnow() - timedelta(days=30)).strftime("%Y-%m-%d")
+        end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
+        start_date = (
+            datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
+        ).strftime("%Y-%m-%d")
 
         daily_data = self._get_daily_totals(start_date, end_date)
 
@@ -515,7 +517,11 @@ class UsageAnalytics:
         # Generate forecast dates
         forecast_dates = []
         for i in range(1, days + 1):
-            forecast_dates.append((datetime.utcnow() + timedelta(days=i)).strftime("%Y-%m-%d"))
+            forecast_dates.append(
+                (datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=i)).strftime(
+                    "%Y-%m-%d"
+                )
+            )
 
         return {
             "forecast_available": True,

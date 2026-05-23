@@ -128,6 +128,103 @@ class TestInsightsServiceConfig:
             api_key, _ = svc._get_api_credentials(config)
             assert api_key == "bailian-key"
 
+    def test_get_api_credentials_both_env_vars_set_bailian_wins(self):
+        """Both BAILIAN_CODING_PLAN_API_KEY and OPENAI_API_KEY in env → BAILIAN wins."""
+        svc, _, _, _ = self._make_service()
+        config = {"auth": {"env": {}}}
+        with patch.dict(
+            "os.environ",
+            {
+                "BAILIAN_CODING_PLAN_API_KEY": "env-bailian",
+                "OPENAI_API_KEY": "env-openai",
+            },
+            clear=True,
+        ):
+            api_key, _ = svc._get_api_credentials(config)
+            assert api_key == "env-bailian"
+
+    def test_get_api_credentials_only_openai_env_set(self):
+        """Only OPENAI_API_KEY in env → uses that."""
+        svc, _, _, _ = self._make_service()
+        config = {"auth": {"env": {}}}
+        with patch.dict(
+            "os.environ",
+            {"OPENAI_API_KEY": "env-openai"},
+            clear=True,
+        ):
+            api_key, _ = svc._get_api_credentials(config)
+            assert api_key == "env-openai"
+
+    def test_get_api_credentials_only_bailian_env_set(self):
+        """Only BAILIAN_CODING_PLAN_API_KEY in env → uses that."""
+        svc, _, _, _ = self._make_service()
+        config = {"auth": {"env": {}}}
+        with patch.dict(
+            "os.environ",
+            {"BAILIAN_CODING_PLAN_API_KEY": "env-bailian"},
+            clear=True,
+        ):
+            api_key, _ = svc._get_api_credentials(config)
+            assert api_key == "env-bailian"
+
+    def test_get_api_credentials_neither_set(self):
+        """Neither env var nor config key → no credentials (empty string)."""
+        svc, _, _, _ = self._make_service()
+        config = {"auth": {"env": {}}}
+        with patch.dict("os.environ", {}, clear=True):
+            api_key, _ = svc._get_api_credentials(config)
+            assert api_key == ""
+
+    def test_get_api_credentials_config_bailian_over_env_openai(self):
+        """BAILIAN in config takes priority over OPENAI_API_KEY in env."""
+        svc, _, _, _ = self._make_service()
+        config = {
+            "auth": {
+                "env": {
+                    "BAILIAN_CODING_PLAN_API_KEY": "config-bailian",
+                }
+            }
+        }
+        with patch.dict(
+            "os.environ",
+            {"OPENAI_API_KEY": "env-openai"},
+            clear=True,
+        ):
+            api_key, _ = svc._get_api_credentials(config)
+            assert api_key == "config-bailian"
+
+    def test_get_api_credentials_env_bailian_over_config_openai(self):
+        """BAILIAN_CODING_PLAN_API_KEY in env takes priority over OPENAI_API_KEY in config."""
+        svc, _, _, _ = self._make_service()
+        config = {
+            "auth": {
+                "env": {
+                    "OPENAI_API_KEY": "config-openai",
+                }
+            }
+        }
+        with patch.dict(
+            "os.environ",
+            {"BAILIAN_CODING_PLAN_API_KEY": "env-bailian"},
+            clear=True,
+        ):
+            api_key, _ = svc._get_api_credentials(config)
+            assert api_key == "env-bailian"
+
+    def test_get_api_credentials_config_openai_when_no_env(self):
+        """OPENAI_API_KEY in config is used when no BAILIAN key is available anywhere."""
+        svc, _, _, _ = self._make_service()
+        config = {
+            "auth": {
+                "env": {
+                    "OPENAI_API_KEY": "config-openai",
+                }
+            }
+        }
+        with patch.dict("os.environ", {}, clear=True):
+            api_key, _ = svc._get_api_credentials(config)
+            assert api_key == "config-openai"
+
 
 class TestInsightsServicePrompts:
     """Test prompt building."""

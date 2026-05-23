@@ -1,6 +1,6 @@
 """Unit tests for Session model."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -44,12 +44,12 @@ class TestSession:
         assert s.expires_at == exp
 
     def test_is_expired_with_future_expiry(self):
-        future = datetime.utcnow() + timedelta(hours=1)
+        future = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1)
         s = Session(expires_at=future)
         assert s.is_expired() is False
 
     def test_is_expired_with_past_expiry(self):
-        past = datetime.utcnow() - timedelta(hours=1)
+        past = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)
         s = Session(expires_at=past)
         assert s.is_expired() is True
 

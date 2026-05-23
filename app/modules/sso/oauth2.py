@@ -9,7 +9,7 @@ import hashlib
 import logging
 import secrets
 import urllib.parse
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from app.modules.sso.provider import (
@@ -232,7 +232,7 @@ class OAuth2Provider(SSOProvider):
             SSOToken: Parsed token.
         """
         expires_in = data.get("expires_in", 3600)
-        expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+        expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=expires_in)
 
         return SSOToken(
             access_token=data.get("access_token", ""),

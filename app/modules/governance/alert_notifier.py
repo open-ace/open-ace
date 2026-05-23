@@ -15,7 +15,7 @@ import logging
 import sqlite3
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Callable, Optional, Union
 
@@ -61,7 +61,9 @@ class Alert:
     username: Optional[str] = None
     tool_name: Optional[str] = None
     metadata: dict[str, Any] = field(default_factory=dict)
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(
+        default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
+    )
     read: bool = False
     action_url: Optional[str] = None
     action_text: Optional[str] = None
@@ -572,7 +574,9 @@ class AlertNotifier:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        cutoff = (
+            datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+        ).isoformat()
         cursor.execute(
             adapt_sql(
                 f"DELETE FROM alerts WHERE created_at < ? AND {adapt_boolean_condition('read', True)}"
@@ -698,7 +702,7 @@ class AlertNotifier:
                 else (
                     datetime.fromisoformat(row["created_at"])
                     if row["created_at"]
-                    else datetime.utcnow()
+                    else datetime.now(timezone.utc).replace(tzinfo=None)
                 )
             ),
             read=bool(row["read"]),

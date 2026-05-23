@@ -5,7 +5,7 @@ Repository for project data access operations.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional, cast
 
 from app.models.project import Project, ProjectDailyStats, ProjectStats, UserProject
@@ -48,7 +48,7 @@ class ProjectRepository:
             Optional[int]: Project ID if successful, None otherwise.
         """
         try:
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
 
             if self.db.is_postgresql:
                 # PostgreSQL uses TRUE/FALSE for boolean columns
@@ -207,7 +207,7 @@ class ProjectRepository:
                 return True
 
             updates.append("updated_at = ?")
-            params.append(datetime.utcnow())
+            params.append(datetime.now(timezone.utc).replace(tzinfo=None))
 
             params.append(project_id)
 
@@ -232,7 +232,9 @@ class ProjectRepository:
         try:
             if soft_delete:
                 query = "UPDATE projects SET is_active = FALSE, updated_at = ? WHERE id = ?"
-                self.db.execute(query, (datetime.utcnow(), project_id))
+                self.db.execute(
+                    query, (datetime.now(timezone.utc).replace(tzinfo=None), project_id)
+                )
             else:
                 # Hard delete - remove user_projects first
                 self.db.execute("DELETE FROM user_projects WHERE project_id = ?", (project_id,))
@@ -258,7 +260,7 @@ class ProjectRepository:
             Optional[int]: Relationship ID if successful.
         """
         try:
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
 
             if self.db.is_postgresql:
                 result = self.db.fetch_one(
@@ -344,7 +346,7 @@ class ProjectRepository:
             self.db.execute(
                 query,
                 (
-                    datetime.utcnow(),
+                    datetime.now(timezone.utc).replace(tzinfo=None),
                     sessions_delta,
                     tokens_delta,
                     requests_delta,

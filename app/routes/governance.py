@@ -8,7 +8,7 @@ API routes for enterprise governance features:
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, g, jsonify, request
 
@@ -110,9 +110,15 @@ def api_export_audit_logs():
     format_type = request.args.get("format", "json")
 
     start_time = (
-        datetime.fromisoformat(start_date) if start_date else datetime.utcnow() - timedelta(days=30)
+        datetime.fromisoformat(start_date)
+        if start_date
+        else datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
     )
-    end_time = datetime.fromisoformat(end_date) if end_date else datetime.utcnow()
+    end_time = (
+        datetime.fromisoformat(end_date)
+        if end_date
+        else datetime.now(timezone.utc).replace(tzinfo=None)
+    )
 
     # Export logs
     exported_data = audit_logger.export_logs(
@@ -146,7 +152,7 @@ def api_export_audit_logs():
             {
                 "data": exported_data,
                 "format": format_type,
-                "exported_at": datetime.utcnow().isoformat(),
+                "exported_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
             }
         )
 

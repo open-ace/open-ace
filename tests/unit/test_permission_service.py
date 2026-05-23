@@ -645,7 +645,7 @@ class TestPermissionServiceGetUsersWithPermission:
         svc, _, _ = self._make_service()
 
         users = svc.get_users_with_permission("export_messages")
-        # Only admin has export_messages
+        # Admin has all permissions; test data only has admin_user with this permission
         assert len(users) == 1
         assert users[0]["username"] == "admin_user"
 

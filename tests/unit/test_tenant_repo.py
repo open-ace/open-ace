@@ -5,7 +5,7 @@ integration test plans.
 """
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -261,6 +261,39 @@ class TestTenantRepository:
         result = self.repo._row_to_tenant(row)
         assert result is not None
 
+    def test_row_to_tenant_settings_json_fallback(self):
+        """When tenant_settings table returns no rows, fall back to settings JSON field."""
+        custom_settings = TenantSettings(
+            content_filter_enabled=False,
+            audit_log_enabled=False,
+            audit_log_retention_days=60,
+            data_retention_days=180,
+            sso_enabled=True,
+            sso_provider="okta",
+        )
+        row = self._tenant_row(
+            settings=json.dumps(custom_settings.to_dict()),
+        )
+        # quota table returns data so quota doesn't fallback, settings table returns None
+        self.db.fetch_one.side_effect = [
+            {
+                "daily_token_limit": 1000000,
+                "monthly_token_limit": 30000000,
+                "daily_request_limit": 10000,
+                "monthly_request_limit": 300000,
+                "max_users": 100,
+                "max_sessions_per_user": 5,
+            },
+            None,  # tenant_settings returns no row
+        ]
+        result = self.repo._row_to_tenant(row)
+        assert result.settings.content_filter_enabled is False
+        assert result.settings.audit_log_enabled is False
+        assert result.settings.audit_log_retention_days == 60
+        assert result.settings.data_retention_days == 180
+        assert result.settings.sso_enabled is True
+        assert result.settings.sso_provider == "okta"
+
     # -------------------------------------------------------------------------
     # get_all
     # -------------------------------------------------------------------------
@@ -478,7 +511,9 @@ class TestTenantRepository:
         assert result is True
         # First INSERT should use today's date
         insert_params = mock_cursor.execute.call_args_list[0][0][1]
-        assert insert_params[1] == datetime.utcnow().strftime("%Y-%m-%d")
+        assert insert_params[1] == datetime.now(timezone.utc).replace(tzinfo=None).strftime(
+            "%Y-%m-%d"
+        )
 
     def test_record_usage_exception(self):
         self.db.connection.side_effect = Exception("DB error")

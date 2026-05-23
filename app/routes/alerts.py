@@ -12,7 +12,7 @@ WebSocket endpoint for real-time alerts.
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from flask import Blueprint, g, jsonify, request
 
@@ -246,7 +246,7 @@ def alert_stream():
         yield f"data: {json.dumps({'type': 'connected', 'user_id': user_id})}\n\n"
 
         # Keep connection alive and check for new alerts
-        last_check = datetime.utcnow()
+        last_check = datetime.now(timezone.utc).replace(tzinfo=None)
         notifier = get_alert_notifier()
 
         while True:
@@ -264,7 +264,7 @@ def alert_stream():
                     if alert.created_at > last_check:
                         yield f"data: {json.dumps({'type': 'alert', 'data': alert.to_dict()})}\n\n"
 
-                last_check = datetime.utcnow()
+                last_check = datetime.now(timezone.utc).replace(tzinfo=None)
 
                 # Send heartbeat
                 yield ": heartbeat\n\n"

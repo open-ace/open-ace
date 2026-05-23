@@ -344,7 +344,7 @@ class MessageRepository:
         Returns:
             List[Dict]: List of conversation records.
         """
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, timezone
 
         conditions: list[str] = []
         params: list[Any] = []
@@ -354,9 +354,11 @@ class MessageRepository:
             params.append(date)
         else:
             if not start_date:
-                start_date = (datetime.utcnow() - timedelta(days=90)).strftime("%Y-%m-%d")
+                start_date = (
+                    datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=90)
+                ).strftime("%Y-%m-%d")
             if not end_date:
-                end_date = datetime.utcnow().strftime("%Y-%m-%d")
+                end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
             conditions.append("date >= ?")
             params.append(start_date)
             conditions.append("date <= ?")
@@ -426,7 +428,7 @@ class MessageRepository:
         sender_name: Optional[str] = None,
     ) -> int:
         """Count total conversations matching filters."""
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, timezone
 
         conditions = []
         params = []
@@ -436,9 +438,11 @@ class MessageRepository:
             params.append(date)
         else:
             if not start_date:
-                start_date = (datetime.utcnow() - timedelta(days=90)).strftime("%Y-%m-%d")
+                start_date = (
+                    datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=90)
+                ).strftime("%Y-%m-%d")
             if not end_date:
-                end_date = datetime.utcnow().strftime("%Y-%m-%d")
+                end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
             conditions.append("date >= ?")
             params.append(start_date)
             conditions.append("date <= ?")

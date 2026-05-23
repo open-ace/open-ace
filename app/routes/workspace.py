@@ -10,7 +10,7 @@ API endpoints for workspace functionality including:
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, g, jsonify, request
 
@@ -140,13 +140,15 @@ def _refresh_session(token: str, user_repo=None):
         if isinstance(expires_at, str):
             expires_at = datetime.fromisoformat(expires_at).replace(tzinfo=None)
 
-        remaining = (expires_at - datetime.utcnow()).total_seconds()
+        remaining = (expires_at - datetime.now(timezone.utc).replace(tzinfo=None)).total_seconds()
         threshold = timedelta(minutes=_SESSION_REFRESH_THRESHOLD_MINUTES).total_seconds()
         if remaining > threshold:
             return
 
         timeout_hours = _get_session_timeout_hours()
-        new_expires_at = datetime.utcnow() + timedelta(hours=timeout_hours)
+        new_expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
+            hours=timeout_hours
+        )
         repo.extend_session_expiry(token, new_expires_at)
         g._session_refresh_seconds = int(timeout_hours * 3600)
     except Exception as e:

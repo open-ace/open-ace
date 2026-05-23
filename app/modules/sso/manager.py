@@ -8,7 +8,7 @@ import json
 import logging
 import secrets
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, cast
 
 from app.modules.sso.oauth2 import OAuth2Provider
@@ -198,7 +198,7 @@ class SSOManager:
                         provider_type,
                         json.dumps(config.__dict__),
                         tenant_id,
-                        datetime.utcnow(),
+                        datetime.now(timezone.utc).replace(tzinfo=None),
                     ),
                 )
                 conn.commit()
@@ -489,10 +489,10 @@ class SSOManager:
                         provider_name,
                         provider_user_id,
                         json.dumps(provider_data) if provider_data else None,
-                        datetime.utcnow(),
+                        datetime.now(timezone.utc).replace(tzinfo=None),
                         user_id,
                         json.dumps(provider_data) if provider_data else None,
-                        datetime.utcnow(),
+                        datetime.now(timezone.utc).replace(tzinfo=None),
                     ),
                 )
                 conn.commit()
@@ -549,7 +549,7 @@ class SSOManager:
             Optional[str]: Session token or None.
         """
         session_token = secrets.token_hex(32)
-        expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+        expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=expires_in)
 
         try:
             with self.db.connection() as conn:
@@ -592,7 +592,7 @@ class SSOManager:
             SELECT * FROM sso_sessions
             WHERE session_token = ? AND expires_at > ?
         """,
-            (session_token, datetime.utcnow()),
+            (session_token, datetime.now(timezone.utc).replace(tzinfo=None)),
         )
 
         if not row:
@@ -619,7 +619,8 @@ class SSOManager:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "DELETE FROM sso_sessions WHERE expires_at < ?", (datetime.utcnow(),)
+                    "DELETE FROM sso_sessions WHERE expires_at < ?",
+                    (datetime.now(timezone.utc).replace(tzinfo=None),),
                 )
                 deleted = cursor.rowcount
                 conn.commit()

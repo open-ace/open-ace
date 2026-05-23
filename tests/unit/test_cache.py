@@ -26,21 +26,25 @@ class TestCacheEntry:
         assert entry.created_at == 0.0
         assert entry.hits == 0
 
-    def test_is_expired_no_expiry(self):
-        entry = CacheEntry(value="test", expires_at=None)
-        assert entry.is_expired() is False
-
-    def test_is_expired_future(self):
-        entry = CacheEntry(value="test", expires_at=time.time() + 3600)
-        assert entry.is_expired() is False
-
-    def test_is_expired_past(self):
-        entry = CacheEntry(value="test", expires_at=time.time() - 10)
-        assert entry.is_expired() is True
-
-    def test_is_expired_zero(self):
-        entry = CacheEntry(value="test", expires_at=0)
-        assert entry.is_expired() is True
+    @pytest.mark.parametrize(
+        "expires_at_offset,expected_expired",
+        [
+            (None, False),
+            (3600, False),  # future
+            (-10, True),  # past
+            (None, True),  # special case: expires_at=0
+        ],
+        ids=["no_expiry", "future", "past", "zero"],
+    )
+    def test_is_expired(self, expires_at_offset, expected_expired):
+        if expires_at_offset is None and expected_expired:
+            # Special case: expires_at=0
+            entry = CacheEntry(value="test", expires_at=0)
+        elif expires_at_offset is None:
+            entry = CacheEntry(value="test", expires_at=None)
+        else:
+            entry = CacheEntry(value="test", expires_at=time.time() + expires_at_offset)
+        assert entry.is_expired() is expected_expired
 
     def test_hits_counter(self):
         entry = CacheEntry(value="test")
@@ -194,43 +198,35 @@ class TestMemoryCache:
 class TestRedisCache:
     """Test RedisCache backend."""
 
-    def test_make_key(self):
-        cache = RedisCache(prefix="openace:")
-        assert cache._make_key("test") == "openace:test"
+    @pytest.mark.parametrize(
+        "prefix,key,expected",
+        [
+            ("openace:", "test", "openace:test"),
+            ("custom:", "key", "custom:key"),
+        ],
+        ids=["default_prefix", "custom_prefix"],
+    )
+    def test_make_key(self, prefix, key, expected):
+        cache = RedisCache(prefix=prefix)
+        assert cache._make_key(key) == expected
 
-    def test_make_key_custom_prefix(self):
-        cache = RedisCache(prefix="custom:")
-        assert cache._make_key("key") == "custom:key"
-
-    def test_get_error_returns_none(self):
+    @pytest.mark.parametrize(
+        "method_name,method_args,expected_result",
+        [
+            ("get", ("key1",), None),
+            ("set", ("key1", "value1"), False),
+            ("delete", ("key1",), False),
+            ("clear", (), False),
+            ("exists", ("key1",), False),
+        ],
+        ids=["get", "set", "delete", "clear", "exists"],
+    )
+    def test_error_returns_fallback(self, method_name, method_args, expected_result):
         cache = RedisCache()
         with patch.object(cache, "_get_client", side_effect=Exception("Connection error")):
-            result = cache.get("key1")
-            assert result is None
-
-    def test_set_error_returns_false(self):
-        cache = RedisCache()
-        with patch.object(cache, "_get_client", side_effect=Exception("Connection error")):
-            result = cache.set("key1", "value1")
-            assert result is False
-
-    def test_delete_error_returns_false(self):
-        cache = RedisCache()
-        with patch.object(cache, "_get_client", side_effect=Exception("Connection error")):
-            result = cache.delete("key1")
-            assert result is False
-
-    def test_clear_error_returns_false(self):
-        cache = RedisCache()
-        with patch.object(cache, "_get_client", side_effect=Exception("Connection error")):
-            result = cache.clear()
-            assert result is False
-
-    def test_exists_error_returns_false(self):
-        cache = RedisCache()
-        with patch.object(cache, "_get_client", side_effect=Exception("Connection error")):
-            result = cache.exists("key1")
-            assert result is False
+            method = getattr(cache, method_name)
+            result = method(*method_args)
+            assert result == expected_result
 
     def test_get_success(self):
         import pickle
@@ -282,41 +278,42 @@ class TestRedisCache:
             result = cache.delete("key1")
             assert result is True
 
-    def test_clear_with_keys(self):
+    @pytest.mark.parametrize(
+        "keys,expect_delete_called",
+        [
+            ([b"openace:key1", b"openace:key2"], True),
+            ([], False),
+        ],
+        ids=["with_keys", "no_keys"],
+    )
+    def test_clear(self, keys, expect_delete_called):
         cache = RedisCache()
         mock_client = MagicMock()
-        mock_client.keys.return_value = [b"openace:key1", b"openace:key2"]
+        mock_client.keys.return_value = keys
 
         with patch.object(cache, "_get_client", return_value=mock_client):
             result = cache.clear()
             assert result is True
-            mock_client.delete.assert_called_once()
+            if expect_delete_called:
+                mock_client.delete.assert_called_once()
+            else:
+                mock_client.delete.assert_not_called()
 
-    def test_clear_no_keys(self):
+    @pytest.mark.parametrize(
+        "exists_return,expected",
+        [
+            (1, True),
+            (0, False),
+        ],
+        ids=["exists_true", "exists_false"],
+    )
+    def test_exists(self, exists_return, expected):
         cache = RedisCache()
         mock_client = MagicMock()
-        mock_client.keys.return_value = []
+        mock_client.exists.return_value = exists_return
 
         with patch.object(cache, "_get_client", return_value=mock_client):
-            result = cache.clear()
-            assert result is True
-            mock_client.delete.assert_not_called()
-
-    def test_exists_true(self):
-        cache = RedisCache()
-        mock_client = MagicMock()
-        mock_client.exists.return_value = 1
-
-        with patch.object(cache, "_get_client", return_value=mock_client):
-            assert cache.exists("key1") is True
-
-    def test_exists_false(self):
-        cache = RedisCache()
-        mock_client = MagicMock()
-        mock_client.exists.return_value = 0
-
-        with patch.object(cache, "_get_client", return_value=mock_client):
-            assert cache.exists("key1") is False
+            assert cache.exists("key1") is expected
 
 
 class TestCacheManager:

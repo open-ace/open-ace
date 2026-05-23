@@ -142,15 +142,17 @@ class TestFormatUserData:
         assert result["daily_token_quota"] == 1000000
         assert result["monthly_token_quota"] == 30000000
 
-    def test_user_data_default_is_active(self):
-        user = {"id": 1, "username": "testuser"}
-        result = format_user_data(user)
-        assert result["is_active"] is True
-
-    def test_user_data_explicit_inactive(self):
-        user = {"id": 1, "username": "testuser", "is_active": False}
-        result = format_user_data(user)
-        assert result["is_active"] is False
+    @pytest.mark.parametrize(
+        "user_data,expected_active",
+        [
+            ({"id": 1, "username": "testuser"}, True),
+            ({"id": 1, "username": "testuser", "is_active": False}, False),
+        ],
+        ids=["default_is_active", "explicit_inactive"],
+    )
+    def test_user_data_is_active(self, user_data, expected_active):
+        result = format_user_data(user_data)
+        assert result["is_active"] is expected_active
 
     def test_empty_user_data(self):
         result = format_user_data({})
@@ -161,29 +163,28 @@ class TestFormatUserData:
 class TestFormatTimestamp:
     """Test format_timestamp function."""
 
-    def test_iso_format_with_z(self):
-        result = format_timestamp("2026-01-15T10:30:00Z")
-        assert result == "2026-01-15 10:30:00"
-
-    def test_iso_format_with_offset(self):
-        result = format_timestamp("2026-01-15T10:30:00+08:00")
-        assert result == "2026-01-15 10:30:00"
-
-    def test_none_input(self):
-        result = format_timestamp(None)
-        assert result is None
-
-    def test_empty_string(self):
-        result = format_timestamp("")
-        assert result is None
-
-    def test_invalid_timestamp(self):
-        result = format_timestamp("not-a-timestamp")
-        assert result == "not-a-timestamp"
-
-    def test_plain_date_string(self):
-        result = format_timestamp("2026-01-15")
-        assert result == "2026-01-15 00:00:00"
+    @pytest.mark.parametrize(
+        "input_ts,expected,check_contains",
+        [
+            ("2026-01-15T10:30:00Z", "2026-01-15 10:30:00", None),
+            ("2026-01-15T10:30:00+08:00", "2026-01-15 10:30:00", None),
+            (None, None, None),
+            ("", None, None),
+            ("not-a-timestamp", "not-a-timestamp", None),
+            ("2026-01-15", "2026-01-15 00:00:00", None),
+        ],
+        ids=[
+            "iso_with_z",
+            "iso_with_offset",
+            "none_input",
+            "empty_string",
+            "invalid_timestamp",
+            "plain_date",
+        ],
+    )
+    def test_format_timestamp(self, input_ts, expected, check_contains):
+        result = format_timestamp(input_ts)
+        assert result == expected
 
     def test_iso_format_with_milliseconds(self):
         result = format_timestamp("2026-01-15T10:30:00.123456Z")
@@ -194,46 +195,48 @@ class TestFormatTimestamp:
 class TestFormatNumber:
     """Test format_number function."""
 
-    def test_zero(self):
-        assert format_number(0) == "0"
-
-    def test_small_number(self):
-        assert format_number(42) == "42"
-
-    def test_thousands(self):
-        assert format_number(1000) == "1,000"
-
-    def test_millions(self):
-        assert format_number(1000000) == "1,000,000"
-
-    def test_mixed_digits(self):
-        assert format_number(1234567) == "1,234,567"
-
-    def test_negative_number(self):
-        assert format_number(-1000) == "-1,000"
+    @pytest.mark.parametrize(
+        "value,expected",
+        [
+            (0, "0"),
+            (42, "42"),
+            (1000, "1,000"),
+            (1000000, "1,000,000"),
+            (1234567, "1,234,567"),
+            (-1000, "-1,000"),
+        ],
+        ids=["zero", "small", "thousands", "millions", "mixed_digits", "negative"],
+    )
+    def test_format_number(self, value, expected):
+        assert format_number(value) == expected
 
 
 class TestFormatPercentage:
     """Test format_percentage function."""
 
-    def test_default_decimals(self):
-        assert format_percentage(85.5) == "85.5%"
-
-    def test_zero_decimals(self):
-        assert format_percentage(85.567, decimals=0) == "86%"
-
-    def test_two_decimals(self):
-        assert format_percentage(85.567, decimals=2) == "85.57%"
-
-    def test_zero_value(self):
-        assert format_percentage(0.0) == "0.0%"
-
-    def test_100_percent(self):
-        assert format_percentage(100.0) == "100.0%"
-
-    def test_negative_percentage(self):
-        assert format_percentage(-5.5) == "-5.5%"
-
-    def test_large_value(self):
-        result = format_percentage(1234.5678, decimals=3)
-        assert result == "1234.568%"
+    @pytest.mark.parametrize(
+        "value,decimals,expected",
+        [
+            (85.5, None, "85.5%"),
+            (85.567, 0, "86%"),
+            (85.567, 2, "85.57%"),
+            (0.0, None, "0.0%"),
+            (100.0, None, "100.0%"),
+            (-5.5, None, "-5.5%"),
+            (1234.5678, 3, "1234.568%"),
+        ],
+        ids=[
+            "default_decimals",
+            "zero_decimals",
+            "two_decimals",
+            "zero_value",
+            "100_percent",
+            "negative",
+            "large_value",
+        ],
+    )
+    def test_format_percentage(self, value, decimals, expected):
+        if decimals is None:
+            assert format_percentage(value) == expected
+        else:
+            assert format_percentage(value, decimals=decimals) == expected

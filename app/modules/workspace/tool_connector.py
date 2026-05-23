@@ -8,7 +8,7 @@ Supports tool registration, routing, and health monitoring.
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable, Optional, cast
 
@@ -438,17 +438,17 @@ class ToolConnector:
                 self._tools[tool_name].status = (
                     ToolStatus.ONLINE.value if is_healthy else ToolStatus.OFFLINE.value
                 )
-                self._tools[tool_name].last_check = datetime.utcnow()
+                self._tools[tool_name].last_check = datetime.now(timezone.utc).replace(tzinfo=None)
                 return is_healthy
             except Exception as e:
                 logger.error(f"Health check failed for {tool_name}: {e}")
                 self._tools[tool_name].status = ToolStatus.OFFLINE.value
-                self._tools[tool_name].last_check = datetime.utcnow()
+                self._tools[tool_name].last_check = datetime.now(timezone.utc).replace(tzinfo=None)
                 return False
 
         # No adapter - assume online
         self._tools[tool_name].status = ToolStatus.ONLINE.value
-        self._tools[tool_name].last_check = datetime.utcnow()
+        self._tools[tool_name].last_check = datetime.now(timezone.utc).replace(tzinfo=None)
         return True
 
     async def check_all_health(self) -> dict[str, bool]:
@@ -531,7 +531,7 @@ class ToolConnector:
             return False
 
         self._tools[tool_name].status = status
-        self._tools[tool_name].last_check = datetime.utcnow()
+        self._tools[tool_name].last_check = datetime.now(timezone.utc).replace(tzinfo=None)
         logger.info(f"Updated status for {tool_name}: {status}")
         return True
 

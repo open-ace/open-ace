@@ -5,7 +5,7 @@ API routes for usage analytics and reporting.
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, Response, g, jsonify, request
 
@@ -32,10 +32,14 @@ def get_client_info():
 def api_usage_report():
     """Generate a comprehensive usage report."""
     # Get date range
-    end_date = request.args.get("end_date", datetime.utcnow().strftime("%Y-%m-%d"))
+    end_date = request.args.get(
+        "end_date", datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
+    )
     days = request.args.get("days", default=30, type=int)
 
-    start_date = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
+    start_date = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).strftime(
+        "%Y-%m-%d"
+    )
 
     include_trends = request.args.get("trends", "true").lower() == "true"
     include_anomalies = request.args.get("anomalies", "true").lower() == "true"
@@ -78,10 +82,14 @@ def api_usage_forecast():
 def api_efficiency_metrics():
     """Get efficiency metrics."""
     # Get date range
-    end_date = request.args.get("end_date", datetime.utcnow().strftime("%Y-%m-%d"))
+    end_date = request.args.get(
+        "end_date", datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
+    )
     days = request.args.get("days", default=30, type=int)
 
-    start_date = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
+    start_date = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).strftime(
+        "%Y-%m-%d"
+    )
 
     metrics = usage_analytics.get_efficiency_metrics(start_date, end_date)
 
@@ -93,11 +101,15 @@ def api_efficiency_metrics():
 def api_export_analytics():
     """Export analytics data."""
     # Get parameters
-    end_date = request.args.get("end_date", datetime.utcnow().strftime("%Y-%m-%d"))
+    end_date = request.args.get(
+        "end_date", datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
+    )
     days = request.args.get("days", default=30, type=int)
     format_type = request.args.get("format", "json")
 
-    start_date = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
+    start_date = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).strftime(
+        "%Y-%m-%d"
+    )
 
     # Generate report
     report = usage_analytics.generate_report(
@@ -216,7 +228,7 @@ def api_export_analytics():
         return jsonify(
             {
                 "report": report.to_dict(),
-                "exported_at": datetime.utcnow().isoformat(),
+                "exported_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
                 "format": format_type,
             }
         )

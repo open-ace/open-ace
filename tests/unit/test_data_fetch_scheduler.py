@@ -1,7 +1,7 @@
 """Unit tests for DataFetchScheduler."""
 
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -302,7 +302,7 @@ class TestDataFetchSchedulerCheckQuotas:
     @patch("app.repositories.database.adapt_boolean_condition", return_value="u.is_active = 1")
     @patch("app.repositories.database.Database")
     def test_check_quotas_daily_exceeded(self, mock_db_cls, mock_adapt_bool, mock_adapt_sql):
-        today = datetime.utcnow().strftime("%Y-%m-%d")
+        today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
         mock_db = MagicMock()
         daily_row = {
             "user_id": 1,
@@ -345,7 +345,7 @@ class TestDataFetchSchedulerEnforceUserQuota:
     @patch("app.modules.workspace.session_manager.SessionManager")
     def test_enforce_daily_quota(self, mock_sm_cls, mock_alert):
         s = DataFetchScheduler()
-        today = datetime.utcnow().strftime("%Y-%m-%d")
+        today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
 
         row = {
             "user_id": 1,
@@ -367,7 +367,7 @@ class TestDataFetchSchedulerEnforceUserQuota:
     @patch("app.modules.workspace.session_manager.SessionManager")
     def test_enforce_monthly_quota(self, mock_sm_cls, mock_alert):
         s = DataFetchScheduler()
-        today = datetime.utcnow().strftime("%Y-%m-%d")
+        today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
 
         row = {
             "user_id": 1,
@@ -388,7 +388,7 @@ class TestDataFetchSchedulerEnforceUserQuota:
 
     def test_enforce_deduplication(self):
         s = DataFetchScheduler()
-        today = datetime.utcnow().strftime("%Y-%m-%d")
+        today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
         action_key = f"1:quota_exceeded:{today}:daily"
         s._enforced_users = {action_key}
 
@@ -409,7 +409,7 @@ class TestDataFetchSchedulerEnforceUserQuota:
     @patch("app.modules.workspace.session_manager.SessionManager")
     def test_enforce_terminates_sessions(self, mock_sm_cls, mock_alert):
         s = DataFetchScheduler()
-        today = datetime.utcnow().strftime("%Y-%m-%d")
+        today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
 
         row = {
             "user_id": 1,
@@ -433,7 +433,7 @@ class TestDataFetchSchedulerEnforceUserQuota:
     @patch("app.modules.workspace.session_manager.SessionManager")
     def test_enforce_session_failure_continues(self, mock_sm_cls, mock_alert):
         s = DataFetchScheduler()
-        today = datetime.utcnow().strftime("%Y-%m-%d")
+        today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
 
         row = {
             "user_id": 1,
@@ -455,7 +455,7 @@ class TestDataFetchSchedulerEnforceUserQuota:
     @patch("app.modules.workspace.session_manager.SessionManager")
     def test_enforce_cleans_old_action_keys(self, mock_sm_cls, mock_alert):
         s = DataFetchScheduler()
-        today = datetime.utcnow().strftime("%Y-%m-%d")
+        today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
 
         s._enforced_users = {"99:quota_exceeded:2020-01-01:daily"}
 
@@ -482,7 +482,7 @@ class TestDataFetchSchedulerEnforceUserQuota:
     @patch("app.modules.workspace.session_manager.SessionManager")
     def test_enforce_initializes_enforced_users(self, mock_sm_cls, mock_alert):
         s = DataFetchScheduler()
-        today = datetime.utcnow().strftime("%Y-%m-%d")
+        today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
 
         # Remove _enforced_users attribute to test initialization
         if hasattr(s, "_enforced_users"):

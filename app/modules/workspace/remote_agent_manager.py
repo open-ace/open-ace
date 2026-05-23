@@ -10,7 +10,7 @@ import logging
 import time
 import uuid
 from contextlib import suppress
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, cast
 
 import gevent
@@ -141,7 +141,7 @@ class RemoteAgentManager:
                 cursor.execute(
                     f"UPDATE agent_sessions SET status = 'completed', "
                     f"updated_at = {_param()} WHERE session_id IN ({placeholders})",
-                    [datetime.utcnow().isoformat()] + sids,
+                    [datetime.now(timezone.utc).replace(tzinfo=None).isoformat()] + sids,
                 )
                 conn.commit()
 
@@ -168,7 +168,9 @@ class RemoteAgentManager:
         """Check for stale heartbeats and mark machines offline."""
         with self.db.connection() as conn:
             cursor = conn.cursor()
-            cutoff = datetime.utcnow() - timedelta(seconds=self.HEARTBEAT_TIMEOUT_SECONDS)
+            cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+                seconds=self.HEARTBEAT_TIMEOUT_SECONDS
+            )
 
             cursor.execute(
                 f"""
@@ -176,7 +178,7 @@ class RemoteAgentManager:
                 SET status = 'offline', updated_at = {_param()}
                 WHERE status != 'offline' AND last_heartbeat < {_param()}
             """,
-                (datetime.utcnow().isoformat(), cutoff.isoformat()),
+                (datetime.now(timezone.utc).replace(tzinfo=None).isoformat(), cutoff.isoformat()),
             )
 
             updated = cursor.rowcount
@@ -191,7 +193,9 @@ class RemoteAgentManager:
     def _cleanup_stale_paused_sessions(self) -> None:
         """Stop sessions that have been paused for more than 4 hours."""
         PAUSE_TIMEOUT_HOURS = 4
-        cutoff = datetime.utcnow() - timedelta(hours=PAUSE_TIMEOUT_HOURS)
+        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+            hours=PAUSE_TIMEOUT_HOURS
+        )
 
         try:
             with self.db.connection() as conn:
@@ -247,7 +251,7 @@ class RemoteAgentManager:
             self._registration_tokens[token] = {
                 "tenant_id": tenant_id,
                 "created_by": created_by,
-                "created_at": datetime.utcnow().isoformat(),
+                "created_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
             }
         logger.info(f"Created registration token for tenant {tenant_id}")
         return token
@@ -291,7 +295,7 @@ class RemoteAgentManager:
         with self._lock, self.db.connection() as conn:
             cursor = conn.cursor()
 
-            now = datetime.utcnow().isoformat()
+            now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
             try:
                 # Check for existing machine with same hostname in same tenant
@@ -508,7 +512,11 @@ class RemoteAgentManager:
                 SET status = 'online', last_heartbeat = {_param()}, updated_at = {_param()}
                 WHERE machine_id = {_param()}
             """,
-                (datetime.utcnow().isoformat(), datetime.utcnow().isoformat(), machine_id),
+                (
+                    datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                    datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                    machine_id,
+                ),
             )
             conn.commit()
 
@@ -527,7 +535,7 @@ class RemoteAgentManager:
                 UPDATE remote_machines SET status = 'offline', updated_at = {_param()}
                 WHERE machine_id = {_param()}
             """,
-                (datetime.utcnow().isoformat(), machine_id),
+                (datetime.now(timezone.utc).replace(tzinfo=None).isoformat(), machine_id),
             )
             conn.commit()
 
@@ -747,7 +755,7 @@ class RemoteAgentManager:
 
         with self.db.connection() as conn:
             cursor = conn.cursor()
-            now = datetime.utcnow().isoformat()
+            now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
             cursor.execute(
                 f"""
@@ -763,7 +771,7 @@ class RemoteAgentManager:
         """Update capabilities for a remote machine."""
         with self.db.connection() as conn:
             cursor = conn.cursor()
-            now = datetime.utcnow().isoformat()
+            now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
             cursor.execute(
                 f"""
                 UPDATE remote_machines
@@ -854,7 +862,7 @@ class RemoteAgentManager:
                             user_id,
                             permission,
                             granted_by,
-                            datetime.utcnow().isoformat(),
+                            datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
                         ),
                     )
                 else:
@@ -869,7 +877,7 @@ class RemoteAgentManager:
                             user_id,
                             permission,
                             granted_by,
-                            datetime.utcnow().isoformat(),
+                            datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
                         ),
                     )
                 conn.commit()

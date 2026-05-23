@@ -1,6 +1,6 @@
 """Unit tests for Tenant, TenantStatus, QuotaConfig, TenantSettings, and TenantUsage models."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -231,7 +231,10 @@ class TestTenant:
         assert t.is_active() is False
 
     def test_is_trial_true(self):
-        t = Tenant(status="trial", trial_ends_at=datetime.utcnow() + timedelta(days=30))
+        t = Tenant(
+            status="trial",
+            trial_ends_at=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=30),
+        )
         assert t.is_trial() is True
 
     def test_is_trial_false_not_trial_status(self):
@@ -239,7 +242,10 @@ class TestTenant:
         assert t.is_trial() is False
 
     def test_is_trial_expired(self):
-        t = Tenant(status="trial", trial_ends_at=datetime.utcnow() - timedelta(days=1))
+        t = Tenant(
+            status="trial",
+            trial_ends_at=datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=1),
+        )
         assert t.is_trial() is False
 
     def test_is_trial_no_end_date(self):
@@ -251,11 +257,16 @@ class TestTenant:
         assert t.is_subscription_valid() is True
 
     def test_is_subscription_valid_future(self):
-        t = Tenant(subscription_ends_at=datetime.utcnow() + timedelta(days=30))
+        t = Tenant(
+            subscription_ends_at=datetime.now(timezone.utc).replace(tzinfo=None)
+            + timedelta(days=30)
+        )
         assert t.is_subscription_valid() is True
 
     def test_is_subscription_valid_expired(self):
-        t = Tenant(subscription_ends_at=datetime.utcnow() - timedelta(days=1))
+        t = Tenant(
+            subscription_ends_at=datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=1)
+        )
         assert t.is_subscription_valid() is False
 
     def test_can_add_users_within_limit(self):

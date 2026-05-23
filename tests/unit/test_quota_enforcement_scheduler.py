@@ -1,7 +1,7 @@
 """Unit tests for QuotaEnforcementScheduler."""
 
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
@@ -191,7 +191,7 @@ class TestQuotaEnforcementSchedulerEnforcement:
     @patch("app.repositories.database.adapt_boolean_condition", return_value="u.is_active = 1")
     @patch("app.repositories.database.Database")
     def test_run_enforcement_daily_exceeded(self, mock_db_cls, mock_adapt_bool, mock_adapt_sql):
-        today = datetime.utcnow().strftime("%Y-%m-%d")
+        today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
         mock_db = MagicMock()
         daily_row = {
             "user_id": 1,
@@ -216,7 +216,7 @@ class TestQuotaEnforcementSchedulerEnforcement:
     @patch("app.repositories.database.adapt_boolean_condition", return_value="u.is_active = 1")
     @patch("app.repositories.database.Database")
     def test_run_enforcement_monthly_exceeded(self, mock_db_cls, mock_adapt_bool, mock_adapt_sql):
-        today = datetime.utcnow().strftime("%Y-%m-%d")
+        today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
         mock_db = MagicMock()
         monthly_row = {
             "user_id": 2,
@@ -245,7 +245,7 @@ class TestQuotaEnforcementSchedulerEnforcement:
     def test_run_enforcement_deduplicates_monthly(
         self, mock_db_cls, mock_adapt_bool, mock_adapt_sql
     ):
-        today = datetime.utcnow().strftime("%Y-%m-%d")
+        today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
         mock_db = MagicMock()
         daily_row = {
             "user_id": 1,
@@ -284,7 +284,7 @@ class TestQuotaEnforcementSchedulerEnforcement:
 
     def test_enforce_user_deduplication(self):
         scheduler = QuotaEnforcementScheduler()
-        today = datetime.utcnow().strftime("%Y-%m-%d")
+        today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
 
         row = {
             "user_id": 1,
@@ -306,7 +306,7 @@ class TestQuotaEnforcementSchedulerEnforcement:
     @patch("app.modules.workspace.session_manager.SessionManager")
     def test_enforce_user_creates_alert(self, mock_sm_cls, mock_create_alert):
         scheduler = QuotaEnforcementScheduler()
-        today = datetime.utcnow().strftime("%Y-%m-%d")
+        today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
 
         row = {
             "user_id": 1,
@@ -332,7 +332,7 @@ class TestQuotaEnforcementSchedulerEnforcement:
     @patch("app.modules.workspace.session_manager.SessionManager")
     def test_enforce_user_terminates_sessions(self, mock_sm_cls, mock_create_alert):
         scheduler = QuotaEnforcementScheduler()
-        today = datetime.utcnow().strftime("%Y-%m-%d")
+        today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
 
         row = {
             "user_id": 1,
@@ -359,7 +359,7 @@ class TestQuotaEnforcementSchedulerEnforcement:
         mock_create_alert.side_effect = Exception("Alert service down")
 
         scheduler = QuotaEnforcementScheduler()
-        today = datetime.utcnow().strftime("%Y-%m-%d")
+        today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
 
         row = {
             "user_id": 1,
@@ -385,7 +385,7 @@ class TestQuotaEnforcementSchedulerEnforcement:
         mock_sm_cls.return_value = mock_sm_instance
 
         scheduler = QuotaEnforcementScheduler()
-        today = datetime.utcnow().strftime("%Y-%m-%d")
+        today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
 
         row = {
             "user_id": 1,
@@ -403,7 +403,7 @@ class TestQuotaEnforcementSchedulerEnforcement:
     @patch("app.modules.workspace.session_manager.SessionManager")
     def test_enforce_user_monthly_prefix(self, mock_sm_cls, mock_create_alert):
         scheduler = QuotaEnforcementScheduler()
-        today = datetime.utcnow().strftime("%Y-%m-%d")
+        today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
 
         row = {
             "user_id": 1,
@@ -428,7 +428,7 @@ class TestQuotaEnforcementSchedulerEnforcement:
     @patch("app.modules.workspace.session_manager.SessionManager")
     def test_enforce_user_cleans_old_action_keys(self, mock_sm_cls, mock_create_alert):
         scheduler = QuotaEnforcementScheduler()
-        today = datetime.utcnow().strftime("%Y-%m-%d")
+        today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
 
         # Add old action keys from a different date
         scheduler._enforced_users = {"99:quota_exceeded:2020-01-01:daily"}

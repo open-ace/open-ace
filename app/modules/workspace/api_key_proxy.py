@@ -13,7 +13,7 @@ import os
 import secrets
 import sqlite3
 from base64 import b64decode, b64encode
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, Union, cast
 
 from app.repositories.database import DB_PATH, get_database_url, is_postgresql
@@ -563,7 +563,9 @@ class APIKeyProxyService:
             "tenant_id": tenant_id,
             "provider": provider,
             "session_type": session_type,
-            "exp": (datetime.utcnow() + timedelta(minutes=expires_minutes)).isoformat(),
+            "exp": (
+                datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=expires_minutes)
+            ).isoformat(),
             "jti": secrets.token_hex(16),
         }
 
@@ -613,7 +615,7 @@ class APIKeyProxyService:
 
             # Check expiration
             exp = datetime.fromisoformat(payload["exp"])
-            if datetime.utcnow() > exp:
+            if datetime.now(timezone.utc).replace(tzinfo=None) > exp:
                 logger.warning("Proxy token expired")
                 return None
 
