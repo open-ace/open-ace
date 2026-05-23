@@ -70,7 +70,7 @@ class TenantRepository:
                         ),
                     )
                     result = cursor.fetchone()
-                    tenant_id = result[0] if result else None
+                    tenant_id = result["id"] if result else None
                 else:
                     cursor.execute(
                         """
@@ -407,24 +407,33 @@ class TenantRepository:
             date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
 
         try:
-            from app.repositories.database import adapt_sql
+            from app.repositories.database import adapt_sql, is_postgresql
 
             with self.db.connection() as conn:
                 cursor = conn.cursor()
 
-                # Insert or update usage
-                cursor.execute(
-                    adapt_sql(
+                if is_postgresql():
+                    cursor.execute(
                         """
-                    INSERT INTO tenant_usage (tenant_id, date, tokens_used, requests_made)
-                    VALUES (?, ?, ?, ?)
-                    ON CONFLICT(tenant_id, date) DO UPDATE SET
-                        tokens_used = tokens_used + ?,
-                        requests_made = requests_made + ?
-                """
-                    ),
-                    (tenant_id, date, tokens, requests, tokens, requests),
-                )
+                        INSERT INTO tenant_usage (tenant_id, date, tokens_used, requests_made)
+                        VALUES (%s, %s, %s, %s)
+                        ON CONFLICT(tenant_id, date) DO UPDATE SET
+                            tokens_used = tenant_usage.tokens_used + EXCLUDED.tokens_used,
+                            requests_made = tenant_usage.requests_made + EXCLUDED.requests_made
+                    """,
+                        (tenant_id, date, tokens, requests),
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        INSERT INTO tenant_usage (tenant_id, date, tokens_used, requests_made)
+                        VALUES (?, ?, ?, ?)
+                        ON CONFLICT(tenant_id, date) DO UPDATE SET
+                            tokens_used = tokens_used + ?,
+                            requests_made = requests_made + ?
+                    """,
+                        (tenant_id, date, tokens, requests, tokens, requests),
+                    )
 
                 # Update tenant totals
                 cursor.execute(
@@ -510,15 +519,18 @@ class TenantRepository:
             bool: True if successful.
         """
         try:
-            from app.repositories.database import adapt_sql
+            from app.repositories.database import adapt_sql, is_postgresql
 
             with self.db.connection() as conn:
                 cursor = conn.cursor()
+                count_fn = (
+                    "GREATEST(0, user_count + %s)" if is_postgresql() else "MAX(0, user_count + ?)"
+                )
                 cursor.execute(
                     adapt_sql(
-                        """
+                        f"""
                     UPDATE tenants SET
-                        user_count = MAX(0, user_count + ?),
+                        user_count = {count_fn},
                         updated_at = ?
                     WHERE id = ?
                 """
