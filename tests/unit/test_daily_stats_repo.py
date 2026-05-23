@@ -1,4 +1,10 @@
-"""Unit tests for DailyStatsRepository."""
+"""Unit tests for DailyStatsRepository.
+
+Note: Repository tests use SQL string assertions to verify correct query
+structure (filters, table names, column references). These assertions check
+key structural elements rather than exact formatting, but may still break
+on significant SQL refactoring. See issue #525 for integration test plans.
+"""
 
 from unittest.mock import MagicMock, patch
 

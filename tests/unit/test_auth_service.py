@@ -1,4 +1,11 @@
-"""Unit tests for AuthService."""
+"""Unit tests for AuthService.
+
+Note: Some tests directly invoke private module-level functions
+(_check_login_lockout, _record_failed_login, etc.) to verify edge cases
+(expired lockouts, max attempts, cache TTL) that are difficult to trigger
+through the public login() interface alone. The public interface is also
+tested in TestAuthService.
+"""
 
 import time
 from datetime import datetime, timedelta

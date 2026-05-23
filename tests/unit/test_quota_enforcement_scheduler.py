@@ -422,7 +422,7 @@ class TestQuotaEnforcementSchedulerEnforcement:
 
         mock_create_alert.assert_called_once()
         quota_type = mock_create_alert.call_args[1]["quota_type"]
-        assert "monthly" in quota_type
+        assert quota_type.startswith("monthly")
 
     @patch("app.modules.governance.alert_notifier.create_quota_alert")
     @patch("app.modules.workspace.session_manager.SessionManager")

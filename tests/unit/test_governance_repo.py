@@ -1,4 +1,8 @@
-"""Unit tests for GovernanceRepository."""
+"""Unit tests for GovernanceRepository.
+
+Note: SQL string assertions verify key query structure. See issue #525 for
+integration test plans.
+"""
 
 import json
 import os

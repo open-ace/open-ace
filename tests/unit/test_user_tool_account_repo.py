@@ -1,4 +1,8 @@
-"""Unit tests for UserToolAccountRepository."""
+"""Unit tests for UserToolAccountRepository.
+
+Note: SQL string assertions verify key query structure. See issue #525 for
+integration test plans.
+"""
 
 from unittest.mock import MagicMock, patch
 

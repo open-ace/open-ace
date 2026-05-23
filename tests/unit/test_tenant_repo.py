@@ -1,4 +1,8 @@
-"""Unit tests for TenantRepository."""
+"""Unit tests for TenantRepository.
+
+Note: SQL string assertions verify key query structure. See issue #525 for
+integration test plans.
+"""
 
 import json
 from datetime import datetime

@@ -79,15 +79,15 @@ class TestMemoryCache:
         # Zero TTL is falsy, so default_ttl is used instead, meaning expires_at is set
         assert entry.expires_at is not None
 
-    def test_expired_entry_returns_none(self):
+    def test_negative_ttl_never_expires(self):
         cache = MemoryCache()
         cache.set("key1", "value1", ttl=-1)
-        # ttl=-1 is truthy, and -1 > 0 is False, so expires_at is None (never expires)
+        # ttl=-1: truthy but -1 > 0 is False, so expires_at is None (never expires)
         entry = cache.get("key1")
         assert entry is not None
         assert entry.value == "value1"
 
-    def test_expired_entry_removed(self):
+    def test_negative_ttl_entry_remains_in_cache(self):
         cache = MemoryCache()
         cache.set("key1", "value1", ttl=-1)
         # ttl=-1 results in expires_at=None (never expires), so entry remains
@@ -120,7 +120,7 @@ class TestMemoryCache:
         assert cache.exists("key1") is True
         assert cache.exists("nonexistent") is False
 
-    def test_exists_expired(self):
+    def test_exists_negative_ttl_always_true(self):
         cache = MemoryCache()
         cache.set("key1", "value1", ttl=-1)
         # ttl=-1 results in expires_at=None (never expires), so exists returns True

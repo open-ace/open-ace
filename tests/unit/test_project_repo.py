@@ -1,4 +1,8 @@
-"""Unit tests for ProjectRepository."""
+"""Unit tests for ProjectRepository.
+
+Note: SQL string assertions verify key query structure. See issue #525 for
+integration test plans.
+"""
 
 from datetime import datetime
 from unittest.mock import MagicMock, patch
