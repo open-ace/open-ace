@@ -37,29 +37,93 @@ python3 cli.py config init
 
 ```
 open-ace/
-├── cli.py              # CLI entry point
 ├── web.py              # Web server entry point
 ├── requirements.txt    # Python dependencies
 │
-├── scripts/            # Core scripts
-│   ├── fetch_*.py      # Data collection scripts
-│   ├── shared/         # Shared modules
-│   │   ├── config.py   # Configuration
-│   │   ├── db.py       # Database operations
-│   │   └── utils.py    # Utilities
-│   └── migrations/     # Database migrations
+├── app/                # Flask application
+│   ├── __init__.py     # create_app() factory
+│   ├── routes/         # 23 Blueprint route modules
+│   ├── services/       # 14 business logic services
+│   ├── repositories/   # 11 data access repositories
+│   ├── modules/        # Domain logic packages
+│   │   ├── analytics/  # Usage analytics, ROI, cost optimization
+│   │   ├── compliance/ # Audit analysis, reports, retention
+│   │   ├── governance/ # Audit logging, alerts, quotas, content filter
+│   │   ├── sso/        # OAuth2/OIDC SSO
+│   │   └── workspace/  # Remote agents, sessions, collaboration
+│   ├── models/         # Data models (User, Message, Session, Tenant, etc.)
+│   ├── auth/           # Authentication decorators
+│   └── utils/          # Helpers, validators, formatters
 │
-├── templates/          # HTML templates (Jinja2)
-├── static/             # Static files (CSS, JS)
-│   ├── css/
-│   └── js/
+├── frontend/           # React + TypeScript SPA
+│   └── src/
+│       ├── api/        # API client modules
+│       ├── hooks/      # React Query hooks
+│       ├── components/ # UI components (common, features, work, layout)
+│       ├── store/      # Zustand state management
+│       ├── i18n/       # Internationalization (en/zh/ja/ko)
+│       ├── types/      # TypeScript interfaces
+│       └── utils/      # Formatters, helpers
 │
+├── remote-agent/       # Remote agent daemon
+│   ├── agent.py        # Main daemon loop
+│   ├── executor.py     # CLI subprocess management
+│   ├── cli_adapters/   # Tool adapters (Claude, Qwen, Codex, OpenClaw)
+│   ├── terminal_server.py  # WebSocket PTY server
+│   └── session_sync.py # Session history sync
+│
+├── scripts/            # Data collection scripts
+│   ├── fetch_*.py      # Per-tool data fetchers
+│   ├── shared/         # Shared modules (config, db, utils)
+│   └── migrations/     # Alembic database migrations
+│
+├── k8s/                # Kubernetes manifests
+├── schema/             # Database schema files
+├── static/             # Built frontend assets
+├── templates/          # HTML templates
 ├── tests/              # Test files
-│   ├── issues/         # Issue-specific tests
-│   └── ui/             # UI tests
-│
-└── docs/               # Documentation
+│   ├── unit/           # Unit tests
+│   ├── e2e/            # End-to-end tests
+│   └── issues/         # Issue-specific tests
+└── docs/               # Documentation (en/ + cn/)
 ```
+
+## Frontend Development
+
+### Setup
+
+```bash
+cd frontend
+npm install
+```
+
+### Development Server
+
+```bash
+# Start dev server on port 3000 (proxies API to localhost:5000)
+npm run dev
+```
+
+The backend must be running on port 5000 for the frontend to work.
+
+### Build
+
+```bash
+# Build for production (outputs to ../static/js/dist/)
+npm run build
+```
+
+### Testing
+
+```bash
+# Unit tests
+npm run test
+
+# E2E tests with Playwright
+npx playwright test
+```
+
+See [FRONTEND-GUIDE.md](FRONTEND-GUIDE.md) for the complete frontend reference.
 
 ## Code Style
 
@@ -123,17 +187,19 @@ pytest --cov=scripts/shared tests/
 
 ```
 tests/
-├── conftest.py         # Shared fixtures
-├── test_config.py      # Config module tests
-├── test_db.py          # Database tests
-├── test_utils.py       # Utility tests
-├── issues/             # Issue-specific tests
-│   ├── 15/
-│   ├── 20/
+├── unit/               # Unit tests
+│   ├── test_message_service.py
+│   ├── test_usage_service.py
 │   └── ...
-└── ui/                 # UI tests (Playwright)
-    ├── test_screenshot.py
-    └── ...
+├── e2e/                # End-to-end tests
+│   ├── manage/         # Admin UI tests
+│   ├── remote/         # Remote workspace tests
+│   └── terminal/       # Terminal tests
+├── issues/             # Issue-specific tests
+│   ├── 164/
+│   ├── 517/
+│   └── ...
+└── conftest.py         # Shared fixtures
 ```
 
 ### Writing Tests
