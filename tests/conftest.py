@@ -25,10 +25,17 @@ pytest_plugins = ("pytest_asyncio",)
 
 @pytest.fixture(autouse=True)
 def _clear_cache():
-    """Clear global cache before each test to prevent cross-test pollution."""
+    """Clear global caches before each test to prevent cross-test pollution."""
     from app.utils.cache import get_cache
 
     get_cache().clear()
+
+    try:
+        from app.services.auth_service import _security_settings_cache
+
+        _security_settings_cache.clear()
+    except ImportError:
+        pass
 
 
 class TestConfig:

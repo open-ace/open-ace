@@ -69,7 +69,7 @@ class TestLoginLockout:
 
     def test_no_lockout_initially(self, pg_db):
         self._setup_login_attempts(pg_db)
-        auth_service._security_settings_cache = {}
+        auth_service._security_settings_cache.clear()
 
         with self._patch_db(pg_db):
             is_locked, msg = _check_login_lockout("newuser")
@@ -78,7 +78,7 @@ class TestLoginLockout:
 
     def test_record_failed_login_increments(self, pg_db):
         self._setup_login_attempts(pg_db)
-        auth_service._security_settings_cache = {}
+        auth_service._security_settings_cache.clear()
 
         with self._patch_db(pg_db):
             _record_failed_login("testuser")
@@ -92,7 +92,7 @@ class TestLoginLockout:
 
     def test_lockout_after_max_attempts(self, pg_db):
         self._setup_login_attempts(pg_db)
-        auth_service._security_settings_cache = {}
+        auth_service._security_settings_cache.clear()
 
         with self._patch_db(pg_db):
             max_attempts = auth_service._get_max_login_attempts()
@@ -107,7 +107,7 @@ class TestLoginLockout:
 
     def test_clear_failed_logins(self, pg_db):
         self._setup_login_attempts(pg_db)
-        auth_service._security_settings_cache = {}
+        auth_service._security_settings_cache.clear()
 
         with self._patch_db(pg_db):
             _record_failed_login("cleareduser")

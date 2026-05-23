@@ -86,7 +86,7 @@ class TestLoginLockout:
     def test_no_lockout_initially(self, tmp_db):
         """New username has no lockout."""
         self._setup_login_attempts(tmp_db)
-        auth_service._security_settings_cache = {}
+        auth_service._security_settings_cache.clear()
 
         with self._patch_db(tmp_db):
             is_locked, msg = _check_login_lockout("newuser")
@@ -96,7 +96,7 @@ class TestLoginLockout:
     def test_record_failed_login_increments(self, tmp_db):
         """Recording failed login creates/increments attempt_count."""
         self._setup_login_attempts(tmp_db)
-        auth_service._security_settings_cache = {}
+        auth_service._security_settings_cache.clear()
 
         with self._patch_db(tmp_db):
             _record_failed_login("testuser")
@@ -117,7 +117,7 @@ class TestLoginLockout:
         effective threshold to make the test environment-agnostic.
         """
         self._setup_login_attempts(tmp_db)
-        auth_service._security_settings_cache = {}
+        auth_service._security_settings_cache.clear()
 
         with self._patch_db(tmp_db):
             # Read the effective max_login_attempts from settings
@@ -136,7 +136,7 @@ class TestLoginLockout:
     def test_no_lockout_before_threshold(self, tmp_db):
         """Account is NOT locked before reaching max attempts."""
         self._setup_login_attempts(tmp_db)
-        auth_service._security_settings_cache = {}
+        auth_service._security_settings_cache.clear()
 
         with self._patch_db(tmp_db):
             # Record only 1 attempt (always below any reasonable threshold)
@@ -149,7 +149,7 @@ class TestLoginLockout:
     def test_clear_failed_logins(self, tmp_db):
         """Clearing failed logins removes the record."""
         self._setup_login_attempts(tmp_db)
-        auth_service._security_settings_cache = {}
+        auth_service._security_settings_cache.clear()
 
         with self._patch_db(tmp_db):
             _record_failed_login("cleareduser")
@@ -173,7 +173,7 @@ class TestLoginLockout:
     def test_expired_lockout_allows_login(self, tmp_db):
         """Expired lockout is auto-cleaned and allows login."""
         self._setup_login_attempts(tmp_db)
-        auth_service._security_settings_cache = {}
+        auth_service._security_settings_cache.clear()
 
         # Manually insert an expired lockout
         expired_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=30)
