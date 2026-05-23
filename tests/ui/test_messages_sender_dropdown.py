@@ -7,13 +7,15 @@ This test verifies that:
 2. Sender dropdown is not covered by message cards when expanded
 """
 
+import os
+
 import pytest
 from playwright.async_api import async_playwright, expect
 
 # Test configuration
-BASE_URL = "http://localhost:5000"
-USERNAME = "admin"
-PASSWORD = "admin123"
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 TIMEOUT = 10000  # 10 seconds timeout
 
 

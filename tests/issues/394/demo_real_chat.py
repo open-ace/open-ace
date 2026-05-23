@@ -25,7 +25,7 @@ from playwright.sync_api import sync_playwright
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "demo-real-chat")
 
-HEADLESS = os.environ.get("HEADLESS", "false").lower() == "true"
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 
 TEST_USER = "admin"
 TEST_PASS = "admin123"
@@ -155,7 +155,8 @@ def main():
                 log("Error", f"No webui frame found. Frames: {[f.url[:60] for f in frames]}")
                 take_screenshot(page, "error-no-frame")
                 print("\n>>> Press Enter to close browser... <<<")
-                input()
+                if sys.stdout.isatty():
+                    input()
                 browser.close()
                 return
 
@@ -226,7 +227,8 @@ def main():
 
             if not HEADLESS:
                 print("\n>>> Browser stays open for you to inspect. Press Enter to close. <<<\n")
-                input("Press Enter to close browser...")
+                if sys.stdout.isatty():
+                    input("Press Enter to close browser...")
 
         except KeyboardInterrupt:
             log("Info", "Interrupted")

@@ -44,7 +44,7 @@ class TestSendToolLimitHints(unittest.TestCase):
         from executor import ProcessExecutor
 
         self.executor = ProcessExecutor(
-            server_url="http://localhost:5000",
+            server_url="http://localhost:5001",
             output_callback=None,
             permission_callback=None,
             usage_callback=None,
@@ -196,7 +196,7 @@ class TestToolLimitHintsIntegration(unittest.TestCase):
         from executor import ProcessExecutor
 
         executor = ProcessExecutor(
-            server_url="http://localhost:5000",
+            server_url="http://localhost:5001",
         )
 
         # Verify method exists
@@ -220,7 +220,7 @@ class TestToolLimitHintsExceptionHandling(unittest.TestCase):
         from executor import ProcessExecutor
 
         self.executor = ProcessExecutor(
-            server_url="http://localhost:5000",
+            server_url="http://localhost:5001",
         )
 
     def test_os_error_handling(self):
@@ -294,7 +294,7 @@ class TestToolTimeoutConfiguration(unittest.TestCase):
         from executor import ProcessExecutor
 
         executor = ProcessExecutor(
-            server_url="http://localhost:5000",
+            server_url="http://localhost:5001",
         )
 
         # Verify default timeout
@@ -305,7 +305,7 @@ class TestToolTimeoutConfiguration(unittest.TestCase):
         from executor import ProcessExecutor
 
         executor = ProcessExecutor(
-            server_url="http://localhost:5000",
+            server_url="http://localhost:5001",
             tool_timeout=300,
         )
 
@@ -317,7 +317,7 @@ class TestToolTimeoutConfiguration(unittest.TestCase):
         from executor import ProcessExecutor
 
         executor = ProcessExecutor(
-            server_url="http://localhost:5000",
+            server_url="http://localhost:5001",
             tool_timeout=300,  # 5 minutes
         )
 

@@ -10,9 +10,9 @@ import time
 from playwright.sync_api import sync_playwright
 
 BASE_URL = "http://localhost:5001"
-USERNAME = "admin"
-PASSWORD = "admin123"
-HEADLESS = True
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 SCREENSHOT_DIR = "screenshots/issues/55"
 
 

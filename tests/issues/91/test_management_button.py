@@ -8,8 +8,13 @@ Tests:
 """
 
 import asyncio
+import os
 
 from playwright.async_api import async_playwright
+
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 
 
 async def test_admin_user():
@@ -24,10 +29,10 @@ async def test_admin_user():
         print("=" * 60)
 
         # Login
-        await page.goto("http://localhost:5000/login")
+        await page.goto(f"{BASE_URL}/login")
         await page.wait_for_load_state("networkidle")
-        await page.fill("input#username", "admin")
-        await page.fill("input#password", "admin123")
+        await page.fill("input#username", USERNAME)
+        await page.fill("input#password", PASSWORD)
         async with page.expect_navigation(timeout=10000):
             await page.click('button[type="submit"]')
         await page.wait_for_load_state("networkidle")
@@ -41,7 +46,7 @@ async def test_admin_user():
         print(f"Mode switcher count: {mode_switcher_count}")
 
         # Navigate to manage mode
-        await page.goto("http://localhost:5000/manage/dashboard")
+        await page.goto(f"{BASE_URL}/manage/dashboard")
         await page.wait_for_load_state("networkidle")
         await asyncio.sleep(2)
         print(f"After navigate to /manage/dashboard: {page.url}")
@@ -71,10 +76,10 @@ async def test_normal_user():
         print("=" * 60)
 
         # Login
-        await page.goto("http://localhost:5000/login")
+        await page.goto(f"{BASE_URL}/login")
         await page.wait_for_load_state("networkidle")
-        await page.fill("input#username", "testuser")
-        await page.fill("input#password", "testuser")
+        await page.fill("input#username", USERNAME)
+        await page.fill("input#password", PASSWORD)
         async with page.expect_navigation(timeout=10000):
             await page.click('button[type="submit"]')
         await page.wait_for_load_state("networkidle")
@@ -88,13 +93,13 @@ async def test_normal_user():
         print(f"Mode switcher count: {mode_switcher_count}")
 
         # Try to navigate to manage mode - should be redirected to work
-        await page.goto("http://localhost:5000/manage/dashboard")
+        await page.goto(f"{BASE_URL}/manage/dashboard")
         await page.wait_for_load_state("networkidle")
         await asyncio.sleep(2)
         print(f"After navigate to /manage/dashboard: {page.url}")
 
         # Try to access other manage routes
-        await page.goto("http://localhost:5000/manage/users")
+        await page.goto(f"{BASE_URL}/manage/users")
         await page.wait_for_load_state("networkidle")
         await asyncio.sleep(1)
         print(f"After navigate to /manage/users: {page.url}")
@@ -108,15 +113,13 @@ async def test_normal_user():
         await browser.close()
         return {
             "mode_switcher_visible": mode_switcher_count > 0,
-            "redirected_to_work": "/work" in page.url or page.url == "http://localhost:5000/",
+            "redirected_to_work": "/work" in page.url or page.url == f"{BASE_URL}/",
             "final_url": page.url,
         }
 
 
 async def main():
     """Run all tests."""
-    import os
-
     os.makedirs("/Users/rhuang/workspace/open-ace/screenshots/issues/91", exist_ok=True)
 
     # Test admin user

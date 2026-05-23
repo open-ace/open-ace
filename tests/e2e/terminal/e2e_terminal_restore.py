@@ -10,19 +10,22 @@ Test flow:
 5. Verify navigation to Workspace with correct URL params
 """
 
+import os
 import time
 
 import requests
 from playwright.sync_api import sync_playwright
 
 BASE_URL = "http://localhost:5001"
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 
 
 def get_terminal_session_id():
     """Get a terminal session ID from the API"""
     session = requests.Session()
     login_resp = session.post(
-        f"{BASE_URL}/api/auth/login", json={"username": "admin", "password": "admin123"}
+        f"{BASE_URL}/api/auth/login", json={"username": USERNAME, "password": PASSWORD}
     )
     assert login_resp.json()["success"], "Login failed"
 
@@ -57,8 +60,8 @@ def test_terminal_session_restore(headless=True):
         print("Step 1: Login...")
         page.goto(f"{BASE_URL}/login")
         time.sleep(1)
-        page.fill("input[type='text']", "admin")
-        page.fill("input[type='password']", "admin123")
+        page.fill("input[type='text']", USERNAME)
+        page.fill("input[type='password']", PASSWORD)
         page.click("button[type='submit']")
         time.sleep(2)
         page.wait_for_load_state("networkidle")

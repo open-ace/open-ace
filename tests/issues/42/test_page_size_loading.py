@@ -17,10 +17,12 @@ import time
 import pytest
 from playwright.async_api import async_playwright
 
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
+
 # Test configuration
-BASE_URL = "http://localhost:5000"
-USERNAME = "admin"
-PASSWORD = "admin123"
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 TIMEOUT = 10000  # 10 seconds timeout
 
 # Screenshot directory
@@ -34,7 +36,7 @@ async def test_page_size_loading():
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
     p = async_playwright().start()
-    browser = p.chromium.launch(headless=False)
+    browser = p.chromium.launch(headless=HEADLESS)
     context = await browser.new_context()
     page = await context.new_page()
 

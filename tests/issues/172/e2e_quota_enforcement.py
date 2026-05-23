@@ -25,11 +25,11 @@ sys.path.insert(0, PROJECT_ROOT)
 import requests
 
 # ── 配置 ──────────────────────────────────────────────
-BASE_URL = os.environ.get("BASE_URL", "http://117.72.38.96:5000")
-ADMIN_USER = os.environ.get("ADMIN_USER", "rhuang")
-ADMIN_PASS = os.environ.get("ADMIN_PASS", "admin123")
-TEST_USER = "rhuang"
-TEST_PASS = "admin123"
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+ADMIN_USER = os.environ.get("TEST_USERNAME", "admin")
+ADMIN_PASS = os.environ.get("TEST_PASSWORD", "admin123")
+TEST_USER = os.environ.get("TEST_USERNAME", "admin")
+TEST_PASS = os.environ.get("TEST_PASSWORD", "admin123")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 
 passed = 0

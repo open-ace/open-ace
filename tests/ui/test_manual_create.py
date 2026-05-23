@@ -9,9 +9,16 @@ import time
 
 from playwright.async_api import async_playwright
 
-BASE_URL = "http://117.72.38.96:5000"
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 SCREENSHOT_DIR = "/Users/rhuang/workspace/open-ace/screenshots"
 LOG_FILE = "/Users/rhuang/workspace/open-ace/screenshots/manual_create_log.txt"
+
+
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
+
+
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 
 
 def log(msg):
@@ -28,8 +35,9 @@ async def test_manual_create():
         f.write(f"=== Manual Create Button Test ===\nStart: {time.strftime('%H:%M:%S')}\n\n")
 
     async with async_playwright() as p:
-        log("启动浏览器 (headless=False)")
-        browser = await p.chromium.launch(headless=False)
+        log("启动浏览器")
+
+        browser = await p.chromium.launch(headless=HEADLESS)
         context = await browser.new_context(viewport={"width": 1400, "height": 900})
         page = await context.new_page()
 
@@ -47,8 +55,8 @@ async def test_manual_create():
 
         log("\n=== 登录 ===")
         await page.goto(f"{BASE_URL}/login", wait_until="networkidle")
-        await page.fill('input[type="text"]', "rhuang")
-        await page.fill('input[type="password"]', "admin123")
+        await page.fill('input[type="text"]', USERNAME)
+        await page.fill('input[type="password"]', PASSWORD)
         await page.click('button[type="submit"]')
         await page.wait_for_url("**/work", timeout=10000)
         log("登录成功")

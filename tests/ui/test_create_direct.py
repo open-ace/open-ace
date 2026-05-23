@@ -14,9 +14,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from playwright.sync_api import sync_playwright
 
-BASE_URL = os.environ.get("BASE_URL", "http://117.72.38.96:5000")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 WEBUI_PORT = os.environ.get("WEBUI_PORT", "3101")  # rhuang user's webui port
-HEADLESS = False
+WEBUI_TOKEN = os.environ.get("WEBUI_TOKEN", "")
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 
 SCREENSHOT_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "screenshots"
@@ -54,7 +55,11 @@ def test_create_direct():
 
         try:
             # Direct URL to webui (simulating iframe)
-            webui_url = f"http://117.72.38.96:{WEBUI_PORT}?token=3:3101:eaa97487f8c3a8bc4de76e9369235175:37cb1cec45f9d038&openace_url={BASE_URL}&lang=en"
+            webui_url = (
+                f"http://localhost:{WEBUI_PORT}?token={WEBUI_TOKEN}&openace_url={BASE_URL}&lang=en"
+                if WEBUI_TOKEN
+                else f"http://localhost:{WEBUI_PORT}?openace_url={BASE_URL}&lang=en"
+            )
 
             print(f"\n[1] Opening webui directly: {webui_url}")
             page.goto(webui_url, timeout=30000)
@@ -177,7 +182,8 @@ def test_create_direct():
                 if i % 5 == 0:
                     print(f"  ... waiting ({i*2}s elapsed)")
 
-            input("\n  Press Enter when done...")
+            if sys.stdout.isatty():
+                input("\n  Press Enter when done...")
 
             page.screenshot(path=os.path.join(SCREENSHOT_DIR, "direct_03_final.png"))
 
@@ -220,14 +226,16 @@ def test_create_direct():
                 print("\n  [!] DIAGNOSIS: Some clicks logged but not Create button specifically.")
                 print("     Check if Create button has unusual text or selector.")
 
-            input("\n  Press Enter to close browser...")
+            if sys.stdout.isatty():
+                input("\n  Press Enter to close browser...")
 
         except Exception as e:
             print(f"\n[EXCEPTION] {e}")
             import traceback
 
             traceback.print_exc()
-            input("\n  Press Enter to close browser...")
+            if sys.stdout.isatty():
+                input("\n  Press Enter to close browser...")
 
         finally:
             browser.close()

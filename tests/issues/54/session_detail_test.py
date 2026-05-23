@@ -29,8 +29,8 @@ except ImportError:
 
 # Configuration
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
-USERNAME = os.environ.get("USERNAME", "admin")
-PASSWORD = os.environ.get("PASSWORD", "admin123")
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 VIEWPORT = {"width": 1400, "height": 900}
 SCREENSHOT_DIR = Path(__file__).parent.parent.parent.parent / "screenshots" / "issues" / "54"
 

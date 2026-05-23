@@ -113,7 +113,7 @@ def find_remote_machine(token):
 def cleanup_remote_agent():
     """Kill stale processes on the remote machine and ensure agent is running."""
     log("Cleanup", "Checking remote agent...")
-    remote = "root@192.168.64.4"
+    remote = os.environ.get("REMOTE_HOST", "root@192.168.64.4")
     ssh_opts = ["-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=no"]
 
     try:

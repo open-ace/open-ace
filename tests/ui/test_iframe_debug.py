@@ -8,24 +8,32 @@ import os
 
 from playwright.async_api import async_playwright
 
-BASE_URL = "http://117.72.38.96:5000"
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 SCREENSHOT_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "screenshots"
 )
+
+
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
+
+
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 
 
 async def test_iframe_debug():
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False)
+
+        browser = await p.chromium.launch(headless=HEADLESS)
         context = await browser.new_context(viewport={"width": 1400, "height": 900})
         page = await context.new_page()
 
         print("=== 登录 ===")
         await page.goto(f"{BASE_URL}/login", wait_until="networkidle")
-        await page.fill('input[type="text"]', "rhuang")
-        await page.fill('input[type="password"]', "admin123")
+        await page.fill('input[type="text"]', USERNAME)
+        await page.fill('input[type="password"]', PASSWORD)
         await page.click('button[type="submit"]')
         await page.wait_for_url("**/work", timeout=10000)
         print(f"✓ 登录成功: {page.url}")

@@ -5,13 +5,15 @@ This test verifies that the "Auto Refresh" label and switch are displayed on the
 across all three pages (Dashboard, Analysis, Messages).
 """
 
+import os
+
 from playwright.sync_api import sync_playwright
 
-BASE_URL = "http://localhost:5000"
-USERNAME = "admin"
-PASSWORD = "admin123"
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 VIEWPORT_SIZE = (1400, 900)
-HEADLESS = True
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 
 
 def test_auto_refresh_layout():

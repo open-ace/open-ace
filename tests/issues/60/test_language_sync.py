@@ -7,8 +7,11 @@ This test verifies that:
 """
 
 import asyncio
+import os
 
 from playwright.async_api import async_playwright
+
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 
 
 async def test_language_sync():
@@ -20,7 +23,7 @@ async def test_language_sync():
 
         # Navigate to open-ace work page
         print("1. Navigating to open-ace work page...")
-        await page.goto("http://localhost:5000/work", wait_until="networkidle")
+        await page.goto(f"{BASE_URL}/work", wait_until="networkidle")
 
         # Wait for the page to load
         await page.wait_for_timeout(2000)

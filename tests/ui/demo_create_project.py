@@ -15,9 +15,9 @@ import time
 from playwright.sync_api import sync_playwright
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
-USERNAME = os.environ.get("USERNAME", "admin")
-PASSWORD = os.environ.get("PASSWORD", "admin123")
-HEADLESS = False  # Show browser for demonstration
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 
 
 def test_create_project_flow():
@@ -68,7 +68,8 @@ def test_create_project_flow():
                 page.screenshot(path="/tmp/create_project_demo.png")
                 print("  Screenshot saved: /tmp/create_project_demo.png")
 
-                input("\nPress Enter to close browser...")
+                if sys.stdout.isatty():
+                    input("\nPress Enter to close browser...")
             else:
                 print("  Add project button not found - may need to navigate to correct page")
                 page.screenshot(path="/tmp/work_page.png")

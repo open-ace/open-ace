@@ -21,10 +21,10 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 sys.path.insert(0, project_root)
 
 BASE_URL = "http://localhost:5001"
-USERNAME = "admin"
-PASSWORD = "admin123"
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 VIEWPORT_SIZE = {"width": 1400, "height": 900}
-HEADLESS = False
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 DEFAULT_TIMEOUT = 30000
 OUTPUT_DIR = "./screenshots/issues/71"
 
@@ -330,7 +330,8 @@ def test_tab_notification_chat():
             print("\n按 Enter 关闭浏览器...")
 
             if not HEADLESS:
-                input()
+                if sys.stdout.isatty():
+                    input()
 
             return True
 

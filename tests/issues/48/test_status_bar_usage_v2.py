@@ -26,9 +26,9 @@ from playwright.sync_api import expect, sync_playwright
 
 # Test configuration
 BASE_URL = "http://localhost:5001"
-USERNAME = "admin"
-PASSWORD = "admin123"
-HEADLESS = True
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 VIEWPORT = {"width": 1280, "height": 800}
 SCREENSHOT_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),

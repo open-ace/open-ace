@@ -14,8 +14,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from playwright.sync_api import sync_playwright
 
-BASE_URL = os.environ.get("BASE_URL", "http://117.72.38.96:5000")
-HEADLESS = False
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 
 SCREENSHOT_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "screenshots"
@@ -62,7 +62,8 @@ def test_create_debug():
             page.goto(f"{BASE_URL}/login", timeout=30000)
             print("  Please login as rhuang user in the browser window")
 
-            input("\n  Press Enter after you have logged in...")
+            if sys.stdout.isatty():
+                input("\n  Press Enter after you have logged in...")
 
             current_url = page.url
             print(f"  Current URL: {current_url}")
@@ -160,7 +161,8 @@ def test_create_debug():
             print("  e) Click 'Create' button")
             print("\n  Watch the terminal for debug output...")
 
-            input("\n  Press Enter after clicking Create button...")
+            if sys.stdout.isatty():
+                input("\n  Press Enter after clicking Create button...")
 
             page.screenshot(path=os.path.join(SCREENSHOT_DIR, "debug_03_after_create.png"))
 
@@ -205,7 +207,8 @@ def test_create_debug():
                     "  This suggests the click event is being blocked or form handler not working."
                 )
 
-            input("\n  Press Enter to close browser...")
+            if sys.stdout.isatty():
+                input("\n  Press Enter to close browser...")
             iframe_page.close()
 
         except Exception as e:
@@ -213,7 +216,8 @@ def test_create_debug():
             import traceback
 
             traceback.print_exc()
-            input("\n  Press Enter to close browser...")
+            if sys.stdout.isatty():
+                input("\n  Press Enter to close browser...")
 
         finally:
             browser.close()

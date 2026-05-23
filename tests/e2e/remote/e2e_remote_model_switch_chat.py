@@ -95,7 +95,7 @@ def find_remote_machine(token):
 
 
 def cleanup_remote_agent():
-    remote = "root@192.168.64.4"
+    remote = os.environ.get("REMOTE_HOST", "root@192.168.64.4")
     ssh_opts = ["-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=no"]
     try:
         subprocess.run(
@@ -110,7 +110,7 @@ def cleanup_remote_agent():
 
 def wait_for_remote_agent(token, timeout=40):
     cleanup_remote_agent()
-    remote = "root@192.168.64.4"
+    remote = os.environ.get("REMOTE_HOST", "root@192.168.64.4")
     ssh_opts = ["-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=no"]
     with contextlib.suppress(Exception):
         subprocess.run(

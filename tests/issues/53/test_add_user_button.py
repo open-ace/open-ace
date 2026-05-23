@@ -30,7 +30,7 @@ except ImportError:
     sys.exit(1)
 
 # Test configuration
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 SCREENSHOT_DIR = os.path.join(
@@ -40,6 +40,9 @@ TIMEOUT = 60000  # 60 seconds timeout
 
 # Ensure screenshot directory exists
 os.makedirs(SCREENSHOT_DIR, exist_ok=True)
+
+
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 
 
 async def take_screenshot(page, name):
@@ -57,7 +60,8 @@ async def test_issue53():
 
     async with async_playwright() as p:
         # Launch browser
-        browser = await p.chromium.launch(headless=False)
+
+        browser = await p.chromium.launch(headless=HEADLESS)
         context = await browser.new_context(viewport={"width": 1280, "height": 900})
         page = await context.new_page()
         await page.set_default_timeout(TIMEOUT)

@@ -19,6 +19,8 @@ sys.path.insert(0, PROJECT_ROOT)
 import requests
 from playwright.sync_api import sync_playwright
 
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
+
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 
 TEST_USER = "admin"
@@ -66,7 +68,7 @@ def main():
     # Step 3: 打开可见浏览器
     with sync_playwright() as p:
         browser = p.chromium.launch(
-            headless=False,  # 可见模式
+            headless=HEADLESS,
             slow_mo=100,  # 放慢操作便于观察
         )
         context = browser.new_context(

@@ -1,3 +1,5 @@
+import os
+
 """
 测试 Messages 页面的 UI 修复
 1. Role checkbox 文字对齐
@@ -8,9 +10,9 @@ import time
 
 from playwright.sync_api import sync_playwright
 
-BASE_URL = "http://localhost:5000/"
-USERNAME = "admin"
-PASSWORD = "admin123"
+BASE_URL = "http://localhost:5001/"
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 
 
 def test_messages_ui():

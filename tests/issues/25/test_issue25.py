@@ -3,24 +3,30 @@ Test script for Issue 25: 测试全屏按钮和版本号
 """
 
 import asyncio
+import os
 
 import pytest
 from playwright.async_api import async_playwright
+
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 
 
 @pytest.mark.asyncio
 async def test_issue25():
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False)
+        browser = await p.chromium.launch(headless=HEADLESS)
         context = await browser.new_context(viewport={"width": 1920, "height": 1080})
         page = await context.new_page()
 
-        await page.goto("http://localhost:5000/")
+        await page.goto(BASE_URL)
         await page.wait_for_load_state("networkidle")
 
         if "login" in page.url:
-            await page.fill('input[name="username"]', "admin")
-            await page.fill('input[name="password"]', "admin123")
+            await page.fill('input[name="username"]', USERNAME)
+            await page.fill('input[name="password"]', PASSWORD)
             await page.click('button[type="submit"]')
             await page.wait_for_load_state("networkidle")
 

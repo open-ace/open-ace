@@ -1,3 +1,5 @@
+import os
+
 #!/usr/bin/env python3
 """Check custom sender dropdown on Messages page"""
 
@@ -5,12 +7,14 @@ import time
 
 from playwright.sync_api import sync_playwright
 
-BASE_URL = "http://localhost:5000"
-USERNAME = "admin"
-PASSWORD = "admin123"
+BASE_URL = "http://localhost:5001"
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 
 p = sync_playwright().start()
-browser = p.chromium.launch(headless=False)
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
+
+browser = p.chromium.launch(headless=HEADLESS)
 context = browser.new_context()
 page = context.new_page()
 

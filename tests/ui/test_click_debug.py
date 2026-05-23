@@ -8,8 +8,9 @@ import os
 
 from playwright.async_api import async_playwright
 
-BASE_URL = "http://117.72.38.96:5000"
-WEBUI_PORT = "3101"
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+WEBUI_PORT = os.environ.get("WEBUI_PORT", "3101")
+WEBUI_TOKEN = os.environ.get("WEBUI_TOKEN", "")
 SCREENSHOT_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "screenshots"
 )
@@ -43,7 +44,11 @@ async def test_click_debug():
         page.on("console", lambda msg: console_logs.append(f"[{msg.type}] {msg.text[:200]}"))
 
         # 直接访问 webui URL（带 token）
-        webui_url = f"http://117.72.38.96:{WEBUI_PORT}?token=3:3101:eaa97487f8c3a8bc4de76e9369235175:37cb1cec45f9d038&openace_url={BASE_URL}&lang=en"
+        webui_url = (
+            f"http://localhost:{WEBUI_PORT}?token={WEBUI_TOKEN}&openace_url={BASE_URL}&lang=en"
+            if WEBUI_TOKEN
+            else f"http://localhost:{WEBUI_PORT}?openace_url={BASE_URL}&lang=en"
+        )
 
         print("=== 步骤 1: 打开 webui ===")
         print(f"URL: {webui_url}")

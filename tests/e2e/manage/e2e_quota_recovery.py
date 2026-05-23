@@ -3,12 +3,17 @@
 E2E Test for Terminal Quota Exceeded and Session Recovery
 """
 
+import os
 import time
 
 import requests
 from playwright.sync_api import sync_playwright
 
-BASE_URL = "http://localhost:5001"
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
+
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 
 
 def test_quota_exceeded():
@@ -18,7 +23,7 @@ def test_quota_exceeded():
     # Login as admin
     session = requests.Session()
     login_resp = session.post(
-        f"{BASE_URL}/api/auth/login", json={"username": "admin", "password": "admin123"}
+        f"{BASE_URL}/api/auth/login", json={"username": USERNAME, "password": PASSWORD}
     )
     assert login_resp.json()["success"], "Login failed"
     print("✓ Logged in as admin")
@@ -64,8 +69,8 @@ print('Recorded 2 requests')
 from app.modules.governance.quota_manager import QuotaManager
 quota_mgr = QuotaManager()
 result = quota_mgr.check_quota(user_id=1, tokens=100, requests=1)
-print(f'Allowed: {result[\"allowed\"]}')
-print(f'Reason: {result[\"reason\"]}')
+print(f'Allowed: {result["allowed"]}')
+print(f'Reason: {result["reason"]}')
 """,
         ],
         capture_output=True,
@@ -86,7 +91,7 @@ def test_session_recovery():
     print("\n=== Testing Session Recovery ===")
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
+        browser = p.chromium.launch(headless=HEADLESS)
         context = browser.new_context()
         page = context.new_page()
 
@@ -94,8 +99,8 @@ def test_session_recovery():
         print("Step 1: Login...")
         page.goto(f"{BASE_URL}/login")
         time.sleep(1)
-        page.fill("input[type='text']", "admin")
-        page.fill("input[type='password']", "admin123")
+        page.fill("input[type='text']", USERNAME)
+        page.fill("input[type='password']", PASSWORD)
         page.click("button[type='submit']")
         time.sleep(2)
         page.wait_for_load_state("networkidle")
@@ -156,7 +161,7 @@ def test_terminal_session_in_database():
     # Use requests to check API
     session = requests.Session()
     login_resp = session.post(
-        f"{BASE_URL}/api/auth/login", json={"username": "admin", "password": "admin123"}
+        f"{BASE_URL}/api/auth/login", json={"username": USERNAME, "password": PASSWORD}
     )
     assert login_resp.json()["success"], "Login failed"
 

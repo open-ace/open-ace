@@ -3,16 +3,25 @@ Test for issue 74: Restore session button not working
 """
 
 import asyncio
+import os
 
 from playwright.async_api import async_playwright
 
 BASE_URL = "http://localhost:5001"
 
 
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
+
+
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
+
+
 async def test_restore_button():
     """Test that the restore session button works correctly"""
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False)
+
+        browser = await p.chromium.launch(headless=HEADLESS)
         context = await browser.new_context()
         page = await context.new_page()
 
@@ -26,8 +35,8 @@ async def test_restore_button():
 
         # Login
         print("2. Logging in...")
-        await page.fill("#username", "admin")
-        await page.fill("#password", "admin123")
+        page.fill("#username", USERNAME)
+        await page.fill("#password", PASSWORD)
         await page.click("button[type='submit']")
 
         try:

@@ -7,8 +7,11 @@ list correctly displays the conversation details.
 """
 
 import asyncio
+import os
 
 from playwright.async_api import async_playwright
+
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 
 
 async def test_conversation_detail():
@@ -22,7 +25,7 @@ async def test_conversation_detail():
             # Navigate to conversation history page
             print("Navigating to conversation history page...")
             await page.goto(
-                "http://192.168.31.159:5000/manage/analysis/conversation-history",
+                f"{BASE_URL}/manage/analysis/conversation-history",
                 wait_until="networkidle",
             )
             await page.wait_for_timeout(5000)  # Wait for data to load
