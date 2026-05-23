@@ -25,9 +25,9 @@ sys.path.insert(
 from playwright.async_api import async_playwright, expect
 
 # Test configuration
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000/")
-USERNAME = os.environ.get("USERNAME", "admin")
-PASSWORD = os.environ.get("PASSWORD", "admin123")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001/")
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 VIEWPORT_SIZE = {"width": 1400, "height": 900}
 

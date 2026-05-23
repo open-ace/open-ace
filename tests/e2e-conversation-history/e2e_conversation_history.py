@@ -18,8 +18,8 @@ from playwright.sync_api import sync_playwright
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
-USERNAME = "admin"
-PASSWORD = "admin123"
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "e2e-conversation-history")
 
 

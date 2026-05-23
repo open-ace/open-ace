@@ -6,7 +6,7 @@ Test Objective:
 Verify that the 3 tabs (Prompts, Tools, Docs) in the right panel of work mode are displayed on the same row.
 
 Test Steps:
-1. Visit http://localhost:5000/
+1. Visit http://localhost:5001/
 2. Login to the system (using default credentials)
 3. Navigate to work mode (click /work)
 4. Check the right panel's 3 tabs layout
@@ -31,9 +31,9 @@ import time
 from playwright.async_api import async_playwright
 
 # Test Configuration
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000")
-USERNAME = os.environ.get("USERNAME", "admin")
-PASSWORD = os.environ.get("PASSWORD", "admin123")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 SCREENSHOT_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),

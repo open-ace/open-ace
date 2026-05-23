@@ -13,7 +13,7 @@ import time
 
 from playwright.async_api import async_playwright
 
-BASE_URL = "http://localhost:5000"
+BASE_URL = "http://localhost:5001"
 
 
 async def test_messages_refresh_detailed():

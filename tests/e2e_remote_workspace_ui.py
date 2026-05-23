@@ -75,8 +75,8 @@ ADMIN_USER = "admin"
 ADMIN_PASS = "admin123"
 
 # Machine admin user
-MACHINE_ADMIN_USER = "黄迎春"
-MACHINE_ADMIN_PASS = "admin123"
+MACHINE_ADMIN_USER = os.environ.get("TEST_USERNAME", "admin")
+MACHINE_ADMIN_PASS = os.environ.get("TEST_PASSWORD", "admin123")
 
 # Regular user (assigned to machine as 'user')
 REGULAR_USER = "韩成凤"

@@ -26,15 +26,18 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from playwright.async_api import async_playwright
 
 # Test configuration
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000")
-USERNAME = os.environ.get("USERNAME", "admin")
-PASSWORD = os.environ.get("PASSWORD", "admin123")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 SCREENSHOT_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
     "screenshots",
     "issues",
     "68",
 )
+
+
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 
 
 def ensure_screenshot_dir():
@@ -63,7 +66,8 @@ async def test_data_status():
 
     async with async_playwright() as p:
         # Launch browser
-        browser = await p.chromium.launch(headless=False)
+
+        browser = await p.chromium.launch(headless=HEADLESS)
         context = await browser.new_context(viewport={"width": 1280, "height": 800})
         page = await context.new_page()
 

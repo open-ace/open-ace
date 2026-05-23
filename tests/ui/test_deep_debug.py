@@ -11,9 +11,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from playwright.sync_api import sync_playwright
 
-BASE_URL = os.environ.get("BASE_URL", "http://117.72.38.96:5000")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 WEBUI_PORT = os.environ.get("WEBUI_PORT", "3101")
-HEADLESS = False
+WEBUI_TOKEN = os.environ.get("WEBUI_TOKEN", "")
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 
 SCREENSHOT_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "screenshots"
@@ -38,7 +39,11 @@ def test_deep_debug():
         )
 
         try:
-            webui_url = f"http://117.72.38.96:{WEBUI_PORT}?token=3:3101:eaa97487f8c3a8bc4de76e9369235175:37cb1cec45f9d038&openace_url={BASE_URL}&lang=en"
+            webui_url = (
+                f"http://localhost:{WEBUI_PORT}?token={WEBUI_TOKEN}&openace_url={BASE_URL}&lang=en"
+                if WEBUI_TOKEN
+                else f"http://localhost:{WEBUI_PORT}?openace_url={BASE_URL}&lang=en"
+            )
 
             print(f"\n[1] Opening webui: {webui_url}")
             page.goto(webui_url, timeout=30000)
@@ -161,14 +166,16 @@ def test_deep_debug():
                     if msg["text"].startswith("[") or msg["type"] == "error":
                         print(f"  {msg['text'][:300]}")
 
-            input("\n  Press Enter when done...")
+            if sys.stdout.isatty():
+                input("\n  Press Enter when done...")
 
         except Exception as e:
             print(f"\n[EXCEPTION] {e}")
             import traceback
 
             traceback.print_exc()
-            input("\n  Press Enter to close...")
+            if sys.stdout.isatty():
+                input("\n  Press Enter to close...")
 
         finally:
             browser.close()

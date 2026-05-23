@@ -14,9 +14,9 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 sys.path.insert(0, project_root)
 
 BASE_URL = "http://localhost:5001"
-USERNAME = "admin"
-PASSWORD = "admin123"
-HEADLESS = False
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 
 
 def main():
@@ -142,7 +142,8 @@ def main():
 
             if not HEADLESS:
                 print("\n按 Enter 关闭...")
-                input()
+                if sys.stdout.isatty():
+                    input()
 
         except Exception as e:
             print(f"\n✗ 错误: {e}")

@@ -25,7 +25,7 @@ import requests
 from playwright.sync_api import sync_playwright
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
-HEADLESS = os.environ.get("HEADLESS", "false").lower() == "true"
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 
 TEST_USER = "admin"
 TEST_PASS = "admin123"

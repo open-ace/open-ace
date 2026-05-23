@@ -2,6 +2,7 @@
 Test script to verify /work page loads correctly
 """
 
+import os
 import sys
 
 sys.path.insert(0, "/Users/rhuang/workspace/open-ace/tests")
@@ -10,9 +11,9 @@ from playwright.sync_api import sync_playwright
 
 # Configuration
 BASE_URL = "http://localhost:5001"
-USERNAME = "admin"
-PASSWORD = "admin123"
-HEADLESS = True
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 
 
 def test_work_page_loads():

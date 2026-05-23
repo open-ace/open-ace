@@ -22,11 +22,14 @@ except ImportError:
     sys.exit(1)
 
 # Configuration
-BASE_URL = "http://localhost:5000"
-USERNAME = "admin"
-PASSWORD = "admin123"
+BASE_URL = "http://localhost:5001"
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 VIEWPORT_SIZE = {"width": 1400, "height": 900}
 TIMEOUT = 30000
+
+
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 
 
 def test_add_prompt():
@@ -37,7 +40,8 @@ def test_add_prompt():
     print("=" * 60)
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)  # Set to False to see the browser
+
+        browser = p.chromium.launch(headless=HEADLESS)  # Set to False to see the browser
         context = browser.new_context()
         page = context.new_page()
         page.set_viewport_size(VIEWPORT_SIZE)

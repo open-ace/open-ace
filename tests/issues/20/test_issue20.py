@@ -1,3 +1,5 @@
+import os
+
 #!/usr/bin/env python3
 """
 Test script for Issue #20: Messages page loading slowly
@@ -13,9 +15,9 @@ import pytest
 from playwright.async_api import async_playwright
 
 # Test configuration
-BASE_URL = "http://localhost:5000"
-USERNAME = "admin"
-PASSWORD = "admin123"
+BASE_URL = "http://localhost:5001"
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 TIMEOUT = 15000  # 15 seconds timeout
 
 

@@ -37,7 +37,7 @@ SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "e2e-reconnect")
 TEST_USER = "黄迎春"
 TEST_PASS = "admin123"
 ADMIN_USER = "admin"
-REMOTE_HOST = "root@192.168.64.4"
+REMOTE_HOST = os.environ.get("REMOTE_HOST", "root@192.168.64.4")
 SSH_OPTS = ["-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=no"]
 RESPONSE_TIMEOUT = 120
 PYTHON_BIN = sys.executable  # Use the same Python that runs this test

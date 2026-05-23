@@ -22,7 +22,7 @@ import sys
 from playwright.async_api import async_playwright
 
 # 配置
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 SESSION_TOKEN = os.environ.get("SESSION_TOKEN", "")
 SCREENSHOT_DIR = "/Users/rhuang/workspace/open-ace/screenshots/issues/79"
 

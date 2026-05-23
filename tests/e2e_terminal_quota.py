@@ -3,20 +3,26 @@
 E2E Test for Terminal Session Quota Integration
 """
 
+import os
 import time
 
 from playwright.sync_api import sync_playwright
 
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+
 
 def test_terminal_session():
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
+        browser = p.chromium.launch(headless=HEADLESS)
         context = browser.new_context()
         page = context.new_page()
 
         # 1. Login
         print("Logging in...")
-        page.goto("http://localhost:5001/login")
+        page.goto(f"{BASE_URL}/login")
         time.sleep(1)
         page.screenshot(path="/tmp/01_login.png")
 
@@ -31,7 +37,7 @@ def test_terminal_session():
 
         # 2. Navigate to Work page directly
         print("Going to Work page...")
-        page.goto("http://localhost:5001/work")
+        page.goto(f"{BASE_URL}/work")
         time.sleep(3)
         page.wait_for_load_state("networkidle")
         print(f"Work page URL: {page.url}")
@@ -68,7 +74,7 @@ def test_terminal_session():
 
         # 5. Navigate to Remote Workspaces
         print("Going to Remote Workspaces...")
-        page.goto("http://localhost:5001/manage/remote-workspaces")
+        page.goto(f"{BASE_URL}/manage/remote-workspaces")
         time.sleep(3)
         page.wait_for_load_state("networkidle")
         print(f"Remote Workspaces URL: {page.url}")

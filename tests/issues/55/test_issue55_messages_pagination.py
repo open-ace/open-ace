@@ -9,15 +9,18 @@ This test verifies that:
 4. Page numbers update correctly when navigating
 """
 
+import os
 import time
 
 import pytest
 from playwright.async_api import async_playwright
 
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
+
 # Test configuration
-BASE_URL = "http://localhost:5000"
-USERNAME = "admin"
-PASSWORD = "admin123"
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 TIMEOUT = 10000  # 10 seconds timeout
 
 
@@ -25,7 +28,7 @@ TIMEOUT = 10000  # 10 seconds timeout
 async def test_messages_pagination():
     """Test that Messages page pagination works correctly."""
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False)
+        browser = await p.chromium.launch(headless=HEADLESS)
         context = await browser.new_context()
         page = await context.new_page()
 

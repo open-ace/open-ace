@@ -25,7 +25,7 @@ from playwright.sync_api import sync_playwright
 
 # ── Config ──
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
-HEADLESS = os.environ.get("HEADLESS", "false").lower() == "true"
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "e2e-real-chat")
 
 TEST_USER = "admin"

@@ -5,16 +5,22 @@
 
 import asyncio
 import os
+import sys
 import time
 
 from playwright.async_api import async_playwright
 
-BASE_URL = "http://117.72.38.96:5000"
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 SCREENSHOT_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "screenshots"
 )
 
 LOG_FILE = "/Users/rhuang/workspace/open-ace/screenshots/create_button_log.txt"
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
+
+
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 
 
 def log_message(msg):
@@ -33,8 +39,8 @@ async def test_clear_guide():
         f.write(f"Started: {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n")
 
     async with async_playwright() as p:
-        log_message("启动浏览器 (headless=False)")
-        browser = await p.chromium.launch(headless=False)
+        log_message("启动浏览器")
+        browser = await p.chromium.launch(headless=HEADLESS)
         context = await browser.new_context(viewport={"width": 1400, "height": 900})
         page = await context.new_page()
 
@@ -53,8 +59,8 @@ async def test_clear_guide():
         # === 登录 ===
         log_message("=== 登录 ===")
         await page.goto(f"{BASE_URL}/login", wait_until="networkidle")
-        await page.fill('input[type="text"]', "rhuang")
-        await page.fill('input[type="password"]', "admin123")
+        await page.fill('input[type="text"]', USERNAME)
+        await page.fill('input[type="password"]', PASSWORD)
         await page.click('button[type="submit"]')
         await page.wait_for_url("**/work", timeout=10000)
         log_message("✓ 登录成功")
@@ -157,7 +163,8 @@ async def test_clear_guide():
                 log_message("\n❌ 未检测到 POST /api/projects 调用")
                 log_message("请确保点击的是 Modal 底部的 'Add Project' 按钮，不是其他按钮")
 
-        input("\n按 Enter 关闭浏览器...")
+        if sys.stdout.isatty():
+            input("\n按 Enter 关闭浏览器...")
         await browser.close()
 
 

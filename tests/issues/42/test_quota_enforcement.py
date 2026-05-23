@@ -1,3 +1,5 @@
+import os
+
 #!/usr/bin/env python3
 """
 Test quota enforcement for webui in multi-user mode.
@@ -21,7 +23,7 @@ import requests
 # Configuration
 OPENACE_URL = "http://localhost:5001"
 USERNAME = "黄迎春"
-PASSWORD = "admin123"
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 
 
 def generate_token(user_id: int, port: int, secret: str) -> str:

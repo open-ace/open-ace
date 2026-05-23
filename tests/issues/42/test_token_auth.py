@@ -1,3 +1,5 @@
+import os
+
 #!/usr/bin/env python3
 """
 Test token authentication for webui in multi-user mode.
@@ -20,7 +22,7 @@ import requests
 # Configuration
 OPENACE_URL = "http://localhost:5001"
 USERNAME = "黄迎春"
-PASSWORD = "admin123"
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 TOKEN_SECRET = "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6"
 
 

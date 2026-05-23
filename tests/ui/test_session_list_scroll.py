@@ -24,9 +24,9 @@ import time
 from playwright.async_api import async_playwright, expect
 
 # 测试配置
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000")
-USERNAME = os.environ.get("USERNAME", "testuser")
-PASSWORD = os.environ.get("PASSWORD", "testuser")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 SCREENSHOT_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "screenshots"

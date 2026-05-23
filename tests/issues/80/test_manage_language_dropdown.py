@@ -8,9 +8,9 @@ import time
 
 from playwright.sync_api import expect, sync_playwright
 
-BASE_URL = "http://localhost:5000/"
-USERNAME = "admin"
-PASSWORD = "admin123"
+BASE_URL = "http://localhost:5001/"
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 SCREENSHOT_DIR = "screenshots/issues/80"
 
 

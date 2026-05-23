@@ -69,8 +69,8 @@ SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "e2e-remote-full")
 # 用户
 ADMIN_USER = "admin"
 ADMIN_PASS = "admin123"
-NORMAL_USER = "黄迎春"
-NORMAL_PASS = "admin123"
+NORMAL_USER = os.environ.get("TEST_USERNAME", "admin")
+NORMAL_PASS = os.environ.get("TEST_PASSWORD", "admin123")
 NORMAL_USER_ID = 89  # 黄迎春的 user_id
 TESTUSER_ID = 86  # testuser 的 user_id
 

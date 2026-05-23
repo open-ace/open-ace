@@ -16,20 +16,24 @@ Complete test flow:
 """
 
 import json
+import os
 import time
 
 import requests
 from playwright.sync_api import expect, sync_playwright
 
 BASE_URL = "http://localhost:5001"
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 MACHINE_ID = "0092acb3-9b6d-46db-b6c0-73f4e6d363f3"
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 
 
 def login_api():
     """Login via API and return session with cookies"""
     session = requests.Session()
     resp = session.post(
-        f"{BASE_URL}/api/auth/login", json={"username": "admin", "password": "admin123"}
+        f"{BASE_URL}/api/auth/login", json={"username": USERNAME, "password": PASSWORD}
     )
     assert resp.json()["success"], "Login failed"
     return session
@@ -68,7 +72,7 @@ def wait_for_terminal_status(terminal_id, timeout=30):
     return False
 
 
-def test_terminal_restore_full(headless=False):
+def test_terminal_restore_full(headless=HEADLESS):
     """Full test with conversation and restore"""
     print("\n" + "=" * 60)
     print("Terminal Session Restore - Full Conversation Test")
@@ -100,15 +104,15 @@ def test_terminal_restore_full(headless=False):
     print(f"Expected token: {correct_token[:20]}...")
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=headless)
+        browser = p.chromium.launch(headless=HEADLESS)
         context = browser.new_context()
         page = context.new_page()
 
         # Step 2: Login via UI
         print("\n--- Step 2: Login ---")
         page.goto(f"{BASE_URL}/login")
-        page.fill("input[type='text']", "admin")
-        page.fill("input[type='password']", "admin123")
+        page.fill("input[type='text']", USERNAME)
+        page.fill("input[type='password']", PASSWORD)
         page.click("button[type='submit']")
         # Wait for redirect after login (admin goes to dashboard)
         time.sleep(3)
@@ -308,4 +312,4 @@ if __name__ == "__main__":
     parser.add_argument("--headless", action="store_true")
     args = parser.parse_args()
 
-    test_terminal_restore_full(headless=args.headless)
+    test_terminal_restore_full(headless=HEADLESS)

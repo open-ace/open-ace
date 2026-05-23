@@ -4,13 +4,16 @@ Terminal WebSocket Demo Test - Issue #394
 Tests the WebSocket proxy connection for web terminal feature.
 """
 
+import os
 import sys
 import time
 
 import requests
 from playwright.sync_api import sync_playwright
 
-BASE_URL = "http://localhost:5001"
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
+
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 
 
 def login(page):
@@ -65,6 +68,8 @@ def create_terminal_session(page, machine_id: str):
         create_btn.click()
         time.sleep(2)
 
+
+import os
 
 import pytest
 
@@ -130,7 +135,7 @@ def main():
     print("=" * 50)
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
+        browser = p.chromium.launch(headless=HEADLESS)
         context = browser.new_context()
         page = context.new_page()
 

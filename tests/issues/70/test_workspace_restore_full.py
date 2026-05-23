@@ -24,10 +24,10 @@ sys.path.insert(0, project_root)
 
 # UI 测试配置
 BASE_URL = "http://localhost:5001"
-USERNAME = "admin"
-PASSWORD = "admin123"
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 VIEWPORT_SIZE = {"width": 1400, "height": 900}
-HEADLESS = False  # 使用可见模式
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 DEFAULT_TIMEOUT = 15000
 OUTPUT_DIR = "./screenshots/issues/70"
 
@@ -248,7 +248,8 @@ def test_workspace_restore():
 
             if not HEADLESS:
                 print("\n浏览器保持打开，按 Enter 关闭...")
-                input()
+                if sys.stdout.isatty():
+                    input()
 
         except TimeoutError as e:
             print(f"\n    ✗ 测试超时：{e}")

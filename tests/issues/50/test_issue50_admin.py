@@ -1,3 +1,5 @@
+import os
+
 #!/usr/bin/env python3
 """Test issue 50: Admin user should see all admin menus."""
 
@@ -6,8 +8,9 @@ import asyncio
 from playwright.async_api import async_playwright
 
 # Test admin credentials
-USERNAME = "admin"
-PASSWORD = "admin123"
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 
 
 async def main():
@@ -24,7 +27,7 @@ async def main():
 
         # Navigate to login page
         print("\n1. Navigating to login page...")
-        await page.goto("http://localhost:5000/login")
+        await page.goto(f"{BASE_URL}/login")
         await page.wait_for_load_state("networkidle")
 
         # Fill in login credentials

@@ -12,15 +12,16 @@ Usage:
 """
 
 import asyncio
+import os
 import time
 
 from playwright.async_api import async_playwright
 
 # Test configuration
-BASE_URL = "http://localhost:5000"
-USERNAME = "admin"
-PASSWORD = "admin123"
-HEADLESS = True
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 
 
 async def test_fullscreen_modal():

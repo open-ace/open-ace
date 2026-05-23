@@ -8,9 +8,11 @@ import os
 import pytest
 from playwright.async_api import async_playwright
 
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
+
 BASE_URL = "http://127.0.0.1:5000"
-USERNAME = "admin"
-PASSWORD = "admin123"
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 SCREENSHOT_DIR = "/Users/rhuang/workspace/open-ace/screenshots"
 
 
@@ -20,7 +22,7 @@ async def test_issue30_v4():
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False)
+        browser = await p.chromium.launch(headless=HEADLESS)
         context = await browser.new_context(viewport={"width": 1400, "height": 900})
         page = await context.new_page()
 

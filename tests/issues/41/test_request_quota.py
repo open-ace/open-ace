@@ -1,3 +1,5 @@
+import os
+
 #!/usr/bin/env python3
 """
 Test script for Issue #41: Request Quota Management and Statistics Feature
@@ -24,8 +26,8 @@ except ImportError:
 
 # Configuration
 BASE_URL = "http://localhost:5001"
-USERNAME = "admin"
-PASSWORD = "admin123"
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 VIEWPORT_SIZE = {"width": 1400, "height": 900}
 TIMEOUT = 30000
 
