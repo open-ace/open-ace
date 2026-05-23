@@ -34,6 +34,13 @@ TOOLS = [
         "install_cmd": "npm install -g @qwen-code/qwen-code@latest",
         "env_key": "OPENAI_API_KEY",
     },
+    {
+        "name": "Codex",
+        "cli": "codex",
+        "cmd": "codex",
+        "install_cmd": "npm install -g @openai/codex@latest",
+        "env_key": "OPENAI_API_KEY",
+    },
 ]
 
 MENU_PATH = os.path.abspath(__file__)

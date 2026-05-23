@@ -40,6 +40,7 @@ TOOL_TYPES = {
     "qwen": "Qwen",
     "claude": "Claude",
     "openclaw": "Openclaw",
+    "codex": "Codex",
     "feishu": "飞书",
     "slack": "Slack",
     "other": "其他",

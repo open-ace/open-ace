@@ -31,6 +31,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   claude: 'Claude',
   openclaw: 'OpenClaw',
   openai: 'OpenAI',
+  codex: 'Codex',
   run_shell_command: 'Shell',
 };
 

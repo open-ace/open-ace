@@ -46,7 +46,10 @@ class RemoteAgentManager:
 
     def __init__(self, db_path: Optional[str] = None):
         self.db_path = db_path or str(DB_PATH)
-        self.db = Database()
+        if db_path:
+            self.db = Database(db_url=f"sqlite:///{self.db_path}")
+        else:
+            self.db = Database()
         # Active WebSocket connections: {machine_id: websocket_connection}
         self._connections: dict[str, Any] = {}
         # Session to machine mapping: {session_id: machine_id}

@@ -19,6 +19,7 @@ import logging
 
 from .base import BaseCLIAdapter
 from .claude_code import ClaudeCodeAdapter
+from .codex_cli import CodexCLIAdapter
 from .openclaw import OpenClawAdapter
 from .qwen_code import QwenCodeAdapter
 
@@ -28,6 +29,7 @@ logger = logging.getLogger(__name__)
 ADAPTERS = {
     "qwen-code-cli": QwenCodeAdapter,
     "claude-code": ClaudeCodeAdapter,
+    "codex": CodexCLIAdapter,
     "openclaw": OpenClawAdapter,
 }
 

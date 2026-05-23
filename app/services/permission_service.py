@@ -301,16 +301,28 @@ class PermissionService:
             bool: True if successful.
         """
         try:
+            from app.repositories.database import is_postgresql
+
             with self.db.connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    INSERT OR IGNORE INTO user_permissions
-                    (user_id, permission, granted_by)
-                    VALUES (?, ?, ?)
-                """,
-                    (user_id, permission, granted_by),
-                )
+                if is_postgresql():
+                    cursor.execute(
+                        """
+                        INSERT INTO user_permissions (user_id, permission, granted_by)
+                        VALUES (%s, %s, %s)
+                        ON CONFLICT (user_id, permission) DO NOTHING
+                    """,
+                        (user_id, permission, granted_by),
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        INSERT OR IGNORE INTO user_permissions
+                        (user_id, permission, granted_by)
+                        VALUES (?, ?, ?)
+                    """,
+                        (user_id, permission, granted_by),
+                    )
                 conn.commit()
 
             logger.info(f"Permission '{permission}' granted to user {user_id} by {granted_by}")
@@ -332,13 +344,17 @@ class PermissionService:
             bool: True if successful.
         """
         try:
+            from app.repositories.database import adapt_sql
+
             with self.db.connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
+                    adapt_sql(
+                        """
+                        DELETE FROM user_permissions
+                        WHERE user_id = ? AND permission = ?
                     """
-                    DELETE FROM user_permissions
-                    WHERE user_id = ? AND permission = ?
-                """,
+                    ),
                     (user_id, permission),
                 )
                 conn.commit()
@@ -368,14 +384,18 @@ class PermissionService:
 
         try:
             # Add to database
+            from app.repositories.database import adapt_sql
+
             with self.db.connection() as conn:
                 cursor = conn.cursor()
                 for perm in permissions:
                     cursor.execute(
+                        adapt_sql(
+                            """
+                            INSERT INTO role_permissions (role_name, permission)
+                            VALUES (?, ?)
                         """
-                        INSERT INTO role_permissions (role_name, permission)
-                        VALUES (?, ?)
-                    """,
+                        ),
                         (role_name, perm),
                     )
                 conn.commit()
@@ -408,19 +428,26 @@ class PermissionService:
             return False
 
         try:
+            from app.repositories.database import adapt_sql
+
             with self.db.connection() as conn:
                 cursor = conn.cursor()
 
                 # Remove old permissions
-                cursor.execute("DELETE FROM role_permissions WHERE role_name = ?", (role_name,))
+                cursor.execute(
+                    adapt_sql("DELETE FROM role_permissions WHERE role_name = ?"),
+                    (role_name,),
+                )
 
                 # Add new permissions
                 for perm in permissions:
                     cursor.execute(
+                        adapt_sql(
+                            """
+                            INSERT INTO role_permissions (role_name, permission)
+                            VALUES (?, ?)
                         """
-                        INSERT INTO role_permissions (role_name, permission)
-                        VALUES (?, ?)
-                    """,
+                        ),
                         (role_name, perm),
                     )
 
@@ -455,9 +482,14 @@ class PermissionService:
             return True
 
         try:
+            from app.repositories.database import adapt_sql
+
             with self.db.connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("DELETE FROM role_permissions WHERE role_name = ?", (role_name,))
+                cursor.execute(
+                    adapt_sql("DELETE FROM role_permissions WHERE role_name = ?"),
+                    (role_name,),
+                )
                 conn.commit()
 
             del self.roles[role_name]

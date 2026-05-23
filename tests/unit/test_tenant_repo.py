@@ -90,7 +90,7 @@ class TestTenantRepository:
     def test_create_postgresql(self):
         tenant = self._make_tenant()
         mock_cursor = MagicMock()
-        mock_cursor.fetchone.return_value = [42]
+        mock_cursor.fetchone.return_value = {"id": 42}
         self.db.is_postgresql = True
 
         mock_conn = MagicMock()
@@ -470,12 +470,13 @@ class TestTenantRepository:
         with patch("app.repositories.database.adapt_sql", lambda q: q):
             result = self.repo.hard_delete(1)
         assert result is True
-        # Should delete tenant_usage first, then tenant
-        assert mock_cursor.execute.call_count == 2
-        first_query = mock_cursor.execute.call_args_list[0][0][0]
-        assert "DELETE FROM tenant_usage" in first_query
-        second_query = mock_cursor.execute.call_args_list[1][0][0]
-        assert "DELETE FROM tenants" in second_query
+        # Should delete tenant_usage, tenant_settings, tenant_quotas, then tenant
+        assert mock_cursor.execute.call_count == 4
+        queries = [c[0][0] for c in mock_cursor.execute.call_args_list]
+        assert "DELETE FROM tenant_usage" in queries[0]
+        assert "DELETE FROM tenant_settings" in queries[1]
+        assert "DELETE FROM tenant_quotas" in queries[2]
+        assert "DELETE FROM tenants" in queries[3]
 
     def test_hard_delete_exception(self):
         self.db.connection.side_effect = Exception("DB error")
@@ -577,7 +578,8 @@ class TestTenantRepository:
         self.db.connection.return_value.__exit__ = MagicMock(return_value=False)
 
         with patch("app.repositories.database.adapt_sql", lambda q: q):
-            result = self.repo.update_user_count(tenant_id=1, delta=-1)
+            with patch("app.repositories.database.is_postgresql", return_value=False):
+                result = self.repo.update_user_count(tenant_id=1, delta=-1)
         assert result is True
         query = mock_cursor.execute.call_args[0][0]
         assert "MAX(0, user_count + ?)" in query

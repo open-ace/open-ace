@@ -123,12 +123,20 @@ class RemoteSessionManager:
 
         # Get CLI settings for this tool
         cli_settings = {}
-        tool_name = "claude-code" if cli_tool == "claude-code" else "qwen-code"
+        tool_name = normalize_tool_name(cli_tool)
+        # Map normalized tool name to the key used in API key management
+        settings_tool_map = {
+            "claude": "claude-code",
+            "qwen": "qwen-code",
+            "codex": "codex-cli",
+            "openclaw": "openclaw",
+        }
+        settings_tool = settings_tool_map.get(tool_name, cli_tool)
         tool_settings = self._api_key_proxy.get_cli_settings_for_tool(
-            effective_tenant_id, tool_name
+            effective_tenant_id, settings_tool
         )
         if tool_settings:
-            cli_settings[tool_name] = tool_settings
+            cli_settings[settings_tool] = tool_settings
 
         # Bind session to machine in agent manager
         self._agent_manager.bind_session(session_id, machine_id)
@@ -785,6 +793,8 @@ class RemoteSessionManager:
             "qwen-code-cli": "openai",
             "claude-code": "anthropic",
             "openclaw": "openai",
+            "codex": "openai",
+            "codex-cli": "openai",
         }
         return mapping.get(cli_tool, "openai")
 

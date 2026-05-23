@@ -3354,6 +3354,80 @@ do_fresh_install_remote() {
         exit 1
     }
 
+    # Initialize database schema
+    print_info "Initializing database schema on remote..."
+    ssh "$remote" "
+        cd '$target_path'
+        # Determine database type from config
+        db_type='postgresql'
+        config_file=\$(python3 -c \"import os; print(os.path.expanduser('~/.open-ace/config.json'))\" 2>/dev/null)
+        if [ -f \"\$config_file\" ]; then
+            db_type=\$(python3 -c \"import json; c=json.load(open('\$config_file')); print(c.get('database', {}).get('type', 'postgresql'))\" 2>/dev/null || echo 'postgresql')
+        fi
+
+        if [ \"\$db_type\" = 'postgresql' ]; then
+            schema_file='schema/schema-postgres.sql'
+            # Get database URL from config and parse with python3 urlparse
+            db_url=\$(python3 -c \"import json; c=json.load(open('\$config_file')); print(c.get('database', {}).get('url', ''))\" 2>/dev/null)
+            if [ -n \"\$db_url\" ] && [ -f \"\$schema_file\" ]; then
+                # Use python3 urlparse instead of fragile sed patterns
+                eval \$(python3 -c \"
+from urllib.parse import urlparse
+u = urlparse('\$db_url')
+print(f'db_host={u.hostname or \"localhost\"}')
+print(f'db_port={u.port or 5432}')
+print(f'db_name={(u.path or \"/\").lstrip(\"/\")}')
+print(f'db_user={u.username or \"\"}')
+# Print password with special characters safely escaped
+pw = u.password or ''
+print(f\"db_pass='{pw}'\")
+\")
+                if [ -z \"\$db_name\" ]; then
+                    echo 'ERROR: Could not parse database name from URL'
+                    exit 1
+                fi
+                if PGPASSWORD=\"\$db_pass\" psql -h \"\$db_host\" -p \"\$db_port\" -U \"\$db_user\" -d \"\$db_name\" -f \"\$schema_file\"; then
+                    echo 'Database schema created'
+                else
+                    echo 'ERROR: Failed to execute PostgreSQL schema.'
+                    exit 1
+                fi
+            else
+                echo 'ERROR: Database URL not found or schema file missing'
+                exit 1
+            fi
+        elif [ -f 'schema/schema-sqlite.sql' ]; then
+            if python3 -c \"import sqlite3, os; c=sqlite3.connect(os.path.expanduser('~/.open-ace/ace.db')); c.executescript(open('schema/schema-sqlite.sql').read())\"; then
+                echo 'SQLite schema created'
+            else
+                echo 'ERROR: Failed to execute SQLite schema.'
+                exit 1
+            fi
+        fi
+    " || {
+        print_error "Failed to initialize database schema on remote."
+        exit 1
+    }
+
+    # Mark alembic version as head (skip running migrations)
+    print_info "Marking database version on remote..."
+    ssh "$remote" "
+        cd '$target_path'
+        if [ -f 'alembic.ini' ] && [ -d 'migrations' ]; then
+            if python3 -m alembic stamp head; then
+                echo 'Database version marked as current'
+            else
+                echo 'ERROR: Failed to stamp database version.'
+                exit 1
+            fi
+        else
+            echo 'Warning: Alembic not found, skipping version stamp'
+        fi
+    " || {
+        print_error "Failed to stamp database version on remote."
+        exit 1
+    }
+
     # Create default admin user
     print_info "Creating default admin user on remote..."
     ssh "$remote" "
