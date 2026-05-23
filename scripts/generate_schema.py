@@ -393,6 +393,32 @@ def convert_to_sqlite(postgres_sql):
     lines = postgres_sql.split("\n")
     output_lines = []
 
+    # Pre-scan: find PRIMARY KEY constraints from ALTER TABLE statements
+    # pg_dump puts PKs in ALTER TABLE, but SQLite needs them inline in CREATE TABLE
+    pk_map = {}  # table_name -> pk_column_name
+    for j, ln in enumerate(lines):
+        pk_match = re.search(
+            r"ALTER TABLE(?:\s+ONLY)?(?:\s+(?:public\.)?)?(\w+)\s+.*ADD CONSTRAINT\s+\w+\s+PRIMARY KEY\s*\((\w+)\)",
+            ln,
+        )
+        if pk_match:
+            pk_map[pk_match.group(1)] = pk_match.group(2)
+        else:
+            # Multi-line ALTER TABLE — check next line too
+            if re.match(r"ALTER TABLE", ln):
+                lookahead = j + 1
+                while lookahead < len(lines) and lines[lookahead].strip().startswith("--"):
+                    lookahead += 1
+                if lookahead < len(lines):
+                    pk_match2 = re.search(
+                        r"ADD CONSTRAINT\s+\w+\s+PRIMARY KEY\s*\((\w+)\)",
+                        lines[lookahead],
+                    )
+                    if pk_match2:
+                        tbl = re.search(r"ALTER TABLE(?:\s+ONLY)?(?:\s+(?:public\.)?)?(\w+)", ln)
+                        if tbl:
+                            pk_map[tbl.group(1)] = pk_match2.group(1)
+
     # Header
     output_lines.append("-- Open-ACE Database Schema for SQLite")
     output_lines.append("-- Converted from schema-postgres.sql")
@@ -402,6 +428,15 @@ def convert_to_sqlite(postgres_sql):
     i = 0
     while i < len(lines):
         line = lines[i]
+
+        # Skip input file header comments (PG header — we write our own SQLite header)
+        if (
+            i < 10
+            and line.startswith("--")
+            and ("PostgreSQL" in line or "Auto-generated" in line or "DO NOT EDIT" in line)
+        ):
+            i += 1
+            continue
 
         # Skip PostgreSQL-specific SET statements
         if re.match(r"SET ", line):
@@ -480,6 +515,35 @@ def convert_to_sqlite(postgres_sql):
                 converted = _sqlite_convert_column(bl)
 
                 converted_columns.append(converted)
+
+            # Apply PRIMARY KEY from pk_map
+            pk_col = pk_map.get(table_name)
+            if pk_col:
+                for idx_c, col in enumerate(converted_columns):
+                    # Match: "    pk_col <type> ..." — add PRIMARY KEY to the column
+                    if re.match(rf"^\s+{re.escape(pk_col)}\s+", col):
+                        if "integer" in col.lower():
+                            # integer PK: use AUTOINCREMENT for id-like columns
+                            converted_columns[idx_c] = re.sub(
+                                rf"^(\s+{re.escape(pk_col)})\s+integer\s+NOT\s+NULL",
+                                r"\1 INTEGER PRIMARY KEY AUTOINCREMENT",
+                                col,
+                            )
+                            # If NOT NULL wasn't there (e.g. user_id PK)
+                            if "AUTOINCREMENT" not in converted_columns[idx_c]:
+                                converted_columns[idx_c] = re.sub(
+                                    rf"^(\s+{re.escape(pk_col)})\s+integer",
+                                    r"\1 INTEGER PRIMARY KEY",
+                                    col,
+                                )
+                        else:
+                            # Non-integer PK (e.g. login_attempts.username): just add PRIMARY KEY
+                            converted_columns[idx_c] = re.sub(
+                                rf"^(\s+{re.escape(pk_col)})\s+(\w+)",
+                                r"\1 \2 PRIMARY KEY",
+                                col,
+                            )
+                        break
 
             # Build clean CREATE TABLE statement
             table_lines.append(f"CREATE TABLE {table_name} (")

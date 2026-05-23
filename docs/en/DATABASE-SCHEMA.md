@@ -1,6 +1,6 @@
 # Database Schema
 
-Open ACE supports both SQLite (single-machine) and PostgreSQL (production). The schema contains 44 tables + 1 materialized view, organized by domain.
+Open ACE supports both SQLite (single-machine) and PostgreSQL (production). The schema contains 44 tables + 1 materialized view (full list in schema-postgres.sql; docs below cover the most commonly referenced tables).
 
 Reference: `schema/schema-postgres.sql`
 
@@ -333,20 +333,6 @@ Unique: `(provider_name, provider_user_id)`
 | refresh_token | text | |
 | expires_at | timestamp | |
 
-### sso_auth_states
-
-SSO authentication state temporary storage.
-
-| Column | Type | Notes |
-|--------|------|-------|
-| id | integer PK | Auto-increment |
-| state | text | UNIQUE, NOT NULL |
-| provider_name | text | NOT NULL |
-| user_id | integer | |
-| redirect_url | text | |
-| created_at | timestamp | DEFAULT CURRENT_TIMESTAMP |
-| expires_at | timestamp | NOT NULL |
-
 ## Governance & Compliance
 
 ### audit_logs
@@ -401,22 +387,6 @@ Anomaly status tracking.
 | status | varchar | Processing status |
 | processed_by | integer | Processor ID |
 | processed_at | timestamp | Processing time |
-| created_at | timestamp | Creation time |
-
-### compliance_reports
-
-Compliance report storage.
-
-| Column | Type | Notes |
-|--------|------|-------|
-| id | integer PK | Auto-increment |
-| report_type | text | NOT NULL |
-| period_start | date | NOT NULL |
-| period_end | date | NOT NULL |
-| status | text | DEFAULT 'pending' |
-| generated_by | integer | Generator ID |
-| file_path | text | Report file path |
-| summary | text | Summary |
 | created_at | timestamp | Creation time |
 
 ### insights_reports

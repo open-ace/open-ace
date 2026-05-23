@@ -2,14 +2,10 @@
 -- Converted from schema-postgres.sql
 -- DO NOT EDIT MANUALLY
 
--- Open-ACE Database Schema for PostgreSQL
--- Auto-generated from pg_dump
--- DO NOT EDIT MANUALLY
-
 -- Setup session
 
 CREATE TABLE agent_sessions (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  session_id text NOT NULL,
  session_type text DEFAULT 'chat',
  title text,
@@ -38,7 +34,7 @@ CREATE TABLE agent_sessions (
 );
 
 CREATE TABLE alerts (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  alert_id text NOT NULL,
  alert_type text NOT NULL,
  severity text NOT NULL,
@@ -55,7 +51,7 @@ CREATE TABLE alerts (
 );
 
 CREATE TABLE annotations (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  annotation_id text NOT NULL,
  session_id text NOT NULL,
  message_id text,
@@ -70,7 +66,7 @@ CREATE TABLE annotations (
 );
 
 CREATE TABLE anomaly_status (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  anomaly_type TEXT NOT NULL,
  affected_users_hash TEXT NOT NULL,
  status TEXT DEFAULT 'pending' NOT NULL,
@@ -80,7 +76,7 @@ CREATE TABLE anomaly_status (
 );
 
 CREATE TABLE api_key_store (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  tenant_id integer,
  provider text NOT NULL,
  key_name text NOT NULL,
@@ -96,7 +92,7 @@ CREATE TABLE api_key_store (
 );
 
 CREATE TABLE audit_logs (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  "timestamp" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  user_id integer,
  username text,
@@ -113,7 +109,7 @@ CREATE TABLE audit_logs (
 );
 
 CREATE TABLE content_filter_rules (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  pattern text NOT NULL,
  type text DEFAULT 'keyword',
  severity text DEFAULT 'medium',
@@ -125,7 +121,7 @@ CREATE TABLE content_filter_rules (
 );
 
 CREATE TABLE daily_messages (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  date TEXT NOT NULL,
  tool_name TEXT NOT NULL,
  host_name TEXT DEFAULT 'localhost' NOT NULL,
@@ -171,7 +167,7 @@ CREATE TABLE daily_stats (
 );
 
 CREATE TABLE daily_usage (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  date TEXT NOT NULL,
  tool_name TEXT NOT NULL,
  host_name TEXT DEFAULT 'localhost' NOT NULL,
@@ -202,7 +198,7 @@ CREATE TABLE hourly_stats (
 );
 
 CREATE TABLE insights_reports (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  user_id integer NOT NULL,
  start_date TEXT NOT NULL,
  end_date TEXT NOT NULL,
@@ -218,7 +214,7 @@ CREATE TABLE insights_reports (
 );
 
 CREATE TABLE knowledge_base (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  entry_id text NOT NULL,
  team_id text,
  title text NOT NULL,
@@ -234,13 +230,13 @@ CREATE TABLE knowledge_base (
 );
 
 CREATE TABLE login_attempts (
- username TEXT NOT NULL,
+ username TEXT PRIMARY KEY NOT NULL,
  attempt_count integer DEFAULT 0 NOT NULL,
  locked_until TIMESTAMP
 );
 
 CREATE TABLE machine_assignments (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  machine_id text NOT NULL,
  user_id integer NOT NULL,
  permission text DEFAULT 'use',
@@ -249,7 +245,7 @@ CREATE TABLE machine_assignments (
 );
 
 CREATE TABLE notification_preferences (
- user_id integer NOT NULL,
+ user_id INTEGER PRIMARY KEY AUTOINCREMENT,
  email_enabled INTEGER DEFAULT 1,
  push_enabled INTEGER DEFAULT 1,
  webhook_url text,
@@ -258,7 +254,7 @@ CREATE TABLE notification_preferences (
 );
 
 CREATE TABLE projects (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  path TEXT NOT NULL,
  name TEXT,
  description text,
@@ -270,7 +266,7 @@ CREATE TABLE projects (
 );
 
 CREATE TABLE prompt_templates (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  name text NOT NULL,
  description text,
  category text DEFAULT 'general',
@@ -287,7 +283,7 @@ CREATE TABLE prompt_templates (
 );
 
 CREATE TABLE quota_alerts (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  user_id integer NOT NULL,
  alert_type text NOT NULL,
  quota_type text NOT NULL,
@@ -304,7 +300,7 @@ CREATE TABLE quota_alerts (
 );
 
 CREATE TABLE quota_usage (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  user_id integer NOT NULL,
  date TEXT NOT NULL,
  period text DEFAULT 'daily',
@@ -318,7 +314,7 @@ CREATE TABLE quota_usage (
 );
 
 CREATE TABLE remote_machines (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  machine_id text NOT NULL,
  machine_name text NOT NULL,
  hostname text,
@@ -338,19 +334,19 @@ CREATE TABLE remote_machines (
 );
 
 CREATE TABLE retention_history (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  "timestamp" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  report_data text NOT NULL
 );
 
 CREATE TABLE role_permissions (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  role text NOT NULL,
  permission text NOT NULL
 );
 
 CREATE TABLE security_settings (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  setting_key TEXT NOT NULL,
  setting_value text,
  description text,
@@ -359,7 +355,7 @@ CREATE TABLE security_settings (
 );
 
 CREATE TABLE session_messages (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  session_id text NOT NULL,
  role text NOT NULL,
  content text,
@@ -370,7 +366,7 @@ CREATE TABLE session_messages (
 );
 
 CREATE TABLE sessions (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  token TEXT NOT NULL,
  user_id integer NOT NULL,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -379,7 +375,7 @@ CREATE TABLE sessions (
 );
 
 CREATE TABLE shared_sessions (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  share_id text NOT NULL,
  session_id text NOT NULL,
  shared_by integer,
@@ -397,7 +393,7 @@ CREATE TABLE shared_sessions (
 );
 
 CREATE TABLE sso_identities (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  user_id integer NOT NULL,
  provider_name text NOT NULL,
  provider_user_id text NOT NULL,
@@ -407,7 +403,7 @@ CREATE TABLE sso_identities (
 );
 
 CREATE TABLE sso_providers (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  name text NOT NULL,
  provider_type text NOT NULL,
  config text NOT NULL,
@@ -418,7 +414,7 @@ CREATE TABLE sso_providers (
 );
 
 CREATE TABLE sso_sessions (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  session_token text NOT NULL,
  user_id integer NOT NULL,
  provider_name text NOT NULL,
@@ -429,7 +425,7 @@ CREATE TABLE sso_sessions (
 );
 
 CREATE TABLE sync_events (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  event_id text NOT NULL,
  event_type text NOT NULL,
  "timestamp" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -442,7 +438,7 @@ CREATE TABLE sync_events (
 );
 
 CREATE TABLE team_members (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  team_id text NOT NULL,
  user_id integer NOT NULL,
  username text,
@@ -451,7 +447,7 @@ CREATE TABLE team_members (
 );
 
 CREATE TABLE teams (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  team_id text NOT NULL,
  name text NOT NULL,
  description text,
@@ -462,7 +458,7 @@ CREATE TABLE teams (
 );
 
 CREATE TABLE tenant_quotas (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  tenant_id integer NOT NULL,
  daily_token_limit integer DEFAULT 1000000,
  monthly_token_limit integer DEFAULT 30000000,
@@ -475,7 +471,7 @@ CREATE TABLE tenant_quotas (
 );
 
 CREATE TABLE tenant_settings (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  tenant_id integer NOT NULL,
  content_filter_enabled INTEGER DEFAULT 1,
  audit_log_enabled INTEGER DEFAULT 1,
@@ -491,7 +487,7 @@ CREATE TABLE tenant_settings (
 );
 
 CREATE TABLE tenant_usage (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  tenant_id integer NOT NULL,
  date TEXT NOT NULL,
  tokens_used integer DEFAULT 0,
@@ -502,7 +498,7 @@ CREATE TABLE tenant_usage (
 );
 
 CREATE TABLE tenants (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  name text NOT NULL,
  slug text NOT NULL,
  status text DEFAULT 'active',
@@ -539,7 +535,7 @@ CREATE TABLE usage_summary (
 );
 
 CREATE TABLE user_daily_stats (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  user_id integer NOT NULL,
  date TEXT NOT NULL,
  requests integer DEFAULT 0 NOT NULL,
@@ -552,7 +548,7 @@ CREATE TABLE user_daily_stats (
 );
 
 CREATE TABLE user_permissions (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  user_id integer NOT NULL,
  permission text NOT NULL,
  granted_by integer,
@@ -560,7 +556,7 @@ CREATE TABLE user_permissions (
 );
 
 CREATE TABLE user_projects (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  user_id integer NOT NULL,
  project_id integer NOT NULL,
  first_access_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
@@ -572,7 +568,7 @@ CREATE TABLE user_projects (
 );
 
 CREATE TABLE user_tool_accounts (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  user_id integer NOT NULL,
  tool_account TEXT NOT NULL,
  tool_type TEXT,
@@ -582,7 +578,7 @@ CREATE TABLE user_tool_accounts (
 );
 
 CREATE TABLE users (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  username TEXT NOT NULL,
  password_hash TEXT NOT NULL,
  email TEXT,
@@ -604,7 +600,7 @@ CREATE TABLE users (
 );
 
 CREATE TABLE web_user_auth_sessions (
- id integer NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
  user_id integer NOT NULL,
  session_token text NOT NULL,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

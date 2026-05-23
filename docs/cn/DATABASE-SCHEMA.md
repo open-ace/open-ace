@@ -1,6 +1,6 @@
 # 数据库模式
 
-Open ACE 同时支持 SQLite（单机）和 PostgreSQL（生产环境）。模式包含 44 张表 + 1 个物化视图，按领域组织。
+Open ACE 同时支持 SQLite（单机）和 PostgreSQL（生产环境）。模式包含 44 张表 + 1 个物化视图（完整列表见 schema-postgres.sql，以下为常用表）。
 
 参考文件：`schema/schema-postgres.sql`
 
@@ -333,20 +333,6 @@ AI 代理会话追踪。
 | refresh_token | text | |
 | expires_at | timestamp | |
 
-### sso_auth_states
-
-SSO 认证状态临时存储。
-
-| 列名 | 类型 | 说明 |
-|------|------|------|
-| id | integer PK | 自增 |
-| state | text | UNIQUE, NOT NULL |
-| provider_name | text | NOT NULL |
-| user_id | integer | |
-| redirect_url | text | |
-| created_at | timestamp | DEFAULT CURRENT_TIMESTAMP |
-| expires_at | timestamp | NOT NULL |
-
 ## 治理与合规
 
 ### audit_logs
@@ -401,22 +387,6 @@ SSO 认证状态临时存储。
 | status | varchar | 处理状态 |
 | processed_by | integer | 处理人 ID |
 | processed_at | timestamp | 处理时间 |
-| created_at | timestamp | 创建时间 |
-
-### compliance_reports
-
-合规报告存储。
-
-| 列名 | 类型 | 说明 |
-|------|------|------|
-| id | integer PK | 自增 |
-| report_type | text | NOT NULL |
-| period_start | date | NOT NULL |
-| period_end | date | NOT NULL |
-| status | text | DEFAULT 'pending' |
-| generated_by | integer | 生成者 ID |
-| file_path | text | 报告文件路径 |
-| summary | text | 摘要 |
 | created_at | timestamp | 创建时间 |
 
 ### insights_reports
