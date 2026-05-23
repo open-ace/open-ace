@@ -1,6 +1,6 @@
 # Database Schema
 
-Open ACE supports both SQLite (single-machine) and PostgreSQL (production). The schema contains 36 tables + 1 materialized view, organized by domain.
+Open ACE supports both SQLite (single-machine) and PostgreSQL (production). The schema contains 44 tables + 1 materialized view, organized by domain.
 
 Reference: `schema/schema-postgres.sql`
 
@@ -27,6 +27,7 @@ Core user table with role-based access control.
 | must_change_password | boolean | DEFAULT false |
 | system_account | text | OS username for multi-user mode |
 | deleted_at | timestamp | Soft delete |
+| avatar_url | varchar(500) | Avatar URL |
 
 Indexes: `idx_users_active`, `idx_users_deleted`, `idx_users_email`, `idx_users_role`, `idx_users_tenant`
 
@@ -139,6 +140,17 @@ AI agent session tracking.
 | model | text | |
 | project_id | integer | |
 | project_path | varchar(500) | |
+| context | text | Session context |
+| settings | text | Session settings |
+| tags | text | Tags |
+| created_at | timestamp | Creation time |
+| updated_at | timestamp | Update time |
+| completed_at | timestamp | Completion time |
+| expires_at | timestamp | Expiry time |
+| request_count | integer | DEFAULT 0, request count |
+| workspace_type | text | DEFAULT 'local', workspace type |
+| remote_machine_id | text | Associated remote machine ID |
+| paused_at | timestamp | Pause time |
 
 ### session_messages
 
@@ -321,6 +333,20 @@ Unique: `(provider_name, provider_user_id)`
 | refresh_token | text | |
 | expires_at | timestamp | |
 
+### sso_auth_states
+
+SSO authentication state temporary storage.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | integer PK | Auto-increment |
+| state | text | UNIQUE, NOT NULL |
+| provider_name | text | NOT NULL |
+| user_id | integer | |
+| redirect_url | text | |
+| created_at | timestamp | DEFAULT CURRENT_TIMESTAMP |
+| expires_at | timestamp | NOT NULL |
+
 ## Governance & Compliance
 
 ### audit_logs
@@ -362,6 +388,100 @@ Key-value store for security configuration.
 | setting_key | varchar(100) | UNIQUE |
 | setting_value | text | |
 | description | text | |
+
+### anomaly_status
+
+Anomaly status tracking.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | integer PK | Auto-increment |
+| anomaly_type | varchar | Anomaly type |
+| affected_users_hash | varchar | Affected users hash |
+| status | varchar | Processing status |
+| processed_by | integer | Processor ID |
+| processed_at | timestamp | Processing time |
+| created_at | timestamp | Creation time |
+
+### compliance_reports
+
+Compliance report storage.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | integer PK | Auto-increment |
+| report_type | text | NOT NULL |
+| period_start | date | NOT NULL |
+| period_end | date | NOT NULL |
+| status | text | DEFAULT 'pending' |
+| generated_by | integer | Generator ID |
+| file_path | text | Report file path |
+| summary | text | Summary |
+| created_at | timestamp | Creation time |
+
+### insights_reports
+
+AI-generated usage insight reports.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | integer PK | Auto-increment |
+| user_id | integer | User ID |
+| start_date | varchar | Start date |
+| end_date | varchar | End date |
+| overall_score | integer | Overall score |
+| overall_assessment | text | Overall assessment |
+| strengths | text | Strengths (JSON) |
+| areas_for_improvement | text | Areas for improvement (JSON) |
+| suggestions | text | Suggestions (JSON) |
+| usage_summary | text | Usage summary (JSON) |
+| model | varchar | Model used |
+| raw_response | text | Raw AI response |
+| created_at | timestamp | Creation time |
+
+## Security & Permissions
+
+### login_attempts
+
+Failed login attempt tracking for account lockout.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | integer PK | Auto-increment |
+| username | text | NOT NULL |
+| attempt_count | integer | DEFAULT 0 |
+| locked_until | timestamp | Lock expiry time |
+| last_attempt_at | timestamp | Last attempt time |
+
+### user_permissions
+
+User-level permission overrides.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | integer PK | Auto-increment |
+| user_id | integer | NOT NULL |
+| permission | text | NOT NULL |
+| resource_type | text | Resource type |
+| resource_id | text | Resource ID |
+| granted_by | integer | Grantor |
+| granted_at | timestamp | Grant time |
+
+Indexes: `idx_user_permissions_user`, `idx_user_permissions_permission`
+
+### role_permissions
+
+Role permission templates.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | integer PK | Auto-increment |
+| role | text | NOT NULL |
+| permission | text | NOT NULL |
+| resource_type | text | Resource type |
+| created_at | timestamp | Creation time |
+
+Indexes: `idx_role_permissions_role`, `idx_role_permissions_permission`
 
 ## Alerts & Quotas
 
@@ -455,6 +575,65 @@ Unique: `(user_id, project_id)`
 | is_public | boolean | DEFAULT false |
 | is_featured | boolean | DEFAULT false |
 | use_count | integer | DEFAULT 0 |
+
+## Remote Workspace
+
+### remote_machines
+
+Remote workspace machine registry.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | integer PK | Auto-increment |
+| machine_id | text | Machine unique identifier |
+| machine_name | text | Machine name |
+| hostname | text | Hostname |
+| os_type | text | OS type |
+| os_version | text | OS version |
+| ip_address | text | IP address |
+| status | text | Status |
+| agent_version | text | Agent version |
+| capabilities | text | Capabilities (JSON) |
+| cli_path | text | CLI path |
+| work_dir | text | Working directory |
+| tenant_id | integer | Tenant ID |
+| created_by | integer | Creator ID |
+| created_at | timestamp | Creation time |
+| updated_at | timestamp | Update time |
+| last_heartbeat | timestamp | Last heartbeat time |
+
+### machine_assignments
+
+User-to-remote-machine assignment relationships.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | integer PK | Auto-increment |
+| machine_id | text | Machine ID |
+| user_id | integer | User ID |
+| permission | text | Permission level |
+| granted_by | integer | Grantor ID |
+| granted_at | timestamp | Grant time |
+
+### api_key_store
+
+Encrypted API key storage.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | integer PK | Auto-increment |
+| tenant_id | integer | Tenant ID |
+| provider | text | AI service provider |
+| key_name | text | Key name |
+| encrypted_key | text | Encrypted key |
+| key_hash | text | Key hash |
+| base_url | text | API base URL |
+| is_active | boolean | DEFAULT true |
+| created_by | integer | Creator ID |
+| created_at | timestamp | Creation time |
+| updated_at | timestamp | Update time |
+| cli_tools | text | CLI tools configuration |
+| cli_settings | text | CLI settings |
 
 ## Collaboration
 
@@ -555,6 +734,7 @@ Unique: `(team_id, user_id)`
 | tenant_quotas | tenant_id | tenants | CASCADE |
 | tenant_settings | tenant_id | tenants | CASCADE |
 | tenant_usage | tenant_id | tenants | CASCADE |
+| api_key_store | tenant_id | tenants | CASCADE |
 
 ## Cross-Database Compatibility
 

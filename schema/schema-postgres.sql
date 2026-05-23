@@ -38,7 +38,11 @@ CREATE TABLE agent_sessions (
     completed_at timestamp without time zone,
     expires_at timestamp without time zone,
     project_id integer,
-    project_path character varying(500)
+    project_path character varying(500),
+    request_count integer,
+    workspace_type text DEFAULT 'local'::text,
+    remote_machine_id text,
+    paused_at timestamp without time zone
 );
 
 CREATE SEQUENCE agent_sessions_id_seq
@@ -100,6 +104,50 @@ CREATE SEQUENCE annotations_id_seq
     CACHE 1;
 
 ALTER SEQUENCE annotations_id_seq OWNED BY annotations.id;
+CREATE TABLE anomaly_status (
+    id integer NOT NULL,
+    anomaly_type character varying(100) NOT NULL,
+    affected_users_hash character varying(64) NOT NULL,
+    status character varying(20) DEFAULT 'pending'::character varying NOT NULL,
+    processed_by integer,
+    processed_at timestamp without time zone,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE SEQUENCE anomaly_status_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE anomaly_status_id_seq OWNED BY anomaly_status.id;
+CREATE TABLE api_key_store (
+    id integer NOT NULL,
+    tenant_id integer,
+    provider text NOT NULL,
+    key_name text NOT NULL,
+    encrypted_key text NOT NULL,
+    key_hash text NOT NULL,
+    base_url text,
+    is_active boolean DEFAULT true,
+    created_by integer,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    cli_tools text,
+    cli_settings text
+);
+
+CREATE SEQUENCE api_key_store_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE api_key_store_id_seq OWNED BY api_key_store.id;
 CREATE TABLE audit_logs (
     id integer NOT NULL,
     "timestamp" timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
@@ -242,6 +290,31 @@ CREATE TABLE hourly_stats (
     updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
+CREATE TABLE insights_reports (
+    id integer NOT NULL,
+    user_id integer NOT NULL,
+    start_date character varying(10) NOT NULL,
+    end_date character varying(10) NOT NULL,
+    overall_score integer,
+    overall_assessment text,
+    strengths text,
+    areas_for_improvement text,
+    suggestions text,
+    usage_summary text,
+    model character varying(50),
+    raw_response text,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE SEQUENCE insights_reports_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE insights_reports_id_seq OWNED BY insights_reports.id;
 CREATE TABLE knowledge_base (
     id integer NOT NULL,
     entry_id text NOT NULL,
@@ -267,6 +340,30 @@ CREATE SEQUENCE knowledge_base_id_seq
     CACHE 1;
 
 ALTER SEQUENCE knowledge_base_id_seq OWNED BY knowledge_base.id;
+CREATE TABLE login_attempts (
+    username character varying(255) NOT NULL,
+    attempt_count integer DEFAULT 0 NOT NULL,
+    locked_until timestamp without time zone
+);
+
+CREATE TABLE machine_assignments (
+    id integer NOT NULL,
+    machine_id text NOT NULL,
+    user_id integer NOT NULL,
+    permission text DEFAULT 'use'::text,
+    granted_by integer,
+    granted_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE SEQUENCE machine_assignments_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE machine_assignments_id_seq OWNED BY machine_assignments.id;
 CREATE TABLE notification_preferences (
     user_id integer NOT NULL,
     email_enabled boolean DEFAULT true,
@@ -372,6 +469,35 @@ CREATE SEQUENCE quota_usage_new_id_seq
     CACHE 1;
 
 ALTER SEQUENCE quota_usage_new_id_seq OWNED BY quota_usage.id;
+CREATE TABLE remote_machines (
+    id integer NOT NULL,
+    machine_id text NOT NULL,
+    machine_name text NOT NULL,
+    hostname text,
+    os_type text,
+    os_version text,
+    ip_address text,
+    status text DEFAULT 'offline'::text,
+    agent_version text,
+    capabilities text,
+    cli_path text,
+    work_dir text,
+    tenant_id integer,
+    created_by integer,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    last_heartbeat timestamp without time zone
+);
+
+CREATE SEQUENCE remote_machines_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE remote_machines_id_seq OWNED BY remote_machines.id;
 CREATE TABLE retention_history (
     id integer NOT NULL,
     "timestamp" timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
@@ -387,6 +513,21 @@ CREATE SEQUENCE retention_history_id_seq
     CACHE 1;
 
 ALTER SEQUENCE retention_history_id_seq OWNED BY retention_history.id;
+CREATE TABLE role_permissions (
+    id integer NOT NULL,
+    role text NOT NULL,
+    permission text NOT NULL
+);
+
+CREATE SEQUENCE role_permissions_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE role_permissions_id_seq OWNED BY role_permissions.id;
 CREATE TABLE security_settings (
     id integer NOT NULL,
     setting_key character varying(100) NOT NULL,
@@ -743,6 +884,23 @@ CREATE SEQUENCE user_daily_stats_id_seq
     CACHE 1;
 
 ALTER SEQUENCE user_daily_stats_id_seq OWNED BY user_daily_stats.id;
+CREATE TABLE user_permissions (
+    id integer NOT NULL,
+    user_id integer NOT NULL,
+    permission text NOT NULL,
+    granted_by integer,
+    granted_at text
+);
+
+CREATE SEQUENCE user_permissions_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE user_permissions_id_seq OWNED BY user_permissions.id;
 CREATE TABLE user_projects (
     id integer NOT NULL,
     user_id integer NOT NULL,
@@ -801,6 +959,7 @@ CREATE TABLE users (
     system_account text,
     tenant_id integer,
     must_change_password boolean DEFAULT false,
+    avatar_url character varying(500),
     CONSTRAINT chk_users_role CHECK (((role)::text = ANY ((ARRAY['admin'::character varying, 'manager'::character varying, 'user'::character varying])::text[])))
 );
 
@@ -836,6 +995,10 @@ ALTER TABLE ONLY alerts ALTER COLUMN id SET DEFAULT nextval('alerts_id_seq'::reg
 
 ALTER TABLE ONLY annotations ALTER COLUMN id SET DEFAULT nextval('annotations_id_seq'::regclass);
 
+ALTER TABLE ONLY anomaly_status ALTER COLUMN id SET DEFAULT nextval('anomaly_status_id_seq'::regclass);
+
+ALTER TABLE ONLY api_key_store ALTER COLUMN id SET DEFAULT nextval('api_key_store_id_seq'::regclass);
+
 ALTER TABLE ONLY audit_logs ALTER COLUMN id SET DEFAULT nextval('audit_logs_id_seq'::regclass);
 
 ALTER TABLE ONLY content_filter_rules ALTER COLUMN id SET DEFAULT nextval('content_filter_rules_id_seq'::regclass);
@@ -844,7 +1007,11 @@ ALTER TABLE ONLY daily_messages ALTER COLUMN id SET DEFAULT nextval('daily_messa
 
 ALTER TABLE ONLY daily_usage ALTER COLUMN id SET DEFAULT nextval('daily_usage_id_seq'::regclass);
 
+ALTER TABLE ONLY insights_reports ALTER COLUMN id SET DEFAULT nextval('insights_reports_id_seq'::regclass);
+
 ALTER TABLE ONLY knowledge_base ALTER COLUMN id SET DEFAULT nextval('knowledge_base_id_seq'::regclass);
+
+ALTER TABLE ONLY machine_assignments ALTER COLUMN id SET DEFAULT nextval('machine_assignments_id_seq'::regclass);
 
 ALTER TABLE ONLY projects ALTER COLUMN id SET DEFAULT nextval('projects_id_seq'::regclass);
 
@@ -854,7 +1021,11 @@ ALTER TABLE ONLY quota_alerts ALTER COLUMN id SET DEFAULT nextval('quota_alerts_
 
 ALTER TABLE ONLY quota_usage ALTER COLUMN id SET DEFAULT nextval('quota_usage_new_id_seq'::regclass);
 
+ALTER TABLE ONLY remote_machines ALTER COLUMN id SET DEFAULT nextval('remote_machines_id_seq'::regclass);
+
 ALTER TABLE ONLY retention_history ALTER COLUMN id SET DEFAULT nextval('retention_history_id_seq'::regclass);
+
+ALTER TABLE ONLY role_permissions ALTER COLUMN id SET DEFAULT nextval('role_permissions_id_seq'::regclass);
 
 ALTER TABLE ONLY security_settings ALTER COLUMN id SET DEFAULT nextval('security_settings_id_seq'::regclass);
 
@@ -886,6 +1057,8 @@ ALTER TABLE ONLY tenants ALTER COLUMN id SET DEFAULT nextval('tenants_id_seq'::r
 
 ALTER TABLE ONLY user_daily_stats ALTER COLUMN id SET DEFAULT nextval('user_daily_stats_id_seq'::regclass);
 
+ALTER TABLE ONLY user_permissions ALTER COLUMN id SET DEFAULT nextval('user_permissions_id_seq'::regclass);
+
 ALTER TABLE ONLY user_projects ALTER COLUMN id SET DEFAULT nextval('user_projects_id_seq'::regclass);
 
 ALTER TABLE ONLY user_tool_accounts ALTER COLUMN id SET DEFAULT nextval('user_tool_accounts_id_seq'::regclass);
@@ -912,6 +1085,15 @@ ALTER TABLE ONLY annotations
 ALTER TABLE ONLY annotations
     ADD CONSTRAINT annotations_pkey PRIMARY KEY (id);
 
+ALTER TABLE ONLY anomaly_status
+    ADD CONSTRAINT anomaly_status_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY api_key_store
+    ADD CONSTRAINT api_key_store_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY api_key_store
+    ADD CONSTRAINT api_key_store_tenant_id_provider_key_name_key UNIQUE (tenant_id, provider, key_name);
+
 ALTER TABLE ONLY audit_logs
     ADD CONSTRAINT audit_logs_pkey PRIMARY KEY (id);
 
@@ -924,11 +1106,23 @@ ALTER TABLE ONLY daily_messages
 ALTER TABLE ONLY daily_usage
     ADD CONSTRAINT daily_usage_pkey PRIMARY KEY (id);
 
+ALTER TABLE ONLY insights_reports
+    ADD CONSTRAINT insights_reports_pkey PRIMARY KEY (id);
+
 ALTER TABLE ONLY knowledge_base
     ADD CONSTRAINT knowledge_base_entry_id_key UNIQUE (entry_id);
 
 ALTER TABLE ONLY knowledge_base
     ADD CONSTRAINT knowledge_base_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY login_attempts
+    ADD CONSTRAINT login_attempts_pkey PRIMARY KEY (username);
+
+ALTER TABLE ONLY machine_assignments
+    ADD CONSTRAINT machine_assignments_machine_id_user_id_key UNIQUE (machine_id, user_id);
+
+ALTER TABLE ONLY machine_assignments
+    ADD CONSTRAINT machine_assignments_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY notification_preferences
     ADD CONSTRAINT notification_preferences_pkey PRIMARY KEY (user_id);
@@ -945,8 +1139,20 @@ ALTER TABLE ONLY quota_alerts
 ALTER TABLE ONLY quota_usage
     ADD CONSTRAINT quota_usage_new_pkey PRIMARY KEY (id);
 
+ALTER TABLE ONLY remote_machines
+    ADD CONSTRAINT remote_machines_machine_id_key UNIQUE (machine_id);
+
+ALTER TABLE ONLY remote_machines
+    ADD CONSTRAINT remote_machines_pkey PRIMARY KEY (id);
+
 ALTER TABLE ONLY retention_history
     ADD CONSTRAINT retention_history_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY role_permissions
+    ADD CONSTRAINT role_permissions_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY role_permissions
+    ADD CONSTRAINT role_permissions_role_permission_key UNIQUE (role, permission);
 
 ALTER TABLE ONLY security_settings
     ADD CONSTRAINT security_settings_pkey PRIMARY KEY (id);
@@ -1056,6 +1262,12 @@ ALTER TABLE ONLY user_tool_accounts
 ALTER TABLE ONLY user_daily_stats
     ADD CONSTRAINT user_daily_stats_pkey PRIMARY KEY (id);
 
+ALTER TABLE ONLY user_permissions
+    ADD CONSTRAINT user_permissions_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY user_permissions
+    ADD CONSTRAINT user_permissions_user_id_permission_key UNIQUE (user_id, permission);
+
 ALTER TABLE ONLY user_projects
     ADD CONSTRAINT user_projects_pkey PRIMARY KEY (id);
 
@@ -1112,73 +1324,89 @@ CREATE INDEX idx_annotations_session ON annotations USING btree (session_id);
 --
 --
 
+CREATE INDEX idx_api_key_store_tenant_provider ON api_key_store USING btree (tenant_id, provider);
+
 CREATE INDEX idx_audit_action ON audit_logs USING btree (action);
+
+
+--
+--
 
 CREATE INDEX idx_audit_resource ON audit_logs USING btree (resource_type, resource_id);
 
-
---
---
-
 CREATE INDEX idx_audit_severity ON audit_logs USING btree (severity);
+
+
+--
+--
 
 CREATE INDEX idx_audit_timestamp ON audit_logs USING btree ("timestamp");
 
-
---
---
-
 CREATE INDEX idx_audit_user_id ON audit_logs USING btree (user_id);
+
+
+--
+--
 
 CREATE INDEX idx_daily_stats_date ON daily_stats USING btree (date);
 
-
---
---
-
 CREATE INDEX idx_daily_stats_date_tool ON daily_stats USING btree (date, tool_name);
+
+
+--
+--
 
 CREATE INDEX idx_daily_stats_date_tool_host ON daily_stats USING btree (date, tool_name, host_name);
 
-
---
---
-
 CREATE INDEX idx_daily_stats_host ON daily_stats USING btree (host_name);
+
+
+--
+--
 
 CREATE INDEX idx_daily_stats_project ON daily_stats USING btree (project_id);
 
-
---
---
-
 CREATE INDEX idx_daily_stats_sender ON daily_stats USING btree (sender_name);
+
+
+--
+--
 
 CREATE INDEX idx_daily_stats_tool ON daily_stats USING btree (tool_name);
 
-
---
---
-
 CREATE INDEX idx_filter_rules_enabled ON content_filter_rules USING btree (is_enabled);
+
+
+--
+--
 
 CREATE INDEX idx_filter_rules_type ON content_filter_rules USING btree (type);
 
-
---
---
-
 CREATE INDEX idx_hourly_stats_date ON hourly_stats USING btree (date);
+
+
+--
+--
 
 CREATE INDEX idx_hourly_stats_date_hour ON hourly_stats USING btree (date, hour);
 
-
---
---
-
 CREATE INDEX idx_hourly_stats_hour ON hourly_stats USING btree (hour);
 
+
+--
+--
+
+CREATE INDEX idx_insights_reports_user_date ON insights_reports USING btree (user_id, start_date, end_date);
+
 CREATE INDEX idx_knowledge_team ON knowledge_base USING btree (team_id);
+
+
+--
+--
+
+CREATE INDEX idx_login_attempts_locked_until ON login_attempts USING btree (locked_until);
+
+CREATE INDEX idx_machine_assignments_user_id ON machine_assignments USING btree (user_id);
 
 
 --
@@ -1192,41 +1420,49 @@ CREATE INDEX idx_messages_agent_session_project ON daily_messages USING btree (a
 --
 --
 
+CREATE INDEX idx_messages_conv_history ON daily_messages USING btree (agent_session_id, conversation_id, feishu_conversation_id, tool_name, host_name, sender_name, date, "timestamp", tokens_used, input_tokens, output_tokens, sender_id);
+
 CREATE INDEX idx_messages_conversation ON daily_messages USING btree (date, conversation_id, agent_session_id);
+
+
+--
+--
 
 CREATE INDEX idx_messages_date_role_sender_prefix ON daily_messages USING btree (date, role, sender_name varchar_pattern_ops);
 
-
---
---
-
 CREATE INDEX idx_messages_date_role_timestamp ON daily_messages USING btree (date, role, "timestamp" DESC);
+
+
+--
+--
 
 CREATE INDEX idx_messages_date_sender_id ON daily_messages USING btree (date, sender_id);
 
-
---
---
-
 CREATE INDEX idx_messages_date_tool_host ON daily_messages USING btree (date, tool_name, host_name);
+
+
+--
+--
 
 CREATE INDEX idx_messages_deleted ON daily_messages USING btree (deleted_at);
 
-
---
---
-
 CREATE INDEX idx_messages_host_name ON daily_messages USING btree (host_name);
+
+
+--
+--
 
 CREATE INDEX idx_messages_project_path ON daily_messages USING btree (project_path);
 
-
---
---
-
 CREATE INDEX idx_messages_sender_date_role ON daily_messages USING btree (sender_name, date, role);
 
+
+--
+--
+
 CREATE INDEX idx_messages_sender_id ON daily_messages USING btree (sender_id);
+
+CREATE INDEX idx_messages_sender_name ON daily_messages USING btree (sender_name) WHERE (sender_name IS NOT NULL);
 
 
 --
@@ -1296,185 +1532,201 @@ CREATE INDEX idx_quota_usage_user ON quota_usage USING btree (user_id);
 --
 --
 
+CREATE INDEX idx_remote_machines_hostname_tenant ON remote_machines USING btree (hostname, tenant_id);
+
+CREATE INDEX idx_remote_machines_machine_id ON remote_machines USING btree (machine_id);
+
+
+--
+--
+
+CREATE INDEX idx_remote_machines_status ON remote_machines USING btree (status);
+
 CREATE INDEX idx_security_settings_key ON security_settings USING btree (setting_key);
+
+
+--
+--
 
 CREATE INDEX idx_session_messages_session_id ON session_messages USING btree (session_id);
 
-
---
---
-
 CREATE INDEX idx_session_stats_session_id ON session_stats USING btree (session_id);
+
+
+--
+--
 
 CREATE INDEX idx_session_stats_tool_host ON session_stats USING btree (tool_name, host_name);
 
-
---
---
-
 CREATE INDEX idx_session_stats_updated_at ON session_stats USING btree (updated_at DESC);
+
+
+--
+--
 
 CREATE INDEX idx_sessions_active ON sessions USING btree (is_active, expires_at);
 
-
---
---
-
 CREATE INDEX idx_sessions_expires ON sessions USING btree (expires_at);
+
+
+--
+--
 
 CREATE INDEX idx_sessions_token ON sessions USING btree (token);
 
-
---
---
-
 CREATE INDEX idx_sessions_user_id ON sessions USING btree (user_id);
+
+
+--
+--
 
 CREATE INDEX idx_shared_sessions_session ON shared_sessions USING btree (session_id);
 
-
---
---
-
 CREATE INDEX idx_shared_sessions_target ON shared_sessions USING btree (target_id);
+
+
+--
+--
 
 CREATE INDEX idx_sso_identities_provider ON sso_identities USING btree (provider_name, provider_user_id);
 
-
---
---
-
 CREATE INDEX idx_sso_identities_user ON sso_identities USING btree (user_id);
+
+
+--
+--
 
 CREATE INDEX idx_sso_providers_tenant ON sso_providers USING btree (tenant_id);
 
-
---
---
-
 CREATE INDEX idx_sso_sessions_token ON sso_sessions USING btree (session_token);
+
+
+--
+--
 
 CREATE INDEX idx_sso_sessions_user ON sso_sessions USING btree (user_id);
 
-
---
---
-
 CREATE INDEX idx_sync_events_session_id ON sync_events USING btree (session_id);
+
+
+--
+--
 
 CREATE INDEX idx_sync_events_timestamp ON sync_events USING btree ("timestamp");
 
-
---
---
-
 CREATE INDEX idx_sync_events_user_id ON sync_events USING btree (user_id);
+
+
+--
+--
 
 CREATE INDEX idx_team_members_team ON team_members USING btree (team_id);
 
-
---
---
-
 CREATE INDEX idx_team_members_user ON team_members USING btree (user_id);
+
+
+--
+--
 
 CREATE INDEX idx_teams_owner ON teams USING btree (owner_id);
 
-
---
---
-
 CREATE INDEX idx_tenant_quotas_tenant ON tenant_quotas USING btree (tenant_id);
+
+
+--
+--
 
 CREATE INDEX idx_tenant_settings_tenant ON tenant_settings USING btree (tenant_id);
 
-
---
---
-
 CREATE INDEX idx_tenant_usage_date ON tenant_usage USING btree (date);
+
+
+--
+--
 
 CREATE INDEX idx_tenant_usage_tenant ON tenant_usage USING btree (tenant_id);
 
-
---
---
-
 CREATE INDEX idx_tenants_deleted ON tenants USING btree (deleted_at);
+
+
+--
+--
 
 CREATE INDEX idx_tenants_slug ON tenants USING btree (slug);
 
-
---
---
-
 CREATE INDEX idx_tenants_status ON tenants USING btree (status);
+
+
+--
+--
 
 CREATE INDEX idx_tool_accounts_tool_account ON user_tool_accounts USING btree (tool_account);
 
-
---
---
-
 CREATE INDEX idx_tool_accounts_user_id ON user_tool_accounts USING btree (user_id);
+
+
+--
+--
 
 CREATE INDEX idx_usage_date ON daily_usage USING btree (date);
 
-
---
---
-
 CREATE INDEX idx_usage_date_tool_host ON daily_usage USING btree (date, tool_name, host_name);
+
+
+--
+--
 
 CREATE INDEX idx_usage_host_name ON daily_usage USING btree (host_name);
 
-
---
---
-
 CREATE INDEX idx_usage_summary_host ON usage_summary USING btree (host_name);
+
+
+--
+--
 
 CREATE INDEX idx_usage_summary_tool ON usage_summary USING btree (tool_name);
 
-
---
---
-
 CREATE INDEX idx_usage_tool_name ON daily_usage USING btree (tool_name);
+
+
+--
+--
 
 CREATE INDEX idx_user_daily_stats_date ON user_daily_stats USING btree (date DESC);
 
-
---
---
-
 CREATE INDEX idx_user_daily_stats_user_date ON user_daily_stats USING btree (user_id, date DESC);
+
+
+--
+--
 
 CREATE INDEX idx_user_projects_project ON user_projects USING btree (project_id);
 
-
---
---
-
 CREATE INDEX idx_user_projects_user ON user_projects USING btree (user_id);
+
+
+--
+--
 
 CREATE INDEX idx_users_active ON users USING btree (is_active);
 
-
---
---
-
 CREATE INDEX idx_users_deleted ON users USING btree (deleted_at);
+
+
+--
+--
 
 CREATE INDEX idx_users_email ON users USING btree (email);
 
-
---
---
-
 CREATE INDEX idx_users_role ON users USING btree (role);
 
+
+--
+--
+
 CREATE INDEX idx_users_tenant ON users USING btree (tenant_id);
+
+CREATE UNIQUE INDEX ix_anomaly_status_type_hash ON anomaly_status USING btree (anomaly_type, affected_users_hash);
 
 
 --
@@ -1488,11 +1740,17 @@ CREATE UNIQUE INDEX uq_user_projects_user_project ON user_projects USING btree (
 --
 --
 
+ALTER TABLE ONLY anomaly_status
+    ADD CONSTRAINT anomaly_status_processed_by_fkey FOREIGN KEY (processed_by) REFERENCES users(id);
+
 ALTER TABLE ONLY user_daily_stats
     ADD CONSTRAINT fk_user_daily_stats_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
 
 ALTER TABLE ONLY users
     ADD CONSTRAINT fk_users_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE SET NULL;
+
+ALTER TABLE ONLY insights_reports
+    ADD CONSTRAINT insights_reports_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
 
 ALTER TABLE ONLY quota_alerts
     ADD CONSTRAINT quota_alerts_new_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
