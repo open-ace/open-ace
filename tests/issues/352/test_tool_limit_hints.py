@@ -6,6 +6,7 @@ the assistant about platform tool limitations (e.g., run_shell_command timeout).
 """
 
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -13,6 +14,8 @@ import unittest
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, PropertyMock, patch
+
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 
 # Add remote-agent directory to path
 remote_agent_dir = Path(__file__).parent.parent.parent.parent / "remote-agent"
@@ -44,7 +47,7 @@ class TestSendToolLimitHints(unittest.TestCase):
         from executor import ProcessExecutor
 
         self.executor = ProcessExecutor(
-            server_url="http://localhost:5001",
+            server_url=BASE_URL,
             output_callback=None,
             permission_callback=None,
             usage_callback=None,
@@ -196,7 +199,7 @@ class TestToolLimitHintsIntegration(unittest.TestCase):
         from executor import ProcessExecutor
 
         executor = ProcessExecutor(
-            server_url="http://localhost:5001",
+            server_url=BASE_URL,
         )
 
         # Verify method exists
@@ -220,7 +223,7 @@ class TestToolLimitHintsExceptionHandling(unittest.TestCase):
         from executor import ProcessExecutor
 
         self.executor = ProcessExecutor(
-            server_url="http://localhost:5001",
+            server_url=BASE_URL,
         )
 
     def test_os_error_handling(self):
@@ -294,7 +297,7 @@ class TestToolTimeoutConfiguration(unittest.TestCase):
         from executor import ProcessExecutor
 
         executor = ProcessExecutor(
-            server_url="http://localhost:5001",
+            server_url=BASE_URL,
         )
 
         # Verify default timeout
@@ -305,7 +308,7 @@ class TestToolTimeoutConfiguration(unittest.TestCase):
         from executor import ProcessExecutor
 
         executor = ProcessExecutor(
-            server_url="http://localhost:5001",
+            server_url=BASE_URL,
             tool_timeout=300,
         )
 
@@ -317,7 +320,7 @@ class TestToolTimeoutConfiguration(unittest.TestCase):
         from executor import ProcessExecutor
 
         executor = ProcessExecutor(
-            server_url="http://localhost:5001",
+            server_url=BASE_URL,
             tool_timeout=300,  # 5 minutes
         )
 

@@ -6,9 +6,12 @@ because the span elements were removed by renderSidebarNav function.
 """
 
 import asyncio
+import os
 
 import pytest
 from playwright.async_api import async_playwright
+
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 
 
 @pytest.mark.asyncio
@@ -28,7 +31,7 @@ async def test_sidebar_collapse_normal_user():
 
         try:
             # 访问登录页面
-            await page.goto("http://localhost:5001/login")
+            await page.goto(f"{BASE_URL}/login")
             await page.wait_for_load_state("networkidle")
 
             # 登录普通用户

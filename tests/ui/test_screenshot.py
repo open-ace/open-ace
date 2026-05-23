@@ -2,8 +2,13 @@
 """Test screenshot for Session History resizable columns."""
 
 import asyncio
+import os
 
 from playwright.async_api import async_playwright
+
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 
 
 async def main():
@@ -14,7 +19,7 @@ async def main():
 
         # Navigate to login page
         print("Navigating to login page...")
-        await page.goto("http://localhost:5001/login")
+        await page.goto(f"{BASE_URL}/login")
         await page.wait_for_load_state("networkidle")
 
         # Take screenshot of login page
@@ -23,8 +28,8 @@ async def main():
 
         # Fill in login credentials (default admin/admin123)
         print("Logging in...")
-        await page.fill("#username", "admin")
-        await page.fill("#password", "admin123")
+        await page.fill("#username", USERNAME)
+        await page.fill("#password", PASSWORD)
         await page.click('button[type="submit"]')
 
         # Wait for navigation to dashboard

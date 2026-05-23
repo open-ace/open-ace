@@ -8,9 +8,12 @@
 """
 
 import asyncio
+import os
 import re
 
 from playwright.async_api import async_playwright
+
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 
 
 async def main():
@@ -23,7 +26,7 @@ async def main():
 
         # Navigate to login page
         print("Navigating to login page...")
-        await page.goto("http://localhost:5001/login")
+        await page.goto(f"{BASE_URL}/login")
         await page.wait_for_load_state("networkidle")
 
         # Fill in login credentials

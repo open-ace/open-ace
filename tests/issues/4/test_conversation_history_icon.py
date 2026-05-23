@@ -8,6 +8,9 @@ from playwright.async_api import async_playwright
 SCREENSHOT_DIR = "/Users/rhuang/workspace/open-ace/screenshots/issues/4"
 
 
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+
+
 async def test_conversation_history_icon():
     """Test that conversation history icon is visible in sidebar."""
 
@@ -19,7 +22,7 @@ async def test_conversation_history_icon():
         try:
             # Navigate to the app
             print("1. Navigating to login page...")
-            await page.goto("http://localhost:5001/login", timeout=30000)
+            await page.goto(f"{BASE_URL}/login", timeout=30000)
             await page.wait_for_load_state("networkidle")
 
             # Take screenshot of login page
@@ -40,9 +43,7 @@ async def test_conversation_history_icon():
 
             # Navigate to manage mode to see conversation history
             print("3. Navigating to manage mode...")
-            await page.goto(
-                "http://localhost:5001/manage/analysis/conversation-history", timeout=30000
-            )
+            await page.goto(f"{BASE_URL}/manage/analysis/conversation-history", timeout=30000)
             await page.wait_for_load_state("networkidle")
             await asyncio.sleep(2)
 

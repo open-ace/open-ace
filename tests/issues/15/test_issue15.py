@@ -2,8 +2,11 @@
 """Test screenshot for Issue #15 - Session History conversation detail modal."""
 
 import asyncio
+import os
 
 from playwright.async_api import async_playwright
+
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 
 
 async def main():
@@ -14,7 +17,7 @@ async def main():
 
         # Navigate to login page
         print("Navigating to login page...")
-        await page.goto("http://localhost:5001/login")
+        await page.goto(f"{BASE_URL}/login")
         await page.wait_for_load_state("networkidle")
 
         # Fill in login credentials
@@ -29,7 +32,7 @@ async def main():
 
         # Navigate to home page
         print("Navigating to home page...")
-        await page.goto("http://localhost:5001/")
+        await page.goto(f"{BASE_URL}/")
         await page.wait_for_load_state("networkidle")
         await asyncio.sleep(5)
 

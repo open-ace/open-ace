@@ -7,8 +7,13 @@ Tests:
 """
 
 import asyncio
+import os
 
 from playwright.async_api import async_playwright
+
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 
 
 async def test_admin_default_mode():
@@ -23,10 +28,10 @@ async def test_admin_default_mode():
         print("=" * 60)
 
         # Login
-        await page.goto("http://localhost:5001/login")
+        await page.goto(f"{BASE_URL}/login")
         await page.wait_for_load_state("networkidle")
-        await page.fill("input#username", "admin")
-        await page.fill("input#password", "admin123")
+        await page.fill("input#username", USERNAME)
+        await page.fill("input#password", PASSWORD)
         async with page.expect_navigation(timeout=10000):
             await page.click('button[type="submit"]')
         await page.wait_for_load_state("networkidle")
@@ -61,10 +66,10 @@ async def test_normal_user_default_mode():
 
         try:
             # Login with testuser (if exists)
-            await page.goto("http://localhost:5001/login")
+            await page.goto(f"{BASE_URL}/login")
             await page.wait_for_load_state("networkidle")
-            await page.fill("input#username", "testuser")
-            await page.fill("input#password", "testuser")
+            await page.fill("input#username", USERNAME)
+            await page.fill("input#password", PASSWORD)
 
             # Try to login, but handle potential timeout if user doesn't exist
             try:
@@ -108,8 +113,6 @@ async def test_normal_user_default_mode():
 
 async def main():
     """Run all tests."""
-    import os
-
     os.makedirs("/Users/rhuang/workspace/open-ace/screenshots/ui", exist_ok=True)
 
     # Test admin user

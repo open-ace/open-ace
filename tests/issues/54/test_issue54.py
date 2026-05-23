@@ -21,6 +21,9 @@ from playwright.sync_api import expect
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
 
 
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+
+
 async def take_screenshot(page, name):
     """Take a screenshot and return the path."""
     screenshot_dir = os.path.join(
@@ -55,7 +58,7 @@ class TestIssue54:
 
                 # Step 1: Navigate to login page
                 print("\n[Step 1] Navigate to login page")
-                await page.goto("http://localhost:5001/")
+                await page.goto(f"{BASE_URL}/")
                 await page.wait_for_load_state("networkidle")
                 screenshots.append(take_screenshot(page, "01_login_page.png"))
                 print("  ✓ Login page loaded")
