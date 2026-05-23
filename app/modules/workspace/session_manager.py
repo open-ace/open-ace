@@ -10,7 +10,7 @@ import logging
 import sqlite3
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Optional, Union
 
@@ -211,7 +211,7 @@ class AgentSession:
         """Check if session is expired."""
         if self.expires_at is None:
             return False
-        return datetime.utcnow() > self.expires_at
+        return datetime.now(timezone.utc).replace(tzinfo=None) > self.expires_at
 
     def is_active(self) -> bool:
         """Check if session is active."""
@@ -423,7 +423,7 @@ class SessionManager:
             logger.info(f"Session {session_id} already exists, returning existing session")
             return existing_session
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
 
         expires_at = None
         if expires_in_hours:
@@ -545,7 +545,7 @@ class SessionManager:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         session.updated_at = now
 
         cursor.execute(
@@ -643,7 +643,7 @@ class SessionManager:
             elif k in ["updated_at", "completed_at", "paused_at", "expires_at"] and values[i]:
                 if isinstance(values[i], datetime):
                     values[i] = values[i].isoformat()
-        values.append(datetime.utcnow().isoformat())
+        values.append(datetime.now(timezone.utc).replace(tzinfo=None).isoformat())
         values.append(session_id)
 
         conn = self._get_connection()
@@ -731,7 +731,7 @@ class SessionManager:
             conn.close()
             return None
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         message = SessionMessage(
             session_id=session_id,
             role=role,
@@ -792,7 +792,7 @@ class SessionManager:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         now_iso = now.isoformat()
 
         # First, get session info for statistics update
@@ -891,7 +891,7 @@ class SessionManager:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
         cursor.execute(
             f"""
@@ -1100,7 +1100,7 @@ class SessionManager:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        cutoff = datetime.utcnow() - timedelta(days=days_old)
+        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days_old)
 
         # Get expired session IDs
         cursor.execute(

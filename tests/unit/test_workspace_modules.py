@@ -8,7 +8,7 @@ state_sync, and collaboration modules.
 
 import os
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytest
 
@@ -356,7 +356,7 @@ class TestStateSync:
         event = SyncEvent(
             event_id="test-event-1",
             event_type=SyncEventType.SESSION_START.value,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
             source="test",
             session_id="session-1",
             data={"key": "value"},
@@ -504,7 +504,7 @@ class TestWorkspaceIntegration:
             SyncEvent(
                 event_id="event-1",
                 event_type=SyncEventType.SESSION_START.value,
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
                 source="test",
                 session_id=session.session_id,
             )

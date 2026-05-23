@@ -10,7 +10,7 @@ import logging
 import sqlite3
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Optional, Union
 
@@ -133,7 +133,7 @@ class SharedSession:
         """Check if share is expired."""
         if self.expires_at is None:
             return False
-        return datetime.utcnow() > self.expires_at
+        return datetime.now(timezone.utc).replace(tzinfo=None) > self.expires_at
 
     def can_view(self) -> bool:
         """Check if can view."""
@@ -418,7 +418,7 @@ class CollaborationManager:
             Team: The created team.
         """
         team_id = str(uuid.uuid4())
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
 
         conn = self._get_connection()
         cursor = conn.cursor()
@@ -540,7 +540,13 @@ class CollaborationManager:
                 INSERT INTO team_members (team_id, user_id, username, role, joined_at)
                 VALUES (?, ?, ?, ?, ?)
             """,
-                (team_id, user_id, username, role, datetime.utcnow().isoformat()),
+                (
+                    team_id,
+                    user_id,
+                    username,
+                    role,
+                    datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                ),
             )
 
             conn.commit()
@@ -638,7 +644,7 @@ class CollaborationManager:
             SharedSession: The created share.
         """
         share_id = str(uuid.uuid4())
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
 
         expires_at = None
         if expires_in_hours:
@@ -804,7 +810,7 @@ class CollaborationManager:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
         cursor.execute(
             """
             UPDATE shared_sessions
@@ -850,7 +856,7 @@ class CollaborationManager:
             Annotation: The created annotation.
         """
         annotation_id = str(uuid.uuid4())
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
 
         conn = self._get_connection()
         cursor = conn.cursor()
@@ -983,7 +989,7 @@ class CollaborationManager:
             KnowledgeEntry: The created entry.
         """
         entry_id = str(uuid.uuid4())
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
 
         conn = self._get_connection()
         cursor = conn.cursor()

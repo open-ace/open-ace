@@ -6,7 +6,7 @@ Base class and configuration for SSO providers.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
 
@@ -124,7 +124,7 @@ class SSOToken:
         """Check if token is expired."""
         if not self.expires_at:
             return False
-        return datetime.utcnow() >= self.expires_at
+        return datetime.now(timezone.utc).replace(tzinfo=None) >= self.expires_at
 
 
 @dataclass

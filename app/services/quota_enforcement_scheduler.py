@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -110,8 +110,10 @@ class QuotaEnforcementScheduler:
         """Run quota enforcement check for all users."""
         from app.repositories.database import Database, adapt_boolean_condition, adapt_sql
 
-        today = datetime.utcnow().strftime("%Y-%m-%d")
-        month_start = datetime.utcnow().replace(day=1).strftime("%Y-%m-%d")
+        today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
+        month_start = (
+            datetime.now(timezone.utc).replace(tzinfo=None).replace(day=1).strftime("%Y-%m-%d")
+        )
         self._last_run = datetime.now()
 
         exceeded_users = set()

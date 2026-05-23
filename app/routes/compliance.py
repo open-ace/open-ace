@@ -7,7 +7,7 @@ API endpoints for compliance reporting and data retention management.
 import hashlib
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, Response, g, jsonify, request
 
@@ -146,12 +146,12 @@ def generate_report():
     if period_start:
         period_start = datetime.fromisoformat(period_start)
     else:
-        period_start = datetime.utcnow() - timedelta(days=30)
+        period_start = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
 
     if period_end:
         period_end = datetime.fromisoformat(period_end)
     else:
-        period_end = datetime.utcnow()
+        period_end = datetime.now(timezone.utc).replace(tzinfo=None)
 
     # Generate report
     report = report_generator.generate_report(
@@ -240,7 +240,7 @@ def analyze_patterns():
     """Analyze audit patterns (admin only)."""
 
     days = request.args.get("days", 30, type=int)
-    start_time = datetime.utcnow() - timedelta(days=days)
+    start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
 
     patterns = _get_audit_analyzer().analyze_patterns(start_time=start_time)
 
@@ -253,7 +253,7 @@ def detect_anomalies():
     """Detect audit anomalies (admin only)."""
 
     days = request.args.get("days", 7, type=int)
-    start_time = datetime.utcnow() - timedelta(days=days)
+    start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
 
     anomalies = _get_audit_analyzer().detect_anomalies(start_time=start_time)
 
@@ -298,7 +298,7 @@ def get_security_score():
     """Get security score (admin only)."""
 
     days = request.args.get("days", 30, type=int)
-    start_time = datetime.utcnow() - timedelta(days=days)
+    start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
 
     score = _get_audit_analyzer().generate_security_score(start_time=start_time)
 
@@ -482,7 +482,7 @@ def update_anomaly_status():
 
     hash_val = _anomaly_hash(anomaly_type, affected_users)
     user_id = g.user.get("id") if hasattr(g, "user") else None
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     db = Database()
     try:

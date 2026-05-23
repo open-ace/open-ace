@@ -5,7 +5,7 @@ API endpoints for Single Sign-On authentication.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from flask import Blueprint, g, jsonify, redirect, request, url_for
@@ -244,7 +244,7 @@ def callback(provider_name: str):
         UserRepository().create_session(
             user_id=user_id,
             token=session_token,
-            expires_at=datetime.utcnow(),
+            expires_at=datetime.now(timezone.utc).replace(tzinfo=None),
         )
 
     # Return result

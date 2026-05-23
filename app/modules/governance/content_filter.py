@@ -8,7 +8,7 @@ Detects and filters sensitive information, PII, and prohibited content.
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional, cast
 
@@ -48,7 +48,9 @@ class FilterResult:
     matched_rules: list[dict[str, Any]] = field(default_factory=list)
     redacted_content: Optional[str] = None
     suggestion: Optional[str] = None
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(
+        default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
+    )
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""

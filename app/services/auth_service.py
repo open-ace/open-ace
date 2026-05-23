@@ -7,7 +7,7 @@ Business logic for authentication and authorization.
 import logging
 import secrets
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, cast
 
 from app.repositories.user_repo import UserRepository
@@ -82,8 +82,16 @@ def _check_login_lockout(username: str) -> tuple[bool, Optional[str]]:
         if locked_until:
             if isinstance(locked_until, str):
                 locked_until = datetime.fromisoformat(locked_until)
-            if locked_until > datetime.utcnow():
-                remaining = int((locked_until - datetime.utcnow()).total_seconds() / 60) + 1
+            if locked_until > datetime.now(timezone.utc).replace(tzinfo=None):
+                remaining = (
+                    int(
+                        (
+                            locked_until - datetime.now(timezone.utc).replace(tzinfo=None)
+                        ).total_seconds()
+                        / 60
+                    )
+                    + 1
+                )
                 return True, f"Account temporarily locked. Try again in {remaining} minutes."
             else:
                 # Lockout expired — reset
@@ -134,7 +142,9 @@ def _record_failed_login(username: str) -> None:
             )
 
         if new_count >= max_attempts:
-            locked_until = datetime.utcnow() + timedelta(minutes=lockout_minutes)
+            locked_until = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
+                minutes=lockout_minutes
+            )
             db.execute(
                 f"UPDATE login_attempts SET locked_until = {p} WHERE username = {p}",
                 (locked_until, username),
@@ -229,7 +239,9 @@ class AuthService:
         # Create session token
         token = secrets.token_hex(32)
         timeout_hours = _get_session_timeout_hours()
-        expires_at = datetime.utcnow() + timedelta(hours=timeout_hours)
+        expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
+            hours=timeout_hours
+        )
 
         if not self.user_repo.create_session(user["id"], token, expires_at):
             logger.error(f"Failed to create session for user - {username}")
@@ -351,7 +363,7 @@ class AuthService:
             return False
         if isinstance(expires_at, str):
             expires_at = datetime.fromisoformat(expires_at)
-        return bool(expires_at < datetime.utcnow())
+        return bool(expires_at < datetime.now(timezone.utc).replace(tzinfo=None))
 
     def get_user_profile(self, user_id: int) -> Optional[dict]:
         """

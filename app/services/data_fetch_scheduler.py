@@ -195,11 +195,12 @@ class DataFetchScheduler:
     def _check_quotas(self):
         """Check all users' quotas and enforce limits after data refresh."""
         from datetime import datetime as dt
+        from datetime import timezone as tz
 
         from app.repositories.database import Database, adapt_boolean_condition, adapt_sql
 
-        today = dt.utcnow().strftime("%Y-%m-%d")
-        month_start = dt.utcnow().replace(day=1).strftime("%Y-%m-%d")
+        today = dt.now(tz.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
+        month_start = dt.now(tz.utc).replace(tzinfo=None).replace(day=1).strftime("%Y-%m-%d")
         db = Database()
 
         exceeded_users = set()

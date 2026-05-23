@@ -203,7 +203,9 @@ class WorkspaceService:
             SyncEvent(
                 event_id=str(__import__("uuid").uuid4()),
                 event_type=SyncEventType.SESSION_START.value,
-                timestamp=__import__("datetime").datetime.utcnow(),
+                timestamp=__import__("datetime")
+                .datetime.now(__import__("datetime").timezone.utc)
+                .replace(tzinfo=None),
                 source="workspace",
                 session_id=session.session_id,
                 user_id=user_id,
@@ -238,7 +240,9 @@ class WorkspaceService:
                 SyncEvent(
                     event_id=str(__import__("uuid").uuid4()),
                     event_type=SyncEventType.SESSION_END.value,
-                    timestamp=__import__("datetime").datetime.utcnow(),
+                    timestamp=__import__("datetime")
+                    .datetime.now(__import__("datetime").timezone.utc)
+                    .replace(tzinfo=None),
                     source="workspace",
                     session_id=session_id,
                 )
@@ -318,7 +322,9 @@ class WorkspaceService:
             SyncEvent(
                 event_id=str(__import__("uuid").uuid4()),
                 event_type=SyncEventType.TOOL_CALL.value,
-                timestamp=__import__("datetime").datetime.utcnow(),
+                timestamp=__import__("datetime")
+                .datetime.now(__import__("datetime").timezone.utc)
+                .replace(tzinfo=None),
                 source="workspace",
                 session_id=session_id,
                 tool_name=tool_name,

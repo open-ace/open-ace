@@ -9,7 +9,7 @@ import io
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional, Union
 
@@ -166,7 +166,7 @@ class ReportGenerator:
         metadata = ReportMetadata(
             report_id=str(uuid.uuid4()),
             report_type=report_type,
-            generated_at=datetime.utcnow(),
+            generated_at=datetime.now(timezone.utc).replace(tzinfo=None),
             period_start=period_start,
             period_end=period_end,
             generated_by=generated_by,

@@ -6,7 +6,7 @@ Business logic for multi-tenant management.
 
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from app.models.tenant import QuotaConfig, Tenant, TenantSettings, TenantUsage
@@ -120,7 +120,9 @@ class TenantService:
 
         # Set trial end date if applicable
         if trial_days:
-            tenant.trial_ends_at = datetime.utcnow() + timedelta(days=trial_days)
+            tenant.trial_ends_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
+                days=trial_days
+            )
 
         tenant_id = self.tenant_repo.create(tenant)
         if tenant_id:
@@ -302,7 +304,9 @@ class TenantService:
         Returns:
             List[TenantUsage]: Usage records.
         """
-        start_date = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
+        start_date = (
+            datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+        ).strftime("%Y-%m-%d")
         return self.tenant_repo.get_usage(tenant_id, start_date=start_date)
 
     def check_quota(self, tenant_id: int, tokens: int = 0, requests: int = 1) -> dict[str, Any]:
@@ -325,7 +329,7 @@ class TenantService:
             return {"allowed": False, "reason": "Tenant is not active", "tenant": tenant.to_dict()}
 
         # Get today's usage
-        today = datetime.utcnow().strftime("%Y-%m-%d")
+        today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
         usage_records = self.tenant_repo.get_usage(tenant_id, start_date=today, end_date=today)
 
         today_tokens = sum(u.tokens_used for u in usage_records)

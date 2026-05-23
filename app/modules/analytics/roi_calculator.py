@@ -8,7 +8,7 @@ Provides cost analysis, savings estimation, and productivity metrics.
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from app.repositories.database import Database
@@ -349,7 +349,7 @@ class ROICalculator:
         Returns:
             List of ROIMetrics.
         """
-        today = datetime.utcnow()
+        today = datetime.now(timezone.utc).replace(tzinfo=None)
         start_date = (today - timedelta(days=months * 30)).strftime("%Y-%m-%d")
 
         # Check database type for SQL syntax

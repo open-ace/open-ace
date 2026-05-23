@@ -8,7 +8,7 @@ Records all user actions, system events, and data access for accountability.
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Optional, cast
 
@@ -73,7 +73,9 @@ class AuditLog:
     """Audit log entry data model."""
 
     id: Optional[int] = None
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(
+        default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
+    )
     user_id: Optional[int] = None
     username: Optional[str] = None
     action: str = ""
@@ -115,7 +117,11 @@ class AuditLog:
 
         return cls(
             id=data.get("id"),
-            timestamp=timestamp if isinstance(timestamp, datetime) else datetime.utcnow(),
+            timestamp=(
+                timestamp
+                if isinstance(timestamp, datetime)
+                else datetime.now(timezone.utc).replace(tzinfo=None)
+            ),
             user_id=data.get("user_id"),
             username=data.get("username"),
             action=data.get("action", ""),
@@ -203,7 +209,7 @@ class AuditLogger:
                 """
                     ),
                     (
-                        datetime.utcnow(),
+                        datetime.now(timezone.utc).replace(tzinfo=None),
                         user_id,
                         username,
                         action,
@@ -383,7 +389,7 @@ class AuditLogger:
         Returns:
             Dict with activity summary.
         """
-        start_time = datetime.utcnow() - timedelta(days=days)
+        start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
 
         logs = self.query(user_id=user_id, start_time=start_time, limit=1000)
 
@@ -410,7 +416,7 @@ class AuditLogger:
         Returns:
             int: Number of logs deleted.
         """
-        cutoff = datetime.utcnow() - timedelta(days=days)
+        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
 
         try:
             with self.db.connection() as conn:

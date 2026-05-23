@@ -8,7 +8,7 @@ import logging
 import math
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from app.modules.governance.audit_logger import AuditLogger
@@ -80,9 +80,9 @@ class AuditAnalyzer:
             Dict with pattern analysis results.
         """
         if not start_time:
-            start_time = datetime.utcnow() - timedelta(days=30)
+            start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
         if not end_time:
-            end_time = datetime.utcnow()
+            end_time = datetime.now(timezone.utc).replace(tzinfo=None)
 
         logs = self.audit_logger.query(
             start_time=start_time,
@@ -142,9 +142,9 @@ class AuditAnalyzer:
             List[AnomalyDetection]: Detected anomalies.
         """
         if not start_time:
-            start_time = datetime.utcnow() - timedelta(days=7)
+            start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=7)
         if not end_time:
-            end_time = datetime.utcnow()
+            end_time = datetime.now(timezone.utc).replace(tzinfo=None)
 
         anomalies = []
 
@@ -365,8 +365,8 @@ class AuditAnalyzer:
         Returns:
             Dict with user behavior profile.
         """
-        start_time = datetime.utcnow() - timedelta(days=days)
-        end_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+        end_time = datetime.now(timezone.utc).replace(tzinfo=None)
 
         logs = self.audit_logger.query(
             user_id=user_id,
@@ -434,9 +434,9 @@ class AuditAnalyzer:
             Dict with security score and breakdown.
         """
         if not start_time:
-            start_time = datetime.utcnow() - timedelta(days=30)
+            start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
         if not end_time:
-            end_time = datetime.utcnow()
+            end_time = datetime.now(timezone.utc).replace(tzinfo=None)
 
         # Get anomalies
         anomalies = self.detect_anomalies(start_time, end_time)

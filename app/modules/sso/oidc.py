@@ -10,7 +10,7 @@ import json
 import logging
 import secrets
 import urllib.parse
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, cast
 
 import jwt
@@ -147,7 +147,7 @@ class OIDCProvider(OAuth2Provider):
         if (
             self._jwks_cache is not None
             and self._jwks_cache_time is not None
-            and datetime.utcnow() - self._jwks_cache_time < cache_ttl
+            and datetime.now(timezone.utc).replace(tzinfo=None) - self._jwks_cache_time < cache_ttl
         ):
             return self._jwks_cache
 
@@ -161,7 +161,7 @@ class OIDCProvider(OAuth2Provider):
 
             # Cache the result
             self._jwks_cache = jwks
-            self._jwks_cache_time = datetime.utcnow()
+            self._jwks_cache_time = datetime.now(timezone.utc).replace(tzinfo=None)
 
             logger.debug(f"Successfully fetched JWKS from {jwks_url}")
             return cast("dict[str, Any]", jwks)

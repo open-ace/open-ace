@@ -6,7 +6,7 @@ Manages data retention policies and cleanup for compliance.
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Optional, cast
 
@@ -182,7 +182,7 @@ class DataRetentionManager:
             RetentionReport: Report of cleanup actions.
         """
         report = RetentionReport(
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
             rules_applied=[],
             records_deleted=0,
             records_archived=0,
@@ -193,7 +193,9 @@ class DataRetentionManager:
             if not rule.enabled:
                 continue
 
-            cutoff = datetime.utcnow() - timedelta(days=rule.retention_days)
+            cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+                days=rule.retention_days
+            )
 
             try:
                 if rule.action == "delete":
@@ -457,7 +459,7 @@ class DataRetentionManager:
 
         return {
             "estimates": estimates,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
         }
 
     def get_compliance_status(self) -> dict[str, Any]:
@@ -482,7 +484,9 @@ class DataRetentionManager:
             last_cleanup_time = last_cleanup["timestamp"]
             if isinstance(last_cleanup_time, str):
                 last_cleanup_time = datetime.fromisoformat(last_cleanup_time)
-            days_since_cleanup = (datetime.utcnow() - last_cleanup_time).days
+            days_since_cleanup = (
+                datetime.now(timezone.utc).replace(tzinfo=None) - last_cleanup_time
+            ).days
 
         # Determine compliance status
         is_compliant = True

@@ -5,7 +5,7 @@ Repository for user data access operations.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional, cast
 
 from app.repositories.database import Database, adapt_boolean_value, adapt_sql
@@ -64,7 +64,7 @@ class UserRepository:
                         password_hash,
                         role,
                         is_active,
-                        datetime.utcnow(),
+                        datetime.now(timezone.utc).replace(tzinfo=None),
                         system_account,
                     ),
                     commit=True,
@@ -84,7 +84,7 @@ class UserRepository:
                         password_hash,
                         role,
                         is_active_int,
-                        datetime.utcnow(),
+                        datetime.now(timezone.utc).replace(tzinfo=None),
                         system_account,
                     ),
                 )
@@ -278,7 +278,7 @@ class UserRepository:
         query = "UPDATE users SET last_login = ? WHERE id = ?"
 
         try:
-            self.db.execute(query, (datetime.utcnow(), user_id))
+            self.db.execute(query, (datetime.now(timezone.utc).replace(tzinfo=None), user_id))
             return True
         except Exception as e:
             logger.error(f"Error updating last login: {e}")
@@ -322,7 +322,9 @@ class UserRepository:
         query = "UPDATE users SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL"
 
         try:
-            cursor = self.db.execute(query, (datetime.utcnow(), user_id))
+            cursor = self.db.execute(
+                query, (datetime.now(timezone.utc).replace(tzinfo=None), user_id)
+            )
             return cast("bool", cursor.rowcount > 0)
         except Exception as e:
             logger.error(f"Error soft deleting user: {e}")
@@ -439,7 +441,9 @@ class UserRepository:
         """
 
         try:
-            self.db.execute(query, (user_id, token, datetime.utcnow(), expires_at))
+            self.db.execute(
+                query, (user_id, token, datetime.now(timezone.utc).replace(tzinfo=None), expires_at)
+            )
             return True
         except Exception as e:
             logger.error(f"Error creating session: {e}")
@@ -462,7 +466,7 @@ class UserRepository:
             WHERE s.token = ? AND s.expires_at > ?
         """
 
-        return self.db.fetch_one(query, (token, datetime.utcnow()))
+        return self.db.fetch_one(query, (token, datetime.now(timezone.utc).replace(tzinfo=None)))
 
     def delete_session(self, token: str) -> bool:
         """
@@ -512,7 +516,7 @@ class UserRepository:
         query = "DELETE FROM sessions WHERE expires_at < ?"
 
         try:
-            cursor = self.db.execute(query, (datetime.utcnow(),))
+            cursor = self.db.execute(query, (datetime.now(timezone.utc).replace(tzinfo=None),))
             return cast("int", cursor.rowcount)
         except Exception as e:
             logger.error(f"Error cleaning up sessions: {e}")
