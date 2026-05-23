@@ -109,6 +109,7 @@ def clean_postgres_schema(input_sql):
         "-- Name:",
         "-- Type:",
         "-- Schema:",
+        "-- --",
     ]
 
     # Tables to include (skip alembic_version as it's managed by alembic stamp)
@@ -298,6 +299,95 @@ def clean_postgres_schema(input_sql):
     return "\n".join(output_lines)
 
 
+def _sqlite_convert_column(col_line):
+    """Convert a single column definition from PostgreSQL to SQLite syntax."""
+    # Remove ::type casting (e.g., 'active'::text, DEFAULT 'localhost'::character varying, ::text[])
+    col_line = re.sub(r"::[a-z_]+(\([^)]*\))?(\[\])?", "", col_line)
+
+    # Convert data types — be careful not to replace column names like 'date'
+    # Must replace character varying BEFORE anything that could split it
+    col_line = re.sub(r"character varying\([^)]*\)", "TEXT", col_line)
+    col_line = re.sub(r"character varying", "TEXT", col_line)
+    # Clean up orphaned 'varying' keyword (left after partial :: removal)
+    col_line = re.sub(r"\s+varying\b", "", col_line)
+    col_line = re.sub(r"timestamp without time zone", "TIMESTAMP", col_line)
+    col_line = re.sub(r"timestamp with time zone", "TIMESTAMP", col_line)
+    col_line = re.sub(r"double precision", "REAL", col_line)
+    col_line = re.sub(r"\bbigint\b", "INTEGER", col_line)
+    col_line = re.sub(r"\bsmallint\b", "INTEGER", col_line)
+    col_line = re.sub(r"numeric\([^)]*\)", "REAL", col_line)
+    col_line = re.sub(r"decimal\([^)]*\)", "REAL", col_line)
+    # Convert 'date' type only when it appears as a type (after column name)
+    col_line = re.sub(r"^(\s+\w+)\s+date\b", r"\1 TEXT", col_line)
+
+    # Convert boolean to INTEGER
+    col_line = re.sub(r"\bboolean\b", "INTEGER", col_line)
+    col_line = re.sub(r"DEFAULT true", "DEFAULT 1", col_line)
+    col_line = re.sub(r"DEFAULT false", "DEFAULT 0", col_line)
+
+    # Convert DEFAULT now() to DEFAULT CURRENT_TIMESTAMP
+    col_line = re.sub(r"DEFAULT now\(\)", "DEFAULT CURRENT_TIMESTAMP", col_line)
+
+    # Handle id column with nextval sequence -> PRIMARY KEY AUTOINCREMENT
+    if re.search(r"id\s+integer\s+NOT\s+NULL\s+DEFAULT\s+nextval", col_line):
+        col_line = re.sub(
+            r"id\s+integer\s+NOT\s+NULL\s+DEFAULT\s+nextval\([^)]+\)",
+            "id INTEGER PRIMARY KEY AUTOINCREMENT",
+            col_line,
+        )
+        return col_line
+
+    # Remove any remaining nextval defaults
+    if "nextval" in col_line:
+        col_line = re.sub(r"DEFAULT\s+nextval\([^)]+\)", "", col_line)
+
+    # Clean up double spaces
+    col_line = re.sub(r"  +", " ", col_line)
+
+    return col_line
+
+
+def _sqlite_convert_check(constraint_line):
+    """Convert PostgreSQL CHECK constraint to SQLite-compatible form."""
+    # First remove all ::type casts (including array suffixes like ::text[])
+    constraint_line = re.sub(r"::[a-z_]+(\[\])?", "", constraint_line)
+
+    # Remove orphaned 'varying' keyword
+    constraint_line = re.sub(r"\s+varying\b", "", constraint_line)
+
+    # Replace ANY (ARRAY[...]) and ANY ((ARRAY[...])) with IN (...)
+    def _any_array_to_in(match):
+        return f"IN ({match.group(1)})"
+
+    # Handle: col = ANY ((ARRAY[...]))  (users_role style with double parens)
+    constraint_line = re.sub(
+        r"=\s*ANY\s*\(\(ARRAY\[([^\]]+)\]\)\)",
+        _any_array_to_in,
+        constraint_line,
+    )
+    # Handle: col = ANY (ARRAY[...])  (tenants style with single parens)
+    constraint_line = re.sub(
+        r"=\s*ANY\s*\(ARRAY\[([^\]]+)\]\)",
+        _any_array_to_in,
+        constraint_line,
+    )
+
+    # Clean up extra parens around the IN clause
+    constraint_line = re.sub(r"\(\((\w+)\s+IN\s*\(", r"(\1 IN (", constraint_line)
+    constraint_line = re.sub(r"\(\((\w+)\)\s+IN\s*\(", r"(\1 IN (", constraint_line)
+
+    # Balance parens — PG wraps CHECK expressions in ((...)) which may leave extras
+    open_count = constraint_line.count("(")
+    close_count = constraint_line.count(")")
+    while close_count > open_count:
+        # Remove the rightmost extra )
+        idx = constraint_line.rfind(")")
+        constraint_line = constraint_line[:idx] + constraint_line[idx + 1 :]
+        close_count -= 1
+
+    return constraint_line
+
+
 def convert_to_sqlite(postgres_sql):
     """Convert PostgreSQL schema to SQLite-compatible format."""
     lines = postgres_sql.split("\n")
@@ -305,24 +395,33 @@ def convert_to_sqlite(postgres_sql):
 
     # Header
     output_lines.append("-- Open-ACE Database Schema for SQLite")
-    output_lines.append("-- Auto-generated from PostgreSQL schema")
+    output_lines.append("-- Converted from schema-postgres.sql")
     output_lines.append("-- DO NOT EDIT MANUALLY")
     output_lines.append("")
-
-    # SQLite doesn't support: SEQUENCE, MATERIALIZED VIEW, partial indexes with WHERE,
-    # INCLUDE clause, FOREIGN KEY in ALTER TABLE, ::type casting
 
     i = 0
     while i < len(lines):
         line = lines[i]
 
-        # Skip PostgreSQL-specific setup
-        if re.match(r"SET", line):
+        # Skip PostgreSQL-specific SET statements
+        if re.match(r"SET ", line):
+            i += 1
+            continue
+
+        # Skip blank comment separators
+        if line.strip() == "--" or line.strip() == "-- --":
             i += 1
             continue
 
         # Skip CREATE SEQUENCE (SQLite uses AUTOINCREMENT)
         if re.match(r"CREATE SEQUENCE", line):
+            while i < len(lines) and not lines[i].rstrip().endswith(";"):
+                i += 1
+            i += 1
+            continue
+
+        # Skip ALTER SEQUENCE ... OWNED BY (part of sequence block, but may appear standalone)
+        if re.match(r"ALTER SEQUENCE", line):
             while i < len(lines) and not lines[i].rstrip().endswith(";"):
                 i += 1
             i += 1
@@ -337,132 +436,171 @@ def convert_to_sqlite(postgres_sql):
 
         # Handle CREATE TABLE
         if re.match(r"CREATE TABLE", line):
-            table_lines = [line]
-            i += 1
+            table_lines = []
+            i += 1  # skip the CREATE TABLE line, we'll rewrite it
 
-            # Collect full table definition
+            # Collect full table definition (columns + constraints until closing );)
+            body_lines = []
             while i < len(lines) and not lines[i].rstrip().endswith(";"):
-                col_line = lines[i]
-
-                # Remove ::type casting
-                col_line = re.sub(r"::[a-z_]+(\([^)]*\))?", "", col_line)
-
-                # Convert types
-                col_line = re.sub(r"character varying\([^)]*\)", "TEXT", col_line)
-                col_line = re.sub(r"timestamp without time zone", "TIMESTAMP", col_line)
-                col_line = re.sub(r"timestamp with time zone", "TIMESTAMP", col_line)
-                col_line = re.sub(r"boolean", "INTEGER", col_line)
-                col_line = re.sub(r"double precision", "REAL", col_line)
-                col_line = re.sub(r"bigint", "INTEGER", col_line)
-                col_line = re.sub(r"smallint", "INTEGER", col_line)
-                col_line = re.sub(r"numeric\([^)]*\)", "REAL", col_line)
-                col_line = re.sub(r"decimal\([^)]*\)", "REAL", col_line)
-
-                # Handle SERIAL -> INTEGER PRIMARY KEY AUTOINCREMENT
-                if re.search(r"integer\s+NOT\s+NULL\s+DEFAULT\s+nextval", col_line):
-                    col_line = re.sub(
-                        r"integer\s+NOT\s+NULL\s+DEFAULT\s+nextval\([^)]+\)",
-                        "INTEGER PRIMARY KEY AUTOINCREMENT",
-                        col_line,
-                    )
-                    # Remove the id column line if it's redundant
-                    if "id" in col_line and "PRIMARY KEY" in col_line:
-                        col_line = col_line.replace("NOT NULL", "")
-
-                # Handle DEFAULT with nextval (sequence) - remove it
-                if "nextval" in col_line:
-                    col_line = re.sub(r"DEFAULT\s+nextval\([^)]+\)", "", col_line)
-
-                # Clean up double spaces
-                col_line = re.sub(r"  +", " ", col_line)
-
-                table_lines.append(col_line)
+                body_lines.append(lines[i])
                 i += 1
+            # Skip closing ");"
 
-            # Closing semicolon
-            if i < len(lines):
-                closing = lines[i]
-                closing = re.sub(r"::[a-z_]+", "", closing)
-                table_lines.append(closing)
+            # Extract table name from original line
+            table_match = re.search(
+                r"CREATE TABLE(?:\s+IF NOT EXISTS)?(?:\s+(?:public\.)?)?(\w+)", line
+            )
+            table_name = table_match.group(1) if table_match else "unknown"
 
-            # Process table to handle PRIMARY KEY and AUTOINCREMENT
-            # Find the id column and make it PRIMARY KEY AUTOINCREMENT
-            processed = []
-            has_pk = False
-            for tl in table_lines:
-                if re.search(r"id\s+integer", tl) and not has_pk:
-                    # Make id column PRIMARY KEY AUTOINCREMENT
-                    tl = re.sub(
-                        r"id\s+integer(?:\s+NOT\s+NULL)?(?:\s+DEFAULT\s+nextval[^,]*)?",
-                        "id INTEGER PRIMARY KEY AUTOINCREMENT",
-                        tl,
-                    )
-                    has_pk = True
-                processed.append(tl)
+            converted_columns = []
+            for bl in body_lines:
+                stripped = bl.strip()
 
-            output_lines.extend(processed)
+                # Skip empty lines
+                if not stripped:
+                    continue
+
+                # Handle CHECK constraints
+                if stripped.startswith("CONSTRAINT") and "CHECK" in stripped:
+                    converted = _sqlite_convert_check(stripped)
+                    converted_columns.append(f"    {converted}")
+                    continue
+
+                # Handle UNIQUE constraints inline
+                if stripped.startswith("UNIQUE") or (
+                    stripped.startswith("CONSTRAINT") and "UNIQUE" in stripped
+                ):
+                    # Extract UNIQUE(...) part
+                    unique_match = re.search(r"UNIQUE\s*\([^)]+\)", stripped)
+                    if unique_match:
+                        converted_columns.append(f"    {unique_match.group(0)}")
+                    continue
+
+                # Convert column definitions
+                converted = _sqlite_convert_column(bl)
+
+                converted_columns.append(converted)
+
+            # Build clean CREATE TABLE statement
+            table_lines.append(f"CREATE TABLE {table_name} (")
+            for cl in converted_columns:
+                table_lines.append(cl)
+            table_lines.append(");")
+
+            output_lines.extend(table_lines)
             output_lines.append("")
             i += 1
             continue
 
         # Handle CREATE INDEX
         if re.match(r"CREATE(?: UNIQUE)? INDEX", line):
-            idx_line = line
+            idx_parts = [line]
 
-            # Remove PostgreSQL-specific: USING btree, INCLUDE, WHERE
-            idx_line = re.sub(r" USING [a-z]+", "", idx_line)
-            idx_line = re.sub(r" INCLUDE \([^)]+\)", "", idx_line)
-
-            # Keep partial index WHERE clause but warn (SQLite supports it)
-            # Actually SQLite supports WHERE in indexes
-
-            output_lines.append(idx_line)
-            i += 1
-            while i < len(lines) and not lines[i].rstrip().endswith(";"):
-                idx_cont = lines[i]
-                idx_cont = re.sub(r" USING [a-z]+", "", idx_cont)
-                idx_cont = re.sub(r" INCLUDE \([^)]+\)", "", idx_cont)
-                output_lines.append(idx_cont)
+            # If the CREATE INDEX line already ends with ;, it's a single-line statement
+            if not line.rstrip().endswith(";"):
                 i += 1
-            if i < len(lines):
-                output_lines.append(lines[i])
+                while i < len(lines) and not lines[i].rstrip().endswith(";"):
+                    idx_parts.append(lines[i])
+                    i += 1
+                if i < len(lines):
+                    idx_parts.append(lines[i])
+
+            # Join the full index statement, then clean it
+            full_idx = " ".join(p.strip() for p in idx_parts)
+            # Remove trailing semicolon for processing
+            full_idx = full_idx.rstrip(";")
+
+            # Remove PostgreSQL-specific syntax
+            full_idx = re.sub(r" USING [a-z]+", "", full_idx)
+            full_idx = re.sub(r" INCLUDE \([^)]+\)", "", full_idx)
+            # Remove ::type casts in WHERE clauses
+            full_idx = re.sub(r"::[a-z_\[\]]+", "", full_idx)
+            # Remove varchar_pattern_ops
+            full_idx = re.sub(r"\s+varchar_pattern_ops", "", full_idx)
+            # Convert boolean comparisons in WHERE: (role)::text = 'assistant'::text -> role = 'assistant'
+            full_idx = re.sub(r"\((\w+)\)::text\s*=\s*'([^']*)'::text", r"\1 = '\2'", full_idx)
+            # Convert (user_id IS NOT NULL) AND ... in WHERE
+            full_idx = re.sub(r"\((\w+)\)::text\s*=\s*'([^']*)'", r"\1 = '\2'", full_idx)
+
+            # Skip indexes on materialized views (not supported in SQLite)
+            if re.match(r"CREATE(?: UNIQUE)? INDEX\s+\w+\s+ON\s+session_stats\b", full_idx):
+                i += 1
+                continue
+
+            output_lines.append(f"{full_idx};")
             output_lines.append("")
             i += 1
             continue
 
-        # Skip ALTER TABLE ADD FOREIGN KEY (SQLite needs it in CREATE TABLE)
+        # Handle ALTER TABLE statements
         if re.match(r"ALTER TABLE", line):
-            if "FOREIGN KEY" in line:
-                while i < len(lines) and not lines[i].rstrip().endswith(";"):
-                    i += 1
+            # Collect full statement
+            alter_parts = [line]
+            i += 1
+            while i < len(lines) and not lines[i].rstrip().endswith(";"):
+                alter_parts.append(lines[i])
+                i += 1
+            if i < len(lines):
+                alter_parts.append(lines[i])
+
+            full_alter = " ".join(p.strip() for p in alter_parts)
+
+            # Skip: FOREIGN KEY, PRIMARY KEY, SET DEFAULT nextval, OWNER
+            if any(kw in full_alter for kw in ["FOREIGN KEY", "OWNER TO", "nextval"]):
                 i += 1
                 continue
-            elif "PRIMARY KEY" in line:
-                # Skip ALTER TABLE ADD PRIMARY KEY (handled in CREATE TABLE)
-                while i < len(lines) and not lines[i].rstrip().endswith(";"):
-                    i += 1
+            if re.search(r"ALTER COLUMN.*SET DEFAULT", full_alter):
                 i += 1
                 continue
-            else:
-                # Keep other ALTER TABLE (ADD CONSTRAINT UNIQUE)
-                output_lines.append(line)
-                i += 1
-                while i < len(lines) and not lines[i].rstrip().endswith(";"):
-                    output_lines.append(lines[i])
+            if re.match(r"ALTER TABLE(?:\s+ONLY)?(?:\s+(?:public\.)?)?(\w+)", line):
+                table_m = re.search(r"ALTER TABLE(?:\s+ONLY)?(?:\s+(?:public\.)?)?(\w+)", line)
+                if table_m and table_m.group(1) == "alembic_version":
                     i += 1
-                if i < len(lines):
-                    output_lines.append(lines[i])
-                output_lines.append("")
+                    continue
+
+            # Keep: ADD CONSTRAINT UNIQUE, ADD CONSTRAINT PRIMARY KEY
+            if "ADD CONSTRAINT" in full_alter and (
+                "UNIQUE" in full_alter or "PRIMARY KEY" in full_alter
+            ):
+                # Extract constraint name and columns
+                constraint_match = re.search(
+                    r"ADD CONSTRAINT\s+(\w+)\s+(UNIQUE|PRIMARY KEY)\s*\(([^)]+)\)",
+                    full_alter,
+                )
+                if constraint_match:
+                    cname = constraint_match.group(1)
+                    ctype = constraint_match.group(2)
+                    cols = constraint_match.group(3)
+                    if ctype == "UNIQUE":
+                        output_lines.append(
+                            f"CREATE UNIQUE INDEX {cname} ON {table_m.group(1)} ({cols});"
+                        )
+                        output_lines.append("")
+                    # PRIMARY KEY handled in CREATE TABLE
                 i += 1
                 continue
+
+            # Skip other ALTER TABLE
+            i += 1
+            continue
 
         # Pass through comments and empty lines
-        output_lines.append(line)
+        if line.startswith("--") or not line.strip():
+            output_lines.append(line)
+            i += 1
+            continue
+
+        # Skip anything else that doesn't match
         i += 1
 
-    # Remove alembic_version table (managed by alembic stamp)
+    # Post-processing: clean up alembic_version references
     result = "\n".join(output_lines)
+
+    # Remove alembic_version table (managed by alembic stamp)
     result = re.sub(r"CREATE TABLE alembic_version[^;]+;", "", result, flags=re.DOTALL)
+
+    # Remove consecutive blank lines (more than 1)
+    result = re.sub(r"\n{3,}", "\n\n", result)
 
     return result
 

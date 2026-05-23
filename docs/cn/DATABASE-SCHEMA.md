@@ -680,11 +680,9 @@ API 密钥加密存储。
 
 | 列名 | 类型 | 说明 |
 |------|------|------|
-| id | integer PK | 自增 |
-| username | text | NOT NULL |
+| username | varchar | NOT NULL，查找键 |
 | attempt_count | integer | DEFAULT 0 |
 | locked_until | timestamp | 锁定截止时间 |
-| last_attempt_at | timestamp | 最后尝试时间 |
 
 ### user_permissions
 
@@ -695,10 +693,8 @@ API 密钥加密存储。
 | id | integer PK | 自增 |
 | user_id | integer | NOT NULL |
 | permission | text | NOT NULL |
-| resource_type | text | 资源类型 |
-| resource_id | text | 资源 ID |
 | granted_by | integer | 授权者 |
-| granted_at | timestamp | 授权时间 |
+| granted_at | text | 授权时间 |
 
 索引：`idx_user_permissions_user`, `idx_user_permissions_permission`
 
@@ -711,8 +707,6 @@ API 密钥加密存储。
 | id | integer PK | 自增 |
 | role | text | NOT NULL |
 | permission | text | NOT NULL |
-| resource_type | text | 资源类型 |
-| created_at | timestamp | 创建时间 |
 
 索引：`idx_role_permissions_role`, `idx_role_permissions_permission`
 

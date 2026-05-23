@@ -447,11 +447,9 @@ Failed login attempt tracking for account lockout.
 
 | Column | Type | Notes |
 |--------|------|-------|
-| id | integer PK | Auto-increment |
-| username | text | NOT NULL |
+| username | varchar | NOT NULL, lookup key |
 | attempt_count | integer | DEFAULT 0 |
 | locked_until | timestamp | Lock expiry time |
-| last_attempt_at | timestamp | Last attempt time |
 
 ### user_permissions
 
@@ -462,10 +460,8 @@ User-level permission overrides.
 | id | integer PK | Auto-increment |
 | user_id | integer | NOT NULL |
 | permission | text | NOT NULL |
-| resource_type | text | Resource type |
-| resource_id | text | Resource ID |
 | granted_by | integer | Grantor |
-| granted_at | timestamp | Grant time |
+| granted_at | text | Grant time |
 
 Indexes: `idx_user_permissions_user`, `idx_user_permissions_permission`
 
@@ -478,8 +474,6 @@ Role permission templates.
 | id | integer PK | Auto-increment |
 | role | text | NOT NULL |
 | permission | text | NOT NULL |
-| resource_type | text | Resource type |
-| created_at | timestamp | Creation time |
 
 Indexes: `idx_role_permissions_role`, `idx_role_permissions_permission`
 
@@ -735,6 +729,8 @@ Unique: `(team_id, user_id)`
 | tenant_settings | tenant_id | tenants | CASCADE |
 | tenant_usage | tenant_id | tenants | CASCADE |
 | api_key_store | tenant_id | tenants | CASCADE |
+| machine_assignments | machine_id | remote_machines | — |
+| user_permissions | user_id | users | — |
 
 ## Cross-Database Compatibility
 
