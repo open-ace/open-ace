@@ -325,9 +325,9 @@ def _create_sqlite_tables(db):
             """
             CREATE TABLE IF NOT EXISTS role_permissions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                role TEXT NOT NULL,
+                role_name TEXT NOT NULL,
                 permission TEXT NOT NULL,
-                UNIQUE(role, permission)
+                UNIQUE(role_name, permission)
             )
         """
         )
@@ -634,9 +634,9 @@ def _create_pg_tables(db):
             """
             CREATE TABLE IF NOT EXISTS role_permissions (
                 id SERIAL PRIMARY KEY,
-                role TEXT NOT NULL,
+                role_name TEXT NOT NULL,
                 permission TEXT NOT NULL,
-                UNIQUE(role, permission)
+                UNIQUE(role_name, permission)
             )
         """
         )

@@ -720,6 +720,7 @@ def _create_session_for_test(mgr, user_id, machine_id):
     # Patch route module to use our session manager
     import app.routes.remote as remote_mod
 
+    original_remote_rsm = remote_mod.get_remote_session_manager
     remote_mod.get_remote_session_manager = lambda: session_mgr
 
     result = session_mgr.create_remote_session(
@@ -731,6 +732,7 @@ def _create_session_for_test(mgr, user_id, machine_id):
 
     rsm_mod.get_remote_agent_manager = original_get
     rsm_mod.get_remote_session_manager = original_rsm_get
+    remote_mod.get_remote_session_manager = original_remote_rsm
     return result
 
 
