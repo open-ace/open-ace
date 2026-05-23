@@ -91,6 +91,7 @@ def _create_sqlite_tables(db):
                 parent_id TEXT,
                 role TEXT,
                 content TEXT,
+                full_entry TEXT,
                 tokens_used INTEGER DEFAULT 0,
                 input_tokens INTEGER DEFAULT 0,
                 output_tokens INTEGER DEFAULT 0,
@@ -99,8 +100,17 @@ def _create_sqlite_tables(db):
                 sender_id TEXT,
                 sender_name TEXT,
                 host_name TEXT,
+                message_source TEXT,
+                feishu_conversation_id TEXT,
+                group_subject TEXT,
+                is_group_chat INTEGER DEFAULT 0,
+                agent_session_id TEXT,
+                conversation_id TEXT,
+                created_at TEXT,
+                deleted_at TEXT,
                 user_id INTEGER,
-                is_group_chat INTEGER DEFAULT 0
+                project_path TEXT,
+                UNIQUE(date, tool_name, message_id, host_name)
             )
         """
         )
@@ -137,7 +147,12 @@ def _create_sqlite_tables(db):
                 tokens_used INTEGER DEFAULT 0,
                 input_tokens INTEGER DEFAULT 0,
                 output_tokens INTEGER DEFAULT 0,
-                request_count INTEGER DEFAULT 0
+                request_count INTEGER DEFAULT 0,
+                total_tokens INTEGER DEFAULT 0,
+                total_input_tokens INTEGER DEFAULT 0,
+                total_output_tokens INTEGER DEFAULT 0,
+                message_count INTEGER DEFAULT 0,
+                updated_at TEXT
             )
         """
         )
@@ -275,6 +290,7 @@ def _create_sqlite_tables(db):
                 created_at TEXT,
                 updated_at TEXT,
                 last_login TEXT,
+                deleted_at TEXT,
                 tenant_id INTEGER
             )
         """
@@ -382,6 +398,7 @@ def _create_pg_tables(db):
                 parent_id TEXT,
                 role TEXT,
                 content TEXT,
+                full_entry TEXT,
                 tokens_used INTEGER DEFAULT 0,
                 input_tokens INTEGER DEFAULT 0,
                 output_tokens INTEGER DEFAULT 0,
@@ -390,8 +407,17 @@ def _create_pg_tables(db):
                 sender_id TEXT,
                 sender_name TEXT,
                 host_name TEXT,
+                message_source TEXT,
+                feishu_conversation_id TEXT,
+                group_subject TEXT,
+                is_group_chat INTEGER DEFAULT 0,
+                agent_session_id TEXT,
+                conversation_id TEXT,
+                created_at TEXT,
+                deleted_at TEXT,
                 user_id INTEGER,
-                is_group_chat INTEGER DEFAULT 0
+                project_path TEXT,
+                UNIQUE(date, tool_name, message_id, host_name)
             )
         """
         )
@@ -573,6 +599,7 @@ def _create_pg_tables(db):
                 created_at TEXT,
                 updated_at TEXT,
                 last_login TEXT,
+                deleted_at TEXT,
                 tenant_id INTEGER
             )
         """
@@ -645,28 +672,29 @@ def pg_db():
     # Create a fresh connection pool pointing to the test database
     db_mod._pg_pool = pg_pool.ThreadedConnectionPool(1, 10, test_url)
 
-    db = Database(db_url=test_url)
-    _create_pg_tables(db)
-
-    # Patch global functions so repo code's is_postgresql() and get_database_url()
-    # point to our test database instead of the production config.
     import scripts.shared.config as config_mod
 
-    with patch.object(db_mod, "is_postgresql", return_value=True):
-        with patch.object(db_mod, "get_database_url", return_value=test_url):
-            with patch.object(config_mod, "get_database_url", return_value=test_url):
-                yield db
-
-    # Cleanup: close connections and drop test database
-    db_mod._pg_pool = None
-
-    conn = psycopg2.connect(base_url)
-    conn.autocommit = True
     try:
-        conn.cursor().execute(
-            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = %s",
-            (test_db_name,),
-        )
-        conn.cursor().execute(f'DROP DATABASE IF EXISTS "{test_db_name}"')
+        db = Database(db_url=test_url)
+        _create_pg_tables(db)
+
+        # Patch global functions so repo code's is_postgresql() and get_database_url()
+        # point to our test database instead of the production config.
+        with patch.object(db_mod, "is_postgresql", return_value=True):
+            with patch.object(db_mod, "get_database_url", return_value=test_url):
+                with patch.object(config_mod, "get_database_url", return_value=test_url):
+                    yield db
     finally:
-        conn.close()
+        # Cleanup: close connections and drop test database
+        db_mod._pg_pool = None
+
+        conn = psycopg2.connect(base_url)
+        conn.autocommit = True
+        try:
+            conn.cursor().execute(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = %s",
+                (test_db_name,),
+            )
+            conn.cursor().execute(f'DROP DATABASE IF EXISTS "{test_db_name}"')
+        finally:
+            conn.close()

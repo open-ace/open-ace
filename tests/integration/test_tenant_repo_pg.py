@@ -185,3 +185,10 @@ class TestTenantUsage:
 
         repo.update_user_count(tenant_id, delta=-2)
         assert repo.get_by_id(tenant_id).user_count == 3
+
+    def test_update_user_count_floor_at_zero(self, pg_db):
+        repo = TenantRepository(db=pg_db)
+        tenant_id = repo.create(_make_tenant())
+
+        repo.update_user_count(tenant_id, delta=-100)
+        assert repo.get_by_id(tenant_id).user_count == 0
