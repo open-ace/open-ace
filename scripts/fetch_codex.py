@@ -913,6 +913,7 @@ def update_agent_sessions_stats(messages: list) -> int:
                 )
                 _execute(cursor, check_sql, (session_id,))
                 session_row = cursor.fetchone()
+                _is_new_session = False
 
                 if not session_row:
                     # Session doesn't exist - create a new record
@@ -924,7 +925,7 @@ def update_agent_sessions_stats(messages: list) -> int:
                     project_path = stats["project_path"] or first_msg.get("project_path", "")
 
                     # Extract system_account from sender_name (format: {system_account}-{hostname}-{tool})
-                    system_account = sender_name.split("-")[0] if sender_name else "unknown"
+                    system_account = sender_name.rsplit("-", 2)[0] if sender_name else "unknown"
 
                     # Find user_id by system_account
                     user_sql = f"SELECT id FROM users WHERE system_account = {placeholder} OR username = {placeholder}"
@@ -964,39 +965,41 @@ def update_agent_sessions_stats(messages: list) -> int:
                         ),
                     )
                     updated += 1
-                    # Fall through to insert session_messages (don't continue)
+                    # Skip UPDATE for newly created sessions — INSERT already set all fields
+                    _is_new_session = True
 
-                # Get the most common model
-                model = None
-                if stats["models"]:
-                    model = sorted(stats["models"])[0]
+                if not _is_new_session:
+                    # Get the most common model
+                    model = None
+                    if stats["models"]:
+                        model = sorted(stats["models"])[0]
 
-                # Update agent_sessions table
-                session_updated_at = stats["last_timestamp"] or now
-                sql = f"""
-                    UPDATE agent_sessions
-                    SET message_count = GREATEST(COALESCE(message_count, 0), {placeholder}),
-                        total_tokens = GREATEST(COALESCE(total_tokens, 0), {placeholder}),
-                        request_count = GREATEST(COALESCE(request_count, 0), {placeholder}),
-                        model = COALESCE(model, {placeholder}),
-                        updated_at = {placeholder}
-                    WHERE session_id = {placeholder}
-                """
-                _execute(
-                    cursor,
-                    sql,
-                    (
-                        stats["message_count"],
-                        stats["total_tokens"],
-                        stats["request_count"],
-                        model,
-                        session_updated_at,
-                        session_id,
-                    ),
-                )
+                    # Update agent_sessions table
+                    session_updated_at = stats["last_timestamp"] or now
+                    sql = f"""
+                        UPDATE agent_sessions
+                        SET message_count = GREATEST(COALESCE(message_count, 0), {placeholder}),
+                            total_tokens = GREATEST(COALESCE(total_tokens, 0), {placeholder}),
+                            request_count = GREATEST(COALESCE(request_count, 0), {placeholder}),
+                            model = COALESCE(model, {placeholder}),
+                            updated_at = {placeholder}
+                        WHERE session_id = {placeholder}
+                    """
+                    _execute(
+                        cursor,
+                        sql,
+                        (
+                            stats["message_count"],
+                            stats["total_tokens"],
+                            stats["request_count"],
+                            model,
+                            session_updated_at,
+                            session_id,
+                        ),
+                    )
 
-                if cursor.rowcount > 0:
-                    updated += 1
+                    if cursor.rowcount > 0:
+                        updated += 1
 
                 # Insert messages into session_messages table
                 for msg in stats["messages"]:
