@@ -35,7 +35,7 @@ sys.path.insert(0, os.path.join(PROJECT_ROOT, "app"))
 import requests
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
-REMOTE_HOST = "192.168.64.3"
+REMOTE_HOST = os.environ.get("REMOTE_TEST_HOST", "192.168.64.3")
 REMOTE_USER = "root"
 MACHINE_ID = "6f85734e-9b21-4320-a857-a67bc36b9078"
 TEST_USER = "黄迎春"

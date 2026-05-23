@@ -15,6 +15,7 @@ Event types: session_meta, response_item, event_msg, turn_context
 
 import argparse
 import getpass
+import hashlib
 import json
 import os
 import platform
@@ -540,7 +541,7 @@ def process_jsonl_file(
                     continue
                 role = "assistant"
                 # Generate a synthetic message_id for reasoning
-                content_hash = abs(hash(ts + "reasoning")) % (10**10)
+                content_hash = hashlib.md5((ts + "reasoning").encode()).hexdigest()[:10]
                 message_id = f"reasoning-{content_hash}"
 
             else:
@@ -550,7 +551,7 @@ def process_jsonl_file(
             if not message_id:
                 # Use timestamp + role as unique key
                 raw = f"{ts}-{role}-{payload_type}"
-                message_id = f"codex-{abs(hash(raw)) % (10**12):012d}"
+                message_id = f"codex-{hashlib.md5(raw.encode()).hexdigest()[:12]}"
 
             # Extract content
             content = extract_content_from_response_item(event)

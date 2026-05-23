@@ -35,6 +35,7 @@ import requests
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 WEBUI_URL = os.environ.get("WEBUI_URL", "http://localhost:3000")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
+REMOTE_TEST_HOST = os.environ.get("REMOTE_TEST_HOST", "192.168.64.3")
 TEST_USER = "黄迎春"
 TEST_PASS = "admin123"
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "e2e-codex-comprehensive")
@@ -516,7 +517,7 @@ def test_remote_session_create_codex():
             "ConnectTimeout=5",
             "-o",
             "StrictHostKeyChecking=no",
-            "root@192.168.64.3",
+            f"root@{REMOTE_TEST_HOST}",
             f"grep -c 'codex.*{session_id[:8]}' /tmp/agent.log 2>/dev/null || echo 0",
         ],
         capture_output=True,
@@ -738,7 +739,7 @@ def test_remote_terminal_codex():
             "ConnectTimeout=5",
             "-o",
             "StrictHostKeyChecking=no",
-            "root@192.168.64.3",
+            f"root@{REMOTE_TEST_HOST}",
             'cd /root/.open-ace-agent && python3.9 -c "from terminal_menu import TOOLS; '
             "print([t['cli'] for t in TOOLS if t['cli']=='codex'])\"",
         ],

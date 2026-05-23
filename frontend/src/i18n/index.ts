@@ -2168,6 +2168,11 @@ const translations: Record<Language, Translations> = {
     compactMode: '簡潔モード',
     verbose: '詳細',
     compact: '簡潔',
+    codexSettings: 'Codex 設定 (TOML)',
+    codexSettingsHint:
+      '機密情報以外の Codex 設定のみを構成してください（model、sandbox など）。API キーは含めないでください — 環境変数経由で自動的に挿入されます。',
+    codexSettingsInvalid: 'Codex 設定が無効です',
+    providerCannotChange: 'プロバイダーは変更できません',
   },
   ko: {
     // Common
@@ -2681,6 +2686,11 @@ const translations: Record<Language, Translations> = {
     compactMode: '간단 모드',
     verbose: '상세',
     compact: '간단',
+    codexSettings: 'Codex 설정 (TOML)',
+    codexSettingsHint:
+      '민감하지 않은 Codex 설정만 구성하세요 (model, sandbox 등). API 키는 포함하지 마세요 — 환경 변수를 통해 자동으로 주입됩니다.',
+    codexSettingsInvalid: 'Codex 설정이 유효하지 않습니다',
+    providerCannotChange: '공급자를 변경할 수 없습니다',
   },
 };
 

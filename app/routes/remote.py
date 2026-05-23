@@ -1778,7 +1778,8 @@ def llm_proxy(path=""):
             body = json.dumps(cc_body).encode("utf-8")
             _converted_from_responses = True
             logger.info(
-                "LLM proxy: converted Responses API -> Chat Completions for %s",
+                "LLM proxy: converted Responses API -> Chat Completions for %s "
+                "(non-streaming; streaming conversion not yet implemented)",
                 target_url,
             )
         except Exception as e:

@@ -393,11 +393,9 @@ def _extract_codex_text(payload: dict[str, Any]) -> str:
         if isinstance(content, list):
             texts = []
             for block in content:
-                if (
-                    isinstance(block, dict)
-                    and block.get("type") == "input_text"
-                    or isinstance(block, dict)
-                    and block.get("type") == "output_text"
+                if isinstance(block, dict) and block.get("type") in (
+                    "input_text",
+                    "output_text",
                 ):
                     texts.append(block.get("text", ""))
             return "\n".join(texts)
@@ -550,6 +548,7 @@ class CodexSession:
             elif msg_role == "assistant":
                 role = "assistant"
             else:
+                logger.debug("Skipping response_item with unknown role: %s", msg_role)
                 return
         elif ptype in ("function_call", "custom_tool_call"):
             role = "assistant"
@@ -561,6 +560,7 @@ class CodexSession:
                 return
             role = "assistant"
         else:
+            logger.debug("Skipping response_item with unknown ptype: %s", ptype)
             return
 
         text = _extract_codex_text(payload)

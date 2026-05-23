@@ -843,7 +843,7 @@ const ContentBlockRenderer: React.FC<{
 
     case 'file_change':
       return (
-        <details className="border-start border-3 ps-2 mb-1" style={{ borderColor: block.status === 'accepted' ? '#28a745' : '#dc3545' }}>
+        <details className={`border-start border-3 ps-2 mb-1 ${block.status === 'accepted' ? 'border-success' : 'border-danger'}`}>
           <summary className="small" style={{ cursor: 'pointer' }}>
             <Badge variant={block.status === 'accepted' ? 'success' : 'danger'} className="me-1">
               {block.status === 'accepted' ? 'Accepted' : 'Declined'}

@@ -473,7 +473,7 @@ class APIKeyProxyService:
             # Get tool-specific settings from cli_settings.
             # Try the original tool_name key first, then the canonical form,
             # so that cli_settings keyed by either "codex" or "codex-cli" are found.
-            tool_settings = cli_settings.get(tool_name) or cli_settings.get(canonical_tool, {})
+            tool_settings = cli_settings.get(tool_name, cli_settings.get(canonical_tool, {}))
 
             # Return non-sensitive settings only.
             # API credentials (key + base_url) are NOT injected here —
