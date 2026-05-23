@@ -33,6 +33,13 @@ if shared_dir not in sys.path:
     sys.path.insert(0, script_dir)
 from shared import db
 
+# Import shared codex parser from remote-agent
+_remote_agent_path = os.path.join(script_dir, "..", "remote-agent")
+if _remote_agent_path not in sys.path:
+    sys.path.insert(0, _remote_agent_path)
+from cli_adapters.codex_jsonl_parser import extract_codex_content_blocks as _shared_extract_blocks
+from cli_adapters.codex_jsonl_parser import extract_codex_text as _shared_extract_text
+
 
 def get_default_sender_name(tool: str = "codex") -> str:
     """Generate default sender name in format: {user}-{hostname}-{tool}."""
@@ -81,22 +88,7 @@ def find_all_codex_session_dirs() -> list:
 
         try:
             if codex_sessions.is_dir():
-                # Check if there are jsonl files in the date subdirectories
-                has_jsonl = False
-                for year_dir in codex_sessions.iterdir():
-                    if not year_dir.is_dir():
-                        continue
-                    for month_dir in year_dir.iterdir():
-                        if not month_dir.is_dir():
-                            continue
-                        for day_dir in month_dir.iterdir():
-                            if day_dir.is_dir() and list(day_dir.glob("*.jsonl")):
-                                has_jsonl = True
-                                break
-                        if has_jsonl:
-                            break
-                    if has_jsonl:
-                        break
+                has_jsonl = any(codex_sessions.glob("*/*/*.jsonl"))
 
                 if has_jsonl:
                     results.append((system_account, codex_sessions))
@@ -139,187 +131,23 @@ def parse_timestamp(ts_str: str) -> str:
 def extract_content_blocks_from_response_item(event: dict) -> list[dict]:
     """Extract structured content_blocks from a response_item event.
 
-    Maps Codex response_item payloads to frontend content_blocks format:
-    - message (user) -> {type: 'text', text: ...}
-    - message (assistant) -> {type: 'text', text: ...} + phase in metadata
-    - function_call -> {type: 'tool_use', id, name, input}
-    - function_call_output -> {type: 'tool_result', tool_use_id, content}
-    - custom_tool_call -> {type: 'tool_use', id, name, input: {patch: ...}}
-    - custom_tool_call_output -> {type: 'tool_result', tool_use_id, content}
-    - reasoning (with summary) -> {type: 'reasoning', summary: ...}
-
-    Args:
-        event: A response_item event dict with type and payload
-
-    Returns:
-        List of content_block dicts
+    Delegates to the shared codex_jsonl_parser module.
     """
     payload = event.get("payload", {})
     if not isinstance(payload, dict):
         return []
-
-    payload_type = payload.get("type", "")
-    content_blocks = []
-
-    if payload_type == "message":
-        role = payload.get("role", "")
-        content_list = payload.get("content", [])
-        phase = payload.get("phase")
-
-        texts = []
-        for item in content_list:
-            if not isinstance(item, dict):
-                continue
-            if item.get("type") == "input_text" or item.get("type") == "output_text":
-                text = item.get("text", "")
-                if text:
-                    texts.append(text)
-
-        if texts:
-            block = {"type": "text", "text": "\n".join(texts)}
-            # Store phase as metadata for assistant messages
-            if role == "assistant" and phase:
-                block["metadata"] = {"phase": phase}
-            content_blocks.append(block)
-
-    elif payload_type == "function_call":
-        call_id = payload.get("call_id", "unknown")
-        name = payload.get("name", "unknown")
-        arguments_str = payload.get("arguments", "{}")
-        try:
-            arguments = (
-                json.loads(arguments_str) if isinstance(arguments_str, str) else arguments_str
-            )
-        except (json.JSONDecodeError, TypeError):
-            arguments = {"raw": arguments_str}
-        content_blocks.append(
-            {
-                "type": "tool_use",
-                "id": call_id,
-                "name": name,
-                "input": arguments,
-            }
-        )
-
-    elif payload_type == "function_call_output":
-        call_id = payload.get("call_id", "unknown")
-        output = payload.get("output", "")
-        content_blocks.append(
-            {
-                "type": "tool_result",
-                "tool_use_id": call_id,
-                "content": (
-                    output if isinstance(output, str) else json.dumps(output, ensure_ascii=False)
-                ),
-            }
-        )
-
-    elif payload_type == "custom_tool_call":
-        call_id = payload.get("call_id", "unknown")
-        name = payload.get("name", "unknown")
-        patch_input = payload.get("input", "")
-        status = payload.get("status", "")
-        content_blocks.append(
-            {
-                "type": "tool_use",
-                "id": call_id,
-                "name": name,
-                "input": {"patch": patch_input},
-                "status": status,
-            }
-        )
-
-    elif payload_type == "custom_tool_call_output":
-        call_id = payload.get("call_id", "unknown")
-        output = payload.get("output", "")
-        content_blocks.append(
-            {
-                "type": "tool_result",
-                "tool_use_id": call_id,
-                "content": (
-                    output if isinstance(output, str) else json.dumps(output, ensure_ascii=False)
-                ),
-            }
-        )
-
-    elif payload_type == "reasoning":
-        summary = payload.get("summary", [])
-        if summary and isinstance(summary, list):
-            summary_texts = []
-            for item in summary:
-                if isinstance(item, dict) and item.get("type") == "summary_text":
-                    text = item.get("text", "")
-                    if text:
-                        summary_texts.append(text)
-            if summary_texts:
-                content_blocks.append(
-                    {
-                        "type": "reasoning",
-                        "summary": "\n".join(summary_texts),
-                    }
-                )
-        # If summary is empty (encrypted content), skip - no readable content
-
-    return content_blocks
+    return _shared_extract_blocks(payload)
 
 
 def extract_content_from_response_item(event: dict) -> Optional[str]:
-    """Extract plain text content from a response_item event for database storage."""
+    """Extract plain text content from a response_item event for database storage.
+
+    Delegates to the shared codex_jsonl_parser module.
+    """
     payload = event.get("payload", {})
     if not isinstance(payload, dict):
         return None
-
-    payload_type = payload.get("type", "")
-
-    if payload_type == "message":
-        content_list = payload.get("content", [])
-        texts = []
-        for item in content_list:
-            if not isinstance(item, dict):
-                continue
-            if item.get("type") in ("input_text", "output_text"):
-                text = item.get("text", "")
-                if text:
-                    texts.append(text)
-        if len(texts) == 1:
-            return texts[0]
-        return "\n".join(texts) if texts else None
-
-    elif payload_type == "function_call":
-        name = payload.get("name", "unknown")
-        arguments_str = payload.get("arguments", "{}")
-        return f"[Function: {name}({arguments_str})]"
-
-    elif payload_type == "function_call_output":
-        output = payload.get("output", "")
-        if isinstance(output, str) and len(output) > 2000:
-            return output[:2000] + "...[truncated]"
-        return output if isinstance(output, str) else json.dumps(output, ensure_ascii=False)
-
-    elif payload_type == "custom_tool_call":
-        name = payload.get("name", "unknown")
-        return f"[Tool: {name}]"
-
-    elif payload_type == "custom_tool_call_output":
-        output = payload.get("output", "")
-        if isinstance(output, str) and len(output) > 2000:
-            return output[:2000] + "...[truncated]"
-        return output if isinstance(output, str) else json.dumps(output, ensure_ascii=False)
-
-    elif payload_type == "reasoning":
-        summary = payload.get("summary", [])
-        if summary and isinstance(summary, list):
-            texts = []
-            for item in summary:
-                if isinstance(item, dict) and item.get("type") == "summary_text":
-                    text = item.get("text", "")
-                    if text:
-                        texts.append(text)
-            if texts:
-                return "\n".join(texts)
-        return None
-
-    return None
+    return _shared_extract_text(payload) or None
 
 
 def process_jsonl_file(
@@ -976,11 +804,12 @@ def update_agent_sessions_stats(messages: list) -> int:
 
                     # Update agent_sessions table
                     session_updated_at = stats["last_timestamp"] or now
+                    # Use MAX() subquery for cross-DB compatibility (works on both PostgreSQL and SQLite)
                     sql = f"""
                         UPDATE agent_sessions
-                        SET message_count = GREATEST(COALESCE(message_count, 0), {placeholder}),
-                            total_tokens = GREATEST(COALESCE(total_tokens, 0), {placeholder}),
-                            request_count = GREATEST(COALESCE(request_count, 0), {placeholder}),
+                        SET message_count = CASE WHEN COALESCE(message_count, 0) > {placeholder} THEN COALESCE(message_count, 0) ELSE {placeholder} END,
+                            total_tokens = CASE WHEN COALESCE(total_tokens, 0) > {placeholder} THEN COALESCE(total_tokens, 0) ELSE {placeholder} END,
+                            request_count = CASE WHEN COALESCE(request_count, 0) > {placeholder} THEN COALESCE(request_count, 0) ELSE {placeholder} END,
                             model = COALESCE(model, {placeholder}),
                             updated_at = {placeholder}
                         WHERE session_id = {placeholder}
@@ -990,7 +819,10 @@ def update_agent_sessions_stats(messages: list) -> int:
                         sql,
                         (
                             stats["message_count"],
+                            stats["message_count"],
                             stats["total_tokens"],
+                            stats["total_tokens"],
+                            stats["request_count"],
                             stats["request_count"],
                             model,
                             session_updated_at,

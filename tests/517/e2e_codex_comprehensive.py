@@ -24,85 +24,32 @@ import sys
 import time
 import uuid
 
-# Add project root
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.insert(0, PROJECT_ROOT)
-sys.path.insert(0, os.path.join(PROJECT_ROOT, "scripts"))
-
 import requests
+from test_helpers import (
+    BASE_URL,
+    HEADLESS,
+    PROJECT_ROOT,
+    REMOTE_TEST_HOST,
+    SCREENSHOT_DIR,
+    TEST_PASS,
+    TEST_USER,
+    WEBUI_URL,
+    TestResults,
+    api_get,
+    api_login,
+    api_post,
+    poll_until,
+    print_results,
+    run_test,
+    screenshot,
+)
 
 # ── Configuration ──────────────────────────────────────
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
-WEBUI_URL = os.environ.get("WEBUI_URL", "http://localhost:3000")
-HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
-REMOTE_TEST_HOST = os.environ.get("REMOTE_TEST_HOST", "192.168.64.3")
-TEST_USER = "黄迎春"
-TEST_PASS = "admin123"
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "e2e-codex-comprehensive")
 
 # ── Test state ─────────────────────────────────────────
 auth_token = None
-results = {"passed": 0, "failed": 0, "errors": []}
-
-
-# ── Helpers ─────────────────────────────────────────────
-def ensure_dir():
-    os.makedirs(SCREENSHOT_DIR, exist_ok=True)
-
-
-def shot(page, name):
-    ensure_dir()
-    path = os.path.join(SCREENSHOT_DIR, f"{name}.png")
-    page.screenshot(path=path, full_page=True)
-
-
-def run_test(name, fn):
-    print(f"\n  [TEST] {name}")
-    try:
-        fn()
-        results["passed"] += 1
-        print(f"    [PASS] {name}")
-    except AssertionError as e:
-        results["failed"] += 1
-        results["errors"].append(f"{name}: {e}")
-        print(f"    [FAIL] {name}: {e}")
-    except Exception as e:
-        results["failed"] += 1
-        results["errors"].append(f"{name}: {e.__class__.__name__}: {e}")
-        print(f"    [ERROR] {name}: {e.__class__.__name__}: {e}")
-
-
-def api_login(username=TEST_USER, password=TEST_PASS):
-    r = requests.post(
-        f"{BASE_URL}/api/auth/login",
-        json={"username": username, "password": password},
-    )
-    assert r.status_code == 200, f"Login failed: {r.status_code}"
-    token = r.cookies.get("session_token")
-    assert token, "No session_token cookie"
-    return token
-
-
-def api_get(path, params=None):
-    assert auth_token, "Not logged in"
-    r = requests.get(
-        f"{BASE_URL}/api{path}",
-        params=params,
-        cookies={"session_token": auth_token},
-    )
-    assert r.status_code == 200, f"GET {path} failed: {r.status_code} {r.text[:300]}"
-    return r.json()
-
-
-def api_post(path, data=None, token=None):
-    t = token or auth_token
-    assert t, "Not logged in"
-    r = requests.post(
-        f"{BASE_URL}/api{path}",
-        json=data,
-        cookies={"session_token": t},
-    )
-    return r
+results = TestResults()
 
 
 # ═══════════════════════════════════════════════════════
@@ -485,7 +432,15 @@ def test_remote_session_create_codex():
     print(f"    [2a] API created session: {session_id[:16]}...")
 
     # Step 2b: Wait for agent to launch codex and report back
-    time.sleep(5)
+    poll_until(
+        lambda: api_get("/workspace/sessions", params={"tool_name": "codex", "limit": 5})
+        .get("data", {})
+        .get("total", 0)
+        > 0,
+        timeout=10,
+        interval=1,
+        description="codex sessions appear",
+    )
 
     # Step 2c: Verify session appears in sessions list
     list_data = api_get("/workspace/sessions", params={"tool_name": "codex", "limit": 5})
@@ -568,7 +523,13 @@ def test_remote_session_send_message_codex():
     print(f"    [3a] Session created: {session_id[:16]}...")
 
     # Wait for agent to launch codex
-    time.sleep(3)
+    poll_until(
+        lambda: api_get(f"/workspace/sessions/{session_id}", expect_success=False).status_code
+        == 200,
+        timeout=8,
+        interval=1,
+        description="codex session start",
+    )
 
     # Send message
     r = requests.post(
@@ -580,7 +541,16 @@ def test_remote_session_send_message_codex():
     print("    [3b] Message sent (200 OK)")
 
     # Verify user message stored in session_messages
-    time.sleep(2)
+    poll_until(
+        lambda: api_get(f"/workspace/sessions/{session_id}", params={"include_messages": "true"})
+        .get("data", {})
+        .get("messages", [{}])[0]
+        .get("role")
+        == "user",
+        timeout=5,
+        interval=0.5,
+        description="user message stored",
+    )
     detail = api_get(f"/workspace/sessions/{session_id}", params={"include_messages": "true"})
     messages = detail.get("data", {}).get("messages", [])
     user_msgs = [m for m in messages if m.get("role") == "user"]
@@ -645,14 +615,29 @@ def test_remote_session_restore_codex():
         return
 
     session_id = r.json().get("session", {}).get("session_id")
-    time.sleep(2)
+    poll_until(
+        lambda: api_get(f"/workspace/sessions/{session_id}", expect_success=False).status_code
+        == 200,
+        timeout=5,
+        interval=0.5,
+        description="session created",
+    )
 
     # Stop session
     requests.post(
         f"{BASE_URL}/api/remote/sessions/{session_id}/stop",
         cookies={"session_token": auth_token},
     )
-    time.sleep(1)
+    poll_until(
+        lambda: requests.post(
+            f"{BASE_URL}/api/remote/sessions/{session_id}/stop",
+            cookies={"session_token": auth_token},
+        ).status_code
+        == 200,
+        timeout=3,
+        interval=0.5,
+        description="session stop",
+    )
 
     # Step 4a: Call restore endpoint
     r = requests.post(
@@ -721,7 +706,13 @@ def test_remote_terminal_codex():
     print(f"    [5a] Terminal created: {terminal_id[:16]}...")
 
     # Verify terminal session in DB
-    time.sleep(2)
+    poll_until(
+        lambda: api_get(f"/workspace/sessions/{terminal_id}", expect_success=False).status_code
+        == 200,
+        timeout=5,
+        interval=0.5,
+        description="terminal session in DB",
+    )
     detail = api_get(f"/workspace/sessions/{terminal_id}", params={"include_messages": "true"})
     session_data = detail.get("data", {})
     assert (
@@ -1004,7 +995,7 @@ def main():
     except Exception as e:
         print(f"  SKIP: Login failed: {e}")
         print("  Skipping API-dependent tests")
-        _print_results()
+        print_results(results)
         return
 
     # Monkey-patch global auth_token for api_get/api_post
@@ -1043,19 +1034,7 @@ def main():
     run_test("User tool account codex type", test_user_tool_account_codex)
     run_test("Fetch route includes codex", test_fetch_route_codex)
 
-    _print_results()
-
-
-def _print_results():
-    print("\n" + "=" * 60)
-    print(f"Results: {results['passed']} passed, {results['failed']} failed")
-    if results["errors"]:
-        print("\nFailures:")
-        for err in results["errors"]:
-            print(f"  - {err}")
-    print("=" * 60)
-
-    if results["failed"] > 0:
+    if not print_results(results):
         sys.exit(1)
 
 

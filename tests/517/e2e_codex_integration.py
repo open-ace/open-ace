@@ -24,85 +24,31 @@ import json
 import os
 import sys
 import time
-import traceback
-
-# Add project root
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.insert(0, PROJECT_ROOT)
-sys.path.insert(0, os.path.join(PROJECT_ROOT, "scripts"))
 
 import requests
-
-# ── Configuration ──────────────────────────────────────
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
-WEBUI_URL = os.environ.get("WEBUI_URL", "http://localhost:3000")
-HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
-TEST_USER = "黄迎春"
-TEST_PASS = "admin123"
-SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "e2e-codex")
+import test_helpers
+from test_helpers import (
+    BASE_URL,
+    HEADLESS,
+    PROJECT_ROOT,
+    SCREENSHOT_DIR,
+    WEBUI_URL,
+    TestResults,
+    api_get,
+    api_login,
+    api_post,
+    create_browser_page,
+    playwright_login,
+    poll_until,
+    print_results,
+    run_test,
+    screenshot,
+)
 
 # ── Test state ─────────────────────────────────────────
 auth_token = None
-results = {"passed": 0, "failed": 0, "errors": []}
-
-
-# ── Helpers ─────────────────────────────────────────────
-def ensure_dir():
-    os.makedirs(SCREENSHOT_DIR, exist_ok=True)
-
-
-def shot(page, name):
-    ensure_dir()
-    path = os.path.join(SCREENSHOT_DIR, f"{name}.png")
-    page.screenshot(path=path, full_page=True)
-    print(f"    screenshot: {name}.png")
-
-
-def api_login():
-    global auth_token
-    r = requests.post(
-        f"{BASE_URL}/api/auth/login",
-        json={"username": TEST_USER, "password": TEST_PASS},
-    )
-    assert r.status_code == 200, f"Login failed: {r.status_code} {r.text[:200]}"
-    auth_token = r.cookies.get("session_token")
-    assert auth_token, "No session_token cookie"
-    return auth_token
-
-
-def api_get(path, params=None, expect_success=True):
-    assert auth_token, "Not logged in"
-    r = requests.get(
-        f"{BASE_URL}/api{path}",
-        params=params,
-        cookies={"session_token": auth_token},
-    )
-    if expect_success:
-        assert r.status_code == 200, f"GET {path} failed: {r.status_code} {r.text[:300]}"
-        data = r.json()
-        if expect_success:
-            assert data.get(
-                "success", True
-            ), f"API error for {path}: {data.get('error', 'unknown')}"
-        return data
-    return r
-
-
-def run_test(name, fn):
-    """Run a single test and track results."""
-    print(f"\n  [TEST] {name}")
-    try:
-        fn()
-        results["passed"] += 1
-        print(f"    [PASS] {name}")
-    except AssertionError as e:
-        results["failed"] += 1
-        results["errors"].append(f"{name}: {e}")
-        print(f"    [FAIL] {name}: {e}")
-    except Exception as e:
-        results["failed"] += 1
-        results["errors"].append(f"{name}: {e.__class__.__name__}: {e}")
-        print(f"    [ERROR] {name}: {e.__class__.__name__}: {e}")
+results = TestResults()
+SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "e2e-codex")
 
 
 # ═══════════════════════════════════════════════════════
@@ -293,7 +239,7 @@ def test_api_usage_codex():
     """GET /api/tool/codex/<days> returns usage data."""
     r = requests.get(
         f"{BASE_URL}/api/tool/codex/30",
-        cookies={"session_token": auth_token},
+        cookies={"session_token": test_helpers._auth_token},
     )
     assert r.status_code == 200, f"GET /api/tool/codex/30 failed: {r.status_code} {r.text[:300]}"
     data = r.json()
@@ -323,7 +269,7 @@ def test_api_usage_tools_includes_codex():
     """GET /api/tools includes codex."""
     r = requests.get(
         f"{BASE_URL}/api/tools",
-        cookies={"session_token": auth_token},
+        cookies={"session_token": test_helpers._auth_token},
     )
     assert r.status_code == 200, f"GET /api/tools failed: {r.status_code}"
     data = r.json()
@@ -494,40 +440,34 @@ def test_frontend_codex_sessions_page():
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=HEADLESS)
-        page = browser.new_page(viewport={"width": 1400, "height": 900})
+        browser, page = create_browser_page(p)
+        try:
+            playwright_login(page, WEBUI_URL)
+            page.goto(f"{WEBUI_URL}/work/sessions")
+            page.wait_for_load_state("networkidle")
+            poll_until(
+                lambda: "session" in page.inner_text("body").lower(),
+                timeout=5,
+                interval=0.5,
+                description="sessions page load",
+            )
+            screenshot(page, "codex-sessions-page", SCREENSHOT_DIR)
 
-        # Login (SPA: wait for React to render the form)
-        page.goto(f"{WEBUI_URL}/login")
-        page.wait_for_selector("#username", timeout=10000)
-        page.fill("#username", TEST_USER)
-        page.fill("#password", TEST_PASS)
-        page.click('button[type="submit"]')
-        page.wait_for_load_state("networkidle")
-        time.sleep(1)
-
-        # Navigate to sessions with codex filter
-        page.goto(f"{WEBUI_URL}/work/sessions")
-        page.wait_for_load_state("networkidle")
-        time.sleep(2)
-
-        shot(page, "codex-sessions-page")
-
-        # Verify codex sessions are shown
-        page_text = page.inner_text("body")
-        assert (
-            "codex" in page_text.lower() or "session" in page_text.lower() or "会话" in page_text
-        ), f"Session page doesn't show codex content: {page_text[:300]}"
-        print("    Sessions page loaded with codex filter")
-
-        browser.close()
+            page_text = page.inner_text("body")
+            assert (
+                "codex" in page_text.lower()
+                or "session" in page_text.lower()
+                or "会话" in page_text
+            ), f"Session page doesn't show codex content: {page_text[:300]}"
+            print("    Sessions page loaded with codex filter")
+        finally:
+            browser.close()
 
 
 def test_frontend_codex_session_detail():
     """Frontend session detail page renders codex content_blocks."""
     from playwright.sync_api import sync_playwright
 
-    # First get a session ID via API
     data = api_get("/workspace/sessions", params={"tool_name": "codex", "limit": 1})
     sessions = data.get("data", {}).get("sessions", [])
     if not sessions:
@@ -537,31 +477,24 @@ def test_frontend_codex_session_detail():
     sid = sessions[0]["session_id"]
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=HEADLESS)
-        page = browser.new_page(viewport={"width": 1400, "height": 900})
+        browser, page = create_browser_page(p)
+        try:
+            playwright_login(page, WEBUI_URL)
+            page.goto(f"{WEBUI_URL}/work/sessions")
+            page.wait_for_load_state("networkidle")
+            poll_until(
+                lambda: len(page.inner_text("body")) > 50,
+                timeout=5,
+                interval=0.5,
+                description="session detail load",
+            )
+            screenshot(page, "codex-session-detail", SCREENSHOT_DIR)
 
-        # Login (SPA: wait for React to render the form)
-        page.goto(f"{WEBUI_URL}/login")
-        page.wait_for_selector("#username", timeout=10000)
-        page.fill("#username", TEST_USER)
-        page.fill("#password", TEST_PASS)
-        page.click('button[type="submit"]')
-        page.wait_for_load_state("networkidle")
-        time.sleep(1)
-
-        # Navigate to session detail (Sessions page is under /work/sessions)
-        page.goto(f"{WEBUI_URL}/work/sessions")
-        page.wait_for_load_state("networkidle")
-        time.sleep(2)
-
-        shot(page, "codex-session-detail")
-
-        page_text = page.inner_text("body")
-        # Should show session content
-        assert len(page_text) > 50, "Session detail page appears empty"
-        print(f"    Session detail loaded for {sid[:16]}...")
-
-        browser.close()
+            page_text = page.inner_text("body")
+            assert len(page_text) > 50, "Session detail page appears empty"
+            print(f"    Session detail loaded for {sid[:16]}...")
+        finally:
+            browser.close()
 
 
 def test_frontend_assist_panel_codex():
@@ -569,32 +502,24 @@ def test_frontend_assist_panel_codex():
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=HEADLESS)
-        page = browser.new_page(viewport={"width": 1400, "height": 900})
+        browser, page = create_browser_page(p)
+        try:
+            playwright_login(page, WEBUI_URL)
+            page.goto(f"{WEBUI_URL}/work")
+            page.wait_for_load_state("networkidle")
+            poll_until(
+                lambda: len(page.inner_text("body")) > 50,
+                timeout=5,
+                interval=0.5,
+                description="work page load",
+            )
+            screenshot(page, "codex-assist-panel", SCREENSHOT_DIR)
 
-        # Login (SPA: wait for React to render the form)
-        page.goto(f"{WEBUI_URL}/login")
-        page.wait_for_selector("#username", timeout=10000)
-        page.fill("#username", TEST_USER)
-        page.fill("#password", TEST_PASS)
-        page.click('button[type="submit"]')
-        page.wait_for_load_state("networkidle")
-        time.sleep(1)
-
-        # Navigate to work page
-        page.goto(f"{WEBUI_URL}/work")
-        page.wait_for_load_state("networkidle")
-        time.sleep(2)
-
-        shot(page, "codex-assist-panel")
-
-        # Check if Codex appears in the AI tools
-        page_text = page.inner_text("body")
-        # The assist panel may show "Codex" as one of the AI tools
-        has_codex = "codex" in page_text.lower()
-        print(f"    Work page loaded, codex in panel: {has_codex}")
-
-        browser.close()
+            page_text = page.inner_text("body")
+            has_codex = "codex" in page_text.lower()
+            print(f"    Work page loaded, codex in panel: {has_codex}")
+        finally:
+            browser.close()
 
 
 def test_frontend_api_key_codex_option():
@@ -602,30 +527,24 @@ def test_frontend_api_key_codex_option():
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=HEADLESS)
-        page = browser.new_page(viewport={"width": 1400, "height": 900})
+        browser, page = create_browser_page(p)
+        try:
+            playwright_login(page, WEBUI_URL, username="admin")
+            page.goto(f"{WEBUI_URL}/manage/api-keys")
+            page.wait_for_load_state("networkidle")
+            poll_until(
+                lambda: len(page.inner_text("body")) > 50,
+                timeout=5,
+                interval=0.5,
+                description="api key page load",
+            )
+            screenshot(page, "codex-api-key-page", SCREENSHOT_DIR)
 
-        # Login as admin
-        page.goto(f"{WEBUI_URL}/login")
-        page.wait_for_selector("#username", timeout=10000)
-        page.fill("#username", "admin")
-        page.fill("#password", TEST_PASS)
-        page.click('button[type="submit"]')
-        page.wait_for_load_state("networkidle")
-        time.sleep(1)
-
-        # Navigate to management page
-        page.goto(f"{WEBUI_URL}/manage/api-keys")
-        page.wait_for_load_state("networkidle")
-        time.sleep(2)
-
-        shot(page, "codex-api-key-page")
-
-        page_text = page.inner_text("body")
-        has_codex = "codex" in page_text.lower()
-        print(f"    API key page loaded, codex option present: {has_codex}")
-
-        browser.close()
+            page_text = page.inner_text("body")
+            has_codex = "codex" in page_text.lower()
+            print(f"    API key page loaded, codex option present: {has_codex}")
+        finally:
+            browser.close()
 
 
 # ═══════════════════════════════════════════════════════
@@ -710,7 +629,7 @@ def main():
     except Exception as e:
         print(f"  SKIP: Login failed: {e}")
         print("  Skipping API and frontend tests")
-        _print_results()
+        print_results(results)
         return
 
     run_test("API sessions list codex", test_api_sessions_list_codex)
@@ -743,18 +662,18 @@ def main():
                         "  SKIP: Frontend SPA not rendering (Vite dev server may be from different project)"
                     )
                     browser.close()
-                    _print_results()
+                    print_results(results)
                     return
                 # If page has content but no login form, user may already be authenticated
                 print(f"  SKIP: Login form not found, page content: {root_text[:100]}")
                 browser.close()
-                _print_results()
+                print_results(results)
                 return
             browser.close()
         print("  Frontend server reachable and login form rendered")
     except Exception as e:
         print(f"  SKIP: Frontend not reachable: {e}")
-        _print_results()
+        print_results(results)
         return
 
     run_test("Frontend codex sessions page", test_frontend_codex_sessions_page)
@@ -762,19 +681,7 @@ def main():
     run_test("Frontend assist panel codex", test_frontend_assist_panel_codex)
     run_test("Frontend API key codex option", test_frontend_api_key_codex_option)
 
-    _print_results()
-
-
-def _print_results():
-    print("\n" + "=" * 60)
-    print(f"Results: {results['passed']} passed, {results['failed']} failed")
-    if results["errors"]:
-        print("\nFailures:")
-        for err in results["errors"]:
-            print(f"  - {err}")
-    print("=" * 60)
-
-    if results["failed"] > 0:
+    if not print_results(results):
         sys.exit(1)
 
 

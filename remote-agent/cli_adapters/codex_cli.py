@@ -231,11 +231,9 @@ class CodexCLIAdapter(BaseCLIAdapter):
 
             config_path = codex_dir / "config.toml"
 
-            base = proxy_url.rstrip("/")
+            base = proxy_url.rstrip("/").replace('"', '\\"').replace("\\", "\\\\")
 
             # Build the config content using simple string formatting.
-            # We only set a few keys, so direct string construction is
-            # cleaner than pulling in a TOML library dependency.
             config_lines = []
 
             # Top-level settings

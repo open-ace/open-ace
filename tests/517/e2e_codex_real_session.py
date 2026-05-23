@@ -27,23 +27,29 @@ import subprocess
 import sys
 import time
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.insert(0, PROJECT_ROOT)
-sys.path.insert(0, os.path.join(PROJECT_ROOT, "scripts"))
-sys.path.insert(0, os.path.join(PROJECT_ROOT, "app"))
-
 import requests
+from test_helpers import (
+    BASE_URL,
+    PROJECT_ROOT,
+    REMOTE_TEST_HOST,
+    TEST_PASS,
+    TEST_USER,
+    TestResults,
+    api_get,
+    api_login,
+    api_post,
+    poll_until,
+    print_results,
+    run_test,
+)
 
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
-REMOTE_HOST = os.environ.get("REMOTE_TEST_HOST", "192.168.64.3")
-REMOTE_USER = "root"
-MACHINE_ID = "6f85734e-9b21-4320-a857-a67bc36b9078"
-TEST_USER = "黄迎春"
-TEST_PASS = "admin123"
+REMOTE_HOST = REMOTE_TEST_HOST
+REMOTE_USER = os.environ.get("REMOTE_TEST_USER", "root")
+MACHINE_ID = os.environ.get("REMOTE_MACHINE_ID", "6f85734e-9b21-4320-a857-a67bc36b9078")
 
 auth_token = None
 codex_session_file = None
-results = {"passed": 0, "failed": 0, "errors": []}
+results = TestResults()
 
 
 def ssh_run(cmd, timeout=30):
@@ -62,22 +68,6 @@ def ssh_run(cmd, timeout=30):
         text=True,
         timeout=timeout,
     )
-
-
-def run_test(name, fn):
-    print(f"\n  [TEST] {name}")
-    try:
-        fn()
-        results["passed"] += 1
-        print(f"    [PASS] {name}")
-    except AssertionError as e:
-        results["failed"] += 1
-        results["errors"].append(f"{name}: {e}")
-        print(f"    [FAIL] {name}: {e}")
-    except Exception as e:
-        results["failed"] += 1
-        results["errors"].append(f"{name}: {e.__class__.__name__}: {e}")
-        print(f"    [ERROR] {name}: {e.__class__.__name__}: {e}")
 
 
 def api_get(path, params=None):
@@ -164,7 +154,13 @@ def test_codex_exec_conversation():
     print(f"    [1a] Temp session for proxy: {temp_session_id[:16]}...")
 
     # Wait for agent to start the session (which sets up env vars)
-    time.sleep(20)  # SDK init timeout is 15s + buffer
+    poll_until(
+        lambda: api_get(f"/workspace/sessions/{temp_session_id}", expect_success=False).status_code
+        == 200,
+        timeout=25,
+        interval=2,
+        description="agent session start",
+    )
 
     # Step 1b: Get the proxy token from agent's env
     # The agent process has OPENAI_API_KEY set from the session creation
@@ -475,7 +471,13 @@ def test_terminal_codex_launch():
     assert terminal_id, f"No terminal_id returned: {resp_data}"
     print(f"    [5a] Terminal created: {terminal_id[:16]}...")
 
-    time.sleep(3)
+    poll_until(
+        lambda: api_get(f"/workspace/terminals/{terminal_id}", expect_success=False).status_code
+        == 200,
+        timeout=5,
+        interval=1,
+        description="terminal session in DB",
+    )
 
     # Step 5b: Verify terminal session in DB
     from shared.db import get_connection
@@ -583,8 +585,13 @@ def test_remote_session_create_and_verify():
     )
 
     # Step 6c: Wait for agent to start codex (SDK init timeout is 15s)
-    print("    [6c] Waiting for agent to start codex (up to 20s)...")
-    time.sleep(20)
+    print("    [6c] Waiting for agent to start codex (up to 25s)...")
+    poll_until(
+        lambda: ssh_run(f"grep '{session_id[:8]}' /tmp/agent.log").returncode == 0,
+        timeout=25,
+        interval=2,
+        description="codex session start in agent log",
+    )
 
     # Step 6d: Check agent log for session start
     r = ssh_run(f"grep '{session_id[:8]}' /tmp/agent.log")
@@ -715,15 +722,8 @@ def main():
     run_test("Codex quota tracking", test_codex_quota_tracking)
 
     # Results
-    print("\n" + "=" * 60)
-    print(f"Results: {results['passed']} passed, {results['failed']} failed")
-    if results["errors"]:
-        print("\nFailures:")
-        for err in results["errors"]:
-            print(f"  - {err}")
-    print("=" * 60)
-
-    return 0 if results["failed"] == 0 else 1
+    ok = print_results(results)
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":

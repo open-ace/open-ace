@@ -17,6 +17,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from cli_adapters.codex_jsonl_parser import extract_codex_content_blocks, extract_codex_text
+
 logger = logging.getLogger("openace-agent.session-sync")
 
 # How often to scan for new/changed sessions (seconds)
@@ -385,71 +387,6 @@ class QwenSession:
         }
 
 
-def _extract_codex_text(payload: dict[str, Any]) -> str:
-    """Extract text from a Codex response_item payload."""
-    ptype = payload.get("type", "")
-    if ptype == "message":
-        content = payload.get("content", [])
-        if isinstance(content, list):
-            texts = []
-            for block in content:
-                if isinstance(block, dict) and block.get("type") in (
-                    "input_text",
-                    "output_text",
-                ):
-                    texts.append(block.get("text", ""))
-            return "\n".join(texts)
-    elif ptype == "function_call":
-        name = payload.get("name", "")
-        args = payload.get("arguments", "")
-        return f"[{name}] {args}" if name else ""
-    elif ptype == "function_call_output":
-        return payload.get("output", "")
-    return ""
-
-
-def _extract_codex_content_blocks(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    """Extract structured content blocks from Codex response_item."""
-    ptype = payload.get("type", "")
-    blocks: list[dict[str, Any]] = []
-
-    if ptype == "message":
-        content = payload.get("content", [])
-        if isinstance(content, list):
-            for block in content:
-                if isinstance(block, dict):
-                    btype = block.get("type")
-                    if btype == "input_text" or btype == "output_text":
-                        blocks.append({"type": "text", "text": block.get("text", "")})
-    elif ptype == "function_call":
-        blocks.append(
-            {
-                "type": "tool_use",
-                "id": payload.get("call_id", ""),
-                "name": payload.get("name", ""),
-                "input": payload.get("arguments", {}),
-            }
-        )
-    elif ptype == "function_call_output":
-        blocks.append(
-            {
-                "type": "tool_result",
-                "tool_use_id": payload.get("call_id", ""),
-                "content": payload.get("output", ""),
-            }
-        )
-    elif ptype == "reasoning":
-        summary = payload.get("summary", [])
-        if isinstance(summary, list):
-            texts = []
-            for item in summary:
-                if isinstance(item, dict) and item.get("type") == "summary_text":
-                    texts.append(item.get("text", ""))
-            if texts:
-                blocks.append({"type": "reasoning", "summary": "\n".join(texts)})
-    return blocks
-
-
 class CodexSession:
     """Parsed Codex CLI session from a JSONL file."""
 
@@ -563,8 +500,8 @@ class CodexSession:
             logger.debug("Skipping response_item with unknown ptype: %s", ptype)
             return
 
-        text = _extract_codex_text(payload)
-        blocks = _extract_codex_content_blocks(payload)
+        text = extract_codex_text(payload)
+        blocks = extract_codex_content_blocks(payload)
         self._add_message(role, text, blocks or None, ts)
 
     def _add_message(self, role: str, content: str, content_blocks, ts: str) -> None:
