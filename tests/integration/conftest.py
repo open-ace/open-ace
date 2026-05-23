@@ -1,10 +1,13 @@
 """Fixtures for integration tests using real databases."""
 
+import logging
 import os
 import uuid
 from unittest.mock import patch
 
 import pytest
+
+logger = logging.getLogger(__name__)
 
 import app.repositories.database as db_mod
 from app.repositories.database import Database
@@ -68,8 +71,8 @@ def _create_sqlite_tables(db):
             try:
                 for sql in ddl_fn():
                     cursor.execute(sql)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("DDL function %s failed: %s", ddl_fn.__module__, exc)
 
         conn.commit()
     finally:
@@ -324,7 +327,7 @@ def _create_sqlite_tables(db):
 
 def _get_pg_base_url():
     """Return the base PostgreSQL URL for creating/dropping test databases."""
-    return os.environ.get("PG_TEST_URL", "postgresql://rhuang@localhost:5432/ace")
+    return os.environ.get("PG_TEST_URL", "postgresql://localhost:5432/ace")
 
 
 def _create_pg_tables(db):
@@ -358,8 +361,8 @@ def _create_pg_tables(db):
             try:
                 for sql in ddl_fn():
                     cursor.execute(sql)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("DDL function %s failed: %s", ddl_fn.__module__, exc)
 
         conn.commit()
     finally:
@@ -622,7 +625,7 @@ def pg_db():
     Creates an isolated test database (ace_test_<uuid>), initializes the schema,
     and drops it after tests complete.  Does NOT touch the production 'ace' database.
     """
-    import psycopg2
+    psycopg2 = pytest.importorskip("psycopg2")
     from psycopg2 import pool as pg_pool
     from psycopg2.extras import RealDictCursor
 

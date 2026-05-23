@@ -519,24 +519,31 @@ class TenantRepository:
             bool: True if successful.
         """
         try:
-            from app.repositories.database import adapt_sql, is_postgresql
+            from app.repositories.database import is_postgresql
 
             with self.db.connection() as conn:
                 cursor = conn.cursor()
-                count_fn = (
-                    "GREATEST(0, user_count + %s)" if is_postgresql() else "MAX(0, user_count + ?)"
-                )
-                cursor.execute(
-                    adapt_sql(
-                        f"""
-                    UPDATE tenants SET
-                        user_count = {count_fn},
-                        updated_at = ?
-                    WHERE id = ?
-                """
-                    ),
-                    (delta, datetime.now(timezone.utc).replace(tzinfo=None), tenant_id),
-                )
+                now = datetime.now(timezone.utc).replace(tzinfo=None)
+                if is_postgresql():
+                    cursor.execute(
+                        """
+                        UPDATE tenants SET
+                            user_count = GREATEST(0, user_count + %s),
+                            updated_at = %s
+                        WHERE id = %s
+                    """,
+                        (delta, now, tenant_id),
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        UPDATE tenants SET
+                            user_count = MAX(0, user_count + ?),
+                            updated_at = ?
+                        WHERE id = ?
+                    """,
+                        (delta, now, tenant_id),
+                    )
                 conn.commit()
                 return cast("bool", cursor.rowcount > 0)
 
