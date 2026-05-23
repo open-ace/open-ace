@@ -785,8 +785,12 @@ const translations: Record<Language, Translations> = {
     qwenCodeSettings: 'Qwen Code Settings (JSON)',
     qwenCodeSettingsHint:
       'Configure non-sensitive settings only (modelProviders, model, etc.). Do NOT include API keys or base URLs — they are injected via environment variables automatically.',
+    codexSettings: 'Codex Settings (TOML)',
+    codexSettingsHint:
+      'Configure non-sensitive Codex settings only (model, sandbox, etc.). Do NOT include API keys — they are injected via environment variables automatically.',
     claudeSettingsInvalid: 'Claude Code settings JSON is invalid',
     qwenSettingsInvalid: 'Qwen Code settings JSON is invalid',
+    codexSettingsInvalid: 'Codex settings are invalid',
     providerCannotChange: 'Provider cannot be changed',
 
     // Help Documents
@@ -1597,8 +1601,12 @@ const translations: Record<Language, Translations> = {
     qwenCodeSettings: 'Qwen Code 设置 (JSON)',
     qwenCodeSettingsHint:
       '仅配置非敏感设置（modelProviders、model 等）。请勿填写 API Key 或 Base URL — 系统会通过环境变量自动注入。',
+    codexSettings: 'Codex 设置 (TOML)',
+    codexSettingsHint:
+      '仅配置非敏感 Codex 设置（model、sandbox 等）。请勿填写 API Key — 系统会通过环境变量自动注入。',
     claudeSettingsInvalid: 'Claude Code 设置 JSON 无效',
     qwenSettingsInvalid: 'Qwen Code 设置 JSON 无效',
+    codexSettingsInvalid: 'Codex 设置无效',
     providerCannotChange: '提供商不可更改',
 
     // 帮助文档

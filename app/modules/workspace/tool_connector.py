@@ -244,6 +244,19 @@ class ToolConnector:
                 supports_tools=True,
                 capabilities=["chat", "analysis", "coding", "writing"],
             ),
+            ToolInfo(
+                name="codex",
+                display_name="Codex (OpenAI)",
+                tool_type=ToolType.AGENT.value,
+                description="OpenAI's Codex coding agent",
+                models=["gpt-5.5", "o3", "o4-mini"],
+                default_model="gpt-5.5",
+                max_tokens=258400,
+                supports_streaming=True,
+                supports_vision=True,
+                supports_tools=True,
+                capabilities=["chat", "agent", "coding", "analysis"],
+            ),
         ]
 
         for tool in default_tools:

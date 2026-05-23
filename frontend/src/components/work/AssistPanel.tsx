@@ -72,6 +72,7 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
     { id: 'openclaw', name: 'OpenClaw', icon: 'bi-robot', url: '/work?tool=openclaw' },
     { id: 'claude', name: 'Claude', icon: 'bi-chat-square-text', url: '/work?tool=claude' },
     { id: 'qwen', name: 'Qwen', icon: 'bi-stars', url: '/work?tool=qwen' },
+    { id: 'codex', name: 'Codex', icon: 'bi-cpu', url: '/work?tool=codex' },
   ];
 
   // Help documents - titles in different languages

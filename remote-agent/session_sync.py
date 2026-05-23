@@ -29,6 +29,9 @@ CLAUDE_PROJECTS_DIR = CLAUDE_DIR / "projects"
 QWEN_DIR = Path.home() / ".qwen"
 QWEN_PROJECTS_DIR = QWEN_DIR / "projects"
 
+CODEX_DIR = Path.home() / ".codex"
+CODEX_SESSIONS_DIR = CODEX_DIR / "sessions"
+
 # File to track which sessions have already been synced
 SYNC_STATE_FILE = Path.home() / ".open-ace-agent" / "session_sync_state.json"
 ACTIVE_TERMINAL_FILE = Path.home() / ".open-ace-agent" / "active_terminal.json"
@@ -382,6 +385,224 @@ class QwenSession:
         }
 
 
+def _extract_codex_text(payload: dict[str, Any]) -> str:
+    """Extract text from a Codex response_item payload."""
+    ptype = payload.get("type", "")
+    if ptype == "message":
+        content = payload.get("content", [])
+        if isinstance(content, list):
+            texts = []
+            for block in content:
+                if (
+                    isinstance(block, dict)
+                    and block.get("type") == "input_text"
+                    or isinstance(block, dict)
+                    and block.get("type") == "output_text"
+                ):
+                    texts.append(block.get("text", ""))
+            return "\n".join(texts)
+    elif ptype == "function_call":
+        name = payload.get("name", "")
+        args = payload.get("arguments", "")
+        return f"[{name}] {args}" if name else ""
+    elif ptype == "function_call_output":
+        return payload.get("output", "")
+    return ""
+
+
+def _extract_codex_content_blocks(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Extract structured content blocks from Codex response_item."""
+    ptype = payload.get("type", "")
+    blocks: list[dict[str, Any]] = []
+
+    if ptype == "message":
+        content = payload.get("content", [])
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict):
+                    btype = block.get("type")
+                    if btype == "input_text" or btype == "output_text":
+                        blocks.append({"type": "text", "text": block.get("text", "")})
+    elif ptype == "function_call":
+        blocks.append(
+            {
+                "type": "tool_use",
+                "id": payload.get("call_id", ""),
+                "name": payload.get("name", ""),
+                "input": payload.get("arguments", {}),
+            }
+        )
+    elif ptype == "function_call_output":
+        blocks.append(
+            {
+                "type": "tool_result",
+                "tool_use_id": payload.get("call_id", ""),
+                "content": payload.get("output", ""),
+            }
+        )
+    elif ptype == "reasoning":
+        summary = payload.get("summary", [])
+        if isinstance(summary, list):
+            texts = []
+            for item in summary:
+                if isinstance(item, dict) and item.get("type") == "summary_text":
+                    texts.append(item.get("text", ""))
+            if texts:
+                blocks.append({"type": "reasoning", "summary": "\n".join(texts)})
+    return blocks
+
+
+class CodexSession:
+    """Parsed Codex CLI session from a JSONL file."""
+
+    def __init__(self, session_id: str, jsonl_path: str):
+        self.session_id = session_id
+        self.jsonl_path = jsonl_path
+        self.messages: list[dict[str, Any]] = []
+        self.model: str | None = None
+        self.project_path: str | None = None
+        self.total_input_tokens = 0
+        self.total_output_tokens = 0
+        self.message_count = 0
+        self.first_timestamp: str | None = None
+        self.last_timestamp: str | None = None
+
+    def parse(self) -> bool:
+        """Parse the Codex JSONL file and extract metadata."""
+        try:
+            events = []
+            with open(self.jsonl_path) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        events.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+
+            # First pass: extract session_meta and token counts
+            accumulated_tokens = {"input": 0, "output": 0}
+            for event in events:
+                etype = event.get("type", "")
+                payload = event.get("payload", {})
+                if not isinstance(payload, dict):
+                    continue
+
+                if etype == "session_meta":
+                    self.session_id = payload.get("id", self.session_id)
+                    self.project_path = payload.get("cwd", self.project_path)
+
+                elif etype == "turn_context":
+                    m = payload.get("model")
+                    if m:
+                        self.model = m
+
+                elif etype == "event_msg" and payload.get("type") == "token_count":
+                    info = payload.get("info", {})
+                    if isinstance(info, dict):
+                        last_usage = info.get("last_token_usage", {})
+                        if isinstance(last_usage, dict):
+                            accumulated_tokens["input"] += last_usage.get("input_tokens", 0)
+                            accumulated_tokens["output"] += last_usage.get("output_tokens", 0)
+
+            self.total_input_tokens = accumulated_tokens["input"]
+            self.total_output_tokens = accumulated_tokens["output"]
+
+            # Second pass: extract messages
+            for event in events:
+                etype = event.get("type", "")
+                payload = event.get("payload", {})
+                if not isinstance(payload, dict):
+                    continue
+                ts = event.get("timestamp", "")
+
+                if etype == "response_item":
+                    self._process_response_item(payload, ts)
+                elif etype == "event_msg":
+                    msg_type = payload.get("type", "")
+                    if msg_type == "user_message":
+                        text = payload.get("content", "")
+                        if text:
+                            self._add_message("user", text, [{"type": "text", "text": text}], ts)
+                    elif msg_type == "agent_message":
+                        text = payload.get("content", "")
+                        if text:
+                            self._add_message(
+                                "assistant", text, [{"type": "text", "text": text}], ts
+                            )
+
+            return self.message_count > 0
+
+        except OSError as e:
+            logger.debug("Failed to parse Codex session %s: %s", self.jsonl_path, e)
+            return False
+
+    def _process_response_item(self, payload: dict[str, Any], ts: str) -> None:
+        """Process a Codex response_item event."""
+        ptype = payload.get("type", "")
+        role = None
+
+        if ptype == "message":
+            msg_role = payload.get("role", "")
+            if msg_role == "user":
+                role = "user"
+            elif msg_role == "assistant":
+                role = "assistant"
+            else:
+                return
+        elif ptype in ("function_call", "custom_tool_call"):
+            role = "assistant"
+        elif ptype in ("function_call_output", "custom_tool_call_output"):
+            role = "system"
+        elif ptype == "reasoning":
+            summary = payload.get("summary", [])
+            if not summary:
+                return
+            role = "assistant"
+        else:
+            return
+
+        text = _extract_codex_text(payload)
+        blocks = _extract_codex_content_blocks(payload)
+        self._add_message(role, text, blocks or None, ts)
+
+    def _add_message(self, role: str, content: str, content_blocks, ts: str) -> None:
+        """Add a parsed message."""
+        self.message_count += 1
+        self.messages.append(
+            {
+                "role": role,
+                "content": content,
+                "content_blocks": content_blocks,
+                "timestamp": ts,
+                "model": self.model,
+            }
+        )
+        if ts:
+            if not self.first_timestamp:
+                self.first_timestamp = ts
+            self.last_timestamp = ts
+
+    def to_sync_payload(self, machine_id: str, terminal_id: str) -> dict[str, Any]:
+        """Convert to the payload expected by the Open-ACE session-sync endpoint."""
+        return {
+            "session_id": self.session_id,
+            "machine_id": machine_id,
+            "terminal_id": terminal_id,
+            "tool_name": "codex",
+            "project_path": self.project_path,
+            "model": self.model,
+            "message_count": self.message_count,
+            "total_input_tokens": self.total_input_tokens,
+            "total_output_tokens": self.total_output_tokens,
+            "first_timestamp": self.first_timestamp,
+            "last_timestamp": self.last_timestamp,
+            "source": os.environ.get("OPEN_ACE_TERMINAL_SOURCE", "web_terminal"),
+            "messages": self.messages,
+        }
+
+
 class SessionSyncService:
     """
     Background service that scans for Claude Code session files and syncs
@@ -492,6 +713,7 @@ class SessionSyncService:
         scan_dirs = [
             (CLAUDE_PROJECTS_DIR, ClaudeSession),
             (QWEN_PROJECTS_DIR, QwenSession),
+            (CODEX_SESSIONS_DIR, CodexSession),
         ]
 
         synced_count = 0

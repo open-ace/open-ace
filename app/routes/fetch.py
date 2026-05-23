@@ -160,6 +160,39 @@ def run_fetch_scripts():
                 logger.error(f"Error running openclaw fetch script: {e}")
                 results["openclaw"] = {"success": False, "error": "Internal server error"}
 
+        # Run fetch_codex.py with sudo and --multi-user to scan all users' Codex directories
+        codex_script = os.path.join(project_root, "scripts", "fetch_codex.py")
+        if os.path.exists(codex_script):
+            try:
+                result = subprocess.run(
+                    [
+                        "sudo",
+                        "-n",
+                        "/usr/bin/python3",
+                        codex_script,
+                        "--days",
+                        "1",
+                        "--multi-user",
+                        "--recent",
+                        "--config",
+                        config_path,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=600,
+                    cwd=project_root,
+                )
+                results["codex"] = {
+                    "success": result.returncode == 0,
+                    "output": result.stdout[-1000:] if result.stdout else "",
+                    "error": result.stderr[-500:] if result.stderr else None,
+                }
+            except subprocess.TimeoutExpired:
+                results["codex"] = {"success": False, "error": "Timeout after 10 minutes"}
+            except Exception as e:
+                logger.error(f"Error running codex fetch script: {e}")
+                results["codex"] = {"success": False, "error": "Internal server error"}
+
         with _fetch_lock:
             _fetch_status["last_run"] = datetime.now().isoformat()
             _fetch_status["last_result"] = results

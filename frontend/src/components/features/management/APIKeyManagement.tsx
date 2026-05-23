@@ -40,6 +40,7 @@ const providerBadgeVariant: Record<string, BadgeVariant> = {
 const cliToolOptions = [
   { value: 'claude-code', label: 'Claude Code (Anthropic)' },
   { value: 'qwen-code', label: 'Qwen Code (OpenAI)' },
+  { value: 'codex-cli', label: 'Codex (OpenAI)' },
 ];
 
 // Default settings templates
