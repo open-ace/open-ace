@@ -83,6 +83,11 @@ def make_manager():
 
     ram_compat.is_postgresql = lambda: False
 
+    # Patch session_manager's DB_PATH to use the test database
+    import app.modules.workspace.session_manager as sm_compat
+
+    sm_compat.DB_PATH = TMP_DB
+
     # Reset singleton so each test gets a fresh manager
     import app.modules.workspace.remote_agent_manager as ram_mod
 
@@ -120,11 +125,30 @@ def make_manager():
         "CREATE TABLE IF NOT EXISTS agent_sessions ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT, "
         "session_id TEXT NOT NULL UNIQUE, "
+        "session_type TEXT DEFAULT 'chat', "
+        "title TEXT, "
+        "tool_name TEXT, "
+        "host_name TEXT, "
         "user_id INTEGER, "
         "status TEXT DEFAULT 'active', "
+        "context TEXT, "
+        "settings TEXT, "
+        "project_id TEXT, "
+        "project_path TEXT, "
+        "total_tokens INTEGER DEFAULT 0, "
+        "total_input_tokens INTEGER DEFAULT 0, "
+        "total_output_tokens INTEGER DEFAULT 0, "
+        "message_count INTEGER DEFAULT 0, "
+        "request_count INTEGER DEFAULT 0, "
+        "model TEXT, "
+        "tags TEXT, "
+        "workspace_type TEXT DEFAULT 'local', "
         "remote_machine_id TEXT, "
+        "paused_at TIMESTAMP, "
         "created_at TIMESTAMP, "
-        "updated_at TIMESTAMP)"
+        "updated_at TIMESTAMP, "
+        "completed_at TIMESTAMP, "
+        "expires_at TIMESTAMP)"
     )
     conn.commit()
     conn.close()
@@ -676,11 +700,27 @@ def _create_session_for_test(mgr, user_id, machine_id):
     mgr._connections[machine_id] = True
 
     original_get = rsm_mod.get_remote_agent_manager
+    original_rsm_get = rsm_mod.get_remote_session_manager
     rsm_mod.get_remote_agent_manager = lambda: mgr
+
+    from unittest.mock import MagicMock
 
     from app.modules.workspace.remote_session_manager import RemoteSessionManager
 
     session_mgr = RemoteSessionManager()
+
+    # Mock APIKeyProxyService to avoid needing api_key_store table
+    mock_proxy = MagicMock()
+    mock_proxy.generate_proxy_token.return_value = "test-proxy-token"
+    mock_proxy.get_cli_settings_for_tool.return_value = None
+    session_mgr._api_key_proxy = mock_proxy
+    # Mock send_command to avoid needing actual remote connection
+    mgr.send_command = MagicMock(return_value=True)
+
+    # Patch route module to use our session manager
+    import app.routes.remote as remote_mod
+
+    remote_mod.get_remote_session_manager = lambda: session_mgr
 
     result = session_mgr.create_remote_session(
         user_id=user_id,
@@ -690,10 +730,10 @@ def _create_session_for_test(mgr, user_id, machine_id):
     )
 
     rsm_mod.get_remote_agent_manager = original_get
+    rsm_mod.get_remote_session_manager = original_rsm_get
     return result
 
 
-@pytest.mark.skip(reason="Requires full agent_sessions schema with session_type column")
 def test_route_session_access_owner():
     test("Route: session owner can access own session")
     mgr = make_manager()
@@ -714,7 +754,6 @@ def test_route_session_access_owner():
             fail(f"expected 200, got {resp.status_code}")
 
 
-@pytest.mark.skip(reason="Requires full agent_sessions schema with session_type column")
 def test_route_session_access_machine_admin():
     test("Route: machine admin can access others' session")
     mgr = make_manager()
@@ -735,7 +774,6 @@ def test_route_session_access_machine_admin():
             fail(f"expected 200, got {resp.status_code}, body={resp.get_json()}")
 
 
-@pytest.mark.skip(reason="Requires full agent_sessions schema with session_type column")
 def test_route_session_access_denied_other_user():
     test("Route: regular user cannot access others' session")
     mgr = make_manager()
@@ -756,7 +794,6 @@ def test_route_session_access_denied_other_user():
             fail(f"expected 403, got {resp.status_code}")
 
 
-@pytest.mark.skip(reason="Requires full agent_sessions schema with session_type column")
 def test_route_session_access_unassigned_user():
     test("Route: unassigned user cannot access session")
     mgr = make_manager()
@@ -812,12 +849,10 @@ def main():
     test_route_list_machines_includes_permission()
     test_route_deregister_system_admin_only()
     test_route_generate_token_system_admin_only()
-    # Session tests require full app DB schema (agent_sessions table) — skipped
-    # The _check_session_access logic uses the same get_user_permission() verified above
-    # test_route_session_access_owner()
-    # test_route_session_access_machine_admin()
-    # test_route_session_access_denied_other_user()
-    # test_route_session_access_unassigned_user()
+    test_route_session_access_owner()
+    test_route_session_access_machine_admin()
+    test_route_session_access_denied_other_user()
+    test_route_session_access_unassigned_user()
 
     all_passed = print_summary()
 
