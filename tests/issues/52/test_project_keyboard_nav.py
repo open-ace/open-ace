@@ -27,6 +27,8 @@ sys.path.insert(
 
 from playwright.async_api import async_playwright
 
+from tests.conftest import login_and_navigate
+
 # 测试配置
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
@@ -38,27 +40,6 @@ SCREENSHOT_DIR = os.path.join(
     "issues",
     "52",
 )
-
-
-async def login_and_navigate(page, target_url):
-    """Login via API and navigate to target page."""
-    await page.goto(f"{BASE_URL}/login")
-    await page.wait_for_timeout(1000)
-    result = await page.evaluate(
-        """async (credentials) => {
-        const response = await fetch('/api/auth/login', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(credentials)
-        });
-        return await response.json();
-    }""",
-        {"username": USERNAME, "password": PASSWORD},
-    )
-    if not result.get("success"):
-        raise Exception(f"Login failed: {result}")
-    await page.goto(f"{BASE_URL}{target_url}")
-    await page.wait_for_timeout(3000)
 
 
 @pytest.mark.asyncio

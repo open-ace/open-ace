@@ -1,4 +1,5 @@
 import os
+import sys
 
 #!/usr/bin/env python3
 """Test issue 50: Admin user should see all admin menus."""
@@ -7,35 +8,14 @@ import asyncio
 
 from playwright.async_api import async_playwright
 
+# Ensure project root on sys.path for conftest imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from tests.conftest import login_and_navigate
+
 # Test admin credentials
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
-
-
-async def login_and_navigate(page, target_url=None):
-    """Login via API and navigate to target page."""
-    await page.goto(f"{BASE_URL}/login")
-    await page.wait_for_timeout(1000)
-    result = await page.evaluate(
-        """async (credentials) => {
-        const response = await fetch('/api/auth/login', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(credentials)
-        });
-        return await response.json();
-    }""",
-        {"username": USERNAME, "password": PASSWORD},
-    )
-    if not result.get("success"):
-        raise Exception(f"Login failed: {result}")
-    if target_url:
-        await page.goto(f"{BASE_URL}{target_url}")
-        await page.wait_for_timeout(3000)
-    else:
-        await page.goto(f"{BASE_URL}/manage/dashboard")
-        await page.wait_for_timeout(3000)
 
 
 async def main():

@@ -62,12 +62,11 @@ def login(page: Page):
     # 点击登录按钮
     page.click('button[type="submit"]')
 
-    # 等待登录成功 - 检查 URL 变化
-    # bcrypt rounds=12 可能需要较长时间，使用轮询等待
-    for _ in range(60):
-        if "/login" not in page.url:
-            break
-        page.wait_for_timeout(2000)
+    # 等待登录成功 - bcrypt rounds=12 可能需要较长时间
+    try:
+        page.wait_for_url(lambda url: "/login" not in url, timeout=120000)
+    except Exception:
+        pass
 
 
 def navigate_to(page: Page, path: str):

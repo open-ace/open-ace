@@ -12,6 +12,7 @@ import logging
 import os
 import platform
 import pwd
+import re
 import secrets
 import socket
 import subprocess
@@ -766,8 +767,6 @@ class WebUIManager:
         # - Can contain lowercase letters, digits, underscores, and dashes
         # - Maximum 32 characters
         # - No spaces or special characters
-        import platform
-        import re
 
         if not system_account:
             logger.error("Empty username provided")
