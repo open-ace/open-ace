@@ -20,6 +20,7 @@ interface BadgeProps {
   pill?: boolean;
   children: React.ReactNode;
   className?: string;
+  style?: React.CSSProperties;
   onClick?: () => void;
   dismissible?: boolean;
   onDismiss?: () => void;
@@ -41,6 +42,7 @@ export const Badge: React.FC<BadgeProps> = ({
   pill = false,
   children,
   className,
+  style,
   onClick,
   dismissible = false,
   onDismiss,
@@ -57,7 +59,7 @@ export const Badge: React.FC<BadgeProps> = ({
         className
       )}
       onClick={onClick}
-      style={onClick ? { border: 'none', cursor: 'pointer' } : undefined}
+      style={onClick ? { border: 'none', cursor: 'pointer', ...style } : style}
     >
       {children}
       {dismissible && onDismiss && (
