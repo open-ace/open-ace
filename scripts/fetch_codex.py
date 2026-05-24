@@ -659,6 +659,51 @@ def _process_sessions_dir(
     return total_files
 
 
+def _resolve_user_id_from_sender(cursor, sender_name: str, all_users_cache: list) -> Optional[int]:
+    """Resolve user_id from sender_name (format: {user}-{hostname}-{tool}).
+
+    Hostname may contain hyphens, so rsplit alone is unreliable.
+    Strategy: rsplit for a quick match, then fallback to longest-prefix match.
+
+    Args:
+        cursor: Database cursor.
+        sender_name: Sender name string, e.g. 'rhuang-RichdeMacBook-Pro.local-codex'.
+        all_users_cache: Cached list of all user rows (lazy-loaded externally).
+
+    Returns:
+        user_id or None.
+    """
+    if not sender_name:
+        return None
+
+    from shared.db import _execute, _placeholder
+
+    placeholder = _placeholder()
+
+    # Try rsplit first (works when hostname has no hyphens)
+    candidate = sender_name.rsplit("-", 2)[0]
+    user_sql = (
+        f"SELECT id FROM users WHERE system_account = {placeholder} OR username = {placeholder}"
+    )
+    _execute(cursor, user_sql, (candidate, candidate))
+    user_row = cursor.fetchone()
+    if user_row:
+        return user_row["id"]
+
+    # Fallback: longest-prefix match against all users
+    # Sort by field length descending so e.g. 'alice-admin' matches before 'alice'
+    candidates = sorted(
+        ((u["id"], f) for u in all_users_cache for f in (u["system_account"], u["username"]) if f),
+        key=lambda x: len(x[1]),
+        reverse=True,
+    )
+    for uid, field in candidates:
+        if sender_name.startswith(field + "-"):
+            return uid
+
+    return None
+
+
 def update_agent_sessions_stats(messages: list) -> int:
     """
     Update agent_sessions table statistics from collected Codex messages.
@@ -732,6 +777,15 @@ def update_agent_sessions_stats(messages: list) -> int:
     conn = get_connection()
     cursor = conn.cursor()
 
+    # Lazy-loaded cache for all users (avoids N+1 query inside session loop)
+    _all_users_cache: list = []
+
+    def _get_all_users():
+        if not _all_users_cache:
+            _execute(cursor, "SELECT id, system_account, username FROM users")
+            _all_users_cache.extend(cursor.fetchall())
+        return _all_users_cache
+
     try:
         for session_id, stats in session_stats.items():
             try:
@@ -752,14 +806,8 @@ def update_agent_sessions_stats(messages: list) -> int:
                     sender_name = first_msg.get("sender_name", "")
                     project_path = stats["project_path"] or first_msg.get("project_path", "")
 
-                    # Extract system_account from sender_name (format: {system_account}-{hostname}-{tool})
-                    system_account = sender_name.rsplit("-", 2)[0] if sender_name else "unknown"
-
-                    # Find user_id by system_account
-                    user_sql = f"SELECT id FROM users WHERE system_account = {placeholder} OR username = {placeholder}"
-                    _execute(cursor, user_sql, (system_account, system_account))
-                    user_row = cursor.fetchone()
-                    user_id = user_row["id"] if user_row else None
+                    # Resolve user_id from sender_name (format: {user}-{hostname}-{tool})
+                    user_id = _resolve_user_id_from_sender(cursor, sender_name, _get_all_users())
 
                     title = f"codex - {session_id[:8]}"
 
