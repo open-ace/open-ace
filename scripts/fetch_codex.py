@@ -753,13 +753,30 @@ def update_agent_sessions_stats(messages: list) -> int:
                     project_path = stats["project_path"] or first_msg.get("project_path", "")
 
                     # Extract system_account from sender_name (format: {system_account}-{hostname}-{tool})
-                    system_account = sender_name.rsplit("-", 2)[0] if sender_name else "unknown"
-
-                    # Find user_id by system_account
-                    user_sql = f"SELECT id FROM users WHERE system_account = {placeholder} OR username = {placeholder}"
-                    _execute(cursor, user_sql, (system_account, system_account))
-                    user_row = cursor.fetchone()
-                    user_id = user_row["id"] if user_row else None
+                    # Hostname may contain hyphens, so rsplit alone is unreliable.
+                    # Strategy: rsplit for a quick match, then fallback to scanning all users.
+                    user_id = None
+                    if sender_name:
+                        # Try rsplit first (works when hostname has no hyphens)
+                        candidate = sender_name.rsplit("-", 2)[0]
+                        user_sql = f"SELECT id FROM users WHERE system_account = {placeholder} OR username = {placeholder}"
+                        _execute(cursor, user_sql, (candidate, candidate))
+                        user_row = cursor.fetchone()
+                        if user_row:
+                            user_id = user_row["id"]
+                        else:
+                            # Fallback: try matching each user's system_account/username
+                            # as a prefix of sender_name (handles hyphens in hostname)
+                            all_users_sql = "SELECT id, system_account, username FROM users"
+                            _execute(cursor, all_users_sql)
+                            all_users = cursor.fetchall()
+                            for u in all_users:
+                                for field in (u["system_account"], u["username"]):
+                                    if field and sender_name.startswith(field + "-"):
+                                        user_id = u["id"]
+                                        break
+                                if user_id:
+                                    break
 
                     title = f"codex - {session_id[:8]}"
 
