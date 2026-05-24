@@ -59,31 +59,36 @@ async def test_tenant_form_validation():
             print("UI Test: Issue 221 - Tenant Form Validation")
             print("=" * 60)
 
-            # Step 1: Navigate to home page
-            print("\n[Step 1] Navigate to home page")
-            await page.goto(BASE_URL, wait_until="networkidle")
-            await page.wait_for_timeout(1000)
+            # Step 1: Navigate to home page and login
+            print("\n[Step 1] Navigate to login page")
+            await page.goto(f"{BASE_URL}/login")
+            await page.wait_for_timeout(2000)
 
-            # Check if login is required
-            current_url = page.url
-            if "/login" in current_url or "login" in current_url:
-                print("  Need to login first...")
-                await page.fill("#username", os.environ.get("TEST_USERNAME", "admin"))
-                await page.fill("#password", os.environ.get("TEST_PASSWORD", "admin123"))
-                await page.click('button[type="submit"]')
-                await page.wait_for_timeout(2000)
-                print("  ✓ Logged in")
+            # Login
+            print("  Logging in...")
+            await page.fill("#username", os.environ.get("TEST_USERNAME", "admin"))
+            await page.fill("#password", os.environ.get("TEST_PASSWORD", "admin123"))
+            await page.click('button[type="submit"]')
+            # Wait for redirect - admin goes to /manage/dashboard
+            for _ in range(15):
+                await page.wait_for_timeout(1000)
+                if "/manage/" in page.url or "/work" in page.url:
+                    break
+            await page.wait_for_timeout(2000)
+            print("  ✓ Logged in")
 
             # Step 2: Navigate to Tenant Management page
             print("\n[Step 2] Navigate to Tenant Management page")
-            await page.goto(f"{BASE_URL}/manage/tenants", wait_until="networkidle")
+            await page.goto(f"{BASE_URL}/manage/tenants")
+            # Wait for the page content to fully load (not just navigation)
+            await page.wait_for_selector('button:has-text("Add Tenant")', timeout=15000)
             await page.wait_for_timeout(1000)
             await page.screenshot(path=f"{SCREENSHOT_DIR}/01_tenant_page.png")
             print("  ✓ Tenant Management page loaded")
 
             # Step 3: Click Add Tenant button
             print("\n[Step 3] Click Add Tenant button")
-            add_btn = page.locator("button").filter(has_text="Add Tenant")
+            add_btn = page.locator('button:has-text("Add Tenant")')
             if await add_btn.count() > 0:
                 await add_btn.first.click()
                 await page.wait_for_timeout(500)

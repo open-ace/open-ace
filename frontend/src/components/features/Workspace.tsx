@@ -181,14 +181,20 @@ export const Workspace: React.FC = () => {
 
         // Get user-specific URL (needed for token and openace_url in both modes)
         if (workspaceConfig.enabled) {
-          setLoadingStage('startingWorkspace');
-          try {
-            const userWebUIResponse = await workspaceApi.getUserWebUIUrl();
-            if (userWebUIResponse.success) {
-              setUserWebUI(userWebUIResponse);
+          // Check if we only need terminal — skip webui startup if so
+          const wsType = searchParams.get('workspaceType');
+          const hasOnlyTerminalParams = wsType === 'terminal' && searchParams.get('terminalId');
+
+          if (!hasOnlyTerminalParams) {
+            setLoadingStage('startingWorkspace');
+            try {
+              const userWebUIResponse = await workspaceApi.getUserWebUIUrl();
+              if (userWebUIResponse.success) {
+                setUserWebUI(userWebUIResponse);
+              }
+            } catch {
+              // In single-user mode, token may not be critical for local tabs
             }
-          } catch {
-            // In single-user mode, token may not be critical for local tabs
           }
           setLoadingStage('ready');
         } else {
@@ -1583,7 +1589,11 @@ export const Workspace: React.FC = () => {
   }
 
   // In multi-user mode, check if user webui is available
-  if (config.multi_user_mode && !userWebUI?.success) {
+  // Allow terminal-only tabs to work even when webui is unavailable
+  const urlHasTerminal =
+    searchParams.get('workspaceType') === 'terminal' || searchParams.get('terminalId') !== null;
+  const hasTerminalOnly = tabs.length === 0 || tabs.every((tab) => tab.tabType === 'terminal');
+  if (config.multi_user_mode && !userWebUI?.success && !hasTerminalOnly && !urlHasTerminal) {
     return (
       <div className="workspace">
         <div className="text-center py-5">

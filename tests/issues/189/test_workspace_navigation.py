@@ -18,9 +18,13 @@ import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PROJECT_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, PROJECT_ROOT)
-sys.path.insert(0, os.path.join(PROJECT_ROOT, "remote-agent"))
+REMOTE_AGENT_DIR = os.path.join(PROJECT_ROOT, "remote-agent")
+if REMOTE_AGENT_DIR not in sys.path:
+    sys.path.insert(0, REMOTE_AGENT_DIR)
 
 
 class TestSessionProcessInterrupt(unittest.TestCase):
@@ -152,42 +156,13 @@ class TestSSEDisconnectDetection(unittest.TestCase):
 
     def test_generator_abort_on_disconnect(self):
         """Simulate GeneratorExit during SSE streaming and verify abort is called."""
-        # We test the generate() function's behavior by simulating the scenario
-        # that when the generator is closed (client disconnect), it calls abort_request.
-        # Import the blueprint module to get the generate function
-        import app.routes.remote as remote_module
-
-        # Mock the dependencies
-        mock_agent_mgr = MagicMock()
-        mock_agent_mgr.get_buffered_output.return_value = []
-        mock_agent_mgr.is_session_ended.return_value = False
-
-        mock_session_mgr = MagicMock()
-        mock_session_mgr.abort_request.return_value = True
-
-        with (
-            patch.object(remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr),
-            patch.object(remote_module, "RemoteSessionManager", return_value=mock_session_mgr),
-            patch.object(remote_module, "_require_auth", return_value=None),
-            patch.object(remote_module, "_check_session_access", return_value=(None, None)),
-        ):
-
-            with (
-                remote_module.remote_bp.app_context()
-                if hasattr(remote_module.remote_bp, "app_context")
-                else MagicMock()
-            ):
-                pass  # Flask blueprint context not available in unit test
-
-        # Instead, test the generate function directly
+        # Test the generate function's GeneratorExit behavior directly
         gen_called_abort = [False]
 
         def mock_generate():
             try:
                 yield ": connected\n\n"
-                # Simulate one iteration
                 yield "data: test\n\n"
-                # Simulate client disconnect - GeneratorExit will be raised
             except GeneratorExit:
                 gen_called_abort[0] = True
                 raise

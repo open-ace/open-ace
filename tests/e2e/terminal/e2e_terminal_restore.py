@@ -16,19 +16,21 @@ import time
 import requests
 from playwright.sync_api import sync_playwright
 
-BASE_URL = "http://localhost:5001"
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
+MACHINE_ID = os.environ.get("MACHINE_ID", "6f85734e-9b21-4320-a857-a67bc36b9078")
 
 
-def get_terminal_session_id():
-    """Get a terminal session ID from the API"""
+def get_or_create_terminal_session():
+    """Get an existing terminal session or create a new one"""
     session = requests.Session()
     login_resp = session.post(
         f"{BASE_URL}/api/auth/login", json={"username": USERNAME, "password": PASSWORD}
     )
     assert login_resp.json()["success"], "Login failed"
 
+    # First check for existing terminal sessions
     sessions_resp = session.get(f"{BASE_URL}/api/workspace/sessions?page=1&pageSize=20")
     sessions_data = sessions_resp.json()
     sessions = sessions_data.get("data", {}).get("sessions", [])
@@ -36,6 +38,29 @@ def get_terminal_session_id():
 
     if terminal_sessions:
         return terminal_sessions[0]["session_id"]
+
+    # No existing terminal session — create one
+    print("No terminal session found, creating one...")
+    resp = session.post(
+        f"{BASE_URL}/api/remote/terminal/start",
+        json={"machine_id": MACHINE_ID, "work_dir": "/tmp"},
+    )
+    data = resp.json()
+    if data.get("success"):
+        terminal_id = data["terminal"]["terminal_id"]
+        # Wait for it to start
+        for _ in range(15):
+            status_resp = session.get(
+                f"{BASE_URL}/api/remote/terminal/{terminal_id}/status?machine_id={MACHINE_ID}"
+            )
+            status = status_resp.json().get("terminal", {}).get("status", "unknown")
+            if status == "running":
+                print(f"Terminal {terminal_id[:8]}... is running")
+                return terminal_id
+            time.sleep(2)
+        print("Terminal created but status is not 'running', returning ID anyway")
+        return terminal_id
+
     return None
 
 
@@ -44,7 +69,7 @@ def test_terminal_session_restore(headless=True):
     print("\n=== Testing Terminal Session Restore ===")
 
     # Get terminal session ID first
-    terminal_id = get_terminal_session_id()
+    terminal_id = get_or_create_terminal_session()
     if not terminal_id:
         print("No terminal session found - skipping test")
         return False
@@ -59,12 +84,14 @@ def test_terminal_session_restore(headless=True):
         # 1. Login
         print("Step 1: Login...")
         page.goto(f"{BASE_URL}/login")
-        time.sleep(1)
-        page.fill("input[type='text']", USERNAME)
-        page.fill("input[type='password']", PASSWORD)
+        page.wait_for_selector("#username", state="visible", timeout=10000)
+        page.fill("#username", USERNAME)
+        page.fill("#password", PASSWORD)
         page.click("button[type='submit']")
-        time.sleep(2)
-        page.wait_for_load_state("networkidle")
+        try:
+            page.wait_for_url("**/manage/**", timeout=10000)
+        except Exception:
+            page.wait_for_timeout(5000)
         print("✓ Logged in")
 
         # 2. Navigate to Work page

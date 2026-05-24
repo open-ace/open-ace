@@ -21,7 +21,7 @@ from playwright.sync_api import sync_playwright
 BASE_URL = "http://localhost:5001"
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
-MACHINE_ID = "0092acb3-9b6d-46db-b6c0-73f4e6d363f3"
+MACHINE_ID = os.environ.get("MACHINE_ID", "6f85734e-9b21-4320-a857-a67bc36b9078")
 
 
 def login_api():
@@ -144,10 +144,14 @@ def test_terminal_restore_flow(headless=True):
         # Login
         print("Login...")
         page.goto(f"{BASE_URL}/login")
-        page.fill("input[type='text']", USERNAME)
-        page.fill("input[type='password']", PASSWORD)
+        page.wait_for_selector("#username", state="visible", timeout=10000)
+        page.fill("#username", USERNAME)
+        page.fill("#password", PASSWORD)
         page.click("button[type='submit']")
-        page.wait_for_load_state("networkidle")
+        try:
+            page.wait_for_url("**/manage/**", timeout=10000)
+        except Exception:
+            page.wait_for_timeout(5000)
         print("✓ Logged in")
 
         # Navigate to Work page

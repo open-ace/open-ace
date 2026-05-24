@@ -43,6 +43,12 @@ def remote_module():
         "app.services.webui_manager": MagicMock(),
         "app.services.remote_agent_manager": MagicMock(),
         "gevent": MagicMock(),
+        "gevent.lock": MagicMock(
+            RLock=lambda *a, **kw: MagicMock(__enter__=lambda s: s, __exit__=lambda s, *a: None),
+            Semaphore=lambda *a, **kw: MagicMock(
+                __enter__=lambda s: s, __exit__=lambda s, *a: None
+            ),
+        ),
         "hmac": MagicMock(),
     }
 

@@ -12,7 +12,7 @@ from flask import Blueprint, g, jsonify, redirect, request, url_for
 
 from app.auth.decorators import admin_required, auth_required, public_endpoint
 from app.modules.sso.manager import SSOManager
-from app.modules.sso.provider import list_providers
+from app.modules.sso.provider import get_provider_config, list_providers
 from app.repositories.user_repo import UserRepository
 
 logger = logging.getLogger(__name__)
@@ -42,8 +42,19 @@ def list_sso_providers():
 
     providers = get_sso_manager().list_providers(tenant_id=tenant_id)
 
-    # Also include predefined providers
-    predefined = list_providers()
+    # Also include predefined providers with full config (type, display_name)
+    predefined_names = list_providers()
+    predefined = []
+    for name in predefined_names:
+        config = get_provider_config(name)
+        if config:
+            predefined.append(
+                {
+                    "name": name,
+                    "type": config["provider_type"],
+                    "display_name": config.get("name", name),
+                }
+            )
 
     return jsonify(
         {

@@ -70,7 +70,7 @@ def test_api_performance():
     print("\n[API Test 1] First request to anomaly-detection API...")
     start_time = time.time()
     response = requests.get(
-        f"{BASE_URL}api/analysis/anomaly-detection", params={"start": start_date, "end": end_date}
+        f"{BASE_URL}/api/analysis/anomaly-detection", params={"start": start_date, "end": end_date}
     )
     first_request_time = time.time() - start_time
 
@@ -90,7 +90,7 @@ def test_api_performance():
     print("\n[API Test 2] Cached request to anomaly-detection API...")
     start_time = time.time()
     response = requests.get(
-        f"{BASE_URL}api/analysis/anomaly-detection", params={"start": start_date, "end": end_date}
+        f"{BASE_URL}/api/analysis/anomaly-detection", params={"start": start_date, "end": end_date}
     )
     cached_request_time = time.time() - start_time
 
@@ -107,7 +107,7 @@ def test_api_performance():
     print("\n[API Test 3] Anomaly trend API...")
     start_time = time.time()
     response = requests.get(
-        f"{BASE_URL}api/analysis/anomaly-trend", params={"start": start_date, "end": end_date}
+        f"{BASE_URL}/api/analysis/anomaly-trend", params={"start": start_date, "end": end_date}
     )
     trend_request_time = time.time() - start_time
 
@@ -117,7 +117,7 @@ def test_api_performance():
     # Cached trend request
     start_time = time.time()
     response = requests.get(
-        f"{BASE_URL}api/analysis/anomaly-trend", params={"start": start_date, "end": end_date}
+        f"{BASE_URL}/api/analysis/anomaly-trend", params={"start": start_date, "end": end_date}
     )
     cached_trend_time = time.time() - start_time
 

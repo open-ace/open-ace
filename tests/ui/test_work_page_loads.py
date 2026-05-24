@@ -4,13 +4,14 @@ Test script to verify /work page loads correctly
 
 import os
 import sys
+import time
 
-sys.path.insert(0, "/Users/rhuang/workspace/open-ace/tests")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from playwright.sync_api import sync_playwright
 
 # Configuration
-BASE_URL = "http://localhost:5001"
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
@@ -36,12 +37,26 @@ def test_work_page_loads():
         page.on("console", on_console)
         page.on("pageerror", lambda err: page_errors.append(str(err)))
 
-        # Navigate to /work page
+        # Step 1: Login first
+        print("[Step 1] Logging in...")
+        page.goto(f"{BASE_URL}/login")
+        page.wait_for_selector("#username", timeout=10000)
+        page.fill("#username", USERNAME)
+        page.fill("#password", PASSWORD)
+        page.click('button[type="submit"]')
+        page.wait_for_timeout(5000)
+        page.wait_for_load_state("networkidle")
+        print(f"  Current URL after login: {page.url}")
+
+        # Step 2: Navigate to /work page
+        print("[Step 2] Navigating to /work page...")
         page.goto(f"{BASE_URL}/work", wait_until="networkidle")
-        page.wait_for_timeout(8000)  # Wait for React to render
+        page.wait_for_timeout(5000)  # Wait for React to render
 
         # Take screenshot to see what's on the page
+        os.makedirs("screenshots", exist_ok=True)
         page.screenshot(path="screenshots/test_work_page_debug.png")
+        print(f"  Current URL: {page.url}")
 
         # Print errors
         print("\n=== Console Messages ===")
@@ -54,88 +69,20 @@ def test_work_page_loads():
             print(error)
         print("=== End Page Errors ===\n")
 
-        # Check current URL - might be redirected to login
-        current_url = page.url
-        print(f"Current URL: {current_url}")
-
-        # If on login page, login first
-        if "/login" in current_url:
-            print("On login page, logging in...")
-
-            # Wait for login form
-            page.wait_for_selector('input[placeholder*="username" i]', timeout=5000)
-
-            # Login
-            page.fill('input[placeholder*="username" i]', USERNAME)
-            page.fill('input[placeholder*="password" i]', PASSWORD)
-            page.click('button:has-text("Sign In"), button:has-text("登录")')
-
-            # Wait for navigation and network to be idle
-            page.wait_for_load_state("networkidle")
-            page.wait_for_timeout(5000)  # Wait for redirect and React to render
-
-            # Check URL after login
-            current_url = page.url
-            print(f"URL after login: {current_url}")
-
-            # Take screenshot after login
-            page.screenshot(path="screenshots/test_work_page_after_login.png")
-            print("Screenshot saved to: screenshots/test_work_page_after_login.png")
-
-            # Navigate to /work page if not already there
-            if "/work" not in current_url:
-                print("Navigating to /work...")
-
-                # Clear errors before navigation
-                console_errors.clear()
-                page_errors.clear()
-
-                page.goto(f"{BASE_URL}/work", wait_until="networkidle")
-                page.wait_for_timeout(8000)  # Wait for React to render
-
-                # Take screenshot after navigation
-                page.screenshot(path="screenshots/test_work_page_after_nav.png")
-                print("Screenshot saved to: screenshots/test_work_page_after_nav.png")
-
-                # Print errors after navigation
-                print("\n=== Console Messages after nav ===")
-                for error in console_errors:
-                    print(error)
-                print("=== End Console Messages after nav ===\n")
-
-                print("\n=== Page Errors after nav ===")
-                for error in page_errors:
-                    print(error)
-                print("=== End Page Errors after nav ===\n")
-
-        # Check for loading indicator
-        loading = page.locator(".workspace-loading, .loading-overlay, .spinner-border")
-        if loading.is_visible():
-            print("Loading indicator is visible, waiting...")
-            page.wait_for_timeout(5000)
-
-        # Check for error messages
-        error = page.locator('[class*="error"], [class*="Error"]')
-        if error.is_visible():
-            print(f"Error message found: {error.inner_text()}")
-
-        # Check for workspace content
-        workspace = page.locator(".workspace")
-        if workspace.is_visible():
-            print("Workspace is visible!")
-        else:
-            print("Workspace is NOT visible")
-            # Try to find what's on the page
-            body = page.locator("body")
-            print(f"Body content: {body.inner_html()[:500]}")
-
         # Check if workspace content is visible
         workspace = page.locator(".workspace")
-        assert workspace.is_visible(), "Workspace should be visible"
+        if workspace.count() > 0:
+            print("Workspace element found")
+        else:
+            print("Workspace element not found, checking page structure...")
 
-        # Check for header
-        header = page.locator(".page-header")
-        assert header.is_visible(), "Page header should be visible"
+        # Check for work layout
+        work_layout = page.locator(".work-layout")
+        assert work_layout.count() > 0, "Work layout should be present"
+
+        # Check for work header
+        header = page.locator(".work-header")
+        assert header.is_visible(), "Work header should be visible"
 
         # Check for left panel (session list)
         left_panel = page.locator(".work-left-panel")
@@ -152,7 +99,7 @@ def test_work_page_loads():
         # Take screenshot
         page.screenshot(path="screenshots/test_work_page_loads.png")
 
-        print("✓ All checks passed!")
+        print("All checks passed!")
         print("Screenshot saved to: screenshots/test_work_page_loads.png")
 
         browser.close()

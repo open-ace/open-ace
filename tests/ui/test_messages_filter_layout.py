@@ -39,18 +39,18 @@ async def test_messages_filter_layout():
             # Step 1: Login
             print("\n[Step 1] Logging in...")
             await page.goto(f"{BASE_URL}/login")
+            await page.wait_for_selector("#username", timeout=10000)
             await page.fill("#username", USERNAME)
             await page.fill("#password", PASSWORD)
             await page.click('button[type="submit"]')
-
-            # Wait for redirect to dashboard
-            await page.wait_for_url(f"{BASE_URL}/", timeout=15000)
+            await page.wait_for_timeout(5000)
+            await page.wait_for_load_state("networkidle", timeout=10000)
             print("✓ Login successful")
 
-            # Step 2: Navigate to Messages page
+            # Step 2: Navigate to Messages page directly
             print("\n[Step 2] Navigating to Messages page...")
-            await page.wait_for_selector(".sidebar", timeout=10000)
-            await page.click('.sidebar .nav-item:has-text("Messages")')
+            await page.goto(f"{BASE_URL}/manage/messages")
+            await page.wait_for_load_state("networkidle")
 
             # Wait for messages container
             await page.wait_for_selector(".messages", timeout=10000)
@@ -65,13 +65,13 @@ async def test_messages_filter_layout():
             # Step 4: Verify first row filters
             print("\n[Step 4] Checking first row filters...")
 
-            # Check Date filter
-            date_label = page.locator('small:has-text("Date:")')
+            # Check Date filter (Start Date)
+            date_label = page.locator('small:has-text("Start Date:")')
             await expect(date_label).to_be_visible()
-            print("✓ Date label visible")
+            print("✓ Start Date label visible")
 
             date_input = page.locator('input[type="date"]')
-            await expect(date_input).to_be_visible()
+            await expect(date_input.first).to_be_visible()
             print("✓ Date input visible")
 
             # Check Host filter
@@ -129,8 +129,8 @@ async def test_messages_filter_layout():
             # Step 6: Test filter functionality
             print("\n[Step 6] Testing filter functionality...")
 
-            # Test Date filter change
-            await date_input.fill("2026-03-17")
+            # Test Date filter change (use first date input = Start Date)
+            await date_input.first.fill("2026-03-17")
             await page.wait_for_timeout(500)
             print("✓ Date filter can be changed")
 

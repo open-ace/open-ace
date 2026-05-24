@@ -12,6 +12,7 @@ import logging
 import os
 import platform
 import pwd
+import re
 import secrets
 import socket
 import subprocess
@@ -766,7 +767,6 @@ class WebUIManager:
         # - Can contain lowercase letters, digits, underscores, and dashes
         # - Maximum 32 characters
         # - No spaces or special characters
-        import re
 
         if not system_account:
             logger.error("Empty username provided")
@@ -780,6 +780,11 @@ class WebUIManager:
         if not re.match(r"^[a-z_][a-z0-9_-]*$", system_account):
             logger.error(f"Invalid username format: {system_account}")
             return False
+
+        # macOS doesn't have useradd — skip system user creation
+        if platform.system() == "Darwin":
+            logger.debug(f"Skipping system user creation on macOS for: {system_account}")
+            return True
 
         # Check if user already exists
         result = subprocess.run(["id", system_account], capture_output=True, text=True)

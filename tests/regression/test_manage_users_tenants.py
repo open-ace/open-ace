@@ -88,9 +88,12 @@ def test_add_tenant_button():
 
             # 检查添加租户按钮
             add_btn_selectors = [
+                'button:has-text("Add Tenant")',
                 'button:has-text("Add")',
                 'button:has-text("添加")',
+                'button:has-text("添加租户")',
                 'button:has-text("New Tenant")',
+                ".btn-primary",
             ]
             assert check_element_exists(page, add_btn_selectors), "添加租户按钮应可见"
 

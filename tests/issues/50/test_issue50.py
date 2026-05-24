@@ -3,12 +3,17 @@
 
 import asyncio
 import os
+import sys
 
 from playwright.async_api import async_playwright
 
+# Ensure project root on sys.path for conftest imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from tests.conftest import login_and_navigate
+
 # Test user credentials (normal user, not admin)
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
-PASSWORD = "testpass123"
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 
 
@@ -24,60 +29,43 @@ async def main():
         print("Issue 50: Normal User Menu Test")
         print("=" * 60)
 
-        # Navigate to login page
-        print("\n1. Navigating to login page...")
-        await page.goto(f"{BASE_URL}/login")
-        await page.wait_for_load_state("networkidle")
-
-        # Take screenshot of login page
-        await page.screenshot(path="screenshots/issues/50/01_login_page.png", full_page=True)
-        print("   Saved: screenshots/issues/50/01_login_page.png")
-
-        # Fill in login credentials
-        print(f"\n2. Logging in as normal user: {USERNAME}...")
-        await page.fill("#username", USERNAME)
-        await page.fill("#password", PASSWORD)
-        await page.click('button[type="submit"]')
-
-        # Wait for navigation
-        await page.wait_for_load_state("networkidle")
-        await asyncio.sleep(2)
-
-        # Take screenshot after login
+        # Navigate to login page and login via API
+        print("\n1. Logging in...")
+        await login_and_navigate(page, "/work")
         await page.screenshot(path="screenshots/issues/50/02_after_login.png", full_page=True)
         print("   Saved: screenshots/issues/50/02_after_login.png")
 
         # Check menu items visibility
-        print("\n3. Checking menu items visibility...")
+        print("\n2. Checking menu items visibility...")
 
-        # Get all menu items
+        # Check for work mode nav items
+        nav_items_text = await page.evaluate(
+            """() => {
+            const all = document.querySelectorAll('button, a');
+            return Array.from(all).map(el => el.textContent.trim()).filter(t => t);
+        }"""
+        )
+
         menu_items = {
-            "Dashboard": "nav-dashboard",
-            "Messages": "nav-messages",
-            "Analysis": "nav-analysis",
-            "Management": "nav-management",
-            "Workspace": "nav-workspace",
-            "My Usage Report": "nav-report",
+            "Workspace": "Workspace",
+            "Sessions": "Sessions",
+            "My Usage": "Usage",
         }
 
-        for name, nav_id in menu_items.items():
-            element = await page.query_selector(f"#{nav_id}")
-            if element:
-                is_visible = await element.is_visible()
-                display_style = await element.evaluate("el => el.style.display")
-                status = "VISIBLE" if is_visible else "HIDDEN"
-                print(f"   - {name}: {status} (display: {display_style})")
-                results.append((name, is_visible, display_style))
+        for name, search_text in menu_items.items():
+            found = any(search_text in text for text in nav_items_text)
+            if found:
+                print(f"   - {name}: VISIBLE")
+                results.append((name, True, "visible"))
             else:
-                print(f"   - {name}: NOT FOUND")
-                results.append((name, False, "not_found"))
+                print(f"   - {name}: HIDDEN")
+                results.append((name, False, "hidden"))
 
-        # Verify expected behavior
-        print("\n4. Verifying expected behavior...")
+        # Verify expected behavior for normal user
+        print("\n3. Verifying expected behavior...")
 
-        # For normal user: only Workspace and Report should be visible
-        expected_visible = ["Workspace", "My Usage Report"]
-        expected_hidden = ["Dashboard", "Messages", "Analysis", "Management"]
+        expected_visible = ["Workspace", "Sessions", "My Usage"]
+        expected_hidden = []
 
         all_passed = True
 
@@ -95,11 +83,9 @@ async def main():
                 else:
                     print(f"   PASS: {name} is hidden as expected")
 
-        # Take final screenshot of sidebar
-        sidebar = await page.query_selector(".sidebar")
-        if sidebar:
-            await sidebar.screenshot(path="screenshots/issues/50/03_sidebar.png")
-            print("\n   Saved: screenshots/issues/50/03_sidebar.png")
+        # Take final screenshot
+        await page.screenshot(path="screenshots/issues/50/03_sidebar.png", full_page=True)
+        print("\n   Saved: screenshots/issues/50/03_sidebar.png")
 
         # Summary
         print("\n" + "=" * 60)

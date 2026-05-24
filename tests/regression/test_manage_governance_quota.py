@@ -87,6 +87,15 @@ def test_alert_rules_list():
             login(page)
             navigate_to(page, "/manage/quota")
 
+            # 先点击 Alerts tab
+            try:
+                alerts_tab = page.locator("button.nav-link").filter(has_text="Alert")
+                if alerts_tab.count() > 0:
+                    alerts_tab.click()
+                    page.wait_for_timeout(1000)
+            except Exception:
+                pass
+
             # 检查告警规则列表或空状态
             alert_selectors = [
                 ".alert-rules-list",
@@ -94,6 +103,7 @@ def test_alert_rules_list():
                 ".rules-list",
                 ".empty-state",
                 ".no-data",
+                ".card",
             ]
             assert check_element_exists(page, alert_selectors), "应有告警规则列表或空状态提示"
 

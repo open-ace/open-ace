@@ -211,15 +211,22 @@ async def page(playwright_browser):
 async def logged_in_page(page):
     """Create a page that is already logged in."""
     await page.goto(f"{BASE_URL}/login")
-    await page.wait_for_load_state("networkidle")
-
-    await page.fill('input[name="username"]', TEST_USERNAME)
-    await page.fill('input[name="password"]', TEST_PASSWORD)
-    await page.click('button[type="submit"]')
-
-    # Wait for redirect
-    await page.wait_for_url(lambda url: "/login" not in url, timeout=15000)
-    await page.wait_for_load_state("networkidle")
+    await page.wait_for_timeout(1000)
+    result = await page.evaluate(
+        """async (credentials) => {
+        const response = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(credentials)
+        });
+        return await response.json();
+    }""",
+        {"username": TEST_USERNAME, "password": TEST_PASSWORD},
+    )
+    if not result.get("success"):
+        raise Exception(f"Login failed: {result}")
+    await page.goto(f"{BASE_URL}/work")
+    await page.wait_for_timeout(2000)
 
     yield page
 
@@ -253,3 +260,29 @@ def user_credentials(request):
         "password": password,
         "user_type": user_type,
     }
+
+
+async def login_and_navigate(page, target_url=None, default_url="/work"):
+    """Login via API and navigate to target page.
+
+    Shared helper for Playwright async tests that need an authenticated session.
+    Uses browser fetch() to call the login API directly, avoiding slow bcrypt UI login.
+    """
+    await page.goto(f"{BASE_URL}/login")
+    await page.wait_for_timeout(1000)
+    result = await page.evaluate(
+        """async (credentials) => {
+        const response = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(credentials)
+        });
+        return await response.json();
+    }""",
+        {"username": TEST_USERNAME, "password": TEST_PASSWORD},
+    )
+    if not result.get("success"):
+        raise Exception(f"Login failed: {result}")
+    navigate_to = target_url if target_url else default_url
+    await page.goto(f"{BASE_URL}{navigate_to}")
+    await page.wait_for_timeout(3000)

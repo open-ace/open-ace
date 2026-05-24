@@ -49,16 +49,25 @@ async def test_conversation_detail_modal():
             await page.wait_for_selector("#username", timeout=10000)
             await page.fill("#username", USERNAME)
             await page.fill("#password", PASSWORD)
-            await page.click('button[type="submit"]')
-            await page.wait_for_url(f"{BASE_URL}/", timeout=15000)
-            await page.wait_for_load_state("networkidle", timeout=10000)
+            # Login via API
+            await page.evaluate(
+                """async (credentials) => {
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(credentials)
+                });
+                return await response.json();
+            }""",
+                {"username": USERNAME, "password": PASSWORD},
+            )
             print("   ✓ Login successful")
             test_results.append(("Login", "PASS", ""))
 
             # Step 2: Navigate to Conversation History page
             print("\n[Step 2] Navigating to Conversation History page...")
             await page.goto(f"{BASE_URL}/manage/analysis/conversation-history")
-            await page.wait_for_load_state("networkidle", timeout=10000)
+            await page.wait_for_timeout(3000)
             print("   ✓ Conversation History page loaded")
             test_results.append(("Navigate to Conversation History", "PASS", ""))
 
