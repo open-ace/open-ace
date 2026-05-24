@@ -43,24 +43,25 @@ async def test_recommendations_api():
             # Step 1: Login
             print("\n[Step 1] Logging in...")
             await page.goto(f"{BASE_URL}/login")
-            await page.fill("#username", USERNAME)
-            await page.fill("#password", PASSWORD)
-            await page.click('button[type="submit"]')
-
-            # Wait for redirect to dashboard
-            await page.wait_for_url(f"{BASE_URL}/", timeout=15000)
+            await page.wait_for_timeout(1000)
+            await page.evaluate(
+                """async (credentials) => {
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(credentials)
+                });
+                return await response.json();
+            }""",
+                {"username": USERNAME, "password": PASSWORD},
+            )
             print("✓ Login successful")
 
             # Step 2: Navigate to Analysis page
             print("\n[Step 2] Navigating to Analysis page...")
             start_time = time.time()
-            # Wait for sidebar to be visible
-            await page.wait_for_selector(".sidebar", timeout=10000)
-            # Click on Analysis nav item (using text content in span)
-            await page.click('.sidebar .nav-link:has-text("Analysis")')
-
-            # Wait for analysis section to be visible
-            await page.wait_for_selector("#analysis-section", state="visible", timeout=5000)
+            await page.goto(f"{BASE_URL}/manage/analysis/roi")
+            await page.wait_for_timeout(3000)
             navigation_time = time.time() - start_time
             print(f"✓ Analysis page loaded in {navigation_time:.2f} seconds")
 

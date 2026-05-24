@@ -17,7 +17,7 @@ import {
   Button,
   Select,
   Loading,
-  Error,
+  Error as ErrorDisplay,
   EmptyState,
   Modal,
   TextInput,
@@ -67,7 +67,13 @@ export const SSOSettings: React.FC = () => {
     try {
       const result = await ssoApi.getProviders();
       setRegisteredProviders(result.registered);
-      setPredefinedProviders(result.predefined);
+      // API may return predefined as string[] — normalize to PredefinedProvider objects
+      const normalized = (result.predefined as (PredefinedProvider | string)[]).map((p) =>
+        typeof p === 'string'
+          ? { name: p, type: p === 'okta' ? ('oidc' as const) : ('oauth2' as const), display_name: p.charAt(0).toUpperCase() + p.slice(1) }
+          : p,
+      );
+      setPredefinedProviders(normalized);
     } catch (err) {
       const errorMessage =
         err instanceof Error ? (err as Error).message : 'Failed to fetch providers';
@@ -138,7 +144,7 @@ export const SSOSettings: React.FC = () => {
   }
 
   if (error) {
-    return <Error message={error} onRetry={fetchProviders} />;
+    return <ErrorDisplay message={error} onRetry={fetchProviders} />;
   }
 
   return (

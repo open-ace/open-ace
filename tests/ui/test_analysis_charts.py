@@ -4,7 +4,7 @@ Analysis Charts UI Test
 
 Test that Analysis page charts display data correctly:
 - Usage Heatmap
-- Top Tools
+- Token Trend
 - Peak Usage Periods
 - Top 10 Active Users
 - Tool Comparison
@@ -49,7 +49,7 @@ def test_analysis_charts():
     screenshots = []
     results = {
         "usage_heatmap": False,
-        "top_tools": False,
+        "token_trend": False,
         "peak_usage": False,
         "active_users": False,
         "tool_comparison": False,
@@ -65,28 +65,27 @@ def test_analysis_charts():
         try:
             # Step 1: Navigate to login page
             print("\n[Step 1] Navigate to login page")
-            page.goto(BASE_URL)
+            page.goto(f"{BASE_URL}/login")
             page.wait_for_load_state("networkidle")
             screenshots.append(take_screenshot(page, "01_login"))
 
             # Step 2: Login
             print("[Step 2] Login")
+            page.wait_for_selector("#username", timeout=10000)
             page.fill("#username", USERNAME)
             page.fill("#password", PASSWORD)
             page.click('button[type="submit"]')
+            # Wait for SPA navigation - the URL changes from /login to /manage/dashboard
+            page.wait_for_timeout(5000)
             page.wait_for_load_state("networkidle")
             time.sleep(2)
             screenshots.append(take_screenshot(page, "02_after_login"))
 
-            # Step 3: Navigate to Analysis page
+            # Step 3: Navigate to Analysis page (Trend Analysis)
             print("[Step 3] Navigate to Analysis page")
-            # Navigation uses buttons, not links
-            analysis_btn = page.locator('button:has-text("Analysis")')
-            if analysis_btn.count() > 0:
-                analysis_btn.first.click()
-            else:
-                # Fallback to direct URL
-                page.goto(f"{BASE_URL}#/analysis")
+            # Admin users are redirected to /manage/dashboard after login.
+            # The Analysis charts are now at /manage/analysis/trend (TrendAnalysis component).
+            page.goto(f"{BASE_URL}/manage/analysis/trend")
             page.wait_for_load_state("networkidle")
             time.sleep(3)
             screenshots.append(take_screenshot(page, "03_analysis"))
@@ -96,6 +95,8 @@ def test_analysis_charts():
             heatmap_heading = page.locator(
                 'h5:has-text("Usage Heatmap"), .card-title:has-text("Usage Heatmap"), h5:has-text("使用热力图")'
             )
+            # Wait for the page to fully render with data
+            page.wait_for_timeout(3000)
             if heatmap_heading.count() > 0:
                 print("  ✓ Usage Heatmap heading found")
                 # Check for heatmap cells
@@ -108,23 +109,23 @@ def test_analysis_charts():
             else:
                 print("  ✗ Usage Heatmap heading not found")
 
-            # Step 5: Check Top Tools
-            print("[Step 5] Check Top Tools")
-            top_tools_heading = page.locator(
-                'h5:has-text("Top Tools"), .card-title:has-text("Top Tools"), h5:has-text("热门工具")'
+            # Step 5: Check Token Trend
+            print("[Step 5] Check Token Trend")
+            token_trend_heading = page.locator(
+                'h5:has-text("Token Trend"), .card-title:has-text("Token Trend"), h5:has-text("Token 趋势")'
             )
-            if top_tools_heading.count() > 0:
-                print("  ✓ Top Tools heading found")
+            if token_trend_heading.count() > 0:
+                print("  ✓ Token Trend heading found")
                 # Check for chart or data
-                top_tools_card = top_tools_heading.first.locator("xpath=..")
-                no_data = top_tools_card.locator('text="No data available", text="暂无数据"')
+                token_trend_card = token_trend_heading.first.locator("xpath=..")
+                no_data = token_trend_card.locator('text="No data available", text="暂无数据"')
                 if no_data.count() == 0:
-                    print("  ✓ Top Tools has data")
-                    results["top_tools"] = True
+                    print("  ✓ Token Trend has data")
+                    results["token_trend"] = True
                 else:
-                    print("  ✗ Top Tools shows 'No data available'")
+                    print("  ✗ Token Trend shows 'No data available'")
             else:
-                print("  ✗ Top Tools heading not found")
+                print("  ✗ Token Trend heading not found")
 
             # Step 6: Check Peak Usage Periods
             print("[Step 6] Check Peak Usage Periods")

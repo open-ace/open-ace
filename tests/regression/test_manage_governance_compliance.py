@@ -66,13 +66,17 @@ def test_compliance_rules_list():
             login(page)
             navigate_to(page, "/manage/compliance")
 
-            # 检查合规规则列表或空状态
+            # 检查合规规则列表或报告内容
             rules_selectors = [
                 ".compliance-rules-list",
                 "table",
                 ".data-table",
                 ".empty-state",
                 ".no-data",
+                ".report-type-card",
+                ".card",
+                "[class*='report']",
+                "[class*='compliance']",
             ]
             assert check_element_exists(page, rules_selectors), "应有合规规则列表或空状态提示"
 

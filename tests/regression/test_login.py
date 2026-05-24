@@ -66,9 +66,11 @@ def test_login_success():
             page.fill("#password", "admin123")
             page.click('button[type="submit"]')
 
-            # 等待登录成功 - 检查 URL 变化
-            page.wait_for_timeout(1000)
-            page.wait_for_url(lambda url: "/login" not in url, timeout=15000)
+            # 等待登录成功 - 检查 URL 变化（bcrypt rounds=12 可能很慢）
+            for _ in range(60):
+                if "/login" not in page.url:
+                    break
+                page.wait_for_timeout(2000)
 
             # 验证登录成功
             assert "/login" not in page.url, "登录后应重定向到其他页面"
@@ -120,7 +122,10 @@ def test_logout():
             page.fill("#password", "admin123")
             page.click('button[type="submit"]')
             page.wait_for_timeout(1000)
-            page.wait_for_url(lambda url: "/login" not in url, timeout=15000)
+            for _ in range(60):
+                if "/login" not in page.url:
+                    break
+                page.wait_for_timeout(2000)
 
             # 查找并点击登出按钮
             logout_selectors = [

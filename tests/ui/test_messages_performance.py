@@ -3,26 +3,21 @@
 Test script to measure Messages API query performance.
 Issue #20: Messages page loading slowly.
 
-This script tests the query performance for different filter combinations.
+This script tests the query performance for different filter combinations
+via the HTTP API.
 """
 
 import os
-import sys
 import time
 
-# Add shared directory to path
-script_dir = os.path.dirname(os.path.abspath(__file__))
-shared_dir = os.path.join(script_dir, "shared")
-if shared_dir not in sys.path:
-    sys.path.insert(0, shared_dir)
+import requests
 
-import db
-import utils
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 
 
 def test_query_performance():
     """Test query performance for different filter combinations."""
-    today = utils.get_today()
+    today = time.strftime("%Y-%m-%d")
 
     print("Testing Messages API query performance")
     print(f"Today's date: {today}")
@@ -37,10 +32,10 @@ def test_query_performance():
             "name": "Date + Tool + Host",
             "params": {"date": today, "tool_name": "claude", "host_name": "localhost"},
         },
-        {"name": "Date + Roles", "params": {"date": today, "roles": ["user", "assistant"]}},
+        {"name": "Date + Roles", "params": {"date": today, "roles": "user,assistant"}},
         {
             "name": "Date + Tool + Roles",
-            "params": {"date": today, "tool_name": "claude", "roles": ["user", "assistant"]},
+            "params": {"date": today, "tool_name": "claude", "roles": "user,assistant"},
         },
         {
             "name": "Full filters",
@@ -48,7 +43,7 @@ def test_query_performance():
                 "date": today,
                 "tool_name": "claude",
                 "host_name": "localhost",
-                "roles": ["user", "assistant"],
+                "roles": "user,assistant",
             },
         },
     ]
@@ -59,13 +54,20 @@ def test_query_performance():
         name = test_case["name"]
         params = test_case["params"]
 
-        # Measure query time
+        # Measure API request time
         start_time = time.time()
-        result = db.get_messages_by_date(**params)
-        end_time = time.time()
-
-        query_time_ms = (end_time - start_time) * 1000
-        total_messages = result.get("total", 0)
+        try:
+            response = requests.get(f"{BASE_URL}/api/analysis/messages", params=params, timeout=10)
+            query_time_ms = (time.time() - start_time) * 1000
+            data = response.json()
+            total_messages = data.get("total", 0)
+        except Exception as e:
+            query_time_ms = (time.time() - start_time) * 1000
+            total_messages = 0
+            print(f"\nTest: {name}")
+            print(f"  Error: {e}")
+            results.append({"name": name, "time_ms": query_time_ms, "total": total_messages})
+            continue
 
         results.append({"name": name, "time_ms": query_time_ms, "total": total_messages})
 
@@ -87,14 +89,16 @@ def test_query_performance():
     print("Summary:")
     print("-" * 60)
 
-    # Find slowest query
+    if not results:
+        print("No results to summarize.")
+        return
+
     slowest = max(results, key=lambda x: x["time_ms"])
     fastest = min(results, key=lambda x: x["time_ms"])
 
     print(f"Fastest query: {fastest['name']} ({fastest['time_ms']:.2f} ms)")
     print(f"Slowest query: {slowest['name']} ({slowest['time_ms']:.2f} ms)")
 
-    # Check if any query is too slow
     slow_queries = [r for r in results if r["time_ms"] > 1000]
     if slow_queries:
         print(f"\n⚠ Warning: {len(slow_queries)} queries are slower than 1 second!")

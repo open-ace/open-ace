@@ -7,8 +7,15 @@ using JWKS (JSON Web Key Set).
 """
 
 import base64
+import os
+import sys
 import time
 from unittest.mock import MagicMock, patch
+
+PROJECT_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
+sys.path.insert(0, PROJECT_ROOT)
 
 import jwt
 import pytest

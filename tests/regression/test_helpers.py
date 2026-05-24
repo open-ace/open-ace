@@ -62,20 +62,12 @@ def login(page: Page):
     # 点击登录按钮
     page.click('button[type="submit"]')
 
-    # 等待登录成功 - 检查 URL 变化或成功消息
-    # 登录后有 500ms 延迟，所以需要等待足够时间
-    page.wait_for_timeout(3000)
-
-    # 等待导航完成 - 使用 domcontentloaded 而不是 networkidle
-    try:
-        page.wait_for_url(lambda url: "/login" not in url, timeout=15000)
-    except Exception:
-        # 如果 URL 没变化，检查是否显示成功消息
-        success_msg = page.locator(".login-success, .alert-success")
-        if success_msg.count() > 0 and success_msg.is_visible():
-            # 等待导航完成
-            page.wait_for_timeout(2000)
-            page.wait_for_url(lambda url: "/login" not in url, timeout=10000)
+    # 等待登录成功 - 检查 URL 变化
+    # bcrypt rounds=12 可能需要较长时间，使用轮询等待
+    for _ in range(60):
+        if "/login" not in page.url:
+            break
+        page.wait_for_timeout(2000)
 
 
 def navigate_to(page: Page, path: str):

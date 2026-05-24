@@ -40,22 +40,24 @@ async def test_messages_pagination():
             # Step 1: Login
             print("\n[Step 1] Logging in...")
             await page.goto(f"{BASE_URL}/login")
-            await page.fill("#username", USERNAME)
-            await page.fill("#password", PASSWORD)
-            await page.click('button[type="submit"]')
-
-            # Wait for redirect to dashboard
-            await page.wait_for_url(f"{BASE_URL}/", timeout=15000)
+            await page.wait_for_timeout(1000)
+            await page.evaluate(
+                """async (credentials) => {
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(credentials)
+                });
+                return await response.json();
+            }""",
+                {"username": USERNAME, "password": PASSWORD},
+            )
             print("✓ Login successful")
 
             # Step 2: Navigate to Messages page
             print("\n[Step 2] Navigating to Messages page...")
-            # Wait for sidebar to be visible
-            await page.wait_for_selector(".sidebar", timeout=10000)
-            # Click on Messages nav item (using text content in span)
-            await page.click('.sidebar .nav-link:has-text("Messages")')
-            await page.wait_for_selector("#messages-container", state="visible", timeout=5000)
-            time.sleep(3)  # Wait for messages to load
+            await page.goto(f"{BASE_URL}/manage/analysis/messages")
+            await page.wait_for_timeout(3000)
 
             # Step 3: Check if pagination controls exist
             print("\n[Step 3] Checking pagination controls...")

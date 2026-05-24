@@ -853,7 +853,7 @@ const ContentBlockRenderer: React.FC<{
           <div className="mt-1 small">
             {block.changes.map((change, i) => (
               <div key={i} className="d-flex align-items-center mb-1">
-                <Badge variant={change.change_type === 'add' ? 'success' : change.change_type === 'delete' ? 'danger' : 'warning'} className="me-1" style={{ fontSize: '0.65rem' }}>
+                <Badge variant={change.change_type === 'add' ? 'success' : change.change_type === 'delete' ? 'danger' : 'warning'} className="me-1" pill>
                   {change.change_type.toUpperCase()}
                 </Badge>
                 <code className="small">{change.path}</code>
