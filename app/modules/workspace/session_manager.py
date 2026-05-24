@@ -92,7 +92,12 @@ class SessionMessage:
 
 
 def _format_dt(dt):
-    """Format datetime as ISO 8601 with UTC timezone for consistent frontend display."""
+    """Format datetime as ISO 8601 string.
+
+    - Timezone-aware datetimes preserve their timezone info (e.g., +00:00 for UTC).
+    - Naive datetimes get +00:00 appended because this codebase stores UTC values
+      as naive datetimes (via datetime.now(timezone.utc).replace(tzinfo=None)).
+    """
     if dt is None:
         return None
     iso_str = dt.isoformat()

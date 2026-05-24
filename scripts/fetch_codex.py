@@ -22,7 +22,7 @@ import platform
 import socket
 import sys
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -771,7 +771,7 @@ def update_agent_sessions_stats(messages: list) -> int:
 
     updated = 0
     messages_inserted = 0
-    now = datetime.now().isoformat()
+    now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
     placeholder = _placeholder()
 
     conn = get_connection()
