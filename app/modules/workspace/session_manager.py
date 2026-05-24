@@ -95,13 +95,15 @@ def _format_dt(dt):
     """Format datetime as ISO 8601 string.
 
     - Timezone-aware datetimes preserve their timezone info (e.g., +00:00 for UTC).
-    - Naive datetimes are returned as-is (no timezone suffix), so the frontend
-      interprets them as the browser's local time, matching the server's intent
-      when using datetime.now() without timezone.
+    - Naive datetimes get +00:00 appended because this codebase stores UTC values
+      as naive datetimes (via datetime.now(timezone.utc).replace(tzinfo=None)).
     """
     if dt is None:
         return None
-    return dt.isoformat()
+    iso_str = dt.isoformat()
+    if "+" not in iso_str and "Z" not in iso_str and "-" not in iso_str[-6:]:
+        iso_str += "+00:00"
+    return iso_str
 
 
 @dataclass
