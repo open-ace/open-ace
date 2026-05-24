@@ -3238,6 +3238,65 @@ with open('$config_dir/config.json', 'w') as f:
         print_warning "init_db.py not found, skipping default user creation"
     fi
 
+    # Ensure database schema is up to date before running migrations
+    # This handles cases where tables are missing from older installations
+    print_info "Ensuring database schema is complete..."
+    local db_type="postgresql"
+    if [ -f "$config_dir/config.json" ]; then
+        db_type=$(python3 -c "import json; c=json.load(open('$config_dir/config.json')); print(c.get('database', {}).get('type', 'postgresql'))" 2>/dev/null || echo "postgresql")
+    fi
+
+    local schema_file=""
+    if [ "$db_type" = "postgresql" ]; then
+        schema_file="$target_path/schema/schema-postgres.sql"
+        check_psql_client
+    else
+        schema_file="$target_path/schema/schema-sqlite.sql"
+    fi
+
+    if [ -f "$schema_file" ]; then
+        print_info "Executing schema to create any missing tables: $schema_file"
+        if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ]; then
+            cd "$target_path"
+            if [ "$db_type" = "postgresql" ]; then
+                local db_url=$(python3 -c "import json; c=json.load(open('$config_dir/config.json')); print(c.get('database', {}).get('url', ''))" 2>/dev/null)
+                if [ -n "$db_url" ]; then
+                    local db_host=$(echo "$db_url" | sed -n 's/.*@\([^:]*\):.*/\1/p')
+                    local db_port=$(echo "$db_url" | sed -n 's/.*:\([0-9]*\)\/.*/\1/p')
+                    local db_name=$(echo "$db_url" | sed -n 's/.*\/\([^?]*\).*/\1/p')
+                    local db_user=$(echo "$db_url" | sed -n 's/.*\/\/\([^:@]*\):.*/\1/p')
+                    local db_pass=$(echo "$db_url" | sed -n 's/.*:\/\/[^:]*:\([^@]*\)@.*/\1/p')
+
+                    if su - "$install_user" -c "cd '$target_path' && PGPASSWORD='$db_pass' psql -h '$db_host' -p '$db_port' -U '$db_user' -d '$db_name' -f '$schema_file'" 2>/dev/null; then
+                        print_success "Database schema updated (missing tables created)"
+                    else
+                        print_info "Schema execution completed (some tables may already exist)"
+                    fi
+                fi
+            fi
+            cd - > /dev/null
+        else
+            cd "$target_path"
+            if [ "$db_type" = "postgresql" ]; then
+                local db_url=$(python3 -c "import json; c=json.load(open('$config_dir/config.json')); print(c.get('database', {}).get('url', ''))" 2>/dev/null)
+                if [ -n "$db_url" ]; then
+                    local db_host=$(echo "$db_url" | sed -n 's/.*@\([^:]*\):.*/\1/p')
+                    local db_port=$(echo "$db_url" | sed -n 's/.*:\([0-9]*\)\/.*/\1/p')
+                    local db_name=$(echo "$db_url" | sed -n 's/.*\/\([^?]*\).*/\1/p')
+                    local db_user=$(echo "$db_url" | sed -n 's/.*\/\/\([^:@]*\):.*/\1/p')
+                    local db_pass=$(echo "$db_url" | sed -n 's/.*:\/\/[^:]*:\([^@]*\)@.*/\1/p')
+
+                    if PGPASSWORD="$db_pass" psql -h "$db_host" -p "$db_port" -U "$db_user" -d "$db_name" -f "$schema_file" 2>/dev/null; then
+                        print_success "Database schema updated (missing tables created)"
+                    else
+                        print_info "Schema execution completed (some tables may already exist)"
+                    fi
+                fi
+            fi
+            cd - > /dev/null
+        fi
+    fi
+
     # Run database migrations (alembic upgrade head)
     print_info "Running database migrations..."
     if [ -f "$target_path/alembic.ini" ] && [ -d "$target_path/migrations" ]; then
