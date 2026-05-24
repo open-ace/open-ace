@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from playwright.sync_api import sync_playwright
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
-WEBUI_PORT = os.environ.get("WEBUI_PORT", "3101")  # rhuang user's webui port
+WEBUI_PORT = os.environ.get("WEBUI_PORT", "3101")  # test user's webui port
 WEBUI_TOKEN = os.environ.get("WEBUI_TOKEN", "")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 

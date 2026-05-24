@@ -16,6 +16,8 @@ BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "issues", "51")
 
 
 def check_page_structure():
@@ -77,9 +79,7 @@ def check_page_structure():
             print(card_text[:500])
 
         # 截图
-        page.screenshot(
-            path="/Users/rhuang/workspace/open-ace/screenshots/issues/51/page_structure.png"
-        )
+        page.screenshot(path=os.path.join(SCREENSHOT_DIR, "page_structure.png"))
         print("\n截图保存: screenshots/issues/51/page_structure.png")
 
         browser.close()

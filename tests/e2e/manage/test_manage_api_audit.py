@@ -105,11 +105,11 @@ def run_all_tests():
 
     # Sender filter
     data = api_get(
-        "/api/messages?start_date=2026-04-22&end_date=2026-04-22&sender=rhuang&role=user&limit=3",
+        "/api/messages?start_date=2026-04-22&end_date=2026-04-22&sender=testuser&role=user&limit=3",
         timeout=30,
     )
     if data:
-        print(f"  Sender filter (rhuang): total={data.get('total', 0)}")
+        print(f"  Sender filter (testuser): total={data.get('total', 0)}")
 
     data = api_get("/api/senders", timeout=30)
     if data and isinstance(data, list):

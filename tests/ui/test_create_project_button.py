@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-UI Test: rhuang user - Create Project button test
+UI Test: Non-admin user - Create Project button test
 
-Tests that rhuang user can create project in workspace.
+Tests that non-admin user can create project in workspace.
 Issue: Click Create button has no response.
 """
 
@@ -27,9 +27,9 @@ SCREENSHOT_DIR = os.path.join(
 )
 
 
-def test_rhuang_create_project():
+def test_nonadmin_create_project():
     print("=" * 70)
-    print("rhuang user - Create Project Button Test")
+    print("Non-admin user - Create Project Button Test")
     print("=" * 70)
     print(f"BASE_URL: {BASE_URL}")
     print(f"USERNAME: {USERNAME}")
@@ -65,7 +65,7 @@ def test_rhuang_create_project():
 
         try:
             # Step 1: Login
-            print("\n[1] Login to Open-ACE as rhuang...")
+            print("\n[1] Login to Open-ACE as nonadmin...")
             page.goto(f"{BASE_URL}/login", timeout=30000)
             page.wait_for_selector("#username", timeout=10000)
             page.fill("#username", USERNAME)
@@ -86,7 +86,7 @@ def test_rhuang_create_project():
             print(f"  After login URL: {current_url}")
 
             print("  Login successful!")
-            page.screenshot(path=os.path.join(SCREENSHOT_DIR, "rhuang_01_login.png"))
+            page.screenshot(path=os.path.join(SCREENSHOT_DIR, "nonadmin_01_login.png"))
 
             # Step 2: Navigate to workspace
             print("\n[2] Navigate to workspace page...")
@@ -95,7 +95,7 @@ def test_rhuang_create_project():
 
             current_url = page.url
             print(f"  Current URL: {current_url}")
-            page.screenshot(path=os.path.join(SCREENSHOT_DIR, "rhuang_02_workspace.png"))
+            page.screenshot(path=os.path.join(SCREENSHOT_DIR, "nonadmin_02_workspace.png"))
 
             # Step 3: Wait for iframe
             print("\n[3] Wait for iframe to load...")
@@ -122,17 +122,17 @@ def test_rhuang_create_project():
                     print("  ⚠ Workspace stuck in loading state (backend webui may be unavailable)")
                     print("  Skipping iframe-dependent tests")
                     page.screenshot(
-                        path=os.path.join(SCREENSHOT_DIR, "rhuang_03_workspace_stuck.png")
+                        path=os.path.join(SCREENSHOT_DIR, "nonadmin_03_workspace_stuck.png")
                     )
                     test_passed = True  # Not a test failure - infrastructure issue
                     error_message = None
                 else:
                     error_message = "iframe not found after multiple attempts"
                     print(f"  ERROR: {error_message}")
-                    page.screenshot(path=os.path.join(SCREENSHOT_DIR, "rhuang_03_no_iframe.png"))
+                    page.screenshot(path=os.path.join(SCREENSHOT_DIR, "nonadmin_03_no_iframe.png"))
                 return test_passed
 
-            page.screenshot(path=os.path.join(SCREENSHOT_DIR, "rhuang_03_iframe_found.png"))
+            page.screenshot(path=os.path.join(SCREENSHOT_DIR, "nonadmin_03_iframe_found.png"))
 
             # Step 4: Get frame locator
             print("\n[4] Get frame locator and check content...")
@@ -140,7 +140,7 @@ def test_rhuang_create_project():
 
             # Wait for iframe content to load
             time.sleep(5)
-            page.screenshot(path=os.path.join(SCREENSHOT_DIR, "rhuang_04_iframe_content.png"))
+            page.screenshot(path=os.path.join(SCREENSHOT_DIR, "nonadmin_04_iframe_content.png"))
 
             # Step 5: Find Add Project button
             print("\n[5] Find Add Project button in iframe...")
@@ -167,17 +167,17 @@ def test_rhuang_create_project():
             if not add_btn:
                 error_message = "Add Project button not found"
                 print(f"  ERROR: {error_message}")
-                page.screenshot(path=os.path.join(SCREENSHOT_DIR, "rhuang_05_no_add_btn.png"))
+                page.screenshot(path=os.path.join(SCREENSHOT_DIR, "nonadmin_05_no_add_btn.png"))
                 return False
 
-            page.screenshot(path=os.path.join(SCREENSHOT_DIR, "rhuang_05_add_btn_found.png"))
+            page.screenshot(path=os.path.join(SCREENSHOT_DIR, "nonadmin_05_add_btn_found.png"))
 
             # Step 6: Click Add Project button
             print("\n[6] Click Add Project button...")
             add_btn.click()
             time.sleep(3)  # Wait for modal animation
             print("  Modal should be open")
-            page.screenshot(path=os.path.join(SCREENSHOT_DIR, "rhuang_06_modal_open.png"))
+            page.screenshot(path=os.path.join(SCREENSHOT_DIR, "nonadmin_06_modal_open.png"))
 
             # Step 7: Check DirectoryBrowser
             print("\n[7] Check DirectoryBrowser status...")
@@ -189,7 +189,7 @@ def test_rhuang_create_project():
             for call in browse_calls:
                 print(f"    - {call['method']} {call['url']}")
 
-            page.screenshot(path=os.path.join(SCREENSHOT_DIR, "rhuang_07_directory_browser.png"))
+            page.screenshot(path=os.path.join(SCREENSHOT_DIR, "nonadmin_07_directory_browser.png"))
 
             # Step 8: Select current folder
             print("\n[8] Select current folder...")
@@ -216,7 +216,7 @@ def test_rhuang_create_project():
                 select_btn.click()
                 time.sleep(2)
                 print("  Clicked Select This Folder")
-                page.screenshot(path=os.path.join(SCREENSHOT_DIR, "rhuang_08_after_select.png"))
+                page.screenshot(path=os.path.join(SCREENSHOT_DIR, "nonadmin_08_after_select.png"))
             else:
                 print("  Select button not found, checking current state...")
 
@@ -230,10 +230,14 @@ def test_rhuang_create_project():
                     print("  In details step, form visible")
                     name_input.fill("test-project")
                     time.sleep(1)
-                    page.screenshot(path=os.path.join(SCREENSHOT_DIR, "rhuang_09_details_form.png"))
+                    page.screenshot(
+                        path=os.path.join(SCREENSHOT_DIR, "nonadmin_09_details_form.png")
+                    )
                 else:
                     print("  Not in details step yet")
-                    page.screenshot(path=os.path.join(SCREENSHOT_DIR, "rhuang_09_not_details.png"))
+                    page.screenshot(
+                        path=os.path.join(SCREENSHOT_DIR, "nonadmin_09_not_details.png")
+                    )
             except Exception as e:
                 print(f"  Form check error: {e}")
 
@@ -265,17 +269,17 @@ def test_rhuang_create_project():
             if not create_btn:
                 error_message = "Create button not found"
                 print(f"  ERROR: {error_message}")
-                page.screenshot(path=os.path.join(SCREENSHOT_DIR, "rhuang_10_no_create_btn.png"))
+                page.screenshot(path=os.path.join(SCREENSHOT_DIR, "nonadmin_10_no_create_btn.png"))
                 return False
 
-            page.screenshot(path=os.path.join(SCREENSHOT_DIR, "rhuang_10_create_btn_found.png"))
+            page.screenshot(path=os.path.join(SCREENSHOT_DIR, "nonadmin_10_create_btn_found.png"))
 
             # Step 11: Click Create button
             print("\n[11] Click Create button...")
             create_btn.click()
             print("  Clicked Create button!")
             time.sleep(5)
-            page.screenshot(path=os.path.join(SCREENSHOT_DIR, "rhuang_11_after_create.png"))
+            page.screenshot(path=os.path.join(SCREENSHOT_DIR, "nonadmin_11_after_create.png"))
 
             # Step 12: Check API call
             print("\n[12] Check API call...")
@@ -298,7 +302,7 @@ def test_rhuang_create_project():
                     print("  Modal still visible - click may have been blocked")
                     error_message = "Create button click blocked, no API call"
 
-            page.screenshot(path=os.path.join(SCREENSHOT_DIR, "rhuang_12_final.png"))
+            page.screenshot(path=os.path.join(SCREENSHOT_DIR, "nonadmin_12_final.png"))
 
         except Exception as e:
             error_message = str(e)
@@ -307,7 +311,7 @@ def test_rhuang_create_project():
 
             traceback.print_exc()
             with contextlib.suppress(BaseException):
-                page.screenshot(path=os.path.join(SCREENSHOT_DIR, "rhuang_exception.png"))
+                page.screenshot(path=os.path.join(SCREENSHOT_DIR, "nonadmin_exception.png"))
 
         finally:
             browser.close()
@@ -331,5 +335,5 @@ def test_rhuang_create_project():
 
 
 if __name__ == "__main__":
-    passed = test_rhuang_create_project()
+    passed = test_nonadmin_create_project()
     sys.exit(0 if passed else 1)

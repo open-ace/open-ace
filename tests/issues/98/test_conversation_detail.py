@@ -12,6 +12,8 @@ import os
 from playwright.async_api import async_playwright
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "issues", "98")
 
 
 async def test_conversation_detail():
@@ -32,7 +34,7 @@ async def test_conversation_detail():
 
             # Take screenshot of the page
             await page.screenshot(
-                path="/Users/rhuang/workspace/open-ace/screenshots/issues/98/01_conversation_history.png",
+                path=os.path.join(SCREENSHOT_DIR, "01_conversation_history.png"),
                 full_page=True,
             )
             print("Screenshot saved: 01_conversation_history.png")
@@ -64,7 +66,7 @@ async def test_conversation_detail():
 
                     # Take screenshot of the modal
                     await page.screenshot(
-                        path="/Users/rhuang/workspace/open-ace/screenshots/issues/98/02_conversation_detail_modal.png",
+                        path=os.path.join(SCREENSHOT_DIR, "02_conversation_detail_modal.png"),
                         full_page=True,
                     )
                     print("Screenshot saved: 02_conversation_detail_modal.png")
@@ -100,7 +102,7 @@ async def test_conversation_detail():
         except Exception as e:
             print(f"Error: {e}")
             await page.screenshot(
-                path="/Users/rhuang/workspace/open-ace/screenshots/issues/98/error.png",
+                path=os.path.join(SCREENSHOT_DIR, "error.png"),
                 full_page=True,
             )
             return False

@@ -33,7 +33,7 @@ WEBUI_URL = os.environ.get("WEBUI_URL", "http://127.0.0.1:3101")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "e2e-remote-model-switch")
 
-TEST_USER = "黄迎春"
+TEST_USER = os.environ.get("TEST_REAL_USER", "test_user")
 TEST_PASS = "admin123"
 RESPONSE_TIMEOUT = 60
 

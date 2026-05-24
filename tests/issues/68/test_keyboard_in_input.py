@@ -40,7 +40,7 @@ def ensure_service_running():
         print("启动服务...")
         subprocess.Popen(
             ["python3", "web.py"],
-            cwd="/Users/rhuang/workspace/open-ace",
+            cwd=project_root,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )

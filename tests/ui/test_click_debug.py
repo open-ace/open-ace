@@ -219,11 +219,11 @@ async def test_click_debug():
                     await page.wait_for_timeout(2000)
 
                     # 检查目录列表
-                    dir_buttons = await page.locator('button:has-text("rhuang")').all()
+                    dir_buttons = await page.locator('button:has-text("testuser")').all()
                     if dir_buttons:
                         await dir_buttons[0].click()
                         await page.wait_for_timeout(500)
-                        print("✓ 点击了 rhuang 目录")
+                        print("✓ 点击了 testuser 目录")
 
                         # 点击 Select 按钮
                         select_btn = page.locator(

@@ -22,11 +22,13 @@ except ImportError:
     sys.exit(1)
 
 # Configuration
-BASE_URL = "http://localhost:5001"
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 VIEWPORT_SIZE = {"width": 1400, "height": 900}
 TIMEOUT = 30000
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "issues", "99")
 
 
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
@@ -195,9 +197,7 @@ def test_add_prompt():
                 print("\n✓ Modal closed - prompt might have been created successfully")
 
             # Take screenshot
-            screenshot_path = (
-                "/Users/rhuang/workspace/open-ace/screenshots/issues/99/after_create_click.png"
-            )
+            screenshot_path = os.path.join(SCREENSHOT_DIR, "after_create_click.png")
             os.makedirs(os.path.dirname(screenshot_path), exist_ok=True)
             page.screenshot(path=screenshot_path)
             print(f"\nScreenshot saved: {screenshot_path}")
@@ -216,7 +216,7 @@ def test_add_prompt():
             traceback.print_exc()
 
             # Take screenshot on error
-            screenshot_path = "/Users/rhuang/workspace/open-ace/screenshots/issues/99/error.png"
+            screenshot_path = os.path.join(SCREENSHOT_DIR, "error.png")
             os.makedirs(os.path.dirname(screenshot_path), exist_ok=True)
             page.screenshot(path=screenshot_path)
             print(f"Screenshot saved: {screenshot_path}")

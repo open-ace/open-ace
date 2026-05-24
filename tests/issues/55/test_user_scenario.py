@@ -86,17 +86,17 @@ def test_user_scenario():
             print("  ✓ Quota page loaded")
             take_screenshot(page, "user_01_quota_page.png")
 
-            # Find edit button for user 89 (黄迎春)
-            print("\n[Step 3] Find user 黄迎春 and click edit...")
+            # Find edit button for target user
+            print("\n[Step 3] Find target user and click edit...")
 
-            # Find the card containing 黄迎春
+            # Find the card containing the target user
             cards = page.locator(".card")
             target_card = None
             for i in range(cards.count()):
                 card_text = cards.nth(i).text_content()
-                if "黄迎春" in card_text:
+                if USERNAME in card_text or "admin" in card_text:
                     target_card = cards.nth(i)
-                    print(f"  Found 黄迎春 card at index {i}")
+                    print(f"  Found user card at index {i}")
                     break
 
             if target_card:

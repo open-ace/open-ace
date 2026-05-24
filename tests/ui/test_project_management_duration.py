@@ -25,8 +25,9 @@ BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCREENSHOT_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    PROJECT_ROOT,
     "screenshots",
     "issues",
     "44",
@@ -136,7 +137,7 @@ def test_session_tracking_api():
             f"{BASE_URL}/api/workspace/sessions",
             json={
                 "tool_name": "test-tool",
-                "project_path": "/Users/rhuang/workspace/open-ace",
+                "project_path": PROJECT_ROOT,
                 "session_type": "chat",
             },
         )
@@ -150,7 +151,7 @@ def test_session_tracking_api():
             session_id = data.get("data", {}).get("session_id")
             project_path = data.get("data", {}).get("project_path")
 
-            path_correct = project_path == "/Users/rhuang/workspace/open-ace"
+            path_correct = project_path == PROJECT_ROOT
             results.append(("project_path saved", path_correct))
             print(f"    Session ID: {session_id}")
             print(f"    project_path: {project_path}")

@@ -8,6 +8,8 @@ import pytest
 from playwright.async_api import async_playwright
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "issues", "76")
 
 
 @pytest.mark.asyncio
@@ -97,7 +99,7 @@ async def test_menu(username: str, password: str, user_type: str):
         print(f'localStorage token: {user_info["token"]}')
 
         # 截图
-        screenshot_path = f"/Users/rhuang/workspace/open-ace/screenshots/issues/76/{user_type.lower()}_menu_test.png"
+        screenshot_path = os.path.join(SCREENSHOT_DIR, f"{user_type.lower()}_menu_test.png")
         await page.screenshot(path=screenshot_path)
         print()
         print(f"截图已保存到 {screenshot_path}")

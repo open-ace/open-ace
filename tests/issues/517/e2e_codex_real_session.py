@@ -2,7 +2,7 @@
 """
 Open ACE - Codex Real Session E2E Test
 
-Actually tests the full lifecycle on remote machine 192.168.64.3:
+Actually tests the full lifecycle on a remote test machine:
 1. SSH to remote → run codex exec to get a real AI conversation
 2. Verify codex session file created in ~/.codex/sessions/
 3. Wait for session_sync to sync back to open-ace
@@ -13,8 +13,8 @@ Actually tests the full lifecycle on remote machine 192.168.64.3:
 
 This test REQUIRES:
   - open-ace server running at localhost:5001
-  - Remote machine 192.168.64.3 online with agent running
-  - codex installed on 192.168.64.3
+  - Remote test machine online with agent running
+  - codex installed on remote test machine
   - LLM proxy working (proxy token configured)
 
 Run:

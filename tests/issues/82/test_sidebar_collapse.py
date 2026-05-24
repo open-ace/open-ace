@@ -8,6 +8,8 @@ import pytest
 from playwright.async_api import async_playwright
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "issues", "82")
 
 
 @pytest.mark.asyncio
@@ -63,9 +65,7 @@ async def test_sidebar_collapse():
         print(f"localStorage sidebar_collapsed: {is_collapsed}")
 
         # 截图
-        await page.screenshot(
-            path="/Users/rhuang/workspace/open-ace/screenshots/issues/82/sidebar_collapsed.png"
-        )
+        await page.screenshot(path=os.path.join(SCREENSHOT_DIR, "sidebar_collapsed.png"))
         print()
         print("截图已保存到 screenshots/issues/82/sidebar_collapsed.png")
 
@@ -80,9 +80,7 @@ async def test_sidebar_collapse():
         print(f"再次点击后 Sidebar 宽度: {sidebar_width_final}px")
 
         # 截图
-        await page.screenshot(
-            path="/Users/rhuang/workspace/open-ace/screenshots/issues/82/sidebar_expanded.png"
-        )
+        await page.screenshot(path=os.path.join(SCREENSHOT_DIR, "sidebar_expanded.png"))
         print("截图已保存到 screenshots/issues/82/sidebar_expanded.png")
 
         await browser.close()

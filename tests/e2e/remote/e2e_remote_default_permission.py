@@ -44,7 +44,7 @@ WEBUI_URL = os.environ.get("WEBUI_URL", "http://127.0.0.1:3101")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "e2e-default-permission")
 
-TEST_USER = "黄迎春"
+TEST_USER = os.environ.get("TEST_REAL_USER", "test_user")
 TEST_PASS = "admin123"
 MACHINE_ID = os.environ.get("MACHINE_ID", "4c3b203c-6a50-4298-a661-179f2394fb22")
 RESPONSE_TIMEOUT = 300  # 5 minutes for real AI response

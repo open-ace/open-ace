@@ -120,7 +120,7 @@ def test_quota_status_endpoint(admin_token):
 
 
 def test_user_daily_stats(admin_token):
-    """Test 5: user_daily_stats has data for rhuang."""
+    """Test 5: user_daily_stats has data for test user."""
     # Use the usage/me endpoint instead of admin endpoint
     r = requests.get(f"{BASE_URL}/api/quota/usage/me", cookies={"session_token": admin_token})
     if r.status_code != 200:
@@ -287,8 +287,8 @@ def test_enforcement_scheduler_status():
     ok("Quota enforcement scheduler running (confirmed in logs)")
 
 
-def test_rhuang_quota_data():
-    """Test 14: Verify rhuang's actual quota data via DB."""
+def test_testuser_quota_data():
+    """Test 14: Verify test user's actual quota data via DB."""
     import subprocess
 
     r = subprocess.run(
@@ -303,18 +303,18 @@ def test_rhuang_quota_data():
             "-t",
             "-A",
             "-c",
-            "SELECT username, daily_token_quota, daily_request_quota FROM users WHERE username='rhuang'",
+            "SELECT username, daily_token_quota, daily_request_quota FROM users WHERE username='testuser'",
         ],
         capture_output=True,
         text=True,
         env={**os.environ, "PGPASSWORD": "f43379650019d8eb4b206932"},
     )
     if r.returncode != 0 or not r.stdout.strip():
-        fail("rhuang user", f"not found or query failed: {r.stderr.strip()}")
+        fail("test user", f"not found or query failed: {r.stderr.strip()}")
         return
     parts = r.stdout.strip().split("|")
     log("INFO", f"  User: {parts[0]}, token_quota={parts[1]}M, request_quota={parts[2]}")
-    ok(f"rhuang quota data: token={parts[1]}M, request={parts[2]}")
+    ok(f"test user quota data: token={parts[1]}M, request={parts[2]}")
 
 
 # ══════════════════════════════════════════════════════
@@ -323,7 +323,7 @@ def test_rhuang_quota_data():
 
 
 def test_remote_quota_api():
-    """Test 15: Quota check API returns correct data for rhuang."""
+    """Test 15: Quota check API returns correct data for test user."""
     token = login(TEST_USER, TEST_PASS)
     r = requests.get(f"{BASE_URL}/api/quota/check", cookies={"session_token": token})
     if r.status_code != 200:
@@ -427,7 +427,7 @@ def run_tests():
         test_remote_session_stats_refresh,
         test_monthly_quota_check,
         test_enforcement_scheduler_status,
-        test_rhuang_quota_data,
+        test_testuser_quota_data,
     ]
 
     for test_fn in local_tests:

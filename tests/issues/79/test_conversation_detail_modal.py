@@ -132,7 +132,8 @@ async def test_frontend_build():
     import os
 
     # Check if the build directory exists
-    build_dir = "/Users/rhuang/workspace/open-ace/static/js/dist"
+    PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    build_dir = os.path.join(PROJECT_ROOT, "static", "js", "dist")
     if os.path.exists(build_dir):
         print(f"✓ Build directory exists: {build_dir}")
 

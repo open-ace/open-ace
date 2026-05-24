@@ -29,7 +29,7 @@ import requests
 
 # ── Config ──
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
-TEST_USER = "黄迎春"
+TEST_USER = os.environ.get("TEST_REAL_USER", "test_user")
 TEST_PASS = "admin123"
 RESPONSE_TIMEOUT = 120
 

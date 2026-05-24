@@ -13,6 +13,8 @@ from playwright.sync_api import sync_playwright
 
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 
+TEST_USER = os.environ.get("TEST_REAL_USER", "test_user")
+
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 
 
@@ -20,7 +22,7 @@ def login(page):
     """Login to Open ACE"""
     page.goto(f"{BASE_URL}/login")
     page.wait_for_selector("#username", timeout=5000)
-    page.fill("#username", "黄迎春")
+    page.fill("#username", TEST_USER)
     page.fill("#password", "admin123")
     page.click("button[type='submit']")
     page.wait_for_url("**/work", timeout=10000)
@@ -35,7 +37,7 @@ def get_machine_token():
     data = resp.json()
     machines = data.get("machines", [])
     for m in machines:
-        if "192.168.64.3" in m.get("ip", ""):
+        if os.environ.get("REMOTE_TEST_HOST", "192.168.64.3") in m.get("ip", ""):
             return m.get("token", "")
     return ""
 
@@ -145,7 +147,7 @@ def main():
 
             # Get machine ID
             resp = requests.get(
-                f"{BASE_URL}/api/auth/login", json={"username": "黄迎春", "password": "admin123"}
+                f"{BASE_URL}/api/auth/login", json={"username": TEST_USER, "password": "admin123"}
             )
             # Get session token from cookies
             session_token = None
@@ -162,7 +164,7 @@ def main():
             # Find the real machine
             machine_id = None
             for m in machines:
-                if "192.168.64.3" in m.get("ip_address", ""):
+                if os.environ.get("REMOTE_TEST_HOST", "192.168.64.3") in m.get("ip_address", ""):
                     machine_id = m.get("machine_id")
                     print(f"Found machine: {m.get('machine_name')} (ID: {machine_id})")
                     break

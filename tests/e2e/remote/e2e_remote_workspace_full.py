@@ -22,7 +22,7 @@ Open ACE - 远程工作区完整 Playwright E2E 测试
   │  A15 普通用户不可见远程管理菜单                         │
   └──────────────────────────────────────────────────────┘
 
-  ┌─ 普通用户（黄迎春）──────────────────────────────────┐
+  ┌─ 普通用户（test user）──────────────────────────────────┐
   │  B1  登录普通用户                                     │
   │  B2  侧边栏无「远程工作区」分组                        │
   │  B3  管理员给普通用户分配机器                           │
@@ -71,7 +71,7 @@ ADMIN_USER = "admin"
 ADMIN_PASS = "admin123"
 NORMAL_USER = os.environ.get("TEST_USERNAME", "admin")
 NORMAL_PASS = os.environ.get("TEST_PASSWORD", "admin123")
-NORMAL_USER_ID = 89  # 黄迎春的 user_id
+NORMAL_USER_ID = 89  # test user's user_id
 TESTUSER_ID = 86  # testuser 的 user_id
 
 # ── 测试状态 ────────────────────────────────────────────

@@ -2,7 +2,7 @@
 """
 Open ACE - File Changes Panel E2E Test (Issue #144)
 
-以真实用户「黄迎春」登录，在浏览器中测试文件改动速览面板全流程:
+以测试用户登录，在浏览器中测试文件改动速览面板全流程:
 1. 登录
 2. 用户设置 — 面板开关
 3. 直接导航到 qwen-code-webui 聊天页
@@ -31,7 +31,7 @@ from playwright.sync_api import sync_playwright
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 WEBUI_URL = os.environ.get("WEBUI_URL", "http://localhost:3000")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
-TEST_USER = "黄迎春"
+TEST_USER = os.environ.get("TEST_REAL_USER", "test_user")
 TEST_PASS = "admin123"
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "e2e-file-changes")
 

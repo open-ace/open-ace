@@ -14,6 +14,8 @@ from playwright.async_api import async_playwright
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "ui")
 
 
 async def test_admin_default_mode():
@@ -41,9 +43,7 @@ async def test_admin_default_mode():
         print(f"After login URL: {final_url}")
 
         # Take screenshot
-        await page.screenshot(
-            path="/Users/rhuang/workspace/open-ace/screenshots/ui/admin_default_mode.png"
-        )
+        await page.screenshot(path=os.path.join(SCREENSHOT_DIR, "admin_default_mode.png"))
         print("Screenshot saved to screenshots/ui/admin_default_mode.png")
 
         await browser.close()
@@ -83,7 +83,7 @@ async def test_normal_user_default_mode():
 
                 # Take screenshot
                 await page.screenshot(
-                    path="/Users/rhuang/workspace/open-ace/screenshots/ui/normal_user_default_mode.png"
+                    path=os.path.join(SCREENSHOT_DIR, "normal_user_default_mode.png")
                 )
                 print("Screenshot saved to screenshots/ui/normal_user_default_mode.png")
 
@@ -113,7 +113,7 @@ async def test_normal_user_default_mode():
 
 async def main():
     """Run all tests."""
-    os.makedirs("/Users/rhuang/workspace/open-ace/screenshots/ui", exist_ok=True)
+    os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
     # Test admin user
     admin_result = await test_admin_default_mode()

@@ -28,7 +28,7 @@ from playwright.sync_api import sync_playwright
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 WEBUI_URL = os.environ.get("WEBUI_URL", "http://localhost:3000")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
-TEST_USER = "黄迎春"
+TEST_USER = os.environ.get("TEST_REAL_USER", "test_user")
 TEST_PASS = "admin123"
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "e2e-file-changes-comprehensive")
 
@@ -95,7 +95,7 @@ def navigate_to_chat(page, webui_info, show_panel=True):
     # 使用 encodedProjectName 查询参数（而非 URL 路径），
     # 确保在 projects 加载后通过 Strategy 1 正确解码 workingDirectory
     encoded_project = os.environ.get(
-        "TEST_ENCODED_PROJECT", "-Users-rhuang-workspace-qwen-code-webui"
+        "TEST_ENCODED_PROJECT", "-home-testuser-workspace-test-project"
     )
     panel_param = "true" if show_panel else "false"
 
@@ -277,7 +277,7 @@ def run_tests():
                 try {
                     const url = new URL(window.location.href);
                     const token = url.searchParams.get('token');
-                    const workingDir = new URL(window.location.href).searchParams.get('encodedProjectName')?.replace(/^-/, '/').replace(/-/g, '/') || '/Users/rhuang/workspace/qwen-code-webui';
+                    const workingDir = new URL(window.location.href).searchParams.get('encodedProjectName')?.replace(/^-/, '/').replace(/-/g, '/') || '/home/testuser/workspace/test-project';
                     const resp = await fetch('/api/git/status?workingDirectory=' + workingDir + '&token=' + encodeURIComponent(token));
                     return await resp.json();
                 } catch (e) {
@@ -556,7 +556,7 @@ def run_tests():
 
         # 使用不带 showFileChangesPanel 的 URL（模拟从 open-ace iframe 导航）
         encoded_project = os.environ.get(
-            "TEST_ENCODED_PROJECT", "-Users-rhuang-workspace-qwen-code-webui"
+            "TEST_ENCODED_PROJECT", "-home-testuser-workspace-test-project"
         )
         url_no_panel = (
             f"{webui_url}/projects"

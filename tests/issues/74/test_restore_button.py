@@ -7,11 +7,13 @@ import os
 
 from playwright.async_api import async_playwright
 
-BASE_URL = "http://localhost:5001"
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 
 
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "issues", "74")
 
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
@@ -58,7 +60,7 @@ async def test_restore_button():
 
         # Take screenshot
         await page.screenshot(
-            path="/Users/rhuang/workspace/open-ace/screenshots/issues/74/sessions_page.png",
+            path=os.path.join(SCREENSHOT_DIR, "sessions_page.png"),
             full_page=True,
         )
 
@@ -112,5 +114,5 @@ async def test_restore_button():
 if __name__ == "__main__":
     import os
 
-    os.makedirs("/Users/rhuang/workspace/open-ace/screenshots/issues/74", exist_ok=True)
+    os.makedirs(SCREENSHOT_DIR, exist_ok=True)
     asyncio.run(test_restore_button())

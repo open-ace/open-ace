@@ -70,27 +70,27 @@ class TestResolveUserId:
     """Test _resolve_user_id_from_sender with various sender_name patterns."""
 
     def test_hostname_without_hyphens(self):
-        """rsplit quick match: rhuang-MacBookPro-codex → user_id=89"""
+        """rsplit quick match: testuser-MacBookPro-codex → user_id=89"""
         cursor = _make_cursor_with_users(
-            [{"id": 89, "system_account": "rhuang", "username": "黄迎春"}],
+            [{"id": 89, "system_account": "testuser", "username": "Test User"}],
             rsplit_match=True,
         )
-        result = _run_resolve(cursor, "rhuang-MacBookPro-codex")
+        result = _run_resolve(cursor, "testuser-MacBookPro-codex")
         assert result == 89
 
     def test_hostname_with_hyphens(self):
-        """Fallback: rhuang-RichdeMacBook-Pro.local-codex → user_id=89"""
+        """Fallback: testuser-TestMacBook-Pro.local-codex → user_id=89"""
         cursor = _make_cursor_with_users(
-            [{"id": 89, "system_account": "rhuang", "username": "黄迎春"}],
+            [{"id": 89, "system_account": "testuser", "username": "Test User"}],
             rsplit_match=False,
         )
-        result = _run_resolve(cursor, "rhuang-RichdeMacBook-Pro.local-codex")
+        result = _run_resolve(cursor, "testuser-TestMacBook-Pro.local-codex")
         assert result == 89
 
     def test_no_matching_user(self):
         """No match: unknown-host-codex → None"""
         cursor = _make_cursor_with_users(
-            [{"id": 89, "system_account": "rhuang", "username": "黄迎春"}],
+            [{"id": 89, "system_account": "testuser", "username": "Test User"}],
             rsplit_match=False,
         )
         result = _run_resolve(cursor, "unknown-host-codex")
@@ -128,11 +128,11 @@ class TestResolveUserId:
         cursor = _make_cursor_with_users(
             [
                 {"id": 1, "system_account": None, "username": None},
-                {"id": 2, "system_account": "rhuang", "username": "黄迎春"},
+                {"id": 2, "system_account": "testuser", "username": "Test User"},
             ],
             rsplit_match=False,
         )
-        result = _run_resolve(cursor, "rhuang-host-codex")
+        result = _run_resolve(cursor, "testuser-host-codex")
         assert result == 2
 
 

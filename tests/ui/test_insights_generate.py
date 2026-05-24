@@ -5,18 +5,19 @@ Test script to verify /work/insights page generates report successfully
 import os
 import sys
 
-sys.path.insert(0, "/Users/rhuang/workspace/open-ace/tests")
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(PROJECT_ROOT, "tests"))
 
 import time
 
 from playwright.sync_api import sync_playwright
 
 # Configuration
-BASE_URL = "http://localhost:5001"
-USERNAME = "黄迎春"
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+USERNAME = os.environ.get("TEST_REAL_USER", "test_user")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
-SCREENSHOT_DIR = "/Users/rhuang/workspace/open-ace/screenshots"
+SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots")
 
 
 def test_insights_generate():

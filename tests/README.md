@@ -21,8 +21,9 @@ tests/
 │
 ├── e2e/                     # 端到端测试
 │   ├── remote/              # 远程会话相关 (16 个)
-│   ├── terminal/            # 终端会话相关 (5 个)
-│   └── manage/              # 管理/审计/API Key/配额等 (8 个)
+│   ├── terminal/            # 终端会话相关 (6 个，含配额恢复)
+│   ├── work/                # 工作区/聊天相关 (2 个)
+│   └── manage/              # 管理/审计/API Key 等 (6 个)
 │
 ├── ui/                      # UI 功能测试
 │   └── test_*.py            # Playwright UI 测试（不带 issue 编号）
@@ -35,7 +36,7 @@ tests/
 │   ├── test_navigation.py   # 导航功能
 │   └── ...                  # 各页面功能测试
 │
-├── performance/             # 性能测试
+├── performance/             # 性能测试（页面加载、图表渲染等）
 │
 └── screenshots/             # 测试截图
 ```
@@ -55,8 +56,9 @@ tests/
 ### E2E 测试 (`e2e/`)
 - 使用 Playwright 进行浏览器自动化测试
 - `remote/` - 远程会话相关功能
-- `terminal/` - 终端会话相关功能
-- `manage/` - 管理、审计、API Key、配额等功能
+- `terminal/` - 终端会话相关功能（含配额恢复测试）
+- `work/` - 工作区/聊天功能（如 /context 命令、VSCode WebSocket）
+- `manage/` - 管理、审计、API Key 等功能
 
 ### UI 测试 (`ui/`)
 - 使用 Playwright 进行浏览器自动化测试

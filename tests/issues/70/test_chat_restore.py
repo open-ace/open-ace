@@ -57,7 +57,7 @@ def restart_service():
     # 启动新服务
     subprocess.Popen(
         ["python3", "web.py"],
-        cwd="/Users/rhuang/workspace/open-ace",
+        cwd=project_root,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
@@ -284,7 +284,7 @@ def test_chat_restore():
             # 启动新服务
             subprocess.Popen(
                 ["python3", "web.py"],
-                cwd="/Users/rhuang/workspace/open-ace",
+                cwd=project_root,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )

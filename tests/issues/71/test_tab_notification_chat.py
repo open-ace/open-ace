@@ -20,13 +20,14 @@ from playwright.sync_api import sync_playwright
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, project_root)
 
-BASE_URL = "http://localhost:5001"
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 VIEWPORT_SIZE = {"width": 1400, "height": 900}
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 DEFAULT_TIMEOUT = 30000
 OUTPUT_DIR = "./screenshots/issues/71"
+PROJECT_ROOT = project_root
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -40,7 +41,7 @@ def ensure_service_running():
         print("启动服务...")
         subprocess.Popen(
             ["python3", "web.py"],
-            cwd="/Users/rhuang/workspace/open-ace",
+            cwd=PROJECT_ROOT,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )

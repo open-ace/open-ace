@@ -29,7 +29,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(SCRIPT_DIR)))
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "issues", "35")
 os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
-BASE_URL = "http://127.0.0.1:5000"
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 

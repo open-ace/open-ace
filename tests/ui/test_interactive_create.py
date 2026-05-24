@@ -11,12 +11,11 @@ import time
 from playwright.async_api import async_playwright
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
-SCREENSHOT_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "screenshots"
-)
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots")
 
 # 日志文件
-LOG_FILE = "/Users/rhuang/workspace/open-ace/screenshots/create_button_log.txt"
+LOG_FILE = os.path.join(PROJECT_ROOT, "screenshots", "create_button_log.txt")
 
 
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"

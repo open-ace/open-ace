@@ -42,7 +42,7 @@ BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "e2e-remote-message")
 
-TEST_USER = "黄迎春"
+TEST_USER = os.environ.get("TEST_REAL_USER", "test_user")
 TEST_PASS = "admin123"
 
 # Timeout for waiting for qwen CLI response (seconds)

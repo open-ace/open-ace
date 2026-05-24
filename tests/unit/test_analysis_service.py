@@ -96,10 +96,14 @@ class TestAnalysisService:
     def test_get_user_ranking_cleans_machine_suffix(self):
         svc, _, mock_msg, _ = self._make_service()
         mock_msg.get_user_token_totals.return_value = [
-            {"sender_name": "rhuang-MacBook-Pro.local", "total_tokens": 1000, "message_count": 10},
+            {
+                "sender_name": "testuser-MacBook-Pro.local",
+                "total_tokens": 1000,
+                "message_count": 10,
+            },
         ]
         result = svc.get_user_ranking("2026-05-01", "2026-05-23")
-        assert result["users"][0]["username"] == "rhuang"
+        assert result["users"][0]["username"] == "testuser"
 
     def test_get_conversation_stats(self):
         svc, _, mock_msg, _ = self._make_service()

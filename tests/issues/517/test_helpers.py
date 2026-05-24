@@ -20,7 +20,7 @@ BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 WEBUI_URL = os.environ.get("WEBUI_URL", "http://localhost:3000")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 REMOTE_TEST_HOST = os.environ.get("REMOTE_TEST_HOST", "192.168.64.3")
-TEST_USER = os.environ.get("TEST_USER", "黄迎春")
+TEST_USER = os.environ.get("TEST_REAL_USER", "test_user")
 TEST_PASS = os.environ.get("TEST_PASS", "admin123")
 
 

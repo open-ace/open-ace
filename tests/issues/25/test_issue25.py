@@ -12,6 +12,8 @@ HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots")
 
 
 @pytest.mark.asyncio
@@ -61,7 +63,7 @@ async def test_issue25():
 
             # Take screenshot before fullscreen
             await page.screenshot(
-                path="/Users/rhuang/workspace/open-ace/screenshots/issue25_before_fullscreen.png",
+                path=os.path.join(SCREENSHOT_DIR, "issue25_before_fullscreen.png"),
                 full_page=True,
             )
             print("✓ Saved: issue25_before_fullscreen.png")
@@ -73,7 +75,7 @@ async def test_issue25():
 
                 # Take screenshot in fullscreen mode
                 await page.screenshot(
-                    path="/Users/rhuang/workspace/open-ace/screenshots/issue25_fullscreen.png",
+                    path=os.path.join(SCREENSHOT_DIR, "issue25_fullscreen.png"),
                     full_page=True,
                 )
                 print("✓ Saved: issue25_fullscreen.png")
@@ -85,7 +87,7 @@ async def test_issue25():
             print("Fullscreen button not found!")
             # Take screenshot anyway
             await page.screenshot(
-                path="/Users/rhuang/workspace/open-ace/screenshots/issue25_debug.png",
+                path=os.path.join(SCREENSHOT_DIR, "issue25_debug.png"),
                 full_page=True,
             )
 

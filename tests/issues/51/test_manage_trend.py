@@ -16,6 +16,8 @@ BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "issues", "51")
 
 
 def check_manage_trend():
@@ -66,7 +68,7 @@ def check_manage_trend():
 
         # 截图
         page.screenshot(
-            path="/Users/rhuang/workspace/open-ace/screenshots/issues/51/manage_dashboard.png",
+            path=os.path.join(SCREENSHOT_DIR, "manage_dashboard.png"),
             full_page=True,
         )
         print("\n截图保存: screenshots/issues/51/manage_dashboard.png")

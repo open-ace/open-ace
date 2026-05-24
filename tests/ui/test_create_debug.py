@@ -60,7 +60,7 @@ def test_create_debug():
         try:
             print("\n[1] Opening login page...")
             page.goto(f"{BASE_URL}/login", timeout=30000)
-            print("  Please login as rhuang user in the browser window")
+            print("  Please login as test user in the browser window")
 
             if sys.stdout.isatty():
                 input("\n  Press Enter after you have logged in...")

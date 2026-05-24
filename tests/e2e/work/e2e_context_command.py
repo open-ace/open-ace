@@ -24,6 +24,9 @@ import traceback
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
+# Absolute project root (for constructing project paths)
+APP_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from playwright.sync_api import sync_playwright
 
 # ── 配置 ──────────────────────────────────────────────
@@ -116,7 +119,7 @@ def run_tests():
                 except Exception:
                     # Last resort: try the work page
                     page.goto(
-                        f"{WEBUI_URL}/work?project=/Users/rhuang/workspace/open-ace",
+                        f"{WEBUI_URL}/work?project={APP_ROOT}",
                         wait_until="domcontentloaded",
                         timeout=10000,
                     )

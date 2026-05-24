@@ -12,6 +12,8 @@ import pytest
 from playwright.async_api import async_playwright
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "issues", "82")
 
 
 @pytest.mark.asyncio
@@ -109,7 +111,7 @@ async def test_sidebar_collapse_normal_user():
 
             # 截图
             await page.screenshot(
-                path="/Users/rhuang/workspace/open-ace/screenshots/issues/82/normal_user_sidebar_collapsed.png"
+                path=os.path.join(SCREENSHOT_DIR, "normal_user_sidebar_collapsed.png")
             )
             print("\n5. 截图已保存: screenshots/issues/82/normal_user_sidebar_collapsed.png")
 
@@ -138,7 +140,7 @@ async def test_sidebar_collapse_normal_user():
 
             # 截图
             await page.screenshot(
-                path="/Users/rhuang/workspace/open-ace/screenshots/issues/82/normal_user_sidebar_expanded.png"
+                path=os.path.join(SCREENSHOT_DIR, "normal_user_sidebar_expanded.png")
             )
             print("   截图已保存: screenshots/issues/82/normal_user_sidebar_expanded.png")
 

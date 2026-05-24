@@ -2,7 +2,7 @@
 """
 Open ACE - Remote Workspace Playwright E2E Test
 
-以真实用户「黄迎春」登录，在浏览器中完成远程工作区全流程:
+以测试用户登录，在浏览器中完成远程工作区全流程:
 1. 登录
 2. 进入工作区 (iframe 中加载 qwen-code-webui)
 3. 通过 API 注册远程机器
@@ -30,7 +30,7 @@ from playwright.sync_api import sync_playwright
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 WEBUI_URL = os.environ.get("WEBUI_URL", "http://localhost:3000")
-TEST_USER = "黄迎春"
+TEST_USER = os.environ.get("TEST_REAL_USER", "test_user")
 TEST_PASS = "admin123"
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "e2e-remote")
 
@@ -123,7 +123,7 @@ def api_register_machine(admin_token):
     )
     assert r.status_code == 200
 
-    # 4. 给测试用户分配权限（黄迎春 user_id=89）
+    # 4. 给测试用户分配权限
     r = requests.post(
         f"{BASE_URL}/api/remote/machines/{machine_id}/assign",
         json={"user_id": 89, "permission": "admin"},
@@ -138,7 +138,7 @@ def api_create_session(token):
         f"{BASE_URL}/api/remote/sessions",
         json={
             "machine_id": machine_id,
-            "project_path": "/home/rhuang/workspace/demo-project",
+            "project_path": "/home/testuser/workspace/demo-project",
             "cli_tool": "qwen-code-cli",
             "model": "qwen3-coder-plus",
             "title": "E2E 远程会话",
@@ -162,7 +162,7 @@ def api_agent_output(step, is_complete=False, sid=None):
     outputs = {
         "thinking": '{"type":"thinking","content":"正在分析代码结构，寻找潜在问题..."}',
         "response": '{"type":"assistant","content":"发现 3 个问题：\\n1. API 端点缺少错误处理\\n2. SQL 查询存在注入风险\\n3. 文件顶部有未使用的 import"}',
-        "tool_call": '{"type":"tool_use","tool":"read_file","input":{"path":"/home/rhuang/workspace/demo-project/main.py"}}',
+        "tool_call": '{"type":"tool_use","tool":"read_file","input":{"path":"/home/testuser/workspace/demo-project/main.py"}}',
         "tool_done": '{"type":"tool_result","tool":"read_file","output":"成功读取 142 行代码"}',
         "final": '{"type":"assistant","content":"已修复全部 3 个问题：\\n- 添加了 try/except 错误处理\\n- 参数化 SQL 查询\\n- 移除了 5 个未使用的 import\\n\\n代码已保存，可以运行测试验证。"}',
     }
@@ -323,7 +323,7 @@ def run_tests():
             "/api/remote/sessions",
             {
                 "machine_id": machine_id,
-                "project_path": "/home/rhuang/workspace/demo-project",
+                "project_path": "/home/testuser/workspace/demo-project",
                 "cli_tool": "qwen-code-cli",
                 "model": "qwen3-coder-plus",
                 "title": "E2E 远程会话",

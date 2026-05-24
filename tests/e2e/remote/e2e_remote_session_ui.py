@@ -50,7 +50,7 @@ SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "e2e-remote-session-u
 
 ADMIN_USER = "admin"
 ADMIN_PASS = "admin123"
-TEST_USER = "黄迎春"
+TEST_USER = os.environ.get("TEST_REAL_USER", "test_user")
 TEST_PASS = "admin123"
 
 # ── State ──

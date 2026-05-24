@@ -13,20 +13,20 @@ Flow:
     A4.  Copy token (displayed in modal)
     A5.  Install Agent on remote VM via CLI (only CLI step)
     A6.  Verify machine appears online in the UI
-    A7.  Assign users: 黄迎春 as machine admin, 韩成凤 as regular user
+    A7.  Assign users: test_user as machine admin, regular_user as regular user
     A8.  Navigate to API Keys management page
     A9.  Add OpenAI API key
     A10. Verify key appears in list
 
-  Part B - Regular User Session (韩成凤):
-    B1.  Switch to regular user (韩成凤)
+  Part B - Regular User Session (regular_user):
+    B1.  Switch to regular user (regular_user)
     B2.  Navigate to workspace
     B3.  Create remote session via browser fetch
     B4.  Send message
     B5.  Simulate AI reply via Agent HTTP
     B6.  Verify session data
 
-  Part C - Machine Admin Permission Tests (黄迎春):
+  Part C - Machine Admin Permission Tests (test_user):
     C1.  Machine admin can view others' session
     C2.  Machine admin can stop others' session
     C3.  Machine admin can get machine user list (UI)
@@ -79,7 +79,7 @@ MACHINE_ADMIN_USER = os.environ.get("TEST_USERNAME", "admin")
 MACHINE_ADMIN_PASS = os.environ.get("TEST_PASSWORD", "admin123")
 
 # Regular user (assigned to machine as 'user')
-REGULAR_USER = "韩成凤"
+REGULAR_USER = os.environ.get("TEST_REGULAR_USER", "regular_user")
 REGULAR_PASS = "admin123"
 
 # Unassigned user (not assigned to any machine)
@@ -400,7 +400,7 @@ def _run_all_steps(page):
     # Use API directly to assign both users with correct permissions
     # (UI-based assign tested separately in Part C)
 
-    # Assign machine admin: 黄迎春 with 'admin' permission
+    # Assign machine admin: test_user with 'admin' permission
     requests.post(
         f"{BASE_URL}/api/remote/machines/{machine_id}/assign",
         json={"user_id": int(machine_admin_user_id), "permission": "admin"},
@@ -426,7 +426,7 @@ def _run_all_steps(page):
     assert r1.status_code == 200, f"Assign machine admin failed: {r1.json()}"
     log("Assign", f"✓ {MACHINE_ADMIN_USER} (id={machine_admin_user_id}) assigned as machine admin")
 
-    # Assign regular user: 韩成凤 with 'user' permission
+    # Assign regular user: regular_user with 'user' permission
     r2 = requests.post(
         f"{BASE_URL}/api/remote/machines/{machine_id}/assign",
         json={"user_id": int(regular_user_id), "permission": "user"},
@@ -508,11 +508,11 @@ def _run_all_steps(page):
     log("Verify", "✓ API Key 'production' visible in list")
 
     # ════════════════════════════════════════════
-    #  PART B: Regular User Session (韩成凤)
+    #  PART B: Regular User Session (regular_user)
     # ════════════════════════════════════════════
 
-    # ── B1. Switch to Regular User (韩成凤) ──
-    print("\n══════ B1. Switch to Regular User (韩成凤) ══════")
+    # ── B1. Switch to Regular User (regular_user) ──
+    print("\n══════ B1. Switch to Regular User (regular_user) ══════")
     page.goto(f"{BASE_URL}/logout", wait_until="domcontentloaded")
     pause(1)
     do_login(page, REGULAR_USER, REGULAR_PASS)
@@ -653,7 +653,7 @@ def _run_all_steps(page):
     print(f"  ✓ Session data verified: {output_count} outputs, {tokens} tokens")
 
     # ════════════════════════════════════════════
-    #  PART C: Machine Admin Permission Tests (黄迎春)
+    #  PART C: Machine Admin Permission Tests (test_user)
     # ════════════════════════════════════════════
 
     # ── C1. Machine Admin Can View Others' Session ──

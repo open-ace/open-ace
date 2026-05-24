@@ -17,7 +17,8 @@ import os
 from playwright.async_api import async_playwright
 
 OPENACE_URL = os.environ.get("OPENACE_URL", "http://localhost:5001")
-SCREENSHOT_DIR = "/Users/rhuang/workspace/open-ace/screenshots/issues/65"
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "issues", "65")
 
 # Test credentials
 TEST_USERNAME = os.environ.get("TEST_USERNAME", "admin")

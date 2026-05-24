@@ -159,6 +159,16 @@ TEST_USERNAME = os.environ.get("TEST_USERNAME", "admin")
 TEST_PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 
+# Shared test user accounts (override via env vars for your environment)
+TEST_REAL_USER = os.environ.get("TEST_REAL_USER", "test_user")
+TEST_REAL_PASS = os.environ.get("TEST_REAL_PASS", "test_pass")
+TEST_REGULAR_USER = os.environ.get("TEST_REGULAR_USER", "regular_user")
+TEST_REGULAR_PASS = os.environ.get("TEST_REGULAR_PASS", "regular_pass")
+TEST_SYSTEM_ACCOUNT = os.environ.get("TEST_SYSTEM_ACCOUNT", "testuser")
+
+# Project root for constructing relative paths
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 
 @pytest.fixture(scope="session")
 def browser_type_launch_args():

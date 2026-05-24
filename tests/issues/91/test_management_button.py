@@ -15,6 +15,8 @@ from playwright.async_api import async_playwright
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "issues", "91")
 
 
 async def test_admin_user():
@@ -52,9 +54,7 @@ async def test_admin_user():
         print(f"After navigate to /manage/dashboard: {page.url}")
 
         # Take screenshot
-        await page.screenshot(
-            path="/Users/rhuang/workspace/open-ace/screenshots/issues/91/admin_manage_mode.png"
-        )
+        await page.screenshot(path=os.path.join(SCREENSHOT_DIR, "admin_manage_mode.png"))
         print("Screenshot saved to screenshots/issues/91/admin_manage_mode.png")
 
         await browser.close()
@@ -105,9 +105,7 @@ async def test_normal_user():
         print(f"After navigate to /manage/users: {page.url}")
 
         # Take screenshot
-        await page.screenshot(
-            path="/Users/rhuang/workspace/open-ace/screenshots/issues/91/normal_user_work_mode.png"
-        )
+        await page.screenshot(path=os.path.join(SCREENSHOT_DIR, "normal_user_work_mode.png"))
         print("Screenshot saved to screenshots/issues/91/normal_user_work_mode.png")
 
         await browser.close()
@@ -120,7 +118,7 @@ async def test_normal_user():
 
 async def main():
     """Run all tests."""
-    os.makedirs("/Users/rhuang/workspace/open-ace/screenshots/issues/91", exist_ok=True)
+    os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
     # Test admin user
     admin_result = await test_admin_user()
