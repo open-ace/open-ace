@@ -65,8 +65,13 @@ def login(page: Page):
     # 等待登录成功 - bcrypt rounds=12 可能需要较长时间
     try:
         page.wait_for_url(lambda url: "/login" not in url, timeout=120000)
-    except Exception:
-        pass
+    except Exception as e:
+        current_url = page.url
+        if "/login" in current_url:
+            raise AssertionError(
+                f"Login did not redirect after 120s. Still on {current_url}. "
+                f"Check if credentials are correct or server is responsive. Error: {e}"
+            ) from e
 
 
 def navigate_to(page: Page, path: str):

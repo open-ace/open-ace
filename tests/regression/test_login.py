@@ -69,8 +69,11 @@ def test_login_success():
             # 等待登录成功（bcrypt rounds=12 可能很慢）
             try:
                 page.wait_for_url(lambda url: "/login" not in url, timeout=120000)
-            except Exception:
-                pass
+            except Exception as e:
+                if "/login" in page.url:
+                    raise AssertionError(
+                        f"Login did not redirect after 120s. Still on {page.url}. Error: {e}"
+                    ) from e
 
             # 验证登录成功
             assert "/login" not in page.url, "登录后应重定向到其他页面"
@@ -123,8 +126,11 @@ def test_logout():
             page.click('button[type="submit"]')
             try:
                 page.wait_for_url(lambda url: "/login" not in url, timeout=120000)
-            except Exception:
-                pass
+            except Exception as e:
+                if "/login" in page.url:
+                    raise AssertionError(
+                        f"Login did not redirect after 120s during logout test. Error: {e}"
+                    ) from e
 
             # 查找并点击登出按钮
             logout_selectors = [

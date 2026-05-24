@@ -1,10 +1,9 @@
-import os
-import sys
-
 #!/usr/bin/env python3
 """Test issue 50: Admin user should see all admin menus."""
 
 import asyncio
+import os
+import sys
 
 from playwright.async_api import async_playwright
 

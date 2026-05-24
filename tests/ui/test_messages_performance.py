@@ -13,6 +13,20 @@ import time
 import requests
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
+
+
+def _get_authenticated_session():
+    """Create an authenticated requests session."""
+    session = requests.Session()
+    resp = session.post(
+        f"{BASE_URL}/api/auth/login", json={"username": USERNAME, "password": PASSWORD}
+    )
+    data = resp.json()
+    if not data.get("success"):
+        raise Exception(f"Login failed: {data}")
+    return session
 
 
 def test_query_performance():
@@ -22,6 +36,8 @@ def test_query_performance():
     print("Testing Messages API query performance")
     print(f"Today's date: {today}")
     print("=" * 60)
+
+    session = _get_authenticated_session()
 
     # Test cases with different filter combinations
     test_cases = [
@@ -57,7 +73,7 @@ def test_query_performance():
         # Measure API request time
         start_time = time.time()
         try:
-            response = requests.get(f"{BASE_URL}/api/analysis/messages", params=params, timeout=10)
+            response = session.get(f"{BASE_URL}/api/analysis/messages", params=params, timeout=10)
             query_time_ms = (time.time() - start_time) * 1000
             data = response.json()
             total_messages = data.get("total", 0)
@@ -101,10 +117,17 @@ def test_query_performance():
 
     slow_queries = [r for r in results if r["time_ms"] > 1000]
     if slow_queries:
-        print(f"\n⚠ Warning: {len(slow_queries)} queries are slower than 1 second!")
+        print(f"\nWarning: {len(slow_queries)} queries are slower than 1 second!")
         print("Consider optimizing these queries or adding indexes.")
     else:
-        print("\n✓ All queries are performing well!")
+        print("\nAll queries are performing well!")
+
+    # Assert no query takes longer than 5 seconds
+    max_time = max(r["time_ms"] for r in results) if results else 0
+    assert max_time < 5000, (
+        f"Query performance too slow: {max_time:.0f}ms exceeds 5s threshold. "
+        f"Slowest: {slowest['name']}"
+    )
 
 
 if __name__ == "__main__":
