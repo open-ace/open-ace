@@ -11,31 +11,6 @@ Covers _resolve_user_id_from_sender logic:
 import pytest
 
 
-@pytest.fixture
-def mock_cursor(mocker):
-    """Create a mock cursor that simulates DB queries."""
-
-    class MockCursor:
-        def __init__(self):
-            self._query_results = {}
-            self._last_params = None
-
-        def fetchone(self):
-            key = str(self._last_params)
-            return self._query_results.get(("fetchone", key))
-
-        def fetchall(self):
-            return self._query_results.get("fetchall_all_users", [])
-
-        def set_execute_result(self, sql, params, result):
-            if "fetchall" in str(result):
-                self._query_results["fetchall_all_users"] = result
-            else:
-                self._query_results[("fetchone", str(params))] = result
-
-    return MockCursor()
-
-
 def _make_cursor_with_users(users, rsplit_match=None):
     """Build a mock cursor that returns given users.
 
@@ -79,10 +54,6 @@ def _run_resolve(cursor, sender_name):
     """Run _resolve_user_id_from_sender with mocked _execute/_placeholder."""
     import unittest.mock as mock
 
-    # The function uses shared.db._execute and _placeholder internally,
-    # but since cursor methods match, we pass the cursor directly.
-    # We need to mock the imports inside the function.
-    import scripts.fetch_codex as mod
     from scripts.fetch_codex import _resolve_user_id_from_sender
 
     def mock_execute(cur, sql, params=None):
