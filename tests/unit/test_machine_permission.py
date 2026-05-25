@@ -739,9 +739,21 @@ def _create_session_for_test(mgr, user_id, machine_id):
 
     # Return patches to be restored by caller
     patches = {
-        "rsm_mod.get_remote_agent_manager": (rsm_mod, "get_remote_agent_manager", original_get),
-        "rsm_mod.get_remote_session_manager": (rsm_mod, "get_remote_session_manager", original_rsm_get),
-        "remote_mod.get_remote_session_manager": (remote_mod, "get_remote_session_manager", original_remote_rsm),
+        "rsm_mod.get_remote_agent_manager": (
+            rsm_mod,
+            "get_remote_agent_manager",
+            original_get,
+        ),
+        "rsm_mod.get_remote_session_manager": (
+            rsm_mod,
+            "get_remote_session_manager",
+            original_rsm_get,
+        ),
+        "remote_mod.get_remote_session_manager": (
+            remote_mod,
+            "get_remote_session_manager",
+            original_remote_rsm,
+        ),
     }
 
     return result, session_mgr, patches
