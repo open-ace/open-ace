@@ -88,9 +88,7 @@ def create_default_tenant(
         # This prevents "duplicate key violates unique constraint" errors
         # when subsequent inserts use the sequence's default value
         if db.is_postgresql():
-            cursor.execute(
-                "SELECT setval('tenants_id_seq', (SELECT MAX(id) FROM tenants))"
-            )
+            cursor.execute("SELECT setval('tenants_id_seq', (SELECT MAX(id) FROM tenants))")
             conn.commit()
             print("Synced PostgreSQL sequence tenants_id_seq")
 
