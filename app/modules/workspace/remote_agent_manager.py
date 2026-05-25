@@ -591,14 +591,14 @@ class RemoteAgentManager:
     def store_terminal_info(self, machine_id: str, terminal_id: str, info: dict) -> None:
         """Store terminal status info reported by an agent.
 
-        When terminal is running with a ws_url, start WebSocket proxy to make
-        the terminal accessible from the browser (browser cannot directly connect
-        to remote private IPs).
+        When terminal is running with a ws_url, expose it through the Open ACE
+        backend WebSocket route. Browsers may not be able to reach the remote
+        agent host or backend-side random ports, but they can already reach the
+        main Open ACE origin.
         """
         from app.modules.workspace.terminal_store import terminal_info_store
-        from app.modules.workspace.ws_proxy_manager import get_ws_proxy_manager
 
-        # If terminal is running with ws_url, start WebSocket proxy
+        # If terminal is running with ws_url, publish the backend bridge route
         status = info.get("status")
         ws_url = info.get("ws_url")
         logger.info(
@@ -609,57 +609,25 @@ class RemoteAgentManager:
         )
 
         if status == "running" and ws_url:
-            logger.info("Attempting to start WebSocket proxy for terminal %s", terminal_id[:8])
-            try:
-                proxy_mgr = get_ws_proxy_manager()
+            import secrets
 
-                # Generate auth token for this proxy
-                import secrets
+            existing = terminal_info_store.get(machine_id, terminal_id) or {}
+            browser_token = existing.get("token") or secrets.token_hex(32)
+            original_ws_url = ws_url
+            original_token = info.get("token", "")
 
-                proxy_token = secrets.token_hex(32)
+            info["ws_url"] = f"/api/remote/terminal/{terminal_id}/ws"
+            info["token"] = browser_token
+            info["original_ws_url"] = original_ws_url
+            info["original_token"] = original_token
 
-                # Get backend URL from config (don't rely on Flask request context)
-                backend_url = self._get_backend_url()
-                logger.info("Backend URL for proxy: %s", backend_url)
-
-                # Keep original ws_url and token for proxy to connect to remote
-                original_ws_url = ws_url
-                original_token = info.get("token", "")
-
-                # Start proxy
-                port, proxy_ws_url, actual_token = proxy_mgr.start_proxy(
-                    terminal_id=terminal_id,
-                    machine_id=machine_id,
-                    auth_token=proxy_token,
-                    backend_url=backend_url,
-                )
-
-                # Update info with proxy URL and token for browser
-                # Use actual_token (may be existing token if proxy already running)
-                # Keep original values for proxy to connect to remote
-                info["ws_url"] = proxy_ws_url
-                info["token"] = actual_token  # Token for browser to connect to proxy
-                info["original_ws_url"] = original_ws_url  # Remote terminal's ws_url
-                info["original_token"] = original_token  # Token for proxy to connect to remote
-
-                logger.info(
-                    "Started WS proxy for terminal %s on port %d",
-                    terminal_id[:8],
-                    port,
-                )
-
-            except Exception as e:
-                logger.error("Failed to start WS proxy for terminal %s: %s", terminal_id[:8], e)
-                import traceback
-
-                traceback.print_exc()
-                # Keep original ws_url if proxy fails (may work in some network configs)
+            logger.info("Stored backend WS route for terminal %s", terminal_id[:8])
 
         terminal_info_store.put(machine_id, terminal_id, info)
 
-    def get_backend_url(self) -> str:
+    def get_backend_url(self, request_base_url: Optional[str] = None) -> str:
         """Get the externally reachable backend URL for agents and CLI tools."""
-        # Try to get from config first
+        config: dict[str, Any] = {}
         try:
             import json
             import os
@@ -669,20 +637,29 @@ class RemoteAgentManager:
             config_path = os.path.join(CONFIG_DIR, "config.json")
             if os.path.exists(config_path):
                 with open(config_path) as f:
-                    config: dict[str, Any] = json.load(f)
-                    # Check for external_url or similar config
-                    external_url = config.get("external_url")
-                    if external_url:
-                        # Cast to str since we know it's a string from config
-                        return cast("str", external_url).rstrip("/")
+                    config = json.load(f)
+
         except Exception:
             pass
 
-        # Default to localhost
+        external_url = config.get("external_url")
+        if external_url:
+            return cast("str", external_url).rstrip("/")
+
+        if request_base_url:
+            return request_base_url.rstrip("/")
+
+        server_config = config.get("server") or {}
+        server_url = server_config.get("server_url")
+        if server_url:
+            return cast("str", server_url).rstrip("/")
+
+        # Preserve the legacy no-context fallback. Runtime request paths pass
+        # request.host_url so forwarded deployments use the browser-visible URL.
         return "http://localhost:5001"
 
     def _get_backend_url(self) -> str:
-        """Backward-compatible alias for existing internal callers."""
+        """Backward-compatible alias for internal callers without request context."""
         return self.get_backend_url()
 
     # ==================== Session Tracking ====================

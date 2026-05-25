@@ -11,8 +11,9 @@ filetype>=1.2.0,<2.0.0
 # Production server
 gunicorn>=23.0.0,<24.0.0
 
-# WebSocket support (removed gevent-websocket, using HTTP polling)
+# WebSocket support
 gevent>=23.0.0,<24.0.0
+gevent-websocket>=0.10.1,<1.0.0
 
 # Database
 sqlalchemy>=2.0.49,<3.0.0

@@ -86,11 +86,20 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
 
     setConnectionState('connecting');
 
-    const wsUrlWithToken = wsUrl.includes('?')
-      ? `${wsUrl}&token=${encodeURIComponent(token)}`
-      : `${wsUrl}?token=${encodeURIComponent(token)}&cols=80&rows=24`;
-
     try {
+      if (!wsUrl.trim()) {
+        setConnectionState('disconnected');
+        return;
+      }
+      const absoluteWsUrl = wsUrl.startsWith('/')
+        ? `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}${wsUrl}`
+        : wsUrl;
+      const terminalUrl = new URL(absoluteWsUrl);
+      terminalUrl.searchParams.set('token', token);
+      if (!terminalUrl.searchParams.has('cols')) terminalUrl.searchParams.set('cols', '80');
+      if (!terminalUrl.searchParams.has('rows')) terminalUrl.searchParams.set('rows', '24');
+      const wsUrlWithToken = terminalUrl.toString();
+
       const ws = new WebSocket(wsUrlWithToken, ['binary']);
       console.log('[TerminalTab] WebSocket created, URL length:', wsUrlWithToken.length);
       ws.binaryType = 'arraybuffer';

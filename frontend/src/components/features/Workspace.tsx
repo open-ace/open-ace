@@ -116,8 +116,7 @@ export const Workspace: React.FC = () => {
         try {
           const status = await remoteApi.getTerminalStatus(terminalId, machineId);
           const wsUrl = status.terminal.ws_url ?? '';
-          const hasProxyUrl = wsUrl.includes('localhost') || wsUrl.includes('127.0.0.1');
-          if (status.terminal.status === 'running' && hasProxyUrl) {
+          if (status.terminal.status === 'running' && wsUrl && status.terminal.token) {
             setTabs((prev) =>
               prev.map((t) =>
                 t.id === tabId
@@ -899,7 +898,7 @@ export const Workspace: React.FC = () => {
               console.log('[Terminal] Terminal created:', {
                 terminalId,
                 wsUrl: initialWsUrl,
-                hasProxyUrl: initialWsUrl.includes('localhost'),
+                hasWsUrl: Boolean(initialWsUrl),
               });
 
               const newTab: WorkspaceTab = {
@@ -999,7 +998,6 @@ export const Workspace: React.FC = () => {
               try {
                 const status = await remoteApi.getTerminalStatus(terminalId, machineId);
                 const wsUrl = status.terminal.ws_url ?? '';
-                const hasProxyUrl = wsUrl.includes('localhost') || wsUrl.includes('127.0.0.1');
 
                 console.log('[Terminal] Attach poll:', {
                   attempt,
@@ -1007,7 +1005,7 @@ export const Workspace: React.FC = () => {
                   wsUrl,
                 });
 
-                if (status.terminal.status === 'running' && hasProxyUrl) {
+                if (status.terminal.status === 'running' && wsUrl && status.terminal.token) {
                   // Update tab with fresh ws_url and token
                   setTabs((prev) =>
                     prev.map((t) =>
@@ -1075,9 +1073,11 @@ export const Workspace: React.FC = () => {
                             machineId
                           );
                           const newWs = newStatus.terminal.ws_url ?? '';
-                          const hasProxy =
-                            newWs.includes('localhost') || newWs.includes('127.0.0.1');
-                          if (newStatus.terminal.status === 'running' && hasProxy) {
+                          if (
+                            newStatus.terminal.status === 'running' &&
+                            newWs &&
+                            newStatus.terminal.token
+                          ) {
                             setTabs((prev) =>
                               prev.map((t) =>
                                 t.id === tabId
@@ -1927,9 +1927,11 @@ export const Workspace: React.FC = () => {
                                 tab.machineId!
                               );
                               const wsUrl = status.terminal.ws_url ?? '';
-                              const hasProxyUrl =
-                                wsUrl.includes('localhost') || wsUrl.includes('127.0.0.1');
-                              if (status.terminal.status === 'running' && hasProxyUrl) {
+                              if (
+                                status.terminal.status === 'running' &&
+                                wsUrl &&
+                                status.terminal.token
+                              ) {
                                 setTabs((prev) =>
                                   prev.map((t) =>
                                     t.id === tab.id
@@ -2256,7 +2258,7 @@ export const Workspace: React.FC = () => {
                 terminalId,
                 initialWsUrl,
                 initialToken,
-                hasProxyUrl: initialWsUrl.includes('localhost'),
+                hasWsUrl: Boolean(initialWsUrl),
               });
 
               const newTab: WorkspaceTab = {
