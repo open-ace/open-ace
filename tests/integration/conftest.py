@@ -136,6 +136,13 @@ def _create_sqlite_tables(db):
             )
         """
         )
+        # Add UNIQUE constraint for INSERT OR REPLACE to work correctly
+        cursor.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_daily_stats_date_tool_host_sender
+            ON daily_stats (date, tool_name, host_name, sender_name)
+        """
+        )
         cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS hourly_stats (
