@@ -688,6 +688,12 @@ def test_route_generate_token_system_admin_only():
             fail(f"expected 403, got {resp.status_code}")
 
 
+def _restore_patches(patches):
+    """Restore all patched values."""
+    for name, (module, attr, original) in patches.items():
+        setattr(module, attr, original)
+
+
 def _create_session_for_test(mgr, user_id, machine_id):
     """Helper to create a remote session with patched singleton."""
     import app.modules.workspace.remote_agent_manager as ram_mod
@@ -702,6 +708,12 @@ def _create_session_for_test(mgr, user_id, machine_id):
     original_get = rsm_mod.get_remote_agent_manager
     original_rsm_get = rsm_mod.get_remote_session_manager
     rsm_mod.get_remote_agent_manager = lambda: mgr
+
+    # Patch DB_PATH so RemoteSessionManager's SessionManager uses the test database
+    import app.modules.workspace.session_manager as sm_compat
+
+    original_sm_db_path = sm_compat.DB_PATH
+    sm_compat.DB_PATH = mgr.db_path
 
     from unittest.mock import MagicMock
 
@@ -730,10 +742,21 @@ def _create_session_for_test(mgr, user_id, machine_id):
         title="Test Session",
     )
 
+    # Restore patches that are no longer needed
+    # NOTE: Do NOT restore remote_mod.get_remote_session_manager here,
+    # because Flask routes still need to use our session_mgr for subsequent requests.
     rsm_mod.get_remote_agent_manager = original_get
     rsm_mod.get_remote_session_manager = original_rsm_get
-    remote_mod.get_remote_session_manager = original_remote_rsm
-    return result
+    sm_compat.DB_PATH = original_sm_db_path
+    # Return patches so caller can restore after test
+    patches = {
+        "remote_mod.get_remote_session_manager": (
+            remote_mod,
+            "get_remote_session_manager",
+            original_remote_rsm,
+        ),
+    }
+    return result, session_mgr, patches
 
 
 def test_route_session_access_owner():
@@ -743,13 +766,15 @@ def test_route_session_access_owner():
     app = _make_app(mgr)
 
     with app.test_client() as client:
-        result = _create_session_for_test(mgr, 3, "mid-machine-a")
+        result, session_mgr, patches = _create_session_for_test(mgr, 3, "mid-machine-a")
         if not result:
             fail("session creation failed")
+            _restore_patches(patches)
             return
 
         sid = result["session_id"]
         resp = _auth_get(client, f"/api/remote/sessions/{sid}", "test-token-3-user")
+        _restore_patches(patches)
         if resp.status_code == 200:
             ok("session owner can access session")
         else:
@@ -763,13 +788,15 @@ def test_route_session_access_machine_admin():
     app = _make_app(mgr)
 
     with app.test_client() as client:
-        result = _create_session_for_test(mgr, 3, "mid-machine-a")
+        result, session_mgr, patches = _create_session_for_test(mgr, 3, "mid-machine-a")
         if not result:
             fail("session creation failed")
+            _restore_patches(patches)
             return
 
         sid = result["session_id"]
         resp = _auth_get(client, f"/api/remote/sessions/{sid}", "test-token-2-user")
+        _restore_patches(patches)
         if resp.status_code == 200:
             ok("machine admin can access others' session")
         else:
@@ -783,13 +810,15 @@ def test_route_session_access_denied_other_user():
     app = _make_app(mgr)
 
     with app.test_client() as client:
-        result = _create_session_for_test(mgr, 2, "mid-machine-a")
+        result, session_mgr, patches = _create_session_for_test(mgr, 2, "mid-machine-a")
         if not result:
             fail("session creation failed")
+            _restore_patches(patches)
             return
 
         sid = result["session_id"]
         resp = _auth_get(client, f"/api/remote/sessions/{sid}", "test-token-3-user")
+        _restore_patches(patches)
         if resp.status_code == 403:
             ok("regular user gets 403 for others' session")
         else:
@@ -803,13 +832,15 @@ def test_route_session_access_unassigned_user():
     app = _make_app(mgr)
 
     with app.test_client() as client:
-        result = _create_session_for_test(mgr, 2, "mid-machine-a")
+        result, session_mgr, patches = _create_session_for_test(mgr, 2, "mid-machine-a")
         if not result:
             fail("session creation failed")
+            _restore_patches(patches)
             return
 
         sid = result["session_id"]
         resp = _auth_get(client, f"/api/remote/sessions/{sid}", "test-token-99-user")
+        _restore_patches(patches)
         if resp.status_code == 403:
             ok("unassigned user gets 403")
         else:
