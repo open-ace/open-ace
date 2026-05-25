@@ -16,6 +16,21 @@ from app.repositories.database import Database
 logger = logging.getLogger(__name__)
 
 
+def _parse_datetime(value: Any) -> Optional[datetime]:
+    """Parse datetime value from database.
+
+    PostgreSQL returns datetime objects directly, while SQLite returns strings.
+    This helper handles both cases.
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        return datetime.fromisoformat(value)
+    return None
+
+
 class TenantRepository:
     """Repository for tenant data access."""
 
@@ -630,16 +645,10 @@ class TenantRepository:
             contact_name=row.get("contact_name"),
             quota=quota,
             settings=settings,
-            created_at=datetime.fromisoformat(row["created_at"]) if row.get("created_at") else None,
-            updated_at=datetime.fromisoformat(row["updated_at"]) if row.get("updated_at") else None,
-            trial_ends_at=(
-                datetime.fromisoformat(row["trial_ends_at"]) if row.get("trial_ends_at") else None
-            ),
-            subscription_ends_at=(
-                datetime.fromisoformat(row["subscription_ends_at"])
-                if row.get("subscription_ends_at")
-                else None
-            ),
+            created_at=_parse_datetime(row.get("created_at")),
+            updated_at=_parse_datetime(row.get("updated_at")),
+            trial_ends_at=_parse_datetime(row.get("trial_ends_at")),
+            subscription_ends_at=_parse_datetime(row.get("subscription_ends_at")),
             user_count=row.get("user_count", 0),
             total_tokens_used=row.get("total_tokens_used", 0),
             total_requests_made=row.get("total_requests_made", 0),

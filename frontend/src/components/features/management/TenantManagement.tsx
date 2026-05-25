@@ -83,9 +83,17 @@ export const TenantManagement: React.FC = () => {
         plan: planFilter || undefined,
       });
       setTenants(result.tenants);
-    } catch (err) {
-      const errorMessage =
-        err instanceof Error ? (err as Error).message : 'Failed to fetch tenants';
+    } catch (err: unknown) {
+      // API client throws ApiError objects (plain objects with message property)
+      // not Error instances. Check for message property first.
+      let errorMessage: string;
+      if (err && typeof err === 'object' && 'message' in err) {
+        errorMessage = String((err as { message: string }).message);
+      } else if (err instanceof Error) {
+        errorMessage = (err as Error).message;
+      } else {
+        errorMessage = 'Failed to fetch tenants';
+      }
       setError(errorMessage);
     } finally {
       setIsLoading(false);
@@ -169,8 +177,17 @@ export const TenantManagement: React.FC = () => {
       }
       handleCloseModal();
       fetchTenants();
-    } catch (err) {
-      const errorMessage = err instanceof Error ? (err as Error).message : 'Failed to save tenant';
+    } catch (err: unknown) {
+      // API client throws ApiError objects (plain objects with message property),
+      // not Error instances. Check for message property first.
+      let errorMessage: string;
+      if (err && typeof err === 'object' && 'message' in err) {
+        errorMessage = String((err as { message: string }).message);
+      } else if (err instanceof Error) {
+        errorMessage = (err as Error).message;
+      } else {
+        errorMessage = 'Failed to save tenant';
+      }
       setFormError(errorMessage);
     }
   };

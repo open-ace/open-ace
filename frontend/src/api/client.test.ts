@@ -225,10 +225,12 @@ describe('ApiClient', () => {
 
       await client.get('/api/test', undefined, controller.signal);
 
+      // Note: client combines user signal with timeout signal via combineSignals()
+      // The signal passed to fetch is a combined signal, not the original user signal
       expect(fetch).toHaveBeenCalledWith(
         '/api/test',
         expect.objectContaining({
-          signal: controller.signal,
+          signal: expect.any(AbortSignal),
         })
       );
     });
