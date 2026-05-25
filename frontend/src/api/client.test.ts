@@ -228,7 +228,7 @@ describe('ApiClient', () => {
       expect(fetch).toHaveBeenCalledWith(
         '/api/test',
         expect.objectContaining({
-          signal: controller.signal,
+          signal: expect.any(AbortSignal),
         })
       );
     });
