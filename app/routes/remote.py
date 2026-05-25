@@ -1618,49 +1618,13 @@ def get_terminal_status(terminal_id):
 
 @remote_bp.route("/terminal/<terminal_id>/ws")
 def terminal_websocket(terminal_id):
-    """Main-origin WebSocket bridge for remote web terminals."""
-    browser_ws = request.environ.get("wsgi.websocket")
-    if browser_ws is None:
-        return jsonify({"error": "WebSocket upgrade required"}), 400
+    """Fallback for non-WebSocket requests to the terminal WS endpoint.
 
-    token = request.args.get("token", "")
-    found = terminal_info_store.find_by_terminal_id(terminal_id)
-    if not found:
-        logger.warning("Terminal WS requested for unknown terminal %s", terminal_id[:8])
-        browser_ws.close(1011, "Terminal not available")
-        return ""
-
-    machine_id, info = found
-    stored_token = info.get("token", "")
-    if not token or not stored_token or not hmac.compare_digest(token, stored_token):
-        logger.warning("Terminal WS rejected invalid token for terminal %s", terminal_id[:8])
-        browser_ws.close(4001, "Authentication failed")
-        return ""
-
-    remote_ws_url = info.get("original_ws_url") or info.get("ws_url", "")
-    remote_token = info.get("original_token", "")
-    if not remote_ws_url or remote_ws_url.startswith("/"):
-        logger.error("Terminal WS missing remote URL for terminal %s", terminal_id[:8])
-        browser_ws.close(1011, "Remote terminal not available")
-        return ""
-
-    try:
-        from app.modules.workspace.terminal_ws_bridge import bridge_terminal_websocket
-
-        logger.info(
-            "Bridging terminal %s for machine %s through main backend",
-            terminal_id[:8],
-            machine_id[:8],
-        )
-        bridge_terminal_websocket(terminal_id, browser_ws, remote_ws_url, remote_token)
-    except Exception as e:
-        logger.error("Terminal WS bridge failed for terminal %s: %s", terminal_id[:8], e)
-        try:
-            browser_ws.close(1011, "Remote terminal connection failed")
-        except Exception:
-            pass
-
-    return ""
+    Real WebSocket connections are intercepted by TerminalWebSocketMiddleware
+    at the WSGI layer (see app/terminal_ws_middleware.py).  This route only
+    fires when the request is a plain HTTP GET (no WebSocket upgrade).
+    """
+    return jsonify({"error": "WebSocket upgrade required"}), 400
 
 
 # ==================== LLM Proxy ====================
