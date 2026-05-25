@@ -188,7 +188,9 @@ class TestAnalysisService:
         assert "2026-05-05" not in anomaly_dates, "Zero token day should not be flagged as anomaly"
 
         # Spike should still be detected
-        assert any(a["type"] == "spike" for a in result["anomalies"]), "Spike anomaly should be detected"
+        assert any(
+            a["type"] == "spike" for a in result["anomalies"]
+        ), "Spike anomaly should be detected"
 
     def test_get_recommendations_with_data(self):
         svc, mock_usage, _, _ = self._make_service()
