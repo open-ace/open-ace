@@ -468,18 +468,10 @@ class ProjectRepository:
                 COALESCE(SUM(up.total_duration_seconds), 0) as total_duration_seconds,
                 MIN(up.first_access_at) as first_access,
                 MAX(up.last_access_at) as last_access,
-                COALESCE(dm_stats.total_tokens, 0) as total_tokens,
-                COALESCE(dm_stats.total_requests, 0) as total_requests
+                COALESCE(SUM(up.total_tokens), 0) as total_tokens,
+                COALESCE(SUM(up.total_requests), 0) as total_requests
             FROM projects p
             LEFT JOIN user_projects up ON p.id = up.project_id
-            LEFT JOIN (
-                SELECT project_path,
-                       SUM(tokens_used) as total_tokens,
-                       COUNT(*) as total_requests
-                FROM daily_messages
-                WHERE project_path IS NOT NULL
-                GROUP BY project_path
-            ) dm_stats ON p.path = dm_stats.project_path
             WHERE p.is_active IS TRUE
             GROUP BY p.id
             ORDER BY total_tokens DESC
