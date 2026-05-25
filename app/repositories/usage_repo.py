@@ -1023,8 +1023,10 @@ class UsageRepository:
             (f"{escape_like(system_account)}%", start_date, end_date),
         )
 
-        # Remote session usage from agent_sessions (includes terminal sessions)
-        remote_row = self.db.fetch_one(
+        # Session usage from agent_sessions (includes local, remote, and terminal sessions)
+        # Note: WebUI creates 'local' sessions, CLI via remote mode creates 'remote' sessions,
+        # and terminal sessions have workspace_type='terminal'
+        session_row = self.db.fetch_one(
             """
             SELECT
                 COALESCE(SUM(total_tokens), 0) as tokens,
@@ -1035,7 +1037,7 @@ class UsageRepository:
                 ), 0) as requests
             FROM agent_sessions
             WHERE user_id = ?
-              AND workspace_type IN ('remote', 'terminal')
+              AND workspace_type IN ('local', 'remote', 'terminal')
               AND CAST(created_at AS DATE) >= ? AND CAST(created_at AS DATE) <= ?
         """,
             (user_id, start_date, end_date),
@@ -1043,16 +1045,16 @@ class UsageRepository:
 
         local_tokens = int(local_row["tokens"]) if local_row else 0
         local_requests = int(local_row["requests"]) if local_row else 0
-        remote_tokens = int(remote_row["tokens"]) if remote_row else 0
-        remote_requests = int(remote_row["requests"]) if remote_row else 0
+        session_tokens = int(session_row["tokens"]) if session_row else 0
+        session_requests = int(session_row["requests"]) if session_row else 0
 
         return {
-            "tokens": local_tokens + remote_tokens,
-            "requests": local_requests + remote_requests,
+            "tokens": local_tokens + session_tokens,
+            "requests": local_requests + session_requests,
             "local_tokens": local_tokens,
             "local_requests": local_requests,
-            "remote_tokens": remote_tokens,
-            "remote_requests": remote_requests,
+            "remote_tokens": session_tokens,  # Keep legacy field name for compatibility
+            "remote_requests": session_requests,  # Keep legacy field name for compatibility
         }
 
     def get_user_daily_detail(
@@ -1081,8 +1083,8 @@ class UsageRepository:
             (f"{escape_like(system_account)}%", start_date, end_date),
         )
 
-        # Remote session usage from agent_sessions + session_messages (includes terminal)
-        remote_rows = self.db.fetch_all(
+        # Session usage from agent_sessions + session_messages (includes local, remote, terminal)
+        session_rows = self.db.fetch_all(
             """
             SELECT
                 CAST(s.created_at AS DATE) as date,
@@ -1097,7 +1099,7 @@ class UsageRepository:
                 ) as request_count
             FROM agent_sessions s
             WHERE s.user_id = ?
-              AND s.workspace_type IN ('remote', 'terminal')
+              AND s.workspace_type IN ('local', 'remote', 'terminal')
               AND CAST(s.created_at AS DATE) >= ? AND CAST(s.created_at AS DATE) <= ?
             GROUP BY CAST(s.created_at AS DATE), s.workspace_type
             ORDER BY CAST(s.created_at AS DATE) DESC
@@ -1117,7 +1119,7 @@ class UsageRepository:
                     "request_count": int(row["request_count"] or 0),
                 }
             )
-        for row in remote_rows:
+        for row in session_rows:
             results.append(
                 {
                     "date": str(row["date"]),
