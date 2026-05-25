@@ -149,6 +149,7 @@ AGENT_FILES=(
     terminal_menu.py
     terminal_server.py
     websocket_proxy.py
+    session_isolation.py
     session_sync.py
     openace_cli.py
     __init__.py
