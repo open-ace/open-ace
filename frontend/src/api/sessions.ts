@@ -65,7 +65,11 @@ export type ContentBlock =
   | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
   | { type: 'tool_result'; tool_use_id: string; content: string | ContentBlock[] }
   | { type: 'reasoning'; summary: string }
-  | { type: 'file_change'; changes: FileChangeDetail[]; status: 'accepted' | 'declined' | 'modified' }
+  | {
+      type: 'file_change';
+      changes: FileChangeDetail[];
+      status: 'accepted' | 'declined' | 'modified';
+    }
   | { type: 'task_summary'; text: string; duration_ms: number; time_to_first_token_ms?: number };
 
 export interface SessionFilters {

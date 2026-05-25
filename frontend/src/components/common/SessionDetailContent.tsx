@@ -843,17 +843,31 @@ const ContentBlockRenderer: React.FC<{
 
     case 'file_change':
       return (
-        <details className={`border-start border-3 ps-2 mb-1 ${block.status === 'accepted' ? 'border-success' : 'border-danger'}`}>
+        <details
+          className={`border-start border-3 ps-2 mb-1 ${block.status === 'accepted' ? 'border-success' : 'border-danger'}`}
+        >
           <summary className="small" style={{ cursor: 'pointer' }}>
             <Badge variant={block.status === 'accepted' ? 'success' : 'danger'} className="me-1">
               {block.status === 'accepted' ? 'Accepted' : 'Declined'}
             </Badge>
-            <span className="fw-medium">{block.changes.length} file change{block.changes.length !== 1 ? 's' : ''}</span>
+            <span className="fw-medium">
+              {block.changes.length} file change{block.changes.length !== 1 ? 's' : ''}
+            </span>
           </summary>
           <div className="mt-1 small">
             {block.changes.map((change, i) => (
               <div key={i} className="d-flex align-items-center mb-1">
-                <Badge variant={change.change_type === 'add' ? 'success' : change.change_type === 'delete' ? 'danger' : 'warning'} className="me-1" pill>
+                <Badge
+                  variant={
+                    change.change_type === 'add'
+                      ? 'success'
+                      : change.change_type === 'delete'
+                        ? 'danger'
+                        : 'warning'
+                  }
+                  className="me-1"
+                  pill
+                >
                   {change.change_type.toUpperCase()}
                 </Badge>
                 <code className="small">{change.path}</code>
@@ -875,10 +889,7 @@ const ContentBlockRenderer: React.FC<{
               </span>
             )}
           </div>
-          <div
-            className="small"
-            style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
-          >
+          <div className="small" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
             {block.text}
           </div>
         </div>
