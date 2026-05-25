@@ -36,6 +36,13 @@ def create_app(config=None):
     # This is needed for HTTPS iframe URL generation in multi-user mode
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 
+    # Terminal WebSocket must be handled at the WSGI layer because
+    # Flask/Werkzeug cannot reliably route upgraded connections.
+    # See issue #147 and #557 for context.
+    from app.terminal_ws_middleware import TerminalWebSocketMiddleware
+
+    app.wsgi_app = TerminalWebSocketMiddleware(app.wsgi_app)
+
     # Load configuration
     app.config["TEMPLATES_AUTO_RELOAD"] = True
 
