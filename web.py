@@ -92,7 +92,18 @@ if __name__ == "__main__":
 
     from gevent.pywsgi import WSGIServer
 
-    server = WSGIServer((WEB_HOST, WEB_PORT), app)
+    try:
+        from geventwebsocket.handler import WebSocketHandler
+    except ImportError:
+        WebSocketHandler = None
+
+    server_kwargs = {}
+    if WebSocketHandler is not None:
+        server_kwargs["handler_class"] = WebSocketHandler
+    else:
+        print("WARNING: gevent-websocket is not installed; web terminal WS is disabled")
+
+    server = WSGIServer((WEB_HOST, WEB_PORT), app, **server_kwargs)
 
     # Graceful shutdown: stop webui instances on SIGTERM/SIGINT
     import signal

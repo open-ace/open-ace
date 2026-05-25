@@ -60,6 +60,8 @@ def load_user():
         return
     if request.path.startswith("/api/remote/llm-proxy"):
         return
+    if request.endpoint == "remote.terminal_websocket":
+        return
     # Agent file downloads are public (needed for agent installation)
     if request.path.startswith("/api/remote/agent/files/"):
         return
@@ -1326,7 +1328,7 @@ def start_terminal():
     )
 
     # Use external URL for LLM proxy (remote machine needs to access it)
-    backend_url = agent_mgr.get_backend_url()
+    backend_url = agent_mgr.get_backend_url(request.host_url)
     proxy_url = f"{backend_url}/api/remote/llm-proxy"
     logger.info("start_terminal: backend_url=%s, proxy_url=%s", backend_url, proxy_url)
 
@@ -1433,7 +1435,7 @@ def start_cli_terminal():
         session_type="terminal",
     )
 
-    backend_url = agent_mgr.get_backend_url()
+    backend_url = agent_mgr.get_backend_url(request.host_url)
     proxy_url = f"{backend_url}/api/remote/llm-proxy"
 
     logger.info(
@@ -1485,7 +1487,7 @@ def stop_terminal():
     }
     agent_mgr.send_command(machine_id, cmd)
 
-    # Clean up local store
+    # Clean up local store; TerminalInfoStore also closes active bridge connections.
     terminal_info_store.pop(machine_id, terminal_id)
 
     # Update session status to completed
@@ -1539,7 +1541,7 @@ def attach_terminal(terminal_id):
     )
 
     # Get proxy URL for LLM API
-    backend_url = agent_mgr.get_backend_url()
+    backend_url = agent_mgr.get_backend_url(request.host_url)
     proxy_url = f"{backend_url}/api/remote/llm-proxy"
 
     # Send attach_terminal command to agent with fresh tokens
@@ -1612,6 +1614,53 @@ def get_terminal_status(terminal_id):
     if info:
         return jsonify({"success": True, "terminal": info})
     return jsonify({"success": True, "terminal": {"status": "unknown"}})
+
+
+@remote_bp.route("/terminal/<terminal_id>/ws")
+def terminal_websocket(terminal_id):
+    """Main-origin WebSocket bridge for remote web terminals."""
+    browser_ws = request.environ.get("wsgi.websocket")
+    if browser_ws is None:
+        return jsonify({"error": "WebSocket upgrade required"}), 400
+
+    token = request.args.get("token", "")
+    found = terminal_info_store.find_by_terminal_id(terminal_id)
+    if not found:
+        logger.warning("Terminal WS requested for unknown terminal %s", terminal_id[:8])
+        browser_ws.close(1011, "Terminal not available")
+        return ""
+
+    machine_id, info = found
+    stored_token = info.get("token", "")
+    if not token or not stored_token or not hmac.compare_digest(token, stored_token):
+        logger.warning("Terminal WS rejected invalid token for terminal %s", terminal_id[:8])
+        browser_ws.close(4001, "Authentication failed")
+        return ""
+
+    remote_ws_url = info.get("original_ws_url") or info.get("ws_url", "")
+    remote_token = info.get("original_token", "")
+    if not remote_ws_url or remote_ws_url.startswith("/"):
+        logger.error("Terminal WS missing remote URL for terminal %s", terminal_id[:8])
+        browser_ws.close(1011, "Remote terminal not available")
+        return ""
+
+    try:
+        from app.modules.workspace.terminal_ws_bridge import bridge_terminal_websocket
+
+        logger.info(
+            "Bridging terminal %s for machine %s through main backend",
+            terminal_id[:8],
+            machine_id[:8],
+        )
+        bridge_terminal_websocket(terminal_id, browser_ws, remote_ws_url, remote_token)
+    except Exception as e:
+        logger.error("Terminal WS bridge failed for terminal %s: %s", terminal_id[:8], e)
+        try:
+            browser_ws.close(1011, "Remote terminal connection failed")
+        except Exception:
+            pass
+
+    return ""
 
 
 # ==================== LLM Proxy ====================
