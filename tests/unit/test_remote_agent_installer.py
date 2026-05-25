@@ -7,6 +7,14 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+def runtime_agent_files():
+    agent_dir = REPO_ROOT / "remote-agent"
+    excluded = {"install.ps1", "install.sh", "uninstall.ps1", "uninstall.sh"}
+    return sorted(
+        path.name for path in agent_dir.iterdir() if path.is_file() and path.name not in excluded
+    )
+
+
 def test_install_script_reports_missing_python(tmp_path):
     """The installer should not silently exit when Python is unavailable."""
     fake_bin = tmp_path / "bin"
@@ -40,6 +48,26 @@ def test_install_script_reports_missing_python(tmp_path):
     assert result.returncode == 1
     assert "Checking prerequisites" in result.stdout
     assert "Python 3.8+ is not installed" in result.stdout
+
+
+def test_shell_installer_downloads_all_runtime_agent_files():
+    expected = runtime_agent_files()
+
+    script = (REPO_ROOT / "remote-agent" / "install.sh").read_text(encoding="utf-8")
+    match = re.search(r"AGENT_FILES=\(\n(?P<files>.*?)\n\)", script, re.DOTALL)
+
+    assert match is not None
+    assert sorted(match.group("files").split()) == expected
+
+
+def test_powershell_installer_downloads_all_runtime_agent_files():
+    expected = sorted(name for name in runtime_agent_files() if name != "__init__.py")
+
+    script = (REPO_ROOT / "remote-agent" / "install.ps1").read_text(encoding="utf-8")
+    match = re.search(r"\$files = @\((?P<files>.*?)\)", script, re.DOTALL)
+
+    assert match is not None
+    assert sorted(re.findall(r'"([^"]+)"', match.group("files"))) == expected
 
 
 def test_shell_installer_downloads_all_cli_adapters():
