@@ -111,14 +111,13 @@ find_python() {
     return 1
 }
 
-PYTHON_PATH=$(find_python)
-if [[ -z "$PYTHON_PATH" ]]; then
+if ! PYTHON_PATH=$(find_python); then
     log_error "Python 3.8+ is not installed. Please install Python 3.8+ first."
     exit 1
 fi
 
 PYTHON_VERSION=$("$PYTHON_PATH" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-log_success "Python $PYTHON_PATH found at $PYTHON_PATH"
+log_success "Python ${PYTHON_VERSION} found at $PYTHON_PATH"
 
 # Check pip
 if ! "$PYTHON_PATH" -m pip --version &>/dev/null; then
