@@ -58,9 +58,9 @@ export interface ToolComparison {
 
 export interface Recommendation {
   type: string;
-  title: string;
-  description: string;
-  impact: string;
+  message: string;
+  details: string;
+  impact?: string;
 }
 
 export interface UserSegmentation {

@@ -435,13 +435,15 @@ export const Analysis: React.FC = () => {
                           <div>
                             <h6 className="mb-1">
                               <i className={cn('bi me-2', getRecommendationIcon(rec.type))} />
-                              {rec.title}
+                              {rec.message}
                             </h6>
-                            <p className="mb-1 text-muted small">{rec.description}</p>
+                            <p className="mb-1 text-muted small">{rec.details}</p>
                           </div>
-                          <span className={cn('badge', getImpactBadge(rec.impact))}>
-                            {rec.impact}
-                          </span>
+                          {rec.impact && (
+                            <span className={cn('badge', getImpactBadge(rec.impact))}>
+                              {rec.impact}
+                            </span>
+                          )}
                         </div>
                       </li>
                     ))}
