@@ -166,6 +166,32 @@ class TestAnalysisService:
         assert result["anomalies"] == []
         assert result["summary"]["total"] == 0
 
+    def test_detect_anomalies_zero_tokens_not_flagged(self):
+        """Test that days with zero tokens are not flagged as anomalies."""
+        svc, _, mock_msg, _ = self._make_service()
+        # Mix of normal days and zero-token days
+        daily_data = [
+            {"date": "2026-05-01", "total_tokens": 100},
+            {"date": "2026-05-02", "total_tokens": 100},
+            {"date": "2026-05-03", "total_tokens": 100},
+            {"date": "2026-05-04", "total_tokens": 0},  # Zero tokens - should NOT be anomaly
+            {"date": "2026-05-05", "total_tokens": 0},  # Zero tokens - should NOT be anomaly
+            {"date": "2026-05-06", "total_tokens": 100},
+            {"date": "2026-05-07", "total_tokens": 5000},  # Spike - should be anomaly
+        ]
+        mock_msg.get_daily_token_totals.return_value = daily_data
+        result = svc.detect_anomalies("2026-05-01", "2026-05-07")
+
+        # Zero token days should not appear in anomalies
+        anomaly_dates = [a["date"] for a in result["anomalies"]]
+        assert "2026-05-04" not in anomaly_dates, "Zero token day should not be flagged as anomaly"
+        assert "2026-05-05" not in anomaly_dates, "Zero token day should not be flagged as anomaly"
+
+        # Spike should still be detected
+        assert any(
+            a["type"] == "spike" for a in result["anomalies"]
+        ), "Spike anomaly should be detected"
+
     def test_get_recommendations_with_data(self):
         svc, mock_usage, _, _ = self._make_service()
         mock_usage.get_daily_range.return_value = [

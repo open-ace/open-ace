@@ -813,7 +813,10 @@ class AnalysisService:
 
         Anomaly types:
         1. usage_spike: Daily usage exceeds 2 standard deviations above mean
-        2. usage_drop: Daily usage below 50% of average
+        2. usage_drop: Daily usage has some activity but below 50% of average
+
+        Note: Days with zero tokens (no activity) are not considered anomalies.
+        They indicate inactivity (e.g., maintenance, downtime, holidays).
 
         Args:
             start_date: Optional start date filter.
@@ -854,6 +857,10 @@ class AnalysisService:
             token = d.get("total_tokens", 0)
             date = d.get("date")
 
+            # No activity - not an anomaly, just inactive
+            if token == 0:
+                continue
+
             if std_dev > 0:
                 deviation = (token - avg_tokens) / std_dev
 
@@ -876,7 +883,7 @@ class AnalysisService:
 
                     anomalies.append(anomaly)
 
-                # Usage drop: below 50% of average
+                # Usage drop: has some activity but significantly below average
                 elif token < avg_tokens * 0.5 and avg_tokens > 0:
                     anomaly = {
                         "date": date,
