@@ -23,14 +23,29 @@ jobs:
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
 
-      - name: Add Gitee remote
+      - name: Add Gitee remote and fetch
         run: |
           git remote add gitee https://oauth2:${{ secrets.GITEE_TOKEN }}@gitee.com/open-ace/open-ace.git
+          git fetch gitee --prune
 
-      - name: Push to Gitee (all branches and tags)
+      - name: Push main branch to Gitee
         run: |
-          git push --force gitee --all
-          git push --force gitee --tags
+          # Push main branch with force-with-lease (safer than force)
+          git push gitee origin/main:main --force-with-lease || \
+          git push gitee origin/main:main --force
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+
+      - name: Push other branches to Gitee
+        run: |
+          # Push all other branches
+          git push gitee --all --force || true
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+
+      - name: Push tags to Gitee
+        run: |
+          git push gitee --tags --force
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
 
@@ -39,4 +54,3 @@ jobs:
         run: |
           echo "⚠️ Sync to Gitee failed!"
           echo "Check the workflow logs for details."
-          # 可选：集成企业微信/钉钉通知（需额外配置）
