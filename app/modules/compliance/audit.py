@@ -494,8 +494,10 @@ class AuditAnalyzer:
                         else created_at
                     )
                     # Convert to local time for consistent display
-                    if ts.tzinfo is not None:
-                        ts = ts.astimezone()
+                    if ts.tzinfo is None:
+                        # Assume UTC if no timezone info
+                        ts = ts.replace(tzinfo=timezone.utc)
+                    ts = ts.astimezone()
                     all_timestamps.append(ts)
                 except Exception:
                     pass
