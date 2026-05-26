@@ -37,6 +37,7 @@ export interface AuditPattern {
   period: { start: string; end: string };
   total_events: number;
   hourly_distribution: Record<string, number>;
+  login_hourly_distribution: Record<string, number>;
   daily_distribution: Record<string, number>;
   action_distribution: Record<string, number>;
   unique_users: number;
