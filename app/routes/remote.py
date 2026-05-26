@@ -32,6 +32,8 @@ logger = logging.getLogger(__name__)
 MAX_RAW_CONTENT_LENGTH = 100000
 MAX_MESSAGE_LENGTH = 50000
 
+_CLI_SETTINGS_TOOLS = ["claude-code", "qwen-code", "codex-cli"]
+
 remote_bp = Blueprint("remote", __name__)
 
 
@@ -1345,7 +1347,7 @@ def start_terminal():
 
     # Get CLI settings for supported menu tools
     cli_settings = {}
-    for tool_name in ["claude-code", "qwen-code", "codex-cli"]:
+    for tool_name in _CLI_SETTINGS_TOOLS:
         tool_settings = api_proxy.get_cli_settings_for_tool(tenant_id, tool_name)
         if tool_settings:
             cli_settings[tool_name] = tool_settings
@@ -1450,7 +1452,7 @@ def start_cli_terminal():
     proxy_url = f"{backend_url}/api/remote/llm-proxy"
 
     cli_settings = {}
-    for tool_name in ["claude-code", "qwen-code", "codex-cli"]:
+    for tool_name in _CLI_SETTINGS_TOOLS:
         tool_settings = api_proxy.get_cli_settings_for_tool(tenant_id, tool_name)
         if tool_settings:
             cli_settings[tool_name] = tool_settings

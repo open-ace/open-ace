@@ -87,7 +87,12 @@ def bridge_terminal_websocket(
     _register_bridge(state)
 
     try:
-        with connect(upstream_url, subprotocols=["binary"], close_timeout=5) as remote_ws:
+        with connect(
+            upstream_url,
+            subprotocols=["binary"],
+            close_timeout=5,
+            proxy=None,
+        ) as remote_ws:
             state.remote_ws = remote_ws
             logger.info("Connected backend bridge to remote terminal: %s", remote_ws_url)
 
@@ -149,7 +154,12 @@ def bridge_terminal_websocket_raw(
     _register_bridge(state)
 
     try:
-        with connect(upstream_url, subprotocols=["binary"], close_timeout=5) as remote_ws:
+        with connect(
+            upstream_url,
+            subprotocols=["binary"],
+            close_timeout=5,
+            proxy=None,
+        ) as remote_ws:
             state.remote_ws = remote_ws
             logger.info("Connected raw bridge to remote terminal: %s", remote_ws_url)
 

@@ -105,7 +105,13 @@ def _toml_key(key: str) -> str:
 
 def _toml_value(value: Any) -> str:
     if isinstance(value, str):
-        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        escaped = (
+            value.replace("\\", "\\\\")
+            .replace('"', '\\"')
+            .replace("\n", "\\n")
+            .replace("\t", "\\t")
+            .replace("\r", "\\r")
+        )
         return f'"{escaped}"'
     if isinstance(value, bool):
         return "true" if value else "false"
