@@ -329,7 +329,9 @@ export const QuotaAlerts: React.FC = () => {
               );
               const monthlyTokenPercentage = getUsagePercentage(
                 user.tokens_used_month,
-                user.monthly_token_quota ? user.monthly_token_quota * TOKEN_QUOTA_MULTIPLIER : undefined
+                user.monthly_token_quota
+                  ? user.monthly_token_quota * TOKEN_QUOTA_MULTIPLIER
+                  : undefined
               );
               const dailyRequestPercentage = getUsagePercentage(
                 user.requests_today,
