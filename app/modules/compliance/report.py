@@ -215,7 +215,7 @@ class ReportGenerator:
         start_date = period_start.strftime("%Y-%m-%d")
         end_date = period_end.strftime("%Y-%m-%d")
 
-        # Get usage data
+        # Get usage data from daily_usage (aggregated by tool/host)
         usage_data = self.db.fetch_all(
             """
             SELECT
@@ -224,9 +224,8 @@ class ReportGenerator:
                 host_name,
                 SUM(input_tokens) as total_input_tokens,
                 SUM(output_tokens) as total_output_tokens,
-                SUM(total_tokens) as total_tokens,
-                SUM(requests) as total_requests,
-                COUNT(DISTINCT user_id) as unique_users
+                SUM(tokens_used) as total_tokens,
+                SUM(request_count) as total_requests
             FROM daily_usage
             WHERE date >= ? AND date <= ?
             GROUP BY date, tool_name, host_name
@@ -234,6 +233,17 @@ class ReportGenerator:
         """,
             (start_date, end_date),
         )
+
+        # Get unique users count from user_daily_stats table
+        unique_users_result = self.db.fetch_one(
+            """
+            SELECT COUNT(DISTINCT user_id) as unique_users
+            FROM user_daily_stats
+            WHERE date >= ? AND date <= ?
+        """,
+            (start_date, end_date),
+        )
+        unique_users = unique_users_result.get("unique_users", 0) if unique_users_result else 0
 
         # Calculate summary
         total_tokens = sum(r.get("total_tokens", 0) or 0 for r in usage_data)
@@ -251,6 +261,7 @@ class ReportGenerator:
                 "requests": total_requests,
                 "tools_used": len(unique_tools),
                 "tools": list(unique_tools),
+                "unique_users": unique_users,
             },
             "averages": {
                 "daily_tokens": total_tokens // max((period_end - period_start).days + 1, 1),
@@ -269,7 +280,7 @@ class ReportGenerator:
         start_date = period_start.strftime("%Y-%m-%d")
         end_date = period_end.strftime("%Y-%m-%d")
 
-        # Get user activity
+        # Get user activity from user_daily_stats (has user_id column)
         user_activity = self.db.fetch_all(
             """
             SELECT
@@ -277,14 +288,14 @@ class ReportGenerator:
                 u.username,
                 u.email,
                 u.role,
-                COUNT(DISTINCT du.date) as active_days,
-                SUM(du.total_tokens) as total_tokens,
-                SUM(du.requests) as total_requests,
-                MIN(du.date) as first_activity,
-                MAX(du.date) as last_activity
+                COUNT(DISTINCT uds.date) as active_days,
+                SUM(uds.tokens) as total_tokens,
+                SUM(uds.requests) as total_requests,
+                MIN(uds.date) as first_activity,
+                MAX(uds.date) as last_activity
             FROM users u
-            LEFT JOIN daily_usage du ON u.id = du.user_id
-                AND du.date >= ? AND du.date <= ?
+            LEFT JOIN user_daily_stats uds ON u.id = uds.user_id
+                AND uds.date >= ? AND uds.date <= ?
             GROUP BY u.id
             ORDER BY total_tokens DESC
         """,
