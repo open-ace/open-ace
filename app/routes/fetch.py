@@ -35,6 +35,35 @@ _fetch_status: dict[str, Any] = {
 _fetch_lock = threading.Lock()
 
 
+def _run_subprocess(cmd, timeout=600, cwd=None):
+    """Run subprocess using Popen to avoid gevent monkey-patch issues.
+
+    gevent monkey.patch_all() causes subprocess.run to crash (SIGSEGV)
+    when executing sudo commands. Using Popen + communicate() works correctly.
+    """
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=cwd,
+    )
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+        return type(
+            "Result",
+            (),
+            {
+                "returncode": proc.returncode,
+                "stdout": stdout.decode("utf-8", errors="replace") if stdout else "",
+                "stderr": stderr.decode("utf-8", errors="replace") if stderr else "",
+            },
+        )()
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate()
+        raise
+
+
 def run_fetch_scripts():
     """Run data fetch scripts in background."""
     global _fetch_status
@@ -73,13 +102,11 @@ def run_fetch_scripts():
             try:
                 config_path = os.path.expanduser("~/.open-ace/config.json")
 
-                result = subprocess.run(
+                result = _run_subprocess(
                     _build_cmd(
                         qwen_script,
                         ["--days", "1", "--multi-user", "--recent", "--config", config_path],
                     ),
-                    capture_output=True,
-                    text=True,
                     timeout=600,
                     cwd=project_root,
                 )
@@ -98,13 +125,11 @@ def run_fetch_scripts():
         claude_script = os.path.join(project_root, "scripts", "fetch_claude.py")
         if os.path.exists(claude_script):
             try:
-                result = subprocess.run(
+                result = _run_subprocess(
                     _build_cmd(
                         claude_script,
                         ["--days", "1", "--multi-user", "--recent", "--config", config_path],
                     ),
-                    capture_output=True,
-                    text=True,
                     timeout=600,
                     cwd=project_root,
                 )
@@ -123,7 +148,7 @@ def run_fetch_scripts():
         openclaw_script = os.path.join(project_root, "scripts", "fetch_openclaw.py")
         if os.path.exists(openclaw_script):
             try:
-                result = subprocess.run(
+                result = _run_subprocess(
                     _build_cmd(
                         openclaw_script,
                         [
@@ -137,8 +162,6 @@ def run_fetch_scripts():
                             config_path,
                         ],
                     ),
-                    capture_output=True,
-                    text=True,
                     timeout=600,
                     cwd=project_root,
                 )
@@ -157,13 +180,11 @@ def run_fetch_scripts():
         codex_script = os.path.join(project_root, "scripts", "fetch_codex.py")
         if os.path.exists(codex_script):
             try:
-                result = subprocess.run(
+                result = _run_subprocess(
                     _build_cmd(
                         codex_script,
                         ["--days", "1", "--multi-user", "--recent", "--config", config_path],
                     ),
-                    capture_output=True,
-                    text=True,
                     timeout=600,
                     cwd=project_root,
                 )
