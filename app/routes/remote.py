@@ -19,7 +19,10 @@ import uuid
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
 from app.auth.decorators import _extract_token, _load_user_from_token, admin_required
-from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
+from app.modules.workspace.api_key_proxy import (
+    get_api_key_proxy_service,
+    validate_cli_settings_payload,
+)
 from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
 from app.modules.workspace.remote_session_manager import get_remote_session_manager
 from app.modules.workspace.terminal_store import terminal_info_store
@@ -342,6 +345,10 @@ def store_api_key():
     if not provider or not key_name or not api_key:
         return jsonify({"error": "provider, key_name, and api_key are required"}), 400
 
+    validation_error = validate_cli_settings_payload(cli_settings)
+    if validation_error:
+        return jsonify({"error": validation_error}), 400
+
     api_proxy = get_api_key_proxy_service()
     result = api_proxy.store_api_key(
         tenant_id=tenant_id,
@@ -373,6 +380,10 @@ def update_api_key(key_id):
     if is_active is not None and not isinstance(is_active, bool):
         return jsonify({"error": "is_active must be a boolean"}), 400
     tenant_id = int(data.get("tenant_id", 1))
+
+    validation_error = validate_cli_settings_payload(cli_settings)
+    if validation_error:
+        return jsonify({"error": validation_error}), 400
 
     api_proxy = get_api_key_proxy_service()
     success = api_proxy.update_api_key_by_id(

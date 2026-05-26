@@ -792,7 +792,6 @@ const translations: Record<Language, Translations> = {
       'Configure non-sensitive Codex settings only (model, sandbox, etc.). Do NOT include API keys — they are injected via environment variables automatically.',
     claudeSettingsInvalid: 'Claude Code settings JSON is invalid',
     qwenSettingsInvalid: 'Qwen Code settings JSON is invalid',
-    codexSettingsInvalid: 'Codex settings are invalid',
     providerCannotChange: 'Provider cannot be changed',
 
     // Help Documents
@@ -1610,7 +1609,6 @@ const translations: Record<Language, Translations> = {
       '仅配置非敏感 Codex 设置（model、sandbox 等）。请勿填写 API Key — 系统会通过环境变量自动注入。',
     claudeSettingsInvalid: 'Claude Code 设置 JSON 无效',
     qwenSettingsInvalid: 'Qwen Code 设置 JSON 无效',
-    codexSettingsInvalid: 'Codex 设置无效',
     providerCannotChange: '提供商不可更改',
 
     // 帮助文档
@@ -2177,7 +2175,6 @@ const translations: Record<Language, Translations> = {
     codexSettings: 'Codex 設定 (TOML)',
     codexSettingsHint:
       '機密情報以外の Codex 設定のみを構成してください（model、sandbox など）。API キーは含めないでください — 環境変数経由で自動的に挿入されます。',
-    codexSettingsInvalid: 'Codex 設定が無効です',
     providerCannotChange: 'プロバイダーは変更できません',
   },
   ko: {
@@ -2697,7 +2694,6 @@ const translations: Record<Language, Translations> = {
     codexSettings: 'Codex 설정 (TOML)',
     codexSettingsHint:
       '민감하지 않은 Codex 설정만 구성하세요 (model, sandbox 등). API 키는 포함하지 마세요 — 환경 변수를 통해 자동으로 주입됩니다.',
-    codexSettingsInvalid: 'Codex 설정이 유효하지 않습니다',
     providerCannotChange: '공급자를 변경할 수 없습니다',
   },
 };

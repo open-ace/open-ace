@@ -342,6 +342,8 @@ export const APIKeyManagement: React.FC = () => {
       }
     }
     if (formData.cli_tools.includes('codex-cli') && formData.codex_settings.trim()) {
+      // Codex uses TOML as its native config format, so we preserve the
+      // raw editor text here and let the backend validate/parse it.
       settings['codex-cli'] = formData.codex_settings;
     }
     return JSON.stringify(settings);

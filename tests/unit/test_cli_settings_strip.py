@@ -161,3 +161,24 @@ wire_api = "responses"
         assert result["model"] == "qwen3.7-max"
         assert result["model_providers"]["openace"]["name"] == "Open ACE Proxy"
         assert result["model_providers"]["openace"]["wire_api"] == "responses"
+
+
+class TestValidateCliSettingsPayload:
+    """Test server-side validation of stored CLI settings payloads."""
+
+    def test_accepts_valid_codex_toml_string(self):
+        from app.modules.workspace.api_key_proxy import validate_cli_settings_payload
+
+        error = validate_cli_settings_payload(
+            """
+            {"codex-cli":"model_provider = \\"openace\\"\\nmodel = \\"qwen3.7-max\\""}
+            """
+        )
+        assert error is None
+
+    def test_rejects_invalid_codex_toml_string(self):
+        from app.modules.workspace.api_key_proxy import validate_cli_settings_payload
+
+        error = validate_cli_settings_payload('{"codex-cli":"[broken"}')
+        assert error is not None
+        assert "Invalid Codex settings TOML" in error

@@ -58,7 +58,7 @@ def _collect_dynamic_env_keys(settings: dict[str, Any]) -> set[str]:
     return dynamic
 
 
-def _parse_codex_settings(raw_settings: Any) -> dict[str, Any]:
+def _parse_codex_settings(raw_settings: Any, *, raise_on_error: bool = False) -> dict[str, Any]:
     """Parse stored Codex settings from TOML string or dict form."""
     if isinstance(raw_settings, dict):
         return raw_settings.copy()
@@ -66,11 +66,38 @@ def _parse_codex_settings(raw_settings: Any) -> dict[str, Any]:
         try:
             parsed = tomllib.loads(raw_settings)
         except tomllib.TOMLDecodeError as exc:
+            if raise_on_error:
+                raise ValueError(f"Invalid Codex settings TOML: {exc}") from exc
             logger.warning("Invalid Codex settings TOML in api_key_store: %s", exc)
             return {}
         if isinstance(parsed, dict):
             return parsed
     return {}
+
+
+def validate_cli_settings_payload(raw_cli_settings: Optional[str]) -> Optional[str]:
+    """Validate CLI settings payload before storing it."""
+    if not raw_cli_settings:
+        return None
+
+    try:
+        parsed = json.loads(raw_cli_settings)
+    except json.JSONDecodeError as exc:
+        return f"cli_settings must be valid JSON: {exc}"
+
+    if not isinstance(parsed, dict):
+        return "cli_settings must be a JSON object"
+
+    codex_settings = parsed.get("codex-cli")
+    if codex_settings is not None:
+        if not isinstance(codex_settings, (str, dict)):
+            return "codex-cli settings must be a TOML string or object"
+        try:
+            _parse_codex_settings(codex_settings, raise_on_error=True)
+        except ValueError as exc:
+            return str(exc)
+
+    return None
 
 
 def _param() -> str:
