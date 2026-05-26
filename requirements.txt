@@ -14,7 +14,7 @@ gunicorn>=23.0.0,<24.0.0
 # WebSocket support
 gevent>=23.0.0,<24.0.0
 gevent-websocket>=0.10.1,<1.0.0
-werkzeug>=2.3,<3.0  # gevent-websocket 0.10.1 is incompatible with Werkzeug 3.x
+werkzeug>=2.3,<3.0.0
 
 # Database
 sqlalchemy>=2.0.49,<3.0.0
