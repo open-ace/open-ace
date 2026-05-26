@@ -1,8 +1,8 @@
 """Lightweight RFC 6455 WebSocket server-side frame protocol.
 
 Minimal implementation for terminal WebSocket: supports binary, text,
-close, and ping/pong frames.  No fragmentation, no compression, no
-extension negotiation.
+close, and ping/pong frames, including fragmentation reassembly.
+No compression, no extension negotiation.
 
 All I/O uses raw ``socket.recv()`` / ``socket.sendall()`` — never the
 gevent ``rfile`` wrapper — to avoid the compatibility issue between
@@ -71,19 +71,27 @@ def _recv_exactly(sock, n: int) -> bytes:
 def recv_message(sock) -> bytes | str | None:
     """Read one complete WebSocket message from *sock*.
 
+    Supports RFC 6455 fragmentation: continuation frames are accumulated
+    until the FIN bit is set.  Control frames (ping/pong/close) may be
+    interleaved within a fragmented message and are handled inline.
+
     Returns:
-        - ``bytes`` for binary frames
-        - ``str`` for text frames
+        - ``bytes`` for binary messages
+        - ``str`` for text messages
         - ``None`` on close frame or connection error
 
     Ping frames are automatically answered with pong.
     """
+    fragments: list[bytes] = []
+    message_opcode: int | None = None
+
     while True:
         header = _recv_exactly(sock, 2)
         if len(header) < 2:
             return None
 
         first, second = header[0], header[1]
+        fin = bool(first & 0x80)
         opcode = first & 0x0F
         masked = bool(second & 0x80)
         length = second & 0x7F
@@ -114,19 +122,31 @@ def recv_message(sock) -> bytes | str | None:
                 payload[i] ^= mask_key[i % 4]
             payload = bytes(payload)
 
+        # Control frames can appear between fragments
         if opcode == OP_CLOSE:
             return None
         if opcode == OP_PING:
             send_pong(sock, payload)
-            continue  # wait for next frame
+            continue
         if opcode == OP_PONG:
-            continue  # ignore unsolicited pong
-        if opcode == OP_TEXT:
-            return payload.decode("utf-8", errors="replace")
-        if opcode == OP_BINARY:
-            return payload
-        # Ignore other opcodes (continuation, etc.)
-        continue
+            continue
+
+        # Data frames
+        if opcode in (OP_TEXT, OP_BINARY):
+            message_opcode = opcode
+            fragments = [payload]
+        elif opcode == OP_CONT:
+            if message_opcode is None:
+                return None
+            fragments.append(payload)
+        else:
+            continue
+
+        if fin:
+            combined = b"".join(fragments)
+            if message_opcode == OP_TEXT:
+                return combined.decode("utf-8", errors="replace")
+            return combined
 
 
 def send_message(sock, data: bytes | str) -> None:

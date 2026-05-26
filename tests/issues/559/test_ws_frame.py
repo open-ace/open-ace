@@ -12,6 +12,7 @@ import app.ws_frame as ws_frame
 # Re-export for convenience
 OP_BINARY = ws_frame.OP_BINARY
 OP_CLOSE = ws_frame.OP_CLOSE
+OP_CONT = ws_frame.OP_CONT
 OP_PING = ws_frame.OP_PING
 OP_PONG = ws_frame.OP_PONG
 OP_TEXT = ws_frame.OP_TEXT
@@ -388,3 +389,92 @@ class TestRoundTrip:
         sock = FakeSocket(frame)
         result = ws_frame.recv_message(sock)
         assert result == payload
+
+
+# ---------------------------------------------------------------------------
+# Tests: fragmentation (RFC 6455 continuation frames)
+# ---------------------------------------------------------------------------
+
+
+def _build_fragment_frame(payload: bytes, opcode: int, fin: bool, mask: bool = True) -> bytes:
+    """Build a single frame with explicit FIN and opcode (for fragmentation tests)."""
+    first = (0x80 if fin else 0x00) | opcode
+    mask_bit = 0x80 if mask else 0x00
+    length = len(payload)
+    mask_key = b"\x37\xfa\x21\x3d" if mask else b""
+
+    if length < 126:
+        header = struct.pack("!BB", first, mask_bit | length)
+    elif length < 65536:
+        header = struct.pack("!BBH", first, mask_bit | 126, length)
+    else:
+        header = struct.pack("!BBQ", first, mask_bit | 127, length)
+
+    masked_payload = _mask(mask_key, payload) if mask else payload
+    return header + mask_key + masked_payload
+
+
+class TestFragmentation:
+    def test_text_two_fragments(self):
+        """Text message split into two fragments."""
+        f1 = _build_fragment_frame(b"hel", OP_TEXT, fin=False)
+        f2 = _build_fragment_frame(b"lo", OP_CONT, fin=True)
+        sock = FakeSocket(f1 + f2)
+        assert ws_frame.recv_message(sock) == "hello"
+
+    def test_binary_three_fragments(self):
+        """Binary message split into three fragments."""
+        f1 = _build_fragment_frame(b"\x00\x01", OP_BINARY, fin=False)
+        f2 = _build_fragment_frame(b"\x02\x03", OP_CONT, fin=False)
+        f3 = _build_fragment_frame(b"\x04\x05", OP_CONT, fin=True)
+        sock = FakeSocket(f1 + f2 + f3)
+        assert ws_frame.recv_message(sock) == b"\x00\x01\x02\x03\x04\x05"
+
+    def test_ping_between_fragments(self):
+        """Control frame (ping) interleaved within a fragmented message."""
+        f1 = _build_fragment_frame(b"hel", OP_TEXT, fin=False)
+        ping = _build_fragment_frame(b"check", OP_PING, fin=True)
+        f2 = _build_fragment_frame(b"lo", OP_CONT, fin=True)
+        sock = FakeSocket(f1 + ping + f2)
+        result = ws_frame.recv_message(sock)
+        assert result == "hello"
+        # Verify pong was sent for the interleaved ping
+        assert sock.all_sent[0] == 0x8A  # pong opcode
+
+    def test_pong_between_fragments(self):
+        """Unsolicited pong between fragments is silently ignored."""
+        f1 = _build_fragment_frame(b"ab", OP_TEXT, fin=False)
+        pong = _build_fragment_frame(b"", OP_PONG, fin=True)
+        f2 = _build_fragment_frame(b"cd", OP_CONT, fin=True)
+        sock = FakeSocket(f1 + pong + f2)
+        assert ws_frame.recv_message(sock) == "abcd"
+
+    def test_close_between_fragments_returns_none(self):
+        """Close frame between fragments terminates the message."""
+        f1 = _build_fragment_frame(b"ab", OP_TEXT, fin=False)
+        close = _build_fragment_frame(b"\x03\xe8", OP_CLOSE, fin=True)
+        sock = FakeSocket(f1 + close)
+        assert ws_frame.recv_message(sock) is None
+
+    def test_single_frame_fin_true(self):
+        """Normal single-frame message (fin=True) still works."""
+        frame = _build_fragment_frame(b"complete", OP_TEXT, fin=True)
+        sock = FakeSocket(frame)
+        assert ws_frame.recv_message(sock) == "complete"
+
+    def test_utf8_fragmented(self):
+        """UTF-8 text split across fragment boundaries."""
+        full = "你好世界"
+        raw = full.encode("utf-8")
+        # Split in the middle of a multi-byte sequence is fine at the
+        # frame level; reassembly joins bytes before decoding.
+        f1 = _build_fragment_frame(raw[:6], OP_TEXT, fin=False)
+        f2 = _build_fragment_frame(raw[6:], OP_CONT, fin=True)
+        sock = FakeSocket(f1 + f2)
+        assert ws_frame.recv_message(sock) == full
+
+    def test_unexpected_cont_without_data_frame_returns_none(self):
+        """OP_CONT received without a preceding data frame is invalid."""
+        frame = _build_fragment_frame(b"stray", OP_CONT, fin=True)
+        sock = FakeSocket(frame)
+        assert ws_frame.recv_message(sock) is None
