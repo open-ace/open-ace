@@ -175,7 +175,7 @@ class ROICalculator:
         return self.DEFAULT_PRICING
 
     def parse_model_name(self, model_raw: Any) -> str:
-        """
+        r"""
         Parse model name from various formats.
 
         Supports:
@@ -200,7 +200,7 @@ class ROICalculator:
                 model_parsed = json.loads(model_raw)
                 if isinstance(model_parsed, list):
                     # Return first model from list, or default if empty
-                    return model_parsed[0] if model_parsed else "default"
+                    return str(model_parsed[0]) if model_parsed else "default"
                 elif isinstance(model_parsed, str):
                     return model_parsed
                 else:
