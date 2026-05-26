@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from app.modules.governance.audit_logger import AuditLogger
+from app.repositories.database import adapt_sql, get_db_connection  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -385,8 +386,6 @@ class AuditAnalyzer:
         )
 
         # Query agent_sessions for user work sessions
-        from app.repositories.database import adapt_sql, get_db_connection
-
         sessions_data = []
         try:
             with get_db_connection() as conn:
