@@ -404,7 +404,9 @@ class AuditAnalyzer:
                 )
                 sessions_data = cursor.fetchall()
         except Exception as e:
-            logger.warning(f"Failed to query agent_sessions: {e}")
+            logger.warning(
+                f"Failed to query agent_sessions: {type(e).__name__}: {e}", exc_info=True
+            )
 
         # Combine audit logs and session data for analysis
         total_actions = len(logs) + len(sessions_data)
@@ -414,6 +416,14 @@ class AuditAnalyzer:
                 "user_id": user_id,
                 "period_days": days,
                 "total_actions": 0,
+                "actions_per_day": 0.0,
+                "action_breakdown": {},
+                "hourly_distribution": {},
+                "daily_distribution": {},
+                "peak_activity_hour": 0,
+                "peak_activity_day": "-",
+                "first_activity": None,
+                "last_activity": None,
                 "message": "No activity found for this user",
             }
 
