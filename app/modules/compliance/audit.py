@@ -376,6 +376,7 @@ class AuditAnalyzer:
         start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
         end_time = datetime.now(timezone.utc).replace(tzinfo=None)
 
+        # Query audit logs for administrative actions
         logs = self.audit_logger.query(
             user_id=user_id,
             start_time=start_time,
@@ -383,7 +384,31 @@ class AuditAnalyzer:
             limit=1000,
         )
 
-        if not logs:
+        # Query agent_sessions for user work sessions
+        from app.repositories.database import adapt_sql, get_db_connection
+
+        sessions_data = []
+        try:
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                # Query agent_sessions for this user
+                cursor.execute(
+                    adapt_sql("""
+                    SELECT session_id, created_at, message_count, total_tokens, tool_name
+                    FROM agent_sessions
+                    WHERE user_id = ? AND created_at >= ? AND created_at <= ?
+                    ORDER BY created_at DESC
+                    """),
+                    (user_id, start_time.isoformat(), end_time.isoformat()),
+                )
+                sessions_data = cursor.fetchall()
+        except Exception as e:
+            logger.warning(f"Failed to query agent_sessions: {e}")
+
+        # Combine audit logs and session data for analysis
+        total_actions = len(logs) + len(sessions_data)
+
+        if total_actions == 0:
             return {
                 "user_id": user_id,
                 "period_days": days,
@@ -391,7 +416,7 @@ class AuditAnalyzer:
                 "message": "No activity found for this user",
             }
 
-        # Analyze patterns
+        # Analyze patterns from audit logs
         action_counts: defaultdict[str, int] = defaultdict(int)
         hourly_activity: defaultdict[int, int] = defaultdict(int)
         daily_activity: defaultdict[int, int] = defaultdict(int)
@@ -402,15 +427,66 @@ class AuditAnalyzer:
                 hourly_activity[log.timestamp.hour] += 1
                 daily_activity[log.timestamp.weekday()] += 1
 
+        # Analyze patterns from agent_sessions
+        for session in sessions_data:
+            # Handle both dict (PostgreSQL RealDictCursor) and tuple (SQLite)
+            if isinstance(session, dict):
+                created_at = session.get("created_at")
+                message_count = session.get("message_count")
+                tool_name = session.get("tool_name")
+            else:
+                # SQLite returns tuple: (session_id, created_at, message_count, total_tokens, tool_name)
+                created_at = session[1] if len(session) > 1 else None
+                message_count = session[2] if len(session) > 2 else None
+                tool_name = session[4] if len(session) > 4 else None
+
+            # Add session action counts
+            action_counts["session"] += 1
+            if message_count:
+                # Convert to int in case database returns string
+                try:
+                    action_counts["message"] += int(message_count)
+                except (ValueError, TypeError):
+                    pass
+            if tool_name:
+                action_counts[f"tool:{tool_name}"] += 1
+
+            # Parse created_at timestamp
+            if created_at:
+                try:
+                    ts = datetime.fromisoformat(created_at) if isinstance(created_at, str) else created_at
+                    hourly_activity[ts.hour] += 1
+                    daily_activity[ts.weekday()] += 1
+                except Exception:
+                    pass
+
         # Calculate typical session time
         peak_hour = max(hourly_activity.items(), key=lambda x: x[1])[0] if hourly_activity else 0
         peak_day = max(daily_activity.items(), key=lambda x: x[1])[0] if daily_activity else 0
 
+        # Calculate first and last activity times
+        all_timestamps = []
+        for log in logs:
+            if log.timestamp:
+                all_timestamps.append(log.timestamp)
+        for session in sessions_data:
+            # Handle both dict and tuple formats
+            if isinstance(session, dict):
+                created_at = session.get("created_at")
+            else:
+                created_at = session[1] if len(session) > 1 else None
+            if created_at:
+                try:
+                    ts = datetime.fromisoformat(created_at) if isinstance(created_at, str) else created_at
+                    all_timestamps.append(ts)
+                except Exception:
+                    pass
+
         return {
             "user_id": user_id,
             "period_days": days,
-            "total_actions": len(logs),
-            "actions_per_day": len(logs) / days,
+            "total_actions": total_actions,
+            "actions_per_day": total_actions / days,
             "action_breakdown": dict(action_counts),
             "peak_activity_hour": peak_hour,
             "peak_activity_day": [
@@ -424,8 +500,8 @@ class AuditAnalyzer:
             ][peak_day],
             "hourly_distribution": dict(sorted(hourly_activity.items())),
             "daily_distribution": dict(sorted(daily_activity.items())),
-            "first_activity": min(l.timestamp for l in logs if l.timestamp).isoformat(),
-            "last_activity": max(l.timestamp for l in logs if l.timestamp).isoformat(),
+            "first_activity": min(all_timestamps).isoformat() if all_timestamps else None,
+            "last_activity": max(all_timestamps).isoformat() if all_timestamps else None,
         }
 
     def generate_security_score(
