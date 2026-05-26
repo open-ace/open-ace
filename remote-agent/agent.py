@@ -19,12 +19,10 @@ import sys
 import tempfile
 import time
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 import requests
-from cli_adapters.base import normalize_model_providers
-from constants import SENSITIVE_ENV_KEYS, collect_dynamic_env_keys
+from cli_settings import apply_cli_settings
 from executor import ProcessExecutor
 from session_sync import SessionSyncService
 from system_info import get_capabilities
@@ -928,42 +926,13 @@ class RemoteAgent:
             return hostname
         return "127.0.0.1"
 
-    # ----------------------------------------------------------------
-    # CLI Settings Application
-    # ----------------------------------------------------------------
-
-    def _strip_sensitive_fields(self, settings: dict[str, Any]) -> dict[str, Any]:
-        """Remove API key and base URL fields from settings dict.
-
-        These credentials are injected via environment variables by
-        terminal_server.py (web terminal) and executor._build_env()
-        (remote session), so they must not be written to settings.json.
-        """
-        settings = settings.copy()
-        all_sensitive = SENSITIVE_ENV_KEYS | collect_dynamic_env_keys(settings)
-
-        # Remove sensitive keys from env block
-        env = settings.get("env", {})
-        if env:
-            env = {k: v for k, v in env.items() if k not in all_sensitive}
-            settings["env"] = env
-
-        # Remove baseUrl from modelProviders (qwen-code)
-        for provider_models in settings.get("modelProviders", {}).values():
-            if isinstance(provider_models, list):
-                for model in provider_models:
-                    if isinstance(model, dict):
-                        model.pop("baseUrl", None)
-
-        return settings
-
     def _apply_cli_settings(self, cli_settings: dict[str, Any]) -> None:
         """
-        Write settings.json files for configured CLI tools.
+        Write config files for configured CLI tools.
 
-        Only non-sensitive configuration is written (model mappings, theme, etc.).
-        API keys and base URLs are NOT written — they are injected via
-        environment variables by terminal_server.py and executor.
+        API keys are not persisted. The shared writer injects the Open ACE
+        proxy routing for Qwen and Codex while preserving non-sensitive user
+        preferences.
 
         Args:
             cli_settings: Dict with tool_name -> settings mapping
@@ -972,79 +941,8 @@ class RemoteAgent:
         if not cli_settings:
             return
 
-        for tool_name, settings in cli_settings.items():
-            try:
-                settings = self._strip_sensitive_fields(settings)
-                if tool_name == "claude-code":
-                    self._write_claude_settings(settings)
-                elif tool_name == "qwen-code":
-                    self._write_qwen_settings(settings)
-                else:
-                    logger.warning("Unknown tool name for settings: %s", tool_name)
-            except Exception as e:
-                logger.error("Failed to write settings for %s: %s", tool_name, e)
-
-    def _write_claude_settings(self, settings: dict[str, Any]) -> None:
-        """
-        Write ~/.claude/settings.json for Claude Code.
-
-        Settings should already contain injected API credentials
-        (ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL) from build_settings().
-        """
-        claude_dir = Path.home() / ".claude"
-        claude_dir.mkdir(parents=True, exist_ok=True)
-
-        settings_path = claude_dir / "settings.json"
-
-        # Preserve existing settings, merge new ones
-        existing = {}
-        if settings_path.exists():
-            try:
-                existing = json.loads(settings_path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                existing = {}
-
-        merged = {**existing, **settings}
-
-        # Atomic write via temp file + rename
-        self._atomic_write_json(str(settings_path), merged)
-        logger.info("Wrote Claude Code settings to %s", settings_path)
-
-    def _write_qwen_settings(self, settings: dict[str, Any]) -> None:
-        """
-        Write ~/.qwen/settings.json for Qwen Code (bailian format).
-
-        Settings should already contain injected API credentials
-        (env.ZAI_API_KEY etc.) from build_settings().
-        """
-        qwen_dir = Path.home() / ".qwen"
-        qwen_dir.mkdir(parents=True, exist_ok=True)
-
-        settings_path = qwen_dir / "settings.json"
-
-        # Preserve existing settings, merge new ones
-        existing = {}
-        if settings_path.exists():
-            try:
-                existing = json.loads(settings_path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                existing = {}
-
-        merged = {**existing, **settings}
-
-        # Ensure $version is set for Qwen settings format
-        if "$version" not in merged:
-            merged["$version"] = 3
-
-        # Normalize modelProviders: unify all envKeys to OPENAI_API_KEY
-        # and set baseUrl to the LLM proxy so the CLI routes all
-        # requests through the proxy.
         proxy_base_url = f"{self.config.server_url.rstrip('/')}/api/remote/llm-proxy/v1"
-        normalize_model_providers(merged, proxy_base_url=proxy_base_url)
-
-        # Atomic write via temp file + rename
-        self._atomic_write_json(str(settings_path), merged)
-        logger.info("Wrote Qwen Code settings to %s", settings_path)
+        apply_cli_settings(cli_settings, proxy_base_url=proxy_base_url)
 
     # ----------------------------------------------------------------
     # Shutdown

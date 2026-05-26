@@ -68,6 +68,13 @@ const defaultQwenSettings = `{
   }
 }`;
 
+const defaultCodexSettings = `model_provider = "openace"
+model = "qwen3.7-max"
+
+[model_providers.openace]
+name = "Open ACE Proxy"
+wire_api = "responses"`;
+
 export const APIKeyManagement: React.FC = () => {
   const language = useLanguage();
   const { data: keysData, isLoading, isError, error, refetch } = useApiKeys();
@@ -111,7 +118,45 @@ export const APIKeyManagement: React.FC = () => {
     cli_tools: [] as string[],
     claude_settings: '',
     qwen_settings: '',
+    codex_settings: '',
   });
+
+  const stringifyCodexSettings = (value: unknown): string => {
+    if (typeof value === 'string') return value;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return '';
+
+    const formatKey = (key: string) =>
+      /^[A-Za-z0-9_-]+$/.test(key) ? key : `"${key.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+
+    const formatValue = (input: unknown): string => {
+      if (typeof input === 'string') return `"${input.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+      if (typeof input === 'boolean') return input ? 'true' : 'false';
+      if (typeof input === 'number') return String(input);
+      if (Array.isArray(input)) return `[${input.map((item) => formatValue(item)).join(', ')}]`;
+      return `"${String(input)}"`;
+    };
+
+    const emitTable = (obj: Record<string, unknown>, path: string[] = []): string[] => {
+      const lines: string[] = [];
+      const scalarEntries = Object.entries(obj).filter(([, val]) => !(val && typeof val === 'object' && !Array.isArray(val)));
+      const tableEntries = Object.entries(obj).filter(([, val]) => val && typeof val === 'object' && !Array.isArray(val));
+
+      if (path.length) {
+        lines.push(`[${path.map(formatKey).join('.')}]`);
+      }
+      for (const [key, val] of scalarEntries) {
+        lines.push(`${formatKey(key)} = ${formatValue(val)}`);
+      }
+      if (scalarEntries.length && tableEntries.length) lines.push('');
+      tableEntries.forEach(([key, val], index) => {
+        lines.push(...emitTable(val as Record<string, unknown>, [...path, key]));
+        if (index !== tableEntries.length - 1) lines.push('');
+      });
+      return lines;
+    };
+
+    return emitTable(value as Record<string, unknown>).join('\n');
+  };
 
   const handleOpenAdd = () => {
     setFormError(null);
@@ -123,6 +168,7 @@ export const APIKeyManagement: React.FC = () => {
       cli_tools: [],
       claude_settings: '',
       qwen_settings: '',
+      codex_settings: '',
     });
     setShowAddDialog(true);
   };
@@ -135,6 +181,7 @@ export const APIKeyManagement: React.FC = () => {
     let cliTools: string[] = [];
     let claudeSettings = '';
     let qwenSettings = '';
+    let codexSettings = '';
 
     if (key.cli_tools) {
       try {
@@ -153,6 +200,9 @@ export const APIKeyManagement: React.FC = () => {
         if (settings['qwen-code']) {
           qwenSettings = JSON.stringify(settings['qwen-code'], null, 2);
         }
+        if (settings['codex-cli']) {
+          codexSettings = stringifyCodexSettings(settings['codex-cli']);
+        }
       } catch {
         // Ignore parse errors
       }
@@ -166,6 +216,7 @@ export const APIKeyManagement: React.FC = () => {
       cli_tools: cliTools,
       claude_settings: claudeSettings,
       qwen_settings: qwenSettings,
+      codex_settings: codexSettings,
     });
     setShowEditDialog(true);
   };
@@ -181,6 +232,7 @@ export const APIKeyManagement: React.FC = () => {
       // Add tool and set default settings if empty
       let newClaudeSettings = formData.claude_settings;
       let newQwenSettings = formData.qwen_settings;
+      let newCodexSettings = formData.codex_settings;
 
       if (tool === 'claude-code' && !formData.claude_settings) {
         newClaudeSettings = defaultClaudeSettings;
@@ -188,12 +240,16 @@ export const APIKeyManagement: React.FC = () => {
       if (tool === 'qwen-code' && !formData.qwen_settings) {
         newQwenSettings = defaultQwenSettings;
       }
+      if (tool === 'codex-cli' && !formData.codex_settings) {
+        newCodexSettings = defaultCodexSettings;
+      }
 
       setFormData({
         ...formData,
         cli_tools: [...currentTools, tool],
         claude_settings: newClaudeSettings,
         qwen_settings: newQwenSettings,
+        codex_settings: newCodexSettings,
       });
     }
   };
@@ -284,6 +340,11 @@ export const APIKeyManagement: React.FC = () => {
       } catch {
         // Skip invalid JSON
       }
+    }
+    if (formData.cli_tools.includes('codex-cli') && formData.codex_settings.trim()) {
+      // Codex uses TOML as its native config format, so we preserve the
+      // raw editor text here and let the backend validate/parse it.
+      settings['codex-cli'] = formData.codex_settings;
     }
     return JSON.stringify(settings);
   };
@@ -606,6 +667,20 @@ export const APIKeyManagement: React.FC = () => {
             <small className="text-muted">{t('qwenCodeSettingsHint', language)}</small>
           </div>
         )}
+
+        {formData.cli_tools.includes('codex-cli') && (
+          <div className="mb-3">
+            <label className="form-label">{t('codexSettings', language)}</label>
+            <textarea
+              className="form-control"
+              rows={8}
+              value={formData.codex_settings}
+              onChange={(e) => setFormData({ ...formData, codex_settings: e.target.value })}
+              placeholder={defaultCodexSettings}
+            />
+            <small className="text-muted">{t('codexSettingsHint', language)}</small>
+          </div>
+        )}
       </Modal>
 
       {/* Edit API Key Dialog */}
@@ -699,6 +774,19 @@ export const APIKeyManagement: React.FC = () => {
               onChange={(e) => setFormData({ ...formData, qwen_settings: e.target.value })}
             />
             <small className="text-muted">{t('qwenCodeSettingsHint', language)}</small>
+          </div>
+        )}
+
+        {formData.cli_tools.includes('codex-cli') && (
+          <div className="mb-3">
+            <label className="form-label">{t('codexSettings', language)}</label>
+            <textarea
+              className="form-control"
+              rows={8}
+              value={formData.codex_settings}
+              onChange={(e) => setFormData({ ...formData, codex_settings: e.target.value })}
+            />
+            <small className="text-muted">{t('codexSettingsHint', language)}</small>
           </div>
         )}
       </Modal>

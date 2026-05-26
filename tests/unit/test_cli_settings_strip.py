@@ -140,3 +140,45 @@ class TestBuildCliSettingsStripsSensitive:
         assert result["env"]["ANTHROPIC_MODEL"] == "glm-5"
         assert result["model"] == "haiku"
         assert result["theme"] == "dark"
+
+    def test_parses_codex_toml_settings(self):
+        from app.modules.workspace.api_key_proxy import APIKeyProxyService
+
+        svc = APIKeyProxyService.__new__(APIKeyProxyService)
+        result = svc._build_cli_settings_for_tool(
+            "codex-cli",
+            """
+model_provider = "openace"
+model = "qwen3.7-max"
+
+[model_providers.openace]
+name = "Open ACE Proxy"
+wire_api = "responses"
+""",
+        )
+
+        assert result["model_provider"] == "openace"
+        assert result["model"] == "qwen3.7-max"
+        assert result["model_providers"]["openace"]["name"] == "Open ACE Proxy"
+        assert result["model_providers"]["openace"]["wire_api"] == "responses"
+
+
+class TestValidateCliSettingsPayload:
+    """Test server-side validation of stored CLI settings payloads."""
+
+    def test_accepts_valid_codex_toml_string(self):
+        from app.modules.workspace.api_key_proxy import validate_cli_settings_payload
+
+        error = validate_cli_settings_payload(
+            """
+            {"codex-cli":"model_provider = \\"openace\\"\\nmodel = \\"qwen3.7-max\\""}
+            """
+        )
+        assert error is None
+
+    def test_rejects_invalid_codex_toml_string(self):
+        from app.modules.workspace.api_key_proxy import validate_cli_settings_payload
+
+        error = validate_cli_settings_payload('{"codex-cli":"[broken"}')
+        assert error is not None
+        assert "Invalid Codex settings TOML" in error

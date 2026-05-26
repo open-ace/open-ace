@@ -19,7 +19,10 @@ import uuid
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
 from app.auth.decorators import _extract_token, _load_user_from_token, admin_required
-from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
+from app.modules.workspace.api_key_proxy import (
+    get_api_key_proxy_service,
+    validate_cli_settings_payload,
+)
 from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
 from app.modules.workspace.remote_session_manager import get_remote_session_manager
 from app.modules.workspace.terminal_store import terminal_info_store
@@ -28,6 +31,8 @@ logger = logging.getLogger(__name__)
 
 MAX_RAW_CONTENT_LENGTH = 100000
 MAX_MESSAGE_LENGTH = 50000
+
+_CLI_SETTINGS_TOOLS = ["claude-code", "qwen-code", "codex-cli"]
 
 remote_bp = Blueprint("remote", __name__)
 
@@ -342,6 +347,10 @@ def store_api_key():
     if not provider or not key_name or not api_key:
         return jsonify({"error": "provider, key_name, and api_key are required"}), 400
 
+    validation_error = validate_cli_settings_payload(cli_settings)
+    if validation_error:
+        return jsonify({"error": validation_error}), 400
+
     api_proxy = get_api_key_proxy_service()
     result = api_proxy.store_api_key(
         tenant_id=tenant_id,
@@ -373,6 +382,10 @@ def update_api_key(key_id):
     if is_active is not None and not isinstance(is_active, bool):
         return jsonify({"error": "is_active must be a boolean"}), 400
     tenant_id = int(data.get("tenant_id", 1))
+
+    validation_error = validate_cli_settings_payload(cli_settings)
+    if validation_error:
+        return jsonify({"error": validation_error}), 400
 
     api_proxy = get_api_key_proxy_service()
     success = api_proxy.update_api_key_by_id(
@@ -1332,9 +1345,9 @@ def start_terminal():
     proxy_url = f"{backend_url}/api/remote/llm-proxy"
     logger.info("start_terminal: backend_url=%s, proxy_url=%s", backend_url, proxy_url)
 
-    # Get CLI settings for both Claude Code and Qwen Code
+    # Get CLI settings for supported menu tools
     cli_settings = {}
-    for tool_name in ["claude-code", "qwen-code"]:
+    for tool_name in _CLI_SETTINGS_TOOLS:
         tool_settings = api_proxy.get_cli_settings_for_tool(tenant_id, tool_name)
         if tool_settings:
             cli_settings[tool_name] = tool_settings
@@ -1438,6 +1451,12 @@ def start_cli_terminal():
     backend_url = agent_mgr.get_backend_url(request.host_url)
     proxy_url = f"{backend_url}/api/remote/llm-proxy"
 
+    cli_settings = {}
+    for tool_name in _CLI_SETTINGS_TOOLS:
+        tool_settings = api_proxy.get_cli_settings_for_tool(tenant_id, tool_name)
+        if tool_settings:
+            cli_settings[tool_name] = tool_settings
+
     logger.info(
         "Created CLI terminal session %s for user %s on machine %s",
         terminal_id[:8],
@@ -1455,6 +1474,7 @@ def start_cli_terminal():
                 "status": "running",
                 "source": source,
                 "proxy_url": proxy_url,
+                "cli_settings": cli_settings,
                 "tokens": {
                     "anthropic": anthropic_token,
                     "openai": openai_token,
