@@ -90,18 +90,22 @@ if __name__ == "__main__":
             # stdin is not available or termios not supported
             use_reloader = False
 
-    from gevent.pywsgi import WSGIServer
-
-    try:
-        from geventwebsocket.handler import WebSocketHandler
-    except ImportError:
-        WebSocketHandler = None
+    from gevent.pywsgi import WSGIHandler, WSGIServer
 
     server_kwargs = {}
-    if WebSocketHandler is not None:
-        server_kwargs["handler_class"] = WebSocketHandler
-    else:
-        print("WARNING: gevent-websocket is not installed; web terminal WS is disabled")
+    try:
+        from app.terminal_ws_handler import TerminalWSHandler
+
+        server_kwargs["handler_class"] = TerminalWSHandler
+    except ImportError:
+        print("WARNING: terminal_ws_handler unavailable; " "falling back to geventwebsocket")
+        try:
+            from geventwebsocket.handler import WebSocketHandler
+
+            server_kwargs["handler_class"] = WebSocketHandler
+        except ImportError:
+            server_kwargs["handler_class"] = WSGIHandler
+            print("WARNING: gevent-websocket is not installed; " "web terminal WS is disabled")
 
     server = WSGIServer((WEB_HOST, WEB_PORT), app, **server_kwargs)
 
