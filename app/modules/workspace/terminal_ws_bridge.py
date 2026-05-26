@@ -13,11 +13,6 @@ import gevent
 from websockets.exceptions import ConnectionClosed
 from websockets.sync.client import connect
 
-try:
-    from geventwebsocket.exceptions import WebSocketError
-except ImportError:
-    WebSocketError = Exception
-
 import app.ws_frame as ws_frame
 
 logger = logging.getLogger(__name__)
@@ -110,7 +105,7 @@ def bridge_terminal_websocket(
                                 "Ignoring unsupported browser terminal message type: %s",
                                 type(message).__name__,
                             )
-                except (ConnectionClosed, WebSocketError) as e:
+                except ConnectionClosed as e:
                     logger.info("Bridge B→R: connection error: %s", e)
                 except Exception as e:
                     logger.info("Browser to remote terminal bridge error: %s", e)
@@ -123,7 +118,7 @@ def bridge_terminal_websocket(
                     while True:
                         message = remote_ws.recv()
                         browser_ws.send(message)
-                except (ConnectionClosed, WebSocketError) as e:
+                except ConnectionClosed as e:
                     logger.info("Bridge R→B: connection error: %s", e)
                 except Exception as e:
                     logger.debug("Remote terminal to browser bridge error: %s", e)
