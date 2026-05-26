@@ -24,7 +24,7 @@ TOOLS = [
         "name": "Claude Code",
         "cli": "claude",
         "cmd": "claude --bare",
-        "install_cmd": "curl -fsSL https://claude.ai/install.sh | bash",
+        "install_cmd": "npm install -g @anthropic-ai/claude-code@latest",
         "env_key": "ANTHROPIC_API_KEY",
     },
     {
