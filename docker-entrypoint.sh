@@ -180,7 +180,7 @@ echo "=========================================="
 
 exec gunicorn \
     --bind 0.0.0.0:5000 \
-    --worker-class gevent \
+    --worker-class app.gunicorn_worker.TerminalGeventWorker \
     --workers 1 \
     --access-logfile - \
     --error-logfile - \
