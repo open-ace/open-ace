@@ -875,7 +875,7 @@ export const AuditCenter: React.FC = () => {
                 <option value="">-- {t('selectUser', language)} --</option>
                 {users?.map((u) => (
                   <option key={u.id} value={u.id}>
-                    {u.username} (ID: {u.id})
+                    {u.username}
                   </option>
                 ))}
               </select>
@@ -888,28 +888,28 @@ export const AuditCenter: React.FC = () => {
                 <div className="col-md-3">
                   <StatCard
                     label={t('total', language) ?? 'Total Actions'}
-                    value={String(userProfile.total_actions)}
+                    value={String(userProfile.total_actions ?? 0)}
                     variant="primary"
                   />
                 </div>
                 <div className="col-md-3">
                   <StatCard
                     label={t('actionsPerDay', language)}
-                    value={userProfile.actions_per_day.toFixed(1)}
+                    value={(userProfile.actions_per_day ?? 0).toFixed(1)}
                     variant="info"
                   />
                 </div>
                 <div className="col-md-3">
                   <StatCard
                     label={t('peakHour', language)}
-                    value={`${userProfile.peak_activity_hour}:00`}
+                    value={`${userProfile.peak_activity_hour ?? '-'}:00`}
                     variant="warning"
                   />
                 </div>
                 <div className="col-md-3">
                   <StatCard
                     label={t('peakDay', language)}
-                    value={userProfile.peak_activity_day}
+                    value={userProfile.peak_activity_day ?? '-'}
                     variant="success"
                   />
                 </div>
@@ -1011,10 +1011,10 @@ export const AuditCenter: React.FC = () => {
     if (userProfile) {
       rows.push([]);
       rows.push(['User Profile', 'Value']);
-      rows.push(['Total Actions', String(userProfile.total_actions)]);
-      rows.push(['Actions/Day', userProfile.actions_per_day.toFixed(1)]);
-      rows.push(['Peak Hour', `${userProfile.peak_activity_hour}:00`]);
-      rows.push(['Peak Day', userProfile.peak_activity_day]);
+      rows.push(['Total Actions', String(userProfile.total_actions ?? 0)]);
+      rows.push(['Actions/Day', (userProfile.actions_per_day ?? 0).toFixed(1)]);
+      rows.push(['Peak Hour', `${userProfile.peak_activity_hour ?? '-'}:00`]);
+      rows.push(['Peak Day', userProfile.peak_activity_day ?? '-']);
     }
 
     const csv = rows.map((r) => r.map((c) => `"${c.replace(/"/g, '""')}"`).join(',')).join('\n');
