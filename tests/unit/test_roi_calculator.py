@@ -195,3 +195,149 @@ class TestROICalculator:
         calc, _ = self._make_calculator()
         assert calc.HOURLY_LABOR_COST == 50.0
         assert calc.AVG_TIME_SAVED_PER_REQUEST == 5.0
+
+
+class TestParseModelName:
+    """Test parse_model_name method for various model name formats."""
+
+    def _make_calculator(self):
+        mock_db = MagicMock()
+        calc = ROICalculator(db=mock_db)
+        return calc
+
+    def setup_method(self):
+        get_cache().clear()
+
+    def test_parse_simple_string(self):
+        """Test parsing simple model name string."""
+        calc = self._make_calculator()
+        result = calc.parse_model_name("claude-3-sonnet")
+        assert result == "claude-3-sonnet"
+
+    def test_parse_json_array_single_model(self):
+        """Test parsing JSON array string with single model."""
+        calc = self._make_calculator()
+        result = calc.parse_model_name('["claude-3-sonnet"]')
+        assert result == "claude-3-sonnet"
+
+    def test_parse_json_array_multiple_models(self):
+        """Test parsing JSON array string with multiple models."""
+        calc = self._make_calculator()
+        result = calc.parse_model_name('["claude-3-sonnet", "gpt-4"]')
+        # Should return first model
+        assert result == "claude-3-sonnet"
+
+    def test_parse_json_array_empty(self):
+        """Test parsing empty JSON array."""
+        calc = self._make_calculator()
+        result = calc.parse_model_name("[]")
+        assert result == "default"
+
+    def test_parse_json_string_value(self):
+        """Test parsing JSON string value (not array)."""
+        calc = self._make_calculator()
+        result = calc.parse_model_name('"claude-3-haiku"')
+        assert result == "claude-3-haiku"
+
+    def test_parse_none_value(self):
+        """Test parsing None value."""
+        calc = self._make_calculator()
+        result = calc.parse_model_name(None)
+        assert result == "default"
+
+    def test_parse_non_string_value(self):
+        """Test parsing non-string value (e.g., integer)."""
+        calc = self._make_calculator()
+        result = calc.parse_model_name(123)
+        assert result == "123"
+
+    def test_parse_invalid_json(self):
+        """Test parsing invalid JSON string (fallback to raw value)."""
+        calc = self._make_calculator()
+        result = calc.parse_model_name("not-a-json-string")
+        assert result == "not-a-json-string"
+
+    def test_parse_json_with_special_chars(self):
+        """Test parsing JSON with special characters."""
+        calc = self._make_calculator()
+        result = calc.parse_model_name('["claude-3-5-sonnet@20240620"]')
+        assert result == "claude-3-5-sonnet@20240620"
+
+    def test_calculate_cost_with_json_model(self):
+        """Test calculate_cost with JSON array model name."""
+        calc = self._make_calculator()
+        # Using JSON array format for model
+        input_cost, output_cost, total = calc.calculate_cost(1000, 500, '["claude-3-opus"]')
+        # Should use claude-3-opus pricing
+        assert input_cost == 0.015
+        assert output_cost == 0.0375
+
+
+class TestEfficiencyScore:
+    """Test efficiency score calculation."""
+
+    def _make_calculator(self):
+        mock_db = MagicMock()
+        calc = ROICalculator(db=mock_db)
+        return calc
+
+    def setup_method(self):
+        get_cache().clear()
+
+    def test_efficiency_score_base(self):
+        """Test base efficiency score with no tokens."""
+        calc = self._make_calculator()
+        score = calc._calculate_efficiency_score(0, 0, 0, 0, 0.0, 0.0)
+        assert score == 60.0
+
+    def test_efficiency_score_with_good_output_ratio(self):
+        """Test efficiency score with ideal output ratio (30-50%)."""
+        calc = self._make_calculator()
+        # 40% output ratio: 4000 output out of 10000 total
+        score = calc._calculate_efficiency_score(10000, 6000, 4000, 100, 1.0, 2.0)
+        # Base 60 + 20 (output ratio) + 15 (cost-benefit >= 2) + 5 (avg tokens 100)
+        # avg_tokens_per_request = 10000/100 = 100, not in ideal range
+        # So: 60 + 20 + 15 = 95
+        assert score >= 95
+
+    def test_efficiency_score_capped_at_100(self):
+        """Test efficiency score is capped at 100."""
+        calc = self._make_calculator()
+        # Very high savings ratio and ideal output ratio
+        # output_ratio = 4000/10000 = 40% (ideal: 30-50%) -> +20
+        # cost_benefit = 100.0/0.01 = 10000 -> +15
+        # avg_tokens_per_request = 10000/100 = 100 -> not in ideal range
+        score = calc._calculate_efficiency_score(10000, 6000, 4000, 100, 0.01, 100.0)
+        # Base 60 + 20 (output ratio) + 15 (cost-benefit) = 95, not capped
+        # Need higher to reach 100
+        # Let's use ideal avg_tokens_per_request: 500-2000
+        score = calc._calculate_efficiency_score(1000, 600, 400, 1, 0.01, 100.0)
+        # Base 60 + 20 (output ratio 40%) + 15 (cost-benefit) + 5 (avg_tokens=1000)
+        # = 100
+        assert score == 100.0
+
+    def test_efficiency_score_with_negative_roi(self):
+        """Test efficiency score with negative ROI (low cost-benefit)."""
+        calc = self._make_calculator()
+        # Low savings, high cost
+        # output_ratio = 2000/10000 = 20% -> +15 (20-60 range)
+        # cost_benefit = 5.0/10.0 = 0.5 -> +5 (>=0.5)
+        # avg_tokens = 10000/100 = 100 -> +0 (not in range)
+        score = calc._calculate_efficiency_score(10000, 8000, 2000, 100, 10.0, 5.0)
+        # Base 60 + 15 + 5 = 80
+        assert score == 80.0
+
+    def test_roi_metrics_has_efficiency_score(self):
+        """Test ROIMetrics includes efficiency_score field."""
+        metrics = ROIMetrics(
+            period="2026-01-01 to 2026-01-31",
+            start_date="2026-01-01",
+            end_date="2026-01-31",
+            total_cost=10.5,
+            tokens_used=10000,
+            requests_made=100,
+            efficiency_score=85.5,
+        )
+        d = metrics.to_dict()
+        assert "efficiency_score" in d
+        assert d["efficiency_score"] == 85.5
