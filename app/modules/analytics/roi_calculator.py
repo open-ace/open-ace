@@ -49,6 +49,7 @@ class ROIMetrics:
     output_tokens: int = 0
     input_cost: float = 0.0
     output_cost: float = 0.0
+    efficiency_score: float = 0.0
 
     def to_dict(self) -> dict:
         return {
@@ -68,6 +69,7 @@ class ROIMetrics:
             "roi_percentage": round(self.roi_percentage, 2),
             "cost_per_request": round(self.cost_per_request, 6),
             "cost_per_token": round(self.cost_per_token, 8),
+            "efficiency_score": round(self.efficiency_score, 1),
         }
 
 
@@ -172,19 +174,115 @@ class ROICalculator:
                 return pricing
         return self.DEFAULT_PRICING
 
-    def calculate_cost(self, input_tokens: int, output_tokens: int, model: str) -> tuple:
+    def parse_model_name(self, model_raw: Any) -> str:
+        r"""
+        Parse model name from various formats.
+
+        Supports:
+        - Simple string: "claude-3-sonnet"
+        - JSON array string: "[\"claude-3-sonnet\"]"
+        - Multi-model JSON: "[\"claude-3-sonnet\", \"gpt-4\"]"
+
+        Args:
+            model_raw: Raw model field value from database.
+
+        Returns:
+            Parsed model name string.
+        """
+        if model_raw is None:
+            return "default"
+
+        if isinstance(model_raw, str):
+            # Try to parse as JSON
+            try:
+                import json
+
+                model_parsed = json.loads(model_raw)
+                if isinstance(model_parsed, list):
+                    # Return first model from list, or default if empty
+                    return str(model_parsed[0]) if model_parsed else "default"
+                elif isinstance(model_parsed, str):
+                    return model_parsed
+                else:
+                    return str(model_parsed)
+            except (json.JSONDecodeError, TypeError):
+                # Not JSON, return as-is
+                return model_raw
+        else:
+            # Non-string value, convert to string
+            return str(model_raw)
+
+    def _calculate_efficiency_score(
+        self,
+        tokens: int,
+        input_tokens: int,
+        output_tokens: int,
+        requests: int,
+        total_cost: float,
+        estimated_savings: float,
+    ) -> float:
+        """
+        Calculate efficiency score based on multiple factors.
+
+        Args:
+            tokens: Total tokens used.
+            input_tokens: Input tokens.
+            output_tokens: Output tokens.
+            requests: Number of requests.
+            total_cost: Total cost.
+            estimated_savings: Estimated savings.
+
+        Returns:
+            Efficiency score (0-100).
+        """
+        # Base score: 60 points
+        efficiency_score = 60.0
+
+        # Factor 1: Output ratio (output_tokens / total_tokens)
+        if tokens > 0:
+            output_ratio = (output_tokens / tokens) * 100
+            if 30 <= output_ratio <= 50:
+                efficiency_score += 20
+            elif 20 <= output_ratio <= 60:
+                efficiency_score += 15
+            elif output_ratio > 10:
+                efficiency_score += 10
+
+        # Factor 2: Cost-benefit ratio
+        if total_cost > 0:
+            cost_benefit_ratio = estimated_savings / total_cost
+            if cost_benefit_ratio >= 2:
+                efficiency_score += 15
+            elif cost_benefit_ratio >= 1:
+                efficiency_score += 10
+            elif cost_benefit_ratio >= 0.5:
+                efficiency_score += 5
+
+        # Factor 3: Request efficiency
+        if requests > 0:
+            avg_tokens_per_request = tokens / requests
+            if 500 <= avg_tokens_per_request <= 2000:
+                efficiency_score += 5
+            elif 200 <= avg_tokens_per_request <= 5000:
+                efficiency_score += 3
+
+        return min(efficiency_score, 100.0)
+
+    def calculate_cost(self, input_tokens: int, output_tokens: int, model: Any) -> tuple:
         """
         Calculate cost for token usage.
 
         Args:
             input_tokens: Number of input tokens.
             output_tokens: Number of output tokens.
-            model: Model name.
+            model: Model name (can be simple string, JSON array string, etc.).
 
         Returns:
             Tuple of (input_cost, output_cost, total_cost).
         """
-        pricing = self.get_model_pricing(model)
+        # Parse model name from various formats
+        parsed_model = self.parse_model_name(model)
+        pricing = self.get_model_pricing(parsed_model)
 
         input_cost = (input_tokens / 1000) * pricing.input_price
         output_cost = (output_tokens / 1000) * pricing.output_price
@@ -266,23 +364,8 @@ class ROICalculator:
 
         for model_row in model_rows:
             model_raw = model_row.get("model") or "default"
-
-            # Parse JSON string format for model field
-            if isinstance(model_raw, str):
-                try:
-                    import json
-
-                    model_parsed = json.loads(model_raw)
-                    if isinstance(model_parsed, list):
-                        model = model_parsed[0] if model_parsed else "default"
-                    elif isinstance(model_parsed, str):
-                        model = model_parsed
-                    else:
-                        model = str(model_parsed)
-                except (json.JSONDecodeError, TypeError):
-                    model = model_raw
-            else:
-                model = str(model_raw)
+            # Use parse_model_name for consistent parsing
+            model = self.parse_model_name(model_raw)
 
             input_tokens = model_row.get("input_tokens") or 0
             output_tokens = model_row.get("output_tokens") or 0
@@ -315,6 +398,11 @@ class ROICalculator:
         cost_per_request = total_cost / requests if requests > 0 else 0
         cost_per_token = total_cost / tokens if tokens > 0 else 0
 
+        # Calculate efficiency score
+        efficiency_score = self._calculate_efficiency_score(
+            tokens, input_tokens, output_tokens, requests, total_cost, estimated_savings
+        )
+
         return ROIMetrics(
             period=f"{start_date} to {end_date}",
             start_date=start_date,
@@ -332,6 +420,7 @@ class ROICalculator:
             roi_percentage=roi_percentage,
             cost_per_request=cost_per_request,
             cost_per_token=cost_per_token,
+            efficiency_score=efficiency_score,
         )
 
     @cached(ttl=120, key_prefix="roi", skip_args=[0])
@@ -449,6 +538,11 @@ class ROICalculator:
             else:
                 roi_percentage = 0.0
 
+            # Calculate efficiency score
+            efficiency_score = self._calculate_efficiency_score(
+                tokens, input_tokens, output_tokens, requests, total_cost, estimated_savings
+            )
+
             # Create period string (first day of month to last day)
             period_start = f"{month}-01"
             # Calculate last day of month
@@ -480,6 +574,7 @@ class ROICalculator:
                     roi_percentage=roi_percentage,
                     cost_per_request=total_cost / requests if requests > 0 else 0,
                     cost_per_token=total_cost / tokens if tokens > 0 else 0,
+                    efficiency_score=efficiency_score,
                 )
             )
 
@@ -573,6 +668,11 @@ class ROICalculator:
             else:
                 roi_percentage = 0.0
 
+            # Calculate efficiency score
+            efficiency_score = self._calculate_efficiency_score(
+                tokens, input_tokens, output_tokens, requests, total_cost, estimated_savings
+            )
+
             result[tool] = ROIMetrics(
                 period=f"{start_date} to {end_date}",
                 start_date=start_date,
@@ -590,6 +690,7 @@ class ROICalculator:
                 roi_percentage=roi_percentage,
                 cost_per_request=total_cost / requests if requests > 0 else 0,
                 cost_per_token=total_cost / tokens if tokens > 0 else 0,
+                efficiency_score=efficiency_score,
             )
 
         return result
@@ -674,6 +775,11 @@ class ROICalculator:
             else:
                 roi_percentage = 0.0
 
+            # Calculate efficiency score
+            efficiency_score = self._calculate_efficiency_score(
+                tokens, input_tokens, output_tokens, requests, total_cost, estimated_savings
+            )
+
             result[host_name] = ROIMetrics(
                 period=f"{start_date} to {end_date}",
                 start_date=start_date,
@@ -691,6 +797,7 @@ class ROICalculator:
                 roi_percentage=roi_percentage,
                 cost_per_request=total_cost / requests if requests > 0 else 0,
                 cost_per_token=total_cost / tokens if tokens > 0 else 0,
+                efficiency_score=efficiency_score,
             )
 
         return result

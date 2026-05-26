@@ -358,14 +358,20 @@ export const ROIAnalysis: React.FC = () => {
             <StatCard
               label={t('roiPercentage', language)}
               value={
-                roiMetrics.roi_percentage < -100
+                roiMetrics.roi_percentage < -1000
                   ? 'N/A'
                   : `${roiMetrics.roi_percentage.toFixed(1)}%`
               }
               icon={<i className="bi bi-graph-up-arrow fs-4" />}
               variant={roiMetrics.roi_percentage >= 0 ? 'success' : 'danger'}
             />
-            {roiMetrics.roi_percentage < -100 && (
+            {roiMetrics.roi_percentage < 0 && roiMetrics.roi_percentage >= -1000 && (
+              <div className="text-muted small mt-1">
+                <i className="bi bi-info-circle me-1" />
+                {t('roiNegativeHint', language) || '投入成本高于估算节约，可能需要优化使用策略'}
+              </div>
+            )}
+            {roiMetrics.roi_percentage < -1000 && (
               <div className="text-danger small mt-1">
                 <i className="bi bi-exclamation-triangle me-1" />
                 {t('roiDataAnomaly', language) || 'Data anomaly detected'}
@@ -375,12 +381,12 @@ export const ROIAnalysis: React.FC = () => {
           <div className="col-md-3">
             <StatCard
               label={t('efficiencyScore', language)}
-              value={`${(roiMetrics.efficiency_score ?? 85).toFixed(0)}%`}
+              value={`${(roiMetrics.efficiency_score ?? 0).toFixed(0)}%`}
               icon={<i className="bi bi-speedometer2 fs-4" />}
               variant={
-                (roiMetrics.efficiency_score ?? 85) >= 80
+                (roiMetrics.efficiency_score ?? 0) >= 80
                   ? 'success'
-                  : (roiMetrics.efficiency_score ?? 85) >= 60
+                  : (roiMetrics.efficiency_score ?? 0) >= 60
                     ? 'warning'
                     : 'danger'
               }
@@ -389,8 +395,8 @@ export const ROIAnalysis: React.FC = () => {
         </div>
       )}
 
-      {/* Data Anomaly Warning */}
-      {roiMetrics && roiMetrics.roi_percentage < -100 && (
+      {/* Data Anomaly Warning - only show for extreme negative ROI */}
+      {roiMetrics && roiMetrics.roi_percentage < -1000 && (
         <div className="alert alert-warning mb-4" role="alert">
           <i className="bi bi-exclamation-triangle me-2" />
           <strong>{t('dataAnomalyDetected', language) || 'Data Anomaly Detected'}:</strong>{' '}
