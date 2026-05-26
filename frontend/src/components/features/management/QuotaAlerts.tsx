@@ -32,9 +32,10 @@ import { formatTokens, formatDateTime, formatNumber } from '@/utils';
 const TOKEN_QUOTA_MULTIPLIER = 1_000_000;
 
 // Format quota value (stored in M units) to display string
+// Keep M unit format for consistency with edit modal
 const formatQuotaTokens = (quota: number | undefined | null): string => {
   if (!quota) return '∞';
-  return formatTokens(quota * TOKEN_QUOTA_MULTIPLIER);
+  return `${quota.toFixed(2)}M`;
 };
 import { alertsApi, type Alert, type NotificationPreferences } from '@/api';
 import type { QuotaUsage, UpdateQuotaRequest } from '@/api';
@@ -324,11 +325,13 @@ export const QuotaAlerts: React.FC = () => {
             {quotaData.map((user) => {
               const dailyTokenPercentage = getUsagePercentage(
                 user.tokens_used_today,
-                user.daily_token_quota
+                user.daily_token_quota ? user.daily_token_quota * TOKEN_QUOTA_MULTIPLIER : undefined
               );
               const monthlyTokenPercentage = getUsagePercentage(
                 user.tokens_used_month,
                 user.monthly_token_quota
+                  ? user.monthly_token_quota * TOKEN_QUOTA_MULTIPLIER
+                  : undefined
               );
               const dailyRequestPercentage = getUsagePercentage(
                 user.requests_today,
