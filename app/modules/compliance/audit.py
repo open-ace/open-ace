@@ -450,12 +450,20 @@ class AuditAnalyzer:
             if tool_name:
                 action_counts[f"tool:{tool_name}"] += 1
 
-            # Parse created_at timestamp
+            # Parse created_at timestamp and convert to local time
             if created_at:
                 try:
                     ts = datetime.fromisoformat(created_at) if isinstance(created_at, str) else created_at
-                    hourly_activity[ts.hour] += 1
-                    daily_activity[ts.weekday()] += 1
+                    # Convert UTC to local time for accurate hour analysis
+                    if ts.tzinfo is not None:
+                        # Convert to local timezone
+                        local_ts = ts.astimezone()
+                        hourly_activity[local_ts.hour] += 1
+                        daily_activity[local_ts.weekday()] += 1
+                    else:
+                        # No timezone info, assume local time
+                        hourly_activity[ts.hour] += 1
+                        daily_activity[ts.weekday()] += 1
                 except Exception:
                     pass
 
@@ -477,6 +485,9 @@ class AuditAnalyzer:
             if created_at:
                 try:
                     ts = datetime.fromisoformat(created_at) if isinstance(created_at, str) else created_at
+                    # Convert to local time for consistent display
+                    if ts.tzinfo is not None:
+                        ts = ts.astimezone()
                     all_timestamps.append(ts)
                 except Exception:
                     pass
