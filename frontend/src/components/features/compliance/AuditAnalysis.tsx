@@ -86,12 +86,22 @@ export const AuditAnalysis: React.FC = () => {
   }, [selectedUserId, days]);
 
   // Prepare chart data
+  // Helper function to convert UTC hour to local hour
+  const utcToLocalHour = (utcHour: number): number => {
+    const offset = -new Date().getTimezoneOffset() / 60; // getTimezoneOffset returns minutes, negative for ahead of UTC
+    return (utcHour + offset + 24) % 24;
+  };
+
   const loginPatternData = useMemo(() => {
-    if (!patterns?.hourly_distribution) return { labels: [], data: [] };
-    const entries = Object.entries(patterns.hourly_distribution);
+    if (!patterns?.login_hourly_distribution) return { labels: [], data: [] };
+    const entries = Object.entries(patterns.login_hourly_distribution);
+    // Convert UTC hours to local hours for display
+    const localEntries = entries.map(([hour, count]) => [utcToLocalHour(parseInt(hour)), count]);
+    // Sort by local hour
+    const sortedEntries = localEntries.sort((a, b) => a[0] - b[0]);
     return {
-      labels: entries.map(([hour]) => `${hour}:00`),
-      data: entries.map(([, count]) => count),
+      labels: sortedEntries.map(([hour]) => `${hour}:00`),
+      data: sortedEntries.map(([, count]) => count),
     };
   }, [patterns]);
 

@@ -97,6 +97,13 @@ class AuditAnalyzer:
                 hour = log.timestamp.hour
                 hourly_activity[hour] += 1
 
+        # Analyze login by hour of day (for "Login Pattern" chart)
+        login_hourly_activity: defaultdict[int, int] = defaultdict(int)
+        for log in logs:
+            if log.timestamp and log.action == "login":
+                hour = log.timestamp.hour
+                login_hourly_activity[hour] += 1
+
         # Analyze by day of week
         daily_activity: defaultdict[int, int] = defaultdict(int)
         for log in logs:
@@ -122,6 +129,7 @@ class AuditAnalyzer:
             },
             "total_events": len(logs),
             "hourly_distribution": dict(sorted(hourly_activity.items())),
+            "login_hourly_distribution": dict(sorted(login_hourly_activity.items())),
             "daily_distribution": dict(sorted(daily_activity.items())),
             "action_distribution": dict(sorted(action_distribution.items(), key=lambda x: -x[1])),
             "unique_users": len(user_activity),
