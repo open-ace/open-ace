@@ -140,3 +140,24 @@ class TestBuildCliSettingsStripsSensitive:
         assert result["env"]["ANTHROPIC_MODEL"] == "glm-5"
         assert result["model"] == "haiku"
         assert result["theme"] == "dark"
+
+    def test_parses_codex_toml_settings(self):
+        from app.modules.workspace.api_key_proxy import APIKeyProxyService
+
+        svc = APIKeyProxyService.__new__(APIKeyProxyService)
+        result = svc._build_cli_settings_for_tool(
+            "codex-cli",
+            """
+model_provider = "openace"
+model = "qwen3.7-max"
+
+[model_providers.openace]
+name = "Open ACE Proxy"
+wire_api = "responses"
+""",
+        )
+
+        assert result["model_provider"] == "openace"
+        assert result["model"] == "qwen3.7-max"
+        assert result["model_providers"]["openace"]["name"] == "Open ACE Proxy"
+        assert result["model_providers"]["openace"]["wire_api"] == "responses"

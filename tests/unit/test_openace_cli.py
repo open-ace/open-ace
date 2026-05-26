@@ -68,6 +68,30 @@ def test_start_cli_terminal_posts_machine_and_work_dir(monkeypatch):
     ]
 
 
+def test_apply_local_cli_settings_uses_proxy_v1(monkeypatch):
+    openace_cli = load_openace_cli()
+    applied = []
+
+    def fake_apply(cli_settings, proxy_base_url):
+        applied.append((cli_settings, proxy_base_url))
+
+    monkeypatch.setattr(openace_cli, "apply_cli_settings", fake_apply)
+
+    openace_cli._apply_local_cli_settings(
+        {
+            "proxy_url": "https://openace.example/api/remote/llm-proxy",
+            "cli_settings": {"codex-cli": {"model_provider": "openace"}},
+        }
+    )
+
+    assert applied == [
+        (
+            {"codex-cli": {"model_provider": "openace"}},
+            "https://openace.example/api/remote/llm-proxy/v1",
+        )
+    ]
+
+
 def test_login_writes_session_token(monkeypatch, tmp_path):
     openace_cli = load_openace_cli()
     config_path = tmp_path / "config.json"

@@ -1332,9 +1332,9 @@ def start_terminal():
     proxy_url = f"{backend_url}/api/remote/llm-proxy"
     logger.info("start_terminal: backend_url=%s, proxy_url=%s", backend_url, proxy_url)
 
-    # Get CLI settings for both Claude Code and Qwen Code
+    # Get CLI settings for supported menu tools
     cli_settings = {}
-    for tool_name in ["claude-code", "qwen-code"]:
+    for tool_name in ["claude-code", "qwen-code", "codex-cli"]:
         tool_settings = api_proxy.get_cli_settings_for_tool(tenant_id, tool_name)
         if tool_settings:
             cli_settings[tool_name] = tool_settings
@@ -1438,6 +1438,12 @@ def start_cli_terminal():
     backend_url = agent_mgr.get_backend_url(request.host_url)
     proxy_url = f"{backend_url}/api/remote/llm-proxy"
 
+    cli_settings = {}
+    for tool_name in ["claude-code", "qwen-code", "codex-cli"]:
+        tool_settings = api_proxy.get_cli_settings_for_tool(tenant_id, tool_name)
+        if tool_settings:
+            cli_settings[tool_name] = tool_settings
+
     logger.info(
         "Created CLI terminal session %s for user %s on machine %s",
         terminal_id[:8],
@@ -1455,6 +1461,7 @@ def start_cli_terminal():
                 "status": "running",
                 "source": source,
                 "proxy_url": proxy_url,
+                "cli_settings": cli_settings,
                 "tokens": {
                     "anthropic": anthropic_token,
                     "openai": openai_token,

@@ -19,6 +19,11 @@ from typing import Any, Optional, Union, cast
 from app.repositories.database import DB_PATH, get_database_url, is_postgresql
 from app.utils.tool_names import normalize_tool_name
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python < 3.11
+    import tomli as tomllib
+
 logger = logging.getLogger(__name__)
 
 # Environment variable keys that contain API credentials.
@@ -51,6 +56,21 @@ def _collect_dynamic_env_keys(settings: dict[str, Any]) -> set[str]:
                 if isinstance(model, dict) and isinstance(model.get("envKey"), str):
                     dynamic.add(model["envKey"])
     return dynamic
+
+
+def _parse_codex_settings(raw_settings: Any) -> dict[str, Any]:
+    """Parse stored Codex settings from TOML string or dict form."""
+    if isinstance(raw_settings, dict):
+        return raw_settings.copy()
+    if isinstance(raw_settings, str):
+        try:
+            parsed = tomllib.loads(raw_settings)
+        except tomllib.TOMLDecodeError as exc:
+            logger.warning("Invalid Codex settings TOML in api_key_store: %s", exc)
+            return {}
+        if isinstance(parsed, dict):
+            return parsed
+    return {}
 
 
 def _param() -> str:
@@ -486,7 +506,7 @@ class APIKeyProxyService:
     def _build_cli_settings_for_tool(
         self,
         tool_name: str,
-        base_settings: dict,
+        base_settings: Any,
     ) -> dict[str, Any]:
         """
         Build CLI settings containing only non-sensitive configuration.
@@ -501,7 +521,13 @@ class APIKeyProxyService:
         Returns:
             Settings dict with non-sensitive config only.
         """
-        settings = base_settings.copy()
+        canonical_tool = normalize_tool_name(tool_name)
+        if canonical_tool == "codex":
+            settings = _parse_codex_settings(base_settings)
+        elif isinstance(base_settings, dict):
+            settings = base_settings.copy()
+        else:
+            settings = {}
         all_sensitive = _SENSITIVE_ENV_KEYS | _collect_dynamic_env_keys(settings)
 
         # Strip any API credential fields that the user may have

@@ -23,6 +23,11 @@ from pathlib import Path
 from typing import Any
 
 AGENT_DIR = Path(__file__).resolve().parent
+if str(AGENT_DIR) not in sys.path:
+    sys.path.insert(0, str(AGENT_DIR))
+
+from cli_settings import apply_cli_settings
+
 AGENT_CONFIG_PATH = AGENT_DIR / "config.json"
 CLI_CONFIG_DIR = Path.home() / ".open-ace-cli"
 CLI_CONFIG_PATH = CLI_CONFIG_DIR / "config.json"
@@ -202,6 +207,15 @@ def _session_env(terminal: dict[str, Any]) -> dict[str, str]:
     return env
 
 
+def _apply_local_cli_settings(terminal: dict[str, Any]) -> None:
+    """Apply CLI settings returned by /terminal/cli/start before launching tools."""
+    cli_settings = terminal.get("cli_settings") or {}
+    proxy_url = str(terminal.get("proxy_url") or "").rstrip("/")
+    if not cli_settings or not proxy_url:
+        return
+    apply_cli_settings(cli_settings, proxy_base_url=f"{proxy_url}/v1")
+
+
 def _write_active_terminal(terminal: dict[str, Any]) -> None:
     payload = {
         "terminal_id": terminal["session_id"],
@@ -261,6 +275,7 @@ def cmd_status(_: argparse.Namespace) -> int:
 def cmd_menu(args: argparse.Namespace) -> int:
     work_dir = os.path.abspath(args.work_dir or os.getcwd())
     terminal = _start_cli_terminal(work_dir)
+    _apply_local_cli_settings(terminal)
     _write_active_terminal(terminal)
     env = _session_env(terminal)
     os.execvpe(sys.executable, [sys.executable, str(MENU_PATH)], env)
@@ -269,6 +284,7 @@ def cmd_menu(args: argparse.Namespace) -> int:
 def cmd_shell(args: argparse.Namespace) -> int:
     work_dir = os.path.abspath(args.work_dir or os.getcwd())
     terminal = _start_cli_terminal(work_dir)
+    _apply_local_cli_settings(terminal)
     _write_active_terminal(terminal)
     env = _session_env(terminal)
     shell = os.environ.get("SHELL") or "/bin/sh"
