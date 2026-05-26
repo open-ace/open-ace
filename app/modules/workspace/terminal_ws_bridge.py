@@ -18,6 +18,8 @@ try:
 except ImportError:
     WebSocketError = Exception
 
+import app.ws_frame as ws_frame
+
 logger = logging.getLogger(__name__)
 
 MAX_ACTIVE_BRIDGES = 1000
@@ -62,7 +64,8 @@ def close_terminal_bridges(terminal_id: str) -> None:
 
     for state in bridges:
         with suppress(Exception):
-            state.browser_ws.close()
+            if hasattr(state.browser_ws, "close"):
+                state.browser_ws.close()
         if state.remote_ws is not None:
             with suppress(Exception):
                 state.remote_ws.close()
@@ -98,6 +101,7 @@ def bridge_terminal_websocket(
                     while True:
                         message = browser_ws.receive()
                         if message is None:
+                            logger.info("Bridge B→R: browser_ws.receive() returned None, closing")
                             break
                         if isinstance(message, (str, bytes, bytearray, memoryview)):
                             remote_ws.send(message)
@@ -106,10 +110,10 @@ def bridge_terminal_websocket(
                                 "Ignoring unsupported browser terminal message type: %s",
                                 type(message).__name__,
                             )
-                except (ConnectionClosed, WebSocketError):
-                    pass
+                except (ConnectionClosed, WebSocketError) as e:
+                    logger.info("Bridge B→R: connection error: %s", e)
                 except Exception as e:
-                    logger.debug("Browser to remote terminal bridge error: %s", e)
+                    logger.info("Browser to remote terminal bridge error: %s", e)
                 finally:
                     with suppress(Exception):
                         remote_ws.close()
@@ -119,13 +123,69 @@ def bridge_terminal_websocket(
                     while True:
                         message = remote_ws.recv()
                         browser_ws.send(message)
-                except (ConnectionClosed, WebSocketError):
-                    pass
+                except (ConnectionClosed, WebSocketError) as e:
+                    logger.info("Bridge R→B: connection error: %s", e)
                 except Exception as e:
                     logger.debug("Remote terminal to browser bridge error: %s", e)
                 finally:
                     with suppress(Exception):
                         browser_ws.close()
+
+            state.jobs = [gevent.spawn(browser_to_remote), gevent.spawn(remote_to_browser)]
+            gevent.joinall(state.jobs)
+    finally:
+        _unregister_bridge(state)
+
+
+def bridge_terminal_websocket_raw(
+    terminal_id: str, browser_sock, remote_ws_url: str, remote_token: str
+) -> None:
+    """Bridge a raw browser socket (via TerminalWSHandler) to a remote terminal.
+
+    Uses ``ws_frame`` for browser-side I/O and ``websockets.sync`` for the
+    remote side.  The browser socket has already completed the WS handshake
+    before this function is called.
+    """
+    parsed = urllib.parse.urlsplit(remote_ws_url)
+    query = dict(urllib.parse.parse_qsl(parsed.query, keep_blank_values=True))
+    query["token"] = remote_token
+    upstream_url = urllib.parse.urlunsplit(parsed._replace(query=urllib.parse.urlencode(query)))
+    state = TerminalBridgeConnection(terminal_id=terminal_id, browser_ws=browser_sock)
+    _register_bridge(state)
+
+    try:
+        with connect(upstream_url, subprotocols=["binary"], close_timeout=5) as remote_ws:
+            state.remote_ws = remote_ws
+            logger.info("Connected raw bridge to remote terminal: %s", remote_ws_url)
+
+            def browser_to_remote() -> None:
+                try:
+                    while True:
+                        message = ws_frame.recv_message(browser_sock)
+                        if message is None:
+                            logger.info("Raw bridge B→R: browser closed")
+                            break
+                        remote_ws.send(message)
+                except ConnectionClosed as e:
+                    logger.info("Raw bridge B→R: remote closed: %s", e)
+                except Exception as e:
+                    logger.info("Raw bridge B→R error: %s", e)
+                finally:
+                    with suppress(Exception):
+                        remote_ws.close()
+
+            def remote_to_browser() -> None:
+                try:
+                    while True:
+                        message = remote_ws.recv()
+                        ws_frame.send_message(browser_sock, message)
+                except ConnectionClosed as e:
+                    logger.info("Raw bridge R→B: remote closed: %s", e)
+                except Exception as e:
+                    logger.debug("Raw bridge R→B error: %s", e)
+                finally:
+                    with suppress(Exception):
+                        ws_frame.send_close(browser_sock)
 
             state.jobs = [gevent.spawn(browser_to_remote), gevent.spawn(remote_to_browser)]
             gevent.joinall(state.jobs)
