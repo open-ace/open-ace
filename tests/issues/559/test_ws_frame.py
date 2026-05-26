@@ -119,6 +119,27 @@ class TestPerformHandshake:
         assert f"Sec-WebSocket-Accept: {accept}\r\n" in response
         assert response.endswith("\r\n\r\n")
 
+    def test_includes_protocol_header(self):
+        sock = FakeSocket()
+        key = "dGhlIHNhbXBsZSBub25jZQ=="
+        environ = {
+            "HTTP_SEC_WEBSOCKET_KEY": key,
+            "HTTP_SEC_WEBSOCKET_PROTOCOL": "binary",
+        }
+        ws_frame.perform_handshake(environ, sock)
+
+        response = sock.all_sent.decode()
+        assert "Sec-WebSocket-Protocol: binary\r\n" in response
+
+    def test_no_protocol_header_when_not_requested(self):
+        sock = FakeSocket()
+        key = "dGhlIHNhbXBsZSBub25jZQ=="
+        environ = {"HTTP_SEC_WEBSOCKET_KEY": key}
+        ws_frame.perform_handshake(environ, sock)
+
+        response = sock.all_sent.decode()
+        assert "Sec-WebSocket-Protocol" not in response
+
     def test_missing_key_raises(self):
         sock = FakeSocket()
         with pytest.raises(ValueError, match="Missing Sec-WebSocket-Key"):

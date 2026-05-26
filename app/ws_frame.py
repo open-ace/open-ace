@@ -45,14 +45,17 @@ def perform_handshake(environ: dict, sock) -> None:
         raise ValueError("Missing Sec-WebSocket-Key")
 
     accept = _compute_accept_key(key)
-    response = (
+    headers = (
         "HTTP/1.1 101 Switching Protocols\r\n"
         "Upgrade: websocket\r\n"
         "Connection: Upgrade\r\n"
         f"Sec-WebSocket-Accept: {accept}\r\n"
-        "\r\n"
     )
-    sock.sendall(response.encode())
+    protocol = environ.get("HTTP_SEC_WEBSOCKET_PROTOCOL", "")
+    if protocol:
+        headers += f"Sec-WebSocket-Protocol: {protocol}\r\n"
+    headers += "\r\n"
+    sock.sendall(headers.encode())
 
 
 def _recv_exactly(sock, n: int) -> bytes:
