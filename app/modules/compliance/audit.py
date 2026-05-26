@@ -392,12 +392,14 @@ class AuditAnalyzer:
                 cursor = conn.cursor()
                 # Query agent_sessions for this user
                 cursor.execute(
-                    adapt_sql("""
+                    adapt_sql(
+                        """
                     SELECT session_id, created_at, message_count, total_tokens, tool_name
                     FROM agent_sessions
                     WHERE user_id = ? AND created_at >= ? AND created_at <= ?
                     ORDER BY created_at DESC
-                    """),
+                    """
+                    ),
                     (user_id, start_time.isoformat(), end_time.isoformat()),
                 )
                 sessions_data = cursor.fetchall()
@@ -453,17 +455,19 @@ class AuditAnalyzer:
             # Parse created_at timestamp and convert to local time
             if created_at:
                 try:
-                    ts = datetime.fromisoformat(created_at) if isinstance(created_at, str) else created_at
-                    # Convert UTC to local time for accurate hour analysis
-                    if ts.tzinfo is not None:
-                        # Convert to local timezone
-                        local_ts = ts.astimezone()
-                        hourly_activity[local_ts.hour] += 1
-                        daily_activity[local_ts.weekday()] += 1
-                    else:
-                        # No timezone info, assume local time
-                        hourly_activity[ts.hour] += 1
-                        daily_activity[ts.weekday()] += 1
+                    ts = (
+                        datetime.fromisoformat(created_at)
+                        if isinstance(created_at, str)
+                        else created_at
+                    )
+                    # Convert to local time for accurate hour analysis
+                    # Database stores UTC time, need to convert to local
+                    if ts.tzinfo is None:
+                        # Assume UTC if no timezone info (database timestamp without time zone)
+                        ts = ts.replace(tzinfo=timezone.utc)
+                    local_ts = ts.astimezone()
+                    hourly_activity[local_ts.hour] += 1
+                    daily_activity[local_ts.weekday()] += 1
                 except Exception:
                     pass
 
@@ -484,7 +488,11 @@ class AuditAnalyzer:
                 created_at = session[1] if len(session) > 1 else None
             if created_at:
                 try:
-                    ts = datetime.fromisoformat(created_at) if isinstance(created_at, str) else created_at
+                    ts = (
+                        datetime.fromisoformat(created_at)
+                        if isinstance(created_at, str)
+                        else created_at
+                    )
                     # Convert to local time for consistent display
                     if ts.tzinfo is not None:
                         ts = ts.astimezone()
