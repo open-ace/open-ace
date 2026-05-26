@@ -49,11 +49,15 @@ def _run_subprocess(cmd, timeout=600, cwd=None):
     )
     try:
         stdout, stderr = proc.communicate(timeout=timeout)
-        return type('Result', (), {
-            'returncode': proc.returncode,
-            'stdout': stdout.decode('utf-8', errors='replace') if stdout else '',
-            'stderr': stderr.decode('utf-8', errors='replace') if stderr else ''
-        })()
+        return type(
+            "Result",
+            (),
+            {
+                "returncode": proc.returncode,
+                "stdout": stdout.decode("utf-8", errors="replace") if stdout else "",
+                "stderr": stderr.decode("utf-8", errors="replace") if stderr else "",
+            },
+        )()
     except subprocess.TimeoutExpired:
         proc.kill()
         proc.communicate()
