@@ -30,10 +30,22 @@ _db_url_cache = None
 
 
 def _get_db_url() -> str:
-    """Get database URL from config."""
+    """Get database URL from config.
+
+    Automatically adds gssencmode=disable for PostgreSQL when running under sudo
+    to prevent GSSAPI/Kerberos crash (SIGSEGV) in sudo environment.
+    """
     global _db_url_cache
     if _db_url_cache is None:
-        _db_url_cache = config.get_database_url()
+        url = config.get_database_url()
+        # Detect sudo environment: SUDO_USER is set when running under sudo
+        if url.startswith("postgresql") and os.environ.get("SUDO_USER"):
+            # Add gssencmode=disable to prevent GSSAPI crash in sudo environment
+            if "?" in url:
+                url = url + "&gssencmode=disable"
+            else:
+                url = url + "?gssencmode=disable"
+        _db_url_cache = url
     return cast(str, _db_url_cache)
 
 
