@@ -108,8 +108,14 @@ class QuotaEnforcementScheduler:
 
     def _run_enforcement(self):
         """Run quota enforcement check for all users."""
-        from app.repositories.database import Database, adapt_boolean_condition, adapt_sql
+        from app.repositories.database import (
+            Database,
+            adapt_boolean_condition,
+            adapt_sql,
+            is_postgresql,
+        )
 
+        bigint_cast = "::bigint" if is_postgresql() else ""
         today = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
         month_start = (
             datetime.now(timezone.utc).replace(tzinfo=None).replace(day=1).strftime("%Y-%m-%d")
@@ -134,7 +140,7 @@ class QuotaEnforcementScheduler:
                       AND {adapt_boolean_condition("u.is_active", True)}
                       AND (
                         uds.requests >= COALESCE(u.daily_request_quota, 999999)
-                        OR uds.tokens >= COALESCE(u.daily_token_quota, 999999) * 1000000
+                        OR uds.tokens >= COALESCE(u.daily_token_quota, 999999){bigint_cast} * 1000000
                       )
                 """
                 ),
@@ -158,7 +164,7 @@ class QuotaEnforcementScheduler:
                       AND {adapt_boolean_condition("u.is_active", True)}
                     GROUP BY u.id, u.username, u.monthly_request_quota, u.monthly_token_quota
                     HAVING SUM(uds.requests) >= COALESCE(u.monthly_request_quota, 999999)
-                        OR SUM(uds.tokens) >= COALESCE(u.monthly_token_quota, 999999) * 1000000
+                        OR SUM(uds.tokens) >= COALESCE(u.monthly_token_quota, 999999){bigint_cast} * 1000000
                 """
                 ),
                 (month_start, today),

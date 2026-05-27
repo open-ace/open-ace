@@ -197,8 +197,14 @@ class DataFetchScheduler:
         from datetime import datetime as dt
         from datetime import timezone as tz
 
-        from app.repositories.database import Database, adapt_boolean_condition, adapt_sql
+        from app.repositories.database import (
+            Database,
+            adapt_boolean_condition,
+            adapt_sql,
+            is_postgresql,
+        )
 
+        bigint_cast = "::bigint" if is_postgresql() else ""
         today = dt.now(tz.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
         month_start = dt.now(tz.utc).replace(tzinfo=None).replace(day=1).strftime("%Y-%m-%d")
         db = Database()
@@ -219,7 +225,7 @@ class DataFetchScheduler:
                       AND {adapt_boolean_condition("u.is_active", True)}
                       AND (
                         uds.requests >= COALESCE(u.daily_request_quota, 999999)
-                        OR uds.tokens >= COALESCE(u.daily_token_quota, 999999) * 1000000
+                        OR uds.tokens >= COALESCE(u.daily_token_quota, 999999){bigint_cast} * 1000000
                       )
                 """
                 ),
@@ -244,7 +250,7 @@ class DataFetchScheduler:
                       AND u.monthly_token_quota IS NOT NULL
                     GROUP BY u.id, u.username, u.monthly_request_quota, u.monthly_token_quota
                     HAVING SUM(uds.requests) >= COALESCE(u.monthly_request_quota, 999999)
-                        OR SUM(uds.tokens) >= COALESCE(u.monthly_token_quota, 999999) * 1000000
+                        OR SUM(uds.tokens) >= COALESCE(u.monthly_token_quota, 999999){bigint_cast} * 1000000
                 """
                 ),
                 (month_start, today),
