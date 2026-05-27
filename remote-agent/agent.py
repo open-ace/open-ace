@@ -888,8 +888,12 @@ class RemoteAgent:
 
         request_id = data.get("request_id", "")
         requested_path = data.get("path", "")
-        # Use home directory as fallback if no path provided
-        path = requested_path or os.path.expanduser("~")
+        # Expand ~ in path before checking existence (e.g., ~/workspace -> /home/user/workspace)
+        if requested_path:
+            path = os.path.expanduser(requested_path)
+        else:
+            # Use home directory as fallback if no path provided
+            path = os.path.expanduser("~")
         logger.info("Browsing directory: %s (request_id=%s)", path, request_id[:8] if request_id else "none")
 
         try:

@@ -52,6 +52,7 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
   const [showCreateInput, setShowCreateInput] = useState(false);
   const [newDirName, setNewDirName] = useState('');
   const [pathHistory, setPathHistory] = useState<string[]>([]);
+  const [fallbackNote, setFallbackNote] = useState<string | null>(null);
 
   // Cross-platform path utilities
   const getPathSeparator = () => isWindows ? '\\' : '/';
@@ -113,6 +114,7 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
     async (path: string) => {
       setIsLoading(true);
       setError(null);
+      setFallbackNote(null);  // Clear previous fallback note
       try {
         const result = await fsApi.browseRemoteDirectory(machineId, path);
         if (result.success && result.result) {
@@ -121,6 +123,9 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
           setCurrentPath(browseResult.path);
           setParentPath(browseResult.parent);
           setIsWritable(browseResult.is_writable);
+          if (browseResult.fallback_note) {
+            setFallbackNote(browseResult.fallback_note);
+          }
         } else {
           setError(result.error ?? 'Failed to browse directory');
         }
@@ -331,6 +336,14 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
         <div className="alert alert-danger small mb-2">
           <i className="bi bi-exclamation-triangle me-1" />
           {error}
+        </div>
+      )}
+
+      {/* Fallback note - show when path was changed */}
+      {fallbackNote && (
+        <div className="alert alert-info small mb-2">
+          <i className="bi bi-info-circle me-1" />
+          {fallbackNote}
         </div>
       )}
 
