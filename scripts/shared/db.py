@@ -54,6 +54,24 @@ def is_postgresql() -> bool:
     return _get_db_url().startswith("postgresql")
 
 
+def adapt_boolean_value(value: bool) -> Union[bool, int]:
+    """
+    Convert boolean value for database compatibility.
+
+    PostgreSQL uses TRUE/FALSE for boolean columns.
+    SQLite uses 1/0 for boolean columns (INTEGER type affinity).
+
+    Args:
+        value: Boolean value to convert.
+
+    Returns:
+        Union[bool, int]: Boolean for PostgreSQL, integer for SQLite.
+    """
+    if is_postgresql():
+        return value
+    return 1 if value else 0
+
+
 def _placeholder() -> str:
     """Get the appropriate placeholder for the current database."""
     return "%s" if is_postgresql() else "?"
@@ -1488,16 +1506,9 @@ def create_user_with_is_active(
     conn = get_connection()
     cursor = conn.cursor()
 
-    # PostgreSQL uses BOOLEAN for is_active (migration 012 converted it)
-    # SQLite uses INTEGER (1/0) for boolean fields
-    if is_postgresql():
-        # PostgreSQL: use actual boolean values (psycopg2 handles conversion)
-        is_active_val = is_active
-        must_change_val = must_change_password
-    else:
-        # SQLite: use integer values
-        is_active_val = 1 if is_active else 0  # type: ignore[assignment]  # noqa: SQL001
-        must_change_val = 1 if must_change_password else 0  # type: ignore[assignment]  # noqa: SQL001
+    # Convert boolean values for database compatibility
+    is_active_val = adapt_boolean_value(is_active)
+    must_change_val = adapt_boolean_value(must_change_password)
 
     try:
         _execute(
