@@ -596,7 +596,7 @@ class RemoteAgentManager:
             self._browse_results[request_id] = result
         logger.info("Stored browse result for request %s", request_id[:8])
 
-    def get_browse_result(self, request_id: str, timeout: float = 10.0) -> dict | None:
+    def get_browse_result(self, request_id: str, timeout: float = 10.0) -> Optional[dict]:
         """Wait for and retrieve browse result.
 
         Polls for the result with a timeout. Returns None if timeout expires.

@@ -31,7 +31,7 @@ test.describe('Remote Directory Browser', () => {
     await expect(terminalBtn.first()).toBeVisible();
   });
 
-  test('selecting remote workspace shows machine selector', async ({ page }) => {
+  test('selecting remote workspace shows machine list and project path', async ({ page }) => {
     await page.goto('/work');
 
     const newSessionBtn = page.getByTestId('new-session-btn');
@@ -43,12 +43,12 @@ test.describe('Remote Directory Browser', () => {
     await remoteBtn.click();
     await expect(remoteBtn).toHaveAttribute('class', /btn-primary/);
 
-    // Machine list area should be visible (either with machines or "No available machines")
+    // Machine area should show (machine list or "No available machines")
     const machineArea = page.locator('.modal').locator('text=Machine');
     await expect(machineArea.first()).toBeVisible();
   });
 
-  test('selecting terminal workspace shows machine selector', async ({ page }) => {
+  test('selecting terminal workspace shows machine list', async ({ page }) => {
     await page.goto('/work');
 
     const newSessionBtn = page.getByTestId('new-session-btn');
@@ -64,7 +64,7 @@ test.describe('Remote Directory Browser', () => {
     await expect(machineArea.first()).toBeVisible();
   });
 
-  test('browse button appears after machine selection for remote workspace', async ({ page }) => {
+  test('browse button appears when machine is selected for remote workspace', async ({ page }) => {
     await page.goto('/work');
 
     const newSessionBtn = page.getByTestId('new-session-btn');
@@ -81,11 +81,12 @@ test.describe('Remote Directory Browser', () => {
       test.skip(true, 'No machines registered - requires setup');
     }
 
-    const browseBtn = page.locator('button').filter({ hasText: /浏览|Browse/ });
+    // Browse button should appear when a machine is selected (auto-select or manual)
+    const browseBtn = page.locator('.modal button').filter({ hasText: /浏览|Browse/ });
     await expect(browseBtn.first()).toBeVisible();
   });
 
-  test('working directory input appears for terminal workspace', async ({ page }) => {
+  test('project path input appears for terminal workspace when machine selected', async ({ page }) => {
     await page.goto('/work');
 
     const newSessionBtn = page.getByTestId('new-session-btn');
@@ -101,11 +102,12 @@ test.describe('Remote Directory Browser', () => {
       test.skip(true, 'No machines registered - requires setup');
     }
 
-    const workDirLabel = page.locator('.form-label').filter({ hasText: /工作目录|Working Directory/ });
+    // Working directory label or project path should appear
+    const workDirLabel = page.locator('.modal').locator('text=Project Path|Working Directory|工作目录|项目路径');
     await expect(workDirLabel.first()).toBeVisible();
   });
 
-  test('create button is disabled without machine selection', async ({ page }) => {
+  test('create button state reflects machine selection', async ({ page }) => {
     await page.goto('/work');
 
     const newSessionBtn = page.getByTestId('new-session-btn');
@@ -119,7 +121,14 @@ test.describe('Remote Directory Browser', () => {
 
     const createBtn = page.locator('.modal button').filter({ hasText: /创建|Create/ });
     await expect(createBtn.first()).toBeVisible();
-    await expect(createBtn.first()).toBeDisabled();
+
+    // If machines are available, one is auto-selected so Create is enabled
+    const noMachines = page.locator('.modal').getByText(/No available machines|没有可用的机器/);
+    if (await noMachines.isVisible()) {
+      await expect(createBtn.first()).toBeDisabled();
+    } else {
+      await expect(createBtn.first()).toBeEnabled();
+    }
   });
 
   test('modal can be closed with cancel button', async ({ page }) => {
