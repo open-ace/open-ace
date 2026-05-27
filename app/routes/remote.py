@@ -2272,23 +2272,29 @@ def browse_remote_directory(machine_id):
     }
 
     if not agent_mgr.send_command(machine_id, command):
-        return jsonify(
-            {
-                "success": False,
-                "error": "Failed to send command to agent",
-            }
-        ), 500
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Failed to send command to agent",
+                }
+            ),
+            500,
+        )
 
     # Wait for agent response (with timeout)
     result = agent_mgr.get_browse_result(request_id, timeout=15.0)
 
     if result is None:
-        return jsonify(
-            {
-                "success": False,
-                "error": "Timeout waiting for agent response. Please try again.",
-            }
-        ), 504
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Timeout waiting for agent response. Please try again.",
+                }
+            ),
+            504,
+        )
 
     # Return the result from agent
     return jsonify(

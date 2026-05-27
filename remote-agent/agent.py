@@ -884,7 +884,6 @@ class RemoteAgent:
         Returns a list of directories in the specified path for directory browsing UI.
         """
         import os
-        import stat
 
         request_id = data.get("request_id", "")
         requested_path = data.get("path", "")
@@ -894,7 +893,9 @@ class RemoteAgent:
         else:
             # Use home directory as fallback if no path provided
             path = os.path.expanduser("~")
-        logger.info("Browsing directory: %s (request_id=%s)", path, request_id[:8] if request_id else "none")
+        logger.info(
+            "Browsing directory: %s (request_id=%s)", path, request_id[:8] if request_id else "none"
+        )
 
         try:
             # If requested path doesn't exist, try to find a fallback
@@ -904,7 +905,9 @@ class RemoteAgent:
                 if parent and os.path.exists(parent) and os.path.isdir(parent):
                     # Browse parent instead and note the fallback
                     actual_path = parent
-                    fallback_note = f"Requested path '{path}' does not exist. Showing parent directory instead."
+                    fallback_note = (
+                        f"Requested path '{path}' does not exist. Showing parent directory instead."
+                    )
                     logger.info("Path %s not found, falling back to parent %s", path, parent)
                 else:
                     # Fall back to home directory
@@ -950,16 +953,17 @@ class RemoteAgent:
                     if os.path.isdir(full_path):
                         # Check if directory is writable
                         try:
-                            mode = os.stat(full_path).st_mode
                             is_writable = os.access(full_path, os.W_OK)
                         except OSError:
                             is_writable = False
 
-                        directories.append({
-                            "name": entry,
-                            "path": full_path,
-                            "is_writable": is_writable,
-                        })
+                        directories.append(
+                            {
+                                "name": entry,
+                                "path": full_path,
+                                "is_writable": is_writable,
+                            }
+                        )
             except PermissionError:
                 self._http_send(
                     {
