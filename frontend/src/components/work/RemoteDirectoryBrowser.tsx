@@ -55,19 +55,22 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
   const [fallbackNote, setFallbackNote] = useState<string | null>(null);
 
   // Cross-platform path utilities
-  const getPathSeparator = () => isWindows ? '\\' : '/';
+  const getPathSeparator = () => (isWindows ? '\\' : '/');
 
-  const splitPath = useCallback((path: string): string[] => {
-    if (!path) return [];
-    if (isWindows) {
-      const parts = path.split(/[\\/]/).filter(Boolean);
-      if (parts.length > 0 && parts[0].match(/^[A-Za-z]:$/)) {
+  const splitPath = useCallback(
+    (path: string): string[] => {
+      if (!path) return [];
+      if (isWindows) {
+        const parts = path.split(/[\\/]/).filter(Boolean);
+        if (parts.length > 0 && parts[0].match(/^[A-Za-z]:$/)) {
+          return parts;
+        }
         return parts;
       }
-      return parts;
-    }
-    return path.split('/').filter(Boolean);
-  }, [isWindows]);
+      return path.split('/').filter(Boolean);
+    },
+    [isWindows]
+  );
 
   const getRootPath = useCallback((): string => {
     if (isWindows) {
@@ -114,7 +117,7 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
     async (path: string) => {
       setIsLoading(true);
       setError(null);
-      setFallbackNote(null);  // Clear previous fallback note
+      setFallbackNote(null); // Clear previous fallback note
       try {
         const result = await fsApi.browseRemoteDirectory(machineId, path);
         if (result.success && result.result) {
@@ -264,7 +267,10 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
       {/* Breadcrumbs */}
       <div className="mb-2">
         <div className="d-flex align-items-center gap-1 small">
-          <button className="btn btn-link btn-sm p-0" onClick={() => fetchDirectories(getRootPath())}>
+          <button
+            className="btn btn-link btn-sm p-0"
+            onClick={() => fetchDirectories(getRootPath())}
+          >
             {isWindows ? currentPath?.match(/^[A-Za-z]:/)?.[0] || 'C:' : '/'}
           </button>
           {breadcrumbs.map((crumb, index) => (

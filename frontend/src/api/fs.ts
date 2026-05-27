@@ -24,7 +24,7 @@ export interface BrowseResult {
   homePath: string;
   canCreate: boolean;
   is_writable: boolean;
-  fallback_note?: string;  // Note when path was changed to fallback
+  fallback_note?: string; // Note when path was changed to fallback
 }
 
 export interface DirectoryEntry {
