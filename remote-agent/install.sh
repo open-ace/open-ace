@@ -152,6 +152,7 @@ AGENT_FILES=(
     session_isolation.py
     session_sync.py
     openace_cli.py
+    cli_settings.py
     __init__.py
 )
 
