@@ -39,6 +39,7 @@ def _table_exists(conn, table_name: str) -> bool:
 
 
 def upgrade() -> None:
+    """Create login_attempts table if it does not already exist."""
     conn = op.get_bind()
 
     if _table_exists(conn, "login_attempts"):
@@ -58,8 +59,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    conn = op.get_bind()
-
-    if _table_exists(conn, "login_attempts"):
-        op.drop_index("idx_login_attempts_locked_until", table_name="login_attempts")
-        op.drop_table("login_attempts")
+    """No-op: the login_attempts table may have been created by runtime DDL
+    before this migration ran, so dropping it on downgrade would risk
+    deleting pre-existing production data.  Symmetric with the upgrade()
+    early-return when the table already exists.
+    """
