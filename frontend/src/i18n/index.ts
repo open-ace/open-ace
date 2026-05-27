@@ -840,6 +840,12 @@ const translations: Record<Language, Translations> = {
     compactMode: 'Compact Mode',
     verbose: 'Verbose',
     compact: 'Compact',
+
+    // Issue #584: Directory browser
+    browse: 'Browse',
+    recentPaths: 'Recent Paths',
+    browseDirectory: 'Browse Directory',
+    selectDirectory: 'Select Directory',
   },
   zh: {
     // Common
@@ -1655,6 +1661,12 @@ const translations: Record<Language, Translations> = {
     compactMode: '简洁模式',
     verbose: '详细',
     compact: '简洁',
+
+    // Issue #584: Directory browser
+    browse: '浏览',
+    recentPaths: '最近使用的路径',
+    browseDirectory: '浏览目录',
+    selectDirectory: '选择目录',
   },
   ja: {
     // Common

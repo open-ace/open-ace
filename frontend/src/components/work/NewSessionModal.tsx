@@ -13,13 +13,14 @@
  * 2. Embedded (with onCreateLocal/onCreateRemote): calls callbacks directly (used by Workspace "+")
  */
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAvailableMachines, useCreateRemoteSession } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import { Modal, Button } from '@/components/common';
 import { RemoteMachineSelector } from './RemoteMachineSelector';
+import { DirectoryBrowserModal } from './DirectoryBrowserModal';
 import type { RemoteMachine } from '@/api/remote';
 
 interface NewSessionModalProps {
@@ -54,6 +55,8 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
   const [selectedMachineId, setSelectedMachineId] = useState<string>('');
   const [projectPath, setProjectPath] = useState('');
   const [isStartingTerminal, setIsStartingTerminal] = useState(false);
+  const [showDirectoryBrowser, setShowDirectoryBrowser] = useState(false);
+  const [pathHistory, setPathHistory] = useState<string[]>([]);
 
   const { data: machinesData, isLoading: machinesLoading } = useAvailableMachines();
   const createRemoteSession = useCreateRemoteSession();
@@ -67,6 +70,38 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
       handleMachineSelect(machine.machine_id, machine);
     }
   }, [machines.length]);
+
+  // Load path history from localStorage when machine is selected
+  useEffect(() => {
+    if (selectedMachineId) {
+      const savedHistory = localStorage.getItem(`remote-path-history-${selectedMachineId}`);
+      if (savedHistory) {
+        try {
+          const parsed = JSON.parse(savedHistory);
+          if (Array.isArray(parsed)) {
+            setPathHistory(parsed.slice(0, 5));
+          }
+        } catch {
+          // Ignore parse errors
+        }
+      } else {
+        setPathHistory([]);
+      }
+    }
+  }, [selectedMachineId]);
+
+  // Save path to history
+  const savePathToHistory = useCallback((path: string) => {
+    if (!path || !selectedMachineId) return;
+    const newHistory = [path, ...pathHistory.filter((p) => p !== path)].slice(0, 5);
+    setPathHistory(newHistory);
+    localStorage.setItem(`remote-path-history-${selectedMachineId}`, JSON.stringify(newHistory));
+  }, [selectedMachineId, pathHistory]);
+
+  // Select path from history
+  const handleSelectFromHistory = useCallback((path: string) => {
+    setProjectPath(path);
+  }, []);
 
   const selectedMachine = useMemo(
     () => machines.find((m) => m.machine_id === selectedMachineId),
@@ -191,11 +226,12 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
   const isLoading = createRemoteSession.isPending || isStartingTerminal;
 
   return (
-    <Modal
-      isOpen={modalOpen}
-      onClose={onClose}
-      title={t('newSession', language)}
-      footer={
+    <>
+      <Modal
+        isOpen={modalOpen}
+        onClose={onClose}
+        title={t('newSession', language)}
+        footer={
         <>
           <Button variant="secondary" onClick={onClose}>
             {t('cancel', language)}
@@ -257,16 +293,45 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
           {selectedMachineId && workspaceType === 'remote' && (
             <div className="mb-3">
               <label className="form-label">{t('projectPath', language)}</label>
-              <input
-                type="text"
-                className="form-control"
-                value={projectPath}
-                onChange={(e) => setProjectPath(e.target.value)}
-                placeholder={
-                  selectedMachine ? getDefaultPath(selectedMachine.os_type) : '/root/workspace'
-                }
-              />
+              <div className="input-group">
+                <input
+                  type="text"
+                  className="form-control"
+                  value={projectPath}
+                  onChange={(e) => setProjectPath(e.target.value)}
+                  placeholder={
+                    selectedMachine ? getDefaultPath(selectedMachine.os_type) : '/root/workspace'
+                  }
+                />
+                <Button
+                  variant="outline-secondary"
+                  onClick={() => setShowDirectoryBrowser(true)}
+                >
+                  <i className="bi bi-folder2-open me-1" />
+                  {t('browse', language) || 'Browse'}
+                </Button>
+              </div>
               <div className="form-text text-muted small">{t('projectPathHint', language)}</div>
+
+              {/* Path History */}
+              {pathHistory.length > 0 && (
+                <div className="mt-2">
+                  <small className="text-muted">{t('recentPaths', language) || 'Recent Paths'}</small>
+                  <div className="d-flex gap-1 flex-wrap mt-1">
+                    {pathHistory.map((path) => (
+                      <button
+                        key={path}
+                        className="btn btn-sm btn-outline-secondary"
+                        onClick={() => handleSelectFromHistory(path)}
+                        title={path}
+                      >
+                        <i className="bi bi-folder me-1" />
+                        {path.split('/').pop() || path}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -278,18 +343,47 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
                 <label className="form-label">
                   {t('terminalWorkDir', language) || 'Working Directory'}
                 </label>
-                <input
-                  type="text"
-                  className="form-control"
-                  value={projectPath}
-                  onChange={(e) => setProjectPath(e.target.value)}
-                  placeholder={
-                    selectedMachine ? getDefaultPath(selectedMachine.os_type) : '/root/workspace'
-                  }
-                />
+                <div className="input-group">
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={projectPath}
+                    onChange={(e) => setProjectPath(e.target.value)}
+                    placeholder={
+                      selectedMachine ? getDefaultPath(selectedMachine.os_type) : '/root/workspace'
+                    }
+                  />
+                  <Button
+                    variant="outline-secondary"
+                    onClick={() => setShowDirectoryBrowser(true)}
+                  >
+                    <i className="bi bi-folder2-open me-1" />
+                    {t('browse', language) || 'Browse'}
+                  </Button>
+                </div>
                 <div className="form-text text-muted small">
                   {t('terminalWorkDirHint', language) || 'Terminal will open in this directory'}
                 </div>
+
+                {/* Path History */}
+                {pathHistory.length > 0 && (
+                  <div className="mt-2">
+                    <small className="text-muted">{t('recentPaths', language) || 'Recent Paths'}</small>
+                    <div className="d-flex gap-1 flex-wrap mt-1">
+                      {pathHistory.map((path) => (
+                        <button
+                          key={path}
+                          className="btn btn-sm btn-outline-secondary"
+                          onClick={() => handleSelectFromHistory(path)}
+                          title={path}
+                        >
+                          <i className="bi bi-folder me-1" />
+                          {path.split('/').pop() || path}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Info hint */}
@@ -311,5 +405,20 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
         </>
       )}
     </Modal>
+
+    {/* Directory Browser Modal */}
+    {selectedMachineId && (
+      <DirectoryBrowserModal
+        isOpen={showDirectoryBrowser}
+        onClose={() => setShowDirectoryBrowser(false)}
+        machineId={selectedMachineId}
+        initialPath={projectPath || (selectedMachine ? getDefaultPath(selectedMachine.os_type) : '')}
+        onSelectPath={(path) => {
+          setProjectPath(path);
+          savePathToHistory(path);
+        }}
+      />
+    )}
+    </>
   );
 };
