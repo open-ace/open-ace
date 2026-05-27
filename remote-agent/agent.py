@@ -458,6 +458,8 @@ class RemoteAgent:
             self._cmd_stop_terminal(data)
         elif command == "attach_terminal":
             self._cmd_attach_terminal(data)
+        elif command == "browse_directory":
+            self._cmd_browse_directory(data)
         else:
             logger.warning("Unknown command: %s", command)
 
@@ -875,6 +877,115 @@ class RemoteAgent:
                 "status": "not_found",
             }
         )
+
+    def _cmd_browse_directory(self, data: dict[str, Any]) -> None:
+        """Handle a browse_directory command.
+
+        Returns a list of directories in the specified path for directory browsing UI.
+        """
+        import os
+        import stat
+
+        request_id = data.get("request_id", "")
+        path = data.get("path", os.path.expanduser("~"))
+        logger.info("Browsing directory: %s (request_id=%s)", path, request_id[:8] if request_id else "none")
+
+        try:
+            # Check if path exists
+            if not os.path.exists(path):
+                self._http_send(
+                    {
+                        "type": "browse_result",
+                        "machine_id": self.config.machine_id,
+                        "request_id": request_id,
+                        "success": False,
+                        "error": f"Path does not exist: {path}",
+                    }
+                )
+                return
+
+            # Check if it's a directory
+            if not os.path.isdir(path):
+                self._http_send(
+                    {
+                        "type": "browse_result",
+                        "machine_id": self.config.machine_id,
+                        "request_id": request_id,
+                        "success": False,
+                        "error": f"Path is not a directory: {path}",
+                    }
+                )
+                return
+
+            # List directories in the path
+            directories = []
+            try:
+                for entry in os.listdir(path):
+                    full_path = os.path.join(path, entry)
+                    if os.path.isdir(full_path):
+                        # Check if directory is writable
+                        try:
+                            mode = os.stat(full_path).st_mode
+                            is_writable = os.access(full_path, os.W_OK)
+                        except OSError:
+                            is_writable = False
+
+                        directories.append({
+                            "name": entry,
+                            "path": full_path,
+                            "is_writable": is_writable,
+                        })
+            except PermissionError:
+                self._http_send(
+                    {
+                        "type": "browse_result",
+                        "machine_id": self.config.machine_id,
+                        "request_id": request_id,
+                        "success": False,
+                        "error": f"Permission denied: {path}",
+                    }
+                )
+                return
+
+            # Sort directories alphabetically
+            directories.sort(key=lambda d: d["name"].lower())
+
+            # Determine parent path
+            parent = os.path.dirname(path) if path != os.path.dirname(path) else None
+
+            # Check if current path is writable
+            is_writable = os.access(path, os.W_OK)
+
+            self._http_send(
+                {
+                    "type": "browse_result",
+                    "machine_id": self.config.machine_id,
+                    "request_id": request_id,
+                    "success": True,
+                    "result": {
+                        "path": path,
+                        "name": os.path.basename(path) or path,
+                        "directories": directories,
+                        "parent": parent,
+                        "homePath": os.path.expanduser("~"),
+                        "canCreate": is_writable,
+                        "is_writable": is_writable,
+                    },
+                }
+            )
+            logger.info("Browse result for %s: %d directories", path, len(directories))
+
+        except Exception as e:
+            logger.error("Failed to browse directory %s: %s", path, e)
+            self._http_send(
+                {
+                    "type": "browse_result",
+                    "machine_id": self.config.machine_id,
+                    "request_id": request_id,
+                    "success": False,
+                    "error": str(e),
+                }
+            )
 
     def _stop_terminal_process(self, terminal_id: str) -> None:
         """Stop a terminal server process."""

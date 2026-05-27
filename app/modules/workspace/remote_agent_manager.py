@@ -64,6 +64,8 @@ class RemoteAgentManager:
         self._session_end_flags: dict[str, bool] = {}
         # Heartbeat rate limiter: {machine_id: last_db_write_timestamp}
         self._last_heartbeat_db_write: dict[str, float] = {}
+        # Browse results: {request_id: result} for directory browsing
+        self._browse_results: dict[str, dict] = {}
         # Lock for gevent coroutine safety
         self._lock = Semaphore(1)
         self._restore_in_memory_state()
@@ -587,6 +589,27 @@ class RemoteAgentManager:
         """Get and clear pending commands for an HTTP-mode agent."""
         with self._lock:
             return self._command_queues.pop(machine_id, [])
+
+    def store_browse_result(self, request_id: str, result: dict) -> None:
+        """Store browse result from agent for later retrieval."""
+        with self._lock:
+            self._browse_results[request_id] = result
+        logger.info("Stored browse result for request %s", request_id[:8])
+
+    def get_browse_result(self, request_id: str, timeout: float = 10.0) -> dict | None:
+        """Wait for and retrieve browse result.
+
+        Polls for the result with a timeout. Returns None if timeout expires.
+        """
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            with self._lock:
+                if request_id in self._browse_results:
+                    return self._browse_results.pop(request_id)
+            # Sleep briefly before checking again
+            gevent.sleep(0.1)
+        logger.warning("Timeout waiting for browse result %s", request_id[:8])
+        return None
 
     def store_terminal_info(self, machine_id: str, terminal_id: str, info: dict) -> None:
         """Store terminal status info reported by an agent.

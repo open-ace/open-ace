@@ -80,6 +80,18 @@ def mock_agent_mgr():
         "machine_id": "test-machine-001",
         "machine_name": "Test Machine",
         "work_dir": "/home/test/workspace",
+        "status": "offline",  # Machine status
+    }
+    mgr.send_command.return_value = True
+    mgr.get_browse_result.return_value = {
+        "success": True,
+        "result": {
+            "path": "/home/test/workspace",
+            "name": "workspace",
+            "directories": [],
+            "parent": "/home/test",
+            "is_writable": True,
+        },
     }
     return mgr
 
@@ -190,11 +202,21 @@ class TestBrowseRemoteDirectoryAuthCheck:
     def test_admin_user_has_access(self, flask_app, remote_module, mock_agent_mgr):
         """
         Test that admin user has access to browse machine directory.
+
+        When machine is online, sends command to agent and returns result.
         """
         with flask_app.app_context():
             from flask import g
 
             g.user = {"id": 1, "username": "admin", "role": "admin"}
+
+            # Set machine to online for this test
+            mock_agent_mgr.get_machine.return_value = {
+                "machine_id": "test-machine-001",
+                "machine_name": "Test Machine",
+                "work_dir": "/home/test/workspace",
+                "status": "online",
+            }
 
             # Mock request.args to provide request context
             with flask_app.test_request_context():
@@ -207,6 +229,35 @@ class TestBrowseRemoteDirectoryAuthCheck:
                     assert status == 200
                     assert data["success"] is True
                     assert data["result"]["path"] == "/home/test/workspace"
+
+    def test_admin_user_offline_machine(self, flask_app, remote_module, mock_agent_mgr):
+        """
+        Test that browsing offline machine returns error.
+        """
+        with flask_app.app_context():
+            from flask import g
+
+            g.user = {"id": 1, "username": "admin", "role": "admin"}
+
+            # Set machine to offline for this test
+            mock_agent_mgr.get_machine.return_value = {
+                "machine_id": "test-machine-001",
+                "machine_name": "Test Machine",
+                "work_dir": "/home/test/workspace",
+                "status": "offline",
+            }
+
+            # Mock request.args to provide request context
+            with flask_app.test_request_context():
+                with patch.object(
+                    remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr
+                ):
+                    result = remote_module.browse_remote_directory("test-machine-001")
+                    data, status = parse_response(result)
+
+                    assert status == 200
+                    assert data["success"] is False
+                    assert "offline" in data["error"].lower()
 
 
 class TestBrowseRemoteDirectoryEdgeCases:
