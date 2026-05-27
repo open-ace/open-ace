@@ -550,25 +550,29 @@ class PromptLibrary:
         if user_id is not None:
             # Include user's private templates + all public templates
             cursor.execute(
-                f"""
-                SELECT category, COUNT(*) as count
-                FROM prompt_templates
-                WHERE (author_id = ? OR {adapt_boolean_condition('is_public', True)})
-                GROUP BY category
-                ORDER BY count DESC
-            """,
+                adapt_sql(
+                    f"""
+                    SELECT category, COUNT(*) as count
+                    FROM prompt_templates
+                    WHERE (author_id = ? OR {adapt_boolean_condition('is_public', True)})
+                    GROUP BY category
+                    ORDER BY count DESC
+                """
+                ),
                 (user_id,),
             )
         else:
             # Only count public templates
             cursor.execute(
-                f"""
-                SELECT category, COUNT(*) as count
-                FROM prompt_templates
-                WHERE {adapt_boolean_condition('is_public', True)}
-                GROUP BY category
-                ORDER BY count DESC
-            """
+                adapt_sql(
+                    f"""
+                    SELECT category, COUNT(*) as count
+                    FROM prompt_templates
+                    WHERE {adapt_boolean_condition('is_public', True)}
+                    GROUP BY category
+                    ORDER BY count DESC
+                """
+                )
             )
 
         rows = cursor.fetchall()
