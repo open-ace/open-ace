@@ -1044,6 +1044,28 @@ def agent_message():
 
         return jsonify({"success": True})
 
+    elif msg_type == "browse_result":
+        # Agent reports directory browse result
+        request_id = data.get("request_id", "")
+        success = data.get("success", False)
+        result = data.get("result")
+        error = data.get("error")
+
+        if request_id:
+            agent_mgr.store_browse_result(
+                request_id,
+                {
+                    "success": success,
+                    "result": result,
+                    "error": error,
+                },
+            )
+            logger.info("Stored browse result for request %s", request_id[:8])
+        else:
+            logger.warning("browse_result received without request_id")
+
+        return jsonify({"success": True})
+
     elif msg_type == "session_sync":
         # Agent reports Claude Code session data from web terminal
         claude_session_id = data.get("session_id", "")
@@ -2192,9 +2214,6 @@ def browse_remote_directory(machine_id):
 
     Returns directory information for the specified path.
     If no path is specified, returns the machine's work_dir as the default.
-
-    Note: Full directory browsing requires sending commands to the remote agent.
-    This simplified implementation returns machine info with work_dir for basic usage.
     """
 
     # Check authentication - g.user may not be set if before_request auth failed
@@ -2220,22 +2239,69 @@ def browse_remote_directory(machine_id):
     work_dir = machine.get("work_dir") or "/root/workspace"
     browse_path = path or work_dir
 
-    # Return a simplified response compatible with frontend expectations
-    # The frontend can use the work_dir as the default project path
+    # Check if agent is online
+    if machine.get("status") != "online":
+        # Agent offline - return fallback response
+        return jsonify(
+            {
+                "success": False,
+                "error": "Machine is offline. Directory browsing requires an active connection.",
+                "result": {
+                    "path": browse_path,
+                    "name": browse_path.split("/")[-1] or "/",
+                    "directories": [],
+                    "parent": browse_path.rsplit("/", 1)[0] if "/" in browse_path else None,
+                    "homePath": work_dir,
+                    "is_writable": False,
+                },
+                "machine": machine,
+            }
+        )
+
+    # Generate unique request ID for this browse request
+    import uuid
+
+    request_id = str(uuid.uuid4())
+
+    # Send browse_directory command to agent
+    command = {
+        "type": "command",
+        "command": "browse_directory",
+        "request_id": request_id,
+        "path": browse_path,
+    }
+
+    if not agent_mgr.send_command(machine_id, command):
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Failed to send command to agent",
+                }
+            ),
+            500,
+        )
+
+    # Wait for agent response (with timeout)
+    result = agent_mgr.get_browse_result(request_id, timeout=15.0)
+
+    if result is None:
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Timeout waiting for agent response. Please try again.",
+                }
+            ),
+            504,
+        )
+
+    # Return the result from agent
     return jsonify(
         {
-            "success": True,
-            "result": {
-                "path": browse_path,
-                "name": browse_path.split("/")[-1] or "/",
-                "directories": [],  # Full browsing requires remote agent command
-                "parent": browse_path.rsplit("/", 1)[0] if "/" in browse_path else None,
-                "homePath": work_dir,
-                "canCreate": True,  # Assume user can create in work_dir
-                "is_writable": True,
-            },
+            "success": result.get("success", False),
+            "result": result.get("result"),
+            "error": result.get("error"),
             "machine": machine,
-            "message": "Full directory browsing requires remote agent support. "
-            "Use the machine's work_dir as the default project path.",
         }
     )

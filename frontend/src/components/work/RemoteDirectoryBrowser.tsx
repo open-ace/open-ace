@@ -19,6 +19,7 @@ import { Loading, Button, EmptyState } from '@/components/common';
 interface RemoteDirectoryBrowserProps {
   machineId: string;
   initialPath?: string;
+  osType?: string; // Operating system type for cross-platform path handling
   onSelectPath: (path: string) => void;
   onClose?: () => void;
 }
@@ -32,10 +33,16 @@ const PATH_HISTORY_KEY = 'remote-path-history';
 export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
   machineId,
   initialPath,
+  osType,
   onSelectPath,
   onClose,
 }) => {
   const language = useLanguage();
+
+  // Detect if the remote machine is Windows
+  const isWindows = Boolean(osType?.toLowerCase().includes('windows'));
+
+  // State variables
   const [currentPath, setCurrentPath] = useState(initialPath ?? '');
   const [directories, setDirectories] = useState<DirectoryEntry[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -45,6 +52,36 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
   const [showCreateInput, setShowCreateInput] = useState(false);
   const [newDirName, setNewDirName] = useState('');
   const [pathHistory, setPathHistory] = useState<string[]>([]);
+  const [fallbackNote, setFallbackNote] = useState<string | null>(null);
+
+  // Cross-platform path utilities
+  const getPathSeparator = () => (isWindows ? '\\' : '/');
+
+  const splitPath = useCallback(
+    (path: string): string[] => {
+      if (!path) return [];
+      if (isWindows) {
+        const parts = path.split(/[\\/]/).filter(Boolean);
+        if (parts.length > 0 && parts[0].match(/^[A-Za-z]:$/)) {
+          return parts;
+        }
+        return parts;
+      }
+      return path.split('/').filter(Boolean);
+    },
+    [isWindows]
+  );
+
+  const getRootPath = useCallback((): string => {
+    if (isWindows) {
+      const parts = splitPath(currentPath);
+      if (parts.length > 0 && parts[0].match(/^[A-Za-z]:$/)) {
+        return parts[0] + '\\';
+      }
+      return 'C:\\';
+    }
+    return '/';
+  }, [isWindows, currentPath, splitPath]);
 
   // Load path history from localStorage
   useEffect(() => {
@@ -80,6 +117,7 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
     async (path: string) => {
       setIsLoading(true);
       setError(null);
+      setFallbackNote(null); // Clear previous fallback note
       try {
         const result = await fsApi.browseRemoteDirectory(machineId, path);
         if (result.success && result.result) {
@@ -88,6 +126,9 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
           setCurrentPath(browseResult.path);
           setParentPath(browseResult.parent);
           setIsWritable(browseResult.is_writable);
+          if (browseResult.fallback_note) {
+            setFallbackNote(browseResult.fallback_note);
+          }
         } else {
           setError(result.error ?? 'Failed to browse directory');
         }
@@ -149,24 +190,47 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
     fetchDirectories(path);
   };
 
-  // Get display name for path
+  // Get display name for path (cross-platform)
   const getDisplayPath = (path: string) => {
-    const parts = path.split('/').filter(Boolean);
-    return parts.length > 0 ? parts[parts.length - 1] : '/';
+    if (!path) return isWindows ? 'C:\\' : '/';
+    const parts = splitPath(path);
+    if (parts.length === 0) return isWindows ? 'C:\\' : '/';
+    // For Windows drive like "C:", return "C:"
+    if (parts.length === 1 && parts[0].match(/^[A-Za-z]:$/)) {
+      return parts[0];
+    }
+    return parts[parts.length - 1];
   };
 
-  // Get path breadcrumbs
+  // Get path breadcrumbs (cross-platform)
   const breadcrumbs = useMemo(() => {
     if (!currentPath) return [];
-    const parts = currentPath.split('/').filter(Boolean);
+    const parts = splitPath(currentPath);
     const crumbs: { name: string; path: string }[] = [];
-    let accumulatedPath = '';
-    for (const part of parts) {
-      accumulatedPath += '/' + part;
-      crumbs.push({ name: part, path: accumulatedPath });
+
+    if (isWindows) {
+      // Windows: build paths with backslash
+      let accumulatedPath = '';
+      for (let i = 0; i < parts.length; i++) {
+        const part = parts[i];
+        if (i === 0 && part.match(/^[A-Za-z]:$/)) {
+          // Drive letter - skip adding to crumbs since root button already shows it
+          accumulatedPath = part + '\\';
+        } else {
+          accumulatedPath = accumulatedPath + (accumulatedPath.endsWith('\\') ? '' : '\\') + part;
+          crumbs.push({ name: part, path: accumulatedPath });
+        }
+      }
+    } else {
+      // Unix: build paths with forward slash
+      let accumulatedPath = '';
+      for (const part of parts) {
+        accumulatedPath += '/' + part;
+        crumbs.push({ name: part, path: accumulatedPath });
+      }
     }
     return crumbs;
-  }, [currentPath]);
+  }, [currentPath, isWindows]);
 
   return (
     <div className="remote-directory-browser">
@@ -203,12 +267,15 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
       {/* Breadcrumbs */}
       <div className="mb-2">
         <div className="d-flex align-items-center gap-1 small">
-          <button className="btn btn-link btn-sm p-0" onClick={() => fetchDirectories('/')}>
-            /
+          <button
+            className="btn btn-link btn-sm p-0"
+            onClick={() => fetchDirectories(getRootPath())}
+          >
+            {isWindows ? currentPath?.match(/^[A-Za-z]:/)?.[0] || 'C:' : '/'}
           </button>
           {breadcrumbs.map((crumb, index) => (
             <React.Fragment key={crumb.path}>
-              <span className="text-muted">/</span>
+              <span className="text-muted">{getPathSeparator()}</span>
               <button
                 className={`btn btn-link btn-sm p-0 ${
                   index === breadcrumbs.length - 1 ? 'fw-bold' : ''
@@ -275,6 +342,14 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
         <div className="alert alert-danger small mb-2">
           <i className="bi bi-exclamation-triangle me-1" />
           {error}
+        </div>
+      )}
+
+      {/* Fallback note - show when path was changed */}
+      {fallbackNote && (
+        <div className="alert alert-info small mb-2">
+          <i className="bi bi-info-circle me-1" />
+          {fallbackNote}
         </div>
       )}
 
