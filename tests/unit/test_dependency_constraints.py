@@ -27,8 +27,11 @@ def _read_pyproject_dependencies() -> list[str]:
         if in_dependencies and line == "]":
             break
         if in_dependencies and line:
-            # Remove trailing comma, surrounding quotes, and unescape TOML string
-            dep = line.rstrip(",").strip('"').replace('\\"', '"')
+            # Remove trailing comma, then strip outer quotes precisely, then unescape
+            dep = line.rstrip(",")
+            if dep.startswith('"') and dep.endswith('"'):
+                dep = dep[1:-1]
+            dep = dep.replace('\\"', '"')
             dependencies.append(dep)
     return dependencies
 
