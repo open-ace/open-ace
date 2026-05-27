@@ -69,7 +69,7 @@ const defaultQwenSettings = `{
 }`;
 
 const defaultCodexSettings = `model_provider = "openace"
-model = "qwen3.7-max"
+model = "glm-5"
 
 [model_providers.openace]
 name = "Open ACE Proxy"
