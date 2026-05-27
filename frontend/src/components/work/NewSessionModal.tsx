@@ -413,6 +413,7 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
         onClose={() => setShowDirectoryBrowser(false)}
         machineId={selectedMachineId}
         initialPath={projectPath || (selectedMachine ? getDefaultPath(selectedMachine.os_type) : '')}
+        osType={selectedMachine?.os_type ?? undefined}
         onSelectPath={(path) => {
           setProjectPath(path);
           savePathToHistory(path);

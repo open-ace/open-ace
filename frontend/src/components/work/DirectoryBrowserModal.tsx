@@ -20,6 +20,7 @@ interface DirectoryBrowserModalProps {
   onClose: () => void;
   machineId: string;
   initialPath?: string;
+  osType?: string; // Operating system type for cross-platform path handling
   onSelectPath: (path: string) => void;
 }
 
@@ -28,6 +29,7 @@ export const DirectoryBrowserModal: React.FC<DirectoryBrowserModalProps> = ({
   onClose,
   machineId,
   initialPath,
+  osType,
   onSelectPath,
 }) => {
   const language = useLanguage();
@@ -42,6 +44,7 @@ export const DirectoryBrowserModal: React.FC<DirectoryBrowserModalProps> = ({
       <RemoteDirectoryBrowser
         machineId={machineId}
         initialPath={initialPath}
+        osType={osType}
         onSelectPath={(path) => {
           onSelectPath(path);
           onClose();

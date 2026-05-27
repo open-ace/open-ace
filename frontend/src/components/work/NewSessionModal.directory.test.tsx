@@ -4,7 +4,6 @@
  * Issue #584: Tests for directory browser integration
  */
 
-import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 
@@ -34,7 +33,7 @@ vi.mock('@/i18n', () => ({
 }));
 
 vi.mock('@/components/common', () => ({
-  Modal: ({ isOpen, onClose, title, footer, children }: any) =>
+  Modal: ({ isOpen, title, footer, children }: any) =>
     isOpen ? (
       <div data-testid="new-session-modal">
         <h5>{title}</h5>
@@ -145,13 +144,8 @@ describe('NewSessionModal - Directory Browser Integration', () => {
       // because the condition is `selectedMachineId && workspaceType === 'remote'`
       // Since selectedMachineId is empty (no machine selected), the section should not appear
 
-      // Check that browse button is not present by checking its specific test structure
+      // Check that project path section is not rendered
       // Note: The actual component doesn't render project path when no machine is selected
-      // But we need to verify this behavior
-      const browseButtons = screen.queryAllByText('browse');
-      // Should have no browse buttons in the remote project path section
-      // (Terminal section also has browse button, which may appear)
-      // So we check specifically for the project path input
       expect(screen.queryByLabelText('projectPath')).toBeNull();
     });
 
