@@ -206,9 +206,8 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
       for (let i = 0; i < parts.length; i++) {
         const part = parts[i];
         if (i === 0 && part.match(/^[A-Za-z]:$/)) {
-          // Drive letter
+          // Drive letter - skip adding to crumbs since root button already shows it
           accumulatedPath = part + '\\';
-          crumbs.push({ name: part, path: accumulatedPath });
         } else {
           accumulatedPath = accumulatedPath + (accumulatedPath.endsWith('\\') ? '' : '\\') + part;
           crumbs.push({ name: part, path: accumulatedPath });

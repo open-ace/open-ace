@@ -887,22 +887,43 @@ class RemoteAgent:
         import stat
 
         request_id = data.get("request_id", "")
-        path = data.get("path", os.path.expanduser("~"))
+        requested_path = data.get("path", "")
+        # Use home directory as fallback if no path provided
+        path = requested_path or os.path.expanduser("~")
         logger.info("Browsing directory: %s (request_id=%s)", path, request_id[:8] if request_id else "none")
 
         try:
-            # Check if path exists
+            # If requested path doesn't exist, try to find a fallback
             if not os.path.exists(path):
-                self._http_send(
-                    {
-                        "type": "browse_result",
-                        "machine_id": self.config.machine_id,
-                        "request_id": request_id,
-                        "success": False,
-                        "error": f"Path does not exist: {path}",
-                    }
-                )
-                return
+                # Try parent directory first
+                parent = os.path.dirname(path)
+                if parent and os.path.exists(parent) and os.path.isdir(parent):
+                    # Browse parent instead and note the fallback
+                    actual_path = parent
+                    fallback_note = f"Requested path '{path}' does not exist. Showing parent directory instead."
+                    logger.info("Path %s not found, falling back to parent %s", path, parent)
+                else:
+                    # Fall back to home directory
+                    home = os.path.expanduser("~")
+                    if os.path.exists(home):
+                        actual_path = home
+                        fallback_note = f"Requested path '{path}' does not exist. Showing home directory instead."
+                        logger.info("Path %s not found, falling back to home %s", path, home)
+                    else:
+                        # No fallback available
+                        self._http_send(
+                            {
+                                "type": "browse_result",
+                                "machine_id": self.config.machine_id,
+                                "request_id": request_id,
+                                "success": False,
+                                "error": f"Path does not exist: {path}",
+                            }
+                        )
+                        return
+                path = actual_path
+            else:
+                fallback_note = None
 
             # Check if it's a directory
             if not os.path.isdir(path):
@@ -970,6 +991,7 @@ class RemoteAgent:
                         "homePath": os.path.expanduser("~"),
                         "canCreate": is_writable,
                         "is_writable": is_writable,
+                        "fallback_note": fallback_note,  # Include note if path was changed
                     },
                 }
             )
