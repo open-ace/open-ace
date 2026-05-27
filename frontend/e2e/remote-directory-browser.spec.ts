@@ -118,12 +118,7 @@ test.describe('Remote Directory Browser', () => {
     await page.goto('/work');
 
     const newSessionBtn = page.locator('button').filter({ hasText: /新建会话|New Session/ });
-    const btnCount = await newSessionBtn.count();
-
-    if (btnCount === 0) {
-      test.skip(true, 'New session button not found - no machines registered');
-      return;
-    }
+    await expect(newSessionBtn.first()).toBeVisible();
 
     await newSessionBtn.first().click();
     await expect(page.locator('.modal')).toBeVisible();
