@@ -120,6 +120,18 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
     return '/root/workspace';
   };
 
+  // Extract the last directory name from a path (cross-platform)
+  const getLastPathPart = (path: string): string => {
+    if (!path) return path;
+    // Handle both Unix and Windows paths
+    const parts = path.split(/[/\\]/).filter(Boolean);
+    // For Windows drive like "C:", return it directly
+    if (parts.length === 1 && parts[0].match(/^[A-Za-z]:$/)) {
+      return parts[0];
+    }
+    return parts[parts.length - 1] || path;
+  };
+
   // Handle machine selection from RemoteMachineSelector
   const handleMachineSelect = (machineId: string, machine: RemoteMachine | undefined) => {
     setSelectedMachineId(machineId);
@@ -326,7 +338,7 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
                         title={path}
                       >
                         <i className="bi bi-folder me-1" />
-                        {path.split('/').pop() || path}
+                        {getLastPathPart(path)}
                       </button>
                     ))}
                   </div>
@@ -378,7 +390,7 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
                           title={path}
                         >
                           <i className="bi bi-folder me-1" />
-                          {path.split('/').pop() || path}
+                          {getLastPathPart(path)}
                         </button>
                       ))}
                     </div>
