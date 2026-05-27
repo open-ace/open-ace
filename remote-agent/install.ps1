@@ -85,7 +85,8 @@ $files = @(
     "websocket_proxy.py",
     "session_isolation.py",
     "session_sync.py",
-    "openace_cli.py"
+    "openace_cli.py",
+    "cli_settings.py"
 )
 $adapterFiles = @("__init__.py", "base.py", "qwen_code.py", "claude_code.py", "codex_cli.py", "codex_jsonl_parser.py", "openclaw.py")
 
