@@ -862,17 +862,17 @@ class AnalysisService:
                 continue
 
             if std_dev > 0:
-                deviation = (token - avg_tokens) / std_dev
+                std_deviation = (token - avg_tokens) / std_dev  # For spike detection
 
                 # Usage spike: more than 2 standard deviations above mean
-                if deviation > 2:
+                if std_deviation > 2:
                     anomaly = {
                         "date": date,
                         "tokens": token,
                         "expected": round(avg_tokens),
-                        "deviation": round(deviation, 2),
+                        "deviation": round(abs(token - avg_tokens) / avg_tokens * 100, 1),  # Unified: percentage
                         "type": "spike",
-                        "severity": "high" if deviation > 3 else "medium",
+                        "severity": "high" if std_deviation > 3 else "medium",
                     }
 
                     # Apply filters
@@ -889,7 +889,7 @@ class AnalysisService:
                         "date": date,
                         "tokens": token,
                         "expected": round(avg_tokens),
-                        "deviation": round((avg_tokens - token) / avg_tokens * 100, 1),
+                        "deviation": round(abs(token - avg_tokens) / avg_tokens * 100, 1),  # Unified: percentage
                         "type": "drop",
                         "severity": "low",
                     }
