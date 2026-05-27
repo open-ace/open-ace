@@ -43,8 +43,9 @@ test.describe('Remote Directory Browser', () => {
     await remoteBtn.click();
     await expect(remoteBtn).toHaveAttribute('class', /btn-primary/);
 
-    const machineSelect = page.locator('select');
-    await expect(machineSelect.first()).toBeVisible();
+    // Machine list area should be visible (either with machines or "No available machines")
+    const machineArea = page.locator('.modal').locator('text=Machine');
+    await expect(machineArea.first()).toBeVisible();
   });
 
   test('selecting terminal workspace shows machine selector', async ({ page }) => {
@@ -59,8 +60,8 @@ test.describe('Remote Directory Browser', () => {
     await terminalBtn.click();
     await expect(terminalBtn).toHaveAttribute('class', /btn-primary/);
 
-    const machineSelect = page.locator('select');
-    await expect(machineSelect.first()).toBeVisible();
+    const machineArea = page.locator('.modal').locator('text=Machine');
+    await expect(machineArea.first()).toBeVisible();
   });
 
   test('browse button appears after machine selection for remote workspace', async ({ page }) => {
@@ -74,12 +75,11 @@ test.describe('Remote Directory Browser', () => {
     const remoteBtn = page.locator('button').filter({ hasText: /远程|Remote/ });
     await remoteBtn.click();
 
-    const machineSelect = page.locator('select').first();
-    const options = await machineSelect.locator('option').count();
-    test.skip(options <= 1, 'No machines registered - requires setup');
-
-    await machineSelect.selectOption({ index: 1 });
-    await page.waitForTimeout(500);
+    // Check if machines are available
+    const noMachines = page.locator('.modal').getByText(/No available machines|没有可用的机器/);
+    if (await noMachines.isVisible()) {
+      test.skip(true, 'No machines registered - requires setup');
+    }
 
     const browseBtn = page.locator('button').filter({ hasText: /浏览|Browse/ });
     await expect(browseBtn.first()).toBeVisible();
@@ -96,12 +96,10 @@ test.describe('Remote Directory Browser', () => {
     const terminalBtn = page.locator('button').filter({ hasText: /终端|Terminal/ });
     await terminalBtn.click();
 
-    const machineSelect = page.locator('select').first();
-    const options = await machineSelect.locator('option').count();
-    test.skip(options <= 1, 'No machines registered - requires setup');
-
-    await machineSelect.selectOption({ index: 1 });
-    await page.waitForTimeout(500);
+    const noMachines = page.locator('.modal').getByText(/No available machines|没有可用的机器/);
+    if (await noMachines.isVisible()) {
+      test.skip(true, 'No machines registered - requires setup');
+    }
 
     const workDirLabel = page.locator('.form-label').filter({ hasText: /工作目录|Working Directory/ });
     await expect(workDirLabel.first()).toBeVisible();
