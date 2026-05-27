@@ -870,7 +870,9 @@ class AnalysisService:
                         "date": date,
                         "tokens": token,
                         "expected": round(avg_tokens),
-                        "deviation": round(abs(token - avg_tokens) / avg_tokens * 100, 1),  # Unified: percentage
+                        "deviation": round(
+                            abs(token - avg_tokens) / avg_tokens * 100, 1
+                        ),  # Unified: percentage
                         "type": "spike",
                         "severity": "high" if std_deviation > 3 else "medium",
                     }
@@ -889,7 +891,9 @@ class AnalysisService:
                         "date": date,
                         "tokens": token,
                         "expected": round(avg_tokens),
-                        "deviation": round(abs(token - avg_tokens) / avg_tokens * 100, 1),  # Unified: percentage
+                        "deviation": round(
+                            abs(token - avg_tokens) / avg_tokens * 100, 1
+                        ),  # Unified: percentage
                         "type": "drop",
                         "severity": "low",
                     }
