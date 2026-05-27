@@ -468,14 +468,17 @@ function getImpactKey(type: string): string {
 }
 
 function getTranslatedMessage(rec: { type: string; message: string }, language: string): string {
-  const key = rec.type === 'optimization' ? 'recOptimizePrompts'
-    : rec.type === 'info' ? 'recHighToolConcentration'
-    : rec.type === 'success' ? 'recHealthyUsage'
-    : null;
-
-  if (key) {
-    return t(key, language as Language);
+  // Match specific message patterns to avoid semantic errors
+  if (rec.message.includes('optimizing prompts') || rec.message.includes('reduce input token')) {
+    return t('recOptimizePrompts', language as Language);
   }
+  if (rec.message.includes('High concentration of usage')) {
+    return t('recHighToolConcentration', language as Language);
+  }
+  if (rec.message.includes('Usage patterns look healthy')) {
+    return t('recHealthyUsage', language as Language);
+  }
+  // Return original message for unmatched patterns
   return rec.message;
 }
 

@@ -129,7 +129,8 @@ export const APIKeyManagement: React.FC = () => {
       /^[A-Za-z0-9_-]+$/.test(key) ? key : `"${key.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 
     const formatValue = (input: unknown): string => {
-      if (typeof input === 'string') return `"${input.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+      if (typeof input === 'string')
+        return `"${input.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
       if (typeof input === 'boolean') return input ? 'true' : 'false';
       if (typeof input === 'number') return String(input);
       if (Array.isArray(input)) return `[${input.map((item) => formatValue(item)).join(', ')}]`;
@@ -138,8 +139,12 @@ export const APIKeyManagement: React.FC = () => {
 
     const emitTable = (obj: Record<string, unknown>, path: string[] = []): string[] => {
       const lines: string[] = [];
-      const scalarEntries = Object.entries(obj).filter(([, val]) => !(val && typeof val === 'object' && !Array.isArray(val)));
-      const tableEntries = Object.entries(obj).filter(([, val]) => val && typeof val === 'object' && !Array.isArray(val));
+      const scalarEntries = Object.entries(obj).filter(
+        ([, val]) => !(val && typeof val === 'object' && !Array.isArray(val))
+      );
+      const tableEntries = Object.entries(obj).filter(
+        ([, val]) => val && typeof val === 'object' && !Array.isArray(val)
+      );
 
       if (path.length) {
         lines.push(`[${path.map(formatKey).join('.')}]`);
