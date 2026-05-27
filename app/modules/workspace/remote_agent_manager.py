@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Open ACE - Remote Agent Manager
 
@@ -11,7 +13,7 @@ import time
 import uuid
 from contextlib import suppress
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 import gevent
 from gevent.lock import Semaphore
@@ -44,7 +46,7 @@ class RemoteAgentManager:
     # Heartbeat rate-limiting interval (seconds)
     HEARTBEAT_DB_WRITE_INTERVAL = 30
 
-    def __init__(self, db_path: Optional[str] = None):
+    def __init__(self, db_path: str | None = None):
         self.db_path = db_path or str(DB_PATH)
         if db_path:
             self.db = Database(db_url=f"sqlite:///{self.db_path}")
@@ -266,13 +268,13 @@ class RemoteAgentManager:
         registration_token: str,
         machine_id: str,
         machine_name: str,
-        hostname: Optional[str] = None,
-        os_type: Optional[str] = None,
-        os_version: Optional[str] = None,
-        capabilities: Optional[dict] = None,
-        agent_version: Optional[str] = None,
-        ip_address: Optional[str] = None,
-    ) -> Optional[dict[str, Any]]:
+        hostname: str | None = None,
+        os_type: str | None = None,
+        os_version: str | None = None,
+        capabilities: dict | None = None,
+        agent_version: str | None = None,
+        ip_address: str | None = None,
+    ) -> dict[str, Any] | None:
         """
         Register a new remote machine using a registration token.
 
@@ -596,7 +598,7 @@ class RemoteAgentManager:
             self._browse_results[request_id] = result
         logger.info("Stored browse result for request %s", request_id[:8])
 
-    def get_browse_result(self, request_id: str, timeout: float = 10.0) -> Optional[dict]:
+    def get_browse_result(self, request_id: str, timeout: float = 10.0) -> dict | None:
         """Wait for and retrieve browse result.
 
         Polls for the result with a timeout. Returns None if timeout expires.
@@ -648,7 +650,7 @@ class RemoteAgentManager:
 
         terminal_info_store.put(machine_id, terminal_id, info)
 
-    def get_backend_url(self, request_base_url: Optional[str] = None) -> str:
+    def get_backend_url(self, request_base_url: str | None = None) -> str:
         """Get the externally reachable backend URL for agents and CLI tools."""
         config: dict[str, Any] = {}
         try:
@@ -699,7 +701,7 @@ class RemoteAgentManager:
             self._session_machines.pop(session_id, None)
             self._output_buffers.pop(session_id, None)
 
-    def get_machine_for_session(self, session_id: str) -> Optional[str]:
+    def get_machine_for_session(self, session_id: str) -> str | None:
         """Get the machine ID for a session."""
         return self._session_machines.get(session_id)
 
@@ -735,7 +737,7 @@ class RemoteAgentManager:
         machine_id: str,
         status: str = "idle",
         active_sessions: int = 0,
-        capabilities: Optional[dict[str, Any]] = None,
+        capabilities: dict[str, Any] | None = None,
     ) -> None:
         """Process a heartbeat from a remote agent."""
         # Ensure HTTP polling agents are tracked in _connections
@@ -788,7 +790,7 @@ class RemoteAgentManager:
 
     # ==================== Machine Queries ====================
 
-    def get_machine(self, machine_id: str) -> Optional[dict[str, Any]]:
+    def get_machine(self, machine_id: str) -> dict[str, Any] | None:
         """Get machine details."""
         with self.db.connection() as conn:
             cursor = conn.cursor()
@@ -804,7 +806,7 @@ class RemoteAgentManager:
         return self._row_to_machine(row)
 
     def list_machines(
-        self, tenant_id: Optional[int] = None, user_id: Optional[int] = None
+        self, tenant_id: int | None = None, user_id: int | None = None
     ) -> list[dict[str, Any]]:
         """List machines, optionally filtered by tenant or user assignments."""
         with self.db.connection() as conn:
@@ -908,7 +910,7 @@ class RemoteAgentManager:
 
         return cast("bool", success)
 
-    def check_user_access(self, machine_id: str, user_id: int) -> Optional[str]:
+    def check_user_access(self, machine_id: str, user_id: int) -> str | None:
         """Check user access, returns permission level ('admin'/'user') or None."""
         with self.db.connection() as conn:
             cursor = conn.cursor()
@@ -924,11 +926,9 @@ class RemoteAgentManager:
 
         if result is None:
             return None
-        return cast(
-            "Optional[str]", result["permission"] if isinstance(result, dict) else result[0]
-        )
+        return cast("str | None", result["permission"] if isinstance(result, dict) else result[0])
 
-    def get_user_permission(self, machine_id: str, user_id: int) -> Optional[str]:
+    def get_user_permission(self, machine_id: str, user_id: int) -> str | None:
         """Return user's machine permission: 'admin', 'user', or None."""
         return self.check_user_access(machine_id, user_id)
 
@@ -1055,7 +1055,7 @@ def get_ddl_statements() -> list[str]:
 
 
 # Global singleton
-_agent_manager: Optional[RemoteAgentManager] = None
+_agent_manager: RemoteAgentManager | None = None
 
 
 def get_remote_agent_manager() -> RemoteAgentManager:

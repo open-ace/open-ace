@@ -14,7 +14,7 @@
 import React, { useState, useMemo } from 'react';
 import { cn } from '@/utils';
 import { useLanguage } from '@/store';
-import { t } from '@/i18n';
+import { t, type Language } from '@/i18n';
 import {
   Card,
   StatCard,
@@ -400,12 +400,16 @@ export const AnomalyDetection: React.FC = () => {
                           <div>
                             <h6 className="mb-1">
                               <i className={cn('bi me-2', getRecommendationIcon(rec.type))} />
-                              {rec.title}
+                              {getTranslatedMessage(rec, language)}
                             </h6>
-                            <p className="mb-1 text-muted small">{rec.description}</p>
+                            {rec.details && (
+                              <p className="mb-1 text-muted small">
+                                {getTranslatedDetails(rec, language)}
+                              </p>
+                            )}
                           </div>
-                          <span className={cn('badge', getImpactBadge(rec.impact))}>
-                            {rec.impact}
+                          <span className={cn('badge', getImpactBadge(rec.type))}>
+                            {t(getImpactKey(rec.type), language)}
                           </span>
                         </div>
                       </li>
@@ -437,12 +441,62 @@ function getRecommendationIcon(type: string): string {
   return icons[type] ?? 'bi-lightbulb';
 }
 
-function getImpactBadge(impact: string | undefined): string {
-  if (!impact) return 'bg-secondary';
+function getImpactBadge(type: string): string {
   const badges: Record<string, string> = {
-    high: 'bg-danger',
-    medium: 'bg-warning',
-    low: 'bg-info',
+    optimization: 'bg-warning',
+    cost: 'bg-danger',
+    performance: 'bg-warning',
+    security: 'bg-danger',
+    usage: 'bg-info',
+    info: 'bg-info',
+    success: 'bg-success',
   };
-  return badges[impact.toLowerCase()] || 'bg-secondary';
+  return badges[type] || 'bg-secondary';
+}
+
+function getImpactKey(type: string): string {
+  const keys: Record<string, string> = {
+    optimization: 'recImpactMedium',
+    cost: 'recImpactHigh',
+    performance: 'recImpactMedium',
+    security: 'recImpactHigh',
+    usage: 'recImpactLow',
+    info: 'recImpactInfo',
+    success: 'recImpactGood',
+  };
+  return keys[type] || 'recImpactInfo';
+}
+
+function getTranslatedMessage(rec: { type: string; message: string }, language: string): string {
+  // Match specific message patterns to avoid semantic errors
+  if (rec.message.includes('optimizing prompts') || rec.message.includes('reduce input token')) {
+    return t('recOptimizePrompts', language as Language);
+  }
+  if (rec.message.includes('High concentration of usage')) {
+    return t('recHighToolConcentration', language as Language);
+  }
+  if (rec.message.includes('Usage patterns look healthy')) {
+    return t('recHealthyUsage', language as Language);
+  }
+  // Return original message for unmatched patterns
+  return rec.message;
+}
+
+function getTranslatedDetails(rec: { type: string; details?: string }, language: string): string {
+  if (!rec.details) return '';
+
+  // Parse and translate details
+  // Pattern 1: "Current output/input ratio: 0.04"
+  const ratioMatch = rec.details.match(/Current output\/input ratio:\s*([\d.]+)/);
+  if (ratioMatch) {
+    return `${t('recCurrentRatio', language as Language)}: ${ratioMatch[1]}`;
+  }
+
+  // Pattern 2: "qwen accounts for 100.0% of total tokens"
+  const toolMatch = rec.details.match(/(.+)\s+accounts for\s+([\d.]+%)\s+of total tokens/);
+  if (toolMatch) {
+    return `${toolMatch[1]} ${t('recToolAccountsFor', language as Language)} ${toolMatch[2]}`;
+  }
+
+  return rec.details;
 }
