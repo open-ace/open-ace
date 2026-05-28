@@ -250,7 +250,7 @@ export const useAppStore = create<AppState>()(
         // Issue #65: Persist workspace tabs state (exclude sensitive fields)
         workspaceTabs: state.workspaceTabs.map(
           // eslint-disable-next-line @typescript-eslint/no-unused-vars
-          ({ terminalToken, terminalWsUrl, ...rest }) => rest
+          ({ terminalToken, terminalWsUrl, waitingForUser, waitingType, ...rest }) => rest
         ),
         workspaceActiveTabId: state.workspaceActiveTabId,
       }),
