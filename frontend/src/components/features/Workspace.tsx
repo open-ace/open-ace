@@ -93,6 +93,12 @@ export const Workspace: React.FC = () => {
   // Remote projects list (Issue #417: Populate "Your Projects" for remote workspace)
   const [remoteProjects, setRemoteProjects] = useState<RemoteProject[]>([]);
 
+  // State for switch project request from iframe (Issue #229)
+  const [switchProjectRequest, setSwitchProjectRequest] = useState<{
+    workspaceType: 'local' | 'remote';
+    machineId?: string;
+  } | null>(null);
+
   // Tab notifications setting
   const enableTabNotifications = useEnableTabNotifications();
 
@@ -403,6 +409,18 @@ export const Workspace: React.FC = () => {
       // Listen for ESC key forwarded from qwen-code-webui iframe (Issue #103)
       if (event.data?.type === 'qwen-code-esc-pressed' && workspaceFullscreen) {
         exitWorkspaceFullscreen();
+      }
+
+      // Listen for switch project request from qwen-code-webui iframe (Issue #229)
+      // When user clicks "Switch project" button inside iframe while thinking,
+      // create a new tab for project selection instead of interrupting current session
+      if (event.data?.type === 'qwen-code-switch-project-request') {
+        const { workspaceType, machineId } = event.data;
+        // Set state to trigger tab creation in separate useEffect
+        setSwitchProjectRequest({
+          workspaceType: workspaceType ?? 'local',
+          machineId: machineId ?? undefined,
+        });
       }
     };
 
@@ -1204,6 +1222,20 @@ export const Workspace: React.FC = () => {
     },
     [getEffectiveUrl, userWebUI, language, addStoredTab, setStoredActiveTabId, clearTabNotification]
   );
+
+  // Handle switch project request from iframe (Issue #229)
+  // Create a new tab for project selection without interrupting current session
+  useEffect(() => {
+    if (switchProjectRequest) {
+      createNewTab(undefined, {
+        workspaceType: switchProjectRequest.workspaceType,
+        machineId: switchProjectRequest.machineId,
+        machineName: undefined, // machineName will be set after project selection
+      });
+      // Clear the request after handling
+      setSwitchProjectRequest(null);
+    }
+  }, [switchProjectRequest, createNewTab]);
 
   // Actually remove a tab (shared by closeTab and remote close confirmation)
   const doCloseTab = useCallback(
