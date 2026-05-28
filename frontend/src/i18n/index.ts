@@ -865,8 +865,7 @@ const translations: Record<Language, Translations> = {
     emptyDirectory: 'Empty Directory',
     noSubdirectories: 'No subdirectories found',
     folderName: 'Folder name',
-    createDirNotAvailable:
-      'Unable to create directory. Please check the folder name and try again.',
+    createDirFailed: 'Unable to create directory. Please check the folder name and try again.',
     createDirError: 'Failed to create directory.',
   },
   zh: {
@@ -1708,7 +1707,7 @@ const translations: Record<Language, Translations> = {
     emptyDirectory: '空目录',
     noSubdirectories: '没有子目录',
     folderName: '文件夹名称',
-    createDirNotAvailable: '无法创建目录，请检查文件夹名称后重试。',
+    createDirFailed: '无法创建目录，请检查文件夹名称后重试。',
     createDirError: '创建目录失败。',
   },
   ja: {
@@ -2256,8 +2255,7 @@ const translations: Record<Language, Translations> = {
     emptyDirectory: '空のディレクトリ',
     noSubdirectories: 'サブディレクトリがありません',
     folderName: 'フォルダ名',
-    createDirNotAvailable:
-      'ディレクトリを作成できません。フォルダ名を確認して再試行してください。',
+    createDirFailed: 'ディレクトリを作成できません。フォルダ名を確認して再試行してください。',
     createDirError: 'ディレクトリの作成に失敗しました。',
   },
   ko: {
@@ -2803,8 +2801,7 @@ const translations: Record<Language, Translations> = {
     emptyDirectory: '빈 디렉토리',
     noSubdirectories: '하위 디렉토리 없음',
     folderName: '폴더 이름',
-    createDirNotAvailable:
-      '디렉토리를 생성할 수 없습니다. 폴더 이름을 확인하고 다시 시도해 주세요.',
+    createDirFailed: '디렉토리를 생성할 수 없습니다. 폴더 이름을 확인하고 다시 시도해 주세요.',
     createDirError: '디렉토리 생성에 실패했습니다.',
   },
 };

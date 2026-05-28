@@ -2328,6 +2328,9 @@ def create_remote_directory(machine_id):
     if not dir_path:
         return jsonify({"success": False, "error": "Path is required"}), 400
 
+    if len(dir_path) > 4096:
+        return jsonify({"success": False, "error": "Path too long"}), 400
+
     machine = agent_mgr.get_machine(machine_id)
     if not machine:
         return jsonify({"error": "Machine not found"}), 404

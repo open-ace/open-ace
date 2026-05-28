@@ -178,10 +178,12 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
         setNewDirName('');
         await fetchDirectories(currentPath);
       } else {
-        setError(result.error || t('createDirError', language) || 'Failed to create directory');
+        const fallback = t('createDirError', language) ?? 'Failed to create directory';
+        setError(result.error ?? fallback);
       }
     } catch (err) {
-      setError((err as Error)?.message || t('createDirError', language) || 'Failed to create directory');
+      const fallback = t('createDirError', language) ?? 'Failed to create directory';
+      setError((err as Error)?.message ?? fallback);
     } finally {
       setIsLoading(false);
     }
