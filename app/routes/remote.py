@@ -343,9 +343,15 @@ def store_api_key():
     cli_settings = data.get(
         "cli_settings"
     )  # JSON object: {"claude-code": {...}, "qwen-code": {...}}
+    scope = data.get("scope", "remote")
+    priority = data.get("priority", 0)
+    weight = data.get("weight", 100)
 
     if not provider or not key_name or not api_key:
         return jsonify({"error": "provider, key_name, and api_key are required"}), 400
+
+    if scope not in ("local", "remote", "shared"):
+        return jsonify({"error": "scope must be 'local', 'remote', or 'shared'"}), 400
 
     validation_error = validate_cli_settings_payload(cli_settings)
     if validation_error:
@@ -361,6 +367,9 @@ def store_api_key():
         created_by=g.user["id"],
         cli_tools=cli_tools,
         cli_settings=cli_settings,
+        scope=scope,
+        priority=int(priority),
+        weight=int(weight),
     )
 
     if result.get("success"):
@@ -381,6 +390,11 @@ def update_api_key(key_id):
     is_active = data.get("is_active")
     if is_active is not None and not isinstance(is_active, bool):
         return jsonify({"error": "is_active must be a boolean"}), 400
+    scope = data.get("scope")
+    if scope is not None and scope not in ("local", "remote", "shared"):
+        return jsonify({"error": "scope must be 'local', 'remote', or 'shared'"}), 400
+    priority = data.get("priority")
+    weight = data.get("weight")
     tenant_id = int(data.get("tenant_id", 1))
 
     validation_error = validate_cli_settings_payload(cli_settings)
@@ -396,6 +410,9 @@ def update_api_key(key_id):
         cli_tools=cli_tools,
         cli_settings=cli_settings,
         is_active=is_active,
+        scope=scope,
+        priority=int(priority) if priority is not None else None,
+        weight=int(weight) if weight is not None else None,
     )
 
     if success:
@@ -1748,342 +1765,407 @@ def llm_proxy(path=""):
             429,
         )
 
-    # Resolve real API key
-    key_result = api_proxy.resolve_api_key(tenant_id, provider)
-    if not key_result:
-        return (
-            jsonify(
-                {
-                    "error": {
-                        "message": f"No API key configured for provider '{provider}'",
-                        "type": "config_error",
+    # Resolve real API key with scope filtering + failover loop.
+    # Retries until no more candidate keys remain for the provider/scope.
+    api_proxy = get_api_key_proxy_service()
+    exclude_key_ids: set[int] = set()
+    attempt = 0
+
+    while True:
+        attempt += 1
+        key_result = api_proxy.resolve_api_key_for_scope(
+            tenant_id, provider, scope="remote", exclude_key_ids=exclude_key_ids
+        )
+        if not key_result:
+            if exclude_key_ids:
+                # All candidate keys exhausted
+                return (
+                    jsonify(
+                        {
+                            "error": {
+                                "message": (
+                                    f"All {len(exclude_key_ids)} API key(s) failed "
+                                    f"for provider '{provider}'"
+                                ),
+                                "type": "upstream_error",
+                            }
+                        }
+                    ),
+                    502,
+                )
+            return (
+                jsonify(
+                    {
+                        "error": {
+                            "message": f"No API key configured for provider '{provider}'",
+                            "type": "config_error",
+                        }
                     }
-                }
-            ),
-            500,
-        )
-
-    api_key, base_url = key_result
-
-    # Determine target URL
-    if base_url:
-        target_base = base_url.rstrip("/")
-        # If base_url already ends with /v1, strip the /v1 prefix from path
-        if target_base.endswith("/v1"):
-            target_base = target_base[:-3]  # Remove trailing /v1
-    else:
-        # Default provider URLs
-        provider_urls = {
-            "openai": "https://api.openai.com",
-            "anthropic": "https://api.anthropic.com",
-            "google": "https://generativelanguage.googleapis.com",
-        }
-        target_base = provider_urls.get(provider, "https://api.openai.com")
-
-    if path:
-        # For Anthropic provider, keep the full path including /v1 prefix
-        # (z.ai proxy needs /v1/messages, not /messages)
-        target_url = f"{target_base}/{path}"
-    else:
-        # Handle direct path in the request URL
-        target_url = f"{target_base}{request.path.split('/llm-proxy')[-1]}"
-
-    # Log model from request body
-    try:
-        _body_json = json.loads(request.get_data())
-        _model = _body_json.get("model", "?")
-    except Exception:
-        _model = "?"
-    logger.info(
-        "LLM proxy: %s -> %s model=%s provider=%s", request.method, target_url, _model, provider
-    )
-
-    # Log response status for debugging
-    _orig_target_url = target_url
-
-    # ------------------------------------------------------------------
-    # Responses API → Chat Completions conversion for non-OpenAI providers
-    # ------------------------------------------------------------------
-    # Codex CLI uses the OpenAI Responses API (POST /v1/responses) which
-    # many third-party providers (dashscope, etc.) do not support. When
-    # the target provider is not the real OpenAI and the request targets
-    # /v1/responses, we convert the request body to Chat Completions
-    # format and forward to /v1/chat/completions instead.
-    _converted_from_responses = False
-    # Check if the target provider actually supports the Responses API.
-    # Only the real OpenAI API (api.openai.com) supports /v1/responses.
-    # Third-party OpenAI-compatible providers (dashscope, etc.) typically
-    # only support /v1/chat/completions, so we convert the request.
-    _is_real_openai = "api.openai.com" in target_url
-    if path and path.endswith("/responses") and not _is_real_openai:
-        try:
-            resp_body = json.loads(request.get_data())
-            messages = []
-            # Extract input: can be a string or array of content items
-            input_data = resp_body.get("input", "")
-            if isinstance(input_data, str):
-                messages.append({"role": "user", "content": input_data})
-            elif isinstance(input_data, list):
-                # Build message list from input array
-                for item in input_data:
-                    if isinstance(item, dict):
-                        role = item.get("role", "user")
-                        content = item.get("content", "")
-                        if isinstance(content, list):
-                            # Multi-part content
-                            content = " ".join(
-                                p.get("text", "") for p in content if isinstance(p, dict)
-                            )
-                        # Map unsupported roles for non-OpenAI providers
-                        if role == "developer":
-                            role = "system"
-                        messages.append({"role": role, "content": content or ""})
-
-            # Add instructions as system message if present
-            instructions = resp_body.get("instructions")
-            if instructions:
-                messages.insert(0, {"role": "system", "content": instructions})
-
-            if not messages:
-                messages.append({"role": "user", "content": ""})
-
-            cc_body = {
-                "model": resp_body.get("model", ""),
-                "messages": messages,
-                "stream": False,  # Non-streaming: we'll convert the response
-            }
-            if resp_body.get("max_output_tokens"):
-                cc_body["max_tokens"] = resp_body["max_output_tokens"]
-            if resp_body.get("temperature") is not None:
-                cc_body["temperature"] = resp_body["temperature"]
-
-            # Rewrite target URL to /v1/chat/completions
-            target_url = target_url.replace("/responses", "/chat/completions")
-            body = json.dumps(cc_body).encode("utf-8")
-            _converted_from_responses = True
-            logger.info(
-                "LLM proxy: converted Responses API -> Chat Completions for %s "
-                "(non-streaming; streaming conversion not yet implemented)",
-                target_url,
+                ),
+                500,
             )
-        except Exception as e:
-            logger.warning("Failed to convert Responses API request: %s", e)
 
-    # Forward the request
-    try:
-        import requests as http_requests
+        api_key, base_url, key_id = key_result
 
-        # Build forwarded headers
-        fwd_headers = {}
-        for key, value in request.headers:
-            if key.lower() in ("content-type", "accept", "user-agent"):
-                fwd_headers[key] = value
-
-        # Set the real API key
-        if provider == "anthropic":
-            fwd_headers["x-api-key"] = api_key
-            fwd_headers["anthropic-version"] = "2023-06-01"
+        # Determine target URL
+        if base_url:
+            target_base = base_url.rstrip("/")
+            if target_base.endswith("/v1"):
+                target_base = target_base[:-3]
         else:
-            fwd_headers["Authorization"] = f"Bearer {api_key}"
+            provider_urls = {
+                "openai": "https://api.openai.com",
+                "anthropic": "https://api.anthropic.com",
+                "google": "https://generativelanguage.googleapis.com",
+            }
+            target_base = provider_urls.get(provider, "https://api.openai.com")
 
-        # Check if this is a streaming request
-        if not _converted_from_responses:
-            body = request.get_data()
+        if path:
+            target_url = f"{target_base}/{path}"
+        else:
+            target_url = f"{target_base}{request.path.split('/llm-proxy')[-1]}"
 
-        # Forward the request (bypass system proxy to avoid interference)
-        resp = http_requests.request(
-            method=request.method,
-            url=target_url,
-            headers=fwd_headers,
-            data=body,
-            stream=True,
-            timeout=120,
-            proxies={"http": None, "https": None},  # type: ignore[dict-item]
+        # Log model from request body
+        try:
+            _body_json = json.loads(request.get_data())
+            _model = _body_json.get("model", "?")
+        except Exception:
+            _model = "?"
+        logger.info(
+            "LLM proxy: %s -> %s model=%s provider=%s key_id=%s attempt=%d",
+            request.method,
+            target_url,
+            _model,
+            provider,
+            key_id,
+            attempt,
         )
 
-        if resp.status_code >= 400:
-            peek = (
-                resp.content[:500]
-                if not resp.headers.get("Content-Type", "").startswith("text/event-stream")
-                else b""
-            )
-            logger.error(
-                f"LLM proxy error {resp.status_code} from {_orig_target_url}: {peek.decode('utf-8', errors='replace')}"
-            )
+        # Log response status for debugging
+        _orig_target_url = target_url
 
-        # If we converted from Responses API, convert the Chat Completions
-        # response back to Responses API format
-        if _converted_from_responses and resp.status_code == 200:
+        # ------------------------------------------------------------------
+        # Responses API → Chat Completions conversion for non-OpenAI providers
+        # ------------------------------------------------------------------
+        # Codex CLI uses the OpenAI Responses API (POST /v1/responses) which
+        # many third-party providers (dashscope, etc.) do not support. When
+        # the target provider is not the real OpenAI and the request targets
+        # /v1/responses, we convert the request body to Chat Completions
+        # format and forward to /v1/chat/completions instead.
+        _converted_from_responses = False
+        # Check if the target provider actually supports the Responses API.
+        # Only the real OpenAI API (api.openai.com) supports /v1/responses.
+        # Third-party OpenAI-compatible providers (dashscope, etc.) typically
+        # only support /v1/chat/completions, so we convert the request.
+        _is_real_openai = "api.openai.com" in target_url
+        if path and path.endswith("/responses") and not _is_real_openai:
             try:
-                cc_resp = resp.json()
-                # Build a minimal Responses API compatible response
-                response_id = f"resp_{cc_resp.get('id', 'default')}"
-                model = cc_resp.get("model", "")
-                output_text = ""
-                if cc_resp.get("choices"):
-                    output_text = cc_resp["choices"][0].get("message", {}).get("content", "")
-                usage = cc_resp.get("usage", {})
+                resp_body = json.loads(request.get_data())
+                messages = []
+                # Extract input: can be a string or array of content items
+                input_data = resp_body.get("input", "")
+                if isinstance(input_data, str):
+                    messages.append({"role": "user", "content": input_data})
+                elif isinstance(input_data, list):
+                    # Build message list from input array
+                    for item in input_data:
+                        if isinstance(item, dict):
+                            role = item.get("role", "user")
+                            content = item.get("content", "")
+                            if isinstance(content, list):
+                                # Multi-part content
+                                content = " ".join(
+                                    p.get("text", "") for p in content if isinstance(p, dict)
+                                )
+                            # Map unsupported roles for non-OpenAI providers
+                            if role == "developer":
+                                role = "system"
+                            messages.append({"role": role, "content": content or ""})
 
-                # Return SSE stream in Responses API format
-                import uuid as _uuid
+                # Add instructions as system message if present
+                instructions = resp_body.get("instructions")
+                if instructions:
+                    messages.insert(0, {"role": "system", "content": instructions})
 
-                item_id = f"msg_{_uuid.uuid4().hex[:24]}"
-                events: list[dict] = [
-                    {
-                        "type": "response.created",
-                        "response": {
-                            "id": response_id,
-                            "object": "response",
-                            "status": "in_progress",
-                            "model": model,
-                            "output": [],
-                            "usage": None,
-                        },
-                    },
-                    {
-                        "type": "response.output_item.added",
-                        "output_index": 0,
-                        "item": {
-                            "type": "message",
-                            "id": item_id,
-                            "status": "in_progress",
-                            "role": "assistant",
-                            "content": [],
-                        },
-                    },
-                    {
-                        "type": "response.content_part.added",
-                        "output_index": 0,
-                        "content_index": 0,
-                        "part": {"type": "output_text", "text": ""},
-                    },
-                    {
-                        "type": "response.output_text.delta",
-                        "output_index": 0,
-                        "content_index": 0,
-                        "delta": output_text,
-                    },
-                    {
-                        "type": "response.output_text.done",
-                        "output_index": 0,
-                        "content_index": 0,
-                        "text": output_text,
-                    },
-                    {
-                        "type": "response.content_part.done",
-                        "output_index": 0,
-                        "content_index": 0,
-                        "part": {"type": "output_text", "text": output_text},
-                    },
-                    {
-                        "type": "response.output_item.done",
-                        "output_index": 0,
-                        "item": {
-                            "type": "message",
-                            "id": item_id,
-                            "status": "completed",
-                            "role": "assistant",
-                            "content": [{"type": "output_text", "text": output_text}],
-                        },
-                    },
-                    {
-                        "type": "response.completed",
-                        "response": {
-                            "id": response_id,
-                            "object": "response",
-                            "status": "completed",
-                            "model": model,
-                            "output": [
-                                {
-                                    "type": "message",
-                                    "id": item_id,
-                                    "status": "completed",
-                                    "role": "assistant",
-                                    "content": [{"type": "output_text", "text": output_text}],
-                                }
-                            ],
-                            "usage": (
-                                {
-                                    "input_tokens": usage.get("prompt_tokens", 0),
-                                    "output_tokens": usage.get("completion_tokens", 0),
-                                    "total_tokens": usage.get("total_tokens", 0),
-                                }
-                                if usage
-                                else None
-                            ),
-                        },
-                    },
-                ]
+                if not messages:
+                    messages.append({"role": "user", "content": ""})
 
-                def sse_stream():
-                    for event in events:
-                        yield f"event: {event['type']}\ndata: {json.dumps(event)}\n\n"
+                cc_body = {
+                    "model": resp_body.get("model", ""),
+                    "messages": messages,
+                    "stream": False,  # Non-streaming: we'll convert the response
+                }
+                if resp_body.get("max_output_tokens"):
+                    cc_body["max_tokens"] = resp_body["max_output_tokens"]
+                if resp_body.get("temperature") is not None:
+                    cc_body["temperature"] = resp_body["temperature"]
 
-                return Response(
-                    sse_stream(),
-                    status=200,
-                    content_type="text/event-stream",
+                # Rewrite target URL to /v1/chat/completions
+                target_url = target_url.replace("/responses", "/chat/completions")
+                body = json.dumps(cc_body).encode("utf-8")
+                _converted_from_responses = True
+                logger.info(
+                    "LLM proxy: converted Responses API -> Chat Completions for %s "
+                    "(non-streaming; streaming conversion not yet implemented)",
+                    target_url,
                 )
             except Exception as e:
-                logger.error("Failed to convert CC response to Responses format: %s", e)
-                # Fall through to normal response handling
+                logger.warning("Failed to convert Responses API request: %s", e)
 
-        # Handle streaming response
-        content_type = resp.headers.get("Content-Type", "")
+        # Forward the request
+        try:
+            import requests as http_requests
 
-        def generate():
-            total_content = b""
-            for chunk in resp.iter_content(chunk_size=4096):
-                total_content += chunk
-                yield chunk
+            # Build forwarded headers
+            fwd_headers = {}
+            for key, value in request.headers:
+                if key.lower() in ("content-type", "accept", "user-agent"):
+                    fwd_headers[key] = value
 
-            # After streaming completes, try to extract token usage
-            try:
-                _record_llm_usage(total_content, session_id, user_id, provider, content_type)
-            except Exception as e:
-                logger.error(f"Failed to record LLM usage: {e}")
+            # Set the real API key
+            if provider == "anthropic":
+                fwd_headers["x-api-key"] = api_key
+                fwd_headers["anthropic-version"] = "2023-06-01"
+            else:
+                fwd_headers["Authorization"] = f"Bearer {api_key}"
 
-        # Build response headers
-        response_headers = {}
-        for key, value in resp.headers.items():
-            if key.lower() in ("content-type", "x-request-id", "openai-organization"):
-                response_headers[key] = value
+            # Check if this is a streaming request
+            if not _converted_from_responses:
+                body = request.get_data()
 
-        if "text/event-stream" in content_type:
-            return Response(
-                stream_with_context(generate()),
-                status=resp.status_code,
-                headers=response_headers,
-                content_type=content_type,
-            )
-        else:
-            # Non-streaming response
-            content = resp.content
-            try:
-                _record_llm_usage(content, session_id, user_id, provider, content_type)
-            except Exception as e:
-                logger.error(f"Failed to record LLM usage: {e}")
-
-            return Response(
-                content,
-                status=resp.status_code,
-                headers=response_headers,
-                content_type=content_type,
+            # Forward the request (bypass system proxy to avoid interference)
+            resp = http_requests.request(
+                method=request.method,
+                url=target_url,
+                headers=fwd_headers,
+                data=body,
+                stream=True,
+                timeout=120,
+                proxies={"http": None, "https": None},  # type: ignore[dict-item]
             )
 
-    except Exception as e:
-        logger.error(f"LLM proxy error: {e}")
-        return (
-            jsonify(
-                {
-                    "error": {
-                        "message": f"Proxy error: {str(e)}",
-                        "type": "proxy_error",
+            if resp.status_code >= 400:
+                peek = (
+                    resp.content[:500]
+                    if not resp.headers.get("Content-Type", "").startswith("text/event-stream")
+                    else b""
+                )
+                logger.error(
+                    "LLM proxy error %d from %s key_id=%s: %s",
+                    resp.status_code,
+                    _orig_target_url,
+                    key_id,
+                    peek.decode("utf-8", errors="replace"),
+                )
+
+                # Failover: on auth/quota errors, exclude this key and retry
+                if resp.status_code in (401, 403):
+                    logger.info(
+                        "LLM proxy failover: excluding key_id=%s, retrying (attempt %d)",
+                        key_id,
+                        attempt,
+                    )
+                    exclude_key_ids.add(key_id)
+                    continue
+                if resp.status_code == 429:
+                    logger.info(
+                        "LLM proxy rate-limited: excluding key_id=%s, retrying (attempt %d)",
+                        key_id,
+                        attempt,
+                    )
+                    exclude_key_ids.add(key_id)
+                    continue
+
+            # If we converted from Responses API, convert the Chat Completions
+            # response back to Responses API format
+            if _converted_from_responses and resp.status_code == 200:
+                try:
+                    cc_resp = resp.json()
+                    # Build a minimal Responses API compatible response
+                    response_id = f"resp_{cc_resp.get('id', 'default')}"
+                    model = cc_resp.get("model", "")
+                    output_text = ""
+                    if cc_resp.get("choices"):
+                        output_text = cc_resp["choices"][0].get("message", {}).get("content", "")
+                    usage = cc_resp.get("usage", {})
+
+                    # Return SSE stream in Responses API format
+                    import uuid as _uuid
+
+                    item_id = f"msg_{_uuid.uuid4().hex[:24]}"
+                    events: list[dict] = [
+                        {
+                            "type": "response.created",
+                            "response": {
+                                "id": response_id,
+                                "object": "response",
+                                "status": "in_progress",
+                                "model": model,
+                                "output": [],
+                                "usage": None,
+                            },
+                        },
+                        {
+                            "type": "response.output_item.added",
+                            "output_index": 0,
+                            "item": {
+                                "type": "message",
+                                "id": item_id,
+                                "status": "in_progress",
+                                "role": "assistant",
+                                "content": [],
+                            },
+                        },
+                        {
+                            "type": "response.content_part.added",
+                            "output_index": 0,
+                            "content_index": 0,
+                            "part": {"type": "output_text", "text": ""},
+                        },
+                        {
+                            "type": "response.output_text.delta",
+                            "output_index": 0,
+                            "content_index": 0,
+                            "delta": output_text,
+                        },
+                        {
+                            "type": "response.output_text.done",
+                            "output_index": 0,
+                            "content_index": 0,
+                            "text": output_text,
+                        },
+                        {
+                            "type": "response.content_part.done",
+                            "output_index": 0,
+                            "content_index": 0,
+                            "part": {"type": "output_text", "text": output_text},
+                        },
+                        {
+                            "type": "response.output_item.done",
+                            "output_index": 0,
+                            "item": {
+                                "type": "message",
+                                "id": item_id,
+                                "status": "completed",
+                                "role": "assistant",
+                                "content": [{"type": "output_text", "text": output_text}],
+                            },
+                        },
+                        {
+                            "type": "response.completed",
+                            "response": {
+                                "id": response_id,
+                                "object": "response",
+                                "status": "completed",
+                                "model": model,
+                                "output": [
+                                    {
+                                        "type": "message",
+                                        "id": item_id,
+                                        "status": "completed",
+                                        "role": "assistant",
+                                        "content": [{"type": "output_text", "text": output_text}],
+                                    }
+                                ],
+                                "usage": (
+                                    {
+                                        "input_tokens": usage.get("prompt_tokens", 0),
+                                        "output_tokens": usage.get("completion_tokens", 0),
+                                        "total_tokens": usage.get("total_tokens", 0),
+                                    }
+                                    if usage
+                                    else None
+                                ),
+                            },
+                        },
+                    ]
+
+                    def sse_stream(_events=events):  # noqa: B023
+                        for event in _events:
+                            yield f"event: {event['type']}\ndata: {json.dumps(event)}\n\n"
+
+                    return Response(
+                        sse_stream(),
+                        status=200,
+                        content_type="text/event-stream",
+                    )
+                except Exception as e:
+                    logger.error("Failed to convert CC response to Responses format: %s", e)
+                    # Fall through to normal response handling
+
+            # Handle streaming response
+            content_type = resp.headers.get("Content-Type", "")
+
+            def generate(_resp=resp, _content_type=content_type):  # noqa: B023
+                total_content = b""
+                for chunk in _resp.iter_content(chunk_size=4096):
+                    total_content += chunk
+                    yield chunk
+
+                # After streaming completes, try to extract token usage
+                try:
+                    _record_llm_usage(total_content, session_id, user_id, provider, _content_type)
+                except Exception as e:
+                    logger.error(f"Failed to record LLM usage: {e}")
+
+            # Build response headers
+            response_headers = {}
+            for key, value in resp.headers.items():
+                if key.lower() in (
+                    "content-type",
+                    "x-request-id",
+                    "openai-organization",
+                ):
+                    response_headers[key] = value
+
+            if "text/event-stream" in content_type:
+                return Response(
+                    stream_with_context(generate()),
+                    status=resp.status_code,
+                    headers=response_headers,
+                    content_type=content_type,
+                )
+            else:
+                # Non-streaming response
+                content = resp.content
+                try:
+                    _record_llm_usage(content, session_id, user_id, provider, content_type)
+                except Exception as e:
+                    logger.error(f"Failed to record LLM usage: {e}")
+
+                return Response(
+                    content,
+                    status=resp.status_code,
+                    headers=response_headers,
+                    content_type=content_type,
+                )
+
+        except Exception as e:
+            logger.error(f"LLM proxy error: {e}")
+            return (
+                jsonify(
+                    {
+                        "error": {
+                            "message": f"Proxy error: {str(e)}",
+                            "type": "proxy_error",
+                        }
                     }
+                ),
+                502,
+            )
+
+    # Should not reach here — all loop paths either return or continue
+    return (
+        jsonify(
+            {
+                "error": {
+                    "message": "All API key attempts failed",
+                    "type": "proxy_error",
                 }
-            ),
-            502,
-        )
+            }
+        ),
+        502,
+    )
 
 
 def _record_llm_usage(

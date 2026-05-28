@@ -179,6 +179,11 @@ class APIKeyProxyService:
                 created_by INTEGER,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                cli_tools TEXT,
+                cli_settings TEXT,
+                scope TEXT DEFAULT 'remote',
+                priority INTEGER DEFAULT 0,
+                weight INTEGER DEFAULT 100,
                 UNIQUE(tenant_id, provider, key_name)
             )
         """
@@ -231,6 +236,9 @@ class APIKeyProxyService:
         created_by: Optional[int] = None,
         cli_tools: Optional[str] = None,
         cli_settings: Optional[str] = None,
+        scope: str = "remote",
+        priority: int = 0,
+        weight: int = 100,
     ) -> dict[str, Any]:
         """
         Store an encrypted API key for a tenant/provider.
@@ -257,8 +265,8 @@ class APIKeyProxyService:
         try:
             cursor.execute(
                 f"""
-                INSERT INTO api_key_store (tenant_id, provider, key_name, encrypted_key, key_hash, base_url, created_by, cli_tools, cli_settings)
-                VALUES ({_params(9)})
+                INSERT INTO api_key_store (tenant_id, provider, key_name, encrypted_key, key_hash, base_url, created_by, cli_tools, cli_settings, scope, priority, weight)
+                VALUES ({_params(12)})
                 ON CONFLICT (tenant_id, provider, key_name) DO UPDATE SET
                     encrypted_key = EXCLUDED.encrypted_key,
                     key_hash = EXCLUDED.key_hash,
@@ -266,6 +274,9 @@ class APIKeyProxyService:
                     is_active = TRUE,
                     cli_tools = EXCLUDED.cli_tools,
                     cli_settings = EXCLUDED.cli_settings,
+                    scope = EXCLUDED.scope,
+                    priority = EXCLUDED.priority,
+                    weight = EXCLUDED.weight,
                     updated_at = CURRENT_TIMESTAMP
             """,
                 (
@@ -278,6 +289,9 @@ class APIKeyProxyService:
                     created_by,
                     cli_tools,
                     cli_settings,
+                    scope,
+                    priority,
+                    weight,
                 ),
             )
 
@@ -302,6 +316,9 @@ class APIKeyProxyService:
         """
         Resolve and decrypt an API key for a tenant/provider.
 
+        Backward-compatible method that delegates to resolve_api_key_for_scope
+        with scope='remote'.
+
         Args:
             tenant_id: Tenant ID.
             provider: Provider name.
@@ -309,30 +326,96 @@ class APIKeyProxyService:
         Returns:
             Tuple of (api_key, base_url) or None if not found.
         """
+        result = self.resolve_api_key_for_scope(tenant_id, provider, scope="remote")
+        if result is None:
+            return None
+        return (result[0], result[1])
+
+    def resolve_api_key_for_scope(
+        self,
+        tenant_id: int,
+        provider: str,
+        scope: str = "remote",
+        exclude_key_ids: Optional[set[int]] = None,
+    ) -> Optional[tuple[str, Optional[str], int]]:
+        """
+        Resolve and decrypt an API key for a tenant/provider with scope filtering
+        and multi-key scheduling.
+
+        Args:
+            tenant_id: Tenant ID.
+            provider: Provider name.
+            scope: Key scope — 'local', 'remote', or 'shared' matches both.
+            exclude_key_ids: Key IDs to exclude (for failover retries).
+
+        Returns:
+            Tuple of (api_key, base_url, key_id) or None if not found.
+        """
+        from app.modules.workspace.api_key_router import APIKeyRouter
+
         conn = self._get_connection()
         cursor = conn.cursor()
 
         try:
-            cursor.execute(
-                f"""
-                SELECT encrypted_key, base_url FROM api_key_store
-                WHERE tenant_id = {_param()} AND provider = {_param()} AND is_active = TRUE
-                LIMIT 1
-            """,
-                (tenant_id, provider),
-            )
-            row = cursor.fetchone()
+            # Query keys matching scope (exact match or 'shared')
+            if is_postgresql():
+                cursor.execute(
+                    """
+                    SELECT id, encrypted_key, base_url, priority, weight
+                    FROM api_key_store
+                    WHERE tenant_id = %s AND provider = %s AND is_active = TRUE
+                      AND (scope = %s OR scope = 'shared')
+                    """,
+                    (tenant_id, provider, scope),
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT id, encrypted_key, base_url, priority, weight
+                    FROM api_key_store
+                    WHERE tenant_id = ? AND provider = ? AND is_active = TRUE
+                      AND (scope = ? OR scope = 'shared')
+                    """,
+                    (tenant_id, provider, scope),
+                )
 
-            if not row:
+            rows = cursor.fetchall()
+
+            if not rows:
                 return None
 
-            encrypted_key = row["encrypted_key"] if isinstance(row, dict) else row["encrypted_key"]
-            base_url = row["base_url"] if isinstance(row, dict) else row["base_url"]
+            # Build candidates for the router
+            candidates = []
+            for row in rows:
+                row_dict = row if isinstance(row, dict) else dict(row)
+                encrypted_key = row_dict["encrypted_key"]
+                base_url = row_dict["base_url"]
+                try:
+                    decrypted = self._decrypt_key(encrypted_key)
+                except Exception as e:
+                    logger.warning("Failed to decrypt key id=%s: %s", row_dict["id"], e)
+                    continue
+                candidates.append(
+                    {
+                        "id": row_dict["id"],
+                        "api_key": decrypted,
+                        "base_url": base_url,
+                        "priority": row_dict.get("priority") or 0,
+                        "weight": row_dict.get("weight") or 100,
+                    }
+                )
 
-            api_key = self._decrypt_key(encrypted_key)
-            return (api_key, base_url)
+            if not candidates:
+                return None
+
+            router = APIKeyRouter()
+            selected = router.select_key(candidates, exclude_key_ids=exclude_key_ids)
+            if selected is None:
+                return None
+
+            return (selected["api_key"], selected["base_url"], selected["id"])
         except Exception as e:
-            logger.error(f"Failed to resolve API key: {e}")
+            logger.error("Failed to resolve API key for scope: %s", e)
             return None
         finally:
             conn.close()
@@ -344,7 +427,7 @@ class APIKeyProxyService:
 
         cursor.execute(
             f"""
-            SELECT id, provider, key_name, base_url, is_active, created_at, updated_at, cli_tools, cli_settings
+            SELECT id, provider, key_name, base_url, is_active, created_at, updated_at, cli_tools, cli_settings, scope, priority, weight
             FROM api_key_store
             WHERE tenant_id = {_param()}
             ORDER BY provider, key_name
@@ -368,6 +451,9 @@ class APIKeyProxyService:
                     "updated_at": row["updated_at"],
                     "cli_tools": row["cli_tools"],
                     "cli_settings": row["cli_settings"],
+                    "scope": row["scope"] or "remote",
+                    "priority": row["priority"] if row["priority"] is not None else 0,
+                    "weight": row["weight"] if row["weight"] is not None else 100,
                 }
             )
         return result
@@ -399,6 +485,9 @@ class APIKeyProxyService:
         cli_tools: Optional[str] = None,
         cli_settings: Optional[str] = None,
         is_active: Optional[bool] = None,
+        scope: Optional[str] = None,
+        priority: Optional[int] = None,
+        weight: Optional[int] = None,
     ) -> bool:
         """
         Update an API key by its ID.
@@ -410,6 +499,10 @@ class APIKeyProxyService:
             base_url: Optional new base URL.
             cli_tools: Optional JSON array of CLI tool names.
             cli_settings: Optional JSON object with settings for each tool.
+            is_active: Optional active status.
+            scope: Optional scope ('local', 'remote', 'shared').
+            priority: Optional priority (higher = preferred).
+            weight: Optional weight for weighted random selection.
 
         Returns:
             True if updated successfully, False otherwise.
@@ -435,6 +528,15 @@ class APIKeyProxyService:
         if is_active is not None:
             updates.append(f"is_active = {_param()}")
             values.append(is_active if is_postgresql() else (1 if is_active else 0))
+        if scope is not None:
+            updates.append(f"scope = {_param()}")
+            values.append(scope)
+        if priority is not None:
+            updates.append(f"priority = {_param()}")
+            values.append(priority)
+        if weight is not None:
+            updates.append(f"weight = {_param()}")
+            values.append(weight)
 
         if not updates:
             conn.close()
@@ -457,7 +559,12 @@ class APIKeyProxyService:
         conn.close()
         return success
 
-    def get_cli_settings_for_tool(self, tenant_id: int, tool_name: str) -> Optional[dict[str, Any]]:
+    def get_cli_settings_for_tool(
+        self,
+        tenant_id: int,
+        tool_name: str,
+        scope: str = "remote",
+    ) -> Optional[dict[str, Any]]:
         """
         Get CLI settings for a specific tool from active API keys.
 
@@ -487,10 +594,11 @@ class APIKeyProxyService:
             SELECT id, provider, encrypted_key, base_url, cli_tools, cli_settings
             FROM api_key_store
             WHERE tenant_id = {_param()} AND is_active = TRUE
+              AND (scope = {_param()} OR scope = 'shared')
             ORDER BY id DESC
             LIMIT 10
         """,
-            (tenant_id,),
+            (tenant_id, scope),
         )
 
         rows = cursor.fetchall()
@@ -742,6 +850,11 @@ def get_ddl_statements() -> list[str]:
             created_by INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            cli_tools TEXT,
+            cli_settings TEXT,
+            scope TEXT DEFAULT 'remote',
+            priority INTEGER DEFAULT 0,
+            weight INTEGER DEFAULT 100,
             UNIQUE(tenant_id, provider, key_name)
         )
         """,

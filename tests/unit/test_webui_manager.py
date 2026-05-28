@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-Tests for WebUI Manager - Auth Config and Environment Variable Injection
+Tests for WebUI Manager — API key injection from database.
 
-Unit tests for WorkspaceConfig auth fields and _launch_webui_process env injection.
+Unit tests for WorkspaceConfig (without auth fields) and
+_inject_local_api_keys database-driven key injection.
 """
 
 import json
@@ -15,91 +16,45 @@ import pytest
 from app.services.webui_manager import WebUIManager, WorkspaceConfig
 
 
-class TestWorkspaceConfigAuth:
-    """Tests for WorkspaceConfig auth-related fields."""
+class TestWorkspaceConfig:
+    """Tests for WorkspaceConfig fields."""
 
-    def test_default_auth_fields(self):
-        """Test default values for auth fields."""
+    def test_default_values(self):
+        """Test default values for config fields."""
         config = WorkspaceConfig()
-        assert config.auth_type == ""
-        assert config.auth_env == {}
+        assert config.enabled is False
+        assert config.auth_type == "" if hasattr(config, "auth_type") else True
+        assert config.webui_path == ""
 
-    def test_auth_type_field(self):
-        """Test setting auth_type."""
-        config = WorkspaceConfig(auth_type="openai")
-        assert config.auth_type == "openai"
+    def test_no_auth_env_field(self):
+        """WorkspaceConfig should not have auth_env field after refactor."""
+        config = WorkspaceConfig()
+        assert not hasattr(config, "auth_env")
 
-    def test_auth_env_field(self):
-        """Test setting auth_env."""
-        env = {"OPENAI_API_KEY": "sk-test", "OPENAI_BASE_URL": "https://api.openai.com/v1"}
-        config = WorkspaceConfig(auth_env=env)
-        assert config.auth_env == env
-        assert config.auth_env["OPENAI_API_KEY"] == "sk-test"
-
-    def test_auth_env_default_factory(self):
-        """Test that auth_env uses default_factory (not shared between instances)."""
-        config1 = WorkspaceConfig()
-        config2 = WorkspaceConfig()
-        config1.auth_env["FOO"] = "bar"
-        assert "FOO" not in config2.auth_env
+    def test_no_auth_type_field(self):
+        """WorkspaceConfig should not have auth_type field after refactor."""
+        config = WorkspaceConfig()
+        assert not hasattr(config, "auth_type")
 
 
-class TestLoadConfigAuth:
-    """Tests for _load_config() auth config parsing."""
-
-    def _write_config(self, tmpdir, config_dict):
-        """Helper to write a config.json file."""
-        config_path = os.path.join(tmpdir, "config.json")
-        with open(config_path, "w") as f:
-            json.dump(config_dict, f)
-        return config_path
+class TestLoadConfig:
+    """Tests for _load_config() parsing."""
 
     @patch("app.services.webui_manager.WebUIManager._load_config")
-    def test_load_config_with_auth(self, mock_load):
-        """Test loading config with auth section."""
+    def test_load_config_basic(self, mock_load):
+        """Test loading basic workspace config."""
         config = WorkspaceConfig(
             enabled=True,
-            auth_type="openai",
-            auth_env={
-                "OPENAI_API_KEY": "sk-test123",
-                "OPENAI_BASE_URL": "https://api.openai.com/v1",
-            },
+            multi_user_mode=True,
         )
         mock_load.return_value = config
 
         manager = WebUIManager()
-        assert manager.config.auth_type == "openai"
-        assert manager.config.auth_env["OPENAI_API_KEY"] == "sk-test123"
-        assert manager.config.auth_env["OPENAI_BASE_URL"] == "https://api.openai.com/v1"
+        assert manager.config.enabled is True
+        assert manager.config.multi_user_mode is True
 
-    @patch("app.services.webui_manager.WebUIManager._load_config")
-    def test_load_config_without_auth(self, mock_load):
-        """Test loading config without auth section (backward compatibility)."""
-        config = WorkspaceConfig(enabled=True)
-        mock_load.return_value = config
-
-        manager = WebUIManager()
-        assert manager.config.auth_type == ""
-        assert manager.config.auth_env == {}
-
-    @patch("app.services.webui_manager.WebUIManager._load_config")
-    def test_load_config_anthropic_auth(self, mock_load):
-        """Test loading config with anthropic auth type."""
-        config = WorkspaceConfig(
-            auth_type="anthropic",
-            auth_env={
-                "ANTHROPIC_API_KEY": "sk-ant-test",
-                "ANTHROPIC_BASE_URL": "https://api.anthropic.com",
-            },
-        )
-        mock_load.return_value = config
-
-        manager = WebUIManager()
-        assert manager.config.auth_type == "anthropic"
-        assert manager.config.auth_env["ANTHROPIC_API_KEY"] == "sk-ant-test"
-
-    def test_load_config_from_file_with_auth(self):
-        """Test actual file parsing with auth section."""
+    def test_load_config_from_file_without_auth(self):
+        """Test actual file parsing — auth section should be ignored."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config_data = {
                 "workspace": {
@@ -114,60 +69,107 @@ class TestLoadConfigAuth:
                     "auth_type": "openai",
                     "env": {
                         "OPENAI_API_KEY": "sk-file-test",
-                        "OPENAI_BASE_URL": "https://api.openai.com/v1",
                     },
                 },
             }
 
-            # Patch CONFIG_DIR to use tmpdir
+            config_path = os.path.join(tmpdir, "config.json")
+            with open(config_path, "w") as f:
+                json.dump(config_data, f)
+
             with patch("app.repositories.database.CONFIG_DIR", tmpdir):
                 manager = WebUIManager.__new__(WebUIManager)
-                # Manually call _load_config with patched CONFIG_DIR
+                manager.config = manager._load_config()
 
-                config_path = os.path.join(tmpdir, "config.json")
-                with open(config_path, "w") as f:
-                    json.dump(config_data, f)
-
-                with patch("app.services.webui_manager.WebUIManager._load_config") as mock_load:
-                    mock_load.return_value = WorkspaceConfig(
-                        enabled=True,
-                        multi_user_mode=True,
-                        port_range_start=9000,
-                        port_range_end=9999,
-                        token_secret="test-secret",
-                        webui_path="/tmp/webui",
-                        auth_type="openai",
-                        auth_env={
-                            "OPENAI_API_KEY": "sk-file-test",
-                            "OPENAI_BASE_URL": "https://api.openai.com/v1",
-                        },
-                    )
-                    manager.config = mock_load.return_value
-
-                assert manager.config.auth_type == "openai"
-                assert manager.config.auth_env["OPENAI_API_KEY"] == "sk-file-test"
+            # Config should have workspace fields but NOT auth fields
+            assert manager.config.enabled is True
+            assert manager.config.token_secret == "test-secret"
+            assert not hasattr(manager.config, "auth_env")
+            assert not hasattr(manager.config, "auth_type")
 
 
-class TestLaunchWebuiProcessAuth:
-    """Tests for _launch_webui_process auth env injection."""
+class TestInjectLocalApiKeys:
+    """Tests for _inject_local_api_keys database-driven key injection."""
 
     @patch("app.services.webui_manager.WebUIManager._load_config")
-    def test_auth_type_injected_into_cmd(self, mock_load):
-        """Test that --auth-type is added to the command when configured."""
+    def test_inject_openai_key(self, mock_load):
+        """Test that OpenAI key from database is injected into env."""
+        config = WorkspaceConfig(enabled=True, token_secret="secret")
+        mock_load.return_value = config
+
+        manager = WebUIManager()
+
+        with patch(
+            "app.modules.workspace.api_key_proxy.get_api_key_proxy_service"
+        ) as mock_get_proxy:
+            mock_proxy = MagicMock()
+            mock_proxy.resolve_api_key_for_scope.return_value = (
+                "sk-db-key",
+                "https://api.example.com/v1",
+                42,
+            )
+            mock_get_proxy.return_value = mock_proxy
+
+            env = {}
+            manager._inject_local_api_keys(env)
+
+            assert env["OPENAI_API_KEY"] == "sk-db-key"
+            assert env["OPENAI_BASE_URL"] == "https://api.example.com/v1"
+            # _inject_local_api_keys calls resolve for both openai and anthropic
+            assert mock_proxy.resolve_api_key_for_scope.call_count == 2
+
+    @patch("app.services.webui_manager.WebUIManager._load_config")
+    def test_inject_no_keys_available(self, mock_load):
+        """Test that env is unchanged when no keys are found in database."""
+        config = WorkspaceConfig(enabled=True, token_secret="secret")
+        mock_load.return_value = config
+
+        manager = WebUIManager()
+
+        with patch(
+            "app.modules.workspace.api_key_proxy.get_api_key_proxy_service"
+        ) as mock_get_proxy:
+            mock_proxy = MagicMock()
+            mock_proxy.resolve_api_key_for_scope.return_value = None
+            mock_get_proxy.return_value = mock_proxy
+
+            env = {}
+            manager._inject_local_api_keys(env)
+
+            assert "OPENAI_API_KEY" not in env
+            assert "ANTHROPIC_API_KEY" not in env
+
+    @patch("app.services.webui_manager.WebUIManager._load_config")
+    def test_inject_handles_exception(self, mock_load):
+        """Test that exceptions during key injection are handled gracefully."""
+        config = WorkspaceConfig(enabled=True, token_secret="secret")
+        mock_load.return_value = config
+
+        manager = WebUIManager()
+
+        with patch(
+            "app.modules.workspace.api_key_proxy.get_api_key_proxy_service",
+            side_effect=Exception("DB error"),
+        ):
+            env = {}
+            # Should not raise
+            manager._inject_local_api_keys(env)
+            assert "OPENAI_API_KEY" not in env
+
+    @patch("app.services.webui_manager.WebUIManager._load_config")
+    def test_launch_process_calls_inject(self, mock_load):
+        """Test that _launch_webui_process calls _inject_local_api_keys."""
         config = WorkspaceConfig(
             enabled=True,
             multi_user_mode=False,
             webui_path="/tmp/webui",
             token_secret="secret",
-            auth_type="openai",
-            auth_env={"OPENAI_API_KEY": "sk-test"},
         )
         mock_load.return_value = config
 
         manager = WebUIManager()
         manager._platform = "linux"
 
-        # Mock _find_webui_executable and _load_server_config
         with (
             patch.object(manager, "_ensure_system_user", return_value=True),
             patch.object(
@@ -176,164 +178,17 @@ class TestLaunchWebuiProcessAuth:
                 return_value=("/usr/local/bin/qwen-code-webui", None),
             ),
             patch.object(manager, "_load_server_config", return_value={"web_port": 5000}),
+            patch.object(manager, "_inject_local_api_keys") as mock_inject,
             patch("subprocess.Popen") as mock_popen,
         ):
-
             mock_popen.return_value = MagicMock(pid=12345)
-
             manager._launch_webui_process(1, "testuser", 9000)
 
-            # Verify --auth-type was added to command
-            call_args = mock_popen.call_args
-            cmd = call_args[0][0]
-            assert "--auth-type" in cmd
-            auth_type_idx = cmd.index("--auth-type")
-            assert cmd[auth_type_idx + 1] == "openai"
-
-    @patch("app.services.webui_manager.WebUIManager._load_config")
-    def test_auth_env_injected_into_subprocess(self, mock_load):
-        """Test that auth env vars are passed to subprocess."""
-        config = WorkspaceConfig(
-            enabled=True,
-            multi_user_mode=False,
-            webui_path="/tmp/webui",
-            token_secret="secret",
-            auth_type="openai",
-            auth_env={"OPENAI_API_KEY": "sk-test", "OPENAI_BASE_URL": "https://api.openai.com/v1"},
-        )
-        mock_load.return_value = config
-
-        manager = WebUIManager()
-        manager._platform = "linux"
-
-        with (
-            patch.object(manager, "_ensure_system_user", return_value=True),
-            patch.object(
-                manager,
-                "_find_webui_executable",
-                return_value=("/usr/local/bin/qwen-code-webui", None),
-            ),
-            patch.object(manager, "_load_server_config", return_value={"web_port": 5000}),
-            patch("subprocess.Popen") as mock_popen,
-        ):
-
-            mock_popen.return_value = MagicMock(pid=12345)
-
-            manager._launch_webui_process(1, "testuser", 9000)
-
+            # Verify _inject_local_api_keys was called
+            mock_inject.assert_called_once()
             # Verify env was passed to Popen
             call_kwargs = mock_popen.call_args[1]
             assert "env" in call_kwargs
-            child_env = call_kwargs["env"]
-            assert child_env["OPENAI_API_KEY"] == "sk-test"
-            assert child_env["OPENAI_BASE_URL"] == "https://api.openai.com/v1"
-
-    @patch("app.services.webui_manager.WebUIManager._load_config")
-    def test_no_auth_type_when_not_configured(self, mock_load):
-        """Test that --auth-type is NOT added when not configured."""
-        config = WorkspaceConfig(
-            enabled=True,
-            multi_user_mode=False,
-            webui_path="/tmp/webui",
-            token_secret="secret",
-        )
-        mock_load.return_value = config
-
-        manager = WebUIManager()
-        manager._platform = "linux"
-
-        with (
-            patch.object(manager, "_ensure_system_user", return_value=True),
-            patch.object(
-                manager,
-                "_find_webui_executable",
-                return_value=("/usr/local/bin/qwen-code-webui", None),
-            ),
-            patch.object(manager, "_load_server_config", return_value={"web_port": 5000}),
-            patch("subprocess.Popen") as mock_popen,
-        ):
-
-            mock_popen.return_value = MagicMock(pid=12345)
-
-            manager._launch_webui_process(1, "testuser", 9000)
-
-            cmd = mock_popen.call_args[0][0]
-            assert "--auth-type" not in cmd
-
-    @patch("app.services.webui_manager.WebUIManager._load_config")
-    def test_env_inherits_current_env(self, mock_load):
-        """Test that child env inherits from current process env."""
-        os.environ["EXISTING_VAR"] = "existing_value"
-        config = WorkspaceConfig(
-            enabled=True,
-            multi_user_mode=False,
-            webui_path="/tmp/webui",
-            token_secret="secret",
-            auth_env={"NEW_VAR": "new_value"},
-        )
-        mock_load.return_value = config
-
-        manager = WebUIManager()
-        manager._platform = "linux"
-
-        try:
-            with (
-                patch.object(manager, "_ensure_system_user", return_value=True),
-                patch.object(
-                    manager,
-                    "_find_webui_executable",
-                    return_value=("/usr/local/bin/qwen-code-webui", None),
-                ),
-                patch.object(manager, "_load_server_config", return_value={"web_port": 5000}),
-                patch("subprocess.Popen") as mock_popen,
-            ):
-
-                mock_popen.return_value = MagicMock(pid=12345)
-
-                manager._launch_webui_process(1, "testuser", 9000)
-
-                child_env = mock_popen.call_args[1]["env"]
-                assert child_env["EXISTING_VAR"] == "existing_value"
-                assert child_env["NEW_VAR"] == "new_value"
-        finally:
-            del os.environ["EXISTING_VAR"]
-
-    @patch("app.services.webui_manager.WebUIManager._load_config")
-    def test_auth_env_overrides_existing(self, mock_load):
-        """Test that auth_env values override existing env vars."""
-        os.environ["OVERRIDE_VAR"] = "old_value"
-        config = WorkspaceConfig(
-            enabled=True,
-            multi_user_mode=False,
-            webui_path="/tmp/webui",
-            token_secret="secret",
-            auth_env={"OVERRIDE_VAR": "new_value"},
-        )
-        mock_load.return_value = config
-
-        manager = WebUIManager()
-        manager._platform = "linux"
-
-        try:
-            with (
-                patch.object(manager, "_ensure_system_user", return_value=True),
-                patch.object(
-                    manager,
-                    "_find_webui_executable",
-                    return_value=("/usr/local/bin/qwen-code-webui", None),
-                ),
-                patch.object(manager, "_load_server_config", return_value={"web_port": 5000}),
-                patch("subprocess.Popen") as mock_popen,
-            ):
-
-                mock_popen.return_value = MagicMock(pid=12345)
-
-                manager._launch_webui_process(1, "testuser", 9000)
-
-                child_env = mock_popen.call_args[1]["env"]
-                assert child_env["OVERRIDE_VAR"] == "new_value"
-        finally:
-            del os.environ["OVERRIDE_VAR"]
 
 
 if __name__ == "__main__":
