@@ -121,7 +121,7 @@ def create_default_admin(
         if system_account and existing.get("system_account") != system_account:
             # Validate system_account parameter
             if not system_account.strip():
-                print(f"Warning: system_account is empty string, skipping update")
+                print("Warning: system_account is empty string, skipping update")
                 return True
             try:
                 db.update_user(existing["id"], system_account=system_account)
