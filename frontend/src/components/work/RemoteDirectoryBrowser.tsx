@@ -211,8 +211,7 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
         }
       }
     } else {
-      // Unix: add root, then build paths with forward slash
-      crumbs.push({ name: '/', path: '/' });
+      // Unix: build paths with forward slash
       let accumulatedPath = '';
       for (const part of parts) {
         accumulatedPath += '/' + part;
@@ -247,6 +246,14 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
       {/* Breadcrumbs */}
       <div className="mb-2">
         <div className="d-flex align-items-center gap-1 small">
+          {!isWindows && (
+            <button
+              className="btn btn-link btn-sm p-0"
+              onClick={() => fetchDirectories('/')}
+            >
+              /
+            </button>
+          )}
           {breadcrumbs.map((crumb, index) => (
             <React.Fragment key={crumb.path}>
               {index > 0 && <span className="text-muted">{getPathSeparator()}</span>}
