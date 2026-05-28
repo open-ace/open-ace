@@ -151,13 +151,6 @@ const navSections: NavSection[] = [
         path: '/manage/remote/machines',
         adminOnly: true,
       },
-      {
-        id: 'api-keys',
-        label: 'apiKeys',
-        icon: 'bi-key',
-        path: '/manage/remote/api-keys',
-        adminOnly: true,
-      },
     ],
   },
   {
@@ -169,6 +162,13 @@ const navSections: NavSection[] = [
         label: 'ssoSettings',
         icon: 'bi-key',
         path: '/manage/settings/sso',
+        adminOnly: true,
+      },
+      {
+        id: 'api-keys',
+        label: 'apiKeys',
+        icon: 'bi-key-fill',
+        path: '/manage/settings/api-keys',
         adminOnly: true,
       },
     ],

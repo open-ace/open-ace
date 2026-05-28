@@ -140,8 +140,6 @@ class WorkspaceConfig:
     cleanup_interval_minutes: int = 5
     token_secret: str = ""
     webui_path: str = ""  # Path to qwen-code-webui project directory
-    auth_type: str = ""  # Authentication type: openai, anthropic, gemini etc.
-    auth_env: dict[str, str] = field(default_factory=dict)  # Environment variables for auth
 
 
 class WebUIManager:
@@ -209,7 +207,6 @@ class WebUIManager:
                 config = json.load(f)
 
             workspace = config.get("workspace", {})
-            auth = config.get("auth", {})
             return WorkspaceConfig(
                 enabled=workspace.get("enabled", False),
                 url=workspace.get("url", "http://localhost"),
@@ -221,8 +218,6 @@ class WebUIManager:
                 cleanup_interval_minutes=workspace.get("cleanup_interval_minutes", 5),
                 token_secret=workspace.get("token_secret", ""),
                 webui_path=workspace.get("webui_path", ""),
-                auth_type=auth.get("auth_type", ""),
-                auth_env=auth.get("env", {}),
             )
         except Exception as e:
             logger.error(f"Error loading config: {e}")
@@ -538,6 +533,40 @@ class WebUIManager:
         except Exception:
             return {}
 
+    def _inject_local_api_keys(self, env: dict[str, str]) -> None:
+        """
+        Inject API keys from api_key_store into the child process environment.
+
+        Resolves keys with scope='local' or scope='shared' and sets the
+        standard environment variables (OPENAI_API_KEY, OPENAI_BASE_URL,
+        ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL) for the webui subprocess.
+        """
+        try:
+            from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
+
+            api_proxy = get_api_key_proxy_service()
+            tenant_id = 1  # Default tenant for local workspace
+
+            # Resolve OpenAI provider key
+            openai_result = api_proxy.resolve_api_key_for_scope(tenant_id, "openai", scope="local")
+            if openai_result:
+                api_key, base_url, _ = openai_result
+                env["OPENAI_API_KEY"] = api_key
+                if base_url:
+                    env["OPENAI_BASE_URL"] = base_url
+
+            # Resolve Anthropic provider key
+            anthropic_result = api_proxy.resolve_api_key_for_scope(
+                tenant_id, "anthropic", scope="local"
+            )
+            if anthropic_result:
+                api_key, base_url, _ = anthropic_result
+                env["ANTHROPIC_API_KEY"] = api_key
+                if base_url:
+                    env["ANTHROPIC_BASE_URL"] = base_url
+        except Exception as e:
+            logger.warning("Failed to inject local API keys from database: %s", e)
+
     def _launch_webui_process(
         self, user_id: int, system_account: str, port: int
     ) -> Optional[subprocess.Popen]:
@@ -576,7 +605,8 @@ class WebUIManager:
 
         # Build child environment first (needed for sudo env passing)
         child_env = os.environ.copy()
-        child_env.update(self.config.auth_env)
+        # Inject API keys from database for local workspace use
+        self._inject_local_api_keys(child_env)
 
         # Set OPENACE_LOG_DIR to /tmp to avoid HOME permission issues
         webui_log_dir = f"/tmp/qwen-code-webui-{user_id}"
@@ -656,10 +686,6 @@ class WebUIManager:
                 openace_api_url,
             ]
             cwd = None
-
-        # Append --auth-type if configured
-        if self.config.auth_type:
-            cmd.extend(["--auth-type", self.config.auth_type])
 
         logger.debug(f"Launching webui: {cmd}, cwd: {cwd}")
 

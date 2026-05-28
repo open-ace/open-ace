@@ -295,10 +295,10 @@ const ManageRoutes: React.FC = () => {
 
           {/* Remote Workspace */}
           <Route path="/remote/machines" element={<RemoteMachineManagement />} />
-          <Route path="/remote/api-keys" element={<APIKeyManagement />} />
 
           {/* Settings */}
           <Route path="/settings/sso" element={<SSOSettings />} />
+          <Route path="/settings/api-keys" element={<APIKeyManagement />} />
 
           {/* Default */}
           <Route path="*" element={<Navigate to="/manage/dashboard" replace />} />

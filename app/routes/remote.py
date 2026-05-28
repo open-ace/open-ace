@@ -343,9 +343,15 @@ def store_api_key():
     cli_settings = data.get(
         "cli_settings"
     )  # JSON object: {"claude-code": {...}, "qwen-code": {...}}
+    scope = data.get("scope", "remote")
+    priority = data.get("priority", 0)
+    weight = data.get("weight", 100)
 
     if not provider or not key_name or not api_key:
         return jsonify({"error": "provider, key_name, and api_key are required"}), 400
+
+    if scope not in ("local", "remote", "shared"):
+        return jsonify({"error": "scope must be 'local', 'remote', or 'shared'"}), 400
 
     validation_error = validate_cli_settings_payload(cli_settings)
     if validation_error:
@@ -361,6 +367,9 @@ def store_api_key():
         created_by=g.user["id"],
         cli_tools=cli_tools,
         cli_settings=cli_settings,
+        scope=scope,
+        priority=int(priority),
+        weight=int(weight),
     )
 
     if result.get("success"):
@@ -381,6 +390,11 @@ def update_api_key(key_id):
     is_active = data.get("is_active")
     if is_active is not None and not isinstance(is_active, bool):
         return jsonify({"error": "is_active must be a boolean"}), 400
+    scope = data.get("scope")
+    if scope is not None and scope not in ("local", "remote", "shared"):
+        return jsonify({"error": "scope must be 'local', 'remote', or 'shared'"}), 400
+    priority = data.get("priority")
+    weight = data.get("weight")
     tenant_id = int(data.get("tenant_id", 1))
 
     validation_error = validate_cli_settings_payload(cli_settings)
@@ -396,6 +410,9 @@ def update_api_key(key_id):
         cli_tools=cli_tools,
         cli_settings=cli_settings,
         is_active=is_active,
+        scope=scope,
+        priority=int(priority) if priority is not None else None,
+        weight=int(weight) if weight is not None else None,
     )
 
     if success:
@@ -1748,8 +1765,9 @@ def llm_proxy(path=""):
             429,
         )
 
-    # Resolve real API key
-    key_result = api_proxy.resolve_api_key(tenant_id, provider)
+    # Resolve real API key with scope filtering
+    api_proxy = get_api_key_proxy_service()
+    key_result = api_proxy.resolve_api_key_for_scope(tenant_id, provider, scope="remote")
     if not key_result:
         return (
             jsonify(
@@ -1763,16 +1781,14 @@ def llm_proxy(path=""):
             500,
         )
 
-    api_key, base_url = key_result
+    api_key, base_url, key_id = key_result
 
     # Determine target URL
     if base_url:
         target_base = base_url.rstrip("/")
-        # If base_url already ends with /v1, strip the /v1 prefix from path
         if target_base.endswith("/v1"):
-            target_base = target_base[:-3]  # Remove trailing /v1
+            target_base = target_base[:-3]
     else:
-        # Default provider URLs
         provider_urls = {
             "openai": "https://api.openai.com",
             "anthropic": "https://api.anthropic.com",
@@ -1781,11 +1797,8 @@ def llm_proxy(path=""):
         target_base = provider_urls.get(provider, "https://api.openai.com")
 
     if path:
-        # For Anthropic provider, keep the full path including /v1 prefix
-        # (z.ai proxy needs /v1/messages, not /messages)
         target_url = f"{target_base}/{path}"
     else:
-        # Handle direct path in the request URL
         target_url = f"{target_base}{request.path.split('/llm-proxy')[-1]}"
 
     # Log model from request body
@@ -1795,7 +1808,12 @@ def llm_proxy(path=""):
     except Exception:
         _model = "?"
     logger.info(
-        "LLM proxy: %s -> %s model=%s provider=%s", request.method, target_url, _model, provider
+        "LLM proxy: %s -> %s model=%s provider=%s key_id=%s",
+        request.method,
+        target_url,
+        _model,
+        provider,
+        key_id,
     )
 
     # Log response status for debugging
@@ -1908,7 +1926,11 @@ def llm_proxy(path=""):
                 else b""
             )
             logger.error(
-                f"LLM proxy error {resp.status_code} from {_orig_target_url}: {peek.decode('utf-8', errors='replace')}"
+                "LLM proxy error %d from %s key_id=%s: %s",
+                resp.status_code,
+                _orig_target_url,
+                key_id,
+                peek.decode("utf-8", errors="replace"),
             )
 
         # If we converted from Responses API, convert the Chat Completions
