@@ -130,6 +130,14 @@ class RemoteAgentManager:
 
         The recovery window allows users to reconnect after brief network
         interruptions without losing their session history.
+
+        Note: This method uses a broader query condition (m.status IS NULL OR
+        m.status != 'online') compared to _check_heartbeats() which only checks
+        m.status = 'offline'. This is intentional because:
+        1. This runs at startup and must handle orphaned sessions where the
+           machine record was deleted (m.status IS NULL)
+        2. It must also handle machines in transitional states (e.g., 'idle', 'busy')
+           that were not properly updated before shutdown
         """
         recovery_cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
             seconds=self.SESSION_RECOVERY_WINDOW_SECONDS
@@ -183,7 +191,11 @@ class RemoteAgentManager:
                 conn.commit()
 
             if offline:
-                logger.info("Cleaned up %d remote sessions (inactive > %ds)", len(offline), self.SESSION_RECOVERY_WINDOW_SECONDS)
+                logger.info(
+                    "Cleaned up %d remote sessions (inactive > %ds)",
+                    len(offline),
+                    self.SESSION_RECOVERY_WINDOW_SECONDS,
+                )
         except Exception as e:
             logger.warning("Failed to cleanup offline sessions: %s", e)
 
@@ -223,7 +235,10 @@ class RemoteAgentManager:
                 SET status = 'offline', updated_at = {_param()}
                 WHERE status != 'offline' AND last_heartbeat < {_param()}
             """,
-                (datetime.now(timezone.utc).replace(tzinfo=None).isoformat(), heartbeat_cutoff.isoformat()),
+                (
+                    datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                    heartbeat_cutoff.isoformat(),
+                ),
             )
 
             updated = cursor.rowcount
