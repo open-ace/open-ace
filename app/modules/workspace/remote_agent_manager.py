@@ -75,7 +75,10 @@ class RemoteAgentManager:
         # Lock for gevent coroutine safety
         self._lock = Semaphore(1)
         self._restore_in_memory_state()
-        self._cleanup_offline_sessions()
+        # Defer session cleanup to heartbeat monitor instead of running on startup.
+        # This gives agents time to re-register after a server restart before their
+        # sessions are cleaned up. The heartbeat monitor runs every 60 seconds and
+        # will naturally clean up stale sessions (Ref: #596).
         self._start_heartbeat_monitor()
 
     def _restore_in_memory_state(self) -> None:
@@ -650,6 +653,9 @@ class RemoteAgentManager:
         """
         Queue a command for a remote agent (delivered via HTTP polling).
 
+        Commands are always queued even if the agent is not currently connected.
+        When the agent re-registers, get_pending_commands() will deliver them.
+
         Args:
             machine_id: Target machine ID.
             command: Command dict with 'type', 'command', etc.
@@ -657,15 +663,18 @@ class RemoteAgentManager:
         Returns:
             True if command was queued successfully.
         """
-        if machine_id not in self._connections:
-            logger.warning(f"No active connection for machine {machine_id}")
-            return False
-
         with self._lock:
             if machine_id not in self._command_queues:
                 self._command_queues[machine_id] = []
             self._command_queues[machine_id].append(command)
-        logger.info(f"Queued command for agent {machine_id}")
+
+        if machine_id not in self._connections:
+            logger.info(
+                "Agent %s not connected, command queued for delivery on re-registration",
+                machine_id,
+            )
+        else:
+            logger.info("Queued command for agent %s", machine_id)
         return True
 
     def get_pending_commands(self, machine_id: str) -> list[dict]:

@@ -525,6 +525,21 @@ def get_remote_session(session_id):
         return access_error
 
     if result:
+        # Return explicit error for ended sessions so frontend can handle properly
+        status = result.get("status")
+        if status in ("completed", "stopped", "error"):
+            status_messages = {
+                "completed": "远程会话已结束",
+                "stopped": "远程会话已停止",
+                "error": "远程会话发生错误",
+            }
+            return jsonify(
+                {
+                    "success": False,
+                    "session": result,
+                    "error": status_messages.get(status, "远程会话已结束"),
+                }
+            )
         return jsonify({"success": True, "session": result})
     return jsonify({"error": "Session not found"}), 404
 
