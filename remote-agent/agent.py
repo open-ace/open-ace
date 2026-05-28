@@ -1083,12 +1083,6 @@ class RemoteAgent:
                 )
                 return
 
-            if os.path.exists(dir_path):
-                self._send_create_result(
-                    request_id, False, error=f"Directory already exists: {dir_path}"
-                )
-                return
-
             os.mkdir(dir_path)
 
             self._send_create_result(
@@ -1098,6 +1092,10 @@ class RemoteAgent:
             )
             logger.info("Created directory: %s", dir_path)
 
+        except FileExistsError:
+            self._send_create_result(
+                request_id, False, error=f"Directory already exists: {dir_path}"
+            )
         except PermissionError:
             self._send_create_result(request_id, False, error=f"Permission denied: {dir_path}")
         except OSError as e:

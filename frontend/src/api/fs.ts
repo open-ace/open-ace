@@ -45,6 +45,12 @@ export interface CreateDirectoryResult {
   error?: string;
 }
 
+export interface RemoteOperationResult<T = unknown> {
+  success: boolean;
+  result?: T;
+  error?: string;
+}
+
 // ==================== API Methods ====================
 
 export const fsApi = {
@@ -69,7 +75,7 @@ export const fsApi = {
   browseRemoteDirectory(
     machineId: string,
     path?: string
-  ): Promise<{ success: boolean; result?: BrowseResult; error?: string }> {
+  ): Promise<RemoteOperationResult<BrowseResult>> {
     const params: Record<string, string> = {};
     if (path) params.path = path;
     return apiClient.get(`/api/remote/machines/${machineId}/browse`, params);
@@ -79,7 +85,7 @@ export const fsApi = {
   createRemoteDirectory(
     machineId: string,
     path: string
-  ): Promise<{ success: boolean; result?: { path: string; message?: string }; error?: string }> {
+  ): Promise<RemoteOperationResult<{ path: string; message?: string }>> {
     return apiClient.post(`/api/remote/machines/${machineId}/create-directory`, { path });
   },
 };

@@ -2259,8 +2259,6 @@ def browse_remote_directory(machine_id):
         )
 
     # Generate unique request ID for this browse request
-    import uuid
-
     request_id = str(uuid.uuid4())
 
     # Send browse_directory command to agent

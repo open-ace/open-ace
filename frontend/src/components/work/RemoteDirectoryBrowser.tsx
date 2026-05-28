@@ -51,6 +51,7 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
   const [isWritable, setIsWritable] = useState(false);
   const [showCreateInput, setShowCreateInput] = useState(false);
   const [newDirName, setNewDirName] = useState('');
+  const [isCreating, setIsCreating] = useState(false);
   const [pathHistory, setPathHistory] = useState<string[]>([]);
   const [fallbackNote, setFallbackNote] = useState<string | null>(null);
 
@@ -161,14 +162,14 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
 
   // Create new directory
   const handleCreateDirectory = async () => {
-    if (!newDirName.trim() || !isWritable) return;
+    if (!newDirName.trim() || !isWritable || isCreating) return;
 
     const separator = getPathSeparator();
     const fullPath = currentPath
       ? currentPath + (currentPath.endsWith(separator) ? '' : separator) + newDirName.trim()
       : newDirName.trim();
 
-    setIsLoading(true);
+    setIsCreating(true);
     setError(null);
     setShowCreateInput(false);
 
@@ -185,7 +186,7 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
       const fallback = t('createDirError', language) ?? 'Failed to create directory';
       setError((err as Error)?.message ?? fallback);
     } finally {
-      setIsLoading(false);
+      setIsCreating(false);
     }
   };
 
@@ -311,9 +312,17 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
               className="form-control"
               value={newDirName}
               onChange={(e) => setNewDirName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleCreateDirectory();
+              }}
               placeholder={t('folderName', language) || 'Folder name'}
             />
-            <Button variant="primary" size="sm" onClick={handleCreateDirectory}>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleCreateDirectory}
+              disabled={isCreating}
+            >
               {t('create', language)}
             </Button>
             <Button
