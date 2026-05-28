@@ -529,15 +529,15 @@ def get_remote_session(session_id):
         status = result.get("status")
         if status in ("completed", "stopped", "error"):
             status_messages = {
-                "completed": "远程会话已结束",
-                "stopped": "远程会话已停止",
-                "error": "远程会话发生错误",
+                "completed": "Remote session has ended",
+                "stopped": "Remote session has been stopped",
+                "error": "Remote session encountered an error",
             }
             return jsonify(
                 {
                     "success": False,
                     "session": result,
-                    "error": status_messages.get(status, "远程会话已结束"),
+                    "error": status_messages.get(status, "Remote session has ended"),
                 }
             )
         return jsonify({"success": True, "session": result})
