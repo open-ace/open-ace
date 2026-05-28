@@ -46,6 +46,10 @@ class RemoteAgentManager:
     # Heartbeat rate-limiting interval (seconds)
     HEARTBEAT_DB_WRITE_INTERVAL = 30
 
+    # Session recovery window (seconds) - allows reconnection after brief disconnects
+    # Sessions are only cleaned up if they've been inactive longer than this window
+    SESSION_RECOVERY_WINDOW_SECONDS = 300  # 5 minutes recovery window
+
     def __init__(self, db_path: str | None = None):
         self.db_path = db_path or str(DB_PATH)
         if db_path:
@@ -122,21 +126,47 @@ class RemoteAgentManager:
 
         Unlike the old _cleanup_stale_sessions which nuked ALL active remote
         sessions on startup, this only cleans up sessions whose machine is
-        confirmed offline in the remote_machines table.
+        confirmed offline AND have been inactive longer than the recovery window.
+
+        The recovery window allows users to reconnect after brief network
+        interruptions without losing their session history.
         """
+        recovery_cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+            seconds=self.SESSION_RECOVERY_WINDOW_SECONDS
+        )
+
         try:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
 
-                # Find active remote sessions whose machine is offline
+                # Find active remote sessions whose machine is offline AND
+                # session has been inactive longer than the recovery window
                 cursor.execute(
-                    "SELECT s.session_id, s.remote_machine_id FROM agent_sessions s "
+                    "SELECT s.session_id, s.remote_machine_id, s.updated_at FROM agent_sessions s "
                     "LEFT JOIN remote_machines m ON s.remote_machine_id = m.machine_id "
                     "WHERE s.status = 'active' AND s.workspace_type = 'remote' "
-                    "AND (m.status IS NULL OR m.status != 'online')"
+                    "AND (m.status IS NULL OR m.status != 'online') "
+                    f"AND s.updated_at < {_param()}",
+                    (recovery_cutoff.isoformat(),),
                 )
                 offline = cursor.fetchall()
                 if not offline:
+                    # Log sessions that are preserved within recovery window
+                    cursor.execute(
+                        "SELECT s.session_id, s.updated_at FROM agent_sessions s "
+                        "LEFT JOIN remote_machines m ON s.remote_machine_id = m.machine_id "
+                        "WHERE s.status = 'active' AND s.workspace_type = 'remote' "
+                        "AND (m.status IS NULL OR m.status != 'online') "
+                        f"AND s.updated_at >= {_param()}",
+                        (recovery_cutoff.isoformat(),),
+                    )
+                    preserved = cursor.fetchall()
+                    if preserved:
+                        logger.info(
+                            "Preserved %d remote sessions within recovery window (will be cleaned after %ds)",
+                            len(preserved),
+                            self.SESSION_RECOVERY_WINDOW_SECONDS,
+                        )
                     return
 
                 sids = [r["session_id"] for r in offline]
@@ -153,7 +183,7 @@ class RemoteAgentManager:
                 conn.commit()
 
             if offline:
-                logger.info("Cleaned up %d remote sessions with offline machines", len(offline))
+                logger.info("Cleaned up %d remote sessions (inactive > %ds)", len(offline), self.SESSION_RECOVERY_WINDOW_SECONDS)
         except Exception as e:
             logger.warning("Failed to cleanup offline sessions: %s", e)
 
@@ -172,10 +202,18 @@ class RemoteAgentManager:
         logger.info("Heartbeat monitor started")
 
     def _check_heartbeats(self) -> None:
-        """Check for stale heartbeats and mark machines offline."""
+        """Check for stale heartbeats and mark machines offline.
+
+        Also cleans up remote sessions that have been offline longer than
+        the recovery window, allowing reconnection for brief disconnects.
+        """
+        recovery_cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+            seconds=self.SESSION_RECOVERY_WINDOW_SECONDS
+        )
+
         with self.db.connection() as conn:
             cursor = conn.cursor()
-            cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+            heartbeat_cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
                 seconds=self.HEARTBEAT_TIMEOUT_SECONDS
             )
 
@@ -185,12 +223,40 @@ class RemoteAgentManager:
                 SET status = 'offline', updated_at = {_param()}
                 WHERE status != 'offline' AND last_heartbeat < {_param()}
             """,
-                (datetime.now(timezone.utc).replace(tzinfo=None).isoformat(), cutoff.isoformat()),
+                (datetime.now(timezone.utc).replace(tzinfo=None).isoformat(), heartbeat_cutoff.isoformat()),
             )
 
             updated = cursor.rowcount
             if updated > 0:
                 logger.info(f"Marked {updated} machines offline due to heartbeat timeout")
+
+            # Clean up sessions on offline machines that exceed recovery window
+            cursor.execute(
+                "SELECT s.session_id FROM agent_sessions s "
+                "LEFT JOIN remote_machines m ON s.remote_machine_id = m.machine_id "
+                "WHERE s.status = 'active' AND s.workspace_type = 'remote' "
+                "AND m.status = 'offline' "
+                f"AND s.updated_at < {_param()}",
+                (recovery_cutoff.isoformat(),),
+            )
+            expired_sessions = cursor.fetchall()
+
+            if expired_sessions:
+                sids = [r["session_id"] for r in expired_sessions]
+                with self._lock:
+                    for sid in sids:
+                        self._session_end_flags[sid] = True
+
+                placeholders = ", ".join([_param()] * len(sids))
+                cursor.execute(
+                    f"UPDATE agent_sessions SET status = 'completed', "
+                    f"updated_at = {_param()} WHERE session_id IN ({placeholders})",
+                    [datetime.now(timezone.utc).replace(tzinfo=None).isoformat()] + sids,
+                )
+                logger.info(
+                    f"Cleaned up %d remote sessions (offline > {self.SESSION_RECOVERY_WINDOW_SECONDS}s)",
+                    len(expired_sessions),
+                )
 
             conn.commit()
 
