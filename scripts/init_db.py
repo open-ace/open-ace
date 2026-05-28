@@ -115,6 +115,19 @@ def create_default_admin(
     # Check if admin already exists
     existing = db.get_user_by_username(username)
     if existing:
+        # Update system_account if provided and current value is NULL or different
+        # Note: Only system_account is updated; other fields (email, tenant_id) are not modified
+        # as they are typically set during initial creation and should not be changed by reinstall
+        if system_account and existing.get("system_account") != system_account:
+            # Validate system_account parameter
+            if not system_account.strip():
+                print(f"Warning: system_account is empty string, skipping update")
+                return True
+            try:
+                db.update_user(existing["id"], system_account=system_account)
+                print(f"Updated system_account for '{username}' to '{system_account}'")
+            except Exception as e:
+                print(f"Warning: Failed to update system_account for '{username}': {e}")
         print(f"Admin user '{username}' already exists")
         return True
 
