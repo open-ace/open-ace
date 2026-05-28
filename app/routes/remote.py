@@ -2305,3 +2305,81 @@ def browse_remote_directory(machine_id):
             "machine": machine,
         }
     )
+
+
+@remote_bp.route("/machines/<machine_id>/create-directory", methods=["POST"])
+def create_remote_directory(machine_id):
+    """Create a directory on a remote machine.
+
+    Expects JSON body with 'path' (full path of the directory to create).
+    """
+    if not hasattr(g, "user") or g.user is None:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    agent_mgr = get_remote_agent_manager()
+
+    if g.user.get("role") != "admin":
+        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
+            return jsonify({"error": "Access denied"}), 403
+
+    data = request.get_json() or {}
+    dir_path = data.get("path", "")
+
+    if not dir_path:
+        return jsonify({"success": False, "error": "Path is required"}), 400
+
+    machine = agent_mgr.get_machine(machine_id)
+    if not machine:
+        return jsonify({"error": "Machine not found"}), 404
+
+    if machine.get("status") not in ("online", "idle"):
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Machine is offline. Directory creation requires an active connection.",
+                }
+            ),
+            503,
+        )
+
+    request_id = str(uuid.uuid4())
+
+    command = {
+        "type": "command",
+        "command": "create_directory",
+        "request_id": request_id,
+        "path": dir_path,
+    }
+
+    if not agent_mgr.send_command(machine_id, command):
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Failed to send command to agent",
+                }
+            ),
+            500,
+        )
+
+    result = agent_mgr.get_browse_result(request_id, timeout=15.0)
+
+    if result is None:
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Timeout waiting for agent response. Please try again.",
+                }
+            ),
+            504,
+        )
+
+    return jsonify(
+        {
+            "success": result.get("success", False),
+            "result": result.get("result"),
+            "error": result.get("error"),
+        }
+    )

@@ -74,4 +74,12 @@ export const fsApi = {
     if (path) params.path = path;
     return apiClient.get(`/api/remote/machines/${machineId}/browse`, params);
   },
+
+  // Create directory on remote machine (via HTTP proxy)
+  createRemoteDirectory(
+    machineId: string,
+    path: string
+  ): Promise<{ success: boolean; result?: { path: string; message?: string }; error?: string }> {
+    return apiClient.post(`/api/remote/machines/${machineId}/create-directory`, { path });
+  },
 };

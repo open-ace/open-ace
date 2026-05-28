@@ -460,6 +460,8 @@ class RemoteAgent:
             self._cmd_attach_terminal(data)
         elif command == "browse_directory":
             self._cmd_browse_directory(data)
+        elif command == "create_directory":
+            self._cmd_create_directory(data)
         else:
             logger.warning("Unknown command: %s", command)
 
@@ -1007,6 +1009,142 @@ class RemoteAgent:
 
         except Exception as e:
             logger.error("Failed to browse directory %s: %s", path, e)
+            self._http_send(
+                {
+                    "type": "browse_result",
+                    "machine_id": self.config.machine_id,
+                    "request_id": request_id,
+                    "success": False,
+                    "error": str(e),
+                }
+            )
+
+    def _cmd_create_directory(self, data: dict[str, Any]) -> None:
+        """Handle a create_directory command."""
+        request_id = data.get("request_id", "")
+        dir_path = data.get("path", "")
+
+        if dir_path:
+            dir_path = os.path.expanduser(dir_path)
+        else:
+            self._http_send(
+                {
+                    "type": "browse_result",
+                    "machine_id": self.config.machine_id,
+                    "request_id": request_id,
+                    "success": False,
+                    "error": "No path specified",
+                }
+            )
+            return
+
+        logger.info("Creating directory: %s", dir_path)
+
+        try:
+            parent = os.path.dirname(dir_path)
+            name = os.path.basename(dir_path)
+
+            if not os.path.exists(parent):
+                self._http_send(
+                    {
+                        "type": "browse_result",
+                        "machine_id": self.config.machine_id,
+                        "request_id": request_id,
+                        "success": False,
+                        "error": f"Parent directory does not exist: {parent}",
+                    }
+                )
+                return
+
+            if not os.path.isdir(parent):
+                self._http_send(
+                    {
+                        "type": "browse_result",
+                        "machine_id": self.config.machine_id,
+                        "request_id": request_id,
+                        "success": False,
+                        "error": f"Parent path is not a directory: {parent}",
+                    }
+                )
+                return
+
+            if not os.access(parent, os.W_OK):
+                self._http_send(
+                    {
+                        "type": "browse_result",
+                        "machine_id": self.config.machine_id,
+                        "request_id": request_id,
+                        "success": False,
+                        "error": f"Permission denied: cannot write to {parent}",
+                    }
+                )
+                return
+
+            invalid_chars = set("/\0")
+            if os.name == "nt":
+                invalid_chars.update('\\:*?"<>|')
+            if any(c in name for c in invalid_chars) or not name:
+                self._http_send(
+                    {
+                        "type": "browse_result",
+                        "machine_id": self.config.machine_id,
+                        "request_id": request_id,
+                        "success": False,
+                        "error": f"Invalid directory name: {name}",
+                    }
+                )
+                return
+
+            if os.path.exists(dir_path):
+                self._http_send(
+                    {
+                        "type": "browse_result",
+                        "machine_id": self.config.machine_id,
+                        "request_id": request_id,
+                        "success": False,
+                        "error": f"Directory already exists: {dir_path}",
+                    }
+                )
+                return
+
+            os.makedirs(dir_path, exist_ok=False)
+
+            self._http_send(
+                {
+                    "type": "browse_result",
+                    "machine_id": self.config.machine_id,
+                    "request_id": request_id,
+                    "success": True,
+                    "result": {
+                        "path": dir_path,
+                        "message": "Directory created successfully",
+                    },
+                }
+            )
+            logger.info("Created directory: %s", dir_path)
+
+        except PermissionError:
+            self._http_send(
+                {
+                    "type": "browse_result",
+                    "machine_id": self.config.machine_id,
+                    "request_id": request_id,
+                    "success": False,
+                    "error": f"Permission denied: {dir_path}",
+                }
+            )
+        except OSError as e:
+            self._http_send(
+                {
+                    "type": "browse_result",
+                    "machine_id": self.config.machine_id,
+                    "request_id": request_id,
+                    "success": False,
+                    "error": f"Failed to create directory: {e}",
+                }
+            )
+        except Exception as e:
+            logger.error("Failed to create directory %s: %s", dir_path, e)
             self._http_send(
                 {
                     "type": "browse_result",
