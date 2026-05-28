@@ -262,8 +262,6 @@ class TestAgentCreateDirectory(unittest.TestCase):
         if agent_dir not in sys.path:
             sys.path.insert(0, agent_dir)
 
-        import importlib
-
         if "agent" in sys.modules:
             del sys.modules["agent"]
 
@@ -387,6 +385,17 @@ class TestAgentCreateDirectory(unittest.TestCase):
             agent._cmd_create_directory({"request_id": "test-req-123", "path": dir_path})
             result = self._get_last_send(agent)
             self.assertEqual(result["request_id"], "test-req-123")
+
+    def test_windows_invalid_chars_rejected(self):
+        """Test that Windows-specific invalid characters are rejected when os.name is 'nt'."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dir_path = os.path.join(tmpdir, "bad*name")
+            agent = self._make_agent()
+            with patch("os.name", "nt"):
+                agent._cmd_create_directory({"request_id": "r1", "path": dir_path})
+            result = self._get_last_send(agent)
+            self.assertFalse(result["success"])
+            self.assertIn("Invalid directory name", result["error"])
 
 
 if __name__ == "__main__":

@@ -1033,9 +1033,9 @@ class RemoteAgent:
             "request_id": request_id,
             "success": success,
         }
-        if error:
+        if error is not None:
             response["error"] = error
-        if result:
+        if result is not None:
             response["result"] = result
         self._http_send(response)
 
