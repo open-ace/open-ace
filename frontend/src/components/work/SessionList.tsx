@@ -253,7 +253,11 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
       </div>
 
       {/* New Session Button */}
-      <button className="btn btn-primary btn-sm w-100 mb-3" onClick={handleNewSession} data-testid="new-session-btn">
+      <button
+        className="btn btn-primary btn-sm w-100 mb-3"
+        onClick={handleNewSession}
+        data-testid="new-session-btn"
+      >
         <i className="bi bi-plus-lg me-1" />
         {t('newSession', language)}
       </button>

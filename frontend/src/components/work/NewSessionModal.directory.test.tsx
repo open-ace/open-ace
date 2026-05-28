@@ -12,8 +12,13 @@ vi.mock('@/hooks', () => ({
   useAvailableMachines: () => ({
     data: {
       machines: [
-        { machine_id: 'machine-1', machine_name: 'Test Machine', os_type: 'linux', work_dir: '/root/workspace' }
-      ]
+        {
+          machine_id: 'machine-1',
+          machine_name: 'Test Machine',
+          os_type: 'linux',
+          work_dir: '/root/workspace',
+        },
+      ],
     },
     isLoading: false,
   }),
@@ -44,7 +49,7 @@ vi.mock('@/components/common', () => ({
   Button: ({ variant, onClick, disabled, loading, children }: any) => (
     <button
       onClick={onClick}
-      disabled={disabled || loading}
+      disabled={disabled ?? loading}
       data-testid={`btn-${variant}`}
       className={`btn btn-${variant}`}
     >
@@ -62,7 +67,9 @@ vi.mock('./RemoteMachineSelector', () => ({
         data-testid="machine-select"
       >
         {machines.map((m: any) => (
-          <option key={m.machine_id} value={m.machine_id}>{m.machine_name}</option>
+          <option key={m.machine_id} value={m.machine_id}>
+            {m.machine_name}
+          </option>
         ))}
       </select>
     </div>
@@ -105,31 +112,31 @@ describe('NewSessionModal - Directory Browser Integration', () => {
   describe('Browse Button', () => {
     it('renders browse button for remote workspace', () => {
       render(<NewSessionModal {...defaultProps} />);
-      
+
       // Select remote workspace type
       fireEvent.click(screen.getByText('remoteWorkspace'));
-      
+
       // Select a machine
       const select = screen.getByTestId('machine-select');
       fireEvent.change(select, { target: { value: 'machine-1' } });
-      
+
       // Browse button should appear
       expect(screen.getByText('browse')).toBeInTheDocument();
     });
 
     it('browse button opens directory browser modal', () => {
       render(<NewSessionModal {...defaultProps} />);
-      
+
       // Select remote workspace type
       fireEvent.click(screen.getByText('remoteWorkspace'));
-      
+
       // Select a machine
       const select = screen.getByTestId('machine-select');
       fireEvent.change(select, { target: { value: 'machine-1' } });
-      
+
       // Click browse button
       fireEvent.click(screen.getByText('browse'));
-      
+
       // Directory browser modal should open
       expect(screen.getByTestId('directory-browser-modal')).toBeInTheDocument();
     });
@@ -151,14 +158,14 @@ describe('NewSessionModal - Directory Browser Integration', () => {
 
     it('renders browse button for terminal workspace', () => {
       render(<NewSessionModal {...defaultProps} />);
-      
+
       // Select terminal workspace type
       fireEvent.click(screen.getByText('terminalWorkspace'));
-      
+
       // Select a machine
       const select = screen.getByTestId('machine-select');
       fireEvent.change(select, { target: { value: 'machine-1' } });
-      
+
       // Browse button should appear
       expect(screen.getByText('browse')).toBeInTheDocument();
     });
@@ -168,16 +175,16 @@ describe('NewSessionModal - Directory Browser Integration', () => {
     it('loads path history from localStorage on mount', () => {
       // Set path history in localStorage
       localStorage.setItem('remote-path-history-machine-1', JSON.stringify(['/path1', '/path2']));
-      
+
       render(<NewSessionModal {...defaultProps} />);
-      
+
       // Select remote workspace type
       fireEvent.click(screen.getByText('remoteWorkspace'));
-      
+
       // Select machine
       const select = screen.getByTestId('machine-select');
       fireEvent.change(select, { target: { value: 'machine-1' } });
-      
+
       // Path history should be displayed
       expect(screen.getByText('recentPaths')).toBeInTheDocument();
       expect(screen.getByText('path1')).toBeInTheDocument();
@@ -186,19 +193,19 @@ describe('NewSessionModal - Directory Browser Integration', () => {
 
     it('clicking history button updates path', () => {
       localStorage.setItem('remote-path-history-machine-1', JSON.stringify(['/saved-path']));
-      
+
       render(<NewSessionModal {...defaultProps} />);
-      
+
       // Select remote workspace type
       fireEvent.click(screen.getByText('remoteWorkspace'));
-      
+
       // Select machine
       const select = screen.getByTestId('machine-select');
       fireEvent.change(select, { target: { value: 'machine-1' } });
-      
+
       // Click history button
       fireEvent.click(screen.getByText('saved-path'));
-      
+
       // Path should be updated (check input value)
       const input = screen.getByPlaceholderText('/root/workspace');
       expect(input).toHaveValue('/saved-path');
@@ -206,20 +213,20 @@ describe('NewSessionModal - Directory Browser Integration', () => {
 
     it('saves path to history when selected from browser', async () => {
       render(<NewSessionModal {...defaultProps} />);
-      
+
       // Select remote workspace type
       fireEvent.click(screen.getByText('remoteWorkspace'));
-      
+
       // Select machine
       const select = screen.getByTestId('machine-select');
       fireEvent.change(select, { target: { value: 'machine-1' } });
-      
+
       // Open directory browser
       fireEvent.click(screen.getByText('browse'));
-      
+
       // Select a path
       fireEvent.click(screen.getByTestId('select-path-btn'));
-      
+
       // Wait for state update
       await waitFor(() => {
         const saved = localStorage.getItem('remote-path-history-machine-1');
@@ -231,16 +238,16 @@ describe('NewSessionModal - Directory Browser Integration', () => {
       // Set more than 5 paths
       const paths = ['/path1', '/path2', '/path3', '/path4', '/path5', '/path6', '/path7'];
       localStorage.setItem('remote-path-history-machine-1', JSON.stringify(paths));
-      
+
       render(<NewSessionModal {...defaultProps} />);
-      
+
       // Select remote workspace type
       fireEvent.click(screen.getByText('remoteWorkspace'));
-      
+
       // Select machine
       const select = screen.getByTestId('machine-select');
       fireEvent.change(select, { target: { value: 'machine-1' } });
-      
+
       // Should only show first 5
       const historyButtons = screen.getAllByText(/path\d/);
       expect(historyButtons.length).toBeLessThanOrEqual(5);
@@ -250,17 +257,17 @@ describe('NewSessionModal - Directory Browser Integration', () => {
   describe('Directory Browser Modal', () => {
     it('passes correct machineId to DirectoryBrowserModal', () => {
       render(<NewSessionModal {...defaultProps} />);
-      
+
       // Select remote workspace type
       fireEvent.click(screen.getByText('remoteWorkspace'));
-      
+
       // Select machine
       const select = screen.getByTestId('machine-select');
       fireEvent.change(select, { target: { value: 'machine-1' } });
-      
+
       // Open directory browser
       fireEvent.click(screen.getByText('browse'));
-      
+
       // Check machineId is passed
       expect(screen.getByTestId('browser-machine-id')).toHaveTextContent('machine-1');
     });
