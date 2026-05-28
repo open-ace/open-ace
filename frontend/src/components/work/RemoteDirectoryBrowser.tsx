@@ -72,17 +72,6 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
     [isWindows]
   );
 
-  const getRootPath = useCallback((): string => {
-    if (isWindows) {
-      const parts = splitPath(currentPath);
-      if (parts.length > 0 && parts[0].match(/^[A-Za-z]:$/)) {
-        return parts[0] + '\\';
-      }
-      return 'C:\\';
-    }
-    return '/';
-  }, [isWindows, currentPath, splitPath]);
-
   // Load path history from localStorage
   useEffect(() => {
     const savedHistory = localStorage.getItem(`${PATH_HISTORY_KEY}-${machineId}`);
@@ -222,7 +211,8 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
         }
       }
     } else {
-      // Unix: build paths with forward slash
+      // Unix: add root, then build paths with forward slash
+      crumbs.push({ name: '/', path: '/' });
       let accumulatedPath = '';
       for (const part of parts) {
         accumulatedPath += '/' + part;
@@ -257,15 +247,9 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
       {/* Breadcrumbs */}
       <div className="mb-2">
         <div className="d-flex align-items-center gap-1 small">
-          <button
-            className="btn btn-link btn-sm p-0"
-            onClick={() => fetchDirectories(getRootPath())}
-          >
-            {isWindows ? currentPath?.match(/^[A-Za-z]:/)?.[0] || 'C:' : '/'}
-          </button>
           {breadcrumbs.map((crumb, index) => (
             <React.Fragment key={crumb.path}>
-              <span className="text-muted">{getPathSeparator()}</span>
+              {index > 0 && <span className="text-muted">{getPathSeparator()}</span>}
               <button
                 className={`btn btn-link btn-sm p-0 ${
                   index === breadcrumbs.length - 1 ? 'fw-bold' : ''
