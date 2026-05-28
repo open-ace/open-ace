@@ -2366,16 +2366,19 @@ def browse_remote_directory(machine_id):
         "path": browse_path,
     }
 
-    if not agent_mgr.send_command(machine_id, command):
+    # Check agent connection for synchronous commands — fail fast if offline
+    if not agent_mgr.is_agent_connected(machine_id):
         return (
             jsonify(
                 {
                     "success": False,
-                    "error": "Failed to send command to agent",
+                    "error": "Agent is not connected",
                 }
             ),
-            500,
+            503,
         )
+
+    agent_mgr.send_command(machine_id, command)
 
     # Wait for agent response (with timeout)
     result = agent_mgr.get_browse_result(request_id, timeout=15.0)
@@ -2450,16 +2453,19 @@ def create_remote_directory(machine_id):
         "path": dir_path,
     }
 
-    if not agent_mgr.send_command(machine_id, command):
+    # Check agent connection for synchronous commands — fail fast if offline
+    if not agent_mgr.is_agent_connected(machine_id):
         return (
             jsonify(
                 {
                     "success": False,
-                    "error": "Failed to send command to agent",
+                    "error": "Agent is not connected",
                 }
             ),
-            500,
+            503,
         )
+
+    agent_mgr.send_command(machine_id, command)
 
     result = agent_mgr.get_browse_result(request_id, timeout=15.0)
 

@@ -10,7 +10,6 @@ import contextlib
 import json
 import logging
 import threading
-import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -155,21 +154,7 @@ class RemoteSessionManager:
         if permission_mode:
             command["permission_mode"] = permission_mode
 
-        success = self._agent_manager.send_command(machine_id, command)
-        if not success:
-            for attempt in range(3):
-                time.sleep(2)
-                logger.info(
-                    f"Retrying start_session (attempt {attempt+1}/3) for {machine_id[:8]}..."
-                )
-                success = self._agent_manager.send_command(machine_id, command)
-                if success:
-                    break
-        if not success:
-            self._agent_manager.unbind_session(session_id)
-            self._session_manager.delete_session(session_id)
-            logger.error(f"Failed to start remote session on {machine_id} after retries")
-            return None
+        self._agent_manager.send_command(machine_id, command)
 
         # Update session with remote workspace info
         session.context["workspace_type"] = "remote"
