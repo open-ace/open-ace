@@ -1765,16 +1765,34 @@ def llm_proxy(path=""):
             429,
         )
 
-    # Resolve real API key with scope filtering + failover loop
+    # Resolve real API key with scope filtering + failover loop.
+    # Retries until no more candidate keys remain for the provider/scope.
     api_proxy = get_api_key_proxy_service()
     exclude_key_ids: set[int] = set()
-    max_retries = 2
+    attempt = 0
 
-    for _attempt in range(max_retries + 1):
+    while True:
+        attempt += 1
         key_result = api_proxy.resolve_api_key_for_scope(
             tenant_id, provider, scope="remote", exclude_key_ids=exclude_key_ids
         )
         if not key_result:
+            if exclude_key_ids:
+                # All candidate keys exhausted
+                return (
+                    jsonify(
+                        {
+                            "error": {
+                                "message": (
+                                    f"All {len(exclude_key_ids)} API key(s) failed "
+                                    f"for provider '{provider}'"
+                                ),
+                                "type": "upstream_error",
+                            }
+                        }
+                    ),
+                    502,
+                )
             return (
                 jsonify(
                     {
@@ -1820,7 +1838,7 @@ def llm_proxy(path=""):
             _model,
             provider,
             key_id,
-            _attempt + 1,
+            attempt,
         )
 
         # Log response status for debugging
@@ -1941,21 +1959,19 @@ def llm_proxy(path=""):
                 )
 
                 # Failover: on auth/quota errors, exclude this key and retry
-                if resp.status_code in (401, 403) and _attempt < max_retries:
+                if resp.status_code in (401, 403):
                     logger.info(
-                        "LLM proxy failover: excluding key_id=%s, retrying (%d/%d)",
+                        "LLM proxy failover: excluding key_id=%s, retrying (attempt %d)",
                         key_id,
-                        _attempt + 1,
-                        max_retries,
+                        attempt,
                     )
                     exclude_key_ids.add(key_id)
                     continue
-                if resp.status_code == 429 and _attempt < max_retries:
+                if resp.status_code == 429:
                     logger.info(
-                        "LLM proxy rate-limited: excluding key_id=%s, retrying (%d/%d)",
+                        "LLM proxy rate-limited: excluding key_id=%s, retrying (attempt %d)",
                         key_id,
-                        _attempt + 1,
-                        max_retries,
+                        attempt,
                     )
                     exclude_key_ids.add(key_id)
                     continue
@@ -2138,7 +2154,7 @@ def llm_proxy(path=""):
                 502,
             )
 
-    # Should not reach here (all paths return within the loop)
+    # Should not reach here — all loop paths either return or continue
     return (
         jsonify(
             {
