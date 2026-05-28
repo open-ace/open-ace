@@ -221,7 +221,6 @@ Modules (domain logic):
 - **CLI 子进程管理** — 启动 Claude Code、Qwen Code、Codex 或 OpenClaw
 - **WebSocket 终端** — 浏览器通过终端服务器连接 PTY
 - **会话同步** — 扫描 `~/.claude/`、`~/.qwen/`、`~/.codex/` 的会话历史，每 30 秒同步到服务器
-- **会话隔离** — 创建 `.openace-sessions/` 工作区，使用符号链接连接项目文件
 
 客户端指南请参阅 [REMOTE-AGENT.md](REMOTE-AGENT.md)，服务端指南请参阅 [REMOTE-WORKSPACE.md](REMOTE-WORKSPACE.md)。
 

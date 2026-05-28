@@ -96,10 +96,6 @@ The terminal server provides WebSocket-based PTY access:
 - **Resize** — JSON control messages `{"type":"resize","cols":N,"rows":N}`
 - **Environment** — Auto-injects `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` from proxy tokens
 
-## Session Isolation
-
-Each remote session gets an isolated workspace under `<project>/.openace-sessions/<session_id>/workspace/` with symlinks to 140+ key project items, preventing multi-session context mixing.
-
 ## Session Sync
 
 The agent scans session history directories every 30s and syncs to the server:

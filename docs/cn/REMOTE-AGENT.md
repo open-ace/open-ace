@@ -96,10 +96,6 @@ curl -fsSL https://<server>/api/remote/agent/install.sh | bash -s -- \
 - **调整大小** — JSON 控制消息 `{"type":"resize","cols":N,"rows":N}`
 - **环境** — 自动从代理 token 注入 `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`
 
-## 会话隔离
-
-每个远程会话获得一个隔离的工作区，位于 `<project>/.openace-sessions/<session_id>/workspace/`，通过符号链接连接 140+ 个关键项目文件，防止多会话上下文混淆。
-
 ## 会话同步
 
 代理每 30 秒扫描会话历史目录并同步到服务器：

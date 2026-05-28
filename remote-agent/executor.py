@@ -24,7 +24,6 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from cli_adapters import get_adapter
 from cli_adapters.base import collect_custom_envkeys
-from session_isolation import cleanup_isolated_workspace, create_isolated_workspace
 
 if TYPE_CHECKING:
     from cli_adapters.base import BaseCLIAdapter
@@ -53,7 +52,6 @@ class SessionProcess:
         model: str | None = None,
         permission_mode: str | None = None,
         allowed_tools: list[str] | None = None,
-        original_project_path: str | None = None,
     ):
         self.session_id = session_id
         self.process = process
@@ -65,9 +63,6 @@ class SessionProcess:
         self.env = env
         self.model = model
         self.permission_mode = permission_mode
-        self.original_project_path = (
-            original_project_path or project_path
-        )  # For cleanup (Issue #491)
         self.allowed_tools: list[str] = list(allowed_tools) if allowed_tools else []
 
         self._stdout_thread: threading.Thread | None = None
@@ -850,10 +845,6 @@ class ProcessExecutor:
         # Expand ~ in project path to actual home directory
         project_path = os.path.expanduser(project_path)
 
-        # Create isolated workspace for session (Issue #491)
-        original_project_path = project_path
-        project_path = create_isolated_workspace(session_id, project_path)
-
         # Ensure project path exists
         try:
             Path(project_path).mkdir(parents=True, exist_ok=True)
@@ -950,7 +941,6 @@ class ProcessExecutor:
             model=model,
             permission_mode=permission_mode,
             allowed_tools=allowed_tools,
-            original_project_path=original_project_path,
         )
 
         with self._lock:
@@ -1196,7 +1186,6 @@ class ProcessExecutor:
                 model=old_session.model,
                 permission_mode=old_session.permission_mode,
                 allowed_tools=old_session.allowed_tools,
-                original_project_path=old_session.original_project_path,
             )
 
             with self._lock:
@@ -1335,10 +1324,6 @@ class ProcessExecutor:
             return {"success": False, "error": "Session not found"}
 
         session.stop()
-
-        # Clean up isolated workspace (Issue #491)
-        cleanup_isolated_workspace(session_id, session.project_path)
-
         logger.info("Session %s stopped", session_id[:8])
         self._save_sessions_meta()
         return {"success": True}
@@ -1441,7 +1426,6 @@ class ProcessExecutor:
 
         for session in sessions:
             session.stop()
-            cleanup_isolated_workspace(session.session_id, session.project_path)
 
         with self._lock:
             self._sessions.clear()
@@ -1471,7 +1455,6 @@ class ProcessExecutor:
                         "allowed_tools": s.allowed_tools,
                         "paused": s._paused,
                         "cli_session_id": s._cli_session_id,
-                        "original_project_path": s.original_project_path,
                         "env": (
                             {k: v for k, v in s.env.items() if not k.endswith("TOKEN")}
                             if s.env
@@ -1575,7 +1558,6 @@ class ProcessExecutor:
                 model=info.get("model"),
                 permission_mode=info.get("permission_mode"),
                 allowed_tools=info.get("allowed_tools"),
-                original_project_path=info.get("original_project_path"),
             )
 
             with self._lock:

@@ -221,7 +221,6 @@ The remote agent runs as a Python daemon on remote machines, providing:
 - **CLI subprocess management** — spawns Claude Code, Qwen Code, Codex, or OpenClaw
 - **WebSocket terminal** — browser connects to PTY via terminal server
 - **Session sync** — scans `~/.claude/`, `~/.qwen/`, `~/.codex/` for session history, syncs to server every 30s
-- **Session isolation** — creates `.openace-sessions/` workspaces with symlinked project files
 
 See [REMOTE-AGENT.md](REMOTE-AGENT.md) for the client-side guide and [REMOTE-WORKSPACE.md](REMOTE-WORKSPACE.md) for the server-side guide.
 
