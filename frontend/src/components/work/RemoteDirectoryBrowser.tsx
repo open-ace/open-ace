@@ -234,16 +234,6 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
 
   return (
     <div className="remote-directory-browser">
-      {/* Header */}
-      <div className="d-flex justify-content-between align-items-center mb-3">
-        <h5 className="mb-0">{t('browseDirectory', language) || 'Browse Directory'}</h5>
-        {onClose && (
-          <Button variant="secondary" size="sm" onClick={onClose}>
-            <i className="bi bi-x-lg" />
-          </Button>
-        )}
-      </div>
-
       {/* Path History */}
       {pathHistory.length > 0 && (
         <div className="mb-2">

@@ -857,6 +857,16 @@ const translations: Record<Language, Translations> = {
     recentPaths: 'Recent Paths',
     browseDirectory: 'Browse Directory',
     selectDirectory: 'Select Directory',
+    up: 'Up',
+    newFolder: 'New Folder',
+    select: 'Select',
+    currentPath: 'Current Path',
+    writable: 'Writable',
+    emptyDirectory: 'Empty Directory',
+    noSubdirectories: 'No subdirectories found',
+    folderName: 'Folder name',
+    createDirNotAvailable:
+      'Create directory on remote machine is not yet available. Please create the directory on the remote machine first.',
   },
   zh: {
     // Common
@@ -1689,6 +1699,15 @@ const translations: Record<Language, Translations> = {
     recentPaths: '最近使用的路径',
     browseDirectory: '浏览目录',
     selectDirectory: '选择目录',
+    up: '上级',
+    newFolder: '新建文件夹',
+    select: '选择',
+    currentPath: '当前路径',
+    writable: '可写',
+    emptyDirectory: '空目录',
+    noSubdirectories: '没有子目录',
+    folderName: '文件夹名称',
+    createDirNotAvailable: '暂不支持在远程机器上创建目录，请先在远程机器上手动创建。',
   },
   ja: {
     // Common
@@ -2221,6 +2240,22 @@ const translations: Record<Language, Translations> = {
     codexSettingsHint:
       '機密情報以外の Codex 設定のみを構成してください（model、sandbox など）。API キーは含めないでください — 環境変数経由で自動的に挿入されます。',
     providerCannotChange: 'プロバイダーは変更できません',
+
+    // Issue #584: Directory browser
+    browse: '参照',
+    recentPaths: '最近のパス',
+    browseDirectory: 'ディレクトリを参照',
+    selectDirectory: 'ディレクトリを選択',
+    up: '上へ',
+    newFolder: '新しいフォルダ',
+    select: '選択',
+    currentPath: '現在のパス',
+    writable: '書込可',
+    emptyDirectory: '空のディレクトリ',
+    noSubdirectories: 'サブディレクトリがありません',
+    folderName: 'フォルダ名',
+    createDirNotAvailable:
+      'リモートマシンでのディレクトリ作成はまだサポートされていません。先にリモートマシンで手動作成してください。',
   },
   ko: {
     // Common
@@ -2751,6 +2786,22 @@ const translations: Record<Language, Translations> = {
     codexSettingsHint:
       '민감하지 않은 Codex 설정만 구성하세요 (model, sandbox 등). API 키는 포함하지 마세요 — 환경 변수를 통해 자동으로 주입됩니다.',
     providerCannotChange: '공급자를 변경할 수 없습니다',
+
+    // Issue #584: Directory browser
+    browse: '찾아보기',
+    recentPaths: '최근 경로',
+    browseDirectory: '디렉토리 찾아보기',
+    selectDirectory: '디렉토리 선택',
+    up: '상위',
+    newFolder: '새 폴더',
+    select: '선택',
+    currentPath: '현재 경로',
+    writable: '쓰기 가능',
+    emptyDirectory: '빈 디렉토리',
+    noSubdirectories: '하위 디렉토리 없음',
+    folderName: '폴더 이름',
+    createDirNotAvailable:
+      '원격 머신에서 디렉토리 생성은 아직 지원되지 않습니다. 원격 머신에서 먼저 수동으로 생성해 주세요.',
   },
 };
 
