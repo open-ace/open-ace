@@ -247,10 +247,7 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
       <div className="mb-2">
         <div className="d-flex align-items-center gap-1 small">
           {!isWindows && (
-            <button
-              className="btn btn-link btn-sm p-0"
-              onClick={() => fetchDirectories('/')}
-            >
+            <button className="btn btn-link btn-sm p-0" onClick={() => fetchDirectories('/')}>
               /
             </button>
           )}

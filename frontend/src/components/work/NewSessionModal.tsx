@@ -91,12 +91,15 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
   }, [selectedMachineId]);
 
   // Save path to history
-  const savePathToHistory = useCallback((path: string) => {
-    if (!path || !selectedMachineId) return;
-    const newHistory = [path, ...pathHistory.filter((p) => p !== path)].slice(0, 5);
-    setPathHistory(newHistory);
-    localStorage.setItem(`remote-path-history-${selectedMachineId}`, JSON.stringify(newHistory));
-  }, [selectedMachineId, pathHistory]);
+  const savePathToHistory = useCallback(
+    (path: string) => {
+      if (!path || !selectedMachineId) return;
+      const newHistory = [path, ...pathHistory.filter((p) => p !== path)].slice(0, 5);
+      setPathHistory(newHistory);
+      localStorage.setItem(`remote-path-history-${selectedMachineId}`, JSON.stringify(newHistory));
+    },
+    [selectedMachineId, pathHistory]
+  );
 
   // Select path from history
   const handleSelectFromHistory = useCallback((path: string) => {
@@ -244,117 +247,67 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
         onClose={onClose}
         title={t('newSession', language)}
         footer={
-        <>
-          <Button variant="secondary" onClick={onClose}>
-            {t('cancel', language)}
-          </Button>
-          <Button
-            variant="primary"
-            onClick={handleCreate}
-            disabled={!canCreate}
-            loading={isLoading}
-          >
-            {t('create', language)}
-          </Button>
-        </>
-      }
-    >
-      {/* Workspace Type Selection */}
-      <div className="mb-3">
-        <label className="form-label">{t('selectWorkspaceType', language)}</label>
-        <div className="d-flex gap-2">
-          <button
-            className={`btn flex-fill ${workspaceType === 'local' ? 'btn-primary' : 'btn-outline-primary'}`}
-            onClick={() => setWorkspaceType('local')}
-          >
-            <i className="bi bi-laptop me-1" />
-            {t('localWorkspace', language)}
-          </button>
-          <button
-            className={`btn flex-fill ${workspaceType === 'remote' ? 'btn-primary' : 'btn-outline-primary'}`}
-            onClick={() => setWorkspaceType('remote')}
-          >
-            <i className="bi bi-cloud me-1" />
-            {t('remoteWorkspace', language)}
-          </button>
-          <button
-            className={`btn flex-fill ${workspaceType === 'terminal' ? 'btn-primary' : 'btn-outline-primary'}`}
-            onClick={() => setWorkspaceType('terminal')}
-          >
-            <i className="bi bi-terminal me-1" />
-            {t('terminalWorkspace', language) || 'Terminal'}
-          </button>
-        </div>
-      </div>
-
-      {/* Remote / Terminal Options */}
-      {(workspaceType === 'remote' || workspaceType === 'terminal') && (
-        <>
-          {/* Machine Selector - using RemoteMachineSelector for enhanced functionality */}
-          <div className="mb-3">
-            <label className="form-label">{t('selectMachine', language)}</label>
-            <RemoteMachineSelector
-              onSelectMachine={handleMachineSelect}
-              selectedMachineId={selectedMachineId}
-              machines={machines}
-              isLoading={machinesLoading}
-            />
+          <>
+            <Button variant="secondary" onClick={onClose}>
+              {t('cancel', language)}
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleCreate}
+              disabled={!canCreate}
+              loading={isLoading}
+            >
+              {t('create', language)}
+            </Button>
+          </>
+        }
+      >
+        {/* Workspace Type Selection */}
+        <div className="mb-3">
+          <label className="form-label">{t('selectWorkspaceType', language)}</label>
+          <div className="d-flex gap-2">
+            <button
+              className={`btn flex-fill ${workspaceType === 'local' ? 'btn-primary' : 'btn-outline-primary'}`}
+              onClick={() => setWorkspaceType('local')}
+            >
+              <i className="bi bi-laptop me-1" />
+              {t('localWorkspace', language)}
+            </button>
+            <button
+              className={`btn flex-fill ${workspaceType === 'remote' ? 'btn-primary' : 'btn-outline-primary'}`}
+              onClick={() => setWorkspaceType('remote')}
+            >
+              <i className="bi bi-cloud me-1" />
+              {t('remoteWorkspace', language)}
+            </button>
+            <button
+              className={`btn flex-fill ${workspaceType === 'terminal' ? 'btn-primary' : 'btn-outline-primary'}`}
+              onClick={() => setWorkspaceType('terminal')}
+            >
+              <i className="bi bi-terminal me-1" />
+              {t('terminalWorkspace', language) || 'Terminal'}
+            </button>
           </div>
+        </div>
 
-          {/* Project Path */}
-          {selectedMachineId && workspaceType === 'remote' && (
+        {/* Remote / Terminal Options */}
+        {(workspaceType === 'remote' || workspaceType === 'terminal') && (
+          <>
+            {/* Machine Selector - using RemoteMachineSelector for enhanced functionality */}
             <div className="mb-3">
-              <label className="form-label">{t('projectPath', language)}</label>
-              <div className="input-group">
-                <input
-                  type="text"
-                  className="form-control"
-                  value={projectPath}
-                  onChange={(e) => setProjectPath(e.target.value)}
-                  placeholder={
-                    selectedMachine ? getDefaultPath(selectedMachine.os_type) : '/root/workspace'
-                  }
-                />
-                <Button
-                  variant="outline-secondary"
-                  onClick={() => setShowDirectoryBrowser(true)}
-                >
-                  <i className="bi bi-folder2-open me-1" />
-                  {t('browse', language) || 'Browse'}
-                </Button>
-              </div>
-              <div className="form-text text-muted small">{t('projectPathHint', language)}</div>
-
-              {/* Path History */}
-              {pathHistory.length > 0 && (
-                <div className="mt-2">
-                  <small className="text-muted">{t('recentPaths', language) || 'Recent Paths'}</small>
-                  <div className="d-flex gap-1 flex-wrap mt-1">
-                    {pathHistory.map((path) => (
-                      <button
-                        key={path}
-                        className="btn btn-sm btn-outline-secondary"
-                        onClick={() => handleSelectFromHistory(path)}
-                        title={path}
-                      >
-                        <i className="bi bi-folder me-1" />
-                        {getLastPathPart(path)}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
+              <label className="form-label">{t('selectMachine', language)}</label>
+              <RemoteMachineSelector
+                onSelectMachine={handleMachineSelect}
+                selectedMachineId={selectedMachineId}
+                machines={machines}
+                isLoading={machinesLoading}
+              />
             </div>
-          )}
 
-          {/* Terminal options */}
-          {workspaceType === 'terminal' && selectedMachineId && (
-            <>
-              {/* Working directory for terminal */}
+            {/* Project Path */}
+            {selectedMachineId && workspaceType === 'remote' && (
               <div className="mb-3">
-                <label className="form-label">
-                  {t('terminalWorkDir', language) || 'Working Directory'}
-                </label>
+                <label className="form-label">{t('projectPath', language)}</label>
                 <div className="input-group">
                   <input
                     type="text"
@@ -365,22 +318,19 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
                       selectedMachine ? getDefaultPath(selectedMachine.os_type) : '/root/workspace'
                     }
                   />
-                  <Button
-                    variant="outline-secondary"
-                    onClick={() => setShowDirectoryBrowser(true)}
-                  >
+                  <Button variant="outline-secondary" onClick={() => setShowDirectoryBrowser(true)}>
                     <i className="bi bi-folder2-open me-1" />
                     {t('browse', language) || 'Browse'}
                   </Button>
                 </div>
-                <div className="form-text text-muted small">
-                  {t('terminalWorkDirHint', language) || 'Terminal will open in this directory'}
-                </div>
+                <div className="form-text text-muted small">{t('projectPathHint', language)}</div>
 
                 {/* Path History */}
                 {pathHistory.length > 0 && (
                   <div className="mt-2">
-                    <small className="text-muted">{t('recentPaths', language) || 'Recent Paths'}</small>
+                    <small className="text-muted">
+                      {t('recentPaths', language) || 'Recent Paths'}
+                    </small>
                     <div className="d-flex gap-1 flex-wrap mt-1">
                       {pathHistory.map((path) => (
                         <button
@@ -397,41 +347,99 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
                   </div>
                 )}
               </div>
+            )}
 
-              {/* Info hint */}
-              <div className="alert alert-info small">
-                <i className="bi bi-info-circle me-1" />
-                {t('terminalInfoHint', language) ||
-                  'Opens a web terminal on the remote machine. Claude Code is pre-configured with proxy authentication.'}
+            {/* Terminal options */}
+            {workspaceType === 'terminal' && selectedMachineId && (
+              <>
+                {/* Working directory for terminal */}
+                <div className="mb-3">
+                  <label className="form-label">
+                    {t('terminalWorkDir', language) || 'Working Directory'}
+                  </label>
+                  <div className="input-group">
+                    <input
+                      type="text"
+                      className="form-control"
+                      value={projectPath}
+                      onChange={(e) => setProjectPath(e.target.value)}
+                      placeholder={
+                        selectedMachine
+                          ? getDefaultPath(selectedMachine.os_type)
+                          : '/root/workspace'
+                      }
+                    />
+                    <Button
+                      variant="outline-secondary"
+                      onClick={() => setShowDirectoryBrowser(true)}
+                    >
+                      <i className="bi bi-folder2-open me-1" />
+                      {t('browse', language) || 'Browse'}
+                    </Button>
+                  </div>
+                  <div className="form-text text-muted small">
+                    {t('terminalWorkDirHint', language) || 'Terminal will open in this directory'}
+                  </div>
+
+                  {/* Path History */}
+                  {pathHistory.length > 0 && (
+                    <div className="mt-2">
+                      <small className="text-muted">
+                        {t('recentPaths', language) || 'Recent Paths'}
+                      </small>
+                      <div className="d-flex gap-1 flex-wrap mt-1">
+                        {pathHistory.map((path) => (
+                          <button
+                            key={path}
+                            className="btn btn-sm btn-outline-secondary"
+                            onClick={() => handleSelectFromHistory(path)}
+                            title={path}
+                          >
+                            <i className="bi bi-folder me-1" />
+                            {getLastPathPart(path)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Info hint */}
+                <div className="alert alert-info small">
+                  <i className="bi bi-info-circle me-1" />
+                  {t('terminalInfoHint', language) ||
+                    'Opens a web terminal on the remote machine. Claude Code is pre-configured with proxy authentication.'}
+                </div>
+              </>
+            )}
+
+            {/* Error Display */}
+            {createRemoteSession.isError && workspaceType === 'remote' && (
+              <div className="alert alert-danger small">
+                {t('error', language)}:{' '}
+                {(createRemoteSession.error as Error)?.message || t('error', language)}
               </div>
-            </>
-          )}
+            )}
+          </>
+        )}
+      </Modal>
 
-          {/* Error Display */}
-          {createRemoteSession.isError && workspaceType === 'remote' && (
-            <div className="alert alert-danger small">
-              {t('error', language)}:{' '}
-              {(createRemoteSession.error as Error)?.message || t('error', language)}
-            </div>
-          )}
-        </>
+      {/* Directory Browser Modal */}
+      {selectedMachineId && (
+        <DirectoryBrowserModal
+          isOpen={showDirectoryBrowser}
+          onClose={() => setShowDirectoryBrowser(false)}
+          machineId={selectedMachineId}
+          initialPath={
+            projectPath || (selectedMachine ? getDefaultPath(selectedMachine.os_type) : '')
+          }
+          osType={selectedMachine?.os_type ?? undefined}
+          onSelectPath={(path) => {
+            setProjectPath(path);
+            savePathToHistory(path);
+          }}
+        />
       )}
-    </Modal>
-
-    {/* Directory Browser Modal */}
-    {selectedMachineId && (
-      <DirectoryBrowserModal
-        isOpen={showDirectoryBrowser}
-        onClose={() => setShowDirectoryBrowser(false)}
-        machineId={selectedMachineId}
-        initialPath={projectPath || (selectedMachine ? getDefaultPath(selectedMachine.os_type) : '')}
-        osType={selectedMachine?.os_type ?? undefined}
-        onSelectPath={(path) => {
-          setProjectPath(path);
-          savePathToHistory(path);
-        }}
-      />
-    )}
     </>
   );
 };

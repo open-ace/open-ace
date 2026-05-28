@@ -12,8 +12,13 @@ vi.mock('@/hooks', () => ({
   useAvailableMachines: () => ({
     data: {
       machines: [
-        { machine_id: 'machine-1', machine_name: 'Test Machine', os_type: 'linux', work_dir: '/root/workspace' }
-      ]
+        {
+          machine_id: 'machine-1',
+          machine_name: 'Test Machine',
+          os_type: 'linux',
+          work_dir: '/root/workspace',
+        },
+      ],
     },
     isLoading: false,
   }),
@@ -44,7 +49,7 @@ vi.mock('@/components/common', () => ({
   Button: ({ variant, onClick, disabled, loading, children }: any) => (
     <button
       onClick={onClick}
-      disabled={disabled || loading}
+      disabled={disabled ?? loading}
       data-testid={`btn-${variant}`}
       className={`btn btn-${variant}`}
     >
@@ -62,7 +67,9 @@ vi.mock('./RemoteMachineSelector', () => ({
         data-testid="machine-select"
       >
         {machines.map((m: any) => (
-          <option key={m.machine_id} value={m.machine_id}>{m.machine_name}</option>
+          <option key={m.machine_id} value={m.machine_id}>
+            {m.machine_name}
+          </option>
         ))}
       </select>
     </div>
