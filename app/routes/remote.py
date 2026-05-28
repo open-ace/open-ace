@@ -2239,8 +2239,8 @@ def browse_remote_directory(machine_id):
     work_dir = machine.get("work_dir") or "/root/workspace"
     browse_path = path or work_dir
 
-    # Check if agent is online
-    if machine.get("status") != "online":
+    # Check if agent is online (accept both "online" and "idle" as active states)
+    if machine.get("status") not in ("online", "idle"):
         # Agent offline - return fallback response
         return jsonify(
             {
