@@ -460,6 +460,8 @@ class RemoteAgent:
             self._cmd_attach_terminal(data)
         elif command == "browse_directory":
             self._cmd_browse_directory(data)
+        elif command == "create_directory":
+            self._cmd_create_directory(data)
         else:
             logger.warning("Unknown command: %s", command)
 
@@ -1016,6 +1018,91 @@ class RemoteAgent:
                     "error": str(e),
                 }
             )
+
+    def _send_create_result(
+        self,
+        request_id: str,
+        success: bool,
+        error: str | None = None,
+        result: dict | None = None,
+    ) -> None:
+        """Send a create_directory result back to the server."""
+        response: dict[str, Any] = {
+            "type": "browse_result",
+            "machine_id": self.config.machine_id,
+            "request_id": request_id,
+            "success": success,
+        }
+        if error is not None:
+            response["error"] = error
+        if result is not None:
+            response["result"] = result
+        self._http_send(response)
+
+    def _cmd_create_directory(self, data: dict[str, Any]) -> None:
+        """Handle a create_directory command."""
+        request_id = data.get("request_id", "")
+        dir_path = data.get("path", "")
+
+        if not dir_path:
+            self._send_create_result(request_id, False, error="No path specified")
+            return
+
+        dir_path = os.path.expanduser(dir_path)
+        name = os.path.basename(dir_path)
+
+        # Validate name before realpath (realpath fails on null bytes)
+        invalid_chars = set("/\0")
+        if os.name == "nt":
+            invalid_chars.update('\\:*?"<>|')
+        if any(c in name for c in invalid_chars) or not name:
+            self._send_create_result(request_id, False, error=f"Invalid directory name: {name}")
+            return
+
+        dir_path = os.path.realpath(dir_path)
+        logger.info("Creating directory: %s", dir_path)
+
+        try:
+            parent = os.path.dirname(dir_path)
+
+            if not os.path.exists(parent):
+                self._send_create_result(
+                    request_id, False, error=f"Parent directory does not exist: {parent}"
+                )
+                return
+
+            if not os.path.isdir(parent):
+                self._send_create_result(
+                    request_id, False, error=f"Parent path is not a directory: {parent}"
+                )
+                return
+
+            if not os.access(parent, os.W_OK):
+                self._send_create_result(
+                    request_id, False, error=f"Permission denied: cannot write to {parent}"
+                )
+                return
+
+            os.mkdir(dir_path)
+
+            self._send_create_result(
+                request_id,
+                True,
+                result={"path": dir_path, "message": "Directory created successfully"},
+            )
+            logger.info("Created directory: %s", dir_path)
+
+        except FileExistsError:
+            self._send_create_result(
+                request_id, False, error=f"Directory already exists: {dir_path}"
+            )
+        except PermissionError:
+            self._send_create_result(request_id, False, error=f"Permission denied: {dir_path}")
+        except OSError as e:
+            self._send_create_result(request_id, False, error=f"Failed to create directory: {e}")
+        except Exception as e:
+            logger.error("Failed to create directory %s: %s", dir_path, e)
+            self._send_create_result(request_id, False, error=str(e))
 
     def _stop_terminal_process(self, terminal_id: str) -> None:
         """Stop a terminal server process."""
