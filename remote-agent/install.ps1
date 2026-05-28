@@ -83,7 +83,6 @@ $files = @(
     "terminal_menu.py",
     "terminal_server.py",
     "websocket_proxy.py",
-    "session_isolation.py",
     "session_sync.py",
     "openace_cli.py",
     "cli_settings.py"
