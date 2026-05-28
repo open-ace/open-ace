@@ -20,8 +20,8 @@ export interface WorkspaceTab {
   encodedProjectName?: string; // Encoded project path for session restoration
   toolName?: string; // Tool name for session restoration
   createdAt: number;
-  waitingForUser: boolean;
-  waitingType: 'permission' | 'plan' | 'input' | null;
+  waitingForUser?: boolean;
+  waitingType?: 'permission' | 'plan' | 'input' | null;
   // Settings for tab restoration (Issue #70)
   settings?: {
     model?: string; // Selected model ID
