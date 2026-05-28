@@ -159,9 +159,55 @@ def api_profile():
     return jsonify({"error": "User not found"}), 404
 
 
+# Session refresh threshold (only refresh when less than 10 minutes remaining)
+_AUTH_SESSION_REFRESH_THRESHOLD_MINUTES = 10
+
+
+def _refresh_auth_session(token: str) -> Optional[int]:
+    """Extend session expiry when close to expiration.
+
+    Returns new timeout seconds if session was refreshed, None otherwise.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from app.services.auth_service import _get_session_timeout_hours
+
+    try:
+        # Get current expires_at
+        row = user_repo.db.fetch_one("SELECT expires_at FROM sessions WHERE token = ?", (token,))
+        if not row or not row.get("expires_at"):
+            logger.debug(f"No session row found for token: {token[:16]}...")
+            return None
+
+        expires_at = row["expires_at"]
+        if isinstance(expires_at, str):
+            expires_at = datetime.fromisoformat(expires_at).replace(tzinfo=None)
+
+        remaining = (expires_at - datetime.now(timezone.utc).replace(tzinfo=None)).total_seconds()
+        threshold = timedelta(minutes=_AUTH_SESSION_REFRESH_THRESHOLD_MINUTES).total_seconds()
+        logger.debug(f"Session refresh check: remaining={remaining/60:.1f}min, threshold={threshold/60:.1f}min")
+        if remaining > threshold:
+            logger.debug(f"Session not refreshed: remaining ({remaining/60:.1f}min) > threshold ({threshold/60:.1f}min)")
+            return None
+
+        # Refresh session
+        timeout_hours = _get_session_timeout_hours()
+        new_expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
+            hours=timeout_hours
+        )
+        user_repo.extend_session_expiry(token, new_expires_at)
+        logger.info(f"Session refreshed in auth check, new expiry: {new_expires_at}")
+        return int(timeout_hours * 3600)
+    except Exception as e:
+        logger.warning(f"Failed to refresh session in auth check: {e}")
+        return None
+
+
 @auth_bp.route("/auth/check", methods=["GET"])
 def api_auth_check():
-    """Check if user is authenticated."""
+    """Check if user is authenticated and extend session if needed."""
+    from flask import make_response
+
     token = request.cookies.get("session_token") or request.headers.get(
         "Authorization", ""
     ).replace("Bearer ", "")
@@ -173,24 +219,40 @@ def api_auth_check():
     if not session:
         return jsonify({"authenticated": False})
 
+    # Check if session needs refresh (sliding expiration)
+    new_timeout_seconds = _refresh_auth_session(token)
+
     user_id = int(session.get("user_id", 0))
     user_data = user_repo.get_user_by_id(user_id)
 
     avatar_url = user_data.get("avatar_url") if user_data else None
     avatar_url = _validate_avatar_url(user_id, avatar_url)
 
-    return jsonify(
-        {
-            "authenticated": True,
-            "user": {
-                "id": session.get("user_id"),
-                "username": session.get("username"),
-                "email": session.get("email"),
-                "role": session.get("role"),
-                "avatar_url": avatar_url,
-            },
-        }
-    )
+    response_data = {
+        "authenticated": True,
+        "user": {
+            "id": session.get("user_id"),
+            "username": session.get("username"),
+            "email": session.get("email"),
+            "role": session.get("role"),
+            "avatar_url": avatar_url,
+        },
+    }
+
+    response = make_response(jsonify(response_data))
+
+    # Update cookie max_age if session was refreshed
+    if new_timeout_seconds and request.cookies.get("session_token"):
+        response.set_cookie(
+            "session_token",
+            request.cookies["session_token"],
+            httponly=True,
+            secure=request.is_secure,
+            samesite="Lax",
+            max_age=new_timeout_seconds,
+        )
+
+    return response
 
 
 @auth_bp.route("/auth/me", methods=["GET"])

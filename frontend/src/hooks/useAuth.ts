@@ -2,11 +2,16 @@
  * useAuth Hook - Authentication hook
  */
 
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { authApi } from '@/api';
 import { useAppStore } from '@/store';
 import type { LoginRequest } from '@/api';
+
+// Session keepalive interval (5 minutes)
+// Backend refreshes session when remaining time < 10 minutes
+// So 5-minute interval ensures session is always refreshed before expiry
+const SESSION_KEEPALIVE_INTERVAL_MS = 5 * 60 * 1000;
 
 export function useAuth() {
   const queryClient = useQueryClient();
@@ -20,6 +25,9 @@ export function useAuth() {
     logout: logoutStore,
   } = useAppStore();
 
+  // Ref for keepalive interval
+  const keepaliveIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   // Check auth status on mount
   const {
     isLoading: isCheckingAuth,
@@ -31,6 +39,33 @@ export function useAuth() {
     staleTime: 0, // Always refetch
     refetchOnWindowFocus: true,
   });
+
+  // Session keepalive - periodically refresh auth to extend session
+  useEffect(() => {
+    // Clear existing interval
+    if (keepaliveIntervalRef.current) {
+      clearInterval(keepaliveIntervalRef.current);
+      keepaliveIntervalRef.current = null;
+    }
+
+    // Only start keepalive when authenticated
+    if (isAuthenticated) {
+      keepaliveIntervalRef.current = setInterval(() => {
+        // Silently refetch auth to trigger session refresh on backend
+        refetchAuth().catch(() => {
+          // Ignore errors - session may have expired, will be handled by auth check
+        });
+      }, SESSION_KEEPALIVE_INTERVAL_MS);
+    }
+
+    // Cleanup on unmount or when auth status changes
+    return () => {
+      if (keepaliveIntervalRef.current) {
+        clearInterval(keepaliveIntervalRef.current);
+        keepaliveIntervalRef.current = null;
+      }
+    };
+  }, [isAuthenticated, refetchAuth]);
 
   // Update store when auth check completes
   useEffect(() => {
