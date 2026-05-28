@@ -1814,13 +1814,6 @@ $workspace_config,
     "enabled": true,
     "run_time": "00:30"
   },
-  "auth": {
-    "auth_type": "openai",
-    "env": {
-      "OPENAI_API_KEY": "<YOUR_API_KEY>",
-      "OPENAI_BASE_URL": "https://api.openai.com/v1"
-    }
-  },
   "insights": {
     "model": "glm-5",
     "temperature": 0.3,

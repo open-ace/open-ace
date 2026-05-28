@@ -574,6 +574,7 @@ class TestInsightsServiceGenerateInsights:
         assert error == "insufficient_data"
 
     def test_no_api_key(self):
+        """No key in DB or env → API key not configured."""
         svc, mock_user, mock_msg, mock_insights = self._make_service()
         mock_insights.get_report.return_value = None
         mock_user.get_user_by_id.return_value = {
@@ -583,11 +584,18 @@ class TestInsightsServiceGenerateInsights:
         mock_msg.get_user_messages_stats.return_value = {"total_messages": 50}
         mock_msg.get_user_conversation_samples.return_value = [{"messages": []}]
 
-        with patch.object(svc, "_load_config", return_value={"auth": {"env": {}}}):
-            with patch.dict("os.environ", {}, clear=True):
-                result, error = svc.generate_insights(1, "2026-01-01", "2026-01-31")
-                assert result is None
-                assert error == "API key not configured"
+        with (
+            patch.object(svc, "_load_config", return_value={}),
+            patch.dict("os.environ", {}, clear=True),
+            patch("app.modules.workspace.api_key_proxy.get_api_key_proxy_service") as mock_get,
+        ):
+            mock_proxy = MagicMock()
+            mock_proxy.resolve_api_key_for_scope.return_value = None
+            mock_get.return_value = mock_proxy
+
+            result, error = svc.generate_insights(1, "2026-01-01", "2026-01-31")
+            assert result is None
+            assert error == "API key not configured"
 
     def test_generate_success(self):
         svc, mock_user, mock_msg, mock_insights = self._make_service()
@@ -601,7 +609,6 @@ class TestInsightsServiceGenerateInsights:
         mock_msg.get_user_conversation_samples.return_value = [{"messages": []}]
 
         config = {
-            "auth": {"env": {"OPENAI_API_KEY": "test-key"}},
             "insights": {"model": "glm-5"},
         }
         mock_insights.save_report.return_value = 42
@@ -617,8 +624,18 @@ class TestInsightsServiceGenerateInsights:
 
         with (
             patch.object(svc, "_load_config", return_value=config),
+            patch.dict("os.environ", {}, clear=True),
+            patch("app.modules.workspace.api_key_proxy.get_api_key_proxy_service") as mock_get,
             patch.object(svc, "_call_ai_api", return_value=ai_response),
         ):
+            mock_proxy = MagicMock()
+            mock_proxy.resolve_api_key_for_scope.return_value = (
+                "test-key",
+                "https://api.example.com/v1",
+                1,
+            )
+            mock_get.return_value = mock_proxy
+
             result, error = svc.generate_insights(1, "2026-01-01", "2026-01-31")
             assert error is None
             assert result["overall_score"] == 7
@@ -635,14 +652,23 @@ class TestInsightsServiceGenerateInsights:
         mock_msg.get_user_conversation_samples.return_value = [{"messages": []}]
 
         config = {
-            "auth": {"env": {"OPENAI_API_KEY": "test-key"}},
             "insights": {"model": "glm-5"},
         }
 
         with (
             patch.object(svc, "_load_config", return_value=config),
+            patch.dict("os.environ", {}, clear=True),
+            patch("app.modules.workspace.api_key_proxy.get_api_key_proxy_service") as mock_get,
             patch.object(svc, "_call_ai_api", side_effect=Exception("API down")),
         ):
+            mock_proxy = MagicMock()
+            mock_proxy.resolve_api_key_for_scope.return_value = (
+                "test-key",
+                "https://api.example.com/v1",
+                1,
+            )
+            mock_get.return_value = mock_proxy
+
             result, error = svc.generate_insights(1, "2026-01-01", "2026-01-31")
             assert result is None
             assert "API down" in error
