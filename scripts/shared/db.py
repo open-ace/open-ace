@@ -1767,7 +1767,7 @@ def update_user(user_id: int, **kwargs) -> bool:
     _execute(
         cursor,
         f"""
-        UPDATE users SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+        UPDATE users SET {', '.join(updates)} WHERE id = ?
     """,
         params,
     )
@@ -1784,7 +1784,7 @@ def update_user_password(user_id: int, password_hash: str) -> bool:
     _execute(
         cursor,
         """
-        UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+        UPDATE users SET password_hash = ? WHERE id = ?
     """,
         (password_hash, user_id),
     )
