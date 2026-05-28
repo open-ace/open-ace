@@ -655,7 +655,7 @@ export const APIKeyManagement: React.FC = () => {
           <Select
             options={[
               { value: 'shared', label: 'Shared (Local + Remote)' },
-              { value: 'local', label: 'Local Only (WebUI, Insights)' },
+              { value: 'local', label: 'Local Only' },
               { value: 'remote', label: 'Remote Only (LLM Proxy)' },
             ]}
             value={formData.scope}
@@ -822,7 +822,7 @@ export const APIKeyManagement: React.FC = () => {
           <Select
             options={[
               { value: 'shared', label: 'Shared (Local + Remote)' },
-              { value: 'local', label: 'Local Only (WebUI, Insights)' },
+              { value: 'local', label: 'Local Only' },
               { value: 'remote', label: 'Remote Only (LLM Proxy)' },
             ]}
             value={formData.scope}

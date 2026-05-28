@@ -786,7 +786,7 @@ const translations: Record<Language, Translations> = {
     baseUrl: 'Base URL',
     enterKeyName: 'Enter key name',
     enterApiKey: 'Enter API key',
-    enterBaseUrl: 'Enter base URL (optional)',
+    enterBaseUrl: 'Enter base URL',
     noApiKeys: 'No API keys configured',
     noApiKeysDescription: 'Add API keys to enable LLM proxy for remote agents.',
     keyStatus: 'Status',
