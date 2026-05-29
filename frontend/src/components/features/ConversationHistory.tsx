@@ -117,15 +117,15 @@ export const ConversationHistory: React.FC = () => {
 
   // Get hosts for filter
   const { data: hostsData } = useHosts();
-  const hosts = hostsData ?? [];
+  const hosts = useMemo(() => hostsData ?? [], [hostsData]);
 
   // Get senders for filter
   const { data: sendersData } = useSenders(filters.host);
-  const senders = sendersData ?? [];
+  const senders = useMemo(() => sendersData ?? [], [sendersData]);
 
   // Get tools for filter
   const { data: toolsData } = useTools();
-  const tools = toolsData ?? [];
+  const tools = useMemo(() => toolsData ?? [], [toolsData]);
 
   const { data, isLoading, isFetching, isError, error, refetch } = useConversationHistory({
     ...filters,
@@ -133,7 +133,7 @@ export const ConversationHistory: React.FC = () => {
     pageSize: ITEMS_PER_PAGE,
   });
 
-  const conversations = data?.data ?? [];
+  const conversations = useMemo(() => data?.data ?? [], [data?.data]);
 
   // Mark initial load complete
   useEffect(() => {

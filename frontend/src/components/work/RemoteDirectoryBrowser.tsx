@@ -235,7 +235,7 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
       }
     }
     return crumbs;
-  }, [currentPath, isWindows]);
+  }, [currentPath, isWindows, splitPath]);
 
   return (
     <div className="remote-directory-browser">

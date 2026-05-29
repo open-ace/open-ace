@@ -199,7 +199,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
 
     console.log('[TerminalTab] Initializing xterm.js');
 
-    let terminal: any;
+    let terminal: Terminal | null = null;
 
     const initTerminal = async () => {
       const { Terminal } = await import('@xterm/xterm');
@@ -223,7 +223,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
       terminal.loadAddon(fitAddon);
       terminal.loadAddon(new WebLinksAddon());
 
-      terminal.open(terminalRef.current!);
+      terminal.open(terminalRef.current ?? document.body);
       fitAddon.fit();
 
       terminal.onData((data: string) => {

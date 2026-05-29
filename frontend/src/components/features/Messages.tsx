@@ -28,11 +28,11 @@ export const Messages: React.FC = () => {
 
   // Get hosts for filter
   const { data: hostsData } = useHosts();
-  const hosts = hostsData ?? [];
+  const hosts = useMemo(() => hostsData ?? [], [hostsData]);
 
   // Get senders for filter
   const { data: sendersData } = useSenders(filters.host);
-  const senders = sendersData ?? [];
+  const senders = useMemo(() => sendersData ?? [], [sendersData]);
 
   // Only fetch messages when at least one role is selected
   const hasRoleFilter = selectedRoles.length > 0;

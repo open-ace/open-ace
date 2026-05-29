@@ -82,7 +82,7 @@ export const APIKeyManagement: React.FC = () => {
   const updateApiKey = useUpdateApiKey();
   const deleteApiKey = useDeleteApiKey();
 
-  const keys = keysData?.keys ?? [];
+  const keys = useMemo(() => keysData?.keys ?? [], [keysData?.keys]);
 
   // Memoize parsed CLI tools to avoid repeated JSON.parse in render
   const parsedCliTools = useMemo(() => {

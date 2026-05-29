@@ -147,11 +147,14 @@ export const UserManagement: React.FC = () => {
         await createUser.mutateAsync(formData);
       }
       handleCloseModal();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to save user:', err);
       // Display error message to user
       const errorMessage =
-        err?.message ?? err?.error ?? t('failedToSaveUser', language) ?? 'Failed to save user';
+        (err as Error)?.message ??
+        (err as Record<string, string>)?.error ??
+        t('failedToSaveUser', language) ??
+        'Failed to save user';
       setFormError(errorMessage);
     }
   };

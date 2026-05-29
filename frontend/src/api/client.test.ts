@@ -186,11 +186,17 @@ describe('ApiClient', () => {
       try {
         await client.get('/api/test');
         expect.fail('Should have thrown');
-      } catch (error: any) {
-        expect(error.status).toBe(400);
-        expect(error.message).toBe('Validation error');
-        expect(error.code).toBe('VALIDATION_ERROR');
-        expect(error.details).toEqual({ field: 'name' });
+      } catch (error: unknown) {
+        const apiError = error as {
+          status: number;
+          message: string;
+          code: string;
+          details: unknown;
+        };
+        expect(apiError.status).toBe(400);
+        expect(apiError.message).toBe('Validation error');
+        expect(apiError.code).toBe('VALIDATION_ERROR');
+        expect(apiError.details).toEqual({ field: 'name' });
       }
     });
 
@@ -206,9 +212,10 @@ describe('ApiClient', () => {
       try {
         await client.get('/api/test');
         expect.fail('Should have thrown');
-      } catch (error: any) {
-        expect(error.status).toBe(500);
-        expect(error.message).toBeTruthy();
+      } catch (error: unknown) {
+        const apiError = error as { status: number; message: string };
+        expect(apiError.status).toBe(500);
+        expect(apiError.message).toBeTruthy();
       }
     });
   });

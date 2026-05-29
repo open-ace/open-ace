@@ -94,7 +94,7 @@ export const Sessions: React.FC = () => {
   const pauseRemoteMutation = usePauseRemoteSession();
   const resumeRemoteMutation = useResumeRemoteSession();
 
-  const sessions = data?.data?.sessions ?? [];
+  const sessions = useMemo(() => data?.data?.sessions ?? [], [data?.data?.sessions]);
 
   // Status counts for quick filter pills
   const statusCounts = useMemo(() => {
