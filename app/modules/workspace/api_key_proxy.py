@@ -651,19 +651,21 @@ class APIKeyProxyService:
         """List active API keys for a tool within a scope/shared pool."""
         canonical_tool = normalize_tool_name(tool_name)
         conn = self._get_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            f"""
-            SELECT id, provider, encrypted_key, base_url, cli_tools, cli_settings, priority, weight, scope
-            FROM api_key_store
-            WHERE tenant_id = {_param()} AND provider = {_param()} AND is_active = TRUE
-              AND (scope = {_param()} OR scope = 'shared')
-            ORDER BY priority DESC, weight DESC, id ASC
-        """,
-            (tenant_id, provider, scope),
-        )
-        rows = cursor.fetchall()
-        conn.close()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""
+                SELECT id, provider, encrypted_key, base_url, cli_tools, cli_settings, priority, weight, scope
+                FROM api_key_store
+                WHERE tenant_id = {_param()} AND provider = {_param()} AND is_active = TRUE
+                  AND (scope = {_param()} OR scope = 'shared')
+                ORDER BY priority DESC, weight DESC, id ASC
+            """,
+                (tenant_id, provider, scope),
+            )
+            rows = cursor.fetchall()
+        finally:
+            conn.close()
 
         matches: list[dict[str, Any]] = []
         for row in rows:
@@ -842,18 +844,20 @@ class APIKeyProxyService:
 
         placeholders = _params(len(normalized_ids))
         conn = self._get_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            f"""
-            SELECT id, encrypted_key, base_url, priority, weight
-            FROM api_key_store
-            WHERE tenant_id = {_param()} AND provider = {_param()} AND is_active = TRUE
-              AND id IN ({placeholders})
-        """,
-            (tenant_id, provider, *normalized_ids),
-        )
-        rows = cursor.fetchall()
-        conn.close()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""
+                SELECT id, encrypted_key, base_url, priority, weight
+                FROM api_key_store
+                WHERE tenant_id = {_param()} AND provider = {_param()} AND is_active = TRUE
+                  AND id IN ({placeholders})
+            """,
+                (tenant_id, provider, *normalized_ids),
+            )
+            rows = cursor.fetchall()
+        finally:
+            conn.close()
 
         candidates: list[dict[str, Any]] = []
         for row in rows:

@@ -129,7 +129,7 @@ def _record_llm_usage(
         except Exception:
             pass
     except Exception:
-        pass
+        logger.debug("Failed to record LLM usage", exc_info=True)
 
 
 def handle_llm_proxy_request(

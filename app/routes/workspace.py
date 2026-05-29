@@ -194,6 +194,8 @@ def get_session_models():
     api_proxy = get_api_key_proxy_service()
 
     if workspace_type == "local":
+        # Local workspace is single-tenant; tenant_id=1 is the default tenant.
+        # This must be updated if multi-tenant local workspaces are introduced.
         pool = api_proxy.get_tool_model_pool(
             tenant_id=1,
             tool_name="qwen-code",
