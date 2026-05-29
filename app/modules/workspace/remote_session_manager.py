@@ -63,6 +63,7 @@ class RemoteSessionManager:
         title: str = "",
         tenant_id: Optional[int] = None,
         permission_mode: Optional[str] = None,
+        ha_pool_token: Optional[str] = None,
     ) -> Optional[dict[str, Any]]:
         """
         Create a new remote session.
@@ -96,6 +97,52 @@ class RemoteSessionManager:
 
         # Determine provider based on CLI tool
         provider = self._cli_tool_to_provider(cli_tool)
+        tool_name = normalize_tool_name(cli_tool)
+
+        effective_tenant_id = tenant_id or machine.get("tenant_id", 1)
+        ha_pool: Optional[dict[str, Any]] = None
+        if tool_name == "qwen":
+            if not ha_pool_token:
+                logger.warning("Missing ha_pool_token for qwen remote session creation")
+                return None
+            token_payload = self._api_key_proxy.validate_proxy_token(ha_pool_token)
+            if not token_payload:
+                logger.warning("Invalid ha_pool_token for qwen remote session creation")
+                return None
+            if token_payload.get("session_type") != "ha_pool":
+                logger.warning("Unexpected session_type in ha_pool_token: %s", token_payload)
+                return None
+            if token_payload.get("scope") != "remote":
+                logger.warning("Unexpected scope in ha_pool_token: %s", token_payload)
+                return None
+            if token_payload.get("user_id") != user_id:
+                logger.warning("ha_pool_token user mismatch: %s != %s", token_payload, user_id)
+                return None
+            if token_payload.get("tenant_id") != effective_tenant_id:
+                logger.warning(
+                    "ha_pool_token tenant mismatch: %s != %s",
+                    token_payload,
+                    effective_tenant_id,
+                )
+                return None
+            if token_payload.get("machine_id") != machine_id:
+                logger.warning(
+                    "ha_pool_token machine mismatch: %s != %s", token_payload, machine_id
+                )
+                return None
+            ha_pool = {
+                "provider": provider,
+                "tool_name": "qwen-code",
+                "scope": "remote",
+                "models": token_payload.get("ha_models", []),
+                "candidate_keys": token_payload.get("ha_candidate_keys", []),
+                "model_key_ids": token_payload.get("ha_model_key_ids", {}),
+                "settings": token_payload.get("ha_settings", {}),
+                "empty_reason": token_payload.get("ha_empty_reason"),
+            }
+            if model and not ha_pool.get("model_key_ids", {}).get(model):
+                logger.warning("Requested model %s is not supported by remote HA pool", model)
+                return None
 
         # Generate session ID
         session_id = str(uuid.uuid4())
@@ -112,17 +159,22 @@ class RemoteSessionManager:
         )
 
         # Generate proxy token for this session
-        effective_tenant_id = tenant_id or machine.get("tenant_id", 1)
+
         proxy_token = self._api_key_proxy.generate_proxy_token(
             user_id=user_id,
             session_id=session_id,
             tenant_id=effective_tenant_id,
             provider=provider,
+            extra_payload={
+                "scope": "remote",
+                "tool_name": "qwen-code" if tool_name == "qwen" else tool_name,
+                "ha_candidate_keys": ha_pool.get("candidate_keys", []) if ha_pool else [],
+                "ha_model_key_ids": ha_pool.get("model_key_ids", {}) if ha_pool else {},
+            },
         )
 
         # Get CLI settings for this tool
         cli_settings = {}
-        tool_name = normalize_tool_name(cli_tool)
         # Map normalized tool name to the key used in API key management
         settings_tool_map = {
             "claude": "claude-code",
@@ -131,8 +183,10 @@ class RemoteSessionManager:
             "openclaw": "openclaw",
         }
         settings_tool = settings_tool_map.get(tool_name, cli_tool)
-        tool_settings = self._api_key_proxy.get_cli_settings_for_tool(
-            effective_tenant_id, settings_tool
+        tool_settings = (
+            ha_pool.get("settings")
+            if ha_pool
+            else self._api_key_proxy.get_cli_settings_for_tool(effective_tenant_id, settings_tool)
         )
         if tool_settings:
             cli_settings[settings_tool] = tool_settings
@@ -160,6 +214,11 @@ class RemoteSessionManager:
         session.context["workspace_type"] = "remote"
         session.context["remote_machine_id"] = machine_id
         session.context["cli_tool"] = cli_tool
+        if ha_pool:
+            session.context["ha_pool"] = ha_pool
+            session.context["ha_current_model_key_ids"] = (
+                ha_pool.get("model_key_ids", {}).get(model, []) if model else []
+            )
         self._session_manager.update_session(session)
 
         # Also update the dedicated columns (list_sessions reads from columns, not context JSON)
@@ -324,6 +383,17 @@ class RemoteSessionManager:
         # Update model in DB
         session = self._session_manager.get_session(session_id)
         if session:
+            ha_pool = session.context.get("ha_pool", {}) if session.context else {}
+            if ha_pool:
+                supported_keys = ha_pool.get("model_key_ids", {}).get(model, [])
+                if not supported_keys:
+                    logger.warning(
+                        "Model %s is not supported by session %s HA pool",
+                        model,
+                        session_id[:8],
+                    )
+                    return False
+                session.context["ha_current_model_key_ids"] = supported_keys
             session.model = model
             self._session_manager.update_session(session)
 

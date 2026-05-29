@@ -13,9 +13,11 @@ import os
 import secrets
 import sqlite3
 from base64 import b64decode, b64encode
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, Union, cast
 
+from app.modules.workspace.api_key_router import APIKeyRouter
 from app.repositories.database import DB_PATH, get_database_url, is_postgresql
 from app.utils.tool_names import normalize_tool_name
 
@@ -123,6 +125,7 @@ class APIKeyProxyService:
     def __init__(self, db_path: Optional[str] = None):
         self.db_path = db_path or str(DB_PATH)
         self._encryption_key = self._get_encryption_key()
+        self._router = APIKeyRouter()
 
     def _get_encryption_key(self) -> bytes:
         """Get the AES encryption key from environment variable."""
@@ -638,6 +641,150 @@ class APIKeyProxyService:
 
         return None
 
+    def _list_tool_key_rows(
+        self,
+        tenant_id: int,
+        provider: str,
+        tool_name: str,
+        scope: str,
+    ) -> list[dict[str, Any]]:
+        """List active API keys for a tool within a scope/shared pool."""
+        canonical_tool = normalize_tool_name(tool_name)
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            f"""
+            SELECT id, provider, encrypted_key, base_url, cli_tools, cli_settings, priority, weight, scope
+            FROM api_key_store
+            WHERE tenant_id = {_param()} AND provider = {_param()} AND is_active = TRUE
+              AND (scope = {_param()} OR scope = 'shared')
+            ORDER BY priority DESC, weight DESC, id ASC
+        """,
+            (tenant_id, provider, scope),
+        )
+        rows = cursor.fetchall()
+        conn.close()
+
+        matches: list[dict[str, Any]] = []
+        for row in rows:
+            cli_tools_str = row["cli_tools"] or ""
+            try:
+                cli_tools = json.loads(cli_tools_str) if cli_tools_str else []
+            except json.JSONDecodeError:
+                cli_tools = []
+            if canonical_tool not in {normalize_tool_name(t) for t in cli_tools}:
+                continue
+            matches.append(dict(row))
+        return matches
+
+    def _get_tool_settings_from_row(self, row: dict[str, Any], tool_name: str) -> dict[str, Any]:
+        """Extract non-sensitive tool settings from a DB row."""
+        canonical_tool = normalize_tool_name(tool_name)
+        cli_settings_str = row.get("cli_settings") or "{}"
+        try:
+            cli_settings = json.loads(cli_settings_str) if cli_settings_str else {}
+        except json.JSONDecodeError:
+            cli_settings = {}
+        base_settings = cli_settings.get(tool_name, cli_settings.get(canonical_tool, {}))
+        return self._build_cli_settings_for_tool(tool_name, base_settings)
+
+    def get_tool_model_pool(
+        self,
+        tenant_id: int,
+        tool_name: str,
+        scope: str = "remote",
+        provider: str = "openai",
+    ) -> dict[str, Any]:
+        """Build a deterministic HA model pool for a tool within a scope."""
+        rows = self._list_tool_key_rows(tenant_id, provider, tool_name, scope)
+        if not rows:
+            return {
+                "provider": provider,
+                "tool_name": tool_name,
+                "scope": scope,
+                "models": [],
+                "candidate_keys": [],
+                "model_key_ids": {},
+                "settings": {},
+                "empty_reason": f"No active {tool_name} API keys configured for scope '{scope}'",
+            }
+
+        candidate_keys: list[dict[str, Any]] = []
+        model_entries: dict[str, list[tuple[tuple[int, int, int], dict[str, Any]]]] = {}
+        model_key_ids: dict[str, list[int]] = {}
+        ranked_settings: list[tuple[tuple[int, int, int], dict[str, Any]]] = []
+
+        for row in rows:
+            key_id = int(row["id"])
+            priority = int(row.get("priority") or 0)
+            weight = int(row.get("weight") or 100)
+            settings = self._get_tool_settings_from_row(row, tool_name)
+            ranked_settings.append(((-priority, -weight, key_id), deepcopy(settings)))
+
+            provider_models = settings.get("modelProviders", {}).get("openai", [])
+            supported_model_ids: list[str] = []
+            if isinstance(provider_models, list):
+                for raw_model in provider_models:
+                    if not isinstance(raw_model, dict):
+                        continue
+                    model_id = raw_model.get("id")
+                    if not isinstance(model_id, str) or not model_id:
+                        continue
+                    supported_model_ids.append(model_id)
+                    rank = (-priority, -weight, key_id)
+                    model_entries.setdefault(model_id, []).append((rank, deepcopy(raw_model)))
+                    model_key_ids.setdefault(model_id, []).append(key_id)
+
+            candidate_keys.append(
+                {
+                    "key_id": key_id,
+                    "priority": priority,
+                    "weight": weight,
+                    "scope": row.get("scope") or scope,
+                    "supported_model_ids": sorted(set(supported_model_ids)),
+                }
+            )
+
+        models: list[dict[str, Any]] = []
+        ranked_model_meta: list[tuple[tuple[int, int, int], str, dict[str, Any]]] = []
+        for model_id, entries in model_entries.items():
+            canonical_rank, canonical_model = sorted(entries, key=lambda item: item[0])[0]
+            ranked_model_meta.append((canonical_rank, model_id, canonical_model))
+
+        ranked_model_meta.sort(key=lambda item: (item[0], item[1]))
+        for _, _, model in ranked_model_meta:
+            models.append(model)
+
+        base_settings = (
+            deepcopy(sorted(ranked_settings, key=lambda item: item[0])[0][1])
+            if ranked_settings
+            else {}
+        )
+        model_providers = base_settings.setdefault("modelProviders", {})
+        if not isinstance(model_providers, dict):
+            model_providers = {}
+            base_settings["modelProviders"] = model_providers
+        model_providers["openai"] = models
+        if models and "$version" not in base_settings:
+            base_settings["$version"] = 3
+
+        empty_reason = None
+        if not models:
+            empty_reason = f"Current {tool_name} API keys do not configure any models"
+
+        return {
+            "provider": provider,
+            "tool_name": tool_name,
+            "scope": scope,
+            "models": models,
+            "candidate_keys": candidate_keys,
+            "model_key_ids": {
+                model_id: sorted(set(key_ids)) for model_id, key_ids in model_key_ids.items()
+            },
+            "settings": base_settings,
+            "empty_reason": empty_reason,
+        }
+
     def _build_cli_settings_for_tool(
         self,
         tool_name: str,
@@ -681,6 +828,59 @@ class APIKeyProxyService:
 
         return settings
 
+    def resolve_api_key_from_key_ids(
+        self,
+        tenant_id: int,
+        provider: str,
+        key_ids: list[int],
+        exclude_key_ids: Optional[set[int]] = None,
+    ) -> Optional[tuple[str, Optional[str], int]]:
+        """Resolve a real API key from an allowed key-id subset using HA routing."""
+        normalized_ids = sorted({int(key_id) for key_id in key_ids if key_id is not None})
+        if not normalized_ids:
+            return None
+
+        placeholders = _params(len(normalized_ids))
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            f"""
+            SELECT id, encrypted_key, base_url, priority, weight
+            FROM api_key_store
+            WHERE tenant_id = {_param()} AND provider = {_param()} AND is_active = TRUE
+              AND id IN ({placeholders})
+        """,
+            (tenant_id, provider, *normalized_ids),
+        )
+        rows = cursor.fetchall()
+        conn.close()
+
+        candidates: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                api_key = self._decrypt_key(row["encrypted_key"])
+            except Exception as exc:
+                logger.warning("Failed to decrypt API key %s: %s", row["id"], exc)
+                continue
+            candidates.append(
+                {
+                    "id": int(row["id"]),
+                    "priority": int(row.get("priority") or 0),
+                    "weight": int(row.get("weight") or 100),
+                    "api_key": api_key,
+                    "base_url": row.get("base_url"),
+                }
+            )
+
+        selected = self._router.select_key(candidates, exclude_key_ids=exclude_key_ids)
+        if not selected:
+            return None
+        return (
+            cast("str", selected["api_key"]),
+            cast("Optional[str]", selected.get("base_url")),
+            int(selected["id"]),
+        )
+
     def delete_api_key_by_id(self, key_id: int, tenant_id: int) -> bool:
         """Delete an API key by its ID."""
         conn = self._get_connection()
@@ -707,6 +907,7 @@ class APIKeyProxyService:
         provider: str,
         expires_minutes: int = 1440,
         session_type: str = "agent",
+        extra_payload: Optional[dict[str, Any]] = None,
     ) -> str:
         """
         Generate a proxy token for a remote agent session.
@@ -738,6 +939,8 @@ class APIKeyProxyService:
             ).isoformat(),
             "jti": secrets.token_hex(16),
         }
+        if extra_payload:
+            payload.update(extra_payload)
 
         payload_json = json.dumps(payload, sort_keys=True)
         payload_b64 = b64encode(payload_json.encode()).decode()
