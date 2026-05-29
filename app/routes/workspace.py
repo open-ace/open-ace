@@ -15,7 +15,9 @@ from datetime import datetime, timedelta, timezone
 from flask import Blueprint, g, jsonify, request
 
 from app.auth.decorators import _extract_token, _load_user_from_token
+from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
 from app.modules.workspace.collaboration import SharePermission, get_collaboration_manager
+from app.modules.workspace.llm_proxy_handler import handle_llm_proxy_request
 from app.modules.workspace.prompt_library import PromptCategory, PromptTemplate, get_prompt_library
 from app.modules.workspace.session_manager import SessionType, _param, get_session_manager
 from app.modules.workspace.state_sync import get_state_sync_manager
@@ -78,6 +80,8 @@ def load_user():
     """Load the current user from session token before each request."""
     # Skip auth for CORS preflight requests (browser-initiated, carries no business data)
     if request.method == "OPTIONS":
+        return None
+    if request.path.startswith("/api/workspace/llm-proxy"):
         return None
 
     token = _extract_token()
@@ -170,6 +174,113 @@ def refresh_session_cookie(response):
         )
         g._session_refresh_seconds = None
     return response
+
+
+@workspace_bp.route("/llm-proxy", methods=["POST", "HEAD"])
+@workspace_bp.route("/llm-proxy/<path:path>", methods=["GET", "POST", "PUT", "DELETE", "HEAD"])
+def local_llm_proxy(path=""):
+    """Transparent LLM proxy for local multi-user qwen-code-webui sessions."""
+    api_proxy = get_api_key_proxy_service()
+    return handle_llm_proxy_request(scope="local", api_proxy=api_proxy, path=path)
+
+
+@workspace_bp.route("/session-models", methods=["GET"])
+def get_session_models():
+    """Return integrated-mode qwen-code model options for the current scope context."""
+    workspace_type = request.args.get("workspace_type", "local")
+    if workspace_type not in {"local", "remote"}:
+        return jsonify({"success": False, "error": "workspace_type must be local or remote"}), 400
+
+    api_proxy = get_api_key_proxy_service()
+
+    if workspace_type == "local":
+        # Local workspace is single-tenant; tenant_id=1 is the default tenant.
+        # This must be updated if multi-tenant local workspaces are introduced.
+        pool = api_proxy.get_tool_model_pool(
+            tenant_id=1,
+            tool_name="qwen-code",
+            scope="local",
+            provider="openai",
+        )
+        return jsonify(
+            {
+                "success": True,
+                "models": pool.get("models", []),
+                "empty_reason": pool.get("empty_reason"),
+            }
+        )
+
+    machine_id = request.args.get("machine_id")
+    session_id = request.args.get("session_id")
+    if not machine_id and not session_id:
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "machine_id or session_id is required for remote workspace",
+                }
+            ),
+            400,
+        )
+
+    if session_id:
+        session = get_session_manager().get_session(session_id)
+        if not session:
+            return jsonify({"success": False, "error": "Session not found"}), 404
+        if session.user_id not in (None, g.user["id"]):
+            return jsonify({"success": False, "error": "Forbidden"}), 403
+        ha_pool = session.context.get("ha_pool", {}) if session.context else {}
+        return jsonify(
+            {
+                "success": True,
+                "models": ha_pool.get("models", []),
+                "empty_reason": ha_pool.get("empty_reason"),
+            }
+        )
+
+    from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
+
+    agent_mgr = get_remote_agent_manager()
+    if not machine_id or not agent_mgr.check_user_access(machine_id, g.user["id"]):
+        return jsonify({"success": False, "error": "Machine not found or access denied"}), 404
+
+    machine = agent_mgr.get_machine(machine_id)
+    if not machine:
+        return jsonify({"success": False, "error": "Machine not found"}), 404
+
+    tenant_id = machine.get("tenant_id", 1)
+    pool = api_proxy.get_tool_model_pool(
+        tenant_id=tenant_id,
+        tool_name="qwen-code",
+        scope="remote",
+        provider="openai",
+    )
+    ha_pool_token = api_proxy.generate_proxy_token(
+        user_id=g.user["id"],
+        session_id=f"ha-pool:{machine_id}",
+        tenant_id=tenant_id,
+        provider="openai",
+        session_type="ha_pool",
+        expires_minutes=15,
+        extra_payload={
+            "scope": "remote",
+            "tool_name": "qwen-code",
+            "machine_id": machine_id,
+            "ha_candidate_keys": pool.get("candidate_keys", []),
+            "ha_model_key_ids": pool.get("model_key_ids", {}),
+            "ha_models": pool.get("models", []),
+            "ha_settings": pool.get("settings", {}),
+            "ha_empty_reason": pool.get("empty_reason"),
+        },
+    )
+    return jsonify(
+        {
+            "success": True,
+            "models": pool.get("models", []),
+            "empty_reason": pool.get("empty_reason"),
+            "ha_pool_token": ha_pool_token,
+        }
+    )
 
 
 # ==================== Prompt Templates ====================
