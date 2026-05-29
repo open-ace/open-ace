@@ -366,7 +366,7 @@ def run_all_tests():
             ("Tenant Management", "/manage/tenants", [".card", "table"]),
             ("Project Management", "/manage/projects", [".card", "table"]),
             ("Remote Machines", "/manage/remote/machines", [".card", "table"]),
-            ("API Keys", "/manage/remote/api-keys", [".card", "table"]),
+            ("API Keys", "/manage/settings/api-keys", [".card", "table"]),
             ("SSO Settings", "/manage/settings/sso", [".card", "form", ".sso"]),
         ]
 

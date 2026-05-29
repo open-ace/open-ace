@@ -331,7 +331,7 @@ def store_api_key(auth_token):
     try:
         # Store a test key via REST endpoint
         r = requests.post(
-            f"{BASE_URL}/api/remote/api-keys",
+            f"{BASE_URL}/api/api-keys",
             json={
                 "provider": "openai",
                 "key_name": "e2e-test-key",
@@ -347,7 +347,7 @@ def store_api_key(auth_token):
 
         # List keys via REST endpoint
         r2 = requests.get(
-            f"{BASE_URL}/api/remote/api-keys?tenant_id=1",
+            f"{BASE_URL}/api/api-keys?tenant_id=1",
             cookies={"session_token": auth_token},
             timeout=10,
         )
@@ -376,7 +376,7 @@ def store_api_key(auth_token):
         # Cleanup via REST endpoint
         key_id = keys[0]["id"]
         r3 = requests.delete(
-            f"{BASE_URL}/api/remote/api-keys/{key_id}",
+            f"{BASE_URL}/api/api-keys/{key_id}",
             json={"tenant_id": 1},
             cookies={"session_token": auth_token},
             timeout=10,

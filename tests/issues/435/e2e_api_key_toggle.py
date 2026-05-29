@@ -4,7 +4,7 @@ Open Ace - API Key Activate/Deactivate Toggle Playwright E2E Test
 
 Test the API Key activation toggle feature:
 1. Login as admin
-2. Navigate to API Key management page (/manage/remote/api-keys)
+2. Navigate to API Key management page (/manage/settings/api-keys)
 3. Create a test API key via API
 4. Verify toggle switch is present and active
 5. Deactivate the key via toggle switch
@@ -79,7 +79,7 @@ def api_login():
 
 def api_list_keys(token):
     r = requests.get(
-        f"{BASE_URL}/api/remote/api-keys",
+        f"{BASE_URL}/api/api-keys",
         cookies={"session_token": token},
     )
     assert r.status_code == 200
@@ -88,7 +88,7 @@ def api_list_keys(token):
 
 def api_store_key(token, key_name, provider="anthropic"):
     r = requests.post(
-        f"{BASE_URL}/api/remote/api-keys",
+        f"{BASE_URL}/api/api-keys",
         json={
             "provider": provider,
             "key_name": key_name,
@@ -106,7 +106,7 @@ def api_update_key(token, key_id, **fields):
     body = {"keyId": key_id, "tenant_id": 1}
     body.update(fields)
     r = requests.put(
-        f"{BASE_URL}/api/remote/api-keys/{key_id}",
+        f"{BASE_URL}/api/api-keys/{key_id}",
         json=body,
         cookies={"session_token": token},
     )
@@ -116,7 +116,7 @@ def api_update_key(token, key_id, **fields):
 
 def api_delete_key(token, key_id):
     r = requests.delete(
-        f"{BASE_URL}/api/remote/api-keys/{key_id}",
+        f"{BASE_URL}/api/api-keys/{key_id}",
         json={"tenant_id": 1},
         cookies={"session_token": token},
     )
@@ -174,7 +174,7 @@ def test_api_key_toggle():
 
             # ── Step 2: Navigate to API Key page ───────────
             log_step("Step 2", "Navigate to API Key management")
-            page.goto(f"{BASE_URL}/manage/remote/api-keys")
+            page.goto(f"{BASE_URL}/manage/settings/api-keys")
             pause(2)
             shot(page, "02_api_keys_page")
 

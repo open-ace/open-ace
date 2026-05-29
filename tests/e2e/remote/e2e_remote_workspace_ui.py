@@ -443,7 +443,7 @@ def _run_all_steps(page):
 
     # ── A8. Navigate to API Keys ──
     print("\n══════ A8. Navigate to API Keys ══════")
-    page.goto(f"{BASE_URL}/manage/remote/api-keys", wait_until="domcontentloaded")
+    page.goto(f"{BASE_URL}/manage/settings/api-keys", wait_until="domcontentloaded")
     page.wait_for_selector("h2, .api-key-management, table, .empty-state", timeout=10000)
     pause(2)
     shot(page, "A8_api_keys_page")
@@ -867,7 +867,7 @@ def _run_all_steps(page):
     pause(1)
     do_login(page, ADMIN_USER, ADMIN_PASS)
 
-    page.goto(f"{BASE_URL}/manage/remote/api-keys", wait_until="domcontentloaded")
+    page.goto(f"{BASE_URL}/manage/settings/api-keys", wait_until="domcontentloaded")
     page.wait_for_selector("table, .empty-state", timeout=10000)
     pause(2)
     shot(page, "D1_api_keys_list")

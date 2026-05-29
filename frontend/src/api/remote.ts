@@ -152,22 +152,22 @@ export const remoteApi = {
   listApiKeys(tenantId?: number): Promise<{ success: boolean; keys: ApiKey[] }> {
     const params: Record<string, string> = {};
     if (tenantId) params.tenant_id = String(tenantId);
-    return apiClient.get('/api/remote/api-keys', params);
+    return apiClient.get('/api/api-keys', params);
   },
 
   storeApiKey(
     data: StoreApiKeyRequest
   ): Promise<{ success: boolean; key: { provider: string; key_name: string } }> {
-    return apiClient.post('/api/remote/api-keys', data);
+    return apiClient.post('/api/api-keys', data);
   },
 
   deleteApiKey(keyId: number, tenantId?: number): Promise<{ success: boolean; message: string }> {
-    return apiClient.delete(`/api/remote/api-keys/${keyId}`, { tenant_id: tenantId ?? 1 });
+    return apiClient.delete(`/api/api-keys/${keyId}`, { tenant_id: tenantId ?? 1 });
   },
 
   updateApiKey(data: UpdateApiKeyRequest): Promise<{ success: boolean; message: string }> {
     const { keyId, ...body } = data;
-    return apiClient.put(`/api/remote/api-keys/${keyId}`, body);
+    return apiClient.put(`/api/api-keys/${keyId}`, body);
   },
 
   // Available machines (for session creation)

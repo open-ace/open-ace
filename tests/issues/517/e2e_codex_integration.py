@@ -530,7 +530,7 @@ def test_frontend_api_key_codex_option():
         browser, page = create_browser_page(p)
         try:
             playwright_login(page, WEBUI_URL, username="admin")
-            page.goto(f"{WEBUI_URL}/manage/api-keys")
+            page.goto(f"{WEBUI_URL}/manage/settings/api-keys")
             page.wait_for_load_state("networkidle")
             poll_until(
                 lambda: len(page.inner_text("body")) > 50,

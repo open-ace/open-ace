@@ -4,7 +4,7 @@ Open ACE - API Key CLI Settings Configuration Playwright E2E Test
 
 Test the API Key management with CLI Settings configuration:
 1. Login as admin
-2. Navigate to API Key management page (/manage/remote/api-keys)
+2. Navigate to API Key management page (/manage/settings/api-keys)
 3. Add a new API key with CLI settings (claude-code, qwen-code)
 4. Verify the key appears in table with CLI tools badges
 5. Edit the API key to update CLI settings
@@ -78,7 +78,7 @@ def api_login():
 
 def api_list_keys(token):
     r = requests.get(
-        f"{BASE_URL}/api/remote/api-keys",
+        f"{BASE_URL}/api/api-keys",
         cookies={"session_token": token},
     )
     assert r.status_code == 200
@@ -87,7 +87,7 @@ def api_list_keys(token):
 
 def api_delete_key(token, key_id):
     r = requests.delete(
-        f"{BASE_URL}/api/remote/api-keys/{key_id}",
+        f"{BASE_URL}/api/api-keys/{key_id}",
         json={"tenant_id": 1},
         cookies={"session_token": token},
     )
@@ -143,7 +143,7 @@ def test_api_key_cli_settings():
 
             # ── Step 2: Navigate to API Key management ───────────
             log_step("Step 2", "Navigate to API Key management")
-            page.goto(f"{BASE_URL}/manage/remote/api-keys")
+            page.goto(f"{BASE_URL}/manage/settings/api-keys")
             pause(2)
             shot(page, "02_api_keys_page")
             log_step("Nav", "✓ API Key management page loaded")

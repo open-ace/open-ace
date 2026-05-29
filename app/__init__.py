@@ -191,6 +191,7 @@ def register_blueprints(app):
     from app.routes.alerts import alerts_bp
     from app.routes.analysis import analysis_bp
     from app.routes.analytics import analytics_bp
+    from app.routes.api_keys import api_keys_bp
     from app.routes.auth import auth_bp
     from app.routes.compliance import compliance_bp
     from app.routes.fetch import fetch_bp
@@ -233,6 +234,7 @@ def register_blueprints(app):
     app.register_blueprint(projects_bp, url_prefix="/api")
     app.register_blueprint(insights_bp, url_prefix="/api")
     app.register_blueprint(remote_bp, url_prefix="/api/remote")
+    app.register_blueprint(api_keys_bp, url_prefix="/api")
     app.register_blueprint(pages_bp)
 
     logger.info("All blueprints registered")
