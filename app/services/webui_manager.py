@@ -686,9 +686,6 @@ class WebUIManager:
                 "--openace-api-url",
                 openace_api_url,
             ]
-            # When proxy is configured, qwen-code CLI needs --auth-type openai
-            if child_env.get("OPENAI_API_KEY"):
-                cmd.extend(["--auth-type", "openai"])
             cwd = webui_dir
         elif self._platform in ("linux", "darwin"):
             # Linux/macOS: use sudo -u for global executable
@@ -708,8 +705,6 @@ class WebUIManager:
                 "--openace-api-url",
                 openace_api_url,
             ]
-            if child_env.get("OPENAI_API_KEY"):
-                cmd.extend(["--auth-type", "openai"])
             cwd = None
         else:
             # Other platforms: direct execution (no user switching)
@@ -725,9 +720,11 @@ class WebUIManager:
                 "--openace-api-url",
                 openace_api_url,
             ]
-            if child_env.get("OPENAI_API_KEY"):
-                cmd.extend(["--auth-type", "openai"])
             cwd = None
+
+        # All platforms: when proxy is configured, qwen-code CLI needs --auth-type openai
+        if child_env.get("OPENAI_API_KEY"):
+            cmd.extend(["--auth-type", "openai"])
 
         logger.debug(f"Launching webui: {cmd}, cwd: {cwd}")
 
