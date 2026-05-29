@@ -725,6 +725,8 @@ class WebUIManager:
                 "--openace-api-url",
                 openace_api_url,
             ]
+            if child_env.get("OPENAI_API_KEY"):
+                cmd.extend(["--auth-type", "openai"])
             cwd = None
 
         logger.debug(f"Launching webui: {cmd}, cwd: {cwd}")
