@@ -88,8 +88,13 @@ export const PromptDetailModal: React.FC<PromptDetailModalProps> = ({
       const result = await promptsApi.render(prompt.id, variableValues);
       setRenderedContent(result);
       setHasRendered(true);
-      await copyPromptMutation.mutateAsync(prompt.id);
-      toast.success(t('copied', language));
+      toast.success(t('renderSuccess', language) || 'Rendered successfully');
+      // Record copy action separately - failure should not affect render result
+      try {
+        await copyPromptMutation.mutateAsync(prompt.id);
+      } catch (copyErr) {
+        console.warn('Failed to record prompt copy:', copyErr);
+      }
     } catch (err) {
       console.error('Failed to render prompt:', err);
       toast.error(t('renderFailed', language) || 'Failed to render prompt');
@@ -105,8 +110,13 @@ export const PromptDetailModal: React.FC<PromptDetailModalProps> = ({
 
     const success = await copyToClipboard(contentToCopy);
     if (success) {
+      // Record copy action separately - failure should not affect copy result
       if (prompt) {
-        await copyPromptMutation.mutateAsync(prompt.id);
+        try {
+          await copyPromptMutation.mutateAsync(prompt.id);
+        } catch (copyErr) {
+          console.warn('Failed to record prompt copy:', copyErr);
+        }
       }
       setCopied(true);
       setTimeout(() => {

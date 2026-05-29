@@ -162,7 +162,12 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
 
     const success = await copyToClipboard(prompt.content);
     if (success) {
-      await copyPromptMutation.mutateAsync(prompt.id);
+      // Record copy action separately - failure should not affect copy result
+      try {
+        await copyPromptMutation.mutateAsync(prompt.id);
+      } catch (copyErr) {
+        console.warn('Failed to record prompt copy:', copyErr);
+      }
       setCopiedPromptId(prompt.id);
       setTimeout(() => setCopiedPromptId(null), 1500);
       toast.success(t('copied', language), prompt.name);
