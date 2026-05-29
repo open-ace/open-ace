@@ -106,6 +106,16 @@ export const Workspace: React.FC = () => {
   // Refs for iframe elements (to send focus messages)
   const iframeRefs = useRef<Map<string, HTMLIFrameElement>>(new Map());
 
+  // Workspace tabs state from store (Issue #65) - moved before pollTerminalProxy to fix TS2448
+  const storedTabs = useWorkspaceTabs();
+  const storedActiveTabId = useWorkspaceActiveTabId();
+
+  // Use stable action selectors (fixes infinite loop)
+  const setStoredActiveTabId = useSetWorkspaceActiveTabId();
+  const addStoredTab = useAddWorkspaceTab();
+  const updateStoredTab = useUpdateWorkspaceTab();
+  const removeStoredTab = useRemoveWorkspaceTab();
+
   // Shared terminal proxy polling helper
   const pollTerminalProxy = useCallback(
     async (tabId: string, terminalId: string, machineId: string, maxAttempts: number = 30) => {
@@ -166,16 +176,6 @@ export const Workspace: React.FC = () => {
   // Fullscreen state from global store
   const workspaceFullscreen = useWorkspaceFullscreen();
   const { toggleWorkspaceFullscreen, exitWorkspaceFullscreen } = useAppStore();
-
-  // Workspace tabs state from store (Issue #65)
-  const storedTabs = useWorkspaceTabs();
-  const storedActiveTabId = useWorkspaceActiveTabId();
-
-  // Use stable action selectors (fixes infinite loop)
-  const setStoredActiveTabId = useSetWorkspaceActiveTabId();
-  const addStoredTab = useAddWorkspaceTab();
-  const updateStoredTab = useUpdateWorkspaceTab();
-  const removeStoredTab = useRemoveWorkspaceTab();
 
   // Load workspace config and user webui URL
   useEffect(() => {
