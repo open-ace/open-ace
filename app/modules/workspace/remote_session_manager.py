@@ -168,8 +168,14 @@ class RemoteSessionManager:
             extra_payload={
                 "scope": "remote",
                 "tool_name": "qwen-code" if tool_name == "qwen" else tool_name,
-                "ha_candidate_keys": ha_pool.get("candidate_keys", []) if ha_pool else [],
-                "ha_model_key_ids": ha_pool.get("model_key_ids", {}) if ha_pool else {},
+                **(
+                    {
+                        "ha_candidate_keys": ha_pool.get("candidate_keys", []),
+                        "ha_model_key_ids": ha_pool.get("model_key_ids", {}),
+                    }
+                    if ha_pool
+                    else {}
+                ),
             },
         )
 

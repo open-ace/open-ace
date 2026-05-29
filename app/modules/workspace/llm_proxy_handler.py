@@ -343,7 +343,9 @@ def handle_llm_proxy_request(
                         content = item.get("content", "")
                         if isinstance(content, list):
                             content = " ".join(
-                                part.get("text", "") for part in content if isinstance(part, dict)
+                                str(part.get("text") or "")
+                                for part in content
+                                if isinstance(part, dict)
                             )
                         if role == "developer":
                             role = "system"
@@ -353,6 +355,10 @@ def handle_llm_proxy_request(
                 if instructions:
                     messages.insert(0, {"role": "system", "content": instructions})
                 if not messages:
+                    logger.warning(
+                        "Responses API conversion: no messages extracted from input=%s",
+                        type(input_data).__name__,
+                    )
                     messages.append({"role": "user", "content": ""})
 
                 cc_body = {
