@@ -49,7 +49,8 @@ def _determine_target_url(
     provider: str,
     base_url: str | None,
     path: str,
-) -> str:
+) -> str | tuple[Response, int]:
+    """Build the upstream target URL.  Returns a (Response, status) tuple on validation error."""
     if base_url:
         target_base = base_url.rstrip("/")
         if target_base.endswith("/v1"):
@@ -63,8 +64,18 @@ def _determine_target_url(
         target_base = provider_urls.get(provider, "https://api.openai.com")
 
     if path:
-        return f"{target_base}/{path}"
-    return f"{target_base}{request.path.split('/llm-proxy')[-1]}"
+        suffix = path
+    else:
+        suffix = request.path.split("/llm-proxy")[-1]
+
+    # Reject path-traversal attempts (e.g. "/../../internal")
+    if ".." in suffix.split("/"):
+        return (
+            jsonify({"error": {"message": "Invalid path", "type": "proxy_error"}}),
+            400,
+        )
+
+    return f"{target_base}{suffix}"
 
 
 def _record_llm_usage(
@@ -298,7 +309,10 @@ def handle_llm_proxy_request(
             )
 
         api_key, base_url, key_id = key_result
-        target_url = _determine_target_url(provider, base_url, path)
+        target_result = _determine_target_url(provider, base_url, path)
+        if isinstance(target_result, tuple):
+            return target_result
+        target_url = target_result
 
         logger.info(
             "LLM proxy: %s -> %s model=%s provider=%s key_id=%s attempt=%d scope=%s",
@@ -555,7 +569,7 @@ def handle_llm_proxy_request(
                 jsonify(
                     {
                         "error": {
-                            "message": f"Proxy error: {str(exc)}",
+                            "message": "Internal proxy error",
                             "type": "proxy_error",
                         }
                     }
