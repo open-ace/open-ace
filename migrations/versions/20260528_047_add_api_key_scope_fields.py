@@ -5,7 +5,7 @@ Revises: 046_login_attempts
 Create Date: 2026-05-28
 
 Adds columns for unified API key management:
-- scope: 'local', 'remote', or 'shared' (default 'remote')
+- scope: 'local', 'remote', or 'shared' (default 'shared')
 - priority: higher = preferred (default 0)
 - weight: for weighted random within same priority (default 100)
 
@@ -37,9 +37,6 @@ def upgrade() -> None:
         "api_key_store",
         sa.Column("weight", sa.INTEGER, nullable=True, server_default="100"),
     )
-    # Fix existing keys that were created before the scope field existed;
-    # they were used by local sessions, so 'shared' is the correct default.
-    op.execute("UPDATE api_key_store SET scope = 'shared' WHERE scope IS NULL OR scope = 'remote'")
 
 
 def downgrade() -> None:
