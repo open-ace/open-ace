@@ -18,7 +18,7 @@ export function useMachines() {
 export function useMachineUsers(machineId: string | null) {
   return useQuery({
     queryKey: ['remote', 'machines', machineId, 'users'],
-    queryFn: () => remoteApi.getMachineUsers(machineId!),
+    queryFn: () => remoteApi.getMachineUsers(machineId ?? ''),
     enabled: !!machineId,
   });
 }
@@ -153,12 +153,12 @@ export function useCreateRemoteSession() {
 export function useRemoteSession(sessionId: string | null) {
   return useQuery({
     queryKey: ['remote', 'sessions', sessionId],
-    queryFn: () => remoteApi.getSession(sessionId!),
+    queryFn: () => remoteApi.getSession(sessionId ?? ''),
     enabled: !!sessionId,
     refetchInterval: (query) => {
       const data = query.state.data;
       // Paused sessions don't need frequent polling
-      if (data && (data as any).status === 'paused') return 30000;
+      if (data && (data as Record<string, unknown>).status === 'paused') return 30000;
       return sessionId ? 3000 : false;
     },
   });
@@ -195,7 +195,7 @@ export function usePauseRemoteSession() {
     onMutate: async (sessionId) => {
       await queryClient.cancelQueries({ queryKey: ['remote', 'sessions', sessionId] });
       const previous = queryClient.getQueryData(['remote', 'sessions', sessionId]);
-      queryClient.setQueryData(['remote', 'sessions', sessionId], (old: any) =>
+      queryClient.setQueryData(['remote', 'sessions', sessionId], (old: unknown) =>
         old ? { ...old, status: 'paused' } : old
       );
       return { previous, sessionId };
@@ -219,7 +219,7 @@ export function useResumeRemoteSession() {
     onMutate: async (sessionId) => {
       await queryClient.cancelQueries({ queryKey: ['remote', 'sessions', sessionId] });
       const previous = queryClient.getQueryData(['remote', 'sessions', sessionId]);
-      queryClient.setQueryData(['remote', 'sessions', sessionId], (old: any) =>
+      queryClient.setQueryData(['remote', 'sessions', sessionId], (old: unknown) =>
         old ? { ...old, status: 'active' } : old
       );
       return { previous, sessionId };

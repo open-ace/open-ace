@@ -82,7 +82,7 @@ export const APIKeyManagement: React.FC = () => {
   const updateApiKey = useUpdateApiKey();
   const deleteApiKey = useDeleteApiKey();
 
-  const keys = keysData?.keys ?? [];
+  const keys = useMemo(() => keysData?.keys ?? [], [keysData?.keys]);
 
   // Memoize parsed CLI tools to avoid repeated JSON.parse in render
   const parsedCliTools = useMemo(() => {
@@ -119,6 +119,10 @@ export const APIKeyManagement: React.FC = () => {
     claude_settings: '',
     qwen_settings: '',
     codex_settings: '',
+    scope: 'shared' as string,
+    priority: 0,
+    weight: 100,
+    showAdvanced: false,
   });
 
   const stringifyCodexSettings = (value: unknown): string => {
@@ -174,6 +178,10 @@ export const APIKeyManagement: React.FC = () => {
       claude_settings: '',
       qwen_settings: '',
       codex_settings: '',
+      scope: 'shared',
+      priority: 0,
+      weight: 100,
+      showAdvanced: false,
     });
     setShowAddDialog(true);
   };
@@ -222,6 +230,10 @@ export const APIKeyManagement: React.FC = () => {
       claude_settings: claudeSettings,
       qwen_settings: qwenSettings,
       codex_settings: codexSettings,
+      scope: key.scope || 'shared',
+      priority: key.priority ?? 0,
+      weight: key.weight ?? 100,
+      showAdvanced: (key.priority ?? 0) !== 0 || (key.weight ?? 100) !== 100,
     });
     setShowEditDialog(true);
   };
@@ -387,6 +399,9 @@ export const APIKeyManagement: React.FC = () => {
         base_url: formData.base_url || undefined,
         cli_tools: JSON.stringify(formData.cli_tools),
         cli_settings: buildCliSettingsJson(),
+        scope: formData.scope,
+        priority: formData.priority,
+        weight: formData.weight,
       });
       setShowAddDialog(false);
       refetch();
@@ -425,6 +440,9 @@ export const APIKeyManagement: React.FC = () => {
         base_url: formData.base_url || undefined,
         cli_tools: JSON.stringify(formData.cli_tools),
         cli_settings: buildCliSettingsJson(),
+        scope: formData.scope,
+        priority: formData.priority,
+        weight: formData.weight,
       });
       setShowEditDialog(false);
       setEditTarget(null);
@@ -485,7 +503,7 @@ export const APIKeyManagement: React.FC = () => {
               <tr>
                 <th>{t('provider', language)}</th>
                 <th>{t('keyName', language)}</th>
-                <th>{t('baseUrl', language)}</th>
+                <th>Scope</th>
                 <th>{t('cliTools', language)}</th>
                 <th>{t('keyStatus', language)}</th>
                 <th>{t('tableCreatedAt', language)}</th>
@@ -495,6 +513,10 @@ export const APIKeyManagement: React.FC = () => {
             <tbody>
               {keys.map((key) => {
                 const cliTools = parsedCliTools.get(key.id) ?? [];
+                const scopeLabel =
+                  key.scope === 'shared' ? 'Shared' : key.scope === 'local' ? 'Local' : 'Remote';
+                const scopeVariant =
+                  key.scope === 'shared' ? 'success' : key.scope === 'local' ? 'info' : 'warning';
                 return (
                   <tr key={key.id}>
                     <td>
@@ -504,8 +526,13 @@ export const APIKeyManagement: React.FC = () => {
                     </td>
                     <td>
                       <strong>{key.key_name}</strong>
+                      {key.priority > 0 && (
+                        <small className="text-muted ms-1">P{key.priority}</small>
+                      )}
                     </td>
-                    <td className="text-muted">{key.base_url ?? '-'}</td>
+                    <td>
+                      <Badge variant={scopeVariant}>{scopeLabel}</Badge>
+                    </td>
                     <td>
                       {cliTools.length > 0 ? (
                         cliTools.map((tool) => (
@@ -624,6 +651,63 @@ export const APIKeyManagement: React.FC = () => {
           />
         </div>
 
+        {/* Scope Selection */}
+        <div className="mb-3">
+          <label className="form-label">Scope</label>
+          <Select
+            options={[
+              { value: 'shared', label: 'Shared (Local + Remote)' },
+              { value: 'local', label: 'Local Only' },
+              { value: 'remote', label: 'Remote Only (LLM Proxy)' },
+            ]}
+            value={formData.scope}
+            onChange={(v) => setFormData({ ...formData, scope: v })}
+          />
+          <small className="text-muted">
+            Determines which workspace types can use this key. "Shared" is recommended.
+          </small>
+        </div>
+
+        {/* Advanced Settings (collapsed by default) */}
+        <div className="mb-3">
+          <button
+            type="button"
+            className="btn btn-link p-0 text-decoration-none"
+            onClick={() => setFormData({ ...formData, showAdvanced: !formData.showAdvanced })}
+          >
+            <i className={`bi bi-chevron-${formData.showAdvanced ? 'up' : 'down'} me-1`} />
+            Advanced Settings
+          </button>
+          {formData.showAdvanced && (
+            <div className="mt-2 p-3 border rounded bg-light">
+              <div className="row">
+                <div className="col-6">
+                  <label className="form-label">Priority</label>
+                  <TextInput
+                    type="number"
+                    value={String(formData.priority)}
+                    onChange={(v) => setFormData({ ...formData, priority: parseInt(v) || 0 })}
+                    placeholder="0"
+                  />
+                  <small className="text-muted">Higher = preferred. Default: 0</small>
+                </div>
+                <div className="col-6">
+                  <label className="form-label">Weight</label>
+                  <TextInput
+                    type="number"
+                    value={String(formData.weight)}
+                    onChange={(v) => setFormData({ ...formData, weight: parseInt(v) || 100 })}
+                    placeholder="100"
+                  />
+                  <small className="text-muted">
+                    For weighted random within same priority. Default: 100
+                  </small>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* CLI Tools Section */}
         <div className="mb-3">
           <label className="form-label">{t('cliTools', language)}</label>
@@ -734,6 +818,63 @@ export const APIKeyManagement: React.FC = () => {
             onChange={(v) => setFormData({ ...formData, base_url: v })}
             placeholder={t('enterBaseUrl', language)}
           />
+        </div>
+
+        {/* Scope Selection */}
+        <div className="mb-3">
+          <label className="form-label">Scope</label>
+          <Select
+            options={[
+              { value: 'shared', label: 'Shared (Local + Remote)' },
+              { value: 'local', label: 'Local Only' },
+              { value: 'remote', label: 'Remote Only (LLM Proxy)' },
+            ]}
+            value={formData.scope}
+            onChange={(v) => setFormData({ ...formData, scope: v })}
+          />
+          <small className="text-muted">
+            Determines which workspace types can use this key. "Shared" is recommended.
+          </small>
+        </div>
+
+        {/* Advanced Settings (collapsed by default) */}
+        <div className="mb-3">
+          <button
+            type="button"
+            className="btn btn-link p-0 text-decoration-none"
+            onClick={() => setFormData({ ...formData, showAdvanced: !formData.showAdvanced })}
+          >
+            <i className={`bi bi-chevron-${formData.showAdvanced ? 'up' : 'down'} me-1`} />
+            Advanced Settings
+          </button>
+          {formData.showAdvanced && (
+            <div className="mt-2 p-3 border rounded bg-light">
+              <div className="row">
+                <div className="col-6">
+                  <label className="form-label">Priority</label>
+                  <TextInput
+                    type="number"
+                    value={String(formData.priority)}
+                    onChange={(v) => setFormData({ ...formData, priority: parseInt(v) || 0 })}
+                    placeholder="0"
+                  />
+                  <small className="text-muted">Higher = preferred. Default: 0</small>
+                </div>
+                <div className="col-6">
+                  <label className="form-label">Weight</label>
+                  <TextInput
+                    type="number"
+                    value={String(formData.weight)}
+                    onChange={(v) => setFormData({ ...formData, weight: parseInt(v) || 100 })}
+                    placeholder="100"
+                  />
+                  <small className="text-muted">
+                    For weighted random within same priority. Default: 100
+                  </small>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* CLI Tools Section */}

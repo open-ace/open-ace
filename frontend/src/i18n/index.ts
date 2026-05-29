@@ -786,7 +786,7 @@ const translations: Record<Language, Translations> = {
     baseUrl: 'Base URL',
     enterKeyName: 'Enter key name',
     enterApiKey: 'Enter API key',
-    enterBaseUrl: 'Enter base URL (optional)',
+    enterBaseUrl: 'Enter base URL',
     noApiKeys: 'No API keys configured',
     noApiKeysDescription: 'Add API keys to enable LLM proxy for remote agents.',
     keyStatus: 'Status',
@@ -865,8 +865,7 @@ const translations: Record<Language, Translations> = {
     emptyDirectory: 'Empty Directory',
     noSubdirectories: 'No subdirectories found',
     folderName: 'Folder name',
-    createDirNotAvailable:
-      'Create directory on remote machine is not yet available. Please create the directory on the remote machine first.',
+    createDirError: 'Failed to create directory.',
   },
   zh: {
     // Common
@@ -1707,7 +1706,7 @@ const translations: Record<Language, Translations> = {
     emptyDirectory: '空目录',
     noSubdirectories: '没有子目录',
     folderName: '文件夹名称',
-    createDirNotAvailable: '暂不支持在远程机器上创建目录，请先在远程机器上手动创建。',
+    createDirError: '创建目录失败。',
   },
   ja: {
     // Common
@@ -2254,8 +2253,7 @@ const translations: Record<Language, Translations> = {
     emptyDirectory: '空のディレクトリ',
     noSubdirectories: 'サブディレクトリがありません',
     folderName: 'フォルダ名',
-    createDirNotAvailable:
-      'リモートマシンでのディレクトリ作成はまだサポートされていません。先にリモートマシンで手動作成してください。',
+    createDirError: 'ディレクトリの作成に失敗しました。',
   },
   ko: {
     // Common
@@ -2800,8 +2798,7 @@ const translations: Record<Language, Translations> = {
     emptyDirectory: '빈 디렉토리',
     noSubdirectories: '하위 디렉토리 없음',
     folderName: '폴더 이름',
-    createDirNotAvailable:
-      '원격 머신에서 디렉토리 생성은 아직 지원되지 않습니다. 원격 머신에서 먼저 수동으로 생성해 주세요.',
+    createDirError: '디렉토리 생성에 실패했습니다.',
   },
 };
 

@@ -45,27 +45,31 @@ class InsightsService:
 
     def _get_api_credentials(self, config: dict) -> tuple[str, str]:
         """
-        Get API credentials from config and environment.
+        Get API credentials from the api_key_store database.
 
-        Supports multiple key names used across deployments:
-        - BAILIAN_CODING_PLAN_API_KEY (production deployment)
-        - OPENAI_API_KEY (standard)
+        Resolves keys with scope='local' or 'shared' for the openai provider.
+        Falls back to environment variables if no key is found in the database.
 
         Returns:
             Tuple[api_key, base_url]
         """
-        auth_cfg = config.get("auth", {}).get("env", {})
-        api_key = (
-            auth_cfg.get("BAILIAN_CODING_PLAN_API_KEY")
-            or os.environ.get("BAILIAN_CODING_PLAN_API_KEY", "")
-            or auth_cfg.get("OPENAI_API_KEY")
-            or os.environ.get("OPENAI_API_KEY", "")
-        )
-        base_url = (
-            auth_cfg.get("OPENAI_BASE_URL")
-            or os.environ.get("OPENAI_BASE_URL")
-            or "https://coding.dashscope.aliyuncs.com/v1"
-        )
+        # Primary: resolve from database
+        try:
+            from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
+
+            api_proxy = get_api_key_proxy_service()
+            result = api_proxy.resolve_api_key_for_scope(1, "openai", scope="local")
+            if result:
+                api_key, base_url, _ = result
+                if base_url:
+                    return api_key, base_url
+                return api_key, "https://coding.dashscope.aliyuncs.com/v1"
+        except Exception as e:
+            logger.warning("Failed to resolve API key from database: %s", e)
+
+        # Fallback: environment variables
+        api_key = os.environ.get("OPENAI_API_KEY", "")
+        base_url = os.environ.get("OPENAI_BASE_URL", "https://coding.dashscope.aliyuncs.com/v1")
         return api_key, base_url
 
     def generate_insights(

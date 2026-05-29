@@ -10,7 +10,6 @@ import contextlib
 import json
 import logging
 import threading
-import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -155,21 +154,7 @@ class RemoteSessionManager:
         if permission_mode:
             command["permission_mode"] = permission_mode
 
-        success = self._agent_manager.send_command(machine_id, command)
-        if not success:
-            for attempt in range(3):
-                time.sleep(2)
-                logger.info(
-                    f"Retrying start_session (attempt {attempt+1}/3) for {machine_id[:8]}..."
-                )
-                success = self._agent_manager.send_command(machine_id, command)
-                if success:
-                    break
-        if not success:
-            self._agent_manager.unbind_session(session_id)
-            self._session_manager.delete_session(session_id)
-            logger.error(f"Failed to start remote session on {machine_id} after retries")
-            return None
+        self._agent_manager.send_command(machine_id, command)
 
         # Update session with remote workspace info
         session.context["workspace_type"] = "remote"
@@ -322,14 +307,13 @@ class RemoteSessionManager:
             "session_id": session_id,
             "permission_mode": permission_mode,
         }
-        success = self._agent_manager.send_command(machine_id, command)
+        self._agent_manager.send_command(machine_id, command)
 
-        # Update cache on success
-        if success:
-            self._session_permission_modes[session_id] = permission_mode or "default"
-            logger.info(f"Updated permission_mode for {session_id[:8]}: {new_mode}")
+        # Update cache
+        self._session_permission_modes[session_id] = permission_mode or "default"
+        logger.info(f"Updated permission_mode for {session_id[:8]}: {new_mode}")
 
-        return success
+        return True
 
     def update_model(self, session_id: str, model: str) -> bool:
         """Switch the model of an active remote session."""
@@ -367,10 +351,9 @@ class RemoteSessionManager:
             "session_id": session_id,
         }
 
-        success = self._agent_manager.send_command(machine_id, command)
-        if success:
-            logger.info(f"Sent abort_request for session {session_id[:8]}")
-        return success
+        self._agent_manager.send_command(machine_id, command)
+        logger.info(f"Sent abort_request for session {session_id[:8]}")
+        return True
 
     def stop_session(self, session_id: str) -> bool:
         """Stop a remote session."""
@@ -405,15 +388,14 @@ class RemoteSessionManager:
             "session_id": session_id,
         }
 
-        success = self._agent_manager.send_command(machine_id, command)
-        if success:
-            session = self._session_manager.get_session(session_id)
-            if session:
-                session.status = "paused"
-                session.paused_at = datetime.now(timezone.utc).replace(tzinfo=None)
-                self._session_manager.update_session(session)
+        self._agent_manager.send_command(machine_id, command)
+        session = self._session_manager.get_session(session_id)
+        if session:
+            session.status = "paused"
+            session.paused_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            self._session_manager.update_session(session)
 
-        return success
+        return True
 
     def resume_session(self, session_id: str) -> bool:
         """Resume a paused remote session."""
@@ -427,15 +409,14 @@ class RemoteSessionManager:
             "session_id": session_id,
         }
 
-        success = self._agent_manager.send_command(machine_id, command)
-        if success:
-            session = self._session_manager.get_session(session_id)
-            if session:
-                session.status = "active"
-                session.paused_at = None
-                self._session_manager.update_session(session)
+        self._agent_manager.send_command(machine_id, command)
+        session = self._session_manager.get_session(session_id)
+        if session:
+            session.status = "active"
+            session.paused_at = None
+            self._session_manager.update_session(session)
 
-        return success
+        return True
 
     def get_session_status(self, session_id: str) -> Optional[dict[str, Any]]:
         """Get remote session status and recent output."""

@@ -51,6 +51,7 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
   const [isWritable, setIsWritable] = useState(false);
   const [showCreateInput, setShowCreateInput] = useState(false);
   const [newDirName, setNewDirName] = useState('');
+  const [isCreating, setIsCreating] = useState(false);
   const [pathHistory, setPathHistory] = useState<string[]>([]);
   const [fallbackNote, setFallbackNote] = useState<string | null>(null);
 
@@ -160,18 +161,33 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
   };
 
   // Create new directory
-  // Note: This feature requires remote agent support which is not yet implemented
-  // Users can manually create directories on the remote machine
   const handleCreateDirectory = async () => {
-    if (!newDirName.trim() || !isWritable) return;
+    if (!newDirName.trim() || !isWritable || isCreating) return;
+
+    const separator = getPathSeparator();
+    const fullPath = currentPath
+      ? currentPath + (currentPath.endsWith(separator) ? '' : separator) + newDirName.trim()
+      : newDirName.trim();
+
+    setIsCreating(true);
+    setError(null);
     setShowCreateInput(false);
-    setNewDirName('');
-    // Show info message instead of error - feature not yet available
-    setError(
-      t('createDirNotAvailable', language) ||
-        'Create directory on remote machine is not yet available. ' +
-          'Please create the directory on the remote machine first, then enter the path here.'
-    );
+
+    try {
+      const result = await fsApi.createRemoteDirectory(machineId, fullPath);
+      if (result.success) {
+        setNewDirName('');
+        await fetchDirectories(currentPath);
+      } else {
+        const fallback = t('createDirError', language) ?? 'Failed to create directory';
+        setError(result.error ?? fallback);
+      }
+    } catch (err) {
+      const fallback = t('createDirError', language) ?? 'Failed to create directory';
+      setError((err as Error)?.message ?? fallback);
+    } finally {
+      setIsCreating(false);
+    }
   };
 
   // Select path from history
@@ -219,7 +235,7 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
       }
     }
     return crumbs;
-  }, [currentPath, isWindows]);
+  }, [currentPath, isWindows, splitPath]);
 
   return (
     <div className="remote-directory-browser">
@@ -296,9 +312,17 @@ export const RemoteDirectoryBrowser: React.FC<RemoteDirectoryBrowserProps> = ({
               className="form-control"
               value={newDirName}
               onChange={(e) => setNewDirName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleCreateDirectory();
+              }}
               placeholder={t('folderName', language) || 'Folder name'}
             />
-            <Button variant="primary" size="sm" onClick={handleCreateDirectory}>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleCreateDirectory}
+              disabled={isCreating}
+            >
               {t('create', language)}
             </Button>
             <Button

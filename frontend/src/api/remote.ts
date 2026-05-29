@@ -47,6 +47,9 @@ export interface ApiKey {
   updated_at: string;
   cli_tools: string | null; // JSON array: ["claude-code", "qwen-code"]
   cli_settings: string | null; // JSON object: {"claude-code": {...}, "qwen-code": {...}}
+  scope: string; // 'local', 'remote', or 'shared'
+  priority: number;
+  weight: number;
 }
 
 export interface StoreApiKeyRequest {
@@ -57,6 +60,9 @@ export interface StoreApiKeyRequest {
   tenant_id?: number;
   cli_tools?: string; // JSON array: ["claude-code", "qwen-code"]
   cli_settings?: string; // JSON object: {"claude-code": {...}, "qwen-code": {...}}
+  scope?: string; // 'local', 'remote', or 'shared' (default 'remote')
+  priority?: number;
+  weight?: number;
 }
 
 export interface UpdateApiKeyRequest {
@@ -67,6 +73,9 @@ export interface UpdateApiKeyRequest {
   cli_settings?: string;
   is_active?: boolean;
   tenant_id?: number;
+  scope?: string;
+  priority?: number;
+  weight?: number;
 }
 
 export interface RemoteSession {

@@ -128,7 +128,10 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
     !!selectedSessionId
   );
 
-  const sessions = sessionsData?.data?.sessions ?? [];
+  const sessions = useMemo(
+    () => sessionsData?.data?.sessions ?? [],
+    [sessionsData?.data?.sessions]
+  );
   const restoreSession = useRestoreSession();
 
   // Group sessions by date (API already filtered based on search)

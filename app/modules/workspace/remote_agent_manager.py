@@ -75,7 +75,10 @@ class RemoteAgentManager:
         # Lock for gevent coroutine safety
         self._lock = Semaphore(1)
         self._restore_in_memory_state()
-        self._cleanup_offline_sessions()
+        # Defer session cleanup to heartbeat monitor instead of running on startup.
+        # This gives agents time to re-register after a server restart before their
+        # sessions are cleaned up. The heartbeat monitor runs every 60 seconds and
+        # will naturally clean up stale sessions (Ref: #596).
         self._start_heartbeat_monitor()
 
     def _restore_in_memory_state(self) -> None:
@@ -120,84 +123,6 @@ class RemoteAgentManager:
                 )
         except Exception as e:
             logger.warning("Failed to restore in-memory state: %s", e)
-
-    def _cleanup_offline_sessions(self) -> None:
-        """Mark active remote sessions as completed when their machine is offline.
-
-        Unlike the old _cleanup_stale_sessions which nuked ALL active remote
-        sessions on startup, this only cleans up sessions whose machine is
-        confirmed offline AND have been inactive longer than the recovery window.
-
-        The recovery window allows users to reconnect after brief network
-        interruptions without losing their session history.
-
-        Note: This method uses a broader query condition (m.status IS NULL OR
-        m.status != 'online') compared to _check_heartbeats() which only checks
-        m.status = 'offline'. This is intentional because:
-        1. This runs at startup and must handle orphaned sessions where the
-           machine record was deleted (m.status IS NULL)
-        2. It must also handle machines in transitional states (e.g., 'idle', 'busy')
-           that were not properly updated before shutdown
-        """
-        recovery_cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
-            seconds=self.SESSION_RECOVERY_WINDOW_SECONDS
-        )
-
-        try:
-            with self.db.connection() as conn:
-                cursor = conn.cursor()
-
-                # Find active remote sessions whose machine is offline AND
-                # session has been inactive longer than the recovery window
-                cursor.execute(
-                    "SELECT s.session_id, s.remote_machine_id, s.updated_at FROM agent_sessions s "
-                    "LEFT JOIN remote_machines m ON s.remote_machine_id = m.machine_id "
-                    "WHERE s.status = 'active' AND s.workspace_type = 'remote' "
-                    "AND (m.status IS NULL OR m.status != 'online') "
-                    f"AND s.updated_at < {_param()}",
-                    (recovery_cutoff.isoformat(),),
-                )
-                offline = cursor.fetchall()
-                if not offline:
-                    # Log sessions that are preserved within recovery window
-                    cursor.execute(
-                        "SELECT s.session_id, s.updated_at FROM agent_sessions s "
-                        "LEFT JOIN remote_machines m ON s.remote_machine_id = m.machine_id "
-                        "WHERE s.status = 'active' AND s.workspace_type = 'remote' "
-                        "AND (m.status IS NULL OR m.status != 'online') "
-                        f"AND s.updated_at >= {_param()}",
-                        (recovery_cutoff.isoformat(),),
-                    )
-                    preserved = cursor.fetchall()
-                    if preserved:
-                        logger.info(
-                            "Preserved %d remote sessions within recovery window (will be cleaned after %ds)",
-                            len(preserved),
-                            self.SESSION_RECOVERY_WINDOW_SECONDS,
-                        )
-                    return
-
-                sids = [r["session_id"] for r in offline]
-                with self._lock:
-                    for sid in sids:
-                        self._session_end_flags[sid] = True
-
-                placeholders = ", ".join([_param()] * len(sids))
-                cursor.execute(
-                    f"UPDATE agent_sessions SET status = 'completed', "
-                    f"updated_at = {_param()} WHERE session_id IN ({placeholders})",
-                    [datetime.now(timezone.utc).replace(tzinfo=None).isoformat()] + sids,
-                )
-                conn.commit()
-
-            if offline:
-                logger.info(
-                    "Cleaned up %d remote sessions (inactive > %ds)",
-                    len(offline),
-                    self.SESSION_RECOVERY_WINDOW_SECONDS,
-                )
-        except Exception as e:
-            logger.warning("Failed to cleanup offline sessions: %s", e)
 
     def _start_heartbeat_monitor(self) -> None:
         """Start background thread for heartbeat monitoring."""
@@ -646,9 +571,16 @@ class RemoteAgentManager:
 
     # ==================== Command Dispatch ====================
 
+    def is_agent_connected(self, machine_id: str) -> bool:
+        """Check if an agent is currently connected."""
+        return machine_id in self._connections
+
     def send_command(self, machine_id: str, command: dict[str, Any]) -> bool:
         """
         Queue a command for a remote agent (delivered via HTTP polling).
+
+        Commands are always queued even if the agent is not currently connected.
+        When the agent re-registers, get_pending_commands() will deliver them.
 
         Args:
             machine_id: Target machine ID.
@@ -657,15 +589,18 @@ class RemoteAgentManager:
         Returns:
             True if command was queued successfully.
         """
-        if machine_id not in self._connections:
-            logger.warning(f"No active connection for machine {machine_id}")
-            return False
-
         with self._lock:
             if machine_id not in self._command_queues:
                 self._command_queues[machine_id] = []
             self._command_queues[machine_id].append(command)
-        logger.info(f"Queued command for agent {machine_id}")
+
+        if machine_id not in self._connections:
+            logger.info(
+                "Agent %s not connected, command queued for delivery on re-registration",
+                machine_id,
+            )
+        else:
+            logger.info("Queued command for agent %s", machine_id)
         return True
 
     def get_pending_commands(self, machine_id: str) -> list[dict]:

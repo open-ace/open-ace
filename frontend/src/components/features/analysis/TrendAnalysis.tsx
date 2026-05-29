@@ -64,7 +64,7 @@ export const TrendAnalysis: React.FC = () => {
 
   // Get hosts for filter
   const { data: hostsData } = useHosts();
-  const hosts = hostsData ?? [];
+  const hosts = useMemo(() => hostsData ?? [], [hostsData]);
 
   // Quick date range options
   const [quickRange, setQuickRange] = useState<'7' | '30' | '90' | 'all'>('30');

@@ -77,153 +77,137 @@ class TestInsightsServiceConfig:
                 result = svc._load_config()
                 assert result == {}
 
-    def test_get_api_credentials_from_config(self):
+    def test_get_api_credentials_from_database(self):
+        """API key resolved from database with scope='local'."""
         svc, _, _, _ = self._make_service()
-        config = {
-            "auth": {
-                "env": {
-                    "BAILIAN_CODING_PLAN_API_KEY": "config-key",
-                    "OPENAI_BASE_URL": "https://custom.api.com/v1",
-                }
-            }
-        }
-        with patch.dict("os.environ", {}, clear=True):
-            api_key, base_url = svc._get_api_credentials(config)
-            assert api_key == "config-key"
-            assert base_url == "https://custom.api.com/v1"
+        config = {}
 
-    def test_get_api_credentials_from_env(self):
-        svc, _, _, _ = self._make_service()
-        config = {"auth": {"env": {}}}
-        with patch.dict(
-            "os.environ",
-            {
-                "OPENAI_API_KEY": "env-key",
-                "OPENAI_BASE_URL": "https://env.api.com/v1",
-            },
-            clear=False,
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch("app.modules.workspace.api_key_proxy.get_api_key_proxy_service") as mock_get,
         ):
+            mock_proxy = MagicMock()
+            mock_proxy.resolve_api_key_for_scope.return_value = (
+                "db-key",
+                "https://db.api.com/v1",
+                1,
+            )
+            mock_get.return_value = mock_proxy
+
+            api_key, base_url = svc._get_api_credentials(config)
+            assert api_key == "db-key"
+            assert base_url == "https://db.api.com/v1"
+            mock_proxy.resolve_api_key_for_scope.assert_called_once_with(1, "openai", scope="local")
+
+    def test_get_api_credentials_db_key_default_base_url(self):
+        """DB key without base_url uses default dashscope URL."""
+        svc, _, _, _ = self._make_service()
+        config = {}
+
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch("app.modules.workspace.api_key_proxy.get_api_key_proxy_service") as mock_get,
+        ):
+            mock_proxy = MagicMock()
+            mock_proxy.resolve_api_key_for_scope.return_value = ("db-key", None, 1)
+            mock_get.return_value = mock_proxy
+
+            api_key, base_url = svc._get_api_credentials(config)
+            assert api_key == "db-key"
+            assert base_url == "https://coding.dashscope.aliyuncs.com/v1"
+
+    def test_get_api_credentials_fallback_to_env(self):
+        """Falls back to env vars when database has no key."""
+        svc, _, _, _ = self._make_service()
+        config = {}
+
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "OPENAI_API_KEY": "env-key",
+                    "OPENAI_BASE_URL": "https://env.api.com/v1",
+                },
+                clear=False,
+            ),
+            patch("app.modules.workspace.api_key_proxy.get_api_key_proxy_service") as mock_get,
+        ):
+            mock_proxy = MagicMock()
+            mock_proxy.resolve_api_key_for_scope.return_value = None
+            mock_get.return_value = mock_proxy
+
             api_key, base_url = svc._get_api_credentials(config)
             assert api_key == "env-key"
             assert base_url == "https://env.api.com/v1"
 
-    def test_get_api_credentials_default_base_url(self):
+    def test_get_api_credentials_env_default_base_url(self):
+        """Env fallback with only OPENAI_API_KEY uses default base URL."""
         svc, _, _, _ = self._make_service()
-        config = {"auth": {"env": {}}}
-        with patch.dict("os.environ", {"OPENAI_API_KEY": "key"}, clear=False):
+        config = {}
+
+        with (
+            patch.dict("os.environ", {"OPENAI_API_KEY": "env-key"}, clear=True),
+            patch("app.modules.workspace.api_key_proxy.get_api_key_proxy_service") as mock_get,
+        ):
+            mock_proxy = MagicMock()
+            mock_proxy.resolve_api_key_for_scope.return_value = None
+            mock_get.return_value = mock_proxy
+
             api_key, base_url = svc._get_api_credentials(config)
+            assert api_key == "env-key"
             assert base_url == "https://coding.dashscope.aliyuncs.com/v1"
 
-    def test_get_api_credentials_bailian_priority(self):
+    def test_get_api_credentials_no_key_anywhere(self):
+        """Neither database nor env has a key → empty string."""
         svc, _, _, _ = self._make_service()
-        config = {
-            "auth": {
-                "env": {
-                    "BAILIAN_CODING_PLAN_API_KEY": "bailian-key",
-                    "OPENAI_API_KEY": "openai-key",
-                }
-            }
-        }
-        with patch.dict("os.environ", {}, clear=True):
-            api_key, _ = svc._get_api_credentials(config)
-            assert api_key == "bailian-key"
+        config = {}
 
-    def test_get_api_credentials_both_env_vars_set_bailian_wins(self):
-        """Both BAILIAN_CODING_PLAN_API_KEY and OPENAI_API_KEY in env → BAILIAN wins."""
-        svc, _, _, _ = self._make_service()
-        config = {"auth": {"env": {}}}
-        with patch.dict(
-            "os.environ",
-            {
-                "BAILIAN_CODING_PLAN_API_KEY": "env-bailian",
-                "OPENAI_API_KEY": "env-openai",
-            },
-            clear=True,
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch("app.modules.workspace.api_key_proxy.get_api_key_proxy_service") as mock_get,
         ):
-            api_key, _ = svc._get_api_credentials(config)
-            assert api_key == "env-bailian"
+            mock_proxy = MagicMock()
+            mock_proxy.resolve_api_key_for_scope.return_value = None
+            mock_get.return_value = mock_proxy
 
-    def test_get_api_credentials_only_openai_env_set(self):
-        """Only OPENAI_API_KEY in env → uses that."""
-        svc, _, _, _ = self._make_service()
-        config = {"auth": {"env": {}}}
-        with patch.dict(
-            "os.environ",
-            {"OPENAI_API_KEY": "env-openai"},
-            clear=True,
-        ):
-            api_key, _ = svc._get_api_credentials(config)
-            assert api_key == "env-openai"
-
-    def test_get_api_credentials_only_bailian_env_set(self):
-        """Only BAILIAN_CODING_PLAN_API_KEY in env → uses that."""
-        svc, _, _, _ = self._make_service()
-        config = {"auth": {"env": {}}}
-        with patch.dict(
-            "os.environ",
-            {"BAILIAN_CODING_PLAN_API_KEY": "env-bailian"},
-            clear=True,
-        ):
-            api_key, _ = svc._get_api_credentials(config)
-            assert api_key == "env-bailian"
-
-    def test_get_api_credentials_neither_set(self):
-        """Neither env var nor config key → no credentials (empty string)."""
-        svc, _, _, _ = self._make_service()
-        config = {"auth": {"env": {}}}
-        with patch.dict("os.environ", {}, clear=True):
             api_key, _ = svc._get_api_credentials(config)
             assert api_key == ""
 
-    def test_get_api_credentials_config_bailian_over_env_openai(self):
-        """BAILIAN in config takes priority over OPENAI_API_KEY in env."""
+    def test_get_api_credentials_db_exception_falls_to_env(self):
+        """DB exception is caught gracefully, falls back to env."""
         svc, _, _, _ = self._make_service()
-        config = {
-            "auth": {
-                "env": {
-                    "BAILIAN_CODING_PLAN_API_KEY": "config-bailian",
-                }
-            }
-        }
-        with patch.dict(
-            "os.environ",
-            {"OPENAI_API_KEY": "env-openai"},
-            clear=True,
+        config = {}
+
+        with (
+            patch.dict("os.environ", {"OPENAI_API_KEY": "env-key"}, clear=False),
+            patch(
+                "app.modules.workspace.api_key_proxy.get_api_key_proxy_service",
+                side_effect=Exception("DB down"),
+            ),
         ):
             api_key, _ = svc._get_api_credentials(config)
-            assert api_key == "config-bailian"
+            assert api_key == "env-key"
 
-    def test_get_api_credentials_env_bailian_over_config_openai(self):
-        """BAILIAN_CODING_PLAN_API_KEY in env takes priority over OPENAI_API_KEY in config."""
+    def test_get_api_credentials_db_over_env(self):
+        """Database key takes priority over environment variable."""
         svc, _, _, _ = self._make_service()
-        config = {
-            "auth": {
-                "env": {
-                    "OPENAI_API_KEY": "config-openai",
-                }
-            }
-        }
-        with patch.dict(
-            "os.environ",
-            {"BAILIAN_CODING_PLAN_API_KEY": "env-bailian"},
-            clear=True,
+        config = {}
+
+        with (
+            patch.dict("os.environ", {"OPENAI_API_KEY": "env-key"}, clear=True),
+            patch("app.modules.workspace.api_key_proxy.get_api_key_proxy_service") as mock_get,
         ):
-            api_key, _ = svc._get_api_credentials(config)
-            assert api_key == "env-bailian"
+            mock_proxy = MagicMock()
+            mock_proxy.resolve_api_key_for_scope.return_value = (
+                "db-key",
+                "https://db.api.com/v1",
+                1,
+            )
+            mock_get.return_value = mock_proxy
 
-    def test_get_api_credentials_config_openai_when_no_env(self):
-        """OPENAI_API_KEY in config is used when no BAILIAN key is available anywhere."""
-        svc, _, _, _ = self._make_service()
-        config = {
-            "auth": {
-                "env": {
-                    "OPENAI_API_KEY": "config-openai",
-                }
-            }
-        }
-        with patch.dict("os.environ", {}, clear=True):
-            api_key, _ = svc._get_api_credentials(config)
-            assert api_key == "config-openai"
+            api_key, base_url = svc._get_api_credentials(config)
+            assert api_key == "db-key"
+            assert base_url == "https://db.api.com/v1"
 
 
 class TestInsightsServicePrompts:
@@ -590,6 +574,7 @@ class TestInsightsServiceGenerateInsights:
         assert error == "insufficient_data"
 
     def test_no_api_key(self):
+        """No key in DB or env → API key not configured."""
         svc, mock_user, mock_msg, mock_insights = self._make_service()
         mock_insights.get_report.return_value = None
         mock_user.get_user_by_id.return_value = {
@@ -599,11 +584,18 @@ class TestInsightsServiceGenerateInsights:
         mock_msg.get_user_messages_stats.return_value = {"total_messages": 50}
         mock_msg.get_user_conversation_samples.return_value = [{"messages": []}]
 
-        with patch.object(svc, "_load_config", return_value={"auth": {"env": {}}}):
-            with patch.dict("os.environ", {}, clear=True):
-                result, error = svc.generate_insights(1, "2026-01-01", "2026-01-31")
-                assert result is None
-                assert error == "API key not configured"
+        with (
+            patch.object(svc, "_load_config", return_value={}),
+            patch.dict("os.environ", {}, clear=True),
+            patch("app.modules.workspace.api_key_proxy.get_api_key_proxy_service") as mock_get,
+        ):
+            mock_proxy = MagicMock()
+            mock_proxy.resolve_api_key_for_scope.return_value = None
+            mock_get.return_value = mock_proxy
+
+            result, error = svc.generate_insights(1, "2026-01-01", "2026-01-31")
+            assert result is None
+            assert error == "API key not configured"
 
     def test_generate_success(self):
         svc, mock_user, mock_msg, mock_insights = self._make_service()
@@ -617,7 +609,6 @@ class TestInsightsServiceGenerateInsights:
         mock_msg.get_user_conversation_samples.return_value = [{"messages": []}]
 
         config = {
-            "auth": {"env": {"OPENAI_API_KEY": "test-key"}},
             "insights": {"model": "glm-5"},
         }
         mock_insights.save_report.return_value = 42
@@ -633,8 +624,18 @@ class TestInsightsServiceGenerateInsights:
 
         with (
             patch.object(svc, "_load_config", return_value=config),
+            patch.dict("os.environ", {}, clear=True),
+            patch("app.modules.workspace.api_key_proxy.get_api_key_proxy_service") as mock_get,
             patch.object(svc, "_call_ai_api", return_value=ai_response),
         ):
+            mock_proxy = MagicMock()
+            mock_proxy.resolve_api_key_for_scope.return_value = (
+                "test-key",
+                "https://api.example.com/v1",
+                1,
+            )
+            mock_get.return_value = mock_proxy
+
             result, error = svc.generate_insights(1, "2026-01-01", "2026-01-31")
             assert error is None
             assert result["overall_score"] == 7
@@ -651,14 +652,23 @@ class TestInsightsServiceGenerateInsights:
         mock_msg.get_user_conversation_samples.return_value = [{"messages": []}]
 
         config = {
-            "auth": {"env": {"OPENAI_API_KEY": "test-key"}},
             "insights": {"model": "glm-5"},
         }
 
         with (
             patch.object(svc, "_load_config", return_value=config),
+            patch.dict("os.environ", {}, clear=True),
+            patch("app.modules.workspace.api_key_proxy.get_api_key_proxy_service") as mock_get,
             patch.object(svc, "_call_ai_api", side_effect=Exception("API down")),
         ):
+            mock_proxy = MagicMock()
+            mock_proxy.resolve_api_key_for_scope.return_value = (
+                "test-key",
+                "https://api.example.com/v1",
+                1,
+            )
+            mock_get.return_value = mock_proxy
+
             result, error = svc.generate_insights(1, "2026-01-01", "2026-01-31")
             assert result is None
             assert "API down" in error
