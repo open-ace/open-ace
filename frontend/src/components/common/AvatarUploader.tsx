@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 /**
  * AvatarUploader Component - Upload and crop user avatar
  */

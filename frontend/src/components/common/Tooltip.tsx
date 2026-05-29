@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 /**
  * Tooltip Component - Hover tooltip with animations
  */

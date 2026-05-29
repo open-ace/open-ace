@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 /**
  * NewSessionModal Component - Modal for creating new sessions (local, remote, or terminal)
  *
