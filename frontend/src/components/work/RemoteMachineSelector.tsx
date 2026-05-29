@@ -6,11 +6,12 @@
  * - Machine status indicator
  * - Quick filter/search
  * - Save selected machine preference
+ * - Keyboard navigation (ArrowUp/ArrowDown/Enter) - Issue #101
  *
  * Issue #317: Remote workspace lacks project creation functionality
  */
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import { remoteApi, type RemoteMachine } from '@/api/remote';
@@ -38,10 +39,14 @@ export const RemoteMachineSelector: React.FC<RemoteMachineSelectorProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [searchFilter, setSearchFilter] = useState('');
   const [sortBy, setSortBy] = useState<'name' | 'status' | 'lastHeartbeat'>('name');
+  const [focusedIndex, setFocusedIndex] = useState<number>(-1); // Keyboard navigation state
 
   // Use ref to avoid onSelectMachine dependency causing re-renders
   const onSelectMachineRef = useRef(onSelectMachine);
   onSelectMachineRef.current = onSelectMachine;
+
+  // Ref for the list container to handle keyboard events
+  const listContainerRef = useRef<HTMLDivElement>(null);
 
   // Track if we've already auto-selected (to prevent re-selection on re-render)
   const hasAutoSelectedRef = useRef(false);
@@ -122,10 +127,69 @@ export const RemoteMachineSelector: React.FC<RemoteMachineSelectorProps> = ({
   }, [machines, searchFilter, sortBy]);
 
   // Handle machine selection
-  const handleSelect = (machine: RemoteMachine) => {
-    localStorage.setItem(LAST_MACHINE_KEY, machine.machine_id);
-    onSelectMachine(machine.machine_id, machine);
-  };
+  const handleSelect = useCallback(
+    (machine: RemoteMachine) => {
+      localStorage.setItem(LAST_MACHINE_KEY, machine.machine_id);
+      onSelectMachine(machine.machine_id, machine);
+      setFocusedIndex(-1); // Reset focus after selection
+    },
+    [onSelectMachine]
+  );
+
+  // Scroll to the focused item in the list
+  const scrollToItem = useCallback((index: number) => {
+    if (listContainerRef.current) {
+      const items = listContainerRef.current.querySelectorAll('.list-group-item');
+      if (items[index]) {
+        items[index].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+    }
+  }, []);
+
+  // Keyboard navigation handlers (Issue #101)
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (filteredMachines.length === 0) return;
+
+      switch (e.key) {
+        case 'ArrowDown':
+          e.preventDefault();
+          setFocusedIndex((prev) => {
+            const next = prev < filteredMachines.length - 1 ? prev + 1 : 0;
+            scrollToItem(next);
+            return next;
+          });
+          break;
+        case 'ArrowUp':
+          e.preventDefault();
+          setFocusedIndex((prev) => {
+            const next = prev > 0 ? prev - 1 : filteredMachines.length - 1;
+            scrollToItem(next);
+            return next;
+          });
+          break;
+        case 'Enter':
+          e.preventDefault();
+          if (focusedIndex >= 0 && focusedIndex < filteredMachines.length) {
+            handleSelect(filteredMachines[focusedIndex]);
+          } else if (filteredMachines.length > 0) {
+            // If no item is focused, select the first one
+            handleSelect(filteredMachines[0]);
+          }
+          break;
+        case 'Escape':
+          // Clear focus
+          setFocusedIndex(-1);
+          break;
+      }
+    },
+    [filteredMachines, focusedIndex, handleSelect, scrollToItem]
+  );
+
+  // Reset focus when search filter changes
+  useEffect(() => {
+    setFocusedIndex(-1);
+  }, [searchFilter]);
 
   // Get status badge variant
   const getStatusBadge = (machine: RemoteMachine) => {
@@ -224,14 +288,25 @@ export const RemoteMachineSelector: React.FC<RemoteMachineSelectorProps> = ({
           />
         )
       ) : (
-        <div className="list-group" style={{ maxHeight: '300px', overflow: 'auto' }}>
-          {filteredMachines.map((machine) => (
+        <div
+          ref={listContainerRef}
+          className="list-group"
+          style={{ maxHeight: '300px', overflow: 'auto' }}
+          onKeyDown={handleKeyDown}
+          tabIndex={0}
+          role="listbox"
+          aria-label={t('selectMachine', language) || 'Select machine'}
+        >
+          {filteredMachines.map((machine, index) => (
             <button
               key={machine.machine_id}
               className={`list-group-item list-group-item-action ${
                 selectedMachineId === machine.machine_id ? 'active' : ''
-              }`}
+              } ${focusedIndex === index ? 'focus' : ''}`}
               onClick={() => handleSelect(machine)}
+              onMouseEnter={() => setFocusedIndex(index)}
+              role="option"
+              aria-selected={selectedMachineId === machine.machine_id}
             >
               <div className="d-flex justify-content-between align-items-start">
                 <div>
