@@ -170,8 +170,8 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
           machine_id: selectedMachineId,
         });
         haPoolToken = modelsResp.ha_pool_token;
-      } catch {
-        // Non-fatal: proceed without token; backend will return a descriptive error if needed
+      } catch (err) {
+        console.warn('Failed to fetch ha_pool_token:', err);
       }
 
       const result = await createRemoteSession.mutateAsync({
