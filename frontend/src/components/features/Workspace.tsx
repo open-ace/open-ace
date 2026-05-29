@@ -106,7 +106,27 @@ export const Workspace: React.FC = () => {
   // Refs for iframe elements (to send focus messages)
   const iframeRefs = useRef<Map<string, HTMLIFrameElement>>(new Map());
 
-  // Shared terminal proxy polling helper
+  // Track terminal polling that should be cancelled on tab close
+  const terminalPollCancelRefs = useRef<Map<string, boolean>>(new Map());
+
+  // Track terminal attach attempts (to avoid duplicate attach calls)
+  const terminalAttachAttemptedRefs = useRef<Map<string, boolean>>(new Map());
+
+  // Fullscreen state from global store
+  const workspaceFullscreen = useWorkspaceFullscreen();
+  const { toggleWorkspaceFullscreen, exitWorkspaceFullscreen } = useAppStore();
+
+  // Workspace tabs state from store (Issue #65)
+  const storedTabs = useWorkspaceTabs();
+  const storedActiveTabId = useWorkspaceActiveTabId();
+
+  // Use stable action selectors (fixes infinite loop)
+  const setStoredActiveTabId = useSetWorkspaceActiveTabId();
+  const addStoredTab = useAddWorkspaceTab();
+  const updateStoredTab = useUpdateWorkspaceTab();
+  const removeStoredTab = useRemoveWorkspaceTab();
+
+  // Shared terminal proxy polling helper (moved after updateStoredTab definition)
   const pollTerminalProxy = useCallback(
     async (tabId: string, terminalId: string, machineId: string, maxAttempts: number = 30) => {
       const poll = async (attempt: number) => {
@@ -156,26 +176,6 @@ export const Workspace: React.FC = () => {
     },
     [language, t, toast, updateStoredTab]
   );
-
-  // Track terminal polling that should be cancelled on tab close
-  const terminalPollCancelRefs = useRef<Map<string, boolean>>(new Map());
-
-  // Track terminal attach attempts (to avoid duplicate attach calls)
-  const terminalAttachAttemptedRefs = useRef<Map<string, boolean>>(new Map());
-
-  // Fullscreen state from global store
-  const workspaceFullscreen = useWorkspaceFullscreen();
-  const { toggleWorkspaceFullscreen, exitWorkspaceFullscreen } = useAppStore();
-
-  // Workspace tabs state from store (Issue #65)
-  const storedTabs = useWorkspaceTabs();
-  const storedActiveTabId = useWorkspaceActiveTabId();
-
-  // Use stable action selectors (fixes infinite loop)
-  const setStoredActiveTabId = useSetWorkspaceActiveTabId();
-  const addStoredTab = useAddWorkspaceTab();
-  const updateStoredTab = useUpdateWorkspaceTab();
-  const removeStoredTab = useRemoveWorkspaceTab();
 
   // Load workspace config and user webui URL
   useEffect(() => {
