@@ -295,7 +295,17 @@ class TestInsightsService:
                 {"session_id": "s1", "messages": [{"role": "user", "content": "hello"}]}
             ],
         )
-        with patch.object(service, "_load_config", return_value={"auth": {"env": {}}}):
+        with (
+            patch(
+                "app.modules.workspace.api_key_proxy.get_api_key_proxy_service"
+            ) as mock_get_proxy,
+            patch.object(service, "_load_config", return_value={"auth": {"env": {}}}),
+        ):
+            # Mock API key proxy to return None (no key in database)
+            mock_proxy = MagicMock()
+            mock_proxy.resolve_api_key_for_scope.return_value = None
+            mock_get_proxy.return_value = mock_proxy
+            # Clear environment variables for fallback test
             with patch.dict("os.environ", {}, clear=True):
                 result, error = service.generate_insights(1, "2026-04-09", "2026-04-16")
         assert result is None
@@ -418,6 +428,9 @@ class TestInsightsService:
         )
 
         with (
+            patch(
+                "app.modules.workspace.api_key_proxy.get_api_key_proxy_service"
+            ) as mock_get_proxy,
             patch.object(
                 service,
                 "_load_config",
@@ -428,7 +441,13 @@ class TestInsightsService:
             ),
             patch.object(service, "_call_ai_api", return_value=ai_response),
         ):
-            result, error = service.generate_insights(1, "2026-04-09", "2026-04-16")
+            # Mock API key proxy to return None so fallback to env works
+            mock_proxy = MagicMock()
+            mock_proxy.resolve_api_key_for_scope.return_value = None
+            mock_get_proxy.return_value = mock_proxy
+            # Set environment variable for fallback
+            with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
+                result, error = service.generate_insights(1, "2026-04-09", "2026-04-16")
 
         assert error is None
         assert result is not None
