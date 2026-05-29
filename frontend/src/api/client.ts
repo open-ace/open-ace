@@ -21,6 +21,7 @@ interface RequestConfig {
   signal?: AbortSignal;
   timeout?: number;
   retries?: number;
+  raw?: boolean; // Return raw text instead of parsing as JSON
 }
 
 /**
@@ -110,6 +111,7 @@ class ApiClient {
       signal,
       timeout = DEFAULT_TIMEOUT,
       retries = MAX_RETRIES,
+      raw = false,
     } = config;
 
     const url = `${this.baseUrl}${endpoint}`;
@@ -171,6 +173,11 @@ class ApiClient {
         const text = await response.text();
         if (!text) {
           return {} as T;
+        }
+
+        // Return raw text if raw option is set
+        if (raw) {
+          return text as unknown as T;
         }
 
         return JSON.parse(text) as T;
@@ -238,7 +245,8 @@ class ApiClient {
   async get<T>(
     endpoint: string,
     params?: Record<string, string>,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    raw?: boolean
   ): Promise<T> {
     let url = endpoint;
     if (params && Object.keys(params).length > 0) {
@@ -253,16 +261,17 @@ class ApiClient {
         url = `${endpoint}?${queryString}`;
       }
     }
-    return this.request<T>(url, { method: 'GET', signal });
+    return this.request<T>(url, { method: 'GET', signal, raw });
   }
 
   async post<T>(
     endpoint: string,
     body?: unknown,
     signal?: AbortSignal,
-    timeout?: number
+    timeout?: number,
+    raw?: boolean
   ): Promise<T> {
-    return this.request<T>(endpoint, { method: 'POST', body, signal, timeout });
+    return this.request<T>(endpoint, { method: 'POST', body, signal, timeout, raw });
   }
 
   async put<T>(endpoint: string, body?: unknown, signal?: AbortSignal): Promise<T> {
