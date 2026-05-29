@@ -89,7 +89,7 @@ export function useRevokeUser() {
 
 export function useApiKeys(tenantId?: number) {
   return useQuery({
-    queryKey: ['remote', 'api-keys', tenantId],
+    queryKey: ['api-keys', tenantId],
     queryFn: () => remoteApi.listApiKeys(tenantId),
   });
 }
@@ -100,7 +100,7 @@ export function useStoreApiKey() {
   return useMutation({
     mutationFn: (data: StoreApiKeyRequest) => remoteApi.storeApiKey(data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['remote', 'api-keys'] });
+      queryClient.invalidateQueries({ queryKey: ['api-keys'] });
     },
   });
 }
@@ -112,7 +112,7 @@ export function useDeleteApiKey() {
     mutationFn: ({ keyId, tenantId }: { keyId: number; tenantId?: number }) =>
       remoteApi.deleteApiKey(keyId, tenantId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['remote', 'api-keys'] });
+      queryClient.invalidateQueries({ queryKey: ['api-keys'] });
     },
   });
 }
@@ -123,7 +123,7 @@ export function useUpdateApiKey() {
   return useMutation({
     mutationFn: (data: UpdateApiKeyRequest) => remoteApi.updateApiKey(data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['remote', 'api-keys'] });
+      queryClient.invalidateQueries({ queryKey: ['api-keys'] });
     },
   });
 }

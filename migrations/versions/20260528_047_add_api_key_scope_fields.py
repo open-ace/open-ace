@@ -27,7 +27,7 @@ def upgrade() -> None:
     """Add scope, priority, weight columns to api_key_store."""
     op.add_column(
         "api_key_store",
-        sa.Column("scope", sa.TEXT, nullable=True, server_default="remote"),
+        sa.Column("scope", sa.TEXT, nullable=True, server_default="shared"),
     )
     op.add_column(
         "api_key_store",
@@ -37,6 +37,9 @@ def upgrade() -> None:
         "api_key_store",
         sa.Column("weight", sa.INTEGER, nullable=True, server_default="100"),
     )
+    # Fix existing keys that were created before the scope field existed;
+    # they were used by local sessions, so 'shared' is the correct default.
+    op.execute("UPDATE api_key_store SET scope = 'shared' WHERE scope IS NULL OR scope = 'remote'")
 
 
 def downgrade() -> None:

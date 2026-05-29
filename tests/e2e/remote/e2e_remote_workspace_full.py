@@ -209,7 +209,7 @@ def api_get_machine_users(admin_token, machine_id):
 
 def api_store_key(admin_token, provider, key_name, api_key="sk-test-e2e-xxx"):
     r = requests.post(
-        f"{BASE_URL}/api/remote/api-keys",
+        f"{BASE_URL}/api/api-keys",
         json={"provider": provider, "key_name": key_name, "api_key": api_key, "tenant_id": 1},
         cookies={"session_token": admin_token},
     )
@@ -217,15 +217,13 @@ def api_store_key(admin_token, provider, key_name, api_key="sk-test-e2e-xxx"):
 
 
 def api_list_keys(admin_token):
-    r = requests.get(
-        f"{BASE_URL}/api/remote/api-keys?tenant_id=1", cookies={"session_token": admin_token}
-    )
+    r = requests.get(f"{BASE_URL}/api/api-keys?tenant_id=1", cookies={"session_token": admin_token})
     return r.json().get("keys", [])
 
 
 def api_delete_key(admin_token, key_id):
     r = requests.delete(
-        f"{BASE_URL}/api/remote/api-keys/{key_id}",
+        f"{BASE_URL}/api/api-keys/{key_id}",
         json={"tenant_id": 1},
         cookies={"session_token": admin_token},
     )
@@ -353,7 +351,7 @@ def run_tests():
         # 也检查 HTML 中是否包含远程菜单项的路径
         sidebar_html = sidebar.first.inner_html() if sidebar.count() > 0 else ""
         has_remote_path = (
-            "/manage/remote/machines" in sidebar_html or "/manage/remote/api-keys" in sidebar_html
+            "/manage/remote/machines" in sidebar_html or "/manage/settings/api-keys" in sidebar_html
         )
         shot(page, "A2_sidebar")
         assert has_remote or has_remote_path, f"侧边栏无远程工作区: {sidebar_text[:200]}"
@@ -566,7 +564,7 @@ def run_tests():
 
         # A11: API Key 管理页面 — 初始状态
         print("\n── A11: API Key 管理页面（空状态）──")
-        page.goto(f"{BASE_URL}/manage/remote/api-keys", wait_until="domcontentloaded")
+        page.goto(f"{BASE_URL}/manage/settings/api-keys", wait_until="domcontentloaded")
         page.wait_for_selector("main, .api-key-management", timeout=10000)
         pause(1)
         shot(page, "A11_apikeys_page_empty")

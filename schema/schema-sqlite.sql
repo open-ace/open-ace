@@ -88,7 +88,10 @@ CREATE TABLE api_key_store (
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  cli_tools text,
- cli_settings text
+ cli_settings text,
+ scope text DEFAULT 'shared',
+ priority integer DEFAULT 0,
+ weight integer DEFAULT 100
 );
 
 CREATE TABLE audit_logs (
