@@ -191,6 +191,16 @@ export const RemoteMachineSelector: React.FC<RemoteMachineSelectorProps> = ({
     setFocusedIndex(-1);
   }, [searchFilter]);
 
+  // Auto-focus list container when machines are loaded (Issue #101)
+  useEffect(() => {
+    if (!loading && filteredMachines.length > 0 && listContainerRef.current) {
+      // Use requestAnimationFrame to ensure DOM is ready
+      requestAnimationFrame(() => {
+        listContainerRef.current?.focus();
+      });
+    }
+  }, [loading, filteredMachines.length]);
+
   // Get status badge variant
   const getStatusBadge = (machine: RemoteMachine) => {
     if (machine.connected) {
@@ -302,7 +312,7 @@ export const RemoteMachineSelector: React.FC<RemoteMachineSelectorProps> = ({
               key={machine.machine_id}
               className={`list-group-item list-group-item-action ${
                 selectedMachineId === machine.machine_id ? 'active' : ''
-              } ${focusedIndex === index ? 'focus' : ''}`}
+              } ${focusedIndex === index && selectedMachineId !== machine.machine_id ? 'border-primary bg-light' : ''}`}
               onClick={() => handleSelect(machine)}
               onMouseEnter={() => setFocusedIndex(index)}
               role="option"
