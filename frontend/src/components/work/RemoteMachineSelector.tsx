@@ -191,11 +191,14 @@ export const RemoteMachineSelector: React.FC<RemoteMachineSelectorProps> = ({
     setFocusedIndex(-1);
   }, [searchFilter]);
 
+  // Compute loading state early (fixes TS2448 - variable used before declaration)
+  const loading = externalLoading ?? isLoading;
+
   // Auto-focus list container when machines are loaded (Issue #101)
   useEffect(() => {
     if (!loading && filteredMachines.length > 0 && listContainerRef.current) {
-      // Use requestAnimationFrame to ensure DOM is ready
-      requestAnimationFrame(() => {
+      // Use window.requestAnimationFrame to ensure DOM is ready (fixes no-undef)
+      window.requestAnimationFrame(() => {
         listContainerRef.current?.focus();
       });
     }
@@ -239,8 +242,6 @@ export const RemoteMachineSelector: React.FC<RemoteMachineSelectorProps> = ({
       return `${Math.floor(diffMins / 60)} ${t('hoursAgo', language) || 'h ago'}`;
     return date.toLocaleDateString();
   };
-
-  const loading = externalLoading ?? isLoading;
 
   return (
     <div className="remote-machine-selector">
