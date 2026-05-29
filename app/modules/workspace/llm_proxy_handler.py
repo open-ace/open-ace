@@ -64,7 +64,7 @@ def _determine_target_url(
         target_base = provider_urls.get(provider, "https://api.openai.com")
 
     if path:
-        suffix = path
+        suffix = f"/{path}"
     else:
         suffix = request.path.split("/llm-proxy")[-1]
 
