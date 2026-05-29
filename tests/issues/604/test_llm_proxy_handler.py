@@ -164,12 +164,37 @@ class TestResolveAllowedKeyIds:
 
 
 class TestDetermineTargetUrl:
-    def test_base_url_v1_stripped(self, flask_app):
+    def test_base_url_v1_path_v1_stripped(self, flask_app):
+        """base_url ending /v1 + path starting v1/ → strip v1/ from path."""
+        with flask_app.test_request_context("/"):
+            result = _determine_target_url(
+                "openai", "https://custom.api.com/v1", "v1/chat/completions"
+            )
+            assert result == "https://custom.api.com/v1/chat/completions"
+
+    def test_base_url_v4_path_v1_stripped(self, flask_app):
+        """base_url ending /v4 + path starting v1/ → strip v1/ to avoid /v4/v1/."""
+        with flask_app.test_request_context("/"):
+            result = _determine_target_url(
+                "openai", "https://custom.api.com/v4", "v1/chat/completions"
+            )
+            assert result == "https://custom.api.com/v4/chat/completions"
+
+    def test_versionless_base_url_keeps_v1_in_path(self, flask_app):
+        """base_url without version suffix → keep v1/ in path."""
+        with flask_app.test_request_context("/"):
+            result = _determine_target_url(
+                "openai", "https://custom.api.com", "v1/chat/completions"
+            )
+            assert result == "https://custom.api.com/v1/chat/completions"
+
+    def test_base_url_v1_without_v1_path(self, flask_app):
+        """base_url ending /v1 but path does not start with v1/ → no stripping."""
         with flask_app.test_request_context("/"):
             result = _determine_target_url(
                 "openai", "https://custom.api.com/v1", "chat/completions"
             )
-            assert result == "https://custom.api.com/chat/completions"
+            assert result == "https://custom.api.com/v1/chat/completions"
 
     def test_provider_fallback_anthropic(self, flask_app):
         with flask_app.test_request_context("/"):

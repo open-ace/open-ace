@@ -577,10 +577,17 @@ class WebUIManager:
         """
         try:
             pool = self._build_local_session_model_pool(user_id)
-            env["OPENAI_API_KEY"] = str(pool.get("proxy_token", ""))
+            proxy_token = str(pool.get("proxy_token", ""))
+            env["OPENAI_API_KEY"] = proxy_token
             env["OPENAI_BASE_URL"] = f"{openace_api_url.rstrip('/')}/api/workspace/llm-proxy/v1"
-            env["OPENACE_PROXY_TOKEN"] = str(pool.get("proxy_token", ""))
+            env["OPENACE_PROXY_TOKEN"] = proxy_token
             env["OPENACE_PROXY_URL"] = f"{openace_api_url.rstrip('/')}/api/workspace/llm-proxy"
+            # qwen-code-webui reads the envKey from integrated model config;
+            # set all declared envKeys to the proxy token so the webui can find them
+            for model in pool.get("models", []):
+                env_key = model.get("envKey")
+                if env_key and env_key not in env:
+                    env[env_key] = proxy_token
             return pool
         except Exception as e:
             logger.warning("Failed to configure local OpenAI proxy from database: %s", e)
@@ -714,6 +721,10 @@ class WebUIManager:
                 openace_api_url,
             ]
             cwd = None
+
+        # All platforms: when proxy is configured, qwen-code CLI needs --auth-type openai
+        if child_env.get("OPENAI_API_KEY"):
+            cmd.extend(["--auth-type", "openai"])
 
         logger.debug(f"Launching webui: {cmd}, cwd: {cwd}")
 
