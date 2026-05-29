@@ -100,6 +100,7 @@ class UserDailyStatsAggregator:
                                COALESCE(SUM(dm.input_tokens), 0), COALESCE(SUM(dm.output_tokens), 0), CURRENT_TIMESTAMP
                         FROM daily_messages dm
                         WHERE dm.date >= %s AND dm.date <= %s AND dm.sender_name LIKE %s AND dm.role = 'assistant'
+                              AND (agent_session_id IS NULL OR agent_session_id = '')
                         GROUP BY dm.date::date
                         ON CONFLICT (user_id, date) DO UPDATE SET requests = EXCLUDED.requests, tokens = EXCLUDED.tokens,
                             input_tokens = EXCLUDED.input_tokens, output_tokens = EXCLUDED.output_tokens, updated_at = CURRENT_TIMESTAMP""",
@@ -123,6 +124,7 @@ class UserDailyStatsAggregator:
                         WHERE dm.date >= ? AND dm.date <= ?
                           AND dm.sender_name LIKE ?
                           AND dm.role = 'assistant'
+                          AND (agent_session_id IS NULL OR agent_session_id = '')
                         GROUP BY dm.date
                     """,
                         (user_id, now, start_str, end_str, f"{escape_like(sender_prefix)}%"),

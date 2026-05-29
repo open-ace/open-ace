@@ -1009,6 +1009,8 @@ class UsageRepository:
             Dict with tokens, requests, and per-source breakdown.
         """
         # Local CLI usage from daily_messages
+        # Exclude messages with agent_session_id (WebUI session messages, counted in session_messages)
+        # to avoid double counting
         local_row = self.db.fetch_one(
             """
             SELECT
@@ -1019,6 +1021,7 @@ class UsageRepository:
               AND date >= ? AND date <= ?
               AND role = 'assistant'
               AND (message_source IS NULL OR message_source != 'remote_workspace')
+              AND (agent_session_id IS NULL OR agent_session_id = '')
         """,
             (f"{escape_like(system_account)}%", start_date, end_date),
         )
@@ -1070,6 +1073,7 @@ class UsageRepository:
         Returns a list of daily records suitable for the user's usage report page.
         """
         # Local CLI usage from daily_messages
+        # Exclude messages with agent_session_id (WebUI session messages, counted in session_messages)
         local_rows = self.db.fetch_all(
             """
             SELECT date, tool_name, SUM(tokens_used) as tokens_used,
@@ -1079,6 +1083,7 @@ class UsageRepository:
             WHERE sender_name LIKE ?
               AND date >= ? AND date <= ? AND role = 'assistant'
               AND (message_source IS NULL OR message_source != 'remote_workspace')
+              AND (agent_session_id IS NULL OR agent_session_id = '')
             GROUP BY date, tool_name ORDER BY date DESC""",
             (f"{escape_like(system_account)}%", start_date, end_date),
         )

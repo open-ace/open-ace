@@ -539,6 +539,7 @@ class QuotaManager:
         if user:
             system_account = user.get("system_account") or user.get("username", "")
             if system_account:
+                # Exclude messages with agent_session_id (WebUI session messages, counted elsewhere)
                 local_result = self.db.fetch_one(
                     adapt_sql(
                         """
@@ -549,6 +550,7 @@ class QuotaManager:
                     WHERE sender_name LIKE ? AND date >= ? AND date <= ?
                       AND role = 'assistant'
                       AND (message_source IS NULL OR message_source != 'remote_workspace')
+                      AND (agent_session_id IS NULL OR agent_session_id = '')
                 """
                     ),
                     (f"{escape_like(system_account)}%", start_date, end_date),
@@ -683,6 +685,7 @@ class QuotaManager:
 
         local_usage_lookup: dict[Any, dict[str, int]] = {}
         if sender_conditions:
+            # Exclude messages with agent_session_id (WebUI session messages, counted elsewhere)
             local_usage_rows = self.db.fetch_all(
                 """
                 SELECT sender_name,
@@ -692,6 +695,7 @@ class QuotaManager:
                 WHERE ({}) AND date >= ? AND date <= ?
                   AND role = 'assistant'
                   AND (message_source IS NULL OR message_source != 'remote_workspace')
+                  AND (agent_session_id IS NULL OR agent_session_id = '')
                 GROUP BY sender_name
             """.format(
                     " OR ".join(sender_conditions)
