@@ -513,8 +513,10 @@ export const APIKeyManagement: React.FC = () => {
             <tbody>
               {keys.map((key) => {
                 const cliTools = parsedCliTools.get(key.id) ?? [];
-                const scopeLabel = key.scope === 'shared' ? 'Shared' : key.scope === 'local' ? 'Local' : 'Remote';
-                const scopeVariant = key.scope === 'shared' ? 'success' : key.scope === 'local' ? 'info' : 'warning';
+                const scopeLabel =
+                  key.scope === 'shared' ? 'Shared' : key.scope === 'local' ? 'Local' : 'Remote';
+                const scopeVariant =
+                  key.scope === 'shared' ? 'success' : key.scope === 'local' ? 'info' : 'warning';
                 return (
                   <tr key={key.id}>
                     <td>
@@ -697,7 +699,9 @@ export const APIKeyManagement: React.FC = () => {
                     onChange={(v) => setFormData({ ...formData, weight: parseInt(v) || 100 })}
                     placeholder="100"
                   />
-                  <small className="text-muted">For weighted random within same priority. Default: 100</small>
+                  <small className="text-muted">
+                    For weighted random within same priority. Default: 100
+                  </small>
                 </div>
               </div>
             </div>
@@ -864,7 +868,9 @@ export const APIKeyManagement: React.FC = () => {
                     onChange={(v) => setFormData({ ...formData, weight: parseInt(v) || 100 })}
                     placeholder="100"
                   />
-                  <small className="text-muted">For weighted random within same priority. Default: 100</small>
+                  <small className="text-muted">
+                    For weighted random within same priority. Default: 100
+                  </small>
                 </div>
               </div>
             </div>
