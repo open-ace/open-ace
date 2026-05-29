@@ -22,6 +22,7 @@ import { Modal, Button } from '@/components/common';
 import { RemoteMachineSelector } from './RemoteMachineSelector';
 import { DirectoryBrowserModal } from './DirectoryBrowserModal';
 import type { RemoteMachine } from '@/api/remote';
+import { remoteApi } from '@/api/remote';
 
 interface NewSessionModalProps {
   isOpen?: boolean;
@@ -161,9 +162,22 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
     if (!selectedMachineId || !projectPath) return;
 
     try {
+      // Fetch ha_pool_token required by the backend for qwen-code sessions
+      let haPoolToken: string | undefined;
+      try {
+        const modelsResp = await remoteApi.getSessionModels({
+          workspace_type: 'remote',
+          machine_id: selectedMachineId,
+        });
+        haPoolToken = modelsResp.ha_pool_token;
+      } catch (err) {
+        console.warn('Failed to fetch ha_pool_token:', err);
+      }
+
       const result = await createRemoteSession.mutateAsync({
         machine_id: selectedMachineId,
         project_path: projectPath,
+        ha_pool_token: haPoolToken,
       });
 
       onClose();

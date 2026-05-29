@@ -105,6 +105,14 @@ export interface CreateRemoteSessionRequest {
   cli_tool?: string;
   model?: string;
   title?: string;
+  ha_pool_token?: string;
+}
+
+export interface SessionModelsResponse {
+  success: boolean;
+  models: string[];
+  empty_reason?: string;
+  ha_pool_token?: string;
 }
 
 // ==================== API Methods ====================
@@ -176,6 +184,13 @@ export const remoteApi = {
   },
 
   // Session management
+  getSessionModels(params: {
+    workspace_type: 'local' | 'remote';
+    machine_id?: string;
+  }): Promise<SessionModelsResponse> {
+    return apiClient.get('/api/workspace/session-models', params);
+  },
+
   createSession(
     data: CreateRemoteSessionRequest
   ): Promise<{ success: boolean; session: RemoteSession }> {
