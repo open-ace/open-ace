@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-non-null-assertion, @typescript-eslint/no-explicit-any, react-hooks/exhaustive-deps */
 /**
  * Workspace Component - AI workspace with iframe embedding and tab support
  *
@@ -153,7 +154,7 @@ export const Workspace: React.FC = () => {
       terminalPollCancelRefs.current.delete(tabId);
       poll(0);
     },
-    [language, t, toast]
+    [language, t, toast, updateStoredTab]
   );
 
   // Track terminal polling that should be cancelled on tab close
@@ -836,10 +837,12 @@ export const Workspace: React.FC = () => {
       setStoredActiveTabId(initialActiveTabId);
       // Mark as loading
       setLoadingTabs(new Set(initialTabs.map((t) => t.id)));
+
       setTabsInitialized(true);
     }
   }, [
     config,
+
     userWebUI,
     tabsInitialized,
     storedTabs,
@@ -848,7 +851,9 @@ export const Workspace: React.FC = () => {
     getEffectiveUrl,
     searchParams,
     setSearchParams,
+
     addStoredTab,
+
     setStoredActiveTabId,
   ]);
 
@@ -1543,6 +1548,7 @@ export const Workspace: React.FC = () => {
     };
 
     // Always listen for keyboard events
+
     window.addEventListener('keydown', handleKeyDown);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);

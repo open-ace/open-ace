@@ -2,7 +2,7 @@
  * Tooltip Component - Hover tooltip with animations
  */
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '@/utils';
 
