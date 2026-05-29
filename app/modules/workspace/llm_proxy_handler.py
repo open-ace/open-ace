@@ -53,8 +53,10 @@ def _determine_target_url(
     """Build the upstream target URL.  Returns a (Response, status) tuple on validation error."""
     if base_url:
         target_base = base_url.rstrip("/")
-        if target_base.endswith("/v1"):
-            target_base = target_base[:-3]
+        # path comes from the client's OPENAI_BASE_URL which always includes /v1;
+        # strip it to avoid double-versioning (e.g. /v4/v1/chat/completions)
+        if path.startswith("v1/"):
+            path = path[3:]
     else:
         provider_urls = {
             "openai": "https://api.openai.com",

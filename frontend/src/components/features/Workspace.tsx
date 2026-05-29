@@ -106,7 +106,7 @@ export const Workspace: React.FC = () => {
   // Refs for iframe elements (to send focus messages)
   const iframeRefs = useRef<Map<string, HTMLIFrameElement>>(new Map());
 
-  // Workspace tabs state from store (Issue #65) - moved before pollTerminalProxy to fix TS2448
+  // Workspace tabs state from store (Issue #65)
   const storedTabs = useWorkspaceTabs();
   const storedActiveTabId = useWorkspaceActiveTabId();
 
