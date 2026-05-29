@@ -53,9 +53,12 @@ def _determine_target_url(
     """Build the upstream target URL.  Returns a (Response, status) tuple on validation error."""
     if base_url:
         target_base = base_url.rstrip("/")
-        # path comes from the client's OPENAI_BASE_URL which always includes /v1;
-        # strip it to avoid double-versioning (e.g. /v4/v1/chat/completions)
-        if path.startswith("v1/"):
+        # When base_url already contains a version segment (e.g. /v4), strip the
+        # v1/ prefix from path to avoid double-versioning (/v4/v1/chat/completions).
+        # Only strip when base_url ends with a /v{N} pattern; versionless base_urls
+        # (e.g. https://custom.api.com) rely on the v1/ in path.
+        last_segment = target_base.rsplit("/", 1)[-1]
+        if last_segment.startswith("v") and last_segment[1:].isdigit() and path.startswith("v1/"):
             path = path[3:]
     else:
         provider_urls = {
