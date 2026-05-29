@@ -128,6 +128,12 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
   ];
 
   // Check if prompt has required variables
+  // Check if prompt has any variables (including optional)
+  const hasAnyVariables = (prompt: PromptTemplate): boolean => {
+    return (prompt.variables?.length ?? 0) > 0;
+  };
+
+  // Check if prompt has required variables
   const hasRequiredVariables = (prompt: PromptTemplate): boolean => {
     return prompt.variables?.some((v) => v.required) ?? false;
   };
@@ -238,20 +244,24 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
 
                 {/* Right: Action buttons */}
                 <div className="prompt-item-actions">
-                  {/* Fill variables button */}
+                  {/* Fill variables button - active when has any variables */}
                   <button
-                    className={`prompt-action-btn ${hasRequiredVariables(prompt) ? 'active' : 'disabled'}`}
+                    className={`prompt-action-btn ${hasAnyVariables(prompt) ? 'active' : 'disabled'}`}
                     onClick={(e) => {
                       e.stopPropagation();
                       handlePromptClick(prompt);
                     }}
-                    title={t('fillVariables', language) || 'Fill variables'}
+                    title={
+                      hasAnyVariables(prompt)
+                        ? t('fillVariables', language) || 'Fill variables'
+                        : t('noVariables', language) || 'No variables'
+                    }
                     disabled={false}
                   >
                     <i className="bi bi-input-cursor-text" />
                   </button>
 
-                  {/* Copy button */}
+                  {/* Copy button - disabled only when has required variables */}
                   <button
                     className={`prompt-action-btn ${copiedPromptId === prompt.id ? 'copied' : hasRequiredVariables(prompt) ? 'disabled' : 'active'}`}
                     onClick={(e) => handleDirectCopy(e, prompt)}

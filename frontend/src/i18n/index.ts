@@ -452,6 +452,8 @@ const translations: Record<Language, Translations> = {
     anonymous: 'Anonymous',
     enterPromptName: 'Enter prompt name',
     requiredFields: 'Required fields are missing',
+    fillVariables: 'Fill variables',
+    noVariables: 'No variables',
 
     // Stats
     days_tracked: 'Days',
@@ -1306,6 +1308,8 @@ const translations: Record<Language, Translations> = {
     anonymous: '匿名',
     enterPromptName: '请输入提示词名称',
     requiredFields: '缺少必填字段',
+    fillVariables: '填写变量',
+    noVariables: '无变量',
 
     // Stats
     days_tracked: '天数',
@@ -2120,6 +2124,8 @@ const translations: Record<Language, Translations> = {
     uses: '回使用',
     anonymous: '匿名',
     enterPromptName: 'プロンプト名を入力',
+    fillVariables: '変数を入力',
+    noVariables: '変数なし',
     requiredFields: '必須フィールドが不足しています',
 
     // Stats
@@ -2671,6 +2677,8 @@ const translations: Record<Language, Translations> = {
     anonymous: '익명',
     enterPromptName: '프롬프트 이름 입력',
     requiredFields: '필수 필드가 누락되었습니다',
+    fillVariables: '변수 입력',
+    noVariables: '변수 없음',
 
     // Stats
     days_tracked: '일수',
