@@ -43,7 +43,8 @@ CREATE TABLE daily_messages (
     input_tokens INTEGER DEFAULT 0,
     output_tokens INTEGER DEFAULT 0,
     sender_name TEXT,
-    model TEXT
+    model TEXT,
+    agent_session_id TEXT
 );
 
 CREATE TABLE user_daily_stats (
