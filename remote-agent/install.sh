@@ -401,12 +401,14 @@ else
     log_info "code-server not found, attempting to install..."
     CS_INSTALLED=false
     if [[ "$(uname)" == "Darwin" ]] || [[ "$(uname)" == "Linux" ]]; then
-        # Use the official code-server install script
+        # Download install script to a temp file first (safer than piping to sh)
+        CS_INSTALL_SCRIPT=$(mktemp)
         if command -v curl &>/dev/null; then
-            curl -fsSL https://code-server.dev/install.sh | sh && CS_INSTALLED=true
+            curl -fsSL https://code-server.dev/install.sh -o "$CS_INSTALL_SCRIPT" && sh "$CS_INSTALL_SCRIPT" && CS_INSTALLED=true
         elif command -v wget &>/dev/null; then
-            wget -qO- https://code-server.dev/install.sh | sh && CS_INSTALLED=true
+            wget -qO "$CS_INSTALL_SCRIPT" https://code-server.dev/install.sh && sh "$CS_INSTALL_SCRIPT" && CS_INSTALLED=true
         fi
+        rm -f "$CS_INSTALL_SCRIPT"
     fi
     if [[ "$CS_INSTALLED" == "true" ]]; then
         log_success "code-server installed: $(code-server --version 2>/dev/null | head -1)"

@@ -16,7 +16,7 @@ import os
 import time
 import uuid
 
-from flask import Blueprint, Response, g, jsonify, make_response, request, stream_with_context
+from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
 from app.auth.decorators import _extract_token, _load_user_from_token, admin_required
 from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
@@ -1960,11 +1960,16 @@ def create_remote_directory(machine_id):
 # ── Remote Git endpoints ────────────────────────────────────────────
 
 
-@remote_bp.route("/machines/<machine_id>/git/status", methods=["GET"])
-def remote_git_status(machine_id):
-    """Get git status on a remote machine.
+def _dispatch_remote_git_command(machine_id, command, required_params):
+    """Common auth check, agent lookup, command dispatch, and wait for git commands.
 
-    Query params: path (project path on the remote machine)
+    Args:
+        machine_id: The remote machine ID.
+        command: The git command to send (e.g. "git_status", "git_diff", "git_file").
+        required_params: Dict of query params that must be present and non-empty.
+
+    Returns:
+        Flask JSON response tuple.
     """
     if not hasattr(g, "user") or g.user is None:
         return jsonify({"error": "Unauthorized"}), 401
@@ -1975,9 +1980,21 @@ def remote_git_status(machine_id):
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
 
-    project_path = request.args.get("path")
-    if not project_path:
-        return jsonify({"success": False, "error": "path parameter is required"}), 400
+    # Validate required query params
+    params = {}
+    missing = [name for name in required_params if not request.args.get(name)]
+    if missing:
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": f"{', '.join(missing)} parameter{'s' if len(missing) > 1 else ''} required",
+                }
+            ),
+            400,
+        )
+    for name in required_params:
+        params[name] = request.args.get(name)
 
     machine = agent_mgr.get_machine(machine_id)
     if not machine:
@@ -1991,9 +2008,9 @@ def remote_git_status(machine_id):
         machine_id,
         {
             "type": "command",
-            "command": "git_status",
+            "command": command,
             "request_id": request_id,
-            "project_path": project_path,
+            **params,
         },
     )
 
@@ -2012,6 +2029,15 @@ def remote_git_status(machine_id):
             "error": result.get("error"),
         }
     )
+
+
+@remote_bp.route("/machines/<machine_id>/git/status", methods=["GET"])
+def remote_git_status(machine_id):
+    """Get git status on a remote machine.
+
+    Query params: path (project path on the remote machine)
+    """
+    return _dispatch_remote_git_command(machine_id, "git_status", ["path"])
 
 
 @remote_bp.route("/machines/<machine_id>/git/diff", methods=["GET"])
@@ -2020,57 +2046,7 @@ def remote_git_diff(machine_id):
 
     Query params: path (project path), file (relative file path)
     """
-    if not hasattr(g, "user") or g.user is None:
-        return jsonify({"error": "Unauthorized"}), 401
-
-    agent_mgr = get_remote_agent_manager()
-
-    if g.user.get("role") != "admin":
-        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
-            return jsonify({"error": "Access denied"}), 403
-
-    project_path = request.args.get("path")
-    file = request.args.get("file")
-    if not project_path or not file:
-        return (
-            jsonify({"success": False, "error": "path and file parameters are required"}),
-            400,
-        )
-
-    machine = agent_mgr.get_machine(machine_id)
-    if not machine:
-        return jsonify({"error": "Machine not found"}), 404
-
-    if not agent_mgr.is_agent_connected(machine_id):
-        return jsonify({"success": False, "error": "Agent is not connected"}), 503
-
-    request_id = str(uuid.uuid4())
-    agent_mgr.send_command(
-        machine_id,
-        {
-            "type": "command",
-            "command": "git_diff",
-            "request_id": request_id,
-            "project_path": project_path,
-            "file": file,
-        },
-    )
-
-    result = agent_mgr.get_browse_result(request_id, timeout=15.0)
-
-    if result is None:
-        return (
-            jsonify({"success": False, "error": "Timeout waiting for agent response"}),
-            504,
-        )
-
-    return jsonify(
-        {
-            "success": result.get("success", False),
-            "result": result.get("result"),
-            "error": result.get("error"),
-        }
-    )
+    return _dispatch_remote_git_command(machine_id, "git_diff", ["path", "file"])
 
 
 @remote_bp.route("/machines/<machine_id>/git/file", methods=["GET"])
@@ -2079,57 +2055,7 @@ def remote_git_file(machine_id):
 
     Query params: path (project path), file (relative file path)
     """
-    if not hasattr(g, "user") or g.user is None:
-        return jsonify({"error": "Unauthorized"}), 401
-
-    agent_mgr = get_remote_agent_manager()
-
-    if g.user.get("role") != "admin":
-        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
-            return jsonify({"error": "Access denied"}), 403
-
-    project_path = request.args.get("path")
-    file = request.args.get("file")
-    if not project_path or not file:
-        return (
-            jsonify({"success": False, "error": "path and file parameters are required"}),
-            400,
-        )
-
-    machine = agent_mgr.get_machine(machine_id)
-    if not machine:
-        return jsonify({"error": "Machine not found"}), 404
-
-    if not agent_mgr.is_agent_connected(machine_id):
-        return jsonify({"success": False, "error": "Agent is not connected"}), 503
-
-    request_id = str(uuid.uuid4())
-    agent_mgr.send_command(
-        machine_id,
-        {
-            "type": "command",
-            "command": "git_file",
-            "request_id": request_id,
-            "project_path": project_path,
-            "file": file,
-        },
-    )
-
-    result = agent_mgr.get_browse_result(request_id, timeout=15.0)
-
-    if result is None:
-        return (
-            jsonify({"success": False, "error": "Timeout waiting for agent response"}),
-            504,
-        )
-
-    return jsonify(
-        {
-            "success": result.get("success", False),
-            "result": result.get("result"),
-            "error": result.get("error"),
-        }
-    )
+    return _dispatch_remote_git_command(machine_id, "git_file", ["path", "file"])
 
 
 # ── Remote VSCode (code-server) endpoints ───────────────────────────
@@ -2231,6 +2157,12 @@ def remote_vscode_status(vscode_id):
     if status == "running":
         proxy_url = f"/api/remote/vscode/{vscode_id}/proxy/"
         browser_token = info.get("token", "")
+        # NOTE: Token is passed in the query string so that the iframe src URL
+        # includes it for all sub-resource requests (JS, CSS, WS upgrades via
+        # the proxy path).  This is a deliberate trade-off — the alternative
+        # (cookie-based auth) would not survive cross-origin iframe contexts.
+        # The token is generated with secrets.token_hex(32) (256 bits of
+        # entropy) and is scoped to a single VSCode session.
         response["url"] = f"{proxy_url}?token={browser_token}"
     elif status == "error":
         response["error"] = info.get("error", "")
@@ -2282,7 +2214,7 @@ def remote_vscode_proxy(vscode_id, path=""):
 
     import hmac as _hmac
 
-    from app.modules.workspace.vscode_proxy import build_target_url, proxy_request
+    from app.modules.workspace.vscode_proxy import build_target_url, proxy_request_streaming
     from app.modules.workspace.vscode_store import vscode_info_store
 
     found = vscode_info_store.find_by_vscode_id(vscode_id)
@@ -2320,8 +2252,8 @@ def remote_vscode_proxy(vscode_id, path=""):
     # Get request body
     body = request.get_data()
 
-    # Proxy the request
-    status_code, resp_headers, resp_body = proxy_request(
+    # Proxy the request (streaming for efficient handling of large assets)
+    status_code, resp_headers, content_gen = proxy_request_streaming(
         method=request.method,
         target_url=target_url,
         headers=headers,
@@ -2329,8 +2261,11 @@ def remote_vscode_proxy(vscode_id, path=""):
         params=params if params else None,
     )
 
-    # Build Flask response
-    response = make_response(resp_body, status_code)
+    # Build Flask streaming response
+    response = Response(
+        stream_with_context(content_gen),
+        status=status_code,
+    )
     for k, v in resp_headers.items():
         if k.lower() not in ("content-length", "content-encoding", "transfer-encoding"):
             response.headers[k] = v

@@ -23,6 +23,7 @@ class VSCodeInfoStore:
         self._vscode_index: dict[str, str] = {}
         self._ttl = ttl
         self._cleanup_timer: threading.Timer | None = None
+        self._timer_started = False
 
     def start_cleanup_timer(self) -> None:
         """Start periodic cleanup of stale entries."""
@@ -45,6 +46,12 @@ class VSCodeInfoStore:
 
     def put(self, machine_id: str, vscode_id: str, info: dict) -> None:
         with self._lock:
+            # Lazy-start cleanup timer on first put to avoid spawning a
+            # background thread at module import time.
+            if not self._timer_started:
+                self._timer_started = True
+                self._schedule_cleanup()
+
             info["_updated_at"] = time.time()
             self._store[(machine_id, vscode_id)] = info
             self._vscode_index[vscode_id] = machine_id
@@ -92,6 +99,6 @@ class VSCodeInfoStore:
         return removed
 
 
-# Module-level singleton
+# Module-level singleton — cleanup timer is started lazily on first use
+# to avoid spawning a background thread at import time.
 vscode_info_store = VSCodeInfoStore()
-vscode_info_store.start_cleanup_timer()

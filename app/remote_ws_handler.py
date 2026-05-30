@@ -14,6 +14,7 @@ from __future__ import annotations
 import hmac
 import logging
 import re
+from urllib.parse import urlparse, urlunparse
 
 from gevent.pywsgi import WSGIHandler
 
@@ -191,8 +192,10 @@ class RemoteWSHandler(WSGIHandler):
             self.close_connection = True
             return
 
-        # Convert http URL to ws URL
-        remote_ws_url = original_http_url.replace("https://", "wss://").replace("http://", "ws://")
+        # Convert http URL to ws URL using urllib.parse for safety
+        parsed = urlparse(original_http_url)
+        ws_scheme = "wss" if parsed.scheme == "https" else "ws"
+        remote_ws_url = urlunparse(parsed._replace(scheme=ws_scheme))
 
         # Bridge browser socket to remote code-server.
         try:

@@ -34,6 +34,9 @@ class VSCodeBridgeConnection:
 
 def _register_bridge(state: VSCodeBridgeConnection) -> None:
     with _bridge_lock:
+        total = sum(len(v) for v in _active_bridges.values())
+        if total >= MAX_ACTIVE_BRIDGES:
+            raise RuntimeError(f"Too many active VSCode bridges ({total}/{MAX_ACTIVE_BRIDGES})")
         _active_bridges.setdefault(state.vscode_id, []).append(state)
 
 
