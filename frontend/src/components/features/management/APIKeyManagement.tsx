@@ -281,6 +281,21 @@ export const APIKeyManagement: React.FC = () => {
     }
   };
 
+  /**
+   * Get JSON validation result with error message
+   * Returns: { valid: boolean, error: string | null }
+   */
+  const getJsonValidationResult = (jsonStr: string): { valid: boolean; error: string | null } => {
+    if (!jsonStr.trim()) return { valid: true, error: null };
+    try {
+      JSON.parse(jsonStr);
+      return { valid: true, error: null };
+    } catch (e) {
+      const errorMessage = e instanceof SyntaxError ? e.message : 'Invalid JSON';
+      return { valid: false, error: errorMessage };
+    }
+  };
+
   // Fields that should never be stored in cli_settings —
   // API credentials are injected via environment variables.
   const SENSITIVE_ENV_KEYS = new Set([
@@ -732,12 +747,35 @@ export const APIKeyManagement: React.FC = () => {
           <div className="mb-3">
             <label className="form-label">{t('claudeCodeSettings', language)}</label>
             <textarea
-              className="form-control"
+              className={`form-control ${
+                formData.claude_settings.trim() && !getJsonValidationResult(formData.claude_settings).valid
+                  ? 'is-invalid'
+                  : ''
+              }`}
               rows={8}
               value={formData.claude_settings}
               onChange={(e) => setFormData({ ...formData, claude_settings: e.target.value })}
               placeholder={defaultClaudeSettings}
             />
+            {/* JSON Validation Status Indicator */}
+            {formData.claude_settings.trim() && (
+              <div
+                className={`mt-1 d-flex align-items-center ${
+                  getJsonValidationResult(formData.claude_settings).valid ? 'text-success' : 'text-danger'
+                }`}
+              >
+                <i
+                  className={`bi ${
+                    getJsonValidationResult(formData.claude_settings).valid ? 'bi-check-circle-fill' : 'bi-x-circle-fill'
+                  } me-1`}
+                />
+                <small>
+                  {getJsonValidationResult(formData.claude_settings).valid
+                    ? t('jsonValid', language)
+                    : `${t('jsonInvalid', language)}: ${getJsonValidationResult(formData.claude_settings).error}`}
+                </small>
+              </div>
+            )}
             <small className="text-muted">{t('claudeCodeSettingsHint', language)}</small>
           </div>
         )}
@@ -747,12 +785,35 @@ export const APIKeyManagement: React.FC = () => {
           <div className="mb-3">
             <label className="form-label">{t('qwenCodeSettings', language)}</label>
             <textarea
-              className="form-control"
+              className={`form-control ${
+                formData.qwen_settings.trim() && !getJsonValidationResult(formData.qwen_settings).valid
+                  ? 'is-invalid'
+                  : ''
+              }`}
               rows={10}
               value={formData.qwen_settings}
               onChange={(e) => setFormData({ ...formData, qwen_settings: e.target.value })}
               placeholder={defaultQwenSettings}
             />
+            {/* JSON Validation Status Indicator */}
+            {formData.qwen_settings.trim() && (
+              <div
+                className={`mt-1 d-flex align-items-center ${
+                  getJsonValidationResult(formData.qwen_settings).valid ? 'text-success' : 'text-danger'
+                }`}
+              >
+                <i
+                  className={`bi ${
+                    getJsonValidationResult(formData.qwen_settings).valid ? 'bi-check-circle-fill' : 'bi-x-circle-fill'
+                  } me-1`}
+                />
+                <small>
+                  {getJsonValidationResult(formData.qwen_settings).valid
+                    ? t('jsonValid', language)
+                    : `${t('jsonInvalid', language)}: ${getJsonValidationResult(formData.qwen_settings).error}`}
+                </small>
+              </div>
+            )}
             <small className="text-muted">{t('qwenCodeSettingsHint', language)}</small>
           </div>
         )}
@@ -900,11 +961,34 @@ export const APIKeyManagement: React.FC = () => {
           <div className="mb-3">
             <label className="form-label">{t('claudeCodeSettings', language)}</label>
             <textarea
-              className="form-control"
+              className={`form-control ${
+                formData.claude_settings.trim() && !getJsonValidationResult(formData.claude_settings).valid
+                  ? 'is-invalid'
+                  : ''
+              }`}
               rows={8}
               value={formData.claude_settings}
               onChange={(e) => setFormData({ ...formData, claude_settings: e.target.value })}
             />
+            {/* JSON Validation Status Indicator */}
+            {formData.claude_settings.trim() && (
+              <div
+                className={`mt-1 d-flex align-items-center ${
+                  getJsonValidationResult(formData.claude_settings).valid ? 'text-success' : 'text-danger'
+                }`}
+              >
+                <i
+                  className={`bi ${
+                    getJsonValidationResult(formData.claude_settings).valid ? 'bi-check-circle-fill' : 'bi-x-circle-fill'
+                  } me-1`}
+                />
+                <small>
+                  {getJsonValidationResult(formData.claude_settings).valid
+                    ? t('jsonValid', language)
+                    : `${t('jsonInvalid', language)}: ${getJsonValidationResult(formData.claude_settings).error}`}
+                </small>
+              </div>
+            )}
             <small className="text-muted">{t('claudeCodeSettingsHint', language)}</small>
           </div>
         )}
@@ -914,11 +998,34 @@ export const APIKeyManagement: React.FC = () => {
           <div className="mb-3">
             <label className="form-label">{t('qwenCodeSettings', language)}</label>
             <textarea
-              className="form-control"
+              className={`form-control ${
+                formData.qwen_settings.trim() && !getJsonValidationResult(formData.qwen_settings).valid
+                  ? 'is-invalid'
+                  : ''
+              }`}
               rows={10}
               value={formData.qwen_settings}
               onChange={(e) => setFormData({ ...formData, qwen_settings: e.target.value })}
             />
+            {/* JSON Validation Status Indicator */}
+            {formData.qwen_settings.trim() && (
+              <div
+                className={`mt-1 d-flex align-items-center ${
+                  getJsonValidationResult(formData.qwen_settings).valid ? 'text-success' : 'text-danger'
+                }`}
+              >
+                <i
+                  className={`bi ${
+                    getJsonValidationResult(formData.qwen_settings).valid ? 'bi-check-circle-fill' : 'bi-x-circle-fill'
+                  } me-1`}
+                />
+                <small>
+                  {getJsonValidationResult(formData.qwen_settings).valid
+                    ? t('jsonValid', language)
+                    : `${t('jsonInvalid', language)}: ${getJsonValidationResult(formData.qwen_settings).error}`}
+                </small>
+              </div>
+            )}
             <small className="text-muted">{t('qwenCodeSettingsHint', language)}</small>
           </div>
         )}
