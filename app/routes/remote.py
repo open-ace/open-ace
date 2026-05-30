@@ -1966,7 +1966,7 @@ def _dispatch_remote_git_command(machine_id, command, required_params):
     Args:
         machine_id: The remote machine ID.
         command: The git command to send (e.g. "git_status", "git_diff", "git_file").
-        required_params: Dict of query params that must be present and non-empty.
+        required_params: List of query param names that must be present and non-empty.
 
     Returns:
         Flask JSON response tuple.
@@ -1981,20 +1981,27 @@ def _dispatch_remote_git_command(machine_id, command, required_params):
             return jsonify({"error": "Access denied"}), 403
 
     # Validate required query params
-    params = {}
     missing = [name for name in required_params if not request.args.get(name)]
     if missing:
+        names = " and ".join(missing)
+        plural = "s" if len(missing) > 1 else ""
         return (
             jsonify(
                 {
                     "success": False,
-                    "error": f"{', '.join(missing)} parameter{'s' if len(missing) > 1 else ''} required",
+                    "error": f"{names} parameter{plural} required",
                 }
             ),
             400,
         )
+
+    # Map query param names to command payload names
+    # query "path" → command "project_path"
+    query_to_command = {"path": "project_path"}
+    payload = {}
     for name in required_params:
-        params[name] = request.args.get(name)
+        key = query_to_command.get(name, name)
+        payload[key] = request.args.get(name)
 
     machine = agent_mgr.get_machine(machine_id)
     if not machine:
@@ -2010,7 +2017,7 @@ def _dispatch_remote_git_command(machine_id, command, required_params):
             "type": "command",
             "command": command,
             "request_id": request_id,
-            **params,
+            **payload,
         },
     )
 

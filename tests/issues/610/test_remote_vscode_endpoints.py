@@ -707,7 +707,10 @@ class TestVSCodeProxy(unittest.TestCase):
             ),
         )
 
-        mock_proxy_result = (200, {"Content-Type": "text/html"}, b"<h1>VSCode</h1>")
+        def _gen():
+            yield b"<h1>VSCode</h1>"
+
+        mock_proxy_result = (200, {"Content-Type": "text/html"}, _gen())
 
         with (
             patch(
@@ -715,7 +718,8 @@ class TestVSCodeProxy(unittest.TestCase):
                 return_value="http://remote:8080/",
             ),
             patch(
-                "app.modules.workspace.vscode_proxy.proxy_request", return_value=mock_proxy_result
+                "app.modules.workspace.vscode_proxy.proxy_request_streaming",
+                return_value=mock_proxy_result,
             ),
         ):
             try:
