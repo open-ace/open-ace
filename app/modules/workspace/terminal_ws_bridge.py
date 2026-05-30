@@ -140,7 +140,7 @@ def bridge_terminal_websocket(
 def bridge_terminal_websocket_raw(
     terminal_id: str, browser_sock, remote_ws_url: str, remote_token: str
 ) -> None:
-    """Bridge a raw browser socket (via TerminalWSHandler) to a remote terminal.
+    """Bridge a raw browser socket (via RemoteWSHandler) to a remote terminal.
 
     Uses ``ws_frame`` for browser-side I/O and ``websockets.sync`` for the
     remote side.  The browser socket has already completed the WS handshake

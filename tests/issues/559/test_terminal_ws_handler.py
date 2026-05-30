@@ -1,11 +1,11 @@
-"""Unit tests for app.terminal_ws_handler — custom gevent WSGI handler."""
+"""Unit tests for app.remote_ws_handler — custom gevent WSGI handler."""
 
 import re
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.terminal_ws_handler import _WS_PATH_RE, TerminalWSHandler
+from app.remote_ws_handler import _WS_PATH_RE, RemoteWSHandler
 
 # ---------------------------------------------------------------------------
 # Tests: _WS_PATH_RE
@@ -48,13 +48,13 @@ class TestWSPathRegex:
 
 class TestIsTerminalWsRequest:
     def _make_handler(self, command="GET", path="", upgrade="websocket"):
-        handler = MagicMock(spec=TerminalWSHandler)
+        handler = MagicMock(spec=RemoteWSHandler)
         handler.command = command
         handler.environ = {
             "PATH_INFO": path,
             "HTTP_UPGRADE": upgrade,
         }
-        return TerminalWSHandler._is_terminal_ws_request(handler)
+        return RemoteWSHandler._is_terminal_ws_request(handler)
 
     def test_valid_terminal_ws(self):
         assert self._make_handler(
@@ -106,7 +106,7 @@ class TestIsTerminalWsRequest:
 
 class TestRunApplication:
     def test_terminal_ws_intercepted(self):
-        handler = MagicMock(spec=TerminalWSHandler)
+        handler = MagicMock(spec=RemoteWSHandler)
         handler.command = "GET"
         handler.environ = {
             "PATH_INFO": "/api/remote/terminal/12345678-1234-1234-1234-123456789abc/ws",
@@ -114,19 +114,31 @@ class TestRunApplication:
         }
         handler._handle_terminal_ws = MagicMock()
 
-        TerminalWSHandler.run_application(handler)
+        RemoteWSHandler.run_application(handler)
 
         handler._handle_terminal_ws.assert_called_once()
 
     def test_non_terminal_delegates_to_super(self):
-        """Non-terminal requests should fall through to the parent WSGIHandler."""
-        handler = MagicMock(spec=TerminalWSHandler)
+        """Non-terminal and non-vscode requests should fall through to the parent WSGIHandler."""
+        handler = MagicMock(spec=RemoteWSHandler)
         handler._is_terminal_ws_request.return_value = False
+        handler._is_vscode_ws_request.return_value = False
         handler._handle_terminal_ws = MagicMock()
 
-        with patch.object(TerminalWSHandler.__bases__[0], "run_application") as mock_super:
-            TerminalWSHandler.run_application(handler)
+        with patch.object(RemoteWSHandler.__bases__[0], "run_application") as mock_super:
+            RemoteWSHandler.run_application(handler)
             mock_super.assert_called_once()
+        handler._handle_terminal_ws.assert_not_called()
+
+    def test_vscode_ws_intercepted(self):
+        handler = MagicMock(spec=RemoteWSHandler)
+        handler._is_terminal_ws_request.return_value = False
+        handler._is_vscode_ws_request.return_value = True
+        handler._handle_vscode_ws = MagicMock()
+
+        RemoteWSHandler.run_application(handler)
+
+        handler._handle_vscode_ws.assert_called_once()
         handler._handle_terminal_ws.assert_not_called()
 
 
@@ -139,7 +151,7 @@ class TestHandleTerminalWs:
     UUID = "12345678-1234-1234-1234-123456789abc"
 
     def _make_handler(self, query_string="", token="valid-token"):
-        handler = MagicMock(spec=TerminalWSHandler)
+        handler = MagicMock(spec=RemoteWSHandler)
         handler.environ = {
             "PATH_INFO": f"/api/remote/terminal/{self.UUID}/ws",
             "QUERY_STRING": query_string or f"token={token}",
@@ -156,7 +168,7 @@ class TestHandleTerminalWs:
         handler = self._make_handler()
         mock_store.find_by_terminal_id.return_value = None
 
-        TerminalWSHandler._handle_terminal_ws(handler)
+        RemoteWSHandler._handle_terminal_ws(handler)
 
         mock_send_close.assert_called_once_with(handler.socket, 1011)
         assert handler.close_connection is True
@@ -171,7 +183,7 @@ class TestHandleTerminalWs:
             {"token": "correct-token"},
         )
 
-        TerminalWSHandler._handle_terminal_ws(handler)
+        RemoteWSHandler._handle_terminal_ws(handler)
 
         mock_send_close.assert_called_once_with(handler.socket, 4001)
         assert handler.close_connection is True
@@ -191,7 +203,7 @@ class TestHandleTerminalWs:
             },
         )
 
-        TerminalWSHandler._handle_terminal_ws(handler)
+        RemoteWSHandler._handle_terminal_ws(handler)
 
         mock_send_close.assert_called_once_with(handler.socket, 1011)
         assert handler.close_connection is True
@@ -211,7 +223,7 @@ class TestHandleTerminalWs:
             },
         )
 
-        TerminalWSHandler._handle_terminal_ws(handler)
+        RemoteWSHandler._handle_terminal_ws(handler)
 
         mock_handshake.assert_called_once_with(handler.environ, handler.socket)
         mock_bridge.assert_called_once_with(
@@ -228,7 +240,7 @@ class TestHandleTerminalWs:
         mock_handshake.side_effect = Exception("handshake error")
         handler = self._make_handler()
 
-        TerminalWSHandler._handle_terminal_ws(handler)
+        RemoteWSHandler._handle_terminal_ws(handler)
         assert handler.close_connection is True
 
     @patch("app.ws_frame.send_close")
@@ -249,6 +261,6 @@ class TestHandleTerminalWs:
             },
         )
 
-        TerminalWSHandler._handle_terminal_ws(handler)
+        RemoteWSHandler._handle_terminal_ws(handler)
 
         mock_send_close.assert_called_once_with(handler.socket, 1011)

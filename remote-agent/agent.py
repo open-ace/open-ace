@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import secrets
+import shutil
 import signal
 import socket
 import subprocess
@@ -56,6 +57,10 @@ class RemoteAgent:
         self._terminal_tokens: dict[str, str] = {}
         self._terminal_ports: dict[str, int] = {}
         self._terminal_ws_urls: dict[str, str] = {}  # Store ws_url for attach
+        # VSCode (code-server) state
+        self._vscode_processes: dict[str, subprocess.Popen] = {}
+        self._vscode_tokens: dict[str, str] = {}
+        self._vscode_ports: dict[str, int] = {}
         # Terminal info persistence directory
         script_dir = os.path.dirname(os.path.abspath(__file__))
         self._terminal_info_dir = os.path.join(script_dir, ".terminal_sessions")
@@ -462,6 +467,18 @@ class RemoteAgent:
             self._cmd_browse_directory(data)
         elif command == "create_directory":
             self._cmd_create_directory(data)
+        elif command == "git_status":
+            self._cmd_git_status(data)
+        elif command == "git_diff":
+            self._cmd_git_diff(data)
+        elif command == "git_file":
+            self._cmd_git_file(data)
+        elif command == "start_vscode":
+            self._cmd_start_vscode(data)
+        elif command == "stop_vscode":
+            self._cmd_stop_vscode(data)
+        elif command == "attach_vscode":
+            self._cmd_attach_vscode(data)
         else:
             logger.warning("Unknown command: %s", command)
 
@@ -670,9 +687,23 @@ class RemoteAgent:
 
             # Wait for READY:port output (with timeout)
             port = self._read_terminal_port(proc, terminal_id)
-            # Redirect remaining output to DEVNULL to prevent pipe buffer deadlock
+            # Save references to old PIPE file descriptors.
+            old_stdout, old_stderr = proc.stdout, proc.stderr
+            stderr_output = ""
+
+            if not port:
+                # Process likely exited — safe to read remaining stderr.
+                try:
+                    stderr_output = old_stderr.read().decode(errors="replace")[:500]
+                except Exception:
+                    pass
+
+            # Redirect to DEVNULL to prevent pipe buffer deadlock,
+            # then close the old PIPE file descriptors.
             proc.stdout = open(os.devnull, "wb")
             proc.stderr = open(os.devnull, "wb")
+            old_stdout.close()
+            old_stderr.close()
             if port:
                 self._terminal_ports[terminal_id] = port
                 hostname = self._get_reachable_hostname()
@@ -694,7 +725,6 @@ class RemoteAgent:
                 logger.info("Terminal %s running on %s", terminal_id[:8], ws_url)
                 self._session_sync.notify_terminal_active(terminal_id)
             else:
-                stderr_output = proc.stderr.read().decode() if proc.stderr else "unknown"
                 logger.error("Terminal server failed to start: %s", stderr_output[:500])
                 self._http_send(
                     {
@@ -840,9 +870,13 @@ class RemoteAgent:
 
                 # Wait for READY:port output
                 port = self._read_terminal_port(proc, terminal_id)
-                # Redirect remaining output to DEVNULL to prevent pipe buffer deadlock
+                # Close old PIPE file descriptors and redirect to DEVNULL
+                # to prevent pipe buffer deadlock.
+                old_stdout, old_stderr = proc.stdout, proc.stderr
                 proc.stdout = open(os.devnull, "wb")
                 proc.stderr = open(os.devnull, "wb")
+                old_stdout.close()
+                old_stderr.close()
                 if port:
                     self._terminal_ports[terminal_id] = port
                     hostname = self._get_reachable_hostname()
@@ -1103,6 +1137,460 @@ class RemoteAgent:
         except Exception as e:
             logger.error("Failed to create directory %s: %s", dir_path, e)
             self._send_create_result(request_id, False, error=str(e))
+
+    # ── Git command handlers ──────────────────────────────────────────
+
+    def _run_git(self, args: list[str], cwd: str) -> tuple[str, str, bool]:
+        """Run a git subprocess and return (stdout, stderr, success)."""
+        try:
+            result = subprocess.run(
+                ["git", "-C", cwd] + args,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            return result.stdout, result.stderr, result.returncode == 0
+        except FileNotFoundError:
+            return "", "git is not installed", False
+        except subprocess.TimeoutExpired:
+            return "", "git command timed out", False
+        except Exception as e:
+            return "", str(e), False
+
+    def _send_git_result(
+        self,
+        request_id: str,
+        success: bool,
+        error: str | None = None,
+        result: dict | None = None,
+    ) -> None:
+        """Send a git_result message back to the server."""
+        response: dict[str, Any] = {
+            "type": "git_result",
+            "machine_id": self.config.machine_id,
+            "request_id": request_id,
+            "success": success,
+        }
+        if error is not None:
+            response["error"] = error
+        if result is not None:
+            response["result"] = result
+        self._http_send(response)
+
+    def _cmd_git_status(self, data: dict[str, Any]) -> None:
+        """Handle a git_status command.
+
+        Runs git status and git diff to produce a list of changed files,
+        matching the format of qwen-code-webui/backend/handlers/git.ts.
+        """
+        request_id = data.get("request_id", "")
+        project_path = data.get("project_path", "")
+
+        if not project_path:
+            self._send_git_result(request_id, False, error="No project_path specified")
+            return
+
+        cwd = os.path.realpath(os.path.expanduser(project_path))
+        if not os.path.isdir(cwd):
+            self._send_git_result(request_id, False, error=f"Directory does not exist: {cwd}")
+            return
+
+        if not os.path.isdir(os.path.join(cwd, ".git")):
+            self._send_git_result(request_id, True, result={"files": []})
+            return
+
+        try:
+            # Check if HEAD exists
+            _, _, has_head = self._run_git(["rev-parse", "HEAD"], cwd)
+
+            # Get diff stats
+            diff_args = (
+                ["diff", "--numstat", "HEAD"] if has_head else ["diff", "--cached", "--numstat"]
+            )
+            diff_stdout, _, diff_ok = self._run_git(diff_args, cwd)
+
+            # Get porcelain status
+            status_stdout, _, status_ok = self._run_git(["status", "--porcelain"], cwd)
+
+            files: dict[str, dict] = {}
+
+            # Parse diff stats
+            if diff_ok and diff_stdout.strip():
+                for line in diff_stdout.strip().split("\n"):
+                    parts = line.split("\t")
+                    if len(parts) >= 3:
+                        additions = 0 if parts[0] == "-" else (int(parts[0]) or 0)
+                        deletions = 0 if parts[1] == "-" else (int(parts[1]) or 0)
+                        path = parts[2]
+                        files[path] = {
+                            "path": path,
+                            "status": "added" if additions > 0 and deletions == 0 else "modified",
+                            "additions": additions,
+                            "deletions": deletions,
+                        }
+
+            # Parse porcelain status
+            if status_ok and status_stdout.strip():
+                for line in status_stdout.strip().split("\n"):
+                    if len(line) < 4:
+                        continue
+                    status_code = line[:2]
+                    if "R" in status_code and " -> " in line:
+                        file_path = line[3:].split(" -> ")[1]
+                    else:
+                        file_path = line[3:]
+
+                    if file_path in files:
+                        if "D" in status_code:
+                            files[file_path]["status"] = "deleted"
+                        elif "A" in status_code or status_code == "??":
+                            files[file_path]["status"] = "added"
+                    elif status_code == "??":
+                        files[file_path] = {
+                            "path": file_path,
+                            "status": "added",
+                            "additions": 0,
+                            "deletions": 0,
+                        }
+                    elif "D" in status_code:
+                        files[file_path] = {
+                            "path": file_path,
+                            "status": "deleted",
+                            "additions": 0,
+                            "deletions": 0,
+                        }
+
+            # For added files with 0 additions, count lines
+            for path, change in files.items():
+                if change["status"] == "added" and change["additions"] == 0:
+                    try:
+                        full_path = os.path.join(cwd, path)
+                        if os.path.isfile(full_path):
+                            with open(full_path, errors="replace") as f:
+                                change["additions"] = sum(1 for _ in f)
+                    except OSError:
+                        pass
+
+            sorted_files = sorted(files.values(), key=lambda f: f["path"])
+            self._send_git_result(request_id, True, result={"files": sorted_files})
+            logger.info("git_status for %s: %d files", cwd, len(sorted_files))
+
+        except Exception as e:
+            logger.error("git_status failed for %s: %s", cwd, e)
+            self._send_git_result(request_id, False, error=str(e))
+
+    def _cmd_git_diff(self, data: dict[str, Any]) -> None:
+        """Handle a git_diff command."""
+        request_id = data.get("request_id", "")
+        project_path = data.get("project_path", "")
+        file = data.get("file", "")
+
+        if not project_path or not file:
+            self._send_git_result(request_id, False, error="project_path and file are required")
+            return
+
+        cwd = os.path.realpath(os.path.expanduser(project_path))
+
+        try:
+            # Validate path traversal
+            full_path = os.path.realpath(os.path.join(cwd, file))
+            if not full_path.startswith(os.path.realpath(cwd)):
+                self._send_git_result(request_id, False, error="Path traversal detected")
+                return
+
+            _, _, has_head = self._run_git(["rev-parse", "HEAD"], cwd)
+
+            # Get diff
+            diff_args = (
+                ["diff", "HEAD", "--", file] if has_head else ["diff", "--cached", "--", file]
+            )
+            diff_stdout, _, _ = self._run_git(diff_args, cwd)
+
+            # Get original content
+            original_content = ""
+            if has_head:
+                show_stdout, _, show_ok = self._run_git(["show", f"HEAD:{file}"], cwd)
+                if show_ok:
+                    original_content = show_stdout
+
+            # Get modified content
+            modified_content = ""
+            try:
+                if os.path.isfile(full_path):
+                    with open(full_path, errors="replace") as f:
+                        modified_content = f.read()
+            except OSError:
+                pass
+
+            self._send_git_result(
+                request_id,
+                True,
+                result={
+                    "file": file,
+                    "diff": diff_stdout if has_head else diff_stdout,
+                    "originalContent": original_content,
+                    "modifiedContent": modified_content,
+                },
+            )
+
+        except Exception as e:
+            logger.error("git_diff failed for %s/%s: %s", cwd, file, e)
+            self._send_git_result(request_id, False, error=str(e))
+
+    def _cmd_git_file(self, data: dict[str, Any]) -> None:
+        """Handle a git_file command (read file content)."""
+        request_id = data.get("request_id", "")
+        project_path = data.get("project_path", "")
+        file = data.get("file", "")
+
+        if not project_path or not file:
+            self._send_git_result(request_id, False, error="project_path and file are required")
+            return
+
+        cwd = os.path.realpath(os.path.expanduser(project_path))
+
+        try:
+            full_path = os.path.realpath(os.path.join(cwd, file))
+            if not full_path.startswith(os.path.realpath(cwd)):
+                self._send_git_result(request_id, False, error="Path traversal detected")
+                return
+
+            if not os.path.isfile(full_path):
+                self._send_git_result(request_id, False, error=f"File not found: {file}")
+                return
+
+            with open(full_path, errors="replace") as f:
+                content = f.read()
+
+            self._send_git_result(request_id, True, result={"file": file, "content": content})
+
+        except PermissionError:
+            self._send_git_result(request_id, False, error=f"Permission denied: {file}")
+        except Exception as e:
+            logger.error("git_file failed for %s/%s: %s", cwd, file, e)
+            self._send_git_result(request_id, False, error=str(e))
+
+    # ── VSCode (code-server) command handlers ─────────────────────────
+
+    def _find_code_server(self) -> str | None:
+        """Find code-server binary on the system."""
+        # Check PATH first
+        cs = shutil.which("code-server")
+        if cs:
+            return cs
+        # Check common install locations
+        home = os.path.expanduser("~")
+        common_paths = [
+            os.path.join(home, ".local", "bin", "code-server"),
+            "/usr/local/bin/code-server",
+            "/usr/bin/code-server",
+        ]
+        for path in common_paths:
+            if os.path.isfile(path) and os.access(path, os.X_OK):
+                return path
+        return None
+
+    def _send_vscode_status(
+        self,
+        vscode_id: str,
+        status: str,
+        http_url: str | None = None,
+        token: str | None = None,
+        error: str | None = None,
+    ) -> None:
+        """Send a vscode_status message back to the server."""
+        msg: dict[str, Any] = {
+            "type": "vscode_status",
+            "vscode_id": vscode_id,
+            "machine_id": self.config.machine_id,
+            "status": status,
+        }
+        if http_url is not None:
+            msg["http_url"] = http_url
+        if token is not None:
+            msg["token"] = token
+        if error is not None:
+            msg["error"] = error
+        self._http_send(msg)
+
+    def _cmd_start_vscode(self, data: dict[str, Any]) -> None:
+        """Handle a start_vscode command.
+
+        Starts code-server on the remote machine for the given project path.
+        """
+        vscode_id = data.get("vscode_id", "")
+        project_path = data.get("project_path", "")
+
+        if not project_path:
+            self._send_vscode_status(vscode_id, "error", error="No project_path specified")
+            return
+
+        cwd = os.path.realpath(os.path.expanduser(project_path))
+        if not os.path.isdir(cwd):
+            self._send_vscode_status(vscode_id, "error", error=f"Directory does not exist: {cwd}")
+            return
+
+        # Find code-server
+        cs_path = self._find_code_server()
+        if not cs_path:
+            self._send_vscode_status(
+                vscode_id,
+                "error",
+                error="code-server is not installed. Please install it: https://coder.com/docs/code-server/latest/install",
+            )
+            return
+
+        # Stop existing code-server with same ID if any
+        existing_proc = self._vscode_processes.pop(vscode_id, None)
+        if existing_proc:
+            try:
+                existing_proc.terminate()
+                existing_proc.wait(timeout=5)
+            except Exception:
+                try:
+                    existing_proc.kill()
+                except Exception:
+                    pass
+
+        logger.info("Starting VSCode %s for %s", vscode_id[:8], cwd)
+
+        # Generate auth token
+        vscode_token = secrets.token_hex(32)
+        self._vscode_tokens[vscode_id] = vscode_token
+
+        try:
+            cmd = [
+                cs_path,
+                "--port",
+                "0",  # Auto-select port
+                "--auth",
+                "none",  # Auth handled by open-ace proxy
+                "--disable-telemetry",
+                "--disable-workspace-trust",
+                "--disable-getting-started-override",
+                cwd,
+            ]
+
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                start_new_session=True,
+            )
+            self._vscode_processes[vscode_id] = proc
+
+            # Wait for code-server to print its URL (with timeout)
+            port = self._read_vscode_port(proc, vscode_id)
+
+            # Save references to old PIPE file descriptors.
+            old_stdout, old_stderr = proc.stdout, proc.stderr
+            stderr_output = ""
+
+            if not port:
+                # Process likely exited — safe to read remaining stderr.
+                try:
+                    stderr_output = old_stderr.read().decode(errors="replace")[:500]
+                except Exception:
+                    pass
+
+            # Redirect to DEVNULL to prevent pipe buffer deadlock,
+            # then close the old PIPE file descriptors.
+            proc.stdout = open(os.devnull, "wb")
+            proc.stderr = open(os.devnull, "wb")
+            old_stdout.close()
+            old_stderr.close()
+
+            if port:
+                self._vscode_ports[vscode_id] = port
+                hostname = self._get_reachable_hostname()
+                http_url = f"http://{hostname}:{port}"
+
+                self._send_vscode_status(
+                    vscode_id, "running", http_url=http_url, token=vscode_token
+                )
+                logger.info("VSCode %s running on %s", vscode_id[:8], http_url)
+            else:
+                logger.error("code-server failed to start for %s: %s", vscode_id[:8], stderr_output)
+                self._send_vscode_status(
+                    vscode_id,
+                    "error",
+                    error=f"code-server failed to start: {stderr_output[:200]}",
+                )
+
+        except Exception as e:
+            logger.error("Failed to start code-server: %s", e)
+            self._send_vscode_status(vscode_id, "error", error=str(e))
+
+    def _read_vscode_port(self, proc: subprocess.Popen, vscode_id: str) -> int | None:
+        """Read stdout/stderr from code-server process until a URL with port is found."""
+        import re
+
+        port_pattern = re.compile(r"https?://[\d.]+:(\d+)")
+        deadline = time.time() + 30  # 30s timeout
+        try:
+            while time.time() < deadline:
+                line = proc.stdout.readline()
+                if not line:
+                    # Check stderr too
+                    line = proc.stderr.readline()
+                if not line:
+                    if proc.poll() is not None:
+                        return None
+                    time.sleep(0.5)
+                    continue
+                text = line.decode(errors="replace").strip()
+                match = port_pattern.search(text)
+                if match:
+                    return int(match.group(1))
+        except Exception as e:
+            logger.warning("Error reading code-server port: %s", e)
+        return None
+
+    def _cmd_stop_vscode(self, data: dict[str, Any]) -> None:
+        """Handle a stop_vscode command."""
+        vscode_id = data.get("vscode_id", "")
+        logger.info("Stopping VSCode %s", vscode_id[:8])
+
+        proc = self._vscode_processes.pop(vscode_id, None)
+        if proc:
+            try:
+                proc.terminate()
+                proc.wait(timeout=5)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+
+        self._vscode_ports.pop(vscode_id, None)
+        self._vscode_tokens.pop(vscode_id, None)
+        self._send_vscode_status(vscode_id, "stopped")
+
+    def _cmd_attach_vscode(self, data: dict[str, Any]) -> None:
+        """Handle an attach_vscode command.
+
+        Checks if a code-server process is still running and returns its info.
+        """
+        vscode_id = data.get("vscode_id", "")
+        proc = self._vscode_processes.get(vscode_id)
+        if proc and proc.poll() is None:
+            # Still running
+            port = self._vscode_ports.get(vscode_id)
+            token = self._vscode_tokens.get(vscode_id)
+            if port:
+                hostname = self._get_reachable_hostname()
+                http_url = f"http://{hostname}:{port}"
+                self._send_vscode_status(vscode_id, "running", http_url=http_url, token=token)
+            else:
+                self._send_vscode_status(vscode_id, "error", error="Port info lost")
+        else:
+            # Not running
+            self._vscode_processes.pop(vscode_id, None)
+            self._vscode_ports.pop(vscode_id, None)
+            self._vscode_tokens.pop(vscode_id, None)
+            self._send_vscode_status(vscode_id, "not_found")
+
+    # ── Terminal helpers ───────────────────────────────────────────────
 
     def _stop_terminal_process(self, terminal_id: str) -> None:
         """Stop a terminal server process."""

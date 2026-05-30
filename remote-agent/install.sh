@@ -344,6 +344,80 @@ if [[ -n "$INSTALL_CLI" ]]; then
     fi
 fi
 
+# Step 5.5: Install git and code-server
+log_info "Checking for git and code-server..."
+
+# Install git if not present
+if command -v git &>/dev/null; then
+    log_success "git already installed: $(git --version 2>/dev/null)"
+else
+    log_info "git not found, attempting to install..."
+    GIT_INSTALLED=false
+    if [[ "$(uname)" == "Darwin" ]]; then
+        if command -v brew &>/dev/null; then
+            brew install git && GIT_INSTALLED=true
+        else
+            log_warn "Homebrew not found. Please install git manually: xcode-select --install"
+        fi
+    elif [ -f /etc/os-release ]; then
+        . /etc/os-release
+        case "$ID" in
+            debian|ubuntu|linuxmint|pop)
+                apt-get install -y git && GIT_INSTALLED=true
+                ;;
+            rhel|centos|fedora|rocky|almalinux|ol)
+                if command -v dnf &>/dev/null; then
+                    dnf install -y git && GIT_INSTALLED=true
+                else
+                    yum install -y git && GIT_INSTALLED=true
+                fi
+                ;;
+            alpine)
+                apk add --no-cache git && GIT_INSTALLED=true
+                ;;
+            arch|manjaro)
+                pacman -Sy --noconfirm git && GIT_INSTALLED=true
+                ;;
+            sles|suse)
+                zypper install -y git && GIT_INSTALLED=true
+                ;;
+            *)
+                log_warn "Unsupported OS: $ID. Cannot auto-install git."
+                ;;
+        esac
+    fi
+    if [[ "$GIT_INSTALLED" == "true" ]]; then
+        log_success "git installed: $(git --version 2>/dev/null)"
+    else
+        log_warn "Failed to install git. Remote workspace will be missing file changes panel."
+        log_warn "Please install git manually."
+    fi
+fi
+
+# Install code-server if not present
+if command -v code-server &>/dev/null; then
+    log_success "code-server already installed: $(code-server --version 2>/dev/null | head -1)"
+else
+    log_info "code-server not found, attempting to install..."
+    CS_INSTALLED=false
+    if [[ "$(uname)" == "Darwin" ]] || [[ "$(uname)" == "Linux" ]]; then
+        # Download install script to a temp file first (safer than piping to sh)
+        CS_INSTALL_SCRIPT=$(mktemp)
+        if command -v curl &>/dev/null; then
+            curl -fsSL https://code-server.dev/install.sh -o "$CS_INSTALL_SCRIPT" && sh "$CS_INSTALL_SCRIPT" && CS_INSTALLED=true
+        elif command -v wget &>/dev/null; then
+            wget -qO "$CS_INSTALL_SCRIPT" https://code-server.dev/install.sh && sh "$CS_INSTALL_SCRIPT" && CS_INSTALLED=true
+        fi
+        rm -f "$CS_INSTALL_SCRIPT"
+    fi
+    if [[ "$CS_INSTALLED" == "true" ]]; then
+        log_success "code-server installed: $(code-server --version 2>/dev/null | head -1)"
+    else
+        log_warn "Failed to install code-server. Remote workspace will be missing VSCode editor."
+        log_warn "Please install manually: https://coder.com/docs/code-server/latest/install"
+    fi
+fi
+
 # Step 6: Generate machine ID and save config
 log_info "Generating configuration..."
 MACHINE_ID=$("$PYTHON_PATH" -c "import uuid; print(uuid.uuid4())")
@@ -390,6 +464,9 @@ except:
 # Check installed CLIs
 for cli in ['qwen', 'claude', 'openclaw']:
     caps[f'{cli}_installed'] = shutil.which(cli) is not None
+# Check git and code-server
+caps['has_git'] = shutil.which('git') is not None
+caps['has_code_server'] = shutil.which('code-server') is not None
 print(json.dumps(caps))
 " 2>/dev/null || echo "{}")
 

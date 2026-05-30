@@ -248,4 +248,28 @@ def get_capabilities() -> dict[str, Any]:
         "cli_tools": installed_list,
         "cli_details": tools,
         "max_sessions": 5,
+        "has_git": _check_git(),
+        "has_code_server": _check_code_server(),
     }
+
+
+def _check_git() -> bool:
+    """Check if git is available on the system."""
+    return shutil.which("git") is not None
+
+
+def _check_code_server() -> bool:
+    """Check if code-server is available on the system."""
+    if shutil.which("code-server"):
+        return True
+    # Check common install locations
+    home = os.path.expanduser("~")
+    common_paths = [
+        os.path.join(home, ".local", "bin", "code-server"),
+        "/usr/local/bin/code-server",
+        "/usr/bin/code-server",
+    ]
+    if platform.system() == "Windows":
+        common_paths.append(os.path.join(home, "AppData", "Roaming", "npm", "code-server.cmd"))
+
+    return any(os.path.isfile(path) for path in common_paths)
