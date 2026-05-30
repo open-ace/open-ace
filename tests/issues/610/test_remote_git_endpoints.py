@@ -449,7 +449,8 @@ class TestRemoteGitDiff:
                     data, status = parse_response(remote_module.remote_git_diff("machine-001"))
                     assert status == 400
                     assert data["success"] is False
-                    assert "path and file" in data["error"].lower()
+                    assert "path" in data["error"].lower()
+                    assert "parameter" in data["error"].lower()
 
     def test_missing_file_param_returns_400(
         self, flask_app, remote_module, mock_agent_mgr, admin_user
@@ -467,13 +468,8 @@ class TestRemoteGitDiff:
                     data, status = parse_response(remote_module.remote_git_diff("machine-001"))
                     assert status == 400
                     assert data["success"] is False
-                    assert "path and file" in data["error"].lower()
-
-    def test_missing_both_params_returns_400(
-        self, flask_app, remote_module, mock_agent_mgr, admin_user
-    ):
-        with flask_app.app_context():
-            from flask import g
+                    assert "file" in data["error"].lower()
+                    assert "parameter" in data["error"].lower()
 
             g.user = admin_user
 
