@@ -119,14 +119,26 @@ class TestRunApplication:
         handler._handle_terminal_ws.assert_called_once()
 
     def test_non_terminal_delegates_to_super(self):
-        """Non-terminal requests should fall through to the parent WSGIHandler."""
+        """Non-terminal and non-vscode requests should fall through to the parent WSGIHandler."""
         handler = MagicMock(spec=RemoteWSHandler)
         handler._is_terminal_ws_request.return_value = False
+        handler._is_vscode_ws_request.return_value = False
         handler._handle_terminal_ws = MagicMock()
 
         with patch.object(RemoteWSHandler.__bases__[0], "run_application") as mock_super:
             RemoteWSHandler.run_application(handler)
             mock_super.assert_called_once()
+        handler._handle_terminal_ws.assert_not_called()
+
+    def test_vscode_ws_intercepted(self):
+        handler = MagicMock(spec=RemoteWSHandler)
+        handler._is_terminal_ws_request.return_value = False
+        handler._is_vscode_ws_request.return_value = True
+        handler._handle_vscode_ws = MagicMock()
+
+        RemoteWSHandler.run_application(handler)
+
+        handler._handle_vscode_ws.assert_called_once()
         handler._handle_terminal_ws.assert_not_called()
 
 
