@@ -65,6 +65,12 @@ def load_user():
         return
     if request.endpoint == "remote.terminal_websocket":
         return
+    # VSCode proxy and WebSocket endpoints use their own token authentication
+    # (token in query string, validated against vscode_info_store)
+    if request.path.startswith("/api/remote/vscode/") and (
+        "/proxy/" in request.path or request.path.endswith("/ws")
+    ):
+        return
     # Agent file downloads are public (needed for agent installation)
     if request.path.startswith("/api/remote/agent/files/"):
         return
@@ -2215,10 +2221,11 @@ def remote_vscode_attach(vscode_id):
     methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
 )
 def remote_vscode_proxy(vscode_id, path=""):
-    """HTTP reverse proxy to remote code-server."""
-    if not hasattr(g, "user") or g.user is None:
-        return jsonify({"error": "Unauthorized"}), 401
+    """HTTP reverse proxy to remote code-server.
 
+    Authentication is via the token in query string, validated against
+    vscode_info_store. No session_token cookie required (needed for iframe access).
+    """
     import hmac as _hmac
 
     from app.modules.workspace.vscode_proxy import build_target_url, proxy_request_streaming

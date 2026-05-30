@@ -687,24 +687,9 @@ class RemoteAgent:
 
             # Wait for READY:port output (with timeout)
             port = self._read_terminal_port(proc, terminal_id)
-            # Save references to old PIPE file descriptors.
-            old_stdout, old_stderr = proc.stdout, proc.stderr
-            stderr_output = ""
 
-            if not port:
-                # Process likely exited — safe to read remaining stderr.
-                try:
-                    stderr_output = old_stderr.read().decode(errors="replace")[:500]
-                except Exception:
-                    pass
-
-            # Redirect to DEVNULL to prevent pipe buffer deadlock,
-            # then close the old PIPE file descriptors.
-            proc.stdout = open(os.devnull, "wb")
-            proc.stderr = open(os.devnull, "wb")
-            old_stdout.close()
-            old_stderr.close()
             if port:
+                # Terminal started successfully - keep pipes open.
                 self._terminal_ports[terminal_id] = port
                 hostname = self._get_reachable_hostname()
                 ws_url = f"ws://{hostname}:{port}"
@@ -725,6 +710,12 @@ class RemoteAgent:
                 logger.info("Terminal %s running on %s", terminal_id[:8], ws_url)
                 self._session_sync.notify_terminal_active(terminal_id)
             else:
+                # Process likely exited — read stderr for error message.
+                stderr_output = ""
+                try:
+                    stderr_output = proc.stderr.read().decode(errors="replace")[:500]
+                except Exception:
+                    pass
                 logger.error("Terminal server failed to start: %s", stderr_output[:500])
                 self._http_send(
                     {
@@ -1463,6 +1454,8 @@ class RemoteAgent:
                 cs_path,
                 "--port",
                 "0",  # Auto-select port
+                "--bind-addr",
+                "0.0.0.0",  # Listen on all interfaces for remote access
                 "--auth",
                 "none",  # Auth handled by open-ace proxy
                 "--disable-telemetry",
@@ -1482,25 +1475,11 @@ class RemoteAgent:
             # Wait for code-server to print its URL (with timeout)
             port = self._read_vscode_port(proc, vscode_id)
 
-            # Save references to old PIPE file descriptors.
-            old_stdout, old_stderr = proc.stdout, proc.stderr
-            stderr_output = ""
-
-            if not port:
-                # Process likely exited — safe to read remaining stderr.
-                try:
-                    stderr_output = old_stderr.read().decode(errors="replace")[:500]
-                except Exception:
-                    pass
-
-            # Redirect to DEVNULL to prevent pipe buffer deadlock,
-            # then close the old PIPE file descriptors.
-            proc.stdout = open(os.devnull, "wb")
-            proc.stderr = open(os.devnull, "wb")
-            old_stdout.close()
-            old_stderr.close()
-
             if port:
+                # code-server started successfully - keep pipes open.
+                # The process will continue writing minimal logs; the pipe
+                # buffer won't fill up since code-server output is minimal
+                # after startup.
                 self._vscode_ports[vscode_id] = port
                 hostname = self._get_reachable_hostname()
                 http_url = f"http://{hostname}:{port}"
@@ -1510,6 +1489,12 @@ class RemoteAgent:
                 )
                 logger.info("VSCode %s running on %s", vscode_id[:8], http_url)
             else:
+                # Process likely exited — read stderr for error message.
+                stderr_output = ""
+                try:
+                    stderr_output = proc.stderr.read().decode(errors="replace")[:500]
+                except Exception:
+                    pass
                 logger.error("code-server failed to start for %s: %s", vscode_id[:8], stderr_output)
                 self._send_vscode_status(
                     vscode_id,
