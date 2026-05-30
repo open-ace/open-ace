@@ -2225,8 +2225,12 @@ def remote_vscode_proxy(vscode_id, path=""):
 
     Authentication is via the token in query string, validated against
     vscode_info_store. No session_token cookie required (needed for iframe access).
+
+    For subsequent requests (static assets, API calls), the token can also be
+    provided via a vscode_token cookie, which is set on the first successful
+    request with a token in the query string.
     """
-    import hmac as _hmac
+    import hmac as _hmc
 
     from app.modules.workspace.vscode_proxy import build_target_url, proxy_request_streaming
     from app.modules.workspace.vscode_store import vscode_info_store
@@ -2237,13 +2241,22 @@ def remote_vscode_proxy(vscode_id, path=""):
 
     machine_id, info = found
 
-    # Validate token from query string
+    # Validate token from query string or cookie
+    # Query string token takes precedence (used for initial iframe load)
     token = request.args.get("token", "")
     stored_token = info.get("token", "")
-    if not token or not stored_token:
+
+    if not stored_token:
+        return jsonify({"error": "VSCode session has no token"}), 500
+
+    # If no token in query string, try cookie (for static assets, API calls)
+    if not token:
+        token = request.cookies.get(f"vscode_token_{vscode_id}", "")
+
+    if not token:
         return jsonify({"error": "Invalid or missing token"}), 403
 
-    if not _hmac.compare_digest(token, stored_token):
+    if not _hmc.compare_digest(token, stored_token):
         return jsonify({"error": "Invalid token"}), 403
 
     if info.get("status") != "running":
@@ -2283,6 +2296,21 @@ def remote_vscode_proxy(vscode_id, path=""):
     for k, v in resp_headers.items():
         if k.lower() not in ("content-length", "content-encoding", "transfer-encoding"):
             response.headers[k] = v
+
+    # Set cookie on first request with query string token
+    # This allows subsequent static asset requests to be authenticated via cookie
+    # Note: Set on any successful response (including 302 redirect), not just 200
+    if request.args.get("token") and status_code < 400:
+        cookie_name = f"vscode_token_{vscode_id}"
+        cookie_value = token
+        cookie_path = f"/api/remote/vscode/{vscode_id}/proxy/"
+        # Directly set Set-Cookie header (set_cookie may not work with streaming responses)
+        response.headers["Set-Cookie"] = (
+            f"{cookie_name}={cookie_value}; "
+            f"Path={cookie_path}; "
+            f"Max-Age={24 * 3600}; "
+            f"HttpOnly; SameSite=Lax"
+        )
 
     return response
 
