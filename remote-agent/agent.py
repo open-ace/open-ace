@@ -687,9 +687,17 @@ class RemoteAgent:
 
             # Wait for READY:port output (with timeout)
             port = self._read_terminal_port(proc, terminal_id)
-            # Capture remaining stderr before closing PIPE file descriptors.
+            # Save references to old PIPE file descriptors.
             old_stdout, old_stderr = proc.stdout, proc.stderr
-            stderr_output = old_stderr.read().decode(errors="replace")[:500]
+            stderr_output = ""
+
+            if not port:
+                # Process likely exited — safe to read remaining stderr.
+                try:
+                    stderr_output = old_stderr.read().decode(errors="replace")[:500]
+                except Exception:
+                    pass
+
             # Redirect to DEVNULL to prevent pipe buffer deadlock,
             # then close the old PIPE file descriptors.
             proc.stdout = open(os.devnull, "wb")
@@ -1474,9 +1482,16 @@ class RemoteAgent:
             # Wait for code-server to print its URL (with timeout)
             port = self._read_vscode_port(proc, vscode_id)
 
-            # Capture remaining stderr before closing PIPE file descriptors.
+            # Save references to old PIPE file descriptors.
             old_stdout, old_stderr = proc.stdout, proc.stderr
-            stderr_output = old_stderr.read().decode(errors="replace")[:500]
+            stderr_output = ""
+
+            if not port:
+                # Process likely exited — safe to read remaining stderr.
+                try:
+                    stderr_output = old_stderr.read().decode(errors="replace")[:500]
+                except Exception:
+                    pass
 
             # Redirect to DEVNULL to prevent pipe buffer deadlock,
             # then close the old PIPE file descriptors.
