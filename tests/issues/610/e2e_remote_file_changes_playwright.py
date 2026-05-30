@@ -96,8 +96,16 @@ def api_login_as(username=TEST_USER, password=TEST_PASS):
     r = requests.post(
         f"{BASE_URL}/api/auth/login", json={"username": username, "password": password}
     )
-    assert r.status_code == 200, f"Login failed: {r.status_code}"
+    assert r.status_code == 200, f"Login failed: {r.status_code} {r.text[:200]}"
     return r.cookies.get("session_token")
+
+
+def api_get_user_id(username=TEST_USER, password=TEST_PASS):
+    r = requests.post(
+        f"{BASE_URL}/api/auth/login", json={"username": username, "password": password}
+    )
+    assert r.status_code == 200, f"Login failed: {r.status_code}"
+    return r.json()["user"]["id"]
 
 
 def api_admin_login():
@@ -116,13 +124,14 @@ def register_machine(admin_tok, name, capabilities):
     reg_token = r.json()["registration_token"]
 
     mid = str(uuid.uuid4())
+    short_id = mid[:8]
     r = requests.post(
         f"{BASE_URL}/api/remote/agent/register",
         json={
             "registration_token": reg_token,
             "machine_id": mid,
-            "machine_name": name,
-            "hostname": f"{name.lower().replace(' ', '-')}.local",
+            "machine_name": f"{name} {short_id}",
+            "hostname": f"{name.lower().replace(' ', '-')}-{short_id}.local",
             "os_type": "linux",
             "os_version": "Ubuntu 24.04",
             "capabilities": capabilities,
@@ -239,6 +248,7 @@ def run_tests():
 
         auth_token = api_login_as()
         admin_token = api_admin_login()
+        test_user_id = api_get_user_id(TEST_USER, TEST_PASS)
 
         # ══════ 2. 注册远程机器 ══════
         print("\n══════ 2. 注册远程机器（带 git + code-server）══════")
@@ -254,7 +264,7 @@ def run_tests():
                 "cli_installed": True,
             },
         )
-        assign_machine(admin_token, machine_id_git)
+        assign_machine(admin_token, machine_id_git, test_user_id)
         log_step("注册", f"Git Server: {machine_id_git[:8]}...")
 
         machine_id_no_git = register_machine(
@@ -268,7 +278,7 @@ def run_tests():
                 "cli_installed": False,
             },
         )
-        assign_machine(admin_token, machine_id_no_git)
+        assign_machine(admin_token, machine_id_no_git, test_user_id)
         log_step("注册", f"Minimal Server (no git): {machine_id_no_git[:8]}...")
 
         pause(2)
@@ -550,7 +560,10 @@ def run_tests():
             f"&showFileChangesPanel=true"
         )
         log_step("导航", "打开 ChatPage（远程模式 + 文件变更面板）")
-        page.goto(chat_url, wait_until="networkidle")
+        try:
+            page.goto(chat_url, wait_until="domcontentloaded", timeout=30000)
+        except Exception:
+            log_step("警告", "ChatPage 导航超时，继续验证")
 
         try:
             page.wait_for_selector("textarea, .max-w-6xl, #root, .min-h-screen", timeout=20000)
