@@ -94,12 +94,12 @@ if __name__ == "__main__":
 
     server_kwargs = {}
     try:
-        from app.terminal_ws_handler import TerminalWSHandler
+        from app.remote_ws_handler import RemoteWSHandler
 
-        server_kwargs["handler_class"] = TerminalWSHandler
+        server_kwargs["handler_class"] = RemoteWSHandler
     except ImportError:
         server_kwargs["handler_class"] = WSGIHandler
-        print("WARNING: terminal_ws_handler unavailable; web terminal WS is disabled")
+        print("WARNING: remote_ws_handler unavailable; remote WebSocket is disabled")
 
     server = WSGIServer((WEB_HOST, WEB_PORT), app, **server_kwargs)
 

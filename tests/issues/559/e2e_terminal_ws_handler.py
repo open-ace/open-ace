@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""E2E test: browser WS client -> gevent WSGIServer (TerminalWSHandler) -> upstream terminal.
+"""E2E test: browser WS client -> gevent WSGIServer (RemoteWSHandler) -> upstream terminal.
 
 Verifies the full WebSocket path through the custom handler without
 geventwebsocket: handshake, bidirectional bridging, and clean close.
@@ -81,17 +81,17 @@ def simple_app(environ, start_response):
 
 
 # ═══════════════════════════════════════════════════════════
-# 3. Start gevent WSGIServer with TerminalWSHandler
+# 3. Start gevent WSGIServer with RemoteWSHandler
 # ═══════════════════════════════════════════════════════════
 
 
 def start_gevent_server(app):
-    """Start a gevent WSGIServer with TerminalWSHandler on a random port."""
+    """Start a gevent WSGIServer with RemoteWSHandler on a random port."""
     import socket
 
     from gevent.pywsgi import WSGIServer
 
-    from app.terminal_ws_handler import TerminalWSHandler
+    from app.remote_ws_handler import RemoteWSHandler
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -99,7 +99,7 @@ def start_gevent_server(app):
     sock.listen(1)
     port = sock.getsockname()[1]
 
-    server = WSGIServer(sock, app, handler_class=TerminalWSHandler)
+    server = WSGIServer(sock, app, handler_class=RemoteWSHandler)
 
     import gevent
 
@@ -220,14 +220,14 @@ def main():
     os.environ["no_proxy"] = "127.0.0.1,localhost"
 
     print("=" * 60)
-    print("  E2E: Browser -> TerminalWSHandler -> Upstream Terminal")
+    print("  E2E: Browser -> RemoteWSHandler -> Upstream Terminal")
     print("=" * 60)
 
     upstream_port = start_mock_upstream()
     log("Setup", f"Mock upstream terminal on port {upstream_port}")
 
     server, greenlet, server_port = start_gevent_server(simple_app)
-    log("Setup", f"Gevent server with TerminalWSHandler on port {server_port}")
+    log("Setup", f"Gevent server with RemoteWSHandler on port {server_port}")
 
     terminal_id = str(uuid.uuid4())
     machine_id = f"e2e-machine-{terminal_id[:8]}"

@@ -16,7 +16,7 @@ import os
 import time
 import uuid
 
-from flask import Blueprint, Response, g, jsonify, request, stream_with_context
+from flask import Blueprint, Response, g, jsonify, make_response, request, stream_with_context
 
 from app.auth.decorators import _extract_token, _load_user_from_token, admin_required
 from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
@@ -968,6 +968,76 @@ def agent_message():
 
         return jsonify({"success": True})
 
+    elif msg_type == "git_result":
+        # Agent reports git command result (git_status, git_diff, git_file)
+        request_id = data.get("request_id", "")
+        success = data.get("success", False)
+        result = data.get("result")
+        error = data.get("error")
+
+        if request_id:
+            agent_mgr.store_browse_result(
+                request_id,
+                {
+                    "success": success,
+                    "result": result,
+                    "error": error,
+                },
+            )
+            logger.info("Stored git result for request %s", request_id[:8])
+        else:
+            logger.warning("git_result received without request_id")
+
+        return jsonify({"success": True})
+
+    elif msg_type == "vscode_status":
+        # Agent reports VSCode (code-server) status
+        from app.modules.workspace.vscode_store import vscode_info_store
+
+        vscode_id = data.get("vscode_id", "")
+        status = data.get("status", "")
+        http_url = data.get("http_url", "")
+        vscode_token = data.get("token", "")
+        error = data.get("error", "")
+
+        machine_id_for_vs = data.get("machine_id", "")
+
+        if not vscode_id:
+            logger.warning("vscode_status received without vscode_id")
+            return jsonify({"success": True})
+
+        if status == "running" and http_url:
+            import secrets as _secrets
+
+            browser_token = _secrets.token_hex(32)
+            vscode_info_store.put(
+                machine_id_for_vs,
+                vscode_id,
+                {
+                    "status": "running",
+                    "original_http_url": http_url,
+                    "original_token": vscode_token,
+                    "token": browser_token,
+                    "machine_id": machine_id_for_vs,
+                    "project_path": data.get("project_path", ""),
+                },
+            )
+            logger.info("VSCode %s running on %s", vscode_id[:8], http_url)
+        elif status == "stopped":
+            vscode_info_store.pop(machine_id_for_vs, vscode_id)
+            logger.info("VSCode %s stopped", vscode_id[:8])
+        elif status == "error":
+            vscode_info_store.put(
+                machine_id_for_vs,
+                vscode_id,
+                {"status": "error", "error": error, "machine_id": machine_id_for_vs},
+            )
+            logger.warning("VSCode %s error: %s", vscode_id[:8], error)
+        elif status == "not_found":
+            vscode_info_store.pop(machine_id_for_vs, vscode_id)
+
+        return jsonify({"success": True})
+
     elif msg_type == "session_sync":
         # Agent reports Claude Code session data from web terminal
         claude_session_id = data.get("session_id", "")
@@ -1885,3 +1955,394 @@ def create_remote_directory(machine_id):
             "error": result.get("error"),
         }
     )
+
+
+# ── Remote Git endpoints ────────────────────────────────────────────
+
+
+@remote_bp.route("/machines/<machine_id>/git/status", methods=["GET"])
+def remote_git_status(machine_id):
+    """Get git status on a remote machine.
+
+    Query params: path (project path on the remote machine)
+    """
+    if not hasattr(g, "user") or g.user is None:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    agent_mgr = get_remote_agent_manager()
+
+    if g.user.get("role") != "admin":
+        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
+            return jsonify({"error": "Access denied"}), 403
+
+    project_path = request.args.get("path")
+    if not project_path:
+        return jsonify({"success": False, "error": "path parameter is required"}), 400
+
+    machine = agent_mgr.get_machine(machine_id)
+    if not machine:
+        return jsonify({"error": "Machine not found"}), 404
+
+    if not agent_mgr.is_agent_connected(machine_id):
+        return jsonify({"success": False, "error": "Agent is not connected"}), 503
+
+    request_id = str(uuid.uuid4())
+    agent_mgr.send_command(
+        machine_id,
+        {
+            "type": "command",
+            "command": "git_status",
+            "request_id": request_id,
+            "project_path": project_path,
+        },
+    )
+
+    result = agent_mgr.get_browse_result(request_id, timeout=15.0)
+
+    if result is None:
+        return (
+            jsonify({"success": False, "error": "Timeout waiting for agent response"}),
+            504,
+        )
+
+    return jsonify(
+        {
+            "success": result.get("success", False),
+            "result": result.get("result"),
+            "error": result.get("error"),
+        }
+    )
+
+
+@remote_bp.route("/machines/<machine_id>/git/diff", methods=["GET"])
+def remote_git_diff(machine_id):
+    """Get git diff for a specific file on a remote machine.
+
+    Query params: path (project path), file (relative file path)
+    """
+    if not hasattr(g, "user") or g.user is None:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    agent_mgr = get_remote_agent_manager()
+
+    if g.user.get("role") != "admin":
+        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
+            return jsonify({"error": "Access denied"}), 403
+
+    project_path = request.args.get("path")
+    file = request.args.get("file")
+    if not project_path or not file:
+        return (
+            jsonify({"success": False, "error": "path and file parameters are required"}),
+            400,
+        )
+
+    machine = agent_mgr.get_machine(machine_id)
+    if not machine:
+        return jsonify({"error": "Machine not found"}), 404
+
+    if not agent_mgr.is_agent_connected(machine_id):
+        return jsonify({"success": False, "error": "Agent is not connected"}), 503
+
+    request_id = str(uuid.uuid4())
+    agent_mgr.send_command(
+        machine_id,
+        {
+            "type": "command",
+            "command": "git_diff",
+            "request_id": request_id,
+            "project_path": project_path,
+            "file": file,
+        },
+    )
+
+    result = agent_mgr.get_browse_result(request_id, timeout=15.0)
+
+    if result is None:
+        return (
+            jsonify({"success": False, "error": "Timeout waiting for agent response"}),
+            504,
+        )
+
+    return jsonify(
+        {
+            "success": result.get("success", False),
+            "result": result.get("result"),
+            "error": result.get("error"),
+        }
+    )
+
+
+@remote_bp.route("/machines/<machine_id>/git/file", methods=["GET"])
+def remote_git_file(machine_id):
+    """Read a file from a remote machine.
+
+    Query params: path (project path), file (relative file path)
+    """
+    if not hasattr(g, "user") or g.user is None:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    agent_mgr = get_remote_agent_manager()
+
+    if g.user.get("role") != "admin":
+        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
+            return jsonify({"error": "Access denied"}), 403
+
+    project_path = request.args.get("path")
+    file = request.args.get("file")
+    if not project_path or not file:
+        return (
+            jsonify({"success": False, "error": "path and file parameters are required"}),
+            400,
+        )
+
+    machine = agent_mgr.get_machine(machine_id)
+    if not machine:
+        return jsonify({"error": "Machine not found"}), 404
+
+    if not agent_mgr.is_agent_connected(machine_id):
+        return jsonify({"success": False, "error": "Agent is not connected"}), 503
+
+    request_id = str(uuid.uuid4())
+    agent_mgr.send_command(
+        machine_id,
+        {
+            "type": "command",
+            "command": "git_file",
+            "request_id": request_id,
+            "project_path": project_path,
+            "file": file,
+        },
+    )
+
+    result = agent_mgr.get_browse_result(request_id, timeout=15.0)
+
+    if result is None:
+        return (
+            jsonify({"success": False, "error": "Timeout waiting for agent response"}),
+            504,
+        )
+
+    return jsonify(
+        {
+            "success": result.get("success", False),
+            "result": result.get("result"),
+            "error": result.get("error"),
+        }
+    )
+
+
+# ── Remote VSCode (code-server) endpoints ───────────────────────────
+
+
+@remote_bp.route("/vscode/start", methods=["POST"])
+def remote_vscode_start():
+    """Start a code-server instance on a remote machine."""
+    if not hasattr(g, "user") or g.user is None:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    agent_mgr = get_remote_agent_manager()
+    data = request.get_json() or {}
+    machine_id = data.get("machine_id", "")
+    project_path = data.get("project_path", "")
+
+    if not machine_id or not project_path:
+        return jsonify({"success": False, "error": "machine_id and project_path are required"}), 400
+
+    if g.user.get("role") != "admin":
+        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
+            return jsonify({"error": "Access denied"}), 403
+
+    if not agent_mgr.is_agent_connected(machine_id):
+        return jsonify({"success": False, "error": "Agent is not connected"}), 503
+
+    vscode_id = str(uuid.uuid4())
+    agent_mgr.send_command(
+        machine_id,
+        {
+            "type": "command",
+            "command": "start_vscode",
+            "vscode_id": vscode_id,
+            "project_path": project_path,
+        },
+    )
+
+    return jsonify({"success": True, "vscode_id": vscode_id, "status": "pending"})
+
+
+@remote_bp.route("/vscode/stop", methods=["POST"])
+def remote_vscode_stop():
+    """Stop a code-server instance on a remote machine."""
+    if not hasattr(g, "user") or g.user is None:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    agent_mgr = get_remote_agent_manager()
+    data = request.get_json() or {}
+    vscode_id = data.get("vscode_id", "")
+    machine_id = data.get("machine_id", "")
+
+    if not vscode_id or not machine_id:
+        return jsonify({"success": False, "error": "vscode_id and machine_id are required"}), 400
+
+    if g.user.get("role") != "admin":
+        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
+            return jsonify({"error": "Access denied"}), 403
+
+    agent_mgr.send_command(
+        machine_id,
+        {
+            "type": "command",
+            "command": "stop_vscode",
+            "vscode_id": vscode_id,
+        },
+    )
+
+    # Clean up local store
+    from app.modules.workspace.vscode_store import vscode_info_store
+
+    vscode_info_store.pop(machine_id, vscode_id)
+
+    return jsonify({"success": True})
+
+
+@remote_bp.route("/vscode/<vscode_id>/status", methods=["GET"])
+def remote_vscode_status(vscode_id):
+    """Get the status of a code-server instance."""
+    if not hasattr(g, "user") or g.user is None:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    agent_mgr = get_remote_agent_manager()
+
+    from app.modules.workspace.vscode_store import vscode_info_store
+
+    found = vscode_info_store.find_by_vscode_id(vscode_id)
+    if not found:
+        return jsonify({"success": True, "status": "unknown"})
+
+    machine_id, info = found
+
+    if g.user.get("role") != "admin":
+        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
+            return jsonify({"error": "Access denied"}), 403
+
+    status = info.get("status", "unknown")
+    response = {"success": True, "status": status}
+
+    if status == "running":
+        proxy_url = f"/api/remote/vscode/{vscode_id}/proxy/"
+        browser_token = info.get("token", "")
+        response["url"] = f"{proxy_url}?token={browser_token}"
+    elif status == "error":
+        response["error"] = info.get("error", "")
+
+    return jsonify(response)
+
+
+@remote_bp.route("/vscode/<vscode_id>/attach", methods=["POST"])
+def remote_vscode_attach(vscode_id):
+    """Re-attach to an existing code-server instance."""
+    if not hasattr(g, "user") or g.user is None:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    agent_mgr = get_remote_agent_manager()
+    data = request.get_json() or {}
+    machine_id = data.get("machine_id", "")
+
+    if not machine_id:
+        return jsonify({"success": False, "error": "machine_id is required"}), 400
+
+    if g.user.get("role") != "admin":
+        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
+            return jsonify({"error": "Access denied"}), 403
+
+    agent_mgr.send_command(
+        machine_id,
+        {
+            "type": "command",
+            "command": "attach_vscode",
+            "vscode_id": vscode_id,
+        },
+    )
+
+    return jsonify({"success": True})
+
+
+@remote_bp.route(
+    "/vscode/<vscode_id>/proxy/<path:path>",
+    methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
+)
+@remote_bp.route(
+    "/vscode/<vscode_id>/proxy/",
+    methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
+)
+def remote_vscode_proxy(vscode_id, path=""):
+    """HTTP reverse proxy to remote code-server."""
+    if not hasattr(g, "user") or g.user is None:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    import hmac as _hmac
+
+    from app.modules.workspace.vscode_proxy import build_target_url, proxy_request
+    from app.modules.workspace.vscode_store import vscode_info_store
+
+    found = vscode_info_store.find_by_vscode_id(vscode_id)
+    if not found:
+        return jsonify({"error": "VSCode session not found"}), 404
+
+    machine_id, info = found
+
+    # Validate token from query string
+    token = request.args.get("token", "")
+    stored_token = info.get("token", "")
+    if not token or not stored_token:
+        return jsonify({"error": "Invalid or missing token"}), 403
+
+    if not _hmac.compare_digest(token, stored_token):
+        return jsonify({"error": "Invalid token"}), 403
+
+    if info.get("status") != "running":
+        return jsonify({"error": "VSCode session is not running"}), 503
+
+    original_http_url = info.get("original_http_url", "")
+    if not original_http_url:
+        return jsonify({"error": "Remote URL not available"}), 500
+
+    # Build target URL
+    target_url = build_target_url(original_http_url, path)
+
+    # Preserve query params (except token)
+    params = dict(request.args)
+    params.pop("token", None)
+
+    # Collect request headers
+    headers = {k: v for k, v in request.headers if k.lower() != "host"}
+
+    # Get request body
+    body = request.get_data()
+
+    # Proxy the request
+    status_code, resp_headers, resp_body = proxy_request(
+        method=request.method,
+        target_url=target_url,
+        headers=headers,
+        body=body,
+        params=params if params else None,
+    )
+
+    # Build Flask response
+    response = make_response(resp_body, status_code)
+    for k, v in resp_headers.items():
+        if k.lower() not in ("content-length", "content-encoding", "transfer-encoding"):
+            response.headers[k] = v
+
+    return response
+
+
+@remote_bp.route("/vscode/<vscode_id>/ws")
+def remote_vscode_ws(vscode_id):
+    """Fallback for non-WebSocket requests to the VSCode WS endpoint.
+
+    Real WebSocket connections are intercepted by RemoteWSHandler
+    at the WSGI layer (see app/remote_ws_handler.py).
+    """
+    return jsonify({"error": "WebSocket upgrade required"}), 400
