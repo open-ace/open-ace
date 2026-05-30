@@ -159,6 +159,18 @@ export const APIKeyManagement: React.FC = () => {
     showAdvanced: false,
   });
 
+  // JSON validation function (defined before useMemo to avoid ReferenceError)
+  const getJsonValidationResult = (jsonStr: string): { valid: boolean; error: string | null } => {
+    if (!jsonStr.trim()) return { valid: true, error: null };
+    try {
+      JSON.parse(jsonStr);
+      return { valid: true, error: null };
+    } catch (e) {
+      const errorMessage = e instanceof SyntaxError ? e.message : 'Invalid JSON';
+      return { valid: false, error: errorMessage };
+    }
+  };
+
   // Cached JSON validation results (avoid repeated parsing on each render)
   const claudeValidation = useMemo(
     () => getJsonValidationResult(formData.claude_settings),
@@ -323,21 +335,6 @@ export const APIKeyManagement: React.FC = () => {
       return true;
     } catch {
       return false;
-    }
-  };
-
-  /**
-   * Get JSON validation result with error message
-   * Returns: { valid: boolean, error: string | null }
-   */
-  const getJsonValidationResult = (jsonStr: string): { valid: boolean; error: string | null } => {
-    if (!jsonStr.trim()) return { valid: true, error: null };
-    try {
-      JSON.parse(jsonStr);
-      return { valid: true, error: null };
-    } catch (e) {
-      const errorMessage = e instanceof SyntaxError ? e.message : 'Invalid JSON';
-      return { valid: false, error: errorMessage };
     }
   };
 
