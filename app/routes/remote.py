@@ -2298,6 +2298,16 @@ def remote_vscode_proxy(vscode_id, path=""):
         if k.lower() not in ("content-length", "content-encoding", "transfer-encoding"):
             response.headers[k] = v
 
+    # Handle 302 redirect: preserve token in redirect URL
+    # code-server redirects to ./?folder=xxx, but this loses the token param
+    # We need to add the token back to the redirect Location
+    if status_code == 302 and request.args.get("token"):
+        location = resp_headers.get("Location", "")
+        if location and "token=" not in location:
+            # Add token to redirect URL
+            separator = "?" if "?" not in location else "&"
+            response.headers["Location"] = f"{location}{separator}token={token}"
+
     # Set cookie on first request with query string token
     # This allows subsequent static asset requests to be authenticated via cookie
     # Note: Set on any successful response (including 302 redirect), not just 200
