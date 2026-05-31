@@ -60,6 +60,10 @@ def proxy_request(
     parsed = urllib.parse.urlparse(target_url)
     filtered_headers["Host"] = parsed.netloc
 
+    # Disable system proxy - remote code-server is accessed directly via IP
+    # Empty dict means no proxy (bypasses system proxy settings)
+    proxies: dict[str, str] = {}
+
     try:
         resp = requests.request(
             method=method,
@@ -69,6 +73,7 @@ def proxy_request(
             params=params,
             timeout=60,
             allow_redirects=False,
+            proxies=proxies,
         )
 
         # Build response headers, filtering hop-by-hop
@@ -118,6 +123,11 @@ def proxy_request_streaming(
     parsed = urllib.parse.urlparse(target_url)
     filtered_headers["Host"] = parsed.netloc
 
+    # Disable system proxy - remote code-server is accessed directly via IP
+    # System proxy settings may interfere with direct IP access
+    # Empty dict means no proxy (bypasses system proxy settings)
+    proxies: dict[str, str] = {}
+
     try:
         resp = requests.request(
             method=method,
@@ -128,6 +138,7 @@ def proxy_request_streaming(
             stream=True,
             timeout=60,
             allow_redirects=False,
+            proxies=proxies,
         )
 
         # Build response headers, filtering hop-by-hop
